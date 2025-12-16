@@ -2,7 +2,8 @@
 
 A lightweight biomedical literature research tool - no PostgreSQL required.
 
-BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database. It uses ChromaDB for vector storage and SQLite for metadata, making it easy to install and use on any machine.
+BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database. It uses only the PubMed E-utilities API for searching and fetching article metadata instead of a local database. It uses ChromaDB for vector storage and SQLite for metadata, making it easy to install and use on any machine. Also, in order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows to use cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference
+
 
 ## Features
 

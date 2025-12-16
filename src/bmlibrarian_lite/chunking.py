@@ -31,7 +31,7 @@ from .constants import (
     DEFAULT_CHUNK_SIZE,
     DEFAULT_CHUNK_OVERLAP,
 )
-from .data_models import DocumentChunk
+from .data_models import LiteChunk
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def chunk_text(
     document_id: str,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
-) -> list[DocumentChunk]:
+) -> list[LiteChunk]:
     """
     Split text into overlapping chunks for embedding.
 
@@ -56,7 +56,7 @@ def chunk_text(
         chunk_overlap: Overlap between consecutive chunks in characters
 
     Returns:
-        List of DocumentChunk objects
+        List of LiteChunk objects
 
     Raises:
         ValueError: If chunk_size <= 0, chunk_overlap < 0, or
@@ -88,7 +88,7 @@ def chunk_text(
     stripped_text = text.strip()
     if len(stripped_text) <= chunk_size:
         if stripped_text:  # Only return if non-empty after stripping
-            return [DocumentChunk(
+            return [LiteChunk(
                 id=f"{document_id}_chunk_0",
                 document_id=document_id,
                 text=stripped_text,
@@ -98,7 +98,7 @@ def chunk_text(
             )]
         return []
 
-    chunks: list[DocumentChunk] = []
+    chunks: list[LiteChunk] = []
     start = 0
     chunk_index = 0
     text_length = len(text)
@@ -121,7 +121,7 @@ def chunk_text(
         # boundaries (sentences, paragraphs) can produce chunks smaller than the
         # specified chunk_size, which is desirable for semantic coherence.
         if chunk_text_content:
-            chunk = DocumentChunk(
+            chunk = LiteChunk(
                 id=f"{document_id}_chunk_{chunk_index}",
                 document_id=document_id,
                 text=chunk_text_content,
@@ -199,7 +199,7 @@ def chunk_document_for_interrogation(
     title: Optional[str] = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
-) -> list[DocumentChunk]:
+) -> list[LiteChunk]:
     """
     Chunk a document for the interrogation workflow.
 
@@ -215,7 +215,7 @@ def chunk_document_for_interrogation(
         chunk_overlap: Overlap between chunks
 
     Returns:
-        List of DocumentChunk objects ready for embedding
+        List of LiteChunk objects ready for embedding
 
     Example:
         >>> chunks = chunk_document_for_interrogation(
@@ -279,7 +279,7 @@ def estimate_chunk_count(
     return max(1, (text_length - chunk_overlap) // step + 1)
 
 
-def merge_chunks(chunks: list[DocumentChunk]) -> str:
+def merge_chunks(chunks: list[LiteChunk]) -> str:
     """
     Merge chunks back into original text.
 

@@ -30,9 +30,9 @@ from .data_models import (
 from .exceptions import (
     LiteError,
     ConfigurationError,
-    StorageError,
+    LiteStorageError,
     EmbeddingError,
-    AgentError,
+    LLMError,
 )
 
 __version__ = "0.1.0"
@@ -75,9 +75,9 @@ __all__ = [
     # Exceptions
     "LiteError",
     "ConfigurationError",
-    "StorageError",
+    "LiteStorageError",
     "EmbeddingError",
-    "AgentError",
+    "LLMError",
     # Version
     "__version__",
 ]

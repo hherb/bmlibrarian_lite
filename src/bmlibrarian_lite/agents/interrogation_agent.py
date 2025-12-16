@@ -10,7 +10,7 @@ from typing import Optional
 
 from ..storage import LiteStorage
 from ..config import LiteConfig
-from ..data_models import DocumentChunk
+from ..data_models import LiteChunk
 from ..chunking import chunk_document_for_interrogation
 from ..chroma_embeddings import create_embedding_function, FastEmbedFunction
 from .base import LiteBaseAgent

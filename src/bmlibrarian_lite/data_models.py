@@ -143,7 +143,7 @@ class LiteDocument:
 
 
 @dataclass
-class DocumentChunk:
+class LiteChunk:
     """
     A chunk of a document for embedding and retrieval.
 
