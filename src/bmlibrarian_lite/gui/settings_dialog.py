@@ -19,13 +19,14 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLineEdit,
     QComboBox,
-    QGroupBox,
     QLabel,
     QDialogButtonBox,
     QDoubleSpinBox,
     QMessageBox,
+    QSizePolicy,
     QSpinBox,
-    QApplication,
+    QTabWidget,
+    QWidget,
 )
 from PySide6.QtCore import QThread, Signal
 
@@ -58,6 +59,7 @@ QUALITY_TIER_OPTIONS = [
 FALLBACK_CLAUDE_MODELS = [
     "claude-sonnet-4-20250514",
     "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
     "claude-3-haiku-20240307",
     "claude-3-opus-20240229",
 ]
@@ -124,19 +126,43 @@ class SettingsDialog(QDialog):
         self._fetch_models()
 
     def _setup_ui(self) -> None:
-        """Set up the user interface."""
+        """Set up the user interface with tabbed layout."""
         layout = QVBoxLayout(self)
         layout.setSpacing(scaled(12))
 
-        # LLM settings
-        llm_group = QGroupBox("LLM Settings")
-        llm_layout = QFormLayout(llm_group)
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # Create tabs
+        self._setup_llm_tab()
+        self._setup_embeddings_tab()
+        self._setup_pubmed_tab()
+        self._setup_api_keys_tab()
+        self._setup_openathens_tab()
+        self._setup_quality_tab()
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._save_config)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _setup_llm_tab(self) -> None:
+        """Set up the LLM settings tab."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.model_combo = QComboBox()
-        self.model_combo.addItems(FALLBACK_CLAUDE_MODELS)  # Start with fallback
+        self.model_combo.addItems(FALLBACK_CLAUDE_MODELS)
         self.model_combo.setToolTip("Claude model to use for text generation")
         self.model_combo.setEditable(False)
-        llm_layout.addRow("Model:", self.model_combo)
+        self.model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addRow("Model:", self.model_combo)
 
         self.temperature_spin = QDoubleSpinBox()
         self.temperature_spin.setRange(0.0, 1.0)
@@ -145,20 +171,23 @@ class SettingsDialog(QDialog):
         self.temperature_spin.setToolTip(
             "Lower values are more focused, higher values more creative"
         )
-        llm_layout.addRow("Temperature:", self.temperature_spin)
+        layout.addRow("Temperature:", self.temperature_spin)
 
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(100, 8000)
         self.max_tokens_spin.setSingleStep(100)
         self.max_tokens_spin.setValue(DEFAULT_LLM_MAX_TOKENS)
         self.max_tokens_spin.setToolTip("Maximum tokens in generated response")
-        llm_layout.addRow("Max Tokens:", self.max_tokens_spin)
+        layout.addRow("Max Tokens:", self.max_tokens_spin)
 
-        layout.addWidget(llm_group)
+        self.tab_widget.addTab(tab, "LLM")
 
-        # Embedding settings
-        embed_group = QGroupBox("Embedding Settings")
-        embed_layout = QFormLayout(embed_group)
+    def _setup_embeddings_tab(self) -> None:
+        """Set up the Embeddings settings tab."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.embed_combo = QComboBox()
         try:
@@ -166,25 +195,29 @@ class SettingsDialog(QDialog):
         except Exception:
             self.embed_combo.addItem("BAAI/bge-small-en-v1.5")
         self.embed_combo.setToolTip("Embedding model for semantic search")
-        embed_layout.addRow("Model:", self.embed_combo)
+        self.embed_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addRow("Model:", self.embed_combo)
 
         embed_note = QLabel(
             "<small>Changing embedding model requires re-indexing documents</small>"
         )
-        embed_layout.addRow(embed_note)
+        layout.addRow(embed_note)
 
-        layout.addWidget(embed_group)
+        self.tab_widget.addTab(tab, "Embeddings")
 
-        # PubMed settings
-        pubmed_group = QGroupBox("PubMed Settings")
-        pubmed_layout = QFormLayout(pubmed_group)
+    def _setup_pubmed_tab(self) -> None:
+        """Set up the PubMed settings tab."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("your.email@example.com (recommended)")
         self.email_input.setToolTip(
             "Email for NCBI identification (polite access)"
         )
-        pubmed_layout.addRow("Email:", self.email_input)
+        layout.addRow("Email:", self.email_input)
 
         self.api_key_input = QLineEdit()
         self.api_key_input.setPlaceholderText("Optional - increases rate limit to 10/sec")
@@ -192,19 +225,22 @@ class SettingsDialog(QDialog):
         self.api_key_input.setToolTip(
             "NCBI API key for higher rate limits (optional)"
         )
-        pubmed_layout.addRow("API Key:", self.api_key_input)
+        layout.addRow("API Key:", self.api_key_input)
 
-        layout.addWidget(pubmed_group)
+        self.tab_widget.addTab(tab, "PubMed")
 
-        # API Keys
-        api_group = QGroupBox("API Keys")
-        api_layout = QFormLayout(api_group)
+    def _setup_api_keys_tab(self) -> None:
+        """Set up the API Keys tab."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.anthropic_key_input = QLineEdit()
         self.anthropic_key_input.setEchoMode(QLineEdit.Password)
         self.anthropic_key_input.setPlaceholderText("sk-ant-...")
         self.anthropic_key_input.setToolTip("Anthropic API key for Claude")
-        api_layout.addRow("Anthropic:", self.anthropic_key_input)
+        layout.addRow("Anthropic:", self.anthropic_key_input)
 
         # Load existing API key from environment
         existing_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -215,20 +251,23 @@ class SettingsDialog(QDialog):
             f"<small>API keys are stored securely in "
             f"{self.config.storage.env_file}</small>"
         )
-        api_layout.addRow(api_note)
+        layout.addRow(api_note)
 
-        layout.addWidget(api_group)
+        self.tab_widget.addTab(tab, "API Keys")
 
-        # OpenAthens settings
-        openathens_group = QGroupBox("OpenAthens Institutional Access")
-        openathens_layout = QFormLayout(openathens_group)
+    def _setup_openathens_tab(self) -> None:
+        """Set up the OpenAthens settings tab."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.openathens_enabled = QCheckBox("Enable OpenAthens authentication")
         self.openathens_enabled.setToolTip(
             "Enable institutional access to paywalled PDFs via OpenAthens"
         )
         self.openathens_enabled.stateChanged.connect(self._on_openathens_enabled_changed)
-        openathens_layout.addRow(self.openathens_enabled)
+        layout.addRow(self.openathens_enabled)
 
         self.openathens_url_input = QLineEdit()
         self.openathens_url_input.setPlaceholderText("https://go.openathens.net/redirector/yourinstitution.edu.au")
@@ -238,7 +277,7 @@ class SettingsDialog(QDialog):
             "- https://go.openathens.net/redirector/jcu.edu.au\n"
             "- jcu.edu.au (domain only - will auto-convert)"
         )
-        openathens_layout.addRow("Redirector URL:", self.openathens_url_input)
+        layout.addRow("Redirector URL:", self.openathens_url_input)
 
         self.openathens_session_age = QSpinBox()
         self.openathens_session_age.setRange(1, 168)  # 1 hour to 1 week
@@ -247,7 +286,7 @@ class SettingsDialog(QDialog):
         self.openathens_session_age.setToolTip(
             "Maximum session age before re-authentication required"
         )
-        openathens_layout.addRow("Session Max Age:", self.openathens_session_age)
+        layout.addRow("Session Max Age:", self.openathens_session_age)
 
         openathens_note = QLabel(
             "<small>OpenAthens allows access to paywalled content through "
@@ -256,13 +295,16 @@ class SettingsDialog(QDialog):
             "You can also just enter your institution's domain (e.g., jcu.edu.au).</small>"
         )
         openathens_note.setWordWrap(True)
-        openathens_layout.addRow(openathens_note)
+        layout.addRow(openathens_note)
 
-        layout.addWidget(openathens_group)
+        self.tab_widget.addTab(tab, "OpenAthens")
 
-        # Quality Filtering Settings
-        quality_group = QGroupBox("Quality Filtering")
-        quality_layout = QFormLayout(quality_group)
+    def _setup_quality_tab(self) -> None:
+        """Set up the Quality Filtering tab."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         # Default minimum tier
         self.default_tier_combo = QComboBox()
@@ -271,7 +313,8 @@ class SettingsDialog(QDialog):
         self.default_tier_combo.setToolTip(
             "Default minimum quality tier for document filtering"
         )
-        quality_layout.addRow("Default Minimum Tier:", self.default_tier_combo)
+        self.default_tier_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addRow("Default Minimum Tier:", self.default_tier_combo)
 
         # Default LLM classification
         self.default_llm_classification = QCheckBox("Enable AI classification by default")
@@ -279,7 +322,7 @@ class SettingsDialog(QDialog):
         self.default_llm_classification.setToolTip(
             "Use Claude Haiku to classify unindexed articles (~$0.00025 per article)"
         )
-        quality_layout.addRow(self.default_llm_classification)
+        layout.addRow(self.default_llm_classification)
 
         # Show quality badges
         self.show_quality_badges = QCheckBox("Show quality badges on document cards")
@@ -287,40 +330,36 @@ class SettingsDialog(QDialog):
         self.show_quality_badges.setToolTip(
             "Display color-coded quality tier badges on document cards"
         )
-        quality_layout.addRow(self.show_quality_badges)
+        layout.addRow(self.show_quality_badges)
 
         # Classification model
-        self.class_model_input = QLineEdit()
-        self.class_model_input.setText(QUALITY_CLASSIFIER_MODEL)
-        self.class_model_input.setToolTip(
+        self.class_model_combo = QComboBox()
+        self.class_model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+        self.class_model_combo.setCurrentText(QUALITY_CLASSIFIER_MODEL)
+        self.class_model_combo.setToolTip(
             "Claude model for fast study design classification (Tier 2)"
         )
-        quality_layout.addRow("Classification Model:", self.class_model_input)
+        self.class_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addRow("Classification Model:", self.class_model_combo)
 
         # Assessment model
-        self.assess_model_input = QLineEdit()
-        self.assess_model_input.setText(QUALITY_ASSESSOR_MODEL)
-        self.assess_model_input.setToolTip(
+        self.assess_model_combo = QComboBox()
+        self.assess_model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+        self.assess_model_combo.setCurrentText(QUALITY_ASSESSOR_MODEL)
+        self.assess_model_combo.setToolTip(
             "Claude model for detailed quality assessment (Tier 3)"
         )
-        quality_layout.addRow("Assessment Model:", self.assess_model_input)
+        self.assess_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addRow("Assessment Model:", self.assess_model_combo)
 
         quality_note = QLabel(
             "<small>Quality filtering helps prioritize high-quality evidence "
             "(RCTs, systematic reviews) in literature searches.</small>"
         )
         quality_note.setWordWrap(True)
-        quality_layout.addRow(quality_note)
+        layout.addRow(quality_note)
 
-        layout.addWidget(quality_group)
-
-        # Buttons
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Save | QDialogButtonBox.Cancel
-        )
-        buttons.accepted.connect(self._save_config)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.tab_widget.addTab(tab, "Quality")
 
     def _load_config(self) -> None:
         """Load current configuration into fields."""
@@ -372,10 +411,20 @@ class SettingsDialog(QDialog):
 
             # Models
             class_model = getattr(self.config.quality, 'classification_model', QUALITY_CLASSIFIER_MODEL)
-            self.class_model_input.setText(class_model)
+            idx = self.class_model_combo.findText(class_model)
+            if idx >= 0:
+                self.class_model_combo.setCurrentIndex(idx)
+            else:
+                self.class_model_combo.addItem(class_model)
+                self.class_model_combo.setCurrentText(class_model)
 
             assess_model = getattr(self.config.quality, 'assessment_model', QUALITY_ASSESSOR_MODEL)
-            self.assess_model_input.setText(assess_model)
+            idx = self.assess_model_combo.findText(assess_model)
+            if idx >= 0:
+                self.assess_model_combo.setCurrentIndex(idx)
+            else:
+                self.assess_model_combo.addItem(assess_model)
+                self.assess_model_combo.setCurrentText(assess_model)
 
     def _save_config(self) -> None:
         """Save configuration and close dialog."""
@@ -418,8 +467,8 @@ class SettingsDialog(QDialog):
             self.config.quality.default_minimum_tier = QUALITY_TIER_OPTIONS[tier_idx][1].value
             self.config.quality.use_llm_classification = self.default_llm_classification.isChecked()
             self.config.quality.show_quality_badges = self.show_quality_badges.isChecked()
-            self.config.quality.classification_model = self.class_model_input.text().strip()
-            self.config.quality.assessment_model = self.assess_model_input.text().strip()
+            self.config.quality.classification_model = self.class_model_combo.currentText()
+            self.config.quality.assessment_model = self.assess_model_combo.currentText()
 
         # Save to file
         self.config.save()
@@ -493,21 +542,20 @@ class SettingsDialog(QDialog):
         if not models:
             return
 
-        # Remember current selection
-        current_model = self.model_combo.currentText()
+        # Update all model combo boxes
+        for combo in [self.model_combo, self.class_model_combo, self.assess_model_combo]:
+            current_model = combo.currentText()
+            combo.clear()
+            combo.addItems(models)
 
-        # Update combo box with fetched models
-        self.model_combo.clear()
-        self.model_combo.addItems(models)
-
-        # Restore selection if it exists in new list
-        idx = self.model_combo.findText(current_model)
-        if idx >= 0:
-            self.model_combo.setCurrentIndex(idx)
-        elif current_model:
-            # Current model not in API list - add it anyway
-            self.model_combo.addItem(current_model)
-            self.model_combo.setCurrentText(current_model)
+            # Restore selection if it exists in new list
+            idx = combo.findText(current_model)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            elif current_model:
+                # Current model not in API list - add it anyway
+                combo.addItem(current_model)
+                combo.setCurrentText(current_model)
 
         logger.info(f"Loaded {len(models)} models from Anthropic API")
 
