@@ -8,6 +8,7 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 
 - **Systematic Literature Review**: Search PubMed, score documents, extract citations, and generate reports
 - **Document Interrogation**: Interactive Q&A with loaded documents
+- **PDF Discovery & Download**: Automatic PDF retrieval from PubMed Central, Unpaywall, and DOI resolution
 - **Quality Assessment**: Automated study quality evaluation with evidence grading
 - **Multiple LLM Providers**: Support for both Anthropic Claude (online) and Ollama (local)
 - **Embedded Storage**: ChromaDB + SQLite - no external database needed
@@ -46,6 +47,11 @@ pip install -e .
    ```bash
    export NCBI_EMAIL="your@email.com"
    ```
+
+4. **Optional: Configure PDF Discovery** (for Unpaywall API):
+   - Go to Settings in the GUI
+   - Enter your email address for Unpaywall API access
+   - Configure OpenAthens if you have institutional access
 
 ### Running the Application
 
@@ -165,7 +171,7 @@ BMLibrarian Lite is designed for ease of use and portability:
 |---------|-------------|------------------|
 | Database | PostgreSQL + pgvector | ChromaDB + SQLite |
 | Embeddings | Ollama (local) | FastEmbed (CPU) |
-| PDF Discovery | Full (Unpaywall, PMC, OpenAthens) | Not included |
+| PDF Discovery | Full (Unpaywall, PMC, OpenAthens) | Included (PMC, Unpaywall, DOI) |
 | Multi-Agent Workflow | Full orchestration | Simplified workflow |
 | Installation | Complex | Simple `pip install` |
 

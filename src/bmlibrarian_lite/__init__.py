@@ -34,6 +34,7 @@ from .exceptions import (
     EmbeddingError,
     AgentError,
 )
+from .pdf_discovery import PDFDiscoverer, PDFSource, DiscoveryResult
 
 __version__ = "0.1.0"
 
@@ -72,6 +73,10 @@ __all__ = [
     "ScoredDocument",
     "Citation",
     "InterrogationSession",
+    # PDF Discovery
+    "PDFDiscoverer",
+    "PDFSource",
+    "DiscoveryResult",
     # Exceptions
     "LiteError",
     "ConfigurationError",

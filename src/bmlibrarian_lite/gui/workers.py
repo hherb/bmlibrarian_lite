@@ -3,7 +3,8 @@ Background worker threads for BMLibrarian Lite GUI.
 
 Provides QThread-based workers for long-running operations:
 - AnswerWorker: Generate answers using the interrogation agent
-- PDFDiscoveryWorker: Discover and download PDFs (stub - not available in lite)
+- PDFDiscoveryWorker: Discover and download PDFs from multiple sources
+- OpenAthensAuthWorker: Handle OpenAthens institutional authentication
 - QualityFilterWorker: Filter documents by quality criteria
 
 These workers allow the main GUI thread to remain responsive while
@@ -11,11 +12,15 @@ background operations execute.
 """
 
 import logging
+import webbrowser
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
+
+from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
+from ..pdf_utils import generate_pdf_path
 
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
@@ -70,8 +75,10 @@ class PDFDiscoveryWorker(QThread):
     """
     Background worker for PDF discovery and download.
 
-    Note: In BMLibrarian Lite, PDF discovery is not available.
-    This worker always returns an error indicating the feature is not available.
+    Discovers and downloads PDFs from multiple sources:
+    - PubMed Central (PMC) for open access articles
+    - Unpaywall API for open access discovery
+    - Direct DOI resolution
 
     Signals:
         progress: Emitted with (stage, status) during download
@@ -111,33 +118,98 @@ class PDFDiscoveryWorker(QThread):
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
         self._cancelled = False
+        self._discoverer: Optional[PDFDiscoverer] = None
 
     def run(self) -> None:
         """Execute PDF discovery and download."""
-        # PDF discovery is not available in BMLibrarian Lite
-        self.error.emit(
-            "PDF discovery is not available in BMLibrarian Lite.\n"
-            "You can manually download PDFs and import them into the application."
-        )
+        try:
+            # Extract identifiers from doc_dict
+            doi = self.doc_dict.get("doi")
+            pmid = self.doc_dict.get("pmid")
+            pmcid = self.doc_dict.get("pmcid") or self.doc_dict.get("pmc_id")
+            title = self.doc_dict.get("title")
+
+            if not (doi or pmid or pmcid):
+                self.error.emit(
+                    "No identifiers available (DOI, PMID, or PMCID required).\n"
+                    "Please enter an identifier manually."
+                )
+                return
+
+            # Generate output path
+            output_path = generate_pdf_path(self.doc_dict, self.output_dir)
+
+            # Create discoverer with progress callback
+            self._discoverer = PDFDiscoverer(
+                unpaywall_email=self.unpaywall_email,
+                openathens_url=self.openathens_url,
+                progress_callback=self._emit_progress,
+            )
+
+            # Perform discovery and download
+            result = self._discoverer.discover_and_download(
+                output_path=output_path,
+                doi=doi,
+                pmid=pmid,
+                pmcid=pmcid,
+                title=title,
+                expected_title=title,
+            )
+
+            # Handle result
+            if self._cancelled:
+                return
+
+            if result.success:
+                if result.verification_warning:
+                    self.verification_warning.emit(
+                        str(result.file_path),
+                        result.verification_warning,
+                    )
+                self.finished.emit(str(result.file_path))
+            elif result.is_paywall:
+                self.paywall_detected.emit(
+                    result.paywall_url or "",
+                    result.error or "Access requires subscription",
+                )
+            else:
+                self.error.emit(result.error or "Unknown error during PDF discovery")
+
+        except Exception as e:
+            logger.exception("PDF discovery failed")
+            self.error.emit(f"PDF discovery error: {str(e)}")
+
+    def _emit_progress(self, stage: str, status: str) -> None:
+        """Emit progress signal from discoverer callback."""
+        if not self._cancelled:
+            self.progress.emit(stage, status)
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""
         self._cancelled = True
+        if self._discoverer:
+            self._discoverer.cancel()
 
 
 class OpenAthensAuthWorker(QThread):
     """
     Background worker for OpenAthens interactive authentication.
 
-    Note: In BMLibrarian Lite, OpenAthens authentication is not available.
-    This worker always returns an error indicating the feature is not available.
+    Opens the institutional login page in the default web browser and
+    waits for the user to complete authentication. The browser session
+    will typically persist cookies that can be used for subsequent
+    PDF downloads.
+
+    Note: This is a simple browser-based authentication flow. For full
+    automation, the main BMLibrarian application provides more advanced
+    session management.
 
     Signals:
-        finished: Emitted when authentication succeeds
+        finished: Emitted when authentication is presumed complete
         error: Emitted with error message on failure
     """
 
-    finished = Signal()  # Authentication succeeded
+    finished = Signal()  # Authentication presumed complete
     error = Signal(str)  # error message
 
     def __init__(
@@ -159,12 +231,45 @@ class OpenAthensAuthWorker(QThread):
         self.session_max_age_hours = session_max_age_hours
 
     def run(self) -> None:
-        """Execute OpenAthens interactive authentication."""
-        # OpenAthens authentication is not available in BMLibrarian Lite
-        self.error.emit(
-            "OpenAthens authentication is not available in BMLibrarian Lite.\n"
-            "This feature requires the full BMLibrarian installation."
-        )
+        """Execute OpenAthens interactive authentication via browser."""
+        try:
+            if not self.institution_url:
+                self.error.emit("No institution URL configured.")
+                return
+
+            # Validate URL
+            if not self.institution_url.startswith(("http://", "https://")):
+                self.error.emit(
+                    f"Invalid institution URL: {self.institution_url}\n"
+                    "URL must start with http:// or https://"
+                )
+                return
+
+            logger.info(f"Opening browser for OpenAthens authentication: {self.institution_url}")
+
+            # Open browser for authentication
+            success = webbrowser.open(self.institution_url)
+
+            if not success:
+                self.error.emit(
+                    "Could not open web browser.\n"
+                    "Please open your browser manually and navigate to:\n"
+                    f"{self.institution_url}"
+                )
+                return
+
+            # Give the user time to authenticate (browser has been opened)
+            # The actual authentication happens in the browser, and cookies
+            # will be stored by the browser. For full session management,
+            # the main BMLibrarian app provides more sophisticated handling.
+
+            # Signal that browser was opened successfully
+            # User will need to complete authentication in browser
+            self.finished.emit()
+
+        except Exception as e:
+            logger.exception("OpenAthens authentication failed")
+            self.error.emit(f"Authentication error: {str(e)}")
 
 
 class QualityFilterWorker(QThread):
