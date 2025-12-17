@@ -34,7 +34,7 @@ from .exceptions import (
     EmbeddingError,
     LLMError,
 )
-from .pdf_discovery import PDFDiscoverer, PDFSource, DiscoveryResult
+from .pdf_discovery import PDFDiscoverer, PDFSource, DiscoveryResult, close_browser_session
 
 __version__ = "0.1.0"
 
@@ -77,6 +77,7 @@ __all__ = [
     "PDFDiscoverer",
     "PDFSource",
     "DiscoveryResult",
+    "close_browser_session",
     # Exceptions
     "LiteError",
     "ConfigurationError",

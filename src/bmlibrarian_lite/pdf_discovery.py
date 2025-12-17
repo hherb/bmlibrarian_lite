@@ -5,6 +5,7 @@ Provides multiple methods for discovering and downloading PDF files:
 - Unpaywall API for open access PDFs
 - PubMed Central (PMC) for free full text
 - Direct DOI resolution via CrossRef/content negotiation
+- Browser-based download (Playwright) for bot-protected sites
 
 Usage:
     from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
@@ -21,6 +22,7 @@ Usage:
 import logging
 import re
 import time
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -32,6 +34,204 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+
+# Global browser session manager (singleton, persists across downloads)
+_browser_session: Optional["BrowserSession"] = None
+_browser_lock = threading.Lock()
+
+
+class BrowserSession:
+    """
+    Manages a persistent browser session for PDF downloads.
+
+    Uses Playwright with Chromium to bypass bot protection.
+    The browser window can be visible to allow user interaction
+    (e.g., CAPTCHA solving, cookie consent).
+    """
+
+    def __init__(self, headless: bool = False) -> None:
+        """
+        Initialize browser session.
+
+        Args:
+            headless: If True, run browser without visible window.
+                     Default False to allow user interaction.
+        """
+        self.headless = headless
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._initialized = False
+
+    def _ensure_initialized(self) -> bool:
+        """Lazily initialize the browser on first use."""
+        if self._initialized:
+            return True
+
+        try:
+            from playwright.sync_api import sync_playwright
+
+            logger.info("Starting browser session for PDF downloads...")
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(
+                headless=self.headless,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                ]
+            )
+            self._context = self._browser.new_context(
+                accept_downloads=True,
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+            )
+            self._page = self._context.new_page()
+            self._initialized = True
+            logger.info("Browser session started successfully")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize browser session: {e}")
+            return False
+
+    def download_pdf(
+        self,
+        url: str,
+        output_path: Path,
+        timeout: int = 60000,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Download a PDF using the browser.
+
+        Args:
+            url: URL to download from
+            output_path: Path to save the PDF
+            timeout: Download timeout in milliseconds
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        if not self._ensure_initialized():
+            return False, "Browser session not available"
+
+        try:
+            logger.info(f"Browser downloading: {url}")
+
+            # Set up download handling
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Navigate and wait for potential download
+            with self._page.expect_download(timeout=timeout) as download_info:
+                self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+
+            download = download_info.value
+            download.save_as(output_path)
+
+            # Verify it's a PDF
+            if output_path.exists():
+                with open(output_path, 'rb') as f:
+                    header = f.read(4)
+                    if header == b'%PDF':
+                        logger.info(f"Browser download successful: {output_path}")
+                        return True, None
+                    else:
+                        output_path.unlink(missing_ok=True)
+                        return False, "Downloaded file is not a PDF"
+
+            return False, "Download failed - no file created"
+
+        except Exception as e:
+            error_msg = str(e)
+            # Check if it's a timeout waiting for download (might be HTML page)
+            if "Timeout" in error_msg:
+                # Try to get the page content directly if no download started
+                return self._try_direct_content(url, output_path)
+            logger.warning(f"Browser download failed: {e}")
+            return False, error_msg
+
+    def _try_direct_content(
+        self,
+        url: str,
+        output_path: Path,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Try to get PDF content directly from page response.
+
+        Some sites serve PDF inline rather than as a download.
+        """
+        try:
+            # Check if current page has PDF content
+            content_type = self._page.evaluate(
+                "() => document.contentType"
+            )
+
+            if content_type and 'pdf' in content_type.lower():
+                # Page itself is a PDF, save it
+                response = self._context.request.get(url)
+                if response.ok:
+                    output_path.write_bytes(response.body())
+                    return True, None
+
+            return False, "Page did not serve PDF content"
+
+        except Exception as e:
+            return False, f"Failed to get direct content: {e}"
+
+    def close(self) -> None:
+        """Close the browser session."""
+        if self._page:
+            try:
+                self._page.close()
+            except Exception:
+                pass
+        if self._context:
+            try:
+                self._context.close()
+            except Exception:
+                pass
+        if self._browser:
+            try:
+                self._browser.close()
+            except Exception:
+                pass
+        if self._playwright:
+            try:
+                self._playwright.stop()
+            except Exception:
+                pass
+        self._initialized = False
+        logger.info("Browser session closed")
+
+
+def get_browser_session(headless: bool = False) -> Optional[BrowserSession]:
+    """
+    Get the global browser session, creating it if needed.
+
+    Args:
+        headless: If True, run browser without visible window
+
+    Returns:
+        BrowserSession instance or None if unavailable
+    """
+    global _browser_session
+
+    with _browser_lock:
+        if _browser_session is None:
+            _browser_session = BrowserSession(headless=headless)
+        return _browser_session
+
+
+def close_browser_session() -> None:
+    """Close the global browser session."""
+    global _browser_session
+
+    with _browser_lock:
+        if _browser_session is not None:
+            _browser_session.close()
+            _browser_session = None
 
 # User agent for HTTP requests
 USER_AGENT = "BMLibrarian/1.0 (https://github.com/hherb/bmlibrarian-lite; mailto:support@bmlibrarian.org)"
@@ -103,6 +303,7 @@ class PDFDiscoverer:
     - Unpaywall API for open access discovery
     - PubMed Central for free full text
     - Direct DOI resolution
+    - Browser-based download for bot-protected sites
     - Content verification
     """
 
@@ -111,6 +312,8 @@ class PDFDiscoverer:
         unpaywall_email: Optional[str] = None,
         openathens_url: Optional[str] = None,
         progress_callback: Optional[Callable[[str, str], None]] = None,
+        use_browser_fallback: bool = True,
+        browser_headless: bool = False,
     ) -> None:
         """
         Initialize PDF discoverer.
@@ -119,10 +322,14 @@ class PDFDiscoverer:
             unpaywall_email: Email for Unpaywall API (required for Unpaywall)
             openathens_url: OpenAthens institution URL for authenticated access
             progress_callback: Callback for progress updates (stage, status)
+            use_browser_fallback: If True, use browser for bot-protected downloads
+            browser_headless: If True, run browser without visible window
         """
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
         self.progress_callback = progress_callback
+        self.use_browser_fallback = use_browser_fallback
+        self.browser_headless = browser_headless
         self._session = self._create_session()
         self._cancelled = False
 
@@ -208,6 +415,9 @@ class PDFDiscoverer:
             logger.debug(f"  - {src.source_type.value}: {src.url} (priority={src.priority})")
 
         # Try to download from each source
+        last_paywall_result: Optional[DiscoveryResult] = None
+        blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
+
         for source in sources:
             if self._cancelled:
                 return DiscoveryResult(success=False, error="Cancelled")
@@ -219,8 +429,33 @@ class PDFDiscoverer:
                 return result
 
             if result.is_paywall:
-                # Return paywall result so caller can offer OpenAthens auth
-                return result
+                # For open access sources, a 403 might be bot protection, not paywall
+                # Keep trying other sources first
+                if source.is_open_access:
+                    logger.info(f"Source {source.url} blocked (may be bot protection), trying next source")
+                    blocked_oa_sources.append(source)
+                    last_paywall_result = result
+                    continue
+                else:
+                    # For non-OA sources, return paywall result so caller can offer OpenAthens auth
+                    return result
+
+        # If we have blocked OA sources and browser fallback is enabled, try browser
+        if blocked_oa_sources and self.use_browser_fallback:
+            self._emit_progress("download", "browser_fallback")
+            logger.info("Trying browser-based download for bot-protected sources...")
+
+            for source in blocked_oa_sources:
+                if self._cancelled:
+                    return DiscoveryResult(success=False, error="Cancelled")
+
+                result = self._try_browser_download(source, output_path, expected_title or title)
+                if result.success:
+                    return result
+
+        # If we had a paywall result but no success, return it for OpenAthens option
+        if last_paywall_result:
+            return last_paywall_result
 
         return DiscoveryResult(
             success=False,
@@ -246,10 +481,19 @@ class PDFDiscoverer:
             unpaywall_sources = self._discover_unpaywall(doi)
             sources.extend(unpaywall_sources)
 
-        # Try direct DOI resolution
+        # Try publisher-specific patterns (even if Unpaywall didn't find it)
+        if doi:
+            publisher_sources = self._discover_publisher_specific(doi)
+            for ps in publisher_sources:
+                if ps.url not in [s.url for s in sources]:
+                    sources.append(ps)
+
+        # Try direct DOI resolution as last resort
         if doi:
             doi_sources = self._discover_doi_direct(doi)
-            sources.extend(doi_sources)
+            for ds in doi_sources:
+                if ds.url not in [s.url for s in sources]:
+                    sources.append(ds)
 
         return sources
 
@@ -258,15 +502,27 @@ class PDFDiscoverer:
         pmid: Optional[str],
         pmcid: Optional[str],
     ) -> List[PDFSource]:
-        """Discover PDF from PubMed Central."""
+        """Discover PDF from PubMed Central and Europe PMC."""
         sources: List[PDFSource] = []
 
-        # If we have PMCID, construct direct link
+        # If we have PMCID, construct direct links
         if pmcid:
             pmc_id = pmcid if pmcid.startswith("PMC") else f"PMC{pmcid}"
-            pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/pdf/"
+
+            # Europe PMC (more reliable, less bot protection)
+            europepmc_url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmc_id}&blobtype=pdf"
             sources.append(PDFSource(
-                url=pdf_url,
+                url=europepmc_url,
+                source_type=PDFSourceType.PMC,
+                is_open_access=True,
+                host_type="repository",
+                version="publishedVersion",
+            ))
+
+            # NCBI PMC as fallback
+            ncbi_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/pdf/"
+            sources.append(PDFSource(
+                url=ncbi_url,
                 source_type=PDFSourceType.PMC,
                 is_open_access=True,
                 host_type="repository",
@@ -278,9 +534,20 @@ class PDFDiscoverer:
         if pmid:
             pmcid = self._get_pmcid_from_pmid(pmid)
             if pmcid:
-                pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/"
+                # Europe PMC first
+                europepmc_url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf"
                 sources.append(PDFSource(
-                    url=pdf_url,
+                    url=europepmc_url,
+                    source_type=PDFSourceType.PMC,
+                    is_open_access=True,
+                    host_type="repository",
+                    version="publishedVersion",
+                ))
+
+                # NCBI PMC as fallback
+                ncbi_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/"
+                sources.append(PDFSource(
+                    url=ncbi_url,
                     source_type=PDFSourceType.PMC,
                     is_open_access=True,
                     host_type="repository",
@@ -357,8 +624,126 @@ class PDFDiscoverer:
                         license=location.get("license", ""),
                     ))
 
+                # If no pdf_url but there's a PMC URL, extract PMCID and add PMC sources
+                if not pdf_url:
+                    loc_url = location.get("url", "")
+                    pmcid = self._extract_pmcid_from_url(loc_url)
+                    if pmcid:
+                        # Europe PMC (more reliable)
+                        europepmc_url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf"
+                        if europepmc_url not in [s.url for s in sources]:
+                            sources.append(PDFSource(
+                                url=europepmc_url,
+                                source_type=PDFSourceType.PMC,
+                                is_open_access=True,
+                                host_type="repository",
+                                version=location.get("version", ""),
+                            ))
+
+                        # NCBI PMC as fallback
+                        ncbi_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/"
+                        if ncbi_url not in [s.url for s in sources]:
+                            sources.append(PDFSource(
+                                url=ncbi_url,
+                                source_type=PDFSourceType.PMC,
+                                is_open_access=True,
+                                host_type="repository",
+                                version=location.get("version", ""),
+                            ))
+
+            # Always try publisher-specific patterns for OA content as fallback
+            if data.get("is_oa"):
+                publisher_sources = self._discover_publisher_specific(doi)
+                for ps in publisher_sources:
+                    if ps.url not in [s.url for s in sources]:
+                        sources.append(ps)
+
         except requests.exceptions.RequestException as e:
             logger.warning(f"Unpaywall API error for DOI {doi}: {e}")
+
+        return sources
+
+    def _extract_pmcid_from_url(self, url: str) -> Optional[str]:
+        """Extract PMCID from a PMC URL."""
+        if not url:
+            return None
+        # Match patterns like /pmc/articles/PMC1234567 or /pmc/articles/1234567
+        match = re.search(r'/pmc/articles/(?:PMC)?(\d+)', url, re.IGNORECASE)
+        if match:
+            return f"PMC{match.group(1)}"
+        # Also match standalone numbers in PMC URLs
+        if 'pmc' in url.lower() or 'ncbi' in url.lower():
+            match = re.search(r'(\d{6,})', url)
+            if match:
+                return f"PMC{match.group(1)}"
+        return None
+
+    def _discover_publisher_specific(self, doi: str) -> List[PDFSource]:
+        """Discover PDF using publisher-specific URL patterns."""
+        sources: List[PDFSource] = []
+        doi = self._clean_doi(doi)
+
+        # PLOS journals (plosone, plosntds, plosmedicine, plosbiology, etc.)
+        if doi.startswith("10.1371/journal."):
+            # Extract journal code from DOI (e.g., pntd from journal.pntd.XXXXXXX)
+            match = re.match(r"10\.1371/journal\.(\w+)\.", doi)
+            if match:
+                journal_code = match.group(1)
+                # Map short codes to full journal names
+                plos_journals = {
+                    "pone": "plosone",
+                    "pntd": "plosntds",
+                    "pmed": "plosmedicine",
+                    "pbio": "plosbiology",
+                    "pcbi": "ploscompbiol",
+                    "pgen": "plosgenetics",
+                    "ppat": "plospathogens",
+                }
+                journal_name = plos_journals.get(journal_code, f"plos{journal_code}")
+                pdf_url = f"https://journals.plos.org/{journal_name}/article/file?id={doi}&type=printable"
+                sources.append(PDFSource(
+                    url=pdf_url,
+                    source_type=PDFSourceType.DOI_DIRECT,
+                    is_open_access=True,
+                    host_type="publisher",
+                    version="publishedVersion",
+                ))
+
+        # Frontiers journals
+        elif "frontiersin.org" in doi or doi.startswith("10.3389/"):
+            # Frontiers PDF pattern: https://www.frontiersin.org/articles/10.3389/XXX/pdf
+            pdf_url = f"https://www.frontiersin.org/articles/{doi}/pdf"
+            sources.append(PDFSource(
+                url=pdf_url,
+                source_type=PDFSourceType.DOI_DIRECT,
+                is_open_access=True,
+                host_type="publisher",
+                version="publishedVersion",
+            ))
+
+        # MDPI journals
+        elif doi.startswith("10.3390/"):
+            # MDPI PDF pattern: https://www.mdpi.com/XXX-XXX/X/X/XXX/pdf
+            # Need to resolve DOI first to get the article path
+            pass  # More complex - needs landing page scraping
+
+        # PeerJ
+        elif doi.startswith("10.7717/peerj"):
+            # PeerJ PDF pattern
+            pdf_url = f"https://peerj.com/articles/{doi.split('.')[-1]}.pdf"
+            sources.append(PDFSource(
+                url=pdf_url,
+                source_type=PDFSourceType.DOI_DIRECT,
+                is_open_access=True,
+                host_type="publisher",
+                version="publishedVersion",
+            ))
+
+        # BMC/SpringerOpen (BioMed Central)
+        elif doi.startswith("10.1186/"):
+            # BMC PDF pattern: article URL + .pdf
+            # First need to resolve the DOI to get the article path
+            pass  # More complex - needs landing page scraping
 
         return sources
 
@@ -502,6 +887,66 @@ class PDFDiscoverer:
 
         except Exception as e:
             logger.exception(f"Unexpected error downloading from {source.url}")
+            return DiscoveryResult(success=False, error=str(e))
+
+    def _try_browser_download(
+        self,
+        source: PDFSource,
+        output_path: Path,
+        expected_title: Optional[str],
+    ) -> DiscoveryResult:
+        """
+        Try to download PDF using browser session.
+
+        Used as fallback when regular HTTP requests are blocked by bot protection.
+
+        Args:
+            source: PDF source to download from
+            output_path: Path to save the PDF
+            expected_title: Expected document title for verification
+
+        Returns:
+            DiscoveryResult with success status
+        """
+        logger.info(f"Browser download attempt: {source.url}")
+        self._emit_progress("download", "browser")
+
+        try:
+            browser = get_browser_session(headless=self.browser_headless)
+            if browser is None:
+                return DiscoveryResult(
+                    success=False,
+                    error="Browser session not available",
+                )
+
+            success, error = browser.download_pdf(source.url, output_path)
+
+            if not success:
+                logger.warning(f"Browser download failed: {error}")
+                return DiscoveryResult(success=False, error=error)
+
+            self._emit_progress("download", "success")
+
+            # Verify the downloaded file
+            verification_warning = None
+            if expected_title:
+                self._emit_progress("verification", "starting")
+                is_valid, warning = self._verify_pdf_content(output_path, expected_title)
+                if not is_valid:
+                    verification_warning = warning
+                    self._emit_progress("verification", "mismatch")
+                else:
+                    self._emit_progress("verification", "success")
+
+            return DiscoveryResult(
+                success=True,
+                file_path=output_path,
+                source=source,
+                verification_warning=verification_warning,
+            )
+
+        except Exception as e:
+            logger.exception(f"Browser download error for {source.url}")
             return DiscoveryResult(success=False, error=str(e))
 
     def _is_paywall_response(self, response: requests.Response, url: str) -> bool:

@@ -25,7 +25,9 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QMessageBox,
     QSpinBox,
+    QApplication,
 )
+from PySide6.QtCore import QThread, Signal
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
@@ -52,13 +54,37 @@ QUALITY_TIER_OPTIONS = [
     ("Systematic evidence only (SR/MA)", QualityTier.TIER_5_SYNTHESIS),
 ]
 
-# Available Claude models
-CLAUDE_MODELS = [
+# Fallback Claude models (used if API fetch fails)
+FALLBACK_CLAUDE_MODELS = [
     "claude-sonnet-4-20250514",
     "claude-3-5-sonnet-20241022",
     "claude-3-haiku-20240307",
     "claude-3-opus-20240229",
 ]
+
+
+class ModelFetchWorker(QThread):
+    """Background worker to fetch available models from Anthropic API."""
+
+    models_fetched = Signal(list)  # List of model IDs
+    fetch_failed = Signal(str)  # Error message
+
+    def run(self) -> None:
+        """Fetch models from Anthropic API."""
+        try:
+            import anthropic
+            client = anthropic.Anthropic()
+            models_response = client.models.list()
+
+            # Extract model IDs and sort them
+            model_ids = [model.id for model in models_response.data]
+            # Sort with newest first (based on date in model name)
+            model_ids.sort(reverse=True)
+
+            self.models_fetched.emit(model_ids)
+        except Exception as e:
+            logger.warning(f"Failed to fetch models from API: {e}")
+            self.fetch_failed.emit(str(e))
 
 
 class SettingsDialog(QDialog):
@@ -92,8 +118,10 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setMinimumWidth(scaled(450))
 
+        self._model_fetch_worker: Optional[ModelFetchWorker] = None
         self._setup_ui()
         self._load_config()
+        self._fetch_models()
 
     def _setup_ui(self) -> None:
         """Set up the user interface."""
@@ -105,8 +133,9 @@ class SettingsDialog(QDialog):
         llm_layout = QFormLayout(llm_group)
 
         self.model_combo = QComboBox()
-        self.model_combo.addItems(CLAUDE_MODELS)
+        self.model_combo.addItems(FALLBACK_CLAUDE_MODELS)  # Start with fallback
         self.model_combo.setToolTip("Claude model to use for text generation")
+        self.model_combo.setEditable(False)
         llm_layout.addRow("Model:", self.model_combo)
 
         self.temperature_spin = QDoubleSpinBox()
@@ -451,3 +480,37 @@ class SettingsDialog(QDialog):
         enabled = self.openathens_enabled.isChecked()
         self.openathens_url_input.setEnabled(enabled)
         self.openathens_session_age.setEnabled(enabled)
+
+    def _fetch_models(self) -> None:
+        """Start background fetch of available models from Anthropic API."""
+        self._model_fetch_worker = ModelFetchWorker()
+        self._model_fetch_worker.models_fetched.connect(self._on_models_fetched)
+        self._model_fetch_worker.fetch_failed.connect(self._on_models_fetch_failed)
+        self._model_fetch_worker.start()
+
+    def _on_models_fetched(self, models: list[str]) -> None:
+        """Handle successful model fetch from API."""
+        if not models:
+            return
+
+        # Remember current selection
+        current_model = self.model_combo.currentText()
+
+        # Update combo box with fetched models
+        self.model_combo.clear()
+        self.model_combo.addItems(models)
+
+        # Restore selection if it exists in new list
+        idx = self.model_combo.findText(current_model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+        elif current_model:
+            # Current model not in API list - add it anyway
+            self.model_combo.addItem(current_model)
+            self.model_combo.setCurrentText(current_model)
+
+        logger.info(f"Loaded {len(models)} models from Anthropic API")
+
+    def _on_models_fetch_failed(self, error: str) -> None:
+        """Handle failed model fetch - keep fallback models."""
+        logger.debug(f"Using fallback models (API fetch failed: {error})")
