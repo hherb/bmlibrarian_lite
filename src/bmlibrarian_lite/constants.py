@@ -582,3 +582,9 @@ MAX_AUTHORS_BEFORE_ET_AL = 3
 
 # Maximum lines of abstract to show before scrolling
 AUDIT_ABSTRACT_MAX_LINES = 15
+
+# Card header background color (very pale light blue)
+AUDIT_CARD_HEADER_COLOR = "#E3F2FD"
+
+# Rationale text color (muted)
+AUDIT_RATIONALE_COLOR = "#555555"

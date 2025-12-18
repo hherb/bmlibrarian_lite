@@ -150,17 +150,17 @@ class TestDocumentCard:
         card = DocumentCard(document=sample_document, show_abstract=False)
         # Card starts collapsed
         assert not card.expanded
-        # Abstract widget exists but is hidden
+        # Abstract widget exists but content section is hidden
         assert card._abstract_widget is not None
-        # Use isHidden() since isVisible() requires widget to be shown
-        assert card._abstract_widget.isHidden()
+        # Use isHidden() on content widget since abstract is inside it
+        assert card._content_widget.isHidden()
 
     def test_abstract_expanded_when_requested(self, qapp, sample_document) -> None:
         """Abstract should be expanded when show_abstract=True."""
         card = DocumentCard(document=sample_document, show_abstract=True)
         assert card.expanded
-        # Abstract widget is not hidden when expanded
-        assert not card._abstract_widget.isHidden()
+        # Content section is not hidden when expanded
+        assert not card._content_widget.isHidden()
 
     def test_toggle_expand_collapse(self, qapp, sample_document) -> None:
         """Clicking card should toggle expand/collapse."""
@@ -170,12 +170,12 @@ class TestDocumentCard:
         # Toggle to expand
         card._toggle_expanded()
         assert card.expanded
-        assert not card._abstract_widget.isHidden()
+        assert not card._content_widget.isHidden()
 
         # Toggle to collapse
         card._toggle_expanded()
         assert not card.expanded
-        assert card._abstract_widget.isHidden()
+        assert card._content_widget.isHidden()
 
     def test_send_to_interrogator_signal(self, qapp, sample_document) -> None:
         """Context menu action should emit send_to_interrogator signal."""

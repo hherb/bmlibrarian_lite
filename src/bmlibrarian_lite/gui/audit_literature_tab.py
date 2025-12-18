@@ -60,6 +60,7 @@ class AuditLiteratureTab(QWidget):
         self._cards_by_doc_id: Dict[str, DocumentCard] = {}
         self._documents: Dict[str, LiteDocument] = {}
         self._scores: Dict[str, int] = {}
+        self._score_rationales: Dict[str, str] = {}
         self._quality_assessments: Dict[str, QualityAssessment] = {}
 
         # Thread safety
@@ -175,14 +176,16 @@ class AuditLiteratureTab(QWidget):
             # Store document
             self._documents[document.id] = document
 
-            # Get any existing score/quality
+            # Get any existing score/quality/rationale
             score = self._scores.get(document.id)
+            score_rationale = self._score_rationales.get(document.id)
             quality = self._quality_assessments.get(document.id)
 
             # Create card
             card = DocumentCard(
                 document=document,
                 score=score,
+                score_rationale=score_rationale,
                 quality_assessment=quality,
             )
             card.clicked.connect(self._on_card_clicked)
@@ -207,13 +210,16 @@ class AuditLiteratureTab(QWidget):
         """
         doc_id = scored_doc.document.id
         score = scored_doc.score
+        rationale = scored_doc.explanation
 
         with self._lock:
             self._scores[doc_id] = score
+            if rationale:
+                self._score_rationales[doc_id] = rationale
 
             card = self._cards_by_doc_id.get(doc_id)
             if card:
-                card.set_score(score)
+                card.set_score(score, rationale)
             else:
                 # Document not yet added - store for later
                 logger.debug(f"Score received before document: {doc_id}")
@@ -317,6 +323,7 @@ class AuditLiteratureTab(QWidget):
             self._cards_by_doc_id.clear()
             self._documents.clear()
             self._scores.clear()
+            self._score_rationales.clear()
             self._quality_assessments.clear()
 
             # Show placeholder
