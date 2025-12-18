@@ -70,6 +70,12 @@ class WorkflowWorker(QThread):
     error = Signal(str, str)  # step, error message
     finished = Signal(str)  # final report
 
+    # Granular signals for audit trail
+    query_generated = Signal(str, str)  # (pubmed_query, nl_query)
+    document_scored = Signal(object)  # ScoredDocument
+    citation_extracted = Signal(object)  # Citation
+    quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
+
     def __init__(
         self,
         question: str,
@@ -115,6 +121,11 @@ class WorkflowWorker(QThread):
                 self.question,
                 max_results=self.max_results,
             )
+
+            # Emit query generated signal for audit trail
+            if session:
+                self.query_generated.emit(session.query, session.natural_language_query)
+
             self.step_complete.emit("search", documents)
 
             if self._cancelled:
@@ -137,6 +148,11 @@ class WorkflowWorker(QThread):
                         assessment: QualityAssessment,
                     ) -> None:
                         self.progress.emit("quality_filter", current, total)
+                        # Emit quality assessed signal for audit trail
+                        if assessment and hasattr(assessment, 'document_id'):
+                            self.quality_assessed.emit(
+                                assessment.document_id, assessment
+                            )
 
                     filtered, assessments = self.quality_manager.filter_documents(
                         documents,
@@ -162,12 +178,24 @@ class WorkflowWorker(QThread):
 
             # Step 3: Score documents
             scoring_agent = LiteScoringAgent(config=self.config)
+
+            # Track scored documents for per-document signals
+            scored_docs_list: List[ScoredDocument] = []
+
+            def scoring_progress(current: int, total: int) -> None:
+                self.progress.emit("scoring", current, total)
+
             scored_docs = scoring_agent.score_documents(
                 self.question,
                 documents,
                 min_score=self.min_score,
-                progress_callback=lambda c, t: self.progress.emit("scoring", c, t),
+                progress_callback=scoring_progress,
             )
+
+            # Emit per-document signals for audit trail
+            for scored_doc in scored_docs:
+                self.document_scored.emit(scored_doc)
+
             self.step_complete.emit("scoring", scored_docs)
 
             if self._cancelled:
@@ -181,14 +209,23 @@ class WorkflowWorker(QThread):
                 )
                 return
 
-            # Step 3: Extract citations
+            # Step 4: Extract citations
             citation_agent = LiteCitationAgent(config=self.config)
+
+            def citation_progress(current: int, total: int) -> None:
+                self.progress.emit("citations", current, total)
+
             citations = citation_agent.extract_all_citations(
                 self.question,
                 scored_docs,
                 min_score=self.min_score,
-                progress_callback=lambda c, t: self.progress.emit("citations", c, t),
+                progress_callback=citation_progress,
             )
+
+            # Emit per-citation signals for audit trail
+            for citation in citations:
+                self.citation_extracted.emit(citation)
+
             self.step_complete.emit("citations", citations)
 
             if self._cancelled:
@@ -236,6 +273,15 @@ class SystematicReviewTab(QWidget):
     # Args: report, question, citations, documents_found, scored_documents,
     #       quality_assessments, quality_filter_settings
     report_generated = Signal(str, str, list, list, list, dict, dict)
+
+    # Audit Trail signals - emitted during workflow for real-time updates
+    workflow_started = Signal()  # Emitted when workflow begins
+    workflow_finished = Signal()  # Emitted when workflow completes
+    query_generated = Signal(str, str)  # (pubmed_query, nl_query)
+    documents_found = Signal(list)  # List[LiteDocument]
+    document_scored = Signal(object)  # ScoredDocument
+    citation_extracted = Signal(object)  # Citation
+    quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
 
     def __init__(
         self,
@@ -375,6 +421,9 @@ class SystematicReviewTab(QWidget):
         # Get quality filter settings
         quality_filter = self.quality_filter_panel.get_filter()
 
+        # Emit workflow started signal for audit trail
+        self.workflow_started.emit()
+
         # Create and start worker
         self._worker = WorkflowWorker(
             question=question,
@@ -389,6 +438,13 @@ class SystematicReviewTab(QWidget):
         self._worker.step_complete.connect(self._on_step_complete)
         self._worker.error.connect(self._on_error)
         self._worker.finished.connect(self._on_finished)
+
+        # Connect worker audit trail signals to tab signals
+        self._worker.query_generated.connect(self.query_generated)
+        self._worker.document_scored.connect(self.document_scored)
+        self._worker.citation_extracted.connect(self.citation_extracted)
+        self._worker.quality_assessed.connect(self.quality_assessed)
+
         self._worker.start()
 
     def _cancel_workflow(self) -> None:
@@ -435,6 +491,9 @@ class SystematicReviewTab(QWidget):
             self.progress_label.setText(f"Found {len(docs)} documents")
             # Quality filtering happens after search in the workflow worker
             # Results are stored for later display
+
+            # Emit documents found signal for audit trail
+            self.documents_found.emit(docs)
         elif step == "quality_filter":
             # Handle quality filtering results
             filtered_docs, assessments = result
@@ -463,6 +522,9 @@ class SystematicReviewTab(QWidget):
         self.progress_label.setText("Complete - Report generated")
         self.progress_bar.setValue(100)
         self._reset_ui()
+
+        # Emit workflow finished signal for audit trail
+        self.workflow_finished.emit()
 
         # Build quality filter settings dict for the signal
         quality_filter = self.quality_filter_panel.get_filter()

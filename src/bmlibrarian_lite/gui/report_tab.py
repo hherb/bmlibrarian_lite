@@ -37,7 +37,7 @@ from ..data_models import LiteDocument, ScoredDocument, Citation
 from ..quality import QualityAssessment
 
 # Directory for auto-saved reports
-REPORTS_DIR = Path.home() / "bmlibrarian_reports"
+REPORTS_DIR = Path.home() / "bmlibrarian_reports" / "LITE"
 
 logger = logging.getLogger(__name__)
 

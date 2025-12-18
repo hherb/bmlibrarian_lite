@@ -548,3 +548,37 @@ EUROPEPMC_MAX_RETRIES = 3
 
 # Delay between Europe PMC retry attempts (seconds)
 EUROPEPMC_RETRY_DELAY_SECONDS = 1.0
+
+# =============================================================================
+# Audit Trail UI Constants
+# =============================================================================
+
+# Card layout dimensions (relative, will be scaled by dpi_scale)
+AUDIT_CARD_MIN_HEIGHT = 80
+AUDIT_CARD_SPACING = 8
+AUDIT_CARD_PADDING = 12
+AUDIT_CARD_BORDER_RADIUS = 6
+
+# Score color thresholds (1-5 scale)
+SCORE_THRESHOLD_EXCELLENT = 4.5
+SCORE_THRESHOLD_GOOD = 3.5
+SCORE_THRESHOLD_MODERATE = 2.5
+
+# Score badge colors (hex)
+SCORE_COLOR_EXCELLENT = "#2E7D32"  # Green - scores >= 4.5
+SCORE_COLOR_GOOD = "#1976D2"       # Blue - scores >= 3.5
+SCORE_COLOR_MODERATE = "#F57C00"   # Orange - scores >= 2.5
+SCORE_COLOR_POOR = "#C62828"       # Red - scores < 2.5
+
+# Citation highlight color (yellow)
+CITATION_HIGHLIGHT_COLOR = "#FFEB3B"
+
+# Batched UI update delay (milliseconds)
+# Prevents UI lag during rapid document additions
+AUDIT_UI_UPDATE_DELAY_MS = 100
+
+# Maximum authors to display before "et al."
+MAX_AUTHORS_BEFORE_ET_AL = 3
+
+# Maximum lines of abstract to show before scrolling
+AUDIT_ABSTRACT_MAX_LINES = 15

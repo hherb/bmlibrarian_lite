@@ -70,6 +70,9 @@ def setup_logging(verbose: bool = False) -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
+    # Suppress noisy httpx INFO messages (HTTP Request logs)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def cmd_gui(args: argparse.Namespace) -> int:
     """

@@ -35,6 +35,7 @@ from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from .systematic_review_tab import SystematicReviewTab
+from .audit_trail_tab import AuditTrailTab
 from .report_tab import ReportTab
 from .document_interrogation_tab import DocumentInterrogationTab
 from .settings_dialog import SettingsDialog
@@ -119,6 +120,14 @@ class LiteMainWindow(QMainWindow):
         )
         self.tab_widget.addTab(self.systematic_review_tab, "Systematic Review")
 
+        # Audit Trail tab - between Systematic Review and Report
+        self.audit_trail_tab = AuditTrailTab(
+            config=self.config,
+            storage=self.storage,
+            parent=self,
+        )
+        self.tab_widget.addTab(self.audit_trail_tab, "Audit Trail")
+
         self.report_tab = ReportTab(
             config=self.config,
             storage=self.storage,
@@ -141,6 +150,34 @@ class LiteMainWindow(QMainWindow):
         # Connect citation click signal from Report tab to load document
         self.report_tab.document_requested.connect(
             self._on_document_requested
+        )
+
+        # Connect Audit Trail signals from Systematic Review tab
+        self.systematic_review_tab.workflow_started.connect(
+            self.audit_trail_tab.on_workflow_started
+        )
+        self.systematic_review_tab.workflow_finished.connect(
+            self.audit_trail_tab.on_workflow_finished
+        )
+        self.systematic_review_tab.query_generated.connect(
+            self.audit_trail_tab.on_query_generated
+        )
+        self.systematic_review_tab.documents_found.connect(
+            self.audit_trail_tab.on_documents_found
+        )
+        self.systematic_review_tab.document_scored.connect(
+            self.audit_trail_tab.on_document_scored
+        )
+        self.systematic_review_tab.citation_extracted.connect(
+            self.audit_trail_tab.on_citation_extracted
+        )
+        self.systematic_review_tab.quality_assessed.connect(
+            self.audit_trail_tab.on_quality_assessed
+        )
+
+        # Connect Audit Trail document request to load document
+        self.audit_trail_tab.document_requested.connect(
+            self._on_document_requested_from_audit
         )
 
         # Status bar
@@ -262,7 +299,7 @@ class LiteMainWindow(QMainWindow):
 
     def _on_document_requested(self, doc_id: str) -> None:
         """
-        Handle document request from citation click.
+        Handle document request from citation click in Report tab.
 
         Switches to the Document Interrogation tab and loads
         the requested document for Q&A.
@@ -286,6 +323,54 @@ class LiteMainWindow(QMainWindow):
 
         self.status_bar.showMessage(
             f"Loading document: {citation.document.title[:50]}...", 3000
+        )
+
+    def _on_document_requested_from_audit(self, doc_id: str) -> None:
+        """
+        Handle document request from Audit Trail tab.
+
+        Gets the document from the Audit Trail and loads it
+        in the Document Interrogation tab for Q&A.
+
+        Args:
+            doc_id: Document ID clicked in audit trail
+        """
+        # Try to get citation from the citations tab first
+        citations = self.audit_trail_tab.get_citations_for_document(doc_id)
+
+        if citations:
+            # Use the first citation if available
+            citation = citations[0]
+            self.tab_widget.setCurrentWidget(self.interrogation_tab)
+            self.interrogation_tab.load_from_citation(citation)
+            self.status_bar.showMessage(
+                f"Loading document: {citation.document.title[:50]}...", 3000
+            )
+            return
+
+        # Otherwise get the document directly
+        document = self.audit_trail_tab.get_document(doc_id)
+
+        if not document:
+            logger.warning(f"Document not found in audit trail: {doc_id}")
+            self.status_bar.showMessage(f"Document not found: {doc_id}", 5000)
+            return
+
+        # Switch to interrogation tab and load document
+        self.tab_widget.setCurrentWidget(self.interrogation_tab)
+
+        # Create a minimal citation for loading
+        from ..data_models import Citation
+        citation = Citation(
+            document=document,
+            passage="",  # No specific passage
+            relevance_score=0,
+            context="Loaded from audit trail",
+        )
+        self.interrogation_tab.load_from_citation(citation)
+
+        self.status_bar.showMessage(
+            f"Loading document: {document.title[:50]}...", 3000
         )
 
 
