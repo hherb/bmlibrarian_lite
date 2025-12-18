@@ -49,14 +49,8 @@ def main() -> int:
     Returns:
         Application exit code
     """
-    import sys
-    import os
-
-    # Suppress tokenizers parallelism warning
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-
-    from .gui.app import run_lite_app
-    return run_lite_app()
+    from .cli import main as cli_main
+    return cli_main()
 
 
 __all__ = [

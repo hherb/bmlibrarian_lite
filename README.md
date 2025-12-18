@@ -20,6 +20,14 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 
 ### Installation
 
+**From PyPI (recommended):**
+
+```bash
+pip install bmlibrarian-lite
+```
+
+**From source:**
+
 ```bash
 # Clone the repository
 git clone https://github.com/hherb/bmlibrarian-lite.git
@@ -58,10 +66,13 @@ pip install -e .
 ### Running the Application
 
 ```bash
-# Launch the GUI
-python bmlibrarian_lite.py
+# Launch the GUI (short command)
+bmll
 
-# Or using the package entry point
+# Or using the full name
+bmlibrarian-lite
+
+# Or using Python module
 python -m bmlibrarian_lite
 ```
 
@@ -69,16 +80,19 @@ python -m bmlibrarian_lite
 
 ```bash
 # Show storage statistics
-python bmlibrarian_lite.py stats
+bmll stats
 
 # Validate configuration
-python bmlibrarian_lite.py validate --verbose
+bmll validate --verbose
 
 # Show current configuration
-python bmlibrarian_lite.py config
+bmll config
 
 # Clear all data
-python bmlibrarian_lite.py clear
+bmll clear
+
+# Show version
+bmll --version
 ```
 
 ## Usage
