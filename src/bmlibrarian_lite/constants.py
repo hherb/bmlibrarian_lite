@@ -498,3 +498,53 @@ CLASSIFICATION_RETRY_BACKOFF_MULTIPLIER = 2.0
 # Jitter factor for retry delays (0.0 to 1.0)
 # Adds randomness to prevent thundering herd effects (per golden rule 22)
 CLASSIFICATION_RETRY_JITTER_FACTOR = 0.2
+
+# =============================================================================
+# Europe PMC API Settings
+# =============================================================================
+
+# Europe PMC REST API base URL
+EUROPEPMC_REST_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
+
+# Europe PMC search endpoint
+EUROPEPMC_SEARCH_URL = f"{EUROPEPMC_REST_BASE_URL}/search"
+
+# Request timeout for Europe PMC API calls (seconds)
+EUROPEPMC_REQUEST_TIMEOUT_SECONDS = 30
+
+# User agent for Europe PMC requests
+EUROPEPMC_USER_AGENT = "BMLibrarian/1.0 (https://github.com/hherb/bmlibrarian-lite)"
+
+# =============================================================================
+# Full-text Storage Settings
+# =============================================================================
+
+# Default full-text markdown base directory relative to home
+# Structure: ~/knowledgebase/fulltext/{year}/{pmcid}.md
+DEFAULT_FULLTEXT_BASE_DIR = "knowledgebase/fulltext"
+
+# Default PDF base directory relative to home
+# Structure: ~/knowledgebase/pdf/{year}/{doi}.pdf
+DEFAULT_PDF_BASE_DIR = "knowledgebase/pdf"
+
+# Environment variable name for overriding PDF base directory
+PDF_BASE_DIR_ENV_VAR = "PDF_BASE_DIR"
+
+# =============================================================================
+# Full-text Discovery Settings
+# =============================================================================
+
+# Priority order for full-text sources (higher = preferred)
+FULLTEXT_SOURCE_PRIORITY = {
+    "cached_fulltext": 100,  # Cached markdown (fastest)
+    "europepmc_xml": 90,     # Europe PMC XML API (best quality)
+    "cached_pdf": 80,        # Cached PDF
+    "downloaded_pdf": 70,    # Downloaded PDF
+    "abstract_only": 10,     # Abstract fallback
+}
+
+# Maximum retry attempts for Europe PMC XML retrieval
+EUROPEPMC_MAX_RETRIES = 3
+
+# Delay between Europe PMC retry attempts (seconds)
+EUROPEPMC_RETRY_DELAY_SECONDS = 1.0

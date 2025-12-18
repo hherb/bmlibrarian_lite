@@ -1,10 +1,13 @@
 """
-PDF utility functions for BMLibrarian Lite.
+PDF and full-text utility functions for BMLibrarian Lite.
 
-Pure functions for PDF file path management and document formatting:
+Pure functions for PDF/full-text file path management and document formatting:
 - get_pdf_base_dir(): Get the base directory for PDF storage
+- get_fulltext_base_dir(): Get the base directory for full-text markdown storage
 - generate_pdf_path(): Generate standard PDF path for a document
+- generate_fulltext_path(): Generate standard full-text markdown path for a document
 - find_existing_pdf(): Check if a PDF already exists locally
+- find_existing_fulltext(): Check if a full-text markdown already exists locally
 - format_abstract_as_document(): Format abstract and citation as readable document
 - extract_pdf_text(): Extract text from a PDF file
 
@@ -13,8 +16,11 @@ These functions are stateless and can be reused across different modules.
 Usage:
     from bmlibrarian_lite.pdf_utils import (
         get_pdf_base_dir,
+        get_fulltext_base_dir,
         generate_pdf_path,
+        generate_fulltext_path,
         find_existing_pdf,
+        find_existing_fulltext,
         format_abstract_as_document,
     )
 
@@ -27,6 +33,9 @@ Usage:
 
     # Check for existing PDF
     existing = find_existing_pdf(doc, base_dir)
+
+    # Check for existing full-text markdown (from Europe PMC XML)
+    fulltext = find_existing_fulltext(doc)
 """
 
 import logging
@@ -34,16 +43,16 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .constants import (
+    DEFAULT_FULLTEXT_BASE_DIR,
+    DEFAULT_PDF_BASE_DIR,
+    PDF_BASE_DIR_ENV_VAR,
+)
+
 logger = logging.getLogger(__name__)
 
-# Environment variable name for PDF base directory
-PDF_BASE_DIR_ENV = 'PDF_BASE_DIR'
 
-# Default PDF base directory relative to home
-DEFAULT_PDF_BASE_DIR = 'knowledgebase/pdf'
-
-
-def get_pdf_base_dir(env_var: str = PDF_BASE_DIR_ENV) -> Path:
+def get_pdf_base_dir(env_var: str = PDF_BASE_DIR_ENV_VAR) -> Path:
     """
     Get the base directory for PDF storage.
 
@@ -63,6 +72,23 @@ def get_pdf_base_dir(env_var: str = PDF_BASE_DIR_ENV) -> Path:
     if pdf_base:
         return Path(pdf_base).expanduser()
     return Path.home() / DEFAULT_PDF_BASE_DIR
+
+
+def get_fulltext_base_dir() -> Path:
+    """
+    Get the base directory for full-text markdown storage.
+
+    Full-text markdown files are generated from Europe PMC XML and cached
+    for faster subsequent access.
+
+    Returns:
+        Path to full-text markdown base directory
+
+    Example:
+        base_dir = get_fulltext_base_dir()
+        # Returns Path("/home/user/knowledgebase/fulltext")
+    """
+    return Path.home() / DEFAULT_FULLTEXT_BASE_DIR
 
 
 def generate_pdf_path(
@@ -184,6 +210,145 @@ def find_existing_pdf(
                         return pdf_path
 
     return None
+
+
+def generate_fulltext_path(
+    doc_dict: Dict[str, Any],
+    base_dir: Optional[Path] = None,
+) -> Path:
+    """
+    Generate the standard full-text markdown path for a document.
+
+    Uses year-based folder structure with identifier-based filename.
+    Structure: {base_dir}/{year}/{filename}.md
+
+    Args:
+        doc_dict: Document dictionary with pmcid, pmid, doi, year, id, etc.
+        base_dir: Base directory for full-text storage (default: from get_fulltext_base_dir())
+
+    Returns:
+        Path where full-text markdown should be stored
+
+    Example:
+        doc = {'pmcid': 'PMC12101959', 'year': 2024}
+        path = generate_fulltext_path(doc)
+        # Returns Path("~/knowledgebase/fulltext/2024/PMC12101959.md")
+    """
+    if base_dir is None:
+        base_dir = get_fulltext_base_dir()
+
+    # Extract year for subdirectory
+    year = _extract_year(doc_dict)
+    year_dir = str(year) if year else 'unknown'
+    output_dir = base_dir / year_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate filename - prefer PMC ID, then PMID, then DOI
+    pmcid = doc_dict.get('pmcid') or doc_dict.get('pmc_id')
+    if pmcid:
+        # Normalize PMC ID
+        pmc_num = pmcid.replace("PMC", "")
+        filename = f"PMC{pmc_num}.md"
+    elif doc_dict.get('pmid'):
+        filename = f"pmid_{doc_dict['pmid']}.md"
+    elif doc_dict.get('doi'):
+        safe_doi = doc_dict['doi'].replace('/', '_').replace('\\', '_')
+        filename = f"{safe_doi}.md"
+    else:
+        doc_id = doc_dict.get('id', 'unknown')
+        filename = f"doc_{doc_id}.md"
+
+    return output_dir / filename
+
+
+def find_existing_fulltext(
+    doc_dict: Dict[str, Any],
+    base_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """
+    Check if full-text markdown already exists locally for this document.
+
+    Searches both the expected path and year-based subdirectories
+    to find existing full-text that may have been stored previously.
+
+    Args:
+        doc_dict: Document dictionary with pmcid, pmid, doi, year, id, etc.
+        base_dir: Base directory for full-text storage (default: from get_fulltext_base_dir())
+
+    Returns:
+        Path to existing full-text markdown if found, None otherwise
+
+    Example:
+        doc = {'pmcid': 'PMC12101959', 'year': 2024}
+        existing = find_existing_fulltext(doc)
+        if existing:
+            print(f"Found full-text at: {existing}")
+    """
+    if base_dir is None:
+        base_dir = get_fulltext_base_dir()
+
+    # First check expected path
+    expected_path = generate_fulltext_path(doc_dict, base_dir)
+    if expected_path.exists():
+        logger.info(f"Found existing full-text at: {expected_path}")
+        return expected_path
+
+    # Also check by PMC ID in all year directories
+    pmcid = doc_dict.get('pmcid') or doc_dict.get('pmc_id')
+    if pmcid:
+        pmc_num = pmcid.replace("PMC", "")
+        filename = f"PMC{pmc_num}.md"
+
+        if base_dir.exists():
+            for year_dir in base_dir.iterdir():
+                if year_dir.is_dir():
+                    fulltext_path = year_dir / filename
+                    if fulltext_path.exists():
+                        logger.info(f"Found existing full-text at: {fulltext_path}")
+                        return fulltext_path
+
+    # Also check by PMID
+    pmid = doc_dict.get('pmid')
+    if pmid:
+        filename = f"pmid_{pmid}.md"
+        if base_dir.exists():
+            for year_dir in base_dir.iterdir():
+                if year_dir.is_dir():
+                    fulltext_path = year_dir / filename
+                    if fulltext_path.exists():
+                        logger.info(f"Found existing full-text at: {fulltext_path}")
+                        return fulltext_path
+
+    return None
+
+
+def save_fulltext_markdown(
+    doc_dict: Dict[str, Any],
+    markdown_content: str,
+    base_dir: Optional[Path] = None,
+) -> Path:
+    """
+    Save full-text markdown to the cache directory.
+
+    Args:
+        doc_dict: Document dictionary with pmcid, pmid, doi, year, etc.
+        markdown_content: Markdown content to save
+        base_dir: Base directory for full-text storage
+
+    Returns:
+        Path where the file was saved
+
+    Example:
+        path = save_fulltext_markdown(
+            {'pmcid': 'PMC12101959', 'year': 2024},
+            "# Article Title\n\nContent..."
+        )
+    """
+    path = generate_fulltext_path(doc_dict, base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown_content, encoding='utf-8')
+    logger.info(f"Saved full-text markdown to: {path}")
+    return path
 
 
 def format_abstract_as_document(

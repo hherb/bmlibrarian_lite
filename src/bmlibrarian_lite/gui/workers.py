@@ -4,6 +4,7 @@ Background worker threads for BMLibrarian Lite GUI.
 Provides QThread-based workers for long-running operations:
 - AnswerWorker: Generate answers using the interrogation agent
 - PDFDiscoveryWorker: Discover and download PDFs from multiple sources
+- FulltextDiscoveryWorker: Discover full-text via Europe PMC XML or PDF
 - OpenAthensAuthWorker: Handle OpenAthens institutional authentication
 - QualityFilterWorker: Filter documents by quality criteria
 
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_utils import generate_pdf_path
+from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
 
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
@@ -191,6 +193,114 @@ class PDFDiscoveryWorker(QThread):
             self._discoverer.cancel()
 
 
+class FulltextDiscoveryWorker(QThread):
+    """
+    Background worker for full-text discovery.
+
+    Discovers and retrieves full-text content from multiple sources:
+    1. Cached full-text markdown (fastest)
+    2. Europe PMC XML API (best quality)
+    3. Cached PDF
+    4. PDF download from various sources
+
+    Signals:
+        progress: Emitted with (stage, status) during discovery
+        finished: Emitted with (markdown_content, file_path, source_type) on success
+        paywall_detected: Emitted with (article_url, error_message) when paywall blocks access
+        error: Emitted with error message on failure
+    """
+
+    progress = Signal(str, str)  # stage, status
+    finished = Signal(str, str, str)  # markdown_content, file_path, source_type
+    paywall_detected = Signal(str, str)  # article_url, error_message
+    error = Signal(str)  # error message
+
+    def __init__(
+        self,
+        doc_dict: Dict[str, Any],
+        unpaywall_email: Optional[str] = None,
+        openathens_url: Optional[str] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize full-text discovery worker.
+
+        Args:
+            doc_dict: Document dictionary with doi, pmid, pmcid, title, year, etc.
+            unpaywall_email: Email for Unpaywall API
+            openathens_url: OpenAthens institution URL for authenticated downloads
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.doc_dict = doc_dict
+        self.unpaywall_email = unpaywall_email
+        self.openathens_url = openathens_url
+        self._cancelled = False
+        self._discoverer: Optional[FulltextDiscoverer] = None
+
+    def run(self) -> None:
+        """Execute full-text discovery."""
+        try:
+            # Extract identifiers from doc_dict
+            doi = self.doc_dict.get("doi")
+            pmid = self.doc_dict.get("pmid")
+            pmcid = self.doc_dict.get("pmcid") or self.doc_dict.get("pmc_id")
+            title = self.doc_dict.get("title")
+
+            if not (doi or pmid or pmcid):
+                self.error.emit(
+                    "No identifiers available (DOI, PMID, or PMCID required).\n"
+                    "Please enter an identifier manually."
+                )
+                return
+
+            # Create discoverer with progress callback
+            self._discoverer = FulltextDiscoverer(
+                unpaywall_email=self.unpaywall_email,
+                openathens_url=self.openathens_url,
+                progress_callback=self._emit_progress,
+            )
+
+            # Perform discovery
+            result = self._discoverer.discover_fulltext(
+                doc_dict=self.doc_dict,
+            )
+
+            # Handle result
+            if self._cancelled:
+                return
+
+            if result.success:
+                file_path = str(result.file_path) if result.file_path else ""
+                self.finished.emit(
+                    result.markdown_content or "",
+                    file_path,
+                    result.source_type.value,
+                )
+            elif result.is_paywall:
+                self.paywall_detected.emit(
+                    result.paywall_url or "",
+                    result.error or "Access requires subscription",
+                )
+            else:
+                self.error.emit(result.error or "Full-text not available")
+
+        except Exception as e:
+            logger.exception("Full-text discovery failed")
+            self.error.emit(f"Full-text discovery error: {str(e)}")
+
+    def _emit_progress(self, stage: str, status: str) -> None:
+        """Emit progress signal from discoverer callback."""
+        if not self._cancelled:
+            self.progress.emit(stage, status)
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+        if self._discoverer:
+            self._discoverer.cancel()
+
+
 class OpenAthensAuthWorker(QThread):
     """
     Background worker for OpenAthens interactive authentication.
@@ -237,24 +347,24 @@ class OpenAthensAuthWorker(QThread):
                 self.error.emit("No institution URL configured.")
                 return
 
-            # Validate URL
-            if not self.institution_url.startswith(("http://", "https://")):
-                self.error.emit(
-                    f"Invalid institution URL: {self.institution_url}\n"
-                    "URL must start with http:// or https://"
-                )
-                return
+            # Convert domain to OpenAthens Redirector URL if needed
+            institution_url = self.institution_url
+            if not institution_url.startswith(("http://", "https://")):
+                # Assume it's a domain - convert to OpenAthens Redirector URL
+                # OpenAthens Redirector format: https://go.openathens.net/redirector/DOMAIN
+                institution_url = f"https://go.openathens.net/redirector/{institution_url}"
+                logger.info(f"Converted domain to OpenAthens Redirector URL: {institution_url}")
 
-            logger.info(f"Opening browser for OpenAthens authentication: {self.institution_url}")
+            logger.info(f"Opening browser for OpenAthens authentication: {institution_url}")
 
             # Open browser for authentication
-            success = webbrowser.open(self.institution_url)
+            success = webbrowser.open(institution_url)
 
             if not success:
                 self.error.emit(
                     "Could not open web browser.\n"
                     "Please open your browser manually and navigate to:\n"
-                    f"{self.institution_url}"
+                    f"{institution_url}"
                 )
                 return
 

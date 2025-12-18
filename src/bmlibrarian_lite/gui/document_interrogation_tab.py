@@ -41,6 +41,7 @@ from ..agents import LiteInterrogationAgent
 from ..pdf_utils import (
     get_pdf_base_dir,
     find_existing_pdf,
+    find_existing_fulltext,
     extract_pdf_text,
     get_progress_stage_message,
 )
@@ -49,7 +50,7 @@ from ..conversation_export import (
     export_conversation_to_markdown,
     create_conversation_message,
 )
-from .workers import AnswerWorker, PDFDiscoveryWorker, OpenAthensAuthWorker
+from .workers import AnswerWorker, PDFDiscoveryWorker, FulltextDiscoveryWorker, OpenAthensAuthWorker
 from .chat_widgets import ChatBubble
 from .document_viewer import LiteDocumentViewWidget
 from .dialogs import (
@@ -99,6 +100,7 @@ class DocumentInterrogationTab(QWidget):
         self._agent = LiteInterrogationAgent(config=config, storage=storage)
         self._worker: Optional[AnswerWorker] = None
         self._pdf_worker: Optional[PDFDiscoveryWorker] = None
+        self._fulltext_worker: Optional[FulltextDiscoveryWorker] = None
         self._openathens_worker: Optional[OpenAthensAuthWorker] = None
         self._pdf_progress_dialog: Optional[QProgressDialog] = None
         self._document_loaded = False
@@ -727,20 +729,143 @@ class DocumentInterrogationTab(QWidget):
         self._pending_citation = citation
         title = get_document_title(citation)
 
-        existing = find_existing_pdf(self._current_doc_metadata)
-        if existing:
-            self._load_citation_pdf(existing, citation, "Full Text (PDF - cached)")
+        logger.info(f"load_from_citation: doc_id={citation.document.id}, pmid={citation.document.pmid}, doi={citation.document.doi}, pmc_id={citation.document.pmc_id}")
+        logger.info(f"load_from_citation: metadata={self._current_doc_metadata}")
+
+        # Check for cached full-text markdown first (from Europe PMC XML)
+        cached_fulltext = find_existing_fulltext(self._current_doc_metadata)
+        if cached_fulltext:
+            logger.info(f"load_from_citation: Found cached full-text at {cached_fulltext}")
+            try:
+                content = cached_fulltext.read_text(encoding='utf-8')
+                self._load_citation_fulltext(content, citation, "Full Text (Europe PMC - cached)")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to read cached full-text: {e}")
+
+        # Check for cached PDF
+        existing_pdf = find_existing_pdf(self._current_doc_metadata)
+        if existing_pdf:
+            logger.info(f"load_from_citation: Found existing PDF at {existing_pdf}")
+            self._load_citation_pdf(existing_pdf, citation, "Full Text (PDF - cached)")
             return
 
-        if not has_pdf_identifiers(citation):
+        # Check if we have identifiers to search
+        has_ids = has_pdf_identifiers(citation)
+        logger.info(f"load_from_citation: has_pdf_identifiers={has_ids}")
+        if not has_ids:
+            logger.info("load_from_citation: No identifiers, loading abstract")
             self._load_citation_abstract(citation)
             return
 
-        self._start_pdf_discovery(
-            self._current_doc_metadata, title,
-            on_success=lambda p: self._load_citation_pdf(Path(p), citation, "Full Text (PDF)"),
+        # Start full-text discovery (tries Europe PMC XML first, then PDF)
+        logger.info("load_from_citation: Starting full-text discovery")
+        self._start_fulltext_discovery(
+            self._current_doc_metadata, title, citation,
             on_error=lambda e: self._load_citation_abstract(citation)
         )
+
+    def _start_fulltext_discovery(
+        self,
+        doc_dict: dict,
+        display_title: str,
+        citation: 'Citation',
+        on_error=None,
+    ) -> None:
+        """Start full-text discovery in background (Europe PMC XML or PDF)."""
+        self._current_doc_metadata = doc_dict
+        self._pending_fetch_title = display_title
+
+        self._pdf_progress_dialog = self._create_progress_dialog("Fetching Full Text")
+        self._pdf_progress_dialog.canceled.connect(
+            lambda: (self._cancel_fulltext_discovery(), on_error and on_error("Cancelled"))
+        )
+        self._pdf_progress_dialog.show()
+
+        # Get OpenAthens URL if configured
+        openathens_url = None
+        if self.config.openathens.enabled and self.config.openathens.institution_url:
+            openathens_url = self.config.openathens.institution_url
+
+        self._fulltext_worker = FulltextDiscoveryWorker(
+            doc_dict,
+            self.config.discovery.unpaywall_email or None,
+            openathens_url,
+            self,
+        )
+        self._fulltext_worker.progress.connect(self._update_progress_dialog)
+        self._fulltext_worker.finished.connect(
+            lambda content, path, source: self._on_fulltext_ready(content, path, source, citation)
+        )
+        self._fulltext_worker.paywall_detected.connect(
+            lambda url, err: self._on_paywall_detected(url, err, on_error)
+        )
+        self._fulltext_worker.error.connect(lambda e: self._on_fulltext_error(e, citation, on_error))
+        self._fulltext_worker.start()
+
+    def _on_fulltext_ready(
+        self,
+        markdown_content: str,
+        file_path: str,
+        source_type: str,
+        citation: 'Citation',
+    ) -> None:
+        """Handle full-text discovery completion."""
+        if self._pdf_progress_dialog:
+            self._pdf_progress_dialog.close()
+            self._pdf_progress_dialog = None
+        self._fulltext_worker = None
+
+        # Map source type to user-friendly label
+        source_labels = {
+            "cached_fulltext": "Full Text (Europe PMC - cached)",
+            "europepmc_xml": "Full Text (Europe PMC)",
+            "cached_pdf": "Full Text (PDF - cached)",
+            "downloaded_pdf": "Full Text (PDF)",
+        }
+        source_label = source_labels.get(source_type, f"Full Text ({source_type})")
+
+        if file_path and file_path.endswith('.pdf'):
+            # Load as PDF for display
+            self._load_citation_pdf(Path(file_path), citation, source_label)
+        else:
+            # Load markdown directly
+            self._load_citation_fulltext(markdown_content, citation, source_label)
+
+    def _on_fulltext_error(self, error: str, citation: 'Citation', callback=None) -> None:
+        """Handle full-text discovery error."""
+        if self._pdf_progress_dialog:
+            self._pdf_progress_dialog.close()
+            self._pdf_progress_dialog = None
+        self._fulltext_worker = None
+
+        logger.warning(f"Full-text discovery failed: {error}")
+        if callback:
+            callback(error)
+        else:
+            # Fall back to abstract
+            self._load_citation_abstract(citation)
+
+    def _cancel_fulltext_discovery(self) -> None:
+        """Cancel ongoing full-text discovery."""
+        if self._fulltext_worker:
+            self._fulltext_worker.cancel()
+
+    def _load_citation_fulltext(self, content: str, citation: 'Citation', source_type: str) -> None:
+        """Load full-text markdown content for citation."""
+        title = get_document_title(citation)
+        try:
+            if not content.strip():
+                self._load_citation_abstract(citation)
+                return
+
+            self._agent.load_document(content, title=title)
+            self.document_view.set_text(content, title)
+            self.document_view.show_fulltext_tab()
+            self._finalize_citation_load(citation, source_type, show_wrong_pdf=False)
+        except Exception as e:
+            logger.exception("Failed to load full-text")
+            self._load_citation_abstract(citation)
 
     def _load_citation_pdf(self, pdf_path: Path, citation: 'Citation', source_type: str) -> None:
         """Load PDF for citation."""
