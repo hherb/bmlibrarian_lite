@@ -1,8 +1,9 @@
 """
 Main application window for BMLibrarian Lite.
 
-A lightweight version of BMLibrarian with two tabs:
+A lightweight version of BMLibrarian with three tabs:
 - Systematic Review: Search PubMed, score, extract, and generate reports
+- Report: View and interact with generated reports
 - Document Interrogation: Q&A with loaded documents
 """
 
@@ -25,7 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import StylesheetGenerator
@@ -34,6 +35,7 @@ from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from .systematic_review_tab import SystematicReviewTab
+from .report_tab import ReportTab
 from .document_interrogation_tab import DocumentInterrogationTab
 from .settings_dialog import SettingsDialog
 
@@ -117,6 +119,13 @@ class LiteMainWindow(QMainWindow):
         )
         self.tab_widget.addTab(self.systematic_review_tab, "Systematic Review")
 
+        self.report_tab = ReportTab(
+            config=self.config,
+            storage=self.storage,
+            parent=self,
+        )
+        self.tab_widget.addTab(self.report_tab, "Report")
+
         self.interrogation_tab = DocumentInterrogationTab(
             config=self.config,
             storage=self.storage,
@@ -124,8 +133,13 @@ class LiteMainWindow(QMainWindow):
         )
         self.tab_widget.addTab(self.interrogation_tab, "Document Interrogation")
 
-        # Connect citation click signal to load document in interrogation tab
-        self.systematic_review_tab.document_requested.connect(
+        # Connect report generation signal to display in Report tab
+        self.systematic_review_tab.report_generated.connect(
+            self._on_report_generated
+        )
+
+        # Connect citation click signal from Report tab to load document
+        self.report_tab.document_requested.connect(
             self._on_document_requested
         )
 
@@ -204,6 +218,48 @@ class LiteMainWindow(QMainWindow):
         """
         self._update_token_usage()
 
+    def _on_report_generated(
+        self,
+        report: str,
+        question: str,
+        citations: list,
+        documents_found: list,
+        scored_documents: list,
+        quality_assessments: dict,
+        quality_filter_settings: dict,
+    ) -> None:
+        """
+        Handle report generation from systematic review.
+
+        Displays the report in the Report tab and switches to it.
+
+        Args:
+            report: Generated markdown report
+            question: Research question
+            citations: List of citations extracted
+            documents_found: All documents found in search
+            scored_documents: Documents that passed scoring
+            quality_assessments: Quality assessments by doc ID
+            quality_filter_settings: Quality filter settings used
+        """
+        # Display report in the Report tab
+        self.report_tab.display_report(
+            report=report,
+            question=question,
+            citations=citations,
+            documents_found=documents_found,
+            scored_documents=scored_documents,
+            quality_assessments=quality_assessments,
+            quality_filter_settings=quality_filter_settings,
+        )
+
+        # Switch to Report tab
+        self.tab_widget.setCurrentWidget(self.report_tab)
+
+        self.status_bar.showMessage(
+            f"Report generated with {len(citations)} citations", 5000
+        )
+
     def _on_document_requested(self, doc_id: str) -> None:
         """
         Handle document request from citation click.
@@ -214,8 +270,8 @@ class LiteMainWindow(QMainWindow):
         Args:
             doc_id: Document ID from the citation
         """
-        # Get the citation from the systematic review tab
-        citation = self.systematic_review_tab.get_citation(doc_id)
+        # Get the citation from the Report tab
+        citation = self.report_tab.get_citation(doc_id)
 
         if not citation:
             logger.warning(f"Citation not found for doc_id: {doc_id}")

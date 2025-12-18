@@ -111,25 +111,21 @@ class LiteStudyClassifier(LiteBaseAgent):
     This classifier provides accurate study design classification at minimal
     cost. It specifically focuses on classifying what study design THIS paper
     used, ignoring any other studies mentioned in the abstract.
-
-    Attributes:
-        model: The LLM model to use for classification
     """
+
+    TASK_ID = "study_classification"
 
     def __init__(
         self,
         config: Optional[LiteConfig] = None,
-        model: Optional[str] = None,
     ) -> None:
         """
         Initialize the study classifier.
 
         Args:
             config: BMLibrarian Lite configuration
-            model: Optional model override (default: from constants)
         """
         super().__init__(config)
-        self.model = model or QUALITY_CLASSIFIER_MODEL
 
     def classify(self, document: LiteDocument) -> StudyClassification:
         """
@@ -705,13 +701,3 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
             confidence=0.0,
             raw_response=f"All retries failed: {last_error}",
         )
-
-    def _get_model(self) -> str:
-        """
-        Override to use classifier-specific model.
-
-        Returns:
-            Model string with provider prefix
-        """
-        provider = self.config.llm.provider
-        return f"{provider}:{self.model}"

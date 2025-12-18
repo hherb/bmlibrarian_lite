@@ -54,6 +54,8 @@ class LiteScoringAgent(LiteBaseAgent):
     The agent is stateless - each scoring call is independent.
     """
 
+    TASK_ID = "document_scoring"
+
     def score_document(
         self,
         question: str,

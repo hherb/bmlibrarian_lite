@@ -33,29 +33,22 @@ classifiers = [
 dependencies = [
     # Vector storage (embedded, no server needed)
     "chromadb>=0.5.0",
-
     # Embeddings (CPU-optimized, no PyTorch needed)
     "fastembed>=0.3.0",
-
     # LLM APIs
     "anthropic>=0.34.0",
     "ollama>=0.3.0",
-
     # HTTP client and utilities
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
     "backoff>=2.2.1",
-
     # GUI
     "PySide6>=6.6.0",
-
     # PDF processing
     "PyMuPDF>=1.23.0",
-
     # Text processing
     "pysbd>=0.3.4",
     "tokenizers>=0.19.0",
-
     # Markdown
     "markdown>=3.5.0",
     "pygments>=2.17.0",

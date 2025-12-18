@@ -71,6 +71,8 @@ class LiteInterrogationAgent(LiteBaseAgent):
         storage: LiteStorage instance
     """
 
+    TASK_ID = "document_qa"
+
     # Collection name for document chunks
     CHUNKS_COLLECTION = "document_chunks"
 
@@ -177,7 +179,12 @@ class LiteInterrogationAgent(LiteBaseAgent):
                 self._create_user_message(f"Question: {question}"),
             ]
 
-            response = self._chat(messages, temperature=0.3, max_tokens=200)
+            response = self._chat(
+                messages,
+                task_id="query_expansion",
+                temperature=0.3,
+                max_tokens=200,
+            )
 
             # Parse response into list of queries
             alternatives = [
@@ -334,7 +341,12 @@ Provide a brief summary of what this document appears to be about. Include the m
             self._create_user_message(user_prompt),
         ]
 
-        return self._chat(messages, temperature=0.2, max_tokens=500)
+        return self._chat(
+            messages,
+            task_id="document_summary",
+            temperature=0.2,
+            max_tokens=500,
+        )
 
     def clear_document(self, document_id: Optional[str] = None) -> None:
         """

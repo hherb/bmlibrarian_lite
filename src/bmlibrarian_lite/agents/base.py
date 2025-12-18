@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
-from ..config import LiteConfig
+from ..config import LiteConfig, TaskModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +22,20 @@ class LiteBaseAgent:
     Provides common functionality for LLM communication and configuration.
     Agents inheriting from this class gain access to:
     - Configured LLM client with provider selection
+    - Task-based model configuration
     - Helper methods for creating chat messages
     - Configuration management
 
+    Subclasses should set TASK_ID to their task identifier for automatic
+    model configuration lookup.
+
     Attributes:
         config: Lite configuration instance
+        TASK_ID: Task identifier for model configuration (override in subclass)
     """
+
+    # Override in subclasses to set the task type for model configuration
+    TASK_ID: str = "default"
 
     def __init__(
         self,
@@ -58,23 +66,39 @@ class LiteBaseAgent:
             self._llm_client = LLMClient()
         return self._llm_client
 
-    def _get_model(self) -> str:
+    def _get_task_config(self, task_id: Optional[str] = None) -> TaskModelConfig:
         """
-        Get the configured model string.
+        Get model configuration for a task.
+
+        Args:
+            task_id: Task identifier (uses class TASK_ID if not specified)
+
+        Returns:
+            TaskModelConfig with effective settings for the task
+        """
+        task_id = task_id or self.TASK_ID
+        return self.config.models.get_task_config(task_id)
+
+    def _get_model(self, task_id: Optional[str] = None) -> str:
+        """
+        Get the configured model string for a task.
 
         Combines provider and model name into the format expected
         by LLMClient (e.g., "anthropic:claude-3-haiku-20240307").
 
+        Args:
+            task_id: Task identifier (uses class TASK_ID if not specified)
+
         Returns:
             Model string with provider prefix
         """
-        provider = self.config.llm.provider
-        model = self.config.llm.model
-        return f"{provider}:{model}"
+        task_id = task_id or self.TASK_ID
+        return self.config.models.get_model_string(task_id)
 
     def _chat(
         self,
         messages: list[LLMMessage],
+        task_id: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         json_mode: bool = False,
@@ -82,8 +106,12 @@ class LiteBaseAgent:
         """
         Send a chat request to the LLM.
 
+        Uses task-specific configuration if available, otherwise falls back
+        to defaults. Temperature and max_tokens can be overridden per-call.
+
         Args:
             messages: List of conversation messages
+            task_id: Task identifier for config lookup (uses class TASK_ID if None)
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
             json_mode: Request JSON-formatted output
@@ -91,11 +119,13 @@ class LiteBaseAgent:
         Returns:
             Response text from the LLM
         """
+        task_config = self._get_task_config(task_id)
         response = self.llm_client.chat(
             messages=messages,
-            model=self._get_model(),
-            temperature=temperature or self.config.llm.temperature,
-            max_tokens=max_tokens or self.config.llm.max_tokens,
+            model=f"{task_config.provider}:{task_config.model}",
+            temperature=temperature if temperature is not None else task_config.temperature,
+            max_tokens=max_tokens if max_tokens is not None else task_config.max_tokens,
+            top_p=task_config.top_p,
             json_mode=json_mode,
         )
         return response.content

@@ -55,6 +55,8 @@ class LiteCitationAgent(LiteBaseAgent):
     3. Returns citations with source attribution
     """
 
+    TASK_ID = "citation_extraction"
+
     def extract_citations(
         self,
         question: str,

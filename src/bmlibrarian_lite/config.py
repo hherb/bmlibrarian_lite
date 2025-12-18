@@ -30,22 +30,257 @@ from .constants import (
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
     DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_OLLAMA_HOST,
     SQLITE_DATABASE_NAME,
     MIN_CHUNK_SIZE,
     EMBEDDING_MODEL_SPECS,
+    LLM_TASK_TYPES,
+    LLM_PROVIDERS,
 )
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class LLMConfig:
-    """LLM provider configuration."""
+class TaskModelConfig:
+    """
+    Configuration for a single LLM task.
 
-    provider: str = DEFAULT_LLM_PROVIDER
-    model: str = DEFAULT_LLM_MODEL
+    Each task (scoring, citation extraction, etc.) can have its own
+    provider, model, and parameters.
+
+    Attributes:
+        provider: LLM provider name (anthropic, ollama)
+        model: Model name (empty string means use provider default)
+        temperature: Sampling temperature (0.0-2.0)
+        max_tokens: Maximum output tokens
+        top_p: Nucleus sampling parameter (None = not set)
+        top_k: Top-k sampling parameter (None = not set)
+        context_window: Context window limit (None = use model default)
+    """
+
+    provider: str = ""
+    model: str = ""
     temperature: float = DEFAULT_LLM_TEMPERATURE
     max_tokens: int = DEFAULT_LLM_MAX_TOKENS
+    top_p: Optional[float] = None
+    top_k: Optional[int] = None
+    context_window: Optional[int] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "context_window": self.context_window,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TaskModelConfig":
+        """Create from dictionary."""
+        return cls(
+            provider=data.get("provider", ""),
+            model=data.get("model", ""),
+            temperature=float(data.get("temperature", DEFAULT_LLM_TEMPERATURE)),
+            max_tokens=int(data.get("max_tokens", DEFAULT_LLM_MAX_TOKENS)),
+            top_p=data.get("top_p"),
+            top_k=data.get("top_k"),
+            context_window=data.get("context_window"),
+        )
+
+    def is_configured(self) -> bool:
+        """Return True if this task has custom configuration."""
+        return bool(self.provider)
+
+
+@dataclass
+class ProviderConfig:
+    """
+    Configuration for an LLM provider.
+
+    Attributes:
+        enabled: Whether this provider is available for use
+        base_url: Base URL for the provider API
+        default_model: Default model to use for this provider
+    """
+
+    enabled: bool = True
+    base_url: str = ""
+    default_model: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "enabled": self.enabled,
+            "base_url": self.base_url,
+            "default_model": self.default_model,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProviderConfig":
+        """Create from dictionary."""
+        return cls(
+            enabled=data.get("enabled", True),
+            base_url=data.get("base_url", ""),
+            default_model=data.get("default_model", ""),
+        )
+
+
+@dataclass
+class ModelsConfig:
+    """
+    Multi-provider, task-based model configuration.
+
+    Allows different tasks to use different providers and models.
+    Simple tasks like query conversion can use a fast local Ollama model,
+    while complex tasks like report generation can use Anthropic.
+
+    Attributes:
+        providers: Configuration for each provider
+        default_provider: Default provider for tasks without custom config
+        default_model: Default model for tasks without custom config
+        default_temperature: Default temperature
+        default_max_tokens: Default max tokens
+        tasks: Task-specific configuration overrides
+
+    Example:
+        config.models.default_provider = "anthropic"
+        config.models.default_model = "claude-sonnet-4-20250514"
+
+        # Use Ollama for simple tasks
+        config.models.tasks["query_conversion"] = TaskModelConfig(
+            provider="ollama",
+            model="llama3.2",
+        )
+    """
+
+    providers: dict[str, ProviderConfig] = field(default_factory=dict)
+    default_provider: str = DEFAULT_LLM_PROVIDER
+    default_model: str = DEFAULT_LLM_MODEL
+    default_temperature: float = DEFAULT_LLM_TEMPERATURE
+    default_max_tokens: int = DEFAULT_LLM_MAX_TOKENS
+    tasks: dict[str, TaskModelConfig] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Initialize default provider configurations."""
+        if not self.providers:
+            self.providers = {
+                "anthropic": ProviderConfig(
+                    enabled=True,
+                    base_url=LLM_PROVIDERS["anthropic"]["default_base_url"],
+                    default_model=LLM_PROVIDERS["anthropic"]["default_model"],
+                ),
+                "ollama": ProviderConfig(
+                    enabled=True,
+                    base_url=DEFAULT_OLLAMA_HOST,
+                    default_model=LLM_PROVIDERS["ollama"]["default_model"],
+                ),
+            }
+
+    def get_task_config(self, task_id: str) -> TaskModelConfig:
+        """
+        Get effective configuration for a task.
+
+        If the task has custom settings, returns those.
+        Otherwise, returns default configuration merged with
+        task type defaults from constants.
+
+        Args:
+            task_id: Task identifier (e.g., "document_scoring")
+
+        Returns:
+            TaskModelConfig with effective settings for the task
+        """
+        # Check for task-specific config
+        if task_id in self.tasks and self.tasks[task_id].is_configured():
+            task = self.tasks[task_id]
+            # Fill in model from provider default if not specified
+            model = task.model
+            if not model and task.provider in self.providers:
+                model = self.providers[task.provider].default_model
+            return TaskModelConfig(
+                provider=task.provider,
+                model=model,
+                temperature=task.temperature,
+                max_tokens=task.max_tokens,
+                top_p=task.top_p,
+                top_k=task.top_k,
+                context_window=task.context_window,
+            )
+
+        # Get task type defaults from constants
+        task_type_info = LLM_TASK_TYPES.get(task_id, {})
+        default_temp = task_type_info.get("default_temperature", self.default_temperature)
+        default_tokens = task_type_info.get("default_max_tokens", self.default_max_tokens)
+
+        # Return default config with task-type-specific defaults
+        return TaskModelConfig(
+            provider=self.default_provider,
+            model=self.default_model,
+            temperature=default_temp,
+            max_tokens=default_tokens,
+        )
+
+    def get_model_string(self, task_id: str) -> str:
+        """
+        Get the provider:model string for a task.
+
+        Args:
+            task_id: Task identifier
+
+        Returns:
+            Model string in format "provider:model"
+        """
+        config = self.get_task_config(task_id)
+        return f"{config.provider}:{config.model}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "providers": {
+                name: cfg.to_dict() for name, cfg in self.providers.items()
+            },
+            "default_provider": self.default_provider,
+            "default_model": self.default_model,
+            "default_temperature": self.default_temperature,
+            "default_max_tokens": self.default_max_tokens,
+            "tasks": {
+                task_id: cfg.to_dict()
+                for task_id, cfg in self.tasks.items()
+                if cfg.is_configured()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ModelsConfig":
+        """Create from dictionary."""
+        providers = {}
+        if "providers" in data:
+            providers = {
+                name: ProviderConfig.from_dict(cfg_data)
+                for name, cfg_data in data["providers"].items()
+            }
+
+        tasks = {}
+        if "tasks" in data:
+            tasks = {
+                task_id: TaskModelConfig.from_dict(cfg_data)
+                for task_id, cfg_data in data["tasks"].items()
+            }
+
+        config = cls(
+            providers=providers,
+            default_provider=data.get("default_provider", DEFAULT_LLM_PROVIDER),
+            default_model=data.get("default_model", DEFAULT_LLM_MODEL),
+            default_temperature=float(data.get("default_temperature", DEFAULT_LLM_TEMPERATURE)),
+            default_max_tokens=int(data.get("default_max_tokens", DEFAULT_LLM_MAX_TOKENS)),
+            tasks=tasks,
+        )
+        return config
 
 
 @dataclass
@@ -145,7 +380,7 @@ class LiteConfig:
         config = LiteConfig()
 
         # Modify and save
-        config.llm.model = "claude-3-haiku-20240307"
+        config.models.default_model = "claude-3-haiku-20240307"
         config.save()
 
     Validation Caching:
@@ -154,7 +389,7 @@ class LiteConfig:
         Use invalidate_validation_cache() to force re-validation.
     """
 
-    llm: LLMConfig = field(default_factory=LLMConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
     embeddings: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     pubmed: PubMedConfig = field(default_factory=PubMedConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
@@ -208,14 +443,8 @@ class LiteConfig:
         """
         config = cls()
 
-        if "llm" in data:
-            llm_data = data["llm"]
-            config.llm = LLMConfig(
-                provider=llm_data.get("provider", DEFAULT_LLM_PROVIDER),
-                model=llm_data.get("model", DEFAULT_LLM_MODEL),
-                temperature=float(llm_data.get("temperature", DEFAULT_LLM_TEMPERATURE)),
-                max_tokens=int(llm_data.get("max_tokens", DEFAULT_LLM_MAX_TOKENS)),
-            )
+        if "models" in data:
+            config.models = ModelsConfig.from_dict(data["models"])
 
         if "embeddings" in data:
             embed_data = data["embeddings"]
@@ -274,12 +503,7 @@ class LiteConfig:
             Configuration dictionary
         """
         return {
-            "llm": {
-                "provider": self.llm.provider,
-                "model": self.llm.model,
-                "temperature": self.llm.temperature,
-                "max_tokens": self.llm.max_tokens,
-            },
+            "models": self.models.to_dict(),
             "embeddings": {
                 "model": self.embeddings.model,
                 "cache_dir": str(self.embeddings.cache_dir) if self.embeddings.cache_dir else None,
@@ -434,24 +658,36 @@ class LiteConfig:
         if self.pubmed.email and "@" not in self.pubmed.email:
             errors.append("Invalid email format for PubMed configuration")
 
-        # LLM temperature range (0.0 to 1.0)
-        if not 0.0 <= self.llm.temperature <= 1.0:
+        # LLM temperature range (0.0 to 2.0 - some providers allow up to 2.0)
+        if not 0.0 <= self.models.default_temperature <= 2.0:
             errors.append(
-                f"LLM temperature must be between 0.0 and 1.0, got {self.llm.temperature}"
+                f"LLM temperature must be between 0.0 and 2.0, got {self.models.default_temperature}"
             )
 
         # LLM max tokens (must be positive)
-        if self.llm.max_tokens < 1:
+        if self.models.default_max_tokens < 1:
             errors.append(
-                f"LLM max_tokens must be a positive integer, got {self.llm.max_tokens}"
+                f"LLM max_tokens must be a positive integer, got {self.models.default_max_tokens}"
             )
 
         # LLM provider validation
-        valid_providers = ["anthropic", "openai", "ollama"]
-        if self.llm.provider not in valid_providers:
+        valid_providers = list(LLM_PROVIDERS.keys())
+        if self.models.default_provider not in valid_providers:
             errors.append(
-                f"LLM provider must be one of {valid_providers}, got '{self.llm.provider}'"
+                f"LLM provider must be one of {valid_providers}, got '{self.models.default_provider}'"
             )
+
+        # Validate task-specific configurations
+        for task_id, task_config in self.models.tasks.items():
+            if task_config.is_configured():
+                if task_config.provider not in valid_providers:
+                    errors.append(
+                        f"Task '{task_id}' has invalid provider: '{task_config.provider}'"
+                    )
+                if not 0.0 <= task_config.temperature <= 2.0:
+                    errors.append(
+                        f"Task '{task_id}' temperature must be 0.0-2.0, got {task_config.temperature}"
+                    )
 
         # Embedding model validation
         if self.embeddings.model not in EMBEDDING_MODEL_SPECS:

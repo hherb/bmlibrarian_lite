@@ -40,6 +40,8 @@ class LiteSearchAgent(LiteBaseAgent):
         storage: LiteStorage instance for persistence
     """
 
+    TASK_ID = "query_conversion"
+
     def __init__(
         self,
         storage: Optional[LiteStorage] = None,
@@ -64,9 +66,10 @@ class LiteSearchAgent(LiteBaseAgent):
         )
 
         # Initialize lite query converter (simplified, focused queries)
+        # Uses query_conversion task configuration
         self._query_converter = LiteQueryConverter(
             llm_client=self.llm_client,
-            model=self._get_model(),
+            model=self._get_model("query_conversion"),
         )
 
         # Create embedding function (lazy initialization)

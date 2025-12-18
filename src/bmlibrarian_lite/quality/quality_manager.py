@@ -18,11 +18,6 @@ from typing import Optional, Callable
 
 from ..data_models import LiteDocument
 from ..config import LiteConfig
-from ..constants import (
-    METADATA_HIGH_CONFIDENCE,
-    QUALITY_CLASSIFIER_MODEL,
-    QUALITY_ASSESSOR_MODEL,
-)
 from .data_models import (
     QualityTier,
     QualityFilter,
@@ -63,27 +58,17 @@ class QualityManager:
     def __init__(
         self,
         config: Optional[LiteConfig] = None,
-        classification_model: Optional[str] = None,
-        assessment_model: Optional[str] = None,
     ) -> None:
         """
         Initialize the quality manager.
 
         Args:
             config: BMLibrarian Lite configuration
-            classification_model: Model for Tier 2 (default: Haiku)
-            assessment_model: Model for Tier 3 (default: Sonnet)
         """
         self.config = config or LiteConfig()
         self.metadata_filter = MetadataFilter()
-        self.study_classifier = LiteStudyClassifier(
-            self.config,
-            model=classification_model or QUALITY_CLASSIFIER_MODEL,
-        )
-        self.quality_agent = LiteQualityAgent(
-            self.config,
-            model=assessment_model or QUALITY_ASSESSOR_MODEL,
-        )
+        self.study_classifier = LiteStudyClassifier(config=self.config)
+        self.quality_agent = LiteQualityAgent(config=self.config)
 
     def assess_document(
         self,

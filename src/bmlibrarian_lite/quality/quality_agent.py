@@ -58,25 +58,21 @@ class LiteQualityAgent(LiteBaseAgent):
 
     This agent is more expensive than the classifier and should be used
     selectively for documents that require detailed assessment.
-
-    Attributes:
-        model: The LLM model to use for assessment
     """
+
+    TASK_ID = "quality_assessment"
 
     def __init__(
         self,
         config: Optional[LiteConfig] = None,
-        model: Optional[str] = None,
     ) -> None:
         """
         Initialize the quality agent.
 
         Args:
             config: BMLibrarian Lite configuration
-            model: Optional model override (default: from constants)
         """
         super().__init__(config)
-        self.model = model or QUALITY_ASSESSOR_MODEL
 
     def assess_quality(self, document: LiteDocument) -> QualityAssessment:
         """
@@ -324,13 +320,3 @@ Focus on THIS study's methodology, not studies it references."""
             return max(0.0, min(1.0, conf))
         except (ValueError, TypeError):
             return 0.5
-
-    def _get_model(self) -> str:
-        """
-        Override to use assessor-specific model.
-
-        Returns:
-            Model string with provider prefix
-        """
-        provider = self.config.llm.provider
-        return f"{provider}:{self.model}"

@@ -50,6 +50,8 @@ class LiteReportingAgent(LiteBaseAgent):
     3. Returns a formatted report with references
     """
 
+    TASK_ID = "report_generation"
+
     def generate_report(
         self,
         question: str,
