@@ -203,6 +203,22 @@ class SettingsDialog(QDialog):
         self._load_config()
         self._fetch_all_models()
 
+    def closeEvent(self, event) -> None:
+        """Handle dialog close - wait for background workers to finish."""
+        # Wait for all model fetch workers to complete
+        for worker in self._model_fetch_workers:
+            if worker.isRunning():
+                worker.wait(500)  # Wait up to 500ms each
+        self._model_fetch_workers.clear()
+
+        # Wait for all connection test workers to complete
+        for worker in self._connection_test_workers:
+            if worker.isRunning():
+                worker.wait(500)
+        self._connection_test_workers.clear()
+
+        super().closeEvent(event)
+
     def _setup_ui(self) -> None:
         """Set up the user interface with tabbed layout."""
         layout = QVBoxLayout(self)

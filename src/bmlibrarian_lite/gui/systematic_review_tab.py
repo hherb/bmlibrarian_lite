@@ -491,8 +491,16 @@ class SystematicReviewTab(QWidget):
         """Reset UI to ready state."""
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self._worker = None
-        self._quality_worker = None
+        # Wait for workers to finish before releasing references
+        # to prevent "QThread destroyed while running" errors
+        if self._worker is not None:
+            if self._worker.isRunning():
+                self._worker.wait(1000)  # Wait up to 1 second
+            self._worker = None
+        if self._quality_worker is not None:
+            if self._quality_worker.isRunning():
+                self._quality_worker.wait(1000)
+            self._quality_worker = None
 
     def _store_quality_assessments(
         self,
