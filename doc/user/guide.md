@@ -84,6 +84,50 @@ The Systematic Review tab provides a complete workflow for conducting literature
 | 2 | Low relevance, limited applicability |
 | 1 | Not relevant |
 
+### Audit Trail
+
+The Audit Trail tab provides real-time visibility into the systematic review workflow. It has three sub-tabs:
+
+#### Queries Tab
+
+Shows all generated PubMed queries during the workflow:
+- The natural language question and resulting PubMed query
+- Statistics: documents found, scored, citations extracted
+- Query history for the current session
+
+#### Literature Tab
+
+Displays document cards for all retrieved articles:
+
+**Document Cards:**
+- **Header**: Shows quality badge (RCT, SR, etc.), relevance score (1-5), and title
+- **Metadata**: Authors, journal, year, PMID/DOI
+- **Click to expand**: View the full abstract
+- **LLM Rationale**: See why the document received its score
+
+**Quality Badges:**
+- **RCT**: Randomized Controlled Trial (gold standard)
+- **SR**: Systematic Review / Meta-analysis
+- **Cohort**: Cohort study
+- **Case-Ctrl**: Case-control study
+- **Cross-Sec**: Cross-sectional study
+- **Case**: Case report/series
+
+**Interactions:**
+- **Left-click**: Expand/collapse the card to show abstract
+- **Right-click**: Context menu with options:
+  - Send to Interrogator (opens document for Q&A)
+  - Copy PMID / Copy DOI
+  - Expand / Collapse
+
+#### Citations Tab
+
+Shows extracted citation passages:
+- Citation number and quality badge
+- Document metadata
+- Highlighted passage within the abstract context
+- Relevance explanation from the LLM
+
 ### Document Interrogation
 
 The Document Interrogation tab allows interactive Q&A with loaded documents:
@@ -108,6 +152,16 @@ BMLibrarian Lite can automatically find and download PDFs from multiple sources:
 
 Configure your email in Settings to enable Unpaywall access.
 
+### Quality Assessment
+
+When enabled, the quality filter assesses each document for:
+
+- **Study Design**: RCT, systematic review, cohort, case-control, etc.
+- **Quality Tier**: High, Medium, Low based on methodology
+- **Evidence Level**: Based on study design hierarchy
+
+Quality badges appear on document cards showing the study type with color coding.
+
 ## Configuration
 
 ### Settings Dialog
@@ -119,6 +173,7 @@ Access Settings from the main window to configure:
 - **Temperature**: Control response creativity (lower = more focused)
 - **Email**: Set for PubMed and Unpaywall API access
 - **API Keys**: Configure provider credentials
+- **Quality Filter**: Set minimum quality tier for filtering
 
 ### Configuration File
 
@@ -169,10 +224,28 @@ python bmlibrarian_lite.py clear
 
 All data is stored locally in `~/.bmlibrarian_lite/`:
 
-- **ChromaDB**: Vector embeddings for semantic search
-- **SQLite**: Document metadata and session data
+- **ChromaDB** (`chroma/`): Vector embeddings for semantic search
+- **SQLite** (`metadata.db`): Document metadata and session data
+- **PDFs** (`pdfs/`): Downloaded PDF files
+- **Fulltexts** (`fulltexts/`): Extracted full-text content
 
 No external database server is required.
+
+## Workflow Tips
+
+### Best Practices for Systematic Reviews
+
+1. **Start with a focused question**: Use PICO format (Population, Intervention, Comparison, Outcome)
+2. **Review the generated query**: Check the Audit Trail to see the PubMed query
+3. **Adjust scoring threshold**: Higher threshold = more selective results
+4. **Check quality badges**: Prioritize RCTs and systematic reviews for treatment questions
+5. **Read LLM rationales**: Understand why documents were scored as they were
+
+### Using the Interrogator
+
+1. **Start from Audit Trail**: Right-click a document card and select "Send to Interrogator"
+2. **Ask specific questions**: "What were the primary outcomes?" rather than "Tell me about this study"
+3. **Follow up**: Ask clarifying questions based on the AI's responses
 
 ## Troubleshooting
 
@@ -193,6 +266,10 @@ No external database server is required.
 **PubMed rate limiting**
 - Set `NCBI_EMAIL` to increase rate limits
 - Consider getting a PubMed API key for heavy usage
+
+**Quality badges not appearing**
+- Ensure quality filtering is enabled in Settings
+- Quality assessment only runs when minimum tier is set
 
 ### Getting Help
 

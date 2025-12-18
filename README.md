@@ -2,7 +2,7 @@
 
 A lightweight biomedical literature research tool - no PostgreSQL required.
 
-BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database. It uses only the PubMed E-utilities API for searching and fetching article metadata instead of a local database. It uses ChromaDB for vector storage and SQLite for metadata, making it easy to install and use on any machine. Also, in order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows to use cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference
+BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database. It uses only the PubMed E-utilities API for searching and fetching article metadata instead of a local database. It uses ChromaDB for vector storage and SQLite for metadata, making it easy to install and use on any machine. Also, in order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows to use cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference.
 
 
 ## Features
@@ -11,6 +11,7 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 - **Document Interrogation**: Interactive Q&A with loaded documents
 - **PDF Discovery & Download**: Automatic PDF retrieval from PubMed Central, Unpaywall, and DOI resolution
 - **Quality Assessment**: Automated study quality evaluation with evidence grading
+- **Audit Trail**: Real-time visibility into the review workflow with LLM reasoning transparency
 - **Multiple LLM Providers**: Support for both Anthropic Claude (online) and Ollama (local)
 - **Embedded Storage**: ChromaDB + SQLite - no external database needed
 - **Cross-Platform GUI**: PySide6-based desktop application
@@ -90,6 +91,19 @@ python bmlibrarian_lite.py clear
 4. **Score documents** for relevance (1-5 scale)
 5. **Extract citations** from high-scoring documents
 6. **Generate a report** synthesizing the evidence
+
+### Audit Trail
+
+The Audit Trail tab provides real-time visibility into the systematic review workflow:
+
+- **Queries Tab**: View generated PubMed queries and search statistics
+- **Literature Tab**: Browse document cards with relevance scores and quality badges
+  - Click cards to expand and view abstracts
+  - See LLM rationales for scoring and quality decisions
+  - Quality badges show study design (RCT, Systematic Review, etc.)
+- **Citations Tab**: View extracted citation passages with highlighting
+
+Right-click any document card to send it to the Document Interrogator for deeper analysis.
 
 ### Document Interrogation
 
@@ -174,7 +188,18 @@ BMLibrarian Lite is designed for ease of use and portability:
 | Embeddings | Ollama (local) | FastEmbed (CPU) |
 | PDF Discovery | Full (Unpaywall, PMC, OpenAthens) | Included (PMC, Unpaywall, DOI) |
 | Multi-Agent Workflow | Full orchestration | Simplified workflow |
+| Audit Trail | N/A | Real-time workflow visibility |
 | Installation | Complex | Simple `pip install` |
+
+## Documentation
+
+Documentation is organized into three categories:
+
+- **User Documentation** (`doc/user/`): End-user guides and tutorials
+- **Developer Documentation** (`doc/developer/`): Architecture, API, and contribution guides
+- **LLM Context** (`doc/llm/`): Context for AI assistants working with the codebase
+  - `golden_rules.md` - Coding standards
+  - `database-schema.md` - Database schema reference
 
 ## Development
 

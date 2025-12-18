@@ -46,6 +46,8 @@ python bmlibrarian_lite.py clear        # Clear all data
 - **No magic numbers**: Always use named constants or configuration values; never hardcode numbers
 - **Prefer pure functions**: Write small, reusable pure functions in focused modules over complex long files
 - **Constants go in `constants.py`**: Centralize numeric and string constants
+- **No inline stylesheets**: All stylesheets via the centralised styling system
+- **No hardcoded pixel values**: Use `scaled()` from `dpi_scale.py` for DPI-aware dimensions
 
 ## Architecture
 
@@ -71,6 +73,7 @@ python bmlibrarian_lite.py clear        # Clear all data
 **PubMed Integration** (`pubmed/`)
 - `PubMedSearchClient` - Wrapper around NCBI E-utilities API
 - Converts natural language to PubMed queries
+- Europe PMC full-text XML retrieval support
 
 **PDF Discovery** (`pdf_discovery.py`)
 - `PDFDiscoverer` - Finds and downloads PDFs from PubMed Central, Unpaywall, and DOI resolution
@@ -78,12 +81,38 @@ python bmlibrarian_lite.py clear        # Clear all data
 **Quality Assessment** (`quality/`)
 - Study classification, evidence grading, and quality scoring
 - `QualityManager` orchestrates the assessment workflow
+- `QualityAssessment` dataclass with study design, quality tier, and extraction details
 
 ### GUI Structure (`gui/`)
 
-The PySide6 GUI uses a two-tab design:
+The PySide6 GUI uses a three-tab design:
 - `SystematicReviewTab` - Search PubMed, score documents, extract citations, generate reports
 - `DocumentInterrogationTab` - Load documents and perform Q&A
+- `AuditTrailTab` - Real-time workflow visibility (NEW)
+
+#### Audit Trail Tab (NEW)
+
+The Audit Trail provides transparency into the systematic review workflow with three sub-tabs:
+
+- **Queries Tab** (`audit_queries_tab.py`): Displays generated PubMed queries with statistics (docs found, scored, citations extracted)
+- **Literature Tab** (`audit_literature_tab.py`): Scrollable document cards with relevance scores and quality badges
+- **Citations Tab** (`audit_citations_tab.py`): Document cards with highlighted citation passages
+
+**Document Cards** (`document_card.py`):
+- Collapsible cards - click to expand and show abstract
+- Quality badges (RCT, SR, etc.) with color-coded study design
+- Score badges (1-5) with color gradients
+- LLM rationale display for scoring and quality decisions
+- Right-click context menu to send documents to interrogator
+- Pale blue header background for visual distinction
+
+**Key Audit Trail Signals:**
+- `workflow_started` - Clears previous audit data
+- `query_generated(str)` - New PubMed query generated
+- `documents_found(list[LiteDocument])` - Documents retrieved
+- `document_scored(ScoredDocument)` - Relevance score assigned
+- `quality_assessed(str, QualityAssessment)` - Quality assessment complete
+- `citation_extracted(Citation)` - Citation passage extracted
 
 Background operations use `QThread` workers in `workers.py` to keep the UI responsive.
 
@@ -92,14 +121,28 @@ Background operations use `QThread` workers in `workers.py` to keep the UI respo
 1. User enters research question → `SearchAgent` converts to PubMed query
 2. `PubMedSearchClient` fetches articles → stored in `LiteStorage`
 3. `LiteEmbedder` (FastEmbed) creates embeddings → stored in ChromaDB
-4. `ScoringAgent` scores relevance → `CitationAgent` extracts citations
-5. `ReportingAgent` generates final report
+4. `QualityManager` assesses study quality (optional)
+5. `ScoringAgent` scores relevance → `CitationAgent` extracts citations
+6. `ReportingAgent` generates final report
+7. Audit Trail tab displays real-time progress throughout
 
 ## Key Patterns
 
 - **Lazy initialization**: LLM clients and embedders are created on first use
 - **Qt signals/slots**: GUI components communicate via Qt signal system
 - **Dataclasses throughout**: `LiteDocument`, `LiteChunk`, `SearchSession`, etc.
+- **Thread-safe updates**: Use `threading.RLock()` for concurrent access
+- **DPI scaling**: Use `scaled()` function for all pixel dimensions
+
+## Constants (from `constants.py`)
+
+Key audit trail constants:
+- `AUDIT_CARD_PADDING`, `AUDIT_CARD_SPACING` - Card layout dimensions
+- `AUDIT_CARD_BORDER_RADIUS`, `AUDIT_CARD_MIN_HEIGHT` - Card styling
+- `AUDIT_CARD_HEADER_COLOR` - Pale light blue header (`#E3F2FD`)
+- `AUDIT_RATIONALE_COLOR` - Muted text for LLM rationales (`#555555`)
+- `AUDIT_ABSTRACT_MAX_LINES` - Maximum abstract lines before scroll (15)
+- `MAX_AUTHORS_BEFORE_ET_AL` - Authors to show before "et al." (3)
 
 ## Environment Variables
 
@@ -107,3 +150,26 @@ Background operations use `QThread` workers in `workers.py` to keep the UI respo
 - `OLLAMA_HOST` - Ollama server URL (default: http://localhost:11434)
 - `NCBI_EMAIL` - Recommended for PubMed API
 - `TOKENIZERS_PARALLELISM=false` - Set automatically to avoid HuggingFace warnings
+
+## Documentation Structure
+
+```
+doc/
+├── user/           # End-user documentation
+│   └── guide.md    # User guide
+├── developer/      # Developer documentation
+│   └── guide.md    # Developer guide
+├── llm/            # LLM assistant context
+│   ├── context.md  # General LLM context
+│   ├── database-schema.md  # Database schema reference
+│   └── golden_rules.md     # Coding standards
+└── planning/       # Planning documents
+```
+
+## Related Documentation
+
+- `doc/llm/golden_rules.md` - MUST READ: Coding standards and rules
+- `doc/llm/database-schema.md` - Database schema reference
+- `doc/llm/context.md` - Extended LLM context
+- `doc/developer/guide.md` - Developer guide
+- `doc/user/guide.md` - User guide

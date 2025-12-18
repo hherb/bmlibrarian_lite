@@ -75,10 +75,23 @@ bmlibrarian_lite/
 │   ├── utils.py             # Shared utilities
 │   ├── agents/              # LLM-powered agents
 │   ├── gui/                 # PySide6 interface
+│   │   ├── app.py           # Main window
+│   │   ├── systematic_review_tab.py
+│   │   ├── document_interrogation_tab.py
+│   │   ├── audit_trail_tab.py       # NEW
+│   │   ├── audit_queries_tab.py     # NEW
+│   │   ├── audit_literature_tab.py  # NEW
+│   │   ├── audit_citations_tab.py   # NEW
+│   │   ├── document_card.py         # NEW
+│   │   ├── card_utils.py            # NEW
+│   │   ├── quality_badge.py
+│   │   └── workers.py
 │   ├── llm/                 # LLM client abstraction
 │   ├── pubmed/              # PubMed API integration
 │   ├── quality/             # Study quality assessment
 │   └── resources/           # Styles and assets
+│       └── styles/
+│           └── dpi_scale.py # DPI scaling utilities
 └── tests/                   # Test suite
 ```
 
@@ -242,6 +255,32 @@ class WorkerThread(QThread):
             self.error.emit(str(e))
 ```
 
+#### Audit Trail Components (NEW)
+
+The Audit Trail system provides real-time workflow visibility:
+
+**AuditTrailTab** (`audit_trail_tab.py`):
+- Main container with three sub-tabs
+- Connects to workflow signals from SystematicReviewTab
+- Coordinates data flow between sub-tabs
+
+**DocumentCard** (`document_card.py`):
+- Collapsible card widget for document display
+- Supports quality badges and score badges
+- Shows LLM rationale for scoring/quality decisions
+- Emits signals: `clicked(doc_id)`, `send_to_interrogator(doc_id)`
+
+Key signals for audit trail:
+```python
+# From SystematicReviewTab
+workflow_started = Signal()
+query_generated = Signal(str)
+documents_found = Signal(list)  # list[LiteDocument]
+document_scored = Signal(object)  # ScoredDocument
+quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
+citation_extracted = Signal(object)  # Citation
+```
+
 ### Data Models
 
 Core data structures in `data_models.py`:
@@ -250,9 +289,14 @@ Core data structures in `data_models.py`:
 - `LiteChunk`: A chunk of text with embedding
 - `SearchSession`: Tracks a search workflow
 - `ReviewCheckpoint`: Saves review progress
-- `ScoredDocument`: Document with relevance score
-- `Citation`: Extracted citation information
+- `ScoredDocument`: Document with relevance score and explanation
+- `Citation`: Extracted citation with passage and context
 - `InterrogationSession`: Q&A session state
+
+Quality assessment models in `quality/data_models.py`:
+- `QualityAssessment`: Study design, quality tier, extraction details
+- `StudyDesign`: Enum of study types (RCT, SR, Cohort, etc.)
+- `QualityTier`: Evidence quality level
 
 ## Code Style Requirements
 
@@ -300,22 +344,28 @@ if score > SIMILARITY_THRESHOLD_DEFAULT:
     pass
 ```
 
-4. **Pure Functions**: Prefer small, reusable pure functions:
+4. **DPI Scaling**: Use `scaled()` for all pixel dimensions:
 
 ```python
-# Prefer this
-def extract_pmid(url: str) -> str | None:
-    """Extract PMID from PubMed URL."""
-    match = PMID_PATTERN.search(url)
-    return match.group(1) if match else None
+from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-# Over this (stateful, complex)
-class URLProcessor:
+widget.setMinimumHeight(scaled(50))
+layout.setSpacing(scaled(8))
+```
+
+5. **Thread Safety**: Use locks for shared state:
+
+```python
+import threading
+
+class SharedState:
     def __init__(self):
-        self.cache = {}
+        self._lock = threading.RLock()
+        self._data = {}
 
-    def process(self, url):
-        # Complex stateful logic...
+    def update(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._data[key] = value
 ```
 
 ### Ruff Configuration
@@ -375,6 +425,31 @@ class TestStorage:
         assert retrieved.title == "Test"
 ```
 
+### GUI Testing
+
+For PySide6 widgets, use the `qapp` fixture:
+
+```python
+import pytest
+from PySide6.QtWidgets import QApplication
+
+@pytest.fixture
+def qapp():
+    """Create QApplication for GUI tests."""
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
+def test_document_card(qapp, sample_document):
+    """Test DocumentCard widget."""
+    from bmlibrarian_lite.gui.document_card import DocumentCard
+
+    card = DocumentCard(document=sample_document, score=4)
+    assert card.score == 4
+    assert not card.expanded
+```
+
 ### Test Commands
 
 ```bash
@@ -410,3 +485,18 @@ Use conventional commit format:
 - `refactor:` Code refactoring
 - `test:` Test additions or changes
 - `chore:` Maintenance tasks
+
+### Golden Rules
+
+See `doc/llm/golden_rules.md` for the complete coding standards. Key rules:
+
+1. Never trust input from users or external sources
+2. No magic numbers - use constants
+3. No hardcoded paths - use configuration
+4. All LLM communication through the abstraction layer
+5. All parameters must have type hints
+6. All functions must have docstrings
+7. All errors must be handled and logged
+8. No inline stylesheets - use the styling system
+9. No hardcoded pixel values - use DPI scaling
+10. Write tests for all features

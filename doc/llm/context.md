@@ -9,6 +9,7 @@ BMLibrarian Lite is a biomedical literature research tool that:
 - Scores document relevance using AI
 - Extracts citations and generates synthesis reports
 - Provides document Q&A capabilities
+- Displays audit trail with LLM reasoning transparency
 
 It is a "lite" version requiring no PostgreSQL - uses ChromaDB + SQLite instead.
 
@@ -22,6 +23,8 @@ It is a "lite" version requiring no PostgreSQL - uses ChromaDB + SQLite instead.
 | `src/bmlibrarian_lite/llm/client.py` | Unified LLM client (Anthropic/Ollama) |
 | `src/bmlibrarian_lite/agents/base.py` | Base agent class with `_chat()` method |
 | `src/bmlibrarian_lite/gui/app.py` | Main PySide6 window |
+| `src/bmlibrarian_lite/gui/audit_trail_tab.py` | Audit trail container (NEW) |
+| `src/bmlibrarian_lite/gui/document_card.py` | Collapsible document cards (NEW) |
 | `src/bmlibrarian_lite/constants.py` | Application-wide constants |
 
 ## Code Style Rules (MUST FOLLOW)
@@ -81,28 +84,35 @@ if len(text) > CHUNK_SIZE_DEFAULT:
     chunks = split_text(text, CHUNK_SIZE_DEFAULT, CHUNK_OVERLAP_DEFAULT)
 ```
 
-### 4. Prefer Pure Functions
+### 4. DPI Scaling Required
 
-Write small, focused, reusable functions without side effects:
+All pixel dimensions must use the `scaled()` function:
 
 ```python
-# Preferred: Pure function
-def calculate_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    """Calculate cosine similarity between two vectors."""
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = sum(a * a for a in vec_a) ** 0.5
-    norm_b = sum(b * b for b in vec_b) ** 0.5
-    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-# Avoid: Stateful class for simple operation
-class SimilarityCalculator:
-    def __init__(self):
-        self.cache = {}
-    def calculate(self, a, b):
-        # Complex stateful logic
+widget.setMinimumHeight(scaled(50))
+layout.setContentsMargins(scaled(8), scaled(8), scaled(8), scaled(8))
 ```
 
-### 5. Use Constants Module
+### 5. Thread Safety for Shared State
+
+Use locks for concurrent access:
+
+```python
+import threading
+
+class SharedState:
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._data = {}
+
+    def update(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._data[key] = value
+```
+
+### 6. Use Constants Module
 
 All numeric and string constants go in `constants.py`:
 
@@ -113,6 +123,11 @@ CHUNK_OVERLAP_DEFAULT: int = 50
 SIMILARITY_THRESHOLD_DEFAULT: float = 0.7
 MAX_RESULTS_DEFAULT: int = 100
 PUBMED_BASE_URL: str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+# Audit trail constants
+AUDIT_CARD_PADDING: int = 12
+AUDIT_CARD_HEADER_COLOR: str = "#E3F2FD"
+AUDIT_ABSTRACT_MAX_LINES: int = 15
 ```
 
 ## Common Patterns
@@ -148,6 +163,50 @@ class MyAgent(LiteBaseAgent):
         return self._chat(messages)
 ```
 
+### Creating a Document Card
+
+```python
+from bmlibrarian_lite.gui.document_card import DocumentCard
+from bmlibrarian_lite.data_models import LiteDocument
+from bmlibrarian_lite.quality.data_models import QualityAssessment
+
+# Create card with all optional parameters
+card = DocumentCard(
+    document=document,
+    score=4,
+    score_rationale="Highly relevant because...",
+    quality_assessment=assessment,
+    citation_rationale="Selected this passage because...",
+    show_abstract=False,  # Start collapsed
+)
+
+# Connect signals
+card.clicked.connect(self._on_card_clicked)
+card.send_to_interrogator.connect(self._on_send_to_interrogator)
+
+# Update dynamically
+card.set_score(5, "Updated rationale")
+card.set_quality_assessment(new_assessment)
+```
+
+### GUI Signal Patterns
+
+```python
+from PySide6.QtCore import Signal
+
+class MyTab(QWidget):
+    # Define signals
+    document_scored = Signal(object)  # ScoredDocument
+    quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
+
+    def _on_scoring_complete(self, scored_doc: ScoredDocument) -> None:
+        """Handle scoring completion."""
+        self.document_scored.emit(scored_doc)
+
+# Connect in parent
+self.review_tab.document_scored.connect(self.audit_tab.on_document_scored)
+```
+
 ### Using Storage
 
 ```python
@@ -178,44 +237,6 @@ def store_document(
     )
     storage.add_document(doc)
     return doc.id
-```
-
-### GUI Worker Pattern
-
-```python
-from PySide6.QtCore import QThread, Signal
-
-class SearchWorker(QThread):
-    """Background worker for PubMed search.
-
-    Signals:
-        progress: Emitted with progress percentage.
-        finished: Emitted with search results.
-        error: Emitted with error message.
-    """
-
-    progress = Signal(int)
-    finished = Signal(list)
-    error = Signal(str)
-
-    def __init__(self, query: str, max_results: int) -> None:
-        """Initialize search worker.
-
-        Args:
-            query: PubMed search query.
-            max_results: Maximum results to return.
-        """
-        super().__init__()
-        self._query = query
-        self._max_results = max_results
-
-    def run(self) -> None:
-        """Execute the search in background."""
-        try:
-            results = self._perform_search()
-            self.finished.emit(results)
-        except Exception as e:
-            self.error.emit(str(e))
 ```
 
 ## Environment Variables
@@ -252,6 +273,13 @@ class SearchWorker(QThread):
 4. Create workers for long operations
 5. Add tab in `app.py`
 
+### Adding Audit Trail Support
+
+1. Define signals in the source component (e.g., SystematicReviewTab)
+2. Emit signals at appropriate workflow points
+3. Connect signals in `app.py` to AuditTrailTab methods
+4. Implement handler methods in AuditTrailTab
+
 ## File Organization Principles
 
 - Keep modules focused and small
@@ -268,3 +296,10 @@ class SearchWorker(QThread):
 - Test file names: `test_<module>.py`
 - Test function names: `test_<behavior>`
 - Mock external services (PubMed, LLM APIs)
+- For GUI tests, use the `qapp` fixture
+
+## Related Documentation
+
+- `golden_rules.md` - Complete coding standards (MUST READ)
+- `database-schema.md` - Database schema reference
+- `../developer/guide.md` - Full developer guide
