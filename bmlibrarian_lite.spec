@@ -164,7 +164,7 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,  # Support dark mode
         "LSMinimumSystemVersion": "10.15",
-        "NSHumanReadableCopyright": "Copyright © 2024 Horst Herb. MIT License.",
+        "NSHumanReadableCopyright": "Copyright © 2024 Horst Herb. GPL-3.0 License.",
         # Privacy descriptions (required for notarization)
         "NSNetworkVolumesUsageDescription": "BMLibrarian Lite needs network access to search PubMed and communicate with AI providers.",
         "NSDocumentsFolderUsageDescription": "BMLibrarian Lite needs access to your Documents folder to save and load research files.",
