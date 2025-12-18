@@ -1,5 +1,4 @@
-"""
-Token usage tracking for LLM operations.
+"""Token usage tracking for LLM operations.
 
 Tracks cumulative token usage and estimated costs across all LLM calls
 during a session.
@@ -8,7 +7,12 @@ Usage:
     from bmlibrarian_lite.llm import get_token_tracker
 
     tracker = get_token_tracker()
-    tracker.record_usage(model="claude-3-sonnet", input_tokens=100, output_tokens=50)
+    tracker.record_usage(
+        model="anthropic:claude-3-sonnet",
+        input_tokens=100,
+        output_tokens=50,
+        cost=0.00045,  # Cost calculated by provider
+    )
 
     summary = tracker.get_summary()
     print(f"Total tokens: {summary.total_tokens}")
@@ -19,75 +23,60 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
-
-from .data_types import get_model_info
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class TokenUsageRecord:
-    """
-    Record of a single LLM call's token usage.
+    """Record of a single LLM call's token usage.
 
     Attributes:
-        model: Model that was used
-        input_tokens: Number of input tokens
-        output_tokens: Number of output tokens
-        timestamp: When the call was made
-        cost_usd: Estimated cost in USD
+        model: Model that was used (provider:model format).
+        input_tokens: Number of input tokens.
+        output_tokens: Number of output tokens.
+        timestamp: When the call was made.
+        cost_usd: Cost in USD (provided by caller).
     """
+
     model: str
     input_tokens: int
     output_tokens: int
     timestamp: datetime = field(default_factory=datetime.now)
     cost_usd: float = 0.0
 
-    def __post_init__(self) -> None:
-        """Calculate cost if not provided."""
-        if self.cost_usd == 0.0:
-            model_info = get_model_info(self.model)
-            input_cost = (
-                self.input_tokens * model_info.input_cost_per_million / 1_000_000
-            )
-            output_cost = (
-                self.output_tokens * model_info.output_cost_per_million / 1_000_000
-            )
-            self.cost_usd = input_cost + output_cost
-
 
 @dataclass
 class TokenUsageSummary:
-    """
-    Summary of token usage.
+    """Summary of token usage.
 
     Attributes:
-        total_input_tokens: Total input tokens used
-        total_output_tokens: Total output tokens generated
-        total_tokens: Total tokens (input + output)
-        total_cost_usd: Total estimated cost in USD
-        call_count: Number of LLM calls made
-        by_model: Breakdown by model
+        total_input_tokens: Total input tokens used.
+        total_output_tokens: Total output tokens generated.
+        total_tokens: Total tokens (input + output).
+        total_cost_usd: Total estimated cost in USD.
+        call_count: Number of LLM calls made.
+        by_model: Breakdown by model.
     """
+
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: float = 0.0
     call_count: int = 0
-    by_model: Dict[str, Dict] = field(default_factory=dict)
+    by_model: dict[str, dict] = field(default_factory=dict)
 
 
 class TokenTracker:
-    """
-    Thread-safe token usage tracker.
+    """Thread-safe token usage tracker.
 
     Maintains a running total of token usage and costs for the session.
     """
 
     def __init__(self) -> None:
         """Initialize the token tracker."""
-        self._records: List[TokenUsageRecord] = []
+        self._records: list[TokenUsageRecord] = []
         self._lock = threading.Lock()
         self._total_input = 0
         self._total_output = 0
@@ -98,43 +87,44 @@ class TokenTracker:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cost: float = 0.0,
     ) -> None:
-        """
-        Record token usage from an LLM call.
+        """Record token usage from an LLM call.
 
         Args:
-            model: Model that was used
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens
+            model: Model that was used (provider:model format).
+            input_tokens: Number of input tokens.
+            output_tokens: Number of output tokens.
+            cost: Cost in USD (calculated by provider).
         """
         record = TokenUsageRecord(
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cost_usd=cost,
         )
 
         with self._lock:
             self._records.append(record)
             self._total_input += input_tokens
             self._total_output += output_tokens
-            self._total_cost += record.cost_usd
+            self._total_cost += cost
 
         logger.debug(
             f"Recorded usage: {model}, "
             f"in={input_tokens}, out={output_tokens}, "
-            f"cost=${record.cost_usd:.6f}"
+            f"cost=${cost:.6f}"
         )
 
     def get_summary(self) -> TokenUsageSummary:
-        """
-        Get a summary of token usage.
+        """Get a summary of token usage.
 
         Returns:
-            TokenUsageSummary with aggregate statistics
+            TokenUsageSummary with aggregate statistics.
         """
         with self._lock:
             # Build by-model breakdown
-            by_model: Dict[str, Dict] = {}
+            by_model: dict[str, dict] = {}
             for record in self._records:
                 if record.model not in by_model:
                     by_model[record.model] = {
@@ -167,15 +157,14 @@ class TokenTracker:
 
         logger.debug("Token tracker reset")
 
-    def get_recent_records(self, count: int = 10) -> List[TokenUsageRecord]:
-        """
-        Get recent usage records.
+    def get_recent_records(self, count: int = 10) -> list[TokenUsageRecord]:
+        """Get recent usage records.
 
         Args:
-            count: Number of recent records to return
+            count: Number of recent records to return.
 
         Returns:
-            List of recent TokenUsageRecords
+            List of recent TokenUsageRecords.
         """
         with self._lock:
             return list(self._records[-count:])
@@ -187,16 +176,25 @@ _tracker_lock = threading.Lock()
 
 
 def get_token_tracker() -> TokenTracker:
-    """
-    Get the global token tracker instance.
+    """Get the global token tracker instance.
 
     Creates a new instance if one doesn't exist.
 
     Returns:
-        Global TokenTracker instance
+        Global TokenTracker instance.
     """
     global _global_tracker
     with _tracker_lock:
         if _global_tracker is None:
             _global_tracker = TokenTracker()
         return _global_tracker
+
+
+def reset_token_tracker() -> None:
+    """Reset the global token tracker.
+
+    Creates a fresh tracker instance.
+    """
+    global _global_tracker
+    with _tracker_lock:
+        _global_tracker = TokenTracker()

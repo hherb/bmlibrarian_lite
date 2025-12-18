@@ -2,7 +2,8 @@
 Settings dialog for BMLibrarian Lite.
 
 Provides configuration interface for:
-- LLM settings (model selection)
+- LLM providers (Anthropic, Ollama)
+- Task-based model configuration
 - Embedding model settings
 - PubMed API settings
 - API keys
@@ -16,30 +17,37 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QVBoxLayout,
+    QHBoxLayout,
     QFormLayout,
     QLineEdit,
     QComboBox,
     QLabel,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QGroupBox,
     QMessageBox,
+    QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QTabWidget,
+    QTextEdit,
     QWidget,
 )
 from PySide6.QtCore import QThread, Signal
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-from ..config import LiteConfig
+from ..config import LiteConfig, TaskModelConfig
 from ..embeddings import LiteEmbedder
 from ..constants import (
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
     DEFAULT_LLM_MAX_TOKENS,
-    QUALITY_CLASSIFIER_MODEL,
-    QUALITY_ASSESSOR_MODEL,
+    DEFAULT_OLLAMA_HOST,
+    LLM_PROVIDERS,
+    LLM_TASK_TYPES,
+    LLM_TASK_CATEGORIES,
 )
 from ..quality.data_models import QualityTier
 
@@ -66,27 +74,83 @@ FALLBACK_CLAUDE_MODELS = [
 
 
 class ModelFetchWorker(QThread):
-    """Background worker to fetch available models from Anthropic API."""
+    """Background worker to fetch available models from a provider."""
 
-    models_fetched = Signal(list)  # List of model IDs
-    fetch_failed = Signal(str)  # Error message
+    models_fetched = Signal(str, list)  # (provider, list of model IDs)
+    fetch_failed = Signal(str, str)  # (provider, error message)
+
+    def __init__(self, provider: str, ollama_host: str = DEFAULT_OLLAMA_HOST):
+        """Initialize the worker.
+
+        Args:
+            provider: Provider to fetch models from ("anthropic" or "ollama").
+            ollama_host: Ollama server URL (for ollama provider).
+        """
+        super().__init__()
+        self.provider = provider
+        self.ollama_host = ollama_host
 
     def run(self) -> None:
-        """Fetch models from Anthropic API."""
+        """Fetch models from the provider API."""
         try:
-            import anthropic
-            client = anthropic.Anthropic()
-            models_response = client.models.list()
+            from bmlibrarian_lite.llm.providers import get_provider
 
-            # Extract model IDs and sort them
-            model_ids = [model.id for model in models_response.data]
-            # Sort with newest first (based on date in model name)
-            model_ids.sort(reverse=True)
+            # Get provider instance with optional base_url for ollama
+            kwargs = {}
+            if self.provider == "ollama" and self.ollama_host:
+                kwargs["base_url"] = self.ollama_host
 
-            self.models_fetched.emit(model_ids)
+            provider_instance = get_provider(self.provider, **kwargs)
+            model_metadata = provider_instance.list_models()
+
+            # Extract model IDs
+            model_ids = [m.model_id for m in model_metadata]
+
+            # Sort appropriately
+            if self.provider == "anthropic":
+                model_ids.sort(reverse=True)  # Newest first
+            else:
+                model_ids.sort()  # Alphabetical
+
+            self.models_fetched.emit(self.provider, model_ids)
         except Exception as e:
-            logger.warning(f"Failed to fetch models from API: {e}")
-            self.fetch_failed.emit(str(e))
+            logger.warning(f"Failed to fetch models from {self.provider}: {e}")
+            self.fetch_failed.emit(self.provider, str(e))
+
+
+class ProviderConnectionTestWorker(QThread):
+    """Background worker to test provider connection."""
+
+    test_completed = Signal(str, bool, str)  # (provider, success, message)
+
+    def __init__(self, provider: str, ollama_host: str = DEFAULT_OLLAMA_HOST):
+        """Initialize the worker.
+
+        Args:
+            provider: Provider to test.
+            ollama_host: Ollama server URL.
+        """
+        super().__init__()
+        self.provider = provider
+        self.ollama_host = ollama_host
+
+    def run(self) -> None:
+        """Test the provider connection."""
+        try:
+            from bmlibrarian_lite.llm.providers import get_provider
+
+            # Get provider instance with optional base_url for ollama
+            kwargs = {}
+            if self.provider == "ollama" and self.ollama_host:
+                kwargs["base_url"] = self.ollama_host
+
+            provider_instance = get_provider(self.provider, **kwargs)
+            success, message = provider_instance.test_connection()
+            self.test_completed.emit(self.provider, success, message)
+        except ValueError as e:
+            self.test_completed.emit(self.provider, False, str(e))
+        except Exception as e:
+            self.test_completed.emit(self.provider, False, str(e))
 
 
 class SettingsDialog(QDialog):
@@ -94,10 +158,11 @@ class SettingsDialog(QDialog):
     Settings configuration dialog.
 
     Allows users to configure:
-    - LLM model and parameters
+    - LLM providers (Anthropic, Ollama)
+    - Task-based model settings
     - Embedding model
     - PubMed API credentials
-    - Anthropic API key
+    - API keys
 
     Attributes:
         config: Lite configuration to modify
@@ -118,12 +183,25 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(scaled(450))
+        self.setMinimumWidth(scaled(550))
+        self.setMinimumHeight(scaled(500))
 
-        self._model_fetch_worker: Optional[ModelFetchWorker] = None
+        # Track workers to prevent garbage collection
+        self._model_fetch_workers: list[ModelFetchWorker] = []
+        self._connection_test_workers: list[ProviderConnectionTestWorker] = []
+
+        # Cache fetched models per provider
+        self._available_models: dict[str, list[str]] = {
+            "anthropic": FALLBACK_CLAUDE_MODELS.copy(),
+            "ollama": [],
+        }
+
+        # Task config widgets for saving
+        self._task_widgets: dict[str, dict] = {}
+
         self._setup_ui()
         self._load_config()
-        self._fetch_models()
+        self._fetch_all_models()
 
     def _setup_ui(self) -> None:
         """Set up the user interface with tabbed layout."""
@@ -134,8 +212,9 @@ class SettingsDialog(QDialog):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
 
-        # Create tabs
-        self._setup_llm_tab()
+        # Create tabs - new order with Providers and Tasks first
+        self._setup_providers_tab()
+        self._setup_tasks_tab()
         self._setup_embeddings_tab()
         self._setup_pubmed_tab()
         self._setup_api_keys_tab()
@@ -150,37 +229,238 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _setup_llm_tab(self) -> None:
-        """Set up the LLM settings tab."""
+    def _setup_providers_tab(self) -> None:
+        """Set up the Providers settings tab."""
         tab = QWidget()
-        layout = QFormLayout(tab)
+        layout = QVBoxLayout(tab)
         layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+
+        # Create scrollable area for providers
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(scaled(16))
+
+        # Anthropic provider section
+        self._setup_anthropic_provider(scroll_layout)
+
+        # Ollama provider section
+        self._setup_ollama_provider(scroll_layout)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        self.tab_widget.addTab(tab, "Providers")
+
+    def _setup_anthropic_provider(self, parent_layout: QVBoxLayout) -> None:
+        """Set up the Anthropic provider section."""
+        group = QGroupBox("Anthropic (Claude)")
+        layout = QFormLayout(group)
         layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
-        self.model_combo = QComboBox()
-        self.model_combo.addItems(FALLBACK_CLAUDE_MODELS)
-        self.model_combo.setToolTip("Claude model to use for text generation")
-        self.model_combo.setEditable(False)
-        self.model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addRow("Model:", self.model_combo)
+        # Enabled checkbox
+        self.anthropic_enabled = QCheckBox("Enabled")
+        self.anthropic_enabled.setChecked(True)
+        layout.addRow(self.anthropic_enabled)
 
-        self.temperature_spin = QDoubleSpinBox()
-        self.temperature_spin.setRange(0.0, 1.0)
-        self.temperature_spin.setSingleStep(0.1)
-        self.temperature_spin.setValue(DEFAULT_LLM_TEMPERATURE)
-        self.temperature_spin.setToolTip(
-            "Lower values are more focused, higher values more creative"
+        # Status row with test button
+        status_layout = QHBoxLayout()
+        self.anthropic_status = QLabel("Not tested")
+        self.anthropic_status.setStyleSheet("color: gray;")
+        status_layout.addWidget(self.anthropic_status)
+        status_layout.addStretch()
+
+        self.anthropic_test_btn = QPushButton("Test Connection")
+        self.anthropic_test_btn.clicked.connect(
+            lambda: self._test_provider_connection("anthropic")
         )
-        layout.addRow("Temperature:", self.temperature_spin)
+        status_layout.addWidget(self.anthropic_test_btn)
+        layout.addRow("Status:", status_layout)
 
-        self.max_tokens_spin = QSpinBox()
-        self.max_tokens_spin.setRange(100, 8000)
-        self.max_tokens_spin.setSingleStep(100)
-        self.max_tokens_spin.setValue(DEFAULT_LLM_MAX_TOKENS)
-        self.max_tokens_spin.setToolTip("Maximum tokens in generated response")
-        layout.addRow("Max Tokens:", self.max_tokens_spin)
+        # Default model
+        self.anthropic_default_model = QComboBox()
+        self.anthropic_default_model.addItems(FALLBACK_CLAUDE_MODELS)
+        self.anthropic_default_model.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.anthropic_default_model.setToolTip("Default model for Anthropic tasks")
+        layout.addRow("Default Model:", self.anthropic_default_model)
 
-        self.tab_widget.addTab(tab, "LLM")
+        parent_layout.addWidget(group)
+
+    def _setup_ollama_provider(self, parent_layout: QVBoxLayout) -> None:
+        """Set up the Ollama provider section."""
+        group = QGroupBox("Ollama (Local)")
+        layout = QFormLayout(group)
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # Enabled checkbox
+        self.ollama_enabled = QCheckBox("Enabled")
+        self.ollama_enabled.setChecked(True)
+        layout.addRow(self.ollama_enabled)
+
+        # Host URL
+        self.ollama_host_input = QLineEdit()
+        self.ollama_host_input.setText(DEFAULT_OLLAMA_HOST)
+        self.ollama_host_input.setPlaceholderText(DEFAULT_OLLAMA_HOST)
+        self.ollama_host_input.setToolTip("Ollama server URL")
+        layout.addRow("Host URL:", self.ollama_host_input)
+
+        # Status row with test button
+        status_layout = QHBoxLayout()
+        self.ollama_status = QLabel("Not tested")
+        self.ollama_status.setStyleSheet("color: gray;")
+        status_layout.addWidget(self.ollama_status)
+        status_layout.addStretch()
+
+        self.ollama_test_btn = QPushButton("Test Connection")
+        self.ollama_test_btn.clicked.connect(
+            lambda: self._test_provider_connection("ollama")
+        )
+        status_layout.addWidget(self.ollama_test_btn)
+        layout.addRow("Status:", status_layout)
+
+        # Default model
+        self.ollama_default_model = QComboBox()
+        self.ollama_default_model.setEditable(True)
+        self.ollama_default_model.addItem("llama3.2")
+        self.ollama_default_model.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.ollama_default_model.setToolTip("Default model for Ollama tasks")
+        layout.addRow("Default Model:", self.ollama_default_model)
+
+        # Setup instructions (collapsible)
+        instructions_label = QLabel("Setup Instructions")
+        instructions_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        layout.addRow(instructions_label)
+
+        instructions_text = QTextEdit()
+        instructions_text.setReadOnly(True)
+        instructions_text.setMaximumHeight(scaled(120))
+        instructions_text.setPlainText(LLM_PROVIDERS["ollama"]["setup_instructions"])
+        layout.addRow(instructions_text)
+
+        parent_layout.addWidget(group)
+
+    def _setup_tasks_tab(self) -> None:
+        """Set up the Tasks settings tab with per-task model configuration."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+
+        # Default configuration section
+        default_group = QGroupBox("Default Configuration")
+        default_layout = QFormLayout(default_group)
+        default_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # Provider selector
+        self.default_provider_combo = QComboBox()
+        self.default_provider_combo.addItems(["anthropic", "ollama"])
+        self.default_provider_combo.currentTextChanged.connect(self._on_default_provider_changed)
+        self.default_provider_combo.setToolTip("Default provider for all tasks")
+        default_layout.addRow("Provider:", self.default_provider_combo)
+
+        # Model selector
+        self.default_model_combo = QComboBox()
+        self.default_model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+        self.default_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.default_model_combo.setToolTip("Default model for all tasks")
+        default_layout.addRow("Model:", self.default_model_combo)
+
+        # Temperature
+        self.default_temperature_spin = QDoubleSpinBox()
+        self.default_temperature_spin.setRange(0.0, 2.0)
+        self.default_temperature_spin.setSingleStep(0.1)
+        self.default_temperature_spin.setValue(DEFAULT_LLM_TEMPERATURE)
+        self.default_temperature_spin.setToolTip("Default temperature (0=focused, 2=creative)")
+        default_layout.addRow("Temperature:", self.default_temperature_spin)
+
+        # Max tokens
+        self.default_max_tokens_spin = QSpinBox()
+        self.default_max_tokens_spin.setRange(100, 32000)
+        self.default_max_tokens_spin.setSingleStep(100)
+        self.default_max_tokens_spin.setValue(DEFAULT_LLM_MAX_TOKENS)
+        self.default_max_tokens_spin.setToolTip("Default maximum output tokens")
+        default_layout.addRow("Max Tokens:", self.default_max_tokens_spin)
+
+        layout.addWidget(default_group)
+
+        # Task-specific overrides in a scrollable area
+        task_group = QGroupBox("Task-Specific Overrides (Optional)")
+        task_main_layout = QVBoxLayout(task_group)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(scaled(8))
+
+        # Create a collapsible section for each task category
+        for cat_id, cat_info in LLM_TASK_CATEGORIES.items():
+            cat_label = QLabel(f"<b>{cat_info['name']}</b>")
+            scroll_layout.addWidget(cat_label)
+
+            # Add tasks in this category
+            for task_id in cat_info["tasks"]:
+                if task_id in LLM_TASK_TYPES:
+                    self._add_task_config_widget(scroll_layout, task_id)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        task_main_layout.addWidget(scroll)
+
+        layout.addWidget(task_group)
+        self.tab_widget.addTab(tab, "Tasks")
+
+    def _add_task_config_widget(self, parent_layout: QVBoxLayout, task_id: str) -> None:
+        """Add a task configuration widget."""
+        task_info = LLM_TASK_TYPES[task_id]
+
+        # Container widget
+        container = QWidget()
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(scaled(8), scaled(4), scaled(8), scaled(4))
+
+        # Enable checkbox
+        enable_check = QCheckBox(task_info["name"])
+        enable_check.setToolTip(f"{task_info['description']}\nRecommended: {', '.join(task_info['recommended_models'])}")
+        container_layout.addWidget(enable_check)
+
+        # Provider selector
+        provider_combo = QComboBox()
+        provider_combo.addItems(["anthropic", "ollama"])
+        provider_combo.setEnabled(False)
+        provider_combo.setFixedWidth(scaled(90))
+        provider_combo.currentTextChanged.connect(
+            lambda p, tid=task_id: self._on_task_provider_changed(tid, p)
+        )
+        container_layout.addWidget(provider_combo)
+
+        # Model selector
+        model_combo = QComboBox()
+        model_combo.setEditable(True)
+        model_combo.setEnabled(False)
+        model_combo.setMinimumWidth(scaled(180))
+        container_layout.addWidget(model_combo)
+
+        # Connect enable checkbox
+        def on_enable_changed(checked: bool) -> None:
+            provider_combo.setEnabled(checked)
+            model_combo.setEnabled(checked)
+
+        enable_check.toggled.connect(on_enable_changed)
+
+        parent_layout.addWidget(container)
+
+        # Store references for loading/saving
+        self._task_widgets[task_id] = {
+            "enable": enable_check,
+            "provider": provider_combo,
+            "model": model_combo,
+        }
 
     def _setup_embeddings_tab(self) -> None:
         """Set up the Embeddings settings tab."""
@@ -320,7 +600,7 @@ class SettingsDialog(QDialog):
         self.default_llm_classification = QCheckBox("Enable AI classification by default")
         self.default_llm_classification.setChecked(True)
         self.default_llm_classification.setToolTip(
-            "Use Claude Haiku to classify unindexed articles (~$0.00025 per article)"
+            "Use AI to classify unindexed articles (cost depends on model selection in Tasks tab)"
         )
         layout.addRow(self.default_llm_classification)
 
@@ -332,29 +612,11 @@ class SettingsDialog(QDialog):
         )
         layout.addRow(self.show_quality_badges)
 
-        # Classification model
-        self.class_model_combo = QComboBox()
-        self.class_model_combo.addItems(FALLBACK_CLAUDE_MODELS)
-        self.class_model_combo.setCurrentText(QUALITY_CLASSIFIER_MODEL)
-        self.class_model_combo.setToolTip(
-            "Claude model for fast study design classification (Tier 2)"
-        )
-        self.class_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addRow("Classification Model:", self.class_model_combo)
-
-        # Assessment model
-        self.assess_model_combo = QComboBox()
-        self.assess_model_combo.addItems(FALLBACK_CLAUDE_MODELS)
-        self.assess_model_combo.setCurrentText(QUALITY_ASSESSOR_MODEL)
-        self.assess_model_combo.setToolTip(
-            "Claude model for detailed quality assessment (Tier 3)"
-        )
-        self.assess_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addRow("Assessment Model:", self.assess_model_combo)
-
         quality_note = QLabel(
             "<small>Quality filtering helps prioritize high-quality evidence "
-            "(RCTs, systematic reviews) in literature searches.</small>"
+            "(RCTs, systematic reviews) in literature searches.<br><br>"
+            "Model selection for classification and assessment tasks is configured "
+            "in the Tasks tab (study_classification and quality_assessment tasks).</small>"
         )
         quality_note.setWordWrap(True)
         layout.addRow(quality_note)
@@ -363,17 +625,35 @@ class SettingsDialog(QDialog):
 
     def _load_config(self) -> None:
         """Load current configuration into fields."""
-        # LLM
-        idx = self.model_combo.findText(self.config.llm.model)
-        if idx >= 0:
-            self.model_combo.setCurrentIndex(idx)
-        else:
-            # Model not in list, add it
-            self.model_combo.addItem(self.config.llm.model)
-            self.model_combo.setCurrentText(self.config.llm.model)
+        # Providers
+        if "anthropic" in self.config.models.providers:
+            provider = self.config.models.providers["anthropic"]
+            self.anthropic_enabled.setChecked(provider.enabled)
+            if provider.default_model:
+                self._set_combo_value(self.anthropic_default_model, provider.default_model)
 
-        self.temperature_spin.setValue(self.config.llm.temperature)
-        self.max_tokens_spin.setValue(self.config.llm.max_tokens)
+        if "ollama" in self.config.models.providers:
+            provider = self.config.models.providers["ollama"]
+            self.ollama_enabled.setChecked(provider.enabled)
+            if provider.base_url:
+                self.ollama_host_input.setText(provider.base_url)
+            if provider.default_model:
+                self._set_combo_value(self.ollama_default_model, provider.default_model)
+
+        # Default task config
+        self.default_provider_combo.setCurrentText(self.config.models.default_provider)
+        self._set_combo_value(self.default_model_combo, self.config.models.default_model)
+        self.default_temperature_spin.setValue(self.config.models.default_temperature)
+        self.default_max_tokens_spin.setValue(self.config.models.default_max_tokens)
+
+        # Task-specific overrides
+        for task_id, widgets in self._task_widgets.items():
+            if task_id in self.config.models.tasks:
+                task_config = self.config.models.tasks[task_id]
+                if task_config.is_configured():
+                    widgets["enable"].setChecked(True)
+                    widgets["provider"].setCurrentText(task_config.provider)
+                    self._set_combo_value(widgets["model"], task_config.model)
 
         # Embeddings
         idx = self.embed_combo.findText(self.config.embeddings.model)
@@ -389,52 +669,62 @@ class SettingsDialog(QDialog):
         self.openathens_enabled.setChecked(self.config.openathens.enabled)
         self.openathens_url_input.setText(self.config.openathens.institution_url)
         self.openathens_session_age.setValue(self.config.openathens.session_max_age_hours)
-        # Update field enabled state
         self._on_openathens_enabled_changed()
 
         # Quality Filtering - load from config if available
         if hasattr(self.config, 'quality') and self.config.quality:
-            # Default tier
             tier_value = getattr(self.config.quality, 'default_minimum_tier', 0)
             for i, (_, tier) in enumerate(QUALITY_TIER_OPTIONS):
                 if tier.value == tier_value:
                     self.default_tier_combo.setCurrentIndex(i)
                     break
 
-            # LLM classification
             use_llm = getattr(self.config.quality, 'use_llm_classification', True)
             self.default_llm_classification.setChecked(use_llm)
 
-            # Show badges
             show_badges = getattr(self.config.quality, 'show_quality_badges', True)
             self.show_quality_badges.setChecked(show_badges)
 
-            # Models
-            class_model = getattr(self.config.quality, 'classification_model', QUALITY_CLASSIFIER_MODEL)
-            idx = self.class_model_combo.findText(class_model)
-            if idx >= 0:
-                self.class_model_combo.setCurrentIndex(idx)
-            else:
-                self.class_model_combo.addItem(class_model)
-                self.class_model_combo.setCurrentText(class_model)
-
-            assess_model = getattr(self.config.quality, 'assessment_model', QUALITY_ASSESSOR_MODEL)
-            idx = self.assess_model_combo.findText(assess_model)
-            if idx >= 0:
-                self.assess_model_combo.setCurrentIndex(idx)
-            else:
-                self.assess_model_combo.addItem(assess_model)
-                self.assess_model_combo.setCurrentText(assess_model)
+    def _set_combo_value(self, combo: QComboBox, value: str) -> None:
+        """Set combo box value, adding if necessary."""
+        idx = combo.findText(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        elif value:
+            combo.addItem(value)
+            combo.setCurrentText(value)
 
     def _save_config(self) -> None:
         """Save configuration and close dialog."""
-        # Update config object
-        self.config.llm.model = self.model_combo.currentText()
-        self.config.llm.temperature = self.temperature_spin.value()
-        self.config.llm.max_tokens = self.max_tokens_spin.value()
+        # Save Providers configuration
+        self.config.models.providers["anthropic"].enabled = self.anthropic_enabled.isChecked()
+        self.config.models.providers["anthropic"].default_model = self.anthropic_default_model.currentText()
 
+        self.config.models.providers["ollama"].enabled = self.ollama_enabled.isChecked()
+        self.config.models.providers["ollama"].base_url = self.ollama_host_input.text().strip()
+        self.config.models.providers["ollama"].default_model = self.ollama_default_model.currentText()
+
+        # Save default task configuration
+        self.config.models.default_provider = self.default_provider_combo.currentText()
+        self.config.models.default_model = self.default_model_combo.currentText()
+        self.config.models.default_temperature = self.default_temperature_spin.value()
+        self.config.models.default_max_tokens = self.default_max_tokens_spin.value()
+
+        # Save task-specific overrides
+        for task_id, widgets in self._task_widgets.items():
+            if widgets["enable"].isChecked():
+                self.config.models.tasks[task_id] = TaskModelConfig(
+                    provider=widgets["provider"].currentText(),
+                    model=widgets["model"].currentText(),
+                )
+            elif task_id in self.config.models.tasks:
+                # Remove disabled task config
+                del self.config.models.tasks[task_id]
+
+        # Save embeddings
         self.config.embeddings.model = self.embed_combo.currentText()
 
+        # Save PubMed
         self.config.pubmed.email = self.email_input.text().strip()
         api_key = self.api_key_input.text().strip()
         self.config.pubmed.api_key = api_key if api_key else None
@@ -442,7 +732,6 @@ class SettingsDialog(QDialog):
         # OpenAthens - validate URL or domain before saving
         openathens_url = self.openathens_url_input.text().strip()
         if self.openathens_enabled.isChecked() and openathens_url:
-            # Allow either full HTTPS URL or domain-only input
             is_domain_only = (
                 '.' in openathens_url and
                 not openathens_url.startswith('http') and
@@ -461,14 +750,12 @@ class SettingsDialog(QDialog):
         self.config.openathens.institution_url = openathens_url
         self.config.openathens.session_max_age_hours = self.openathens_session_age.value()
 
-        # Quality Filtering - save settings if config supports it
+        # Quality Filtering
         if hasattr(self.config, 'quality'):
             tier_idx = self.default_tier_combo.currentIndex()
             self.config.quality.default_minimum_tier = QUALITY_TIER_OPTIONS[tier_idx][1].value
             self.config.quality.use_llm_classification = self.default_llm_classification.isChecked()
             self.config.quality.show_quality_badges = self.show_quality_badges.isChecked()
-            self.config.quality.classification_model = self.class_model_combo.currentText()
-            self.config.quality.assessment_model = self.assess_model_combo.currentText()
 
         # Save to file
         self.config.save()
@@ -530,35 +817,135 @@ class SettingsDialog(QDialog):
         self.openathens_url_input.setEnabled(enabled)
         self.openathens_session_age.setEnabled(enabled)
 
-    def _fetch_models(self) -> None:
-        """Start background fetch of available models from Anthropic API."""
-        self._model_fetch_worker = ModelFetchWorker()
-        self._model_fetch_worker.models_fetched.connect(self._on_models_fetched)
-        self._model_fetch_worker.fetch_failed.connect(self._on_models_fetch_failed)
-        self._model_fetch_worker.start()
+    def _fetch_all_models(self) -> None:
+        """Start background fetch of models from all enabled providers."""
+        # Fetch Anthropic models
+        if self.anthropic_enabled.isChecked():
+            worker = ModelFetchWorker("anthropic")
+            worker.models_fetched.connect(self._on_models_fetched)
+            worker.fetch_failed.connect(self._on_models_fetch_failed)
+            self._model_fetch_workers.append(worker)
+            worker.start()
 
-    def _on_models_fetched(self, models: list[str]) -> None:
-        """Handle successful model fetch from API."""
+        # Fetch Ollama models
+        if self.ollama_enabled.isChecked():
+            worker = ModelFetchWorker("ollama", self.ollama_host_input.text().strip())
+            worker.models_fetched.connect(self._on_models_fetched)
+            worker.fetch_failed.connect(self._on_models_fetch_failed)
+            self._model_fetch_workers.append(worker)
+            worker.start()
+
+    def _on_models_fetched(self, provider: str, models: list[str]) -> None:
+        """Handle successful model fetch from a provider."""
         if not models:
             return
 
-        # Update all model combo boxes
-        for combo in [self.model_combo, self.class_model_combo, self.assess_model_combo]:
-            current_model = combo.currentText()
-            combo.clear()
-            combo.addItems(models)
+        # Cache the models
+        self._available_models[provider] = models
 
-            # Restore selection if it exists in new list
-            idx = combo.findText(current_model)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-            elif current_model:
-                # Current model not in API list - add it anyway
-                combo.addItem(current_model)
-                combo.setCurrentText(current_model)
+        # Update provider default model combo
+        if provider == "anthropic":
+            self._update_model_combo(self.anthropic_default_model, models)
+        elif provider == "ollama":
+            self._update_model_combo(self.ollama_default_model, models)
 
-        logger.info(f"Loaded {len(models)} models from Anthropic API")
+        # Update default model combo if it's using this provider
+        if self.default_provider_combo.currentText() == provider:
+            self._update_model_combo(self.default_model_combo, models)
 
-    def _on_models_fetch_failed(self, error: str) -> None:
+        # Update task-specific combos that use this provider
+        for task_id, widgets in self._task_widgets.items():
+            if widgets["provider"].currentText() == provider:
+                self._update_model_combo(widgets["model"], models)
+
+        logger.info(f"Loaded {len(models)} models from {provider}")
+
+    def _on_models_fetch_failed(self, provider: str, error: str) -> None:
         """Handle failed model fetch - keep fallback models."""
-        logger.debug(f"Using fallback models (API fetch failed: {error})")
+        logger.debug(f"Using fallback models for {provider} (fetch failed: {error})")
+
+    def _update_model_combo(self, combo: QComboBox, models: list[str]) -> None:
+        """Update a model combo box with new models list."""
+        current = combo.currentText()
+        combo.clear()
+        combo.addItems(models)
+
+        # Restore selection
+        idx = combo.findText(current)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        elif current:
+            combo.addItem(current)
+            combo.setCurrentText(current)
+
+    def _on_default_provider_changed(self, provider: str) -> None:
+        """Handle default provider change - update model list."""
+        models = self._available_models.get(provider, [])
+        if models:
+            self._update_model_combo(self.default_model_combo, models)
+        else:
+            # Use fallback
+            self.default_model_combo.clear()
+            if provider == "anthropic":
+                self.default_model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+            else:
+                self.default_model_combo.addItem("llama3.2")
+
+    def _on_task_provider_changed(self, task_id: str, provider: str) -> None:
+        """Handle task provider change - update model list."""
+        if task_id not in self._task_widgets:
+            return
+
+        model_combo = self._task_widgets[task_id]["model"]
+        models = self._available_models.get(provider, [])
+        if models:
+            self._update_model_combo(model_combo, models)
+        else:
+            model_combo.clear()
+            if provider == "anthropic":
+                model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+            else:
+                model_combo.addItem("llama3.2")
+
+    def _test_provider_connection(self, provider: str) -> None:
+        """Test connection to a provider."""
+        # Update UI to show testing
+        if provider == "anthropic":
+            self.anthropic_status.setText("Testing...")
+            self.anthropic_status.setStyleSheet("color: gray;")
+            self.anthropic_test_btn.setEnabled(False)
+        elif provider == "ollama":
+            self.ollama_status.setText("Testing...")
+            self.ollama_status.setStyleSheet("color: gray;")
+            self.ollama_test_btn.setEnabled(False)
+
+        # Start test worker
+        host = self.ollama_host_input.text().strip() if provider == "ollama" else ""
+        worker = ProviderConnectionTestWorker(provider, host)
+        worker.test_completed.connect(self._on_connection_test_completed)
+        self._connection_test_workers.append(worker)
+        worker.start()
+
+    def _on_connection_test_completed(self, provider: str, success: bool, message: str) -> None:
+        """Handle connection test result."""
+        if provider == "anthropic":
+            self.anthropic_status.setText(message)
+            self.anthropic_status.setStyleSheet(
+                "color: green;" if success else "color: red;"
+            )
+            self.anthropic_test_btn.setEnabled(True)
+        elif provider == "ollama":
+            self.ollama_status.setText(message)
+            self.ollama_status.setStyleSheet(
+                "color: green;" if success else "color: red;"
+            )
+            self.ollama_test_btn.setEnabled(True)
+
+        # Refresh models if successful
+        if success:
+            host = self.ollama_host_input.text().strip() if provider == "ollama" else ""
+            worker = ModelFetchWorker(provider, host)
+            worker.models_fetched.connect(self._on_models_fetched)
+            worker.fetch_failed.connect(self._on_models_fetch_failed)
+            self._model_fetch_workers.append(worker)
+            worker.start()

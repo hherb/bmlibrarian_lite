@@ -113,6 +113,206 @@ DEFAULT_LLM_TEMPERATURE = 0.3
 # Default max tokens for LLM responses
 DEFAULT_LLM_MAX_TOKENS = 4096
 
+# Default Ollama host URL
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+
+# =============================================================================
+# LLM Task Types
+# =============================================================================
+
+# Task type definitions with metadata for UI and configuration
+LLM_TASK_TYPES = {
+    "query_conversion": {
+        "name": "Query Conversion",
+        "description": "Convert natural language to PubMed queries",
+        "category": "search",
+        "default_temperature": 0.1,
+        "default_max_tokens": 512,
+        "complexity": "low",
+        "recommended_models": ["claude-3-5-haiku-20241022", "llama3.2", "mistral"],
+    },
+    "document_scoring": {
+        "name": "Document Scoring",
+        "description": "Score document relevance (1-5 scale)",
+        "category": "analysis",
+        "default_temperature": 0.1,
+        "default_max_tokens": 256,
+        "complexity": "medium",
+        "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
+    },
+    "citation_extraction": {
+        "name": "Citation Extraction",
+        "description": "Extract relevant passages from documents",
+        "category": "analysis",
+        "default_temperature": 0.1,
+        "default_max_tokens": 512,
+        "complexity": "medium",
+        "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
+    },
+    "report_generation": {
+        "name": "Report Generation",
+        "description": "Generate synthesis reports from citations",
+        "category": "generation",
+        "default_temperature": 0.3,
+        "default_max_tokens": 4096,
+        "complexity": "high",
+        "recommended_models": ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+    },
+    "query_expansion": {
+        "name": "Query Expansion",
+        "description": "Generate alternative query phrasings",
+        "category": "search",
+        "default_temperature": 0.3,
+        "default_max_tokens": 200,
+        "complexity": "low",
+        "recommended_models": ["claude-3-5-haiku-20241022", "llama3.2", "mistral"],
+    },
+    "document_qa": {
+        "name": "Document Q&A",
+        "description": "Answer questions about documents",
+        "category": "interrogation",
+        "default_temperature": 0.2,
+        "default_max_tokens": 2048,
+        "complexity": "high",
+        "recommended_models": ["claude-sonnet-4-20250514", "llama3.2:70b"],
+    },
+    "document_summary": {
+        "name": "Document Summary",
+        "description": "Generate document summaries",
+        "category": "interrogation",
+        "default_temperature": 0.2,
+        "default_max_tokens": 500,
+        "complexity": "medium",
+        "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
+    },
+    "study_classification": {
+        "name": "Study Classification",
+        "description": "Classify study design type",
+        "category": "quality",
+        "default_temperature": 0.1,
+        "default_max_tokens": 256,
+        "complexity": "low",
+        "recommended_models": ["claude-3-5-haiku-20241022", "llama3.2"],
+    },
+    "quality_assessment": {
+        "name": "Quality Assessment",
+        "description": "Detailed evidence quality assessment",
+        "category": "quality",
+        "default_temperature": 0.1,
+        "default_max_tokens": 1024,
+        "complexity": "high",
+        "recommended_models": ["claude-sonnet-4-20250514"],
+    },
+}
+
+# Task categories for UI grouping
+LLM_TASK_CATEGORIES = {
+    "search": {
+        "name": "Search & Queries",
+        "description": "Tasks related to search query generation",
+        "tasks": ["query_conversion", "query_expansion"],
+    },
+    "analysis": {
+        "name": "Document Analysis",
+        "description": "Tasks for analyzing document content",
+        "tasks": ["document_scoring", "citation_extraction"],
+    },
+    "generation": {
+        "name": "Report Generation",
+        "description": "Tasks for generating reports and summaries",
+        "tasks": ["report_generation"],
+    },
+    "interrogation": {
+        "name": "Document Q&A",
+        "description": "Interactive document questioning",
+        "tasks": ["document_qa", "document_summary"],
+    },
+    "quality": {
+        "name": "Quality Assessment",
+        "description": "Evidence quality evaluation tasks",
+        "tasks": ["study_classification", "quality_assessment"],
+    },
+}
+
+# =============================================================================
+# LLM Provider Definitions
+# =============================================================================
+#
+# Provider metadata is now managed by provider classes in llm/providers/.
+# This dict is maintained for backward compatibility but should be considered
+# deprecated. Use llm.providers.get_all_provider_info() instead.
+
+
+def _get_llm_providers() -> dict[str, dict]:
+    """Get LLM provider info, preferring provider classes when available.
+
+    Returns:
+        Dict mapping provider names to their metadata.
+    """
+    try:
+        from bmlibrarian_lite.llm.providers import get_all_provider_info
+
+        provider_info = get_all_provider_info()
+        # Convert to expected format for backward compatibility
+        result = {}
+        for name, info in provider_info.items():
+            result[name] = {
+                "name": info["display_name"],
+                "description": info["description"],
+                "api_key_env_var": info["api_key_env_var"],
+                "default_base_url": info["default_base_url"],
+                "default_model": info["default_model"],
+                "requires_api_key": info["requires_api_key"],
+                "website_url": info["website_url"],
+                "setup_instructions": info["setup_instructions"],
+            }
+        return result
+    except ImportError:
+        # Fallback if providers not yet loaded
+        pass
+
+    # Fallback static definitions
+    return {
+        "anthropic": {
+            "name": "Anthropic",
+            "description": "Claude models via Anthropic API",
+            "api_key_env_var": "ANTHROPIC_API_KEY",
+            "default_base_url": "https://api.anthropic.com",
+            "default_model": "claude-sonnet-4-20250514",
+            "requires_api_key": True,
+            "website_url": "https://console.anthropic.com",
+            "setup_instructions": """1. Create an account at https://console.anthropic.com
+2. Generate an API key in Settings > API Keys
+3. Enter the key in the API Keys tab""",
+        },
+        "ollama": {
+            "name": "Ollama",
+            "description": "Local models via Ollama server (free)",
+            "api_key_env_var": "",
+            "default_base_url": "http://localhost:11434",
+            "default_model": "medgemma4B_it_q8",
+            "requires_api_key": False,
+            "website_url": "https://ollama.ai",
+            "setup_instructions": """1. Install Ollama from https://ollama.ai
+2. Start the Ollama service: ollama serve
+3. Pull a model: ollama pull medgemma4B_it_q8
+
+Popular models for biomedical research:
+- medgemma4B_it_q8 - Medical domain fine-tuned (default)
+- llama3.2 (3B) - Fast, good for simple tasks
+- llama3.1 (8B) - Good balance of speed and quality
+- mistral (7B) - Fast, good for simple tasks
+- mixtral (8x7B) - High quality, slower
+- meditron (7B) - Medical domain fine-tuned
+
+Verify installation: ollama list""",
+        },
+    }
+
+
+# Lazy-loaded provider info for backward compatibility
+LLM_PROVIDERS = _get_llm_providers()
+
 # =============================================================================
 # Timeout Settings (milliseconds)
 # =============================================================================
