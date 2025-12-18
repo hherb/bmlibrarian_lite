@@ -286,8 +286,11 @@ class OllamaProvider(BaseProvider):
             client = self._get_client()
             response = client.list()
             models = []
-            for model_info in response.get("models", []):
-                name = model_info.get("name", "")
+            # Response is a ListResponse object with .models attribute
+            model_list = getattr(response, "models", []) or []
+            for model_info in model_list:
+                # Each model_info is a Model object with .model attribute
+                name = getattr(model_info, "model", "") or ""
                 if name:
                     # Get full metadata via show()
                     metadata = self._get_model_info(name)
@@ -306,9 +309,10 @@ class OllamaProvider(BaseProvider):
         try:
             client = self._get_client()
             response = client.list()
-            models = response.get("models", [])
-            if models:
-                return True, f"Connected. {len(models)} models available."
+            # Response is a ListResponse object with .models attribute
+            model_list = getattr(response, "models", []) or []
+            if model_list:
+                return True, f"Connected. {len(model_list)} models available."
             return True, "Connected. No models installed."
         except ImportError:
             return False, "Ollama package not installed"
