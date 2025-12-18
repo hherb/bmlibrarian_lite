@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QSpinBox,
 )
-from PySide6.QtCore import Signal, QThread
+from PySide6.QtCore import Signal, QThread, QTimer
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
@@ -491,15 +491,20 @@ class SystematicReviewTab(QWidget):
         """Reset UI to ready state."""
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        # Wait for workers to finish before releasing references
-        # to prevent "QThread destroyed while running" errors
+        # Defer worker cleanup to allow thread to fully exit
+        # This prevents "QThread destroyed while running" errors
+        # when the finished signal is emitted from within run()
+        QTimer.singleShot(100, self._cleanup_workers)
+
+    def _cleanup_workers(self) -> None:
+        """Clean up worker references after threads have exited."""
         if self._worker is not None:
             if self._worker.isRunning():
-                self._worker.wait(1000)  # Wait up to 1 second
+                self._worker.wait(2000)  # Wait up to 2 seconds
             self._worker = None
         if self._quality_worker is not None:
             if self._quality_worker.isRunning():
-                self._quality_worker.wait(1000)
+                self._quality_worker.wait(2000)
             self._quality_worker = None
 
     def _store_quality_assessments(
