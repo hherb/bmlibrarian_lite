@@ -149,10 +149,10 @@ class WorkflowWorker(QThread):
                     ) -> None:
                         self.progress.emit("quality_filter", current, total)
                         # Emit quality assessed signal for audit trail
-                        if assessment and hasattr(assessment, 'document_id'):
-                            self.quality_assessed.emit(
-                                assessment.document_id, assessment
-                            )
+                        # current is 1-indexed, so documents[current-1] is the assessed doc
+                        if assessment and current > 0 and current <= len(documents):
+                            doc_id = documents[current - 1].id
+                            self.quality_assessed.emit(doc_id, assessment)
 
                     filtered, assessments = self.quality_manager.filter_documents(
                         documents,

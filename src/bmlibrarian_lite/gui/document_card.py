@@ -323,11 +323,14 @@ class DocumentCard(QFrame):
                 QTextEdit {
                     background-color: #FAFAFA;
                     color: #333;
-                    font-size: 9pt;
-                    padding: 4px;
+                    font-size: 10pt;
+                    padding: 2px;
+                    margin: 0px;
                     border: none;
                 }
             """)
+            # Remove document margin that causes large gap
+            self._abstract_widget.document().setDocumentMargin(2)
 
             content_layout.addWidget(self._abstract_widget)
 
@@ -339,10 +342,11 @@ class DocumentCard(QFrame):
             self._rationale_widget.setStyleSheet(f"""
                 QLabel {{
                     color: {AUDIT_RATIONALE_COLOR};
-                    font-size: 8pt;
+                    font-size: 9pt;
                     font-style: italic;
                     background: transparent;
-                    padding: 2px 0px;
+                    padding: 0px;
+                    margin: 0px;
                 }}
             """)
             content_layout.addWidget(self._rationale_widget)
@@ -571,10 +575,11 @@ class DocumentCard(QFrame):
             self._rationale_widget.setStyleSheet(f"""
                 QLabel {{
                     color: {AUDIT_RATIONALE_COLOR};
-                    font-size: 8pt;
+                    font-size: 9pt;
                     font-style: italic;
                     background: transparent;
-                    padding: 2px 0px;
+                    padding: 0px;
+                    margin: 0px;
                 }}
             """)
             content_layout = self._content_widget.layout()
