@@ -561,8 +561,16 @@ class BenchmarkResultsDialog(QDialog):
 
 class DocumentExplanationsDialog(QDialog):
     """
-    Dialog showing explanations from each evaluator for a document.
+    Dialog showing document abstract and explanations from each evaluator.
+
+    Allows the user to compare model assessments and select a gold standard.
+
+    Signals:
+        gold_standard_selected: Emitted when user selects a gold standard
+            (document_id, evaluator_name or None for "neither")
     """
+
+    gold_standard_selected = Signal(str, object)  # document_id, evaluator_name or None
 
     def __init__(
         self,
@@ -581,18 +589,21 @@ class DocumentExplanationsDialog(QDialog):
         super().__init__(parent)
         self.comparison = comparison
         self.evaluator_stats = evaluator_stats
+        self._selected_gold_standard: Optional[str] = None
 
-        self.setWindowTitle("Document Explanations")
-        self.setMinimumSize(scaled(600), scaled(400))
+        self.setWindowTitle("Document Review")
+        self.setMinimumSize(scaled(800), scaled(600))
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         """Set up the dialog UI."""
         layout = QVBoxLayout(self)
+        layout.setSpacing(scaled(8))
 
-        # Document info
         doc = self.comparison.document
-        title_label = QLabel(f"<b>{doc.title}</b>")
+
+        # Document header
+        title_label = QLabel(f"<h3>{doc.title}</h3>")
         title_label.setWordWrap(True)
         layout.addWidget(title_label)
 
@@ -601,49 +612,164 @@ class DocumentExplanationsDialog(QDialog):
         meta_label.setStyleSheet("color: gray;")
         layout.addWidget(meta_label)
 
-        # Score summary
-        scores = self.comparison.scores
-        score_text = " | ".join(f"{name}: {score}" for name, score in scores.items())
-        score_label = QLabel(f"<b>Scores:</b> {score_text}")
-        layout.addWidget(score_label)
+        # Main content with tabs
+        tabs = QTabWidget()
 
-        # Explanations
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        # Abstract tab
+        abstract_tab = self._create_abstract_tab(doc)
+        tabs.addTab(abstract_tab, "Abstract")
 
-        explanations_widget = QWidget()
-        explanations_layout = QVBoxLayout(explanations_widget)
+        # Model Assessments tab
+        assessments_tab = self._create_assessments_tab()
+        tabs.addTab(assessments_tab, "Model Assessments")
 
+        layout.addWidget(tabs)
+
+        # Gold standard selection
+        gold_group = QGroupBox("Gold Standard Selection")
+        gold_layout = QHBoxLayout(gold_group)
+
+        gold_label = QLabel("Select which assessment is correct:")
+        gold_layout.addWidget(gold_label)
+
+        # Create buttons for each evaluator
+        self._gold_buttons: Dict[str, QPushButton] = {}
         for stats in self.evaluator_stats:
             name = stats.evaluator.display_name
             score = self.comparison.scores.get(name, "?")
-            explanation = self.comparison.explanations.get(name, "No explanation available")
+            btn = QPushButton(f"{name} (Score: {score})")
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda checked, n=name: self._on_gold_selected(n))
+            gold_layout.addWidget(btn)
+            self._gold_buttons[name] = btn
 
-            # Group for each evaluator
-            group = QGroupBox(f"{name} - Score: {score}")
-            group_layout = QVBoxLayout(group)
+        # "Neither" button
+        neither_btn = QPushButton("Neither")
+        neither_btn.setCheckable(True)
+        neither_btn.clicked.connect(lambda: self._on_gold_selected(None))
+        gold_layout.addWidget(neither_btn)
+        self._gold_buttons["__neither__"] = neither_btn
 
-            # Set background color based on score
-            if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
-                group.setStyleSheet(f"QGroupBox {{ background-color: {BENCHMARK_SCORE_COLORS[score]}; }}")
+        gold_layout.addStretch()
+        layout.addWidget(gold_group)
 
-            explanation_text = QTextEdit()
-            explanation_text.setPlainText(explanation)
-            explanation_text.setReadOnly(True)
-            explanation_text.setMaximumHeight(scaled(100))
-            group_layout.addWidget(explanation_text)
-
-            explanations_layout.addWidget(group)
-
-        explanations_layout.addStretch()
-        scroll.setWidget(explanations_widget)
-        layout.addWidget(scroll)
-
-        # Close button
+        # Button row
         button_layout = QHBoxLayout()
         button_layout.addStretch()
+
+        save_btn = QPushButton("Save Selection")
+        save_btn.clicked.connect(self._on_save)
+        button_layout.addWidget(save_btn)
+
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         button_layout.addWidget(close_btn)
+
         layout.addLayout(button_layout)
+
+    def _create_abstract_tab(self, doc: "LiteDocument") -> QWidget:
+        """Create the abstract display tab."""
+        from ..data_models import LiteDocument  # Import for type hint
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Abstract text
+        abstract_edit = QTextEdit()
+        abstract_edit.setPlainText(doc.abstract or "No abstract available")
+        abstract_edit.setReadOnly(True)
+        layout.addWidget(abstract_edit)
+
+        return tab
+
+    def _create_assessments_tab(self) -> QWidget:
+        """Create the model assessments comparison tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Score summary at top
+        scores = self.comparison.scores
+        score_text = " | ".join(f"<b>{name}:</b> {score}" for name, score in scores.items())
+        score_label = QLabel(f"Scores: {score_text}")
+        layout.addWidget(score_label)
+
+        # Create side-by-side comparison using splitter
+        if len(self.evaluator_stats) == 2:
+            # Two models - use horizontal splitter for side-by-side
+            splitter = QSplitter(Qt.Horizontal)
+            for stats in self.evaluator_stats:
+                panel = self._create_evaluator_panel(stats)
+                splitter.addWidget(panel)
+            splitter.setSizes([1, 1])  # Equal sizes
+            layout.addWidget(splitter)
+        else:
+            # Multiple models - use vertical scroll
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.NoFrame)
+
+            scroll_widget = QWidget()
+            scroll_layout = QVBoxLayout(scroll_widget)
+
+            for stats in self.evaluator_stats:
+                panel = self._create_evaluator_panel(stats)
+                scroll_layout.addWidget(panel)
+
+            scroll_layout.addStretch()
+            scroll.setWidget(scroll_widget)
+            layout.addWidget(scroll)
+
+        return tab
+
+    def _create_evaluator_panel(self, stats: "EvaluatorStats") -> QWidget:
+        """Create a panel showing one evaluator's assessment."""
+        name = stats.evaluator.display_name
+        score = self.comparison.scores.get(name, "?")
+        explanation = self.comparison.explanations.get(name, "No explanation available")
+
+        # Group box with colored header based on score
+        group = QGroupBox(f"{name}")
+        group_layout = QVBoxLayout(group)
+
+        # Score badge
+        score_label = QLabel(f"<b>Score: {score}</b>")
+        if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
+            score_label.setStyleSheet(
+                f"background-color: {BENCHMARK_SCORE_COLORS[score]}; "
+                f"padding: {scaled(4)}px; border-radius: {scaled(4)}px;"
+            )
+        group_layout.addWidget(score_label)
+
+        # Explanation
+        explanation_label = QLabel("<b>Reasoning:</b>")
+        group_layout.addWidget(explanation_label)
+
+        explanation_text = QTextEdit()
+        explanation_text.setPlainText(explanation)
+        explanation_text.setReadOnly(True)
+        explanation_text.setMinimumHeight(scaled(150))
+        group_layout.addWidget(explanation_text)
+
+        return group
+
+    def _on_gold_selected(self, evaluator_name: Optional[str]) -> None:
+        """Handle gold standard selection."""
+        self._selected_gold_standard = evaluator_name
+
+        # Update button states
+        for name, btn in self._gold_buttons.items():
+            if name == "__neither__":
+                btn.setChecked(evaluator_name is None)
+            else:
+                btn.setChecked(name == evaluator_name)
+
+    def _on_save(self) -> None:
+        """Save the gold standard selection."""
+        self.gold_standard_selected.emit(
+            self.comparison.document.id,
+            self._selected_gold_standard
+        )
+        logger.info(
+            f"Gold standard for {self.comparison.document.id}: "
+            f"{self._selected_gold_standard or 'neither'}"
+        )
