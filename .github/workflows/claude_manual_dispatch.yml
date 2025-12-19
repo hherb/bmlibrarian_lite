@@ -1,0 +1,32 @@
+name: Manual Claude Review Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number to review'
+        required: true
+        type: number
+
+jobs:
+  trigger-claude-comment:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Post @claude comment to specified PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = parseInt(core.getInput('pr_number'), 10);
+            if (!pr || isNaN(pr)) {
+              throw new Error('pr_number is required and must be a number');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr,
+              body: '@claude please review this pull request (triggered manually)'
+            });
