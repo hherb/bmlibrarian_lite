@@ -64,6 +64,7 @@ class BenchmarkWorker(QThread):
         documents: List[LiteDocument],
         models: List[str],
         checkpoint_id: Optional[str] = None,
+        existing_scores: Optional[List[ScoredDocument]] = None,
     ) -> None:
         """
         Initialize the benchmark worker.
@@ -75,6 +76,7 @@ class BenchmarkWorker(QThread):
             documents: Documents to benchmark
             models: List of model strings (provider:model format)
             checkpoint_id: Optional checkpoint ID for storing results
+            existing_scores: Pre-existing scores to reuse (e.g., from initial scoring)
         """
         super().__init__()
         self.config = config
@@ -83,6 +85,7 @@ class BenchmarkWorker(QThread):
         self.documents = documents
         self.models = models
         self.checkpoint_id = checkpoint_id
+        self.existing_scores = existing_scores
         self._cancelled = False
 
     def run(self) -> None:
@@ -104,6 +107,7 @@ class BenchmarkWorker(QThread):
                 models=self.models,
                 checkpoint_id=self.checkpoint_id,
                 progress_callback=on_progress,
+                existing_scores=self.existing_scores,
             )
 
             if not self._cancelled:

@@ -676,12 +676,14 @@ class SystematicReviewTab(QWidget):
         self._benchmark_progress_dialog.cancelled.connect(self._cancel_benchmark)
 
         # Create and start worker
+        # Pass existing scored documents so we can reuse scores from the initial scoring
         self._benchmark_worker = BenchmarkWorker(
             config=self.config,
             storage=self.storage,
             question=self._current_question,
             documents=benchmark_documents,
             models=selected_models,
+            existing_scores=self._scored_documents,
         )
         self._benchmark_worker.progress.connect(self._on_benchmark_progress)
         self._benchmark_worker.finished.connect(self._on_benchmark_finished)

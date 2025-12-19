@@ -175,6 +175,7 @@ class BenchmarkRunner:
         checkpoint_id: str,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         reuse_existing: bool = True,
+        existing_scores: Optional[list[ScoredDocument]] = None,
     ) -> BenchmarkResult:
         """
         Execute a benchmark run.
@@ -184,6 +185,7 @@ class BenchmarkRunner:
             checkpoint_id: Checkpoint ID to associate scores with
             progress_callback: Called with (current, total, status_message)
             reuse_existing: If True, reuse cached evaluations
+            existing_scores: Pre-existing scores to reuse (e.g., from initial scoring)
 
         Returns:
             Complete benchmark results
@@ -224,6 +226,17 @@ class BenchmarkRunner:
             started_at=start_time,
         )
 
+        # Build lookup for existing scores by document ID
+        existing_scores_map: dict[str, ScoredDocument] = {}
+        if existing_scores:
+            for sd in existing_scores:
+                existing_scores_map[sd.document.id] = sd
+            logger.info(f"Loaded {len(existing_scores_map)} existing scores for reuse")
+
+        # Get the baseline model string (the model used for initial scoring)
+        baseline_model = self.config.models.get_model_string("document_scoring")
+        logger.debug(f"Baseline model for initial scoring: {baseline_model}")
+
         # Collect scores: evaluator_id -> document_id -> ScoredDocument
         all_scores: dict[str, dict[str, ScoredDocument]] = {}
 
@@ -246,7 +259,33 @@ class BenchmarkRunner:
                         progress_current=current_op,
                     )
 
-                    # Check for existing evaluation
+                    # Check for existing scores from initial scoring
+                    # if this evaluator matches the baseline model
+                    if existing_scores_map and evaluator.model_string == baseline_model:
+                        if document.id in existing_scores_map:
+                            existing = existing_scores_map[document.id]
+                            logger.debug(
+                                f"Reusing initial scoring result for {document.id} "
+                                f"(baseline model: {evaluator.display_name})"
+                            )
+                            # Create a copy with the evaluator info
+                            reused = ScoredDocument(
+                                document=existing.document,
+                                score=existing.score,
+                                explanation=existing.explanation,
+                                evaluator_id=evaluator.id,
+                                evaluator=evaluator,
+                                latency_ms=existing.latency_ms,
+                                tokens_input=existing.tokens_input,
+                                tokens_output=existing.tokens_output,
+                                cost_usd=existing.cost_usd,
+                            )
+                            all_scores[evaluator.id][document.id] = reused
+                            # Save to storage for consistency
+                            self.storage.save_scored_document(reused, checkpoint_id)
+                            continue
+
+                    # Check for existing evaluation in database
                     if reuse_existing:
                         existing = self.storage.get_scored_document_by_evaluator(
                             document_id=document.id,
@@ -318,6 +357,7 @@ class BenchmarkRunner:
         checkpoint_id: Optional[str] = None,
         name: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        existing_scores: Optional[list[ScoredDocument]] = None,
     ) -> BenchmarkResult:
         """
         Convenience method to create and run a benchmark in one call.
@@ -329,6 +369,7 @@ class BenchmarkRunner:
             checkpoint_id: Checkpoint ID to associate scores with (created if not provided)
             name: Optional benchmark name
             progress_callback: Progress callback
+            existing_scores: Pre-existing scores to reuse for the baseline model
 
         Returns:
             Benchmark results
@@ -362,6 +403,7 @@ class BenchmarkRunner:
             run_id=run.id,
             checkpoint_id=checkpoint_id,
             progress_callback=progress_callback,
+            existing_scores=existing_scores,
         )
 
     def _score_document(
