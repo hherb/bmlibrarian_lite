@@ -83,6 +83,14 @@ python bmlibrarian_lite.py clear        # Clear all data
 - `QualityManager` orchestrates the assessment workflow
 - `QualityAssessment` dataclass with study design, quality tier, and extraction details
 
+**Model Benchmarking** (`benchmarking/`)
+- Compare multiple LLM models on document scoring tasks
+- `BenchmarkRunner` - Orchestrates benchmark execution with caching and progress tracking
+- `BenchmarkResult` - Complete results with per-evaluator statistics and agreement matrix
+- `EvaluatorStats` - Per-model metrics (mean score, latency, tokens, cost)
+- `DocumentComparison` - Per-document scores across all evaluators
+- Statistics functions: `compute_agreement_matrix`, `compute_evaluator_stats`
+
 ### GUI Structure (`gui/`)
 
 The PySide6 GUI uses a three-tab design:
@@ -116,6 +124,29 @@ The Audit Trail provides transparency into the systematic review workflow with t
 
 Background operations use `QThread` workers in `workers.py` to keep the UI responsive.
 
+#### Benchmarking Dialogs
+
+The benchmarking system adds model comparison capabilities:
+
+- **BenchmarkConfirmDialog** (`benchmark_dialog.py`): Configure benchmark runs - select models, sampling, view cost estimates
+- **BenchmarkProgressDialog** (`benchmark_dialog.py`): Show progress during benchmark execution
+- **BenchmarkResultsDialog** (`benchmark_results_dialog.py`): Four-tab results display:
+  - *Model Comparison*: Table with mean score, std dev, latency, tokens, cost per evaluator
+  - *Agreement Matrix*: Pairwise agreement percentages (within ±1 score tolerance)
+  - *Score Distribution*: Score counts (1-5) per evaluator
+  - *Document Details*: Per-document scores with filter for disagreements
+
+**Benchmark Workflow:**
+1. After scoring completes, "Run Benchmark" button appears (if benchmarking enabled in settings)
+2. User configures models and sample size in confirmation dialog
+3. `BenchmarkWorker` executes benchmark in background thread
+4. Results dialog displays comparison with export options (CSV, JSON)
+
+**Benchmark Signals:**
+- `BenchmarkWorker.progress(int, int, str)` - Progress updates (current, total, message)
+- `BenchmarkWorker.finished(BenchmarkResult)` - Benchmark complete
+- `BenchmarkWorker.error(str)` - Error occurred
+
 ### Data Flow
 
 1. User enters research question → `SearchAgent` converts to PubMed query
@@ -123,8 +154,9 @@ Background operations use `QThread` workers in `workers.py` to keep the UI respo
 3. `LiteEmbedder` (FastEmbed) creates embeddings → stored in ChromaDB
 4. `QualityManager` assesses study quality (optional)
 5. `ScoringAgent` scores relevance → `CitationAgent` extracts citations
-6. `ReportingAgent` generates final report
-7. Audit Trail tab displays real-time progress throughout
+6. (Optional) `BenchmarkRunner` compares multiple models on scored documents
+7. `ReportingAgent` generates final report
+8. Audit Trail tab displays real-time progress throughout
 
 ## Key Patterns
 
@@ -143,6 +175,12 @@ Key audit trail constants:
 - `AUDIT_RATIONALE_COLOR` - Muted text for LLM rationales (`#555555`)
 - `AUDIT_ABSTRACT_MAX_LINES` - Maximum abstract lines before scroll (15)
 - `MAX_AUTHORS_BEFORE_ET_AL` - Authors to show before "et al." (3)
+
+Key benchmarking constants:
+- `MODEL_PRICING` - Cost per 1M tokens for each supported model
+- `DEFAULT_MODEL_PRICING` - Fallback pricing for unknown models
+- `get_model_pricing(model_string)` - Get pricing for a model
+- `calculate_cost(model, input_tokens, output_tokens)` - Calculate cost in USD
 
 ## Environment Variables
 
