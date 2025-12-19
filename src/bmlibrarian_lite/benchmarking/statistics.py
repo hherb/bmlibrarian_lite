@@ -130,29 +130,28 @@ def compute_exact_agreement(
 def compute_agreement_matrix(
     evaluator_scores: dict[str, list[int]],
     tolerance: int = 1,
-) -> dict[str, dict[str, float]]:
+) -> dict[tuple[str, str], float]:
     """
     Compute pairwise agreement matrix for all evaluators.
 
     Args:
-        evaluator_scores: Mapping of evaluator_id to ordered score list
+        evaluator_scores: Mapping of evaluator name to ordered score list
         tolerance: Maximum difference to count as agreement
 
     Returns:
-        Nested dict: evaluator_id -> evaluator_id -> agreement percentage
+        Dict with (name1, name2) tuple keys mapping to agreement percentage
     """
-    evaluator_ids = list(evaluator_scores.keys())
-    matrix: dict[str, dict[str, float]] = {}
+    evaluator_names = list(evaluator_scores.keys())
+    matrix: dict[tuple[str, str], float] = {}
 
-    for eval1_id in evaluator_ids:
-        matrix[eval1_id] = {}
-        for eval2_id in evaluator_ids:
-            if eval1_id == eval2_id:
-                matrix[eval1_id][eval2_id] = 1.0  # Perfect self-agreement
+    for name1 in evaluator_names:
+        for name2 in evaluator_names:
+            if name1 == name2:
+                matrix[(name1, name2)] = 1.0  # Perfect self-agreement
             else:
-                scores1 = evaluator_scores[eval1_id]
-                scores2 = evaluator_scores[eval2_id]
-                matrix[eval1_id][eval2_id] = compute_agreement(
+                scores1 = evaluator_scores[name1]
+                scores2 = evaluator_scores[name2]
+                matrix[(name1, name2)] = compute_agreement(
                     scores1, scores2, tolerance
                 )
 
@@ -210,33 +209,32 @@ def compute_kendall_tau(
 
 
 def compute_document_comparison(
-    document_id: str,
-    document_title: str,
+    document: "LiteDocument",
     scored_by_evaluator: dict[str, ScoredDocument],
 ) -> DocumentComparison:
     """
     Create a document comparison from scores by different evaluators.
 
     Args:
-        document_id: The document ID
-        document_title: Document title for display
-        scored_by_evaluator: Mapping of evaluator_id to ScoredDocument
+        document: The document being compared
+        scored_by_evaluator: Mapping of evaluator display name to ScoredDocument
 
     Returns:
         DocumentComparison with all evaluator scores
     """
+    from ..data_models import LiteDocument  # Import here to avoid circular
+
     scores = {
-        eval_id: sd.score
-        for eval_id, sd in scored_by_evaluator.items()
+        eval_name: sd.score
+        for eval_name, sd in scored_by_evaluator.items()
     }
     explanations = {
-        eval_id: sd.explanation
-        for eval_id, sd in scored_by_evaluator.items()
+        eval_name: sd.explanation
+        for eval_name, sd in scored_by_evaluator.items()
     }
 
     return DocumentComparison(
-        document_id=document_id,
-        document_title=document_title,
+        document=document,
         scores=scores,
         explanations=explanations,
     )

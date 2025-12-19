@@ -44,6 +44,7 @@ from .quality_filter_panel import QualityFilterPanel
 from .quality_summary import QualitySummaryWidget
 from .workers import QualityFilterWorker
 from .benchmark_dialog import BenchmarkConfirmDialog, BenchmarkProgressDialog, BenchmarkWorker
+from .benchmark_results_dialog import BenchmarkResultsDialog
 
 logger = logging.getLogger(__name__)
 
@@ -704,7 +705,7 @@ class SystematicReviewTab(QWidget):
     def _on_benchmark_finished(self, result: object) -> None:
         """Handle benchmark completion."""
         if self._benchmark_progress_dialog:
-            self._benchmark_progress_dialog.set_complete()
+            self._benchmark_progress_dialog.close()
 
         self.benchmark_btn.setEnabled(True)
 
@@ -715,6 +716,10 @@ class SystematicReviewTab(QWidget):
                 f"Benchmark complete - Total cost: ${cost:.4f}"
             )
             logger.info(f"Benchmark completed: {result}")
+
+            # Show results dialog
+            results_dialog = BenchmarkResultsDialog(result, parent=self)
+            results_dialog.exec()
         else:
             self.progress_label.setText("Benchmark complete")
 

@@ -509,24 +509,21 @@ Evaluate the relevance of this document to the research question."""
             stats = compute_evaluator_stats(evaluator, scored_docs)
             evaluator_stats.append(stats)
 
-        # Compute document comparisons
+        # Compute document comparisons using display names
         document_comparisons = []
         for doc in documents:
-            scored_by_evaluator = {
-                eval_id: scores[doc.id]
-                for eval_id, scores in all_scores.items()
-                if doc.id in scores
-            }
-            if scored_by_evaluator:
+            scored_by_name = {}
+            for evaluator in evaluators:
+                if doc.id in all_scores.get(evaluator.id, {}):
+                    scored_by_name[evaluator.display_name] = all_scores[evaluator.id][doc.id]
+            if scored_by_name:
                 comparison = compute_document_comparison(
-                    document_id=doc.id,
-                    document_title=doc.title,
-                    scored_by_evaluator=scored_by_evaluator,
+                    document=doc,
+                    scored_by_evaluator=scored_by_name,
                 )
                 document_comparisons.append(comparison)
 
-        # Compute agreement matrix
-        # Build ordered score lists for each evaluator
+        # Compute agreement matrix using display names
         doc_ids = [d.id for d in documents]
         evaluator_scores: dict[str, list[int]] = {}
         for evaluator in evaluators:
@@ -536,9 +533,15 @@ Evaluate the relevance of this document to the research question."""
                     scores.append(all_scores[evaluator.id][doc_id].score)
                 else:
                     scores.append(0)  # Missing score
-            evaluator_scores[evaluator.id] = scores
+            evaluator_scores[evaluator.display_name] = scores
 
         agreement_matrix = compute_agreement_matrix(evaluator_scores, tolerance=1)
+
+        # Determine baseline evaluator name from config
+        baseline_name = None
+        if self.config.benchmark.get_baseline_model():
+            baseline_model = self.config.benchmark.get_baseline_model()
+            baseline_name = f"{baseline_model.provider}:{baseline_model.model}"
 
         return BenchmarkResult(
             run_id=run_id,
@@ -548,6 +551,7 @@ Evaluate the relevance of this document to the research question."""
             document_comparisons=document_comparisons,
             agreement_matrix=agreement_matrix,
             total_duration_seconds=duration,
+            baseline_evaluator_name=baseline_name,
         )
 
     def get_benchmark_result(self, run_id: str) -> Optional[BenchmarkResult]:

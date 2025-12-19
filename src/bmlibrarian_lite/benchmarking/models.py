@@ -7,7 +7,10 @@ enabling comparison of evaluator performance.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..data_models import LiteDocument
 
 from ..data_models import Evaluator
 
@@ -84,20 +87,28 @@ class DocumentComparison:
     Comparison of scores for a single document across evaluators.
 
     Attributes:
-        document_id: The document being compared
-        document_title: Document title for display
-        scores: Mapping of evaluator_id to score
-        explanations: Mapping of evaluator_id to explanation
-        max_disagreement: Maximum score difference between evaluators
+        document: The document being compared (for access to full metadata)
+        scores: Mapping of evaluator display name to score
+        explanations: Mapping of evaluator display name to explanation
+        max_score_difference: Maximum score difference between evaluators
     """
 
-    document_id: str
-    document_title: str
-    scores: dict[str, int]  # evaluator_id -> score
-    explanations: dict[str, str]  # evaluator_id -> explanation
+    document: "LiteDocument"
+    scores: dict[str, int]  # evaluator display name -> score
+    explanations: dict[str, str]  # evaluator display name -> explanation
 
     @property
-    def max_disagreement(self) -> int:
+    def document_id(self) -> str:
+        """Get document ID for backwards compatibility."""
+        return self.document.id
+
+    @property
+    def document_title(self) -> str:
+        """Get document title for backwards compatibility."""
+        return self.document.title
+
+    @property
+    def max_score_difference(self) -> int:
         """Maximum score difference between any two evaluators."""
         if len(self.scores) < 2:
             return 0
@@ -105,18 +116,23 @@ class DocumentComparison:
         return max(score_values) - min(score_values)
 
     @property
+    def max_disagreement(self) -> int:
+        """Alias for max_score_difference for backwards compatibility."""
+        return self.max_score_difference
+
+    @property
     def has_disagreement(self) -> bool:
         """Check if evaluators disagree (diff > 1)."""
-        return self.max_disagreement > 1
+        return self.max_score_difference > 1
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
-            "document_id": self.document_id,
-            "document_title": self.document_title,
+            "document_id": self.document.id,
+            "document_title": self.document.title,
             "scores": self.scores,
             "explanations": self.explanations,
-            "max_disagreement": self.max_disagreement,
+            "max_score_difference": self.max_score_difference,
             "has_disagreement": self.has_disagreement,
         }
 
@@ -145,8 +161,9 @@ class BenchmarkResult:
     task_type: str
     evaluator_stats: list[EvaluatorStats]
     document_comparisons: list[DocumentComparison]
-    agreement_matrix: dict[str, dict[str, float]]  # eval1 -> eval2 -> agreement%
+    agreement_matrix: dict[tuple[str, str], float]  # (eval1, eval2) -> agreement%
     total_duration_seconds: float
+    baseline_evaluator_name: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
