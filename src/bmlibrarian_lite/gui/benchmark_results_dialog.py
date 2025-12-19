@@ -35,27 +35,17 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
+from ..constants import (
+    BENCHMARK_SCORE_COLORS,
+    BENCHMARK_AGREEMENT_HIGH,
+    BENCHMARK_AGREEMENT_MEDIUM,
+    BENCHMARK_AGREEMENT_LOW,
+)
 
 if TYPE_CHECKING:
     from ..benchmarking.models import BenchmarkResult, EvaluatorStats, DocumentComparison
 
 logger = logging.getLogger(__name__)
-
-# Score colors for visualization
-SCORE_COLORS = {
-    1: "#FFCDD2",  # Light red
-    2: "#FFE0B2",  # Light orange
-    3: "#FFF9C4",  # Light yellow
-    4: "#C8E6C9",  # Light green
-    5: "#A5D6A7",  # Green
-}
-
-# Agreement level colors
-AGREEMENT_COLORS = {
-    "high": "#A5D6A7",    # >= 90% agreement
-    "medium": "#FFF9C4",  # >= 75% agreement
-    "low": "#FFCDD2",     # < 75% agreement
-}
 
 
 class BenchmarkResultsDialog(QDialog):
@@ -271,7 +261,7 @@ class BenchmarkResultsDialog(QDialog):
                 if i == j:
                     # Diagonal - 100% agreement with self
                     item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(AGREEMENT_COLORS["high"]))
+                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
                 else:
                     # Get agreement value
                     key = (name1, name2)
@@ -285,11 +275,11 @@ class BenchmarkResultsDialog(QDialog):
 
                     # Color based on agreement level
                     if pct >= 90:
-                        item.setBackground(QColor(AGREEMENT_COLORS["high"]))
+                        item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
                     elif pct >= 75:
-                        item.setBackground(QColor(AGREEMENT_COLORS["medium"]))
+                        item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
                     else:
-                        item.setBackground(QColor(AGREEMENT_COLORS["low"]))
+                        item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
 
                 item.setTextAlignment(Qt.AlignCenter)
                 table.setItem(i, j, item)
@@ -304,9 +294,14 @@ class BenchmarkResultsDialog(QDialog):
         # Legend
         legend_layout = QHBoxLayout()
         legend_layout.addStretch()
-        for level, color in AGREEMENT_COLORS.items():
-            label = QLabel(f"  {level.title()}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: 4px;")
+        agreement_legend = [
+            ("High", BENCHMARK_AGREEMENT_HIGH),
+            ("Medium", BENCHMARK_AGREEMENT_MEDIUM),
+            ("Low", BENCHMARK_AGREEMENT_LOW),
+        ]
+        for level, color in agreement_legend:
+            label = QLabel(f"  {level}  ")
+            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
             legend_layout.addWidget(label)
         legend_layout.addStretch()
         layout.addLayout(legend_layout)
@@ -346,7 +341,7 @@ class BenchmarkResultsDialog(QDialog):
 
                 item = QTableWidgetItem(f"{count} ({pct:.0f}%)")
                 item.setTextAlignment(Qt.AlignCenter)
-                item.setBackground(QColor(SCORE_COLORS[score]))
+                item.setBackground(QColor(BENCHMARK_SCORE_COLORS[score]))
                 table.setItem(row, score, item)
 
         # Configure table
@@ -361,9 +356,9 @@ class BenchmarkResultsDialog(QDialog):
         # Score legend
         legend_layout = QHBoxLayout()
         legend_layout.addWidget(QLabel("Score Legend:"))
-        for score, color in SCORE_COLORS.items():
+        for score, color in BENCHMARK_SCORE_COLORS.items():
             label = QLabel(f"  {score}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: 4px;")
+            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
             legend_layout.addWidget(label)
         legend_layout.addStretch()
         layout.addLayout(legend_layout)
@@ -441,7 +436,7 @@ class BenchmarkResultsDialog(QDialog):
             diff_item = QTableWidgetItem(str(max_diff))
             diff_item.setTextAlignment(Qt.AlignCenter)
             if max_diff > 1:
-                diff_item.setBackground(QColor(AGREEMENT_COLORS["low"]))
+                diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
             self.details_table.setItem(row, 1, diff_item)
 
             # Scores per evaluator
@@ -450,8 +445,8 @@ class BenchmarkResultsDialog(QDialog):
                 score = comparison.scores.get(evaluator_name, "-")
                 score_item = QTableWidgetItem(str(score))
                 score_item.setTextAlignment(Qt.AlignCenter)
-                if isinstance(score, int) and score in SCORE_COLORS:
-                    score_item.setBackground(QColor(SCORE_COLORS[score]))
+                if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
+                    score_item.setBackground(QColor(BENCHMARK_SCORE_COLORS[score]))
                 self.details_table.setItem(row, col + 2, score_item)
 
     def _filter_documents(self, filter_type: str) -> None:
@@ -630,8 +625,8 @@ class DocumentExplanationsDialog(QDialog):
             group_layout = QVBoxLayout(group)
 
             # Set background color based on score
-            if isinstance(score, int) and score in SCORE_COLORS:
-                group.setStyleSheet(f"QGroupBox {{ background-color: {SCORE_COLORS[score]}; }}")
+            if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
+                group.setStyleSheet(f"QGroupBox {{ background-color: {BENCHMARK_SCORE_COLORS[score]}; }}")
 
             explanation_text = QTextEdit()
             explanation_text.setPlainText(explanation)

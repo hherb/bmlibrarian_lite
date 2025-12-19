@@ -592,16 +592,26 @@ Evaluate the relevance of this document to the research question."""
                     )
                     evaluator_stats.append(stats)
 
-            # Reconstruct document comparisons
+            # Reconstruct document comparisons (fetch documents from storage)
             document_comparisons = []
             for comp_data in data.get("document_comparisons", []):
-                comparison = DocumentComparison(
-                    document_id=comp_data["document_id"],
-                    document_title=comp_data["document_title"],
-                    scores=comp_data["scores"],
-                    explanations=comp_data["explanations"],
-                )
-                document_comparisons.append(comparison)
+                doc_id = comp_data["document_id"]
+                document = self.storage.get_document(doc_id)
+                if document:
+                    comparison = DocumentComparison(
+                        document=document,
+                        scores=comp_data["scores"],
+                        explanations=comp_data["explanations"],
+                    )
+                    document_comparisons.append(comparison)
+
+            # Reconstruct agreement matrix (convert string keys back to tuples)
+            raw_matrix = data.get("agreement_matrix", {})
+            agreement_matrix: dict[tuple[str, str], float] = {}
+            for key_str, value in raw_matrix.items():
+                if "|" in key_str:
+                    parts = key_str.split("|", 1)
+                    agreement_matrix[(parts[0], parts[1])] = value
 
             return BenchmarkResult(
                 run_id=data["run_id"],
@@ -609,7 +619,7 @@ Evaluate the relevance of this document to the research question."""
                 task_type=data["task_type"],
                 evaluator_stats=evaluator_stats,
                 document_comparisons=document_comparisons,
-                agreement_matrix=data["agreement_matrix"],
+                agreement_matrix=agreement_matrix,
                 total_duration_seconds=data["total_duration_seconds"],
                 created_at=datetime.fromisoformat(data["created_at"]),
             )

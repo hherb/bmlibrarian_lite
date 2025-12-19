@@ -227,13 +227,17 @@ class BenchmarkResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
+        # Convert tuple keys to string keys for JSON serialization
+        serializable_matrix = {
+            f"{k[0]}|{k[1]}": v for k, v in self.agreement_matrix.items()
+        }
         return {
             "run_id": self.run_id,
             "question": self.question,
             "task_type": self.task_type,
             "evaluator_stats": [s.to_dict() for s in self.evaluator_stats],
             "document_comparisons": [d.to_dict() for d in self.document_comparisons],
-            "agreement_matrix": self.agreement_matrix,
+            "agreement_matrix": serializable_matrix,
             "total_duration_seconds": self.total_duration_seconds,
             "total_evaluations": self.total_evaluations,
             "total_cost_usd": self.total_cost_usd,

@@ -590,6 +590,24 @@ AUDIT_CARD_HEADER_COLOR = "#E3F2FD"
 AUDIT_RATIONALE_COLOR = "#555555"
 
 # =============================================================================
+# Benchmark Results Colors
+# =============================================================================
+
+# Score colors for benchmark visualization (1-5 scale)
+BENCHMARK_SCORE_COLORS: dict[int, str] = {
+    1: "#FFCDD2",  # Light red - not relevant
+    2: "#FFE0B2",  # Light orange - marginally relevant
+    3: "#FFF9C4",  # Light yellow - moderately relevant
+    4: "#C8E6C9",  # Light green - highly relevant
+    5: "#A5D6A7",  # Green - directly answers question
+}
+
+# Agreement level colors for matrix visualization
+BENCHMARK_AGREEMENT_HIGH = "#A5D6A7"    # >= 90% agreement
+BENCHMARK_AGREEMENT_MEDIUM = "#FFF9C4"  # >= 75% agreement
+BENCHMARK_AGREEMENT_LOW = "#FFCDD2"     # < 75% agreement
+
+# =============================================================================
 # Model Pricing (per 1M tokens, USD)
 # =============================================================================
 
