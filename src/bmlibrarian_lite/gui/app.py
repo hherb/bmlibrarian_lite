@@ -39,6 +39,7 @@ from .audit_trail_tab import AuditTrailTab
 from .report_tab import ReportTab
 from .document_interrogation_tab import DocumentInterrogationTab
 from .settings_dialog import SettingsDialog
+from .benchmark_results_dialog import BenchmarkResultsTab
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,14 @@ class LiteMainWindow(QMainWindow):
         self.audit_trail_tab.document_requested.connect(
             self._on_document_requested_from_audit
         )
+
+        # Connect benchmark completion signal
+        self.systematic_review_tab.benchmark_completed.connect(
+            self._on_benchmark_completed
+        )
+
+        # Track benchmark results tab (may be created dynamically)
+        self._benchmark_tab: Optional[BenchmarkResultsTab] = None
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -372,6 +381,40 @@ class LiteMainWindow(QMainWindow):
         self.status_bar.showMessage(
             f"Loading document: {document.title[:50]}...", 3000
         )
+
+    def _on_benchmark_completed(self, result: object) -> None:
+        """
+        Handle benchmark completion from systematic review.
+
+        Creates or updates the benchmark results tab and switches to it.
+
+        Args:
+            result: BenchmarkResult from the benchmark run
+        """
+        # Remove existing benchmark tab if present
+        if self._benchmark_tab is not None:
+            index = self.tab_widget.indexOf(self._benchmark_tab)
+            if index >= 0:
+                self.tab_widget.removeTab(index)
+            self._benchmark_tab.deleteLater()
+            self._benchmark_tab = None
+
+        # Create new benchmark results tab
+        self._benchmark_tab = BenchmarkResultsTab(result, parent=self)
+
+        # Add tab after Document Interrogation (at the end)
+        self.tab_widget.addTab(self._benchmark_tab, "Benchmark Results")
+
+        # Switch to the benchmark tab
+        self.tab_widget.setCurrentWidget(self._benchmark_tab)
+
+        # Update status
+        if hasattr(result, 'total_cost_usd'):
+            cost = result.total_cost_usd
+            doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
+            self.status_bar.showMessage(
+                f"Benchmark complete: {doc_count} documents, ${cost:.4f}", 5000
+            )
 
 
 def run_lite_app() -> int:

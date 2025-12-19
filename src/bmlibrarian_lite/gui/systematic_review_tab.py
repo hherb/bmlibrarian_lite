@@ -45,7 +45,6 @@ from .quality_filter_panel import QualityFilterPanel
 from .quality_summary import QualitySummaryWidget
 from .workers import QualityFilterWorker
 from .benchmark_dialog import BenchmarkConfirmDialog, BenchmarkProgressDialog, BenchmarkWorker
-from .benchmark_results_dialog import BenchmarkResultsDialog
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +284,9 @@ class SystematicReviewTab(QWidget):
     document_scored = Signal(object)  # ScoredDocument
     citation_extracted = Signal(object)  # Citation
     quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
+
+    # Benchmark signal - emitted when benchmark completes
+    benchmark_completed = Signal(object)  # BenchmarkResult
 
     def __init__(
         self,
@@ -720,9 +722,8 @@ class SystematicReviewTab(QWidget):
             )
             logger.info(f"Benchmark completed: {result}")
 
-            # Show results dialog
-            results_dialog = BenchmarkResultsDialog(result, parent=self)
-            results_dialog.exec()
+            # Emit signal to show results in a tab (handled by main window)
+            self.benchmark_completed.emit(result)
         else:
             self.progress_label.setText("Benchmark complete")
 
