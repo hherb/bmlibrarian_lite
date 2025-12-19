@@ -15,6 +15,7 @@ import logging
 from typing import Optional, List, Any, Dict
 
 from PySide6.QtWidgets import (
+    QDialog,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -646,7 +647,7 @@ class SystematicReviewTab(QWidget):
             parent=self,
         )
 
-        if dialog.exec() != dialog.Accepted:
+        if dialog.exec() != QDialog.Accepted:
             return
 
         # Get selected models and documents
