@@ -315,7 +315,7 @@ class BenchmarkRunner:
         question: str,
         documents: list[LiteDocument],
         models: list[str],
-        checkpoint_id: str,
+        checkpoint_id: Optional[str] = None,
         name: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> BenchmarkResult:
@@ -326,13 +326,22 @@ class BenchmarkRunner:
             question: Research question
             documents: Documents to evaluate
             models: List of model strings ("provider:model")
-            checkpoint_id: Checkpoint ID to associate scores with
+            checkpoint_id: Checkpoint ID to associate scores with (created if not provided)
             name: Optional benchmark name
             progress_callback: Progress callback
 
         Returns:
             Benchmark results
         """
+        # Create a checkpoint if not provided
+        if checkpoint_id is None:
+            checkpoint = self.storage.create_checkpoint(
+                research_question=question,
+                metadata={"type": "benchmark", "models": models},
+            )
+            checkpoint_id = checkpoint.id
+            logger.info(f"Created benchmark checkpoint {checkpoint_id}")
+
         # Create evaluators
         evaluators = self.create_evaluators_from_models(models)
 
