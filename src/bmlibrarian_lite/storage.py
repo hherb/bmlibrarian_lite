@@ -398,6 +398,26 @@ class LiteStorage:
         except Exception as e:
             raise ChromaDBError(f"Failed to add document {document.id}: {e}") from e
 
+    def upsert_document(
+        self,
+        document: LiteDocument,
+        embedding_function: Any = None,
+    ) -> str:
+        """
+        Insert or update a document in the storage.
+
+        This is an alias for add_document, which already performs upsert
+        operations at the ChromaDB level.
+
+        Args:
+            document: Document to insert or update
+            embedding_function: Optional embedding function
+
+        Returns:
+            Document ID
+        """
+        return self.add_document(document, embedding_function)
+
     def add_documents(
         self,
         documents: list[LiteDocument],
