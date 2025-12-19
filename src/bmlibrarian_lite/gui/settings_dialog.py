@@ -38,7 +38,7 @@ from PySide6.QtCore import QThread, Signal
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-from ..config import LiteConfig, TaskModelConfig
+from ..config import LiteConfig, TaskModelConfig, BenchmarkModelConfig
 from ..embeddings import LiteEmbedder
 from ..constants import (
     DEFAULT_LLM_MODEL,
@@ -236,6 +236,7 @@ class SettingsDialog(QDialog):
         self._setup_api_keys_tab()
         self._setup_openathens_tab()
         self._setup_quality_tab()
+        self._setup_benchmarking_tab()
 
         # Buttons
         buttons = QDialogButtonBox(
@@ -639,6 +640,205 @@ class SettingsDialog(QDialog):
 
         self.tab_widget.addTab(tab, "Quality")
 
+    def _setup_benchmarking_tab(self) -> None:
+        """Set up the Benchmarking settings tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+
+        # Enable benchmarking checkbox
+        self.benchmark_enabled = QCheckBox("Enable model benchmarking")
+        self.benchmark_enabled.setToolTip(
+            "Allow comparing multiple LLM models on evaluation tasks"
+        )
+        self.benchmark_enabled.stateChanged.connect(self._on_benchmark_enabled_changed)
+        layout.addWidget(self.benchmark_enabled)
+
+        # Models group
+        models_group = QGroupBox("Benchmark Models")
+        models_layout = QVBoxLayout(models_group)
+
+        # Model list with scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setMinimumHeight(scaled(200))
+
+        self.benchmark_models_container = QWidget()
+        self.benchmark_models_layout = QVBoxLayout(self.benchmark_models_container)
+        self.benchmark_models_layout.setSpacing(scaled(4))
+        scroll.setWidget(self.benchmark_models_container)
+        models_layout.addWidget(scroll)
+
+        # Add model button
+        add_model_layout = QHBoxLayout()
+        add_model_layout.addStretch()
+        self.add_benchmark_model_btn = QPushButton("+ Add Model")
+        self.add_benchmark_model_btn.clicked.connect(self._add_benchmark_model)
+        add_model_layout.addWidget(self.add_benchmark_model_btn)
+        models_layout.addLayout(add_model_layout)
+
+        layout.addWidget(models_group)
+
+        # Defaults group
+        defaults_group = QGroupBox("Default Settings")
+        defaults_layout = QFormLayout(defaults_group)
+        defaults_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # Sample mode
+        self.benchmark_sample_mode = QComboBox()
+        self.benchmark_sample_mode.addItems(["all", "random"])
+        self.benchmark_sample_mode.setToolTip("How to sample documents for benchmarking")
+        self.benchmark_sample_mode.currentTextChanged.connect(self._on_sample_mode_changed)
+        defaults_layout.addRow("Sample Mode:", self.benchmark_sample_mode)
+
+        # Sample size
+        self.benchmark_sample_size = QSpinBox()
+        self.benchmark_sample_size.setRange(1, 1000)
+        self.benchmark_sample_size.setValue(10)
+        self.benchmark_sample_size.setToolTip("Number of documents when using random sampling")
+        defaults_layout.addRow("Sample Size:", self.benchmark_sample_size)
+
+        layout.addWidget(defaults_group)
+
+        # Info label
+        info_label = QLabel(
+            "<small>Benchmarking compares LLM model performance on document "
+            "scoring tasks. Mark one model as 'Baseline' to compare others against it. "
+            "Results include agreement statistics, cost comparison, and latency metrics.</small>"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        layout.addStretch()
+        self.tab_widget.addTab(tab, "Benchmarking")
+
+        # Store references to model widgets
+        self._benchmark_model_widgets: list[dict] = []
+
+    def _add_benchmark_model(
+        self,
+        provider: str = "anthropic",
+        model: str = "",
+        enabled: bool = True,
+        is_baseline: bool = False,
+    ) -> None:
+        """Add a benchmark model configuration row."""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(scaled(8))
+
+        # Enable checkbox
+        enable_check = QCheckBox()
+        enable_check.setChecked(enabled)
+        enable_check.setToolTip("Include this model in benchmarks")
+        row_layout.addWidget(enable_check)
+
+        # Provider combo
+        provider_combo = QComboBox()
+        provider_combo.addItems(["anthropic", "ollama"])
+        provider_combo.setCurrentText(provider)
+        provider_combo.setFixedWidth(scaled(90))
+        provider_combo.currentTextChanged.connect(
+            lambda p, pc=provider_combo, mc=None: self._on_benchmark_provider_changed(pc, mc)
+        )
+        row_layout.addWidget(provider_combo)
+
+        # Model combo
+        model_combo = QComboBox()
+        model_combo.setEditable(True)
+        model_combo.setMinimumWidth(scaled(180))
+        # Populate with cached models
+        models = self._available_models.get(provider, [])
+        if models:
+            model_combo.addItems(models)
+        elif provider == "anthropic":
+            model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+        else:
+            model_combo.addItem("llama3.2")
+        if model:
+            self._set_combo_value(model_combo, model)
+        row_layout.addWidget(model_combo)
+
+        # Update provider change handler with model combo reference
+        provider_combo.currentTextChanged.disconnect()
+        provider_combo.currentTextChanged.connect(
+            lambda p: self._on_benchmark_provider_changed(provider_combo, model_combo)
+        )
+
+        # Baseline checkbox
+        baseline_check = QCheckBox("Baseline")
+        baseline_check.setChecked(is_baseline)
+        baseline_check.setToolTip("Use as baseline for comparison")
+        baseline_check.toggled.connect(
+            lambda checked, bc=baseline_check: self._on_baseline_changed(bc, checked)
+        )
+        row_layout.addWidget(baseline_check)
+
+        # Remove button
+        remove_btn = QPushButton("×")
+        remove_btn.setFixedWidth(scaled(24))
+        remove_btn.setToolTip("Remove this model")
+        remove_btn.clicked.connect(lambda: self._remove_benchmark_model(row))
+        row_layout.addWidget(remove_btn)
+
+        self.benchmark_models_layout.addWidget(row)
+
+        # Track widget references
+        self._benchmark_model_widgets.append({
+            "row": row,
+            "enable": enable_check,
+            "provider": provider_combo,
+            "model": model_combo,
+            "baseline": baseline_check,
+        })
+
+    def _remove_benchmark_model(self, row: QWidget) -> None:
+        """Remove a benchmark model row."""
+        for i, widgets in enumerate(self._benchmark_model_widgets):
+            if widgets["row"] == row:
+                self._benchmark_model_widgets.pop(i)
+                row.deleteLater()
+                break
+
+    def _on_benchmark_provider_changed(
+        self, provider_combo: QComboBox, model_combo: QComboBox
+    ) -> None:
+        """Handle provider change for a benchmark model row."""
+        if model_combo is None:
+            return
+        provider = provider_combo.currentText()
+        models = self._available_models.get(provider, [])
+        if models:
+            self._update_model_combo(model_combo, models)
+        else:
+            model_combo.clear()
+            if provider == "anthropic":
+                model_combo.addItems(FALLBACK_CLAUDE_MODELS)
+            else:
+                model_combo.addItem("llama3.2")
+
+    def _on_baseline_changed(self, checkbox: QCheckBox, checked: bool) -> None:
+        """Handle baseline checkbox change - only allow one baseline."""
+        if checked:
+            # Uncheck other baseline checkboxes
+            for widgets in self._benchmark_model_widgets:
+                if widgets["baseline"] != checkbox:
+                    widgets["baseline"].setChecked(False)
+
+    def _on_benchmark_enabled_changed(self) -> None:
+        """Handle benchmark enabled checkbox state change."""
+        enabled = self.benchmark_enabled.isChecked()
+        self.benchmark_models_container.setEnabled(enabled)
+        self.add_benchmark_model_btn.setEnabled(enabled)
+        self.benchmark_sample_mode.setEnabled(enabled)
+        self.benchmark_sample_size.setEnabled(enabled)
+
+    def _on_sample_mode_changed(self, mode: str) -> None:
+        """Handle sample mode change - enable/disable sample size."""
+        self.benchmark_sample_size.setEnabled(mode == "random")
+
     def _load_config(self) -> None:
         """Load current configuration into fields."""
         # Providers
@@ -700,6 +900,24 @@ class SettingsDialog(QDialog):
 
             show_badges = getattr(self.config.quality, 'show_quality_badges', True)
             self.show_quality_badges.setChecked(show_badges)
+
+        # Benchmarking - load from config
+        self.benchmark_enabled.setChecked(self.config.benchmark.enabled)
+        self.benchmark_sample_mode.setCurrentText(self.config.benchmark.default_sample_mode)
+        self.benchmark_sample_size.setValue(self.config.benchmark.default_sample_size)
+
+        # Load benchmark models
+        for model_config in self.config.benchmark.models:
+            self._add_benchmark_model(
+                provider=model_config.provider,
+                model=model_config.model,
+                enabled=model_config.enabled,
+                is_baseline=model_config.is_baseline,
+            )
+
+        # Apply enabled state
+        self._on_benchmark_enabled_changed()
+        self._on_sample_mode_changed(self.benchmark_sample_mode.currentText())
 
     def _set_combo_value(self, combo: QComboBox, value: str) -> None:
         """Set combo box value, adding if necessary."""
@@ -772,6 +990,24 @@ class SettingsDialog(QDialog):
             self.config.quality.default_minimum_tier = QUALITY_TIER_OPTIONS[tier_idx][1].value
             self.config.quality.use_llm_classification = self.default_llm_classification.isChecked()
             self.config.quality.show_quality_badges = self.show_quality_badges.isChecked()
+
+        # Benchmarking
+        self.config.benchmark.enabled = self.benchmark_enabled.isChecked()
+        self.config.benchmark.default_sample_mode = self.benchmark_sample_mode.currentText()
+        self.config.benchmark.default_sample_size = self.benchmark_sample_size.value()
+
+        # Save benchmark models from widgets
+        benchmark_models = []
+        for widgets in self._benchmark_model_widgets:
+            model_config = BenchmarkModelConfig(
+                provider=widgets["provider"].currentText(),
+                model=widgets["model"].currentText(),
+                enabled=widgets["enable"].isChecked(),
+                is_baseline=widgets["baseline"].isChecked(),
+            )
+            if model_config.is_configured():
+                benchmark_models.append(model_config)
+        self.config.benchmark.models = benchmark_models
 
         # Save to file
         self.config.save()

@@ -363,6 +363,140 @@ class SearchConfig:
 
 
 @dataclass
+class BenchmarkModelConfig:
+    """
+    Configuration for a single model in benchmarking.
+
+    Attributes:
+        provider: LLM provider name (anthropic, ollama)
+        model: Model name
+        temperature: Sampling temperature
+        max_tokens: Maximum output tokens
+        enabled: Whether this model is included in benchmarks
+        is_baseline: Whether this model serves as the baseline for comparison
+    """
+
+    provider: str = ""
+    model: str = ""
+    temperature: float = 0.1
+    max_tokens: int = 256
+    enabled: bool = True
+    is_baseline: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "enabled": self.enabled,
+            "is_baseline": self.is_baseline,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BenchmarkModelConfig":
+        """Create from dictionary."""
+        return cls(
+            provider=data.get("provider", ""),
+            model=data.get("model", ""),
+            temperature=float(data.get("temperature", 0.1)),
+            max_tokens=int(data.get("max_tokens", 256)),
+            enabled=bool(data.get("enabled", True)),
+            is_baseline=bool(data.get("is_baseline", False)),
+        )
+
+    def get_model_string(self) -> str:
+        """Get the provider:model string."""
+        return f"{self.provider}:{self.model}"
+
+    def is_configured(self) -> bool:
+        """Return True if this model has valid configuration."""
+        return bool(self.provider and self.model)
+
+
+@dataclass
+class BenchmarkConfig:
+    """
+    Configuration for model benchmarking.
+
+    Allows comparing multiple LLM models on evaluation tasks.
+
+    Attributes:
+        enabled: Whether benchmarking feature is enabled
+        models: List of models to include in benchmarks
+        default_sample_mode: How to sample documents ("all" or "random")
+        default_sample_size: Number of documents when using random sampling
+        tasks: List of task IDs to benchmark (e.g., ["document_scoring"])
+    """
+
+    enabled: bool = False
+    models: list[BenchmarkModelConfig] = field(default_factory=list)
+    default_sample_mode: str = "all"
+    default_sample_size: int = 10
+    tasks: list[str] = field(default_factory=lambda: ["document_scoring"])
+
+    def __post_init__(self) -> None:
+        """Initialize with default models if empty."""
+        if not self.models:
+            # Add some sensible defaults
+            self.models = [
+                BenchmarkModelConfig(
+                    provider="anthropic",
+                    model="claude-sonnet-4-20250514",
+                    is_baseline=True,
+                ),
+                BenchmarkModelConfig(
+                    provider="anthropic",
+                    model="claude-3-5-haiku-20241022",
+                ),
+            ]
+
+    def get_enabled_models(self) -> list[BenchmarkModelConfig]:
+        """Get list of enabled and configured models."""
+        return [m for m in self.models if m.enabled and m.is_configured()]
+
+    def get_baseline_model(self) -> Optional[BenchmarkModelConfig]:
+        """Get the baseline model if one is set."""
+        for model in self.models:
+            if model.is_baseline and model.enabled and model.is_configured():
+                return model
+        return None
+
+    def get_model_strings(self) -> list[str]:
+        """Get provider:model strings for all enabled models."""
+        return [m.get_model_string() for m in self.get_enabled_models()]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "enabled": self.enabled,
+            "models": [m.to_dict() for m in self.models],
+            "default_sample_mode": self.default_sample_mode,
+            "default_sample_size": self.default_sample_size,
+            "tasks": self.tasks,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BenchmarkConfig":
+        """Create from dictionary."""
+        models = []
+        if "models" in data:
+            models = [
+                BenchmarkModelConfig.from_dict(m) for m in data["models"]
+            ]
+
+        config = cls(
+            enabled=bool(data.get("enabled", False)),
+            models=models if models else [],
+            default_sample_mode=data.get("default_sample_mode", "all"),
+            default_sample_size=int(data.get("default_sample_size", 10)),
+            tasks=data.get("tasks", ["document_scoring"]),
+        )
+        return config
+
+
+@dataclass
 class LiteConfig:
     """
     Main configuration for BMLibrarian Lite.
@@ -396,6 +530,7 @@ class LiteConfig:
     openathens: OpenAthensConfig = field(default_factory=OpenAthensConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
 
     # Validation cache (not serialized)
     _validation_cache: dict[str, list[str]] = field(
@@ -493,6 +628,9 @@ class LiteConfig:
                 max_results=int(search_data.get("max_results", DEFAULT_MAX_RESULTS)),
             )
 
+        if "benchmark" in data:
+            config.benchmark = BenchmarkConfig.from_dict(data["benchmark"])
+
         return config
 
     def to_dict(self) -> dict[str, Any]:
@@ -529,6 +667,7 @@ class LiteConfig:
                 "similarity_threshold": self.search.similarity_threshold,
                 "max_results": self.search.max_results,
             },
+            "benchmark": self.benchmark.to_dict(),
         }
 
     def save(self, config_path: Optional[Path] = None) -> None:
