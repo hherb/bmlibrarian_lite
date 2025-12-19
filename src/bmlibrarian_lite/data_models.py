@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Any, TYPE_CHECKING
+import hashlib
+import json
 
 if TYPE_CHECKING:
     from .quality.data_models import QualityAssessment
@@ -21,6 +23,214 @@ class DocumentSource(Enum):
     PUBMED = "pubmed"
     LOCAL_PDF = "local_pdf"
     LOCAL_TEXT = "local_text"
+
+
+class EvaluatorType(Enum):
+    """Type of evaluator that produced an evaluation."""
+
+    MODEL = "model"
+    HUMAN = "human"
+
+
+class BenchmarkStatus(Enum):
+    """Status of a benchmark run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class Evaluator:
+    """
+    Represents an entity that can produce evaluations.
+
+    An evaluator can be either an LLM model with specific parameters
+    or a human reviewer. This enables tracking which model/human
+    produced each score for benchmarking comparisons.
+
+    Attributes:
+        id: Unique identifier (auto-generated from params for models)
+        type: Whether this is a model or human evaluator
+        display_name: Human-readable name for UI display
+        provider: LLM provider (anthropic, ollama) - None for human
+        model_name: Model identifier - None for human
+        temperature: Sampling temperature - None for human
+        max_tokens: Max output tokens - None for human
+        top_p: Nucleus sampling parameter - None for human
+        top_k: Top-k sampling parameter - None for human
+        human_name: Reviewer name - None for model
+        human_email: Reviewer email - None for model
+        description: Optional description
+        created_at: When this evaluator was first created
+    """
+
+    id: str
+    type: EvaluatorType
+    display_name: str
+
+    # Model-specific fields (None for human)
+    provider: Optional[str] = None
+    model_name: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    top_p: Optional[float] = None
+    top_k: Optional[int] = None
+
+    # Human-specific fields (None for model)
+    human_name: Optional[str] = None
+    human_email: Optional[str] = None
+
+    description: Optional[str] = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    @classmethod
+    def from_model_config(
+        cls,
+        provider: str,
+        model_name: str,
+        temperature: float = 0.1,
+        max_tokens: int = 256,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+    ) -> "Evaluator":
+        """
+        Create a model evaluator from configuration.
+
+        Generates a deterministic ID from the parameters so that
+        the same model+params always produces the same evaluator ID.
+
+        Args:
+            provider: LLM provider (anthropic, ollama)
+            model_name: Model identifier
+            temperature: Sampling temperature
+            max_tokens: Maximum output tokens
+            top_p: Nucleus sampling parameter
+            top_k: Top-k sampling parameter
+
+        Returns:
+            Evaluator configured for the specified model
+        """
+        # Generate deterministic ID from params
+        params = {
+            "provider": provider,
+            "model": model_name,
+            "temp": temperature,
+            "max_tokens": max_tokens,
+            "top_p": top_p,
+            "top_k": top_k,
+        }
+        param_str = json.dumps(params, sort_keys=True)
+        eval_id = f"eval_{hashlib.sha256(param_str.encode()).hexdigest()[:12]}"
+
+        # Build display name
+        display_name = f"{provider}:{model_name}"
+        if temperature != 0.1:
+            display_name += f" (t={temperature})"
+
+        return cls(
+            id=eval_id,
+            type=EvaluatorType.MODEL,
+            display_name=display_name,
+            provider=provider,
+            model_name=model_name,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            top_k=top_k,
+        )
+
+    @classmethod
+    def from_human(
+        cls,
+        name: str,
+        email: Optional[str] = None,
+    ) -> "Evaluator":
+        """
+        Create a human evaluator.
+
+        Args:
+            name: Reviewer name
+            email: Optional reviewer email
+
+        Returns:
+            Evaluator configured for human review
+        """
+        eval_id = f"human_{hashlib.sha256(name.encode()).hexdigest()[:12]}"
+        return cls(
+            id=eval_id,
+            type=EvaluatorType.HUMAN,
+            display_name=f"Human: {name}",
+            human_name=name,
+            human_email=email,
+        )
+
+    @property
+    def is_model(self) -> bool:
+        """Check if this is a model evaluator."""
+        return self.type == EvaluatorType.MODEL
+
+    @property
+    def is_human(self) -> bool:
+        """Check if this is a human evaluator."""
+        return self.type == EvaluatorType.HUMAN
+
+    @property
+    def model_string(self) -> Optional[str]:
+        """
+        Get provider:model string for LLM client.
+
+        Returns:
+            Model string in "provider:model" format, or None for human
+        """
+        if self.is_model and self.provider and self.model_name:
+            return f"{self.provider}:{self.model_name}"
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "type": self.type.value,
+            "display_name": self.display_name,
+            "provider": self.provider,
+            "model_name": self.model_name,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "human_name": self.human_name,
+            "human_email": self.human_email,
+            "description": self.description,
+            "created_at": self.created_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Evaluator":
+        """Create from dictionary."""
+        created_at = data.get("created_at")
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        elif created_at is None:
+            created_at = datetime.now()
+
+        return cls(
+            id=data["id"],
+            type=EvaluatorType(data["type"]),
+            display_name=data["display_name"],
+            provider=data.get("provider"),
+            model_name=data.get("model_name"),
+            temperature=data.get("temperature"),
+            max_tokens=data.get("max_tokens"),
+            top_p=data.get("top_p"),
+            top_k=data.get("top_k"),
+            human_name=data.get("human_name"),
+            human_email=data.get("human_email"),
+            description=data.get("description"),
+            created_at=created_at,
+        )
 
 
 @dataclass
@@ -205,18 +415,61 @@ class ScoredDocument:
     """
     Document with relevance score.
 
-    Result of document scoring by the LLM.
+    Result of document scoring by an evaluator (LLM model or human).
+    Includes performance metrics for benchmarking comparisons.
+
+    Attributes:
+        document: The scored document
+        score: Relevance score (1-5 scale)
+        explanation: Rationale for the score
+        evaluator_id: ID of the evaluator that produced this score
+        evaluator: Full evaluator object (optional, for convenience)
+        latency_ms: Time taken to produce the score (milliseconds)
+        tokens_input: Number of input tokens used
+        tokens_output: Number of output tokens used
+        cost_usd: Estimated cost in USD
+        scored_at: Timestamp when scoring occurred
     """
 
     document: LiteDocument
     score: int  # 1-5 scale
     explanation: str  # Why this score was assigned
+
+    # Evaluator tracking
+    evaluator_id: Optional[str] = None
+    evaluator: Optional[Evaluator] = None
+
+    # Performance metrics for benchmarking
+    latency_ms: Optional[int] = None
+    tokens_input: Optional[int] = None
+    tokens_output: Optional[int] = None
+    cost_usd: Optional[float] = None
+
     scored_at: datetime = field(default_factory=datetime.now)
 
     @property
     def is_relevant(self) -> bool:
         """Check if document meets minimum relevance threshold (score >= 3)."""
         return self.score >= 3
+
+    @property
+    def total_tokens(self) -> int:
+        """Total tokens used (input + output)."""
+        return (self.tokens_input or 0) + (self.tokens_output or 0)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "document": self.document.to_dict(),
+            "score": self.score,
+            "explanation": self.explanation,
+            "evaluator_id": self.evaluator_id,
+            "latency_ms": self.latency_ms,
+            "tokens_input": self.tokens_input,
+            "tokens_output": self.tokens_output,
+            "cost_usd": self.cost_usd,
+            "scored_at": self.scored_at.isoformat(),
+        }
 
 
 @dataclass
@@ -351,3 +604,120 @@ class InterrogationSession:
             "content": content,
             "timestamp": datetime.now().isoformat(),
         })
+
+
+@dataclass
+class BenchmarkRun:
+    """
+    A benchmark comparison run.
+
+    Tracks a benchmarking session that compares multiple evaluators
+    on a set of documents for a given research question.
+
+    Attributes:
+        id: Unique identifier for this benchmark run
+        name: User-provided name for the run
+        description: Optional description
+        question: Research question being evaluated
+        task_type: Type of task being benchmarked (e.g., document_scoring)
+        evaluator_ids: List of evaluator IDs to compare
+        document_ids: List of document IDs to evaluate
+        status: Current status of the benchmark
+        progress_current: Current progress count
+        progress_total: Total items to process
+        error_message: Error message if failed
+        results_summary: JSON string with aggregated statistics
+        created_at: When the run was created
+        started_at: When execution started
+        completed_at: When execution completed
+    """
+
+    id: str
+    name: str
+    question: str
+    task_type: str
+    evaluator_ids: list[str]
+    document_ids: list[str]
+
+    description: Optional[str] = None
+    status: BenchmarkStatus = BenchmarkStatus.PENDING
+    progress_current: int = 0
+    progress_total: int = 0
+    error_message: Optional[str] = None
+    results_summary: Optional[str] = None
+
+    created_at: datetime = field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    @property
+    def is_complete(self) -> bool:
+        """Check if benchmark has finished (successfully or not)."""
+        return self.status in (
+            BenchmarkStatus.COMPLETED,
+            BenchmarkStatus.FAILED,
+            BenchmarkStatus.CANCELLED,
+        )
+
+    @property
+    def progress_percent(self) -> float:
+        """Get progress as percentage (0.0 to 100.0)."""
+        if self.progress_total == 0:
+            return 0.0
+        return (self.progress_current / self.progress_total) * 100.0
+
+    @property
+    def duration_seconds(self) -> Optional[float]:
+        """Get duration in seconds if completed."""
+        if self.started_at is None:
+            return None
+        end_time = self.completed_at or datetime.now()
+        return (end_time - self.started_at).total_seconds()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "question": self.question,
+            "task_type": self.task_type,
+            "evaluator_ids": self.evaluator_ids,
+            "document_ids": self.document_ids,
+            "status": self.status.value,
+            "progress_current": self.progress_current,
+            "progress_total": self.progress_total,
+            "error_message": self.error_message,
+            "results_summary": self.results_summary,
+            "created_at": self.created_at.isoformat(),
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BenchmarkRun":
+        """Create from dictionary."""
+        def parse_datetime(val: Any) -> Optional[datetime]:
+            if val is None:
+                return None
+            if isinstance(val, datetime):
+                return val
+            return datetime.fromisoformat(val)
+
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            description=data.get("description"),
+            question=data["question"],
+            task_type=data["task_type"],
+            evaluator_ids=data["evaluator_ids"],
+            document_ids=data["document_ids"],
+            status=BenchmarkStatus(data.get("status", "pending")),
+            progress_current=data.get("progress_current", 0),
+            progress_total=data.get("progress_total", 0),
+            error_message=data.get("error_message"),
+            results_summary=data.get("results_summary"),
+            created_at=parse_datetime(data.get("created_at")) or datetime.now(),
+            started_at=parse_datetime(data.get("started_at")),
+            completed_at=parse_datetime(data.get("completed_at")),
+        )

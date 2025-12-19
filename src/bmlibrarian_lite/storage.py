@@ -36,10 +36,15 @@ from .constants import (
     PUBMED_CACHE_TTL_SECONDS,
 )
 from .data_models import (
+    BenchmarkRun,
+    BenchmarkStatus,
     DocumentSource,
+    Evaluator,
+    EvaluatorType,
     LiteDocument,
     ReviewCheckpoint,
     SearchSession,
+    ScoredDocument,
 )
 from .exceptions import ChromaDBError, SQLiteError, LiteStorageError
 
@@ -173,15 +178,38 @@ class LiteStorage:
             FOREIGN KEY (search_session_id) REFERENCES search_sessions(id)
         );
 
-        -- Scored documents (linked to checkpoints)
+        -- Evaluators (models or humans that produce evaluations)
+        CREATE TABLE IF NOT EXISTS evaluators (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL CHECK (type IN ('model', 'human')),
+            display_name TEXT NOT NULL,
+            provider TEXT,
+            model_name TEXT,
+            temperature REAL,
+            max_tokens INTEGER,
+            top_p REAL,
+            top_k INTEGER,
+            human_name TEXT,
+            human_email TEXT,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Scored documents (linked to checkpoints and evaluators)
         CREATE TABLE IF NOT EXISTS scored_documents (
             id TEXT PRIMARY KEY,
             checkpoint_id TEXT NOT NULL,
             document_id TEXT NOT NULL,
             score INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
             explanation TEXT,
+            evaluator_id TEXT,
+            latency_ms INTEGER,
+            tokens_input INTEGER,
+            tokens_output INTEGER,
+            cost_usd REAL,
             scored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (checkpoint_id) REFERENCES review_checkpoints(id)
+            FOREIGN KEY (checkpoint_id) REFERENCES review_checkpoints(id),
+            FOREIGN KEY (evaluator_id) REFERENCES evaluators(id)
         );
 
         -- Citations (linked to checkpoints)
@@ -220,6 +248,27 @@ class LiteStorage:
             metadata TEXT DEFAULT '{}'
         );
 
+        -- Benchmark runs (for comparing evaluators)
+        CREATE TABLE IF NOT EXISTS benchmark_runs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            question TEXT NOT NULL,
+            task_type TEXT NOT NULL,
+            evaluator_ids TEXT NOT NULL,
+            document_ids TEXT NOT NULL,
+            status TEXT DEFAULT 'pending' CHECK (
+                status IN ('pending', 'running', 'completed', 'failed', 'cancelled')
+            ),
+            progress_current INTEGER DEFAULT 0,
+            progress_total INTEGER DEFAULT 0,
+            error_message TEXT,
+            results_summary TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP
+        );
+
         -- Create indexes for common queries
         CREATE INDEX IF NOT EXISTS idx_search_sessions_created
             ON search_sessions(created_at);
@@ -227,12 +276,24 @@ class LiteStorage:
             ON review_checkpoints(updated_at);
         CREATE INDEX IF NOT EXISTS idx_scored_docs_checkpoint
             ON scored_documents(checkpoint_id);
+        CREATE INDEX IF NOT EXISTS idx_scored_docs_evaluator
+            ON scored_documents(evaluator_id);
+        CREATE INDEX IF NOT EXISTS idx_scored_docs_doc_eval
+            ON scored_documents(document_id, evaluator_id);
         CREATE INDEX IF NOT EXISTS idx_citations_checkpoint
             ON citations(checkpoint_id);
         CREATE INDEX IF NOT EXISTS idx_pubmed_cache_expires
             ON pubmed_cache(expires_at);
         CREATE INDEX IF NOT EXISTS idx_interrogation_sessions_created
             ON interrogation_sessions(created_at);
+        CREATE INDEX IF NOT EXISTS idx_evaluators_type
+            ON evaluators(type);
+        CREATE INDEX IF NOT EXISTS idx_evaluators_provider
+            ON evaluators(provider);
+        CREATE INDEX IF NOT EXISTS idx_benchmark_runs_status
+            ON benchmark_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_benchmark_runs_task
+            ON benchmark_runs(task_type);
         """
 
     # =========================================================================
@@ -1083,3 +1144,628 @@ class LiteStorage:
             conn.commit()
 
         logger.warning("All data cleared from storage")
+
+    # =========================================================================
+    # Evaluator Operations
+    # =========================================================================
+
+    def upsert_evaluator(self, evaluator: Evaluator) -> str:
+        """
+        Insert or update an evaluator.
+
+        Args:
+            evaluator: Evaluator to upsert
+
+        Returns:
+            Evaluator ID
+
+        Raises:
+            SQLiteError: If database operation fails
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO evaluators
+                    (id, type, display_name, provider, model_name, temperature,
+                     max_tokens, top_p, top_k, human_name, human_email,
+                     description, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        evaluator.id,
+                        evaluator.type.value,
+                        evaluator.display_name,
+                        evaluator.provider,
+                        evaluator.model_name,
+                        evaluator.temperature,
+                        evaluator.max_tokens,
+                        evaluator.top_p,
+                        evaluator.top_k,
+                        evaluator.human_name,
+                        evaluator.human_email,
+                        evaluator.description,
+                        evaluator.created_at,
+                    ),
+                )
+                conn.commit()
+
+            logger.debug(f"Upserted evaluator {evaluator.id}")
+            return evaluator.id
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Failed to upsert evaluator: {e}") from e
+
+    def get_evaluator(self, evaluator_id: str) -> Optional[Evaluator]:
+        """
+        Get an evaluator by ID.
+
+        Args:
+            evaluator_id: Evaluator ID to retrieve
+
+        Returns:
+            Evaluator if found, None otherwise
+        """
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, type, display_name, provider, model_name, temperature,
+                       max_tokens, top_p, top_k, human_name, human_email,
+                       description, created_at
+                FROM evaluators
+                WHERE id = ?
+                """,
+                (evaluator_id,),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return Evaluator(
+                id=row["id"],
+                type=EvaluatorType(row["type"]),
+                display_name=row["display_name"],
+                provider=row["provider"],
+                model_name=row["model_name"],
+                temperature=row["temperature"],
+                max_tokens=row["max_tokens"],
+                top_p=row["top_p"],
+                top_k=row["top_k"],
+                human_name=row["human_name"],
+                human_email=row["human_email"],
+                description=row["description"],
+                created_at=row["created_at"],
+            )
+
+    def get_evaluators(
+        self,
+        evaluator_type: Optional[EvaluatorType] = None,
+        provider: Optional[str] = None,
+    ) -> list[Evaluator]:
+        """
+        Get evaluators with optional filtering.
+
+        Args:
+            evaluator_type: Filter by type (model or human)
+            provider: Filter by provider (anthropic, ollama)
+
+        Returns:
+            List of matching evaluators
+        """
+        query = "SELECT * FROM evaluators WHERE 1=1"
+        params: list[Any] = []
+
+        if evaluator_type is not None:
+            query += " AND type = ?"
+            params.append(evaluator_type.value)
+
+        if provider is not None:
+            query += " AND provider = ?"
+            params.append(provider)
+
+        query += " ORDER BY created_at DESC"
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+
+            evaluators = []
+            for row in cursor:
+                evaluators.append(Evaluator(
+                    id=row["id"],
+                    type=EvaluatorType(row["type"]),
+                    display_name=row["display_name"],
+                    provider=row["provider"],
+                    model_name=row["model_name"],
+                    temperature=row["temperature"],
+                    max_tokens=row["max_tokens"],
+                    top_p=row["top_p"],
+                    top_k=row["top_k"],
+                    human_name=row["human_name"],
+                    human_email=row["human_email"],
+                    description=row["description"],
+                    created_at=row["created_at"],
+                ))
+
+            return evaluators
+
+    def delete_evaluator(self, evaluator_id: str) -> bool:
+        """
+        Delete an evaluator.
+
+        Note: This will fail if the evaluator has associated scored documents.
+
+        Args:
+            evaluator_id: Evaluator ID to delete
+
+        Returns:
+            True if deleted, False otherwise
+        """
+        with self._sqlite_connection() as conn:
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM evaluators WHERE id = ?",
+                    (evaluator_id,),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            except sqlite3.IntegrityError:
+                logger.warning(
+                    f"Cannot delete evaluator {evaluator_id}: has associated scores"
+                )
+                return False
+
+    # =========================================================================
+    # Scored Document Operations (Extended for Benchmarking)
+    # =========================================================================
+
+    def save_scored_document(
+        self,
+        scored_doc: ScoredDocument,
+        checkpoint_id: str,
+    ) -> str:
+        """
+        Save a scored document with evaluator tracking.
+
+        Args:
+            scored_doc: Scored document to save
+            checkpoint_id: Associated checkpoint ID
+
+        Returns:
+            Scored document ID
+
+        Raises:
+            SQLiteError: If database operation fails
+        """
+        doc_id = str(uuid.uuid4())
+
+        try:
+            with self._sqlite_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO scored_documents
+                    (id, checkpoint_id, document_id, score, explanation,
+                     evaluator_id, latency_ms, tokens_input, tokens_output,
+                     cost_usd, scored_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        doc_id,
+                        checkpoint_id,
+                        scored_doc.document.id,
+                        scored_doc.score,
+                        scored_doc.explanation,
+                        scored_doc.evaluator_id,
+                        scored_doc.latency_ms,
+                        scored_doc.tokens_input,
+                        scored_doc.tokens_output,
+                        scored_doc.cost_usd,
+                        scored_doc.scored_at,
+                    ),
+                )
+                conn.commit()
+
+            logger.debug(f"Saved scored document {doc_id}")
+            return doc_id
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Failed to save scored document: {e}") from e
+
+    def get_scored_document_by_evaluator(
+        self,
+        document_id: str,
+        evaluator_id: str,
+        checkpoint_id: Optional[str] = None,
+    ) -> Optional[ScoredDocument]:
+        """
+        Get a scored document by document ID and evaluator ID.
+
+        This is useful for checking if a document has already been
+        scored by a specific evaluator (for caching/reuse).
+
+        Args:
+            document_id: Document ID
+            evaluator_id: Evaluator ID
+            checkpoint_id: Optional checkpoint ID filter
+
+        Returns:
+            ScoredDocument if found, None otherwise
+        """
+        query = """
+            SELECT sd.*, e.type as eval_type, e.display_name, e.provider,
+                   e.model_name, e.temperature as eval_temp, e.max_tokens as eval_max,
+                   e.top_p, e.top_k
+            FROM scored_documents sd
+            LEFT JOIN evaluators e ON sd.evaluator_id = e.id
+            WHERE sd.document_id = ? AND sd.evaluator_id = ?
+        """
+        params: list[Any] = [document_id, evaluator_id]
+
+        if checkpoint_id is not None:
+            query += " AND sd.checkpoint_id = ?"
+            params.append(checkpoint_id)
+
+        query += " ORDER BY sd.scored_at DESC LIMIT 1"
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            # Get the full document from ChromaDB
+            doc = self.get_document(row["document_id"])
+            if not doc:
+                return None
+
+            # Build evaluator if present
+            evaluator = None
+            if row["evaluator_id"] and row["eval_type"]:
+                evaluator = Evaluator(
+                    id=row["evaluator_id"],
+                    type=EvaluatorType(row["eval_type"]),
+                    display_name=row["display_name"],
+                    provider=row["provider"],
+                    model_name=row["model_name"],
+                    temperature=row["eval_temp"],
+                    max_tokens=row["eval_max"],
+                    top_p=row["top_p"],
+                    top_k=row["top_k"],
+                )
+
+            return ScoredDocument(
+                document=doc,
+                score=row["score"],
+                explanation=row["explanation"],
+                evaluator_id=row["evaluator_id"],
+                evaluator=evaluator,
+                latency_ms=row["latency_ms"],
+                tokens_input=row["tokens_input"],
+                tokens_output=row["tokens_output"],
+                cost_usd=row["cost_usd"],
+                scored_at=row["scored_at"],
+            )
+
+    def get_scores_for_document(
+        self,
+        document_id: str,
+        checkpoint_id: Optional[str] = None,
+    ) -> list[ScoredDocument]:
+        """
+        Get all scores for a document (from different evaluators).
+
+        Args:
+            document_id: Document ID
+            checkpoint_id: Optional checkpoint ID filter
+
+        Returns:
+            List of ScoredDocuments from different evaluators
+        """
+        query = """
+            SELECT sd.*, e.type as eval_type, e.display_name, e.provider,
+                   e.model_name, e.temperature as eval_temp, e.max_tokens as eval_max,
+                   e.top_p, e.top_k
+            FROM scored_documents sd
+            LEFT JOIN evaluators e ON sd.evaluator_id = e.id
+            WHERE sd.document_id = ?
+        """
+        params: list[Any] = [document_id]
+
+        if checkpoint_id is not None:
+            query += " AND sd.checkpoint_id = ?"
+            params.append(checkpoint_id)
+
+        query += " ORDER BY sd.scored_at DESC"
+
+        # Get the document once
+        doc = self.get_document(document_id)
+        if not doc:
+            return []
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+
+            results = []
+            for row in cursor:
+                evaluator = None
+                if row["evaluator_id"] and row["eval_type"]:
+                    evaluator = Evaluator(
+                        id=row["evaluator_id"],
+                        type=EvaluatorType(row["eval_type"]),
+                        display_name=row["display_name"],
+                        provider=row["provider"],
+                        model_name=row["model_name"],
+                        temperature=row["eval_temp"],
+                        max_tokens=row["eval_max"],
+                        top_p=row["top_p"],
+                        top_k=row["top_k"],
+                    )
+
+                results.append(ScoredDocument(
+                    document=doc,
+                    score=row["score"],
+                    explanation=row["explanation"],
+                    evaluator_id=row["evaluator_id"],
+                    evaluator=evaluator,
+                    latency_ms=row["latency_ms"],
+                    tokens_input=row["tokens_input"],
+                    tokens_output=row["tokens_output"],
+                    cost_usd=row["cost_usd"],
+                    scored_at=row["scored_at"],
+                ))
+
+            return results
+
+    # =========================================================================
+    # Benchmark Run Operations
+    # =========================================================================
+
+    def create_benchmark_run(
+        self,
+        name: str,
+        question: str,
+        task_type: str,
+        evaluator_ids: list[str],
+        document_ids: list[str],
+        description: Optional[str] = None,
+    ) -> BenchmarkRun:
+        """
+        Create a new benchmark run.
+
+        Args:
+            name: Name for the benchmark
+            question: Research question being evaluated
+            task_type: Type of task (e.g., document_scoring)
+            evaluator_ids: List of evaluator IDs to compare
+            document_ids: List of document IDs to evaluate
+            description: Optional description
+
+        Returns:
+            Created BenchmarkRun
+
+        Raises:
+            SQLiteError: If database operation fails
+        """
+        run_id = str(uuid.uuid4())
+        now = datetime.now()
+        total = len(evaluator_ids) * len(document_ids)
+
+        try:
+            with self._sqlite_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO benchmark_runs
+                    (id, name, description, question, task_type, evaluator_ids,
+                     document_ids, status, progress_current, progress_total, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        name,
+                        description,
+                        question,
+                        task_type,
+                        json.dumps(evaluator_ids),
+                        json.dumps(document_ids),
+                        BenchmarkStatus.PENDING.value,
+                        0,
+                        total,
+                        now,
+                    ),
+                )
+                conn.commit()
+
+            logger.info(f"Created benchmark run {run_id}")
+            return BenchmarkRun(
+                id=run_id,
+                name=name,
+                description=description,
+                question=question,
+                task_type=task_type,
+                evaluator_ids=evaluator_ids,
+                document_ids=document_ids,
+                status=BenchmarkStatus.PENDING,
+                progress_current=0,
+                progress_total=total,
+                created_at=now,
+            )
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Failed to create benchmark run: {e}") from e
+
+    def get_benchmark_run(self, run_id: str) -> Optional[BenchmarkRun]:
+        """
+        Get a benchmark run by ID.
+
+        Args:
+            run_id: Benchmark run ID
+
+        Returns:
+            BenchmarkRun if found, None otherwise
+        """
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, name, description, question, task_type, evaluator_ids,
+                       document_ids, status, progress_current, progress_total,
+                       error_message, results_summary, created_at, started_at,
+                       completed_at
+                FROM benchmark_runs
+                WHERE id = ?
+                """,
+                (run_id,),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return BenchmarkRun(
+                id=row["id"],
+                name=row["name"],
+                description=row["description"],
+                question=row["question"],
+                task_type=row["task_type"],
+                evaluator_ids=json.loads(row["evaluator_ids"]),
+                document_ids=json.loads(row["document_ids"]),
+                status=BenchmarkStatus(row["status"]),
+                progress_current=row["progress_current"],
+                progress_total=row["progress_total"],
+                error_message=row["error_message"],
+                results_summary=row["results_summary"],
+                created_at=row["created_at"],
+                started_at=row["started_at"],
+                completed_at=row["completed_at"],
+            )
+
+    def get_benchmark_runs(
+        self,
+        status: Optional[BenchmarkStatus] = None,
+        task_type: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BenchmarkRun]:
+        """
+        Get benchmark runs with optional filtering.
+
+        Args:
+            status: Filter by status
+            task_type: Filter by task type
+            limit: Maximum number to return
+
+        Returns:
+            List of benchmark runs, most recent first
+        """
+        query = "SELECT * FROM benchmark_runs WHERE 1=1"
+        params: list[Any] = []
+
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status.value)
+
+        if task_type is not None:
+            query += " AND task_type = ?"
+            params.append(task_type)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+
+            runs = []
+            for row in cursor:
+                runs.append(BenchmarkRun(
+                    id=row["id"],
+                    name=row["name"],
+                    description=row["description"],
+                    question=row["question"],
+                    task_type=row["task_type"],
+                    evaluator_ids=json.loads(row["evaluator_ids"]),
+                    document_ids=json.loads(row["document_ids"]),
+                    status=BenchmarkStatus(row["status"]),
+                    progress_current=row["progress_current"],
+                    progress_total=row["progress_total"],
+                    error_message=row["error_message"],
+                    results_summary=row["results_summary"],
+                    created_at=row["created_at"],
+                    started_at=row["started_at"],
+                    completed_at=row["completed_at"],
+                ))
+
+            return runs
+
+    def update_benchmark_run(
+        self,
+        run_id: str,
+        status: Optional[BenchmarkStatus] = None,
+        progress_current: Optional[int] = None,
+        error_message: Optional[str] = None,
+        results_summary: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> None:
+        """
+        Update a benchmark run.
+
+        Args:
+            run_id: Benchmark run ID
+            status: New status
+            progress_current: Current progress count
+            error_message: Error message if failed
+            results_summary: JSON results summary
+            started_at: When execution started
+            completed_at: When execution completed
+        """
+        updates = []
+        values: list[Any] = []
+
+        if status is not None:
+            updates.append("status = ?")
+            values.append(status.value)
+        if progress_current is not None:
+            updates.append("progress_current = ?")
+            values.append(progress_current)
+        if error_message is not None:
+            updates.append("error_message = ?")
+            values.append(error_message)
+        if results_summary is not None:
+            updates.append("results_summary = ?")
+            values.append(results_summary)
+        if started_at is not None:
+            updates.append("started_at = ?")
+            values.append(started_at)
+        if completed_at is not None:
+            updates.append("completed_at = ?")
+            values.append(completed_at)
+
+        if not updates:
+            return
+
+        values.append(run_id)
+
+        with self._sqlite_connection() as conn:
+            conn.execute(
+                f"UPDATE benchmark_runs SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+
+    def delete_benchmark_run(self, run_id: str) -> bool:
+        """
+        Delete a benchmark run.
+
+        Args:
+            run_id: Benchmark run ID to delete
+
+        Returns:
+            True if deleted, False otherwise
+        """
+        with self._sqlite_connection() as conn:
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM benchmark_runs WHERE id = ?",
+                    (run_id,),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"Failed to delete benchmark run {run_id}: {e}")
+                return False

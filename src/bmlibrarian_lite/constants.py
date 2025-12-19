@@ -588,3 +588,89 @@ AUDIT_CARD_HEADER_COLOR = "#E3F2FD"
 
 # Rationale text color (muted)
 AUDIT_RATIONALE_COLOR = "#555555"
+
+# =============================================================================
+# Benchmark Results Colors
+# =============================================================================
+
+# Score colors for benchmark visualization (1-5 scale)
+BENCHMARK_SCORE_COLORS: dict[int, str] = {
+    1: "#FFCDD2",  # Light red - not relevant
+    2: "#FFE0B2",  # Light orange - marginally relevant
+    3: "#FFF9C4",  # Light yellow - moderately relevant
+    4: "#C8E6C9",  # Light green - highly relevant
+    5: "#A5D6A7",  # Green - directly answers question
+}
+
+# Agreement level colors for matrix visualization
+BENCHMARK_AGREEMENT_HIGH = "#A5D6A7"    # >= 90% agreement
+BENCHMARK_AGREEMENT_MEDIUM = "#FFF9C4"  # >= 75% agreement
+BENCHMARK_AGREEMENT_LOW = "#FFCDD2"     # < 75% agreement
+
+# =============================================================================
+# Model Pricing (per 1M tokens, USD)
+# =============================================================================
+
+# Pricing data for cost estimation in benchmarking
+# Updated: December 2024
+# Source: https://www.anthropic.com/pricing (Anthropic)
+# Note: Ollama models are free (local inference)
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Anthropic Claude models
+    "anthropic:claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
+    "anthropic:claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
+    "anthropic:claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
+    "anthropic:claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+    "anthropic:claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
+    "anthropic:claude-3-sonnet-20240229": {"input": 3.00, "output": 15.00},
+    "anthropic:claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
+
+    # Ollama models (free - local inference)
+    "ollama:llama3.2": {"input": 0.0, "output": 0.0},
+    "ollama:llama3.2:3b": {"input": 0.0, "output": 0.0},
+    "ollama:llama3.1": {"input": 0.0, "output": 0.0},
+    "ollama:llama3.1:8b": {"input": 0.0, "output": 0.0},
+    "ollama:llama3.1:70b": {"input": 0.0, "output": 0.0},
+    "ollama:mistral": {"input": 0.0, "output": 0.0},
+    "ollama:mixtral": {"input": 0.0, "output": 0.0},
+    "ollama:medgemma4B_it_q8": {"input": 0.0, "output": 0.0},
+    "ollama:meditron": {"input": 0.0, "output": 0.0},
+}
+
+# Default pricing for unknown models (conservative estimate)
+DEFAULT_MODEL_PRICING: dict[str, float] = {"input": 1.00, "output": 5.00}
+
+
+def get_model_pricing(model_string: str) -> dict[str, float]:
+    """
+    Get pricing for a model.
+
+    Args:
+        model_string: Model in "provider:model" format
+
+    Returns:
+        Dict with "input" and "output" keys (price per 1M tokens)
+    """
+    return MODEL_PRICING.get(model_string, DEFAULT_MODEL_PRICING)
+
+
+def calculate_cost(
+    model_string: str,
+    tokens_input: int,
+    tokens_output: int,
+) -> float:
+    """
+    Calculate cost in USD for an LLM call.
+
+    Args:
+        model_string: Model in "provider:model" format
+        tokens_input: Number of input tokens
+        tokens_output: Number of output tokens
+
+    Returns:
+        Estimated cost in USD
+    """
+    pricing = get_model_pricing(model_string)
+    input_cost = (tokens_input / 1_000_000) * pricing["input"]
+    output_cost = (tokens_output / 1_000_000) * pricing["output"]
+    return input_cost + output_cost
