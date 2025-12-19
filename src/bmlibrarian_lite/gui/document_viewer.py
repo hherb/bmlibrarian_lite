@@ -2,7 +2,7 @@
 Document viewer widgets for BMLibrarian Lite.
 
 Provides tabbed document viewing components:
-- PDFViewerTab: Tab for viewing PDF documents with text selection
+- PDFViewerTab: Tab for viewing PDF documents with native PDF rendering
 - FullTextTab: Tab for viewing full text/markdown content
 - LiteDocumentViewWidget: Combined tabbed document viewer
 
@@ -18,31 +18,41 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from PySide6.QtPdf import QPdfDocument
+from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
-    QScrollArea,
-    QLabel,
 )
-from PySide6.QtCore import Qt
 
-from bmlibrarian_lite.resources.styles.dpi_scale import get_font_scale
+from bmlibrarian_lite.resources.styles.dpi_scale import get_font_scale, scaled
 
 logger = logging.getLogger(__name__)
 
 
 class PDFViewerTab(QWidget):
     """
-    Tab for viewing PDF documents with text selection.
+    Tab for viewing PDF documents with native PDF rendering.
 
-    Uses PyMuPDF (fitz) for PDF text extraction and displays
-    the extracted text in a scrollable text browser.
+    Uses PySide6's QPdfView for actual PDF display with zoom
+    and page navigation controls.
 
     Attributes:
-        text_viewer: The text viewer widget
+        pdf_view: The QPdfView widget for rendering PDFs
+        pdf_document: The QPdfDocument instance
     """
+
+    # Zoom presets
+    ZOOM_MIN = 25
+    ZOOM_MAX = 400
+    ZOOM_DEFAULT = 100
+    ZOOM_STEP = 25
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         """
@@ -63,11 +73,131 @@ class PDFViewerTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Use QTextBrowser for displaying extracted PDF text
-        self.text_viewer = QTextBrowser()
-        self.text_viewer.setReadOnly(True)
-        self.text_viewer.setOpenExternalLinks(True)
-        layout.addWidget(self.text_viewer)
+        # Toolbar for PDF controls
+        toolbar = self._create_toolbar()
+        layout.addWidget(toolbar)
+
+        # PDF document and view
+        self.pdf_document = QPdfDocument(self)
+        self.pdf_view = QPdfView(self)
+        self.pdf_view.setDocument(self.pdf_document)
+        self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
+        self.pdf_view.setZoomFactor(self.ZOOM_DEFAULT / 100.0)
+        layout.addWidget(self.pdf_view, 1)
+
+        # Connect page change to update page label
+        self.pdf_view.pageNavigator().currentPageChanged.connect(self._on_page_changed)
+
+    def _create_toolbar(self) -> QWidget:
+        """Create the PDF navigation toolbar."""
+        toolbar = QWidget()
+        toolbar.setStyleSheet(
+            "QWidget { background-color: #F0F0F0; border-bottom: 1px solid #D0D0D0; }"
+        )
+        toolbar.setFixedHeight(scaled(36))
+
+        layout = QHBoxLayout(toolbar)
+        layout.setContentsMargins(scaled(8), scaled(4), scaled(8), scaled(4))
+        layout.setSpacing(scaled(8))
+
+        # Zoom out button
+        self.zoom_out_btn = QPushButton("-")
+        self.zoom_out_btn.setFixedSize(scaled(28), scaled(28))
+        self.zoom_out_btn.setToolTip("Zoom out")
+        self.zoom_out_btn.clicked.connect(self._zoom_out)
+        layout.addWidget(self.zoom_out_btn)
+
+        # Zoom percentage spinbox
+        self.zoom_spinbox = QSpinBox()
+        self.zoom_spinbox.setRange(self.ZOOM_MIN, self.ZOOM_MAX)
+        self.zoom_spinbox.setValue(self.ZOOM_DEFAULT)
+        self.zoom_spinbox.setSuffix("%")
+        self.zoom_spinbox.setFixedWidth(scaled(80))
+        self.zoom_spinbox.valueChanged.connect(self._on_zoom_changed)
+        layout.addWidget(self.zoom_spinbox)
+
+        # Zoom in button
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setFixedSize(scaled(28), scaled(28))
+        self.zoom_in_btn.setToolTip("Zoom in")
+        self.zoom_in_btn.clicked.connect(self._zoom_in)
+        layout.addWidget(self.zoom_in_btn)
+
+        # Fit width button
+        self.fit_width_btn = QPushButton("Fit Width")
+        self.fit_width_btn.setToolTip("Fit page width to view")
+        self.fit_width_btn.clicked.connect(self._fit_width)
+        layout.addWidget(self.fit_width_btn)
+
+        layout.addStretch()
+
+        # Page navigation
+        self.page_label = QLabel("Page: 0 / 0")
+        layout.addWidget(self.page_label)
+
+        # Previous page button
+        self.prev_page_btn = QPushButton("<")
+        self.prev_page_btn.setFixedSize(scaled(28), scaled(28))
+        self.prev_page_btn.setToolTip("Previous page")
+        self.prev_page_btn.clicked.connect(self._prev_page)
+        layout.addWidget(self.prev_page_btn)
+
+        # Next page button
+        self.next_page_btn = QPushButton(">")
+        self.next_page_btn.setFixedSize(scaled(28), scaled(28))
+        self.next_page_btn.setToolTip("Next page")
+        self.next_page_btn.clicked.connect(self._next_page)
+        layout.addWidget(self.next_page_btn)
+
+        return toolbar
+
+    def _zoom_in(self) -> None:
+        """Increase zoom level."""
+        new_zoom = min(self.zoom_spinbox.value() + self.ZOOM_STEP, self.ZOOM_MAX)
+        self.zoom_spinbox.setValue(new_zoom)
+
+    def _zoom_out(self) -> None:
+        """Decrease zoom level."""
+        new_zoom = max(self.zoom_spinbox.value() - self.ZOOM_STEP, self.ZOOM_MIN)
+        self.zoom_spinbox.setValue(new_zoom)
+
+    def _on_zoom_changed(self, value: int) -> None:
+        """Handle zoom spinbox value change."""
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
+        self.pdf_view.setZoomFactor(value / 100.0)
+
+    def _fit_width(self) -> None:
+        """Set zoom mode to fit width."""
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        # Update spinbox to reflect actual zoom (approximate)
+        self.zoom_spinbox.blockSignals(True)
+        actual_zoom = int(self.pdf_view.zoomFactor() * 100)
+        self.zoom_spinbox.setValue(actual_zoom)
+        self.zoom_spinbox.blockSignals(False)
+
+    def _prev_page(self) -> None:
+        """Go to previous page."""
+        navigator = self.pdf_view.pageNavigator()
+        if navigator.currentPage() > 0:
+            navigator.jump(navigator.currentPage() - 1, navigator.currentLocation())
+
+    def _next_page(self) -> None:
+        """Go to next page."""
+        navigator = self.pdf_view.pageNavigator()
+        if navigator.currentPage() < self.pdf_document.pageCount() - 1:
+            navigator.jump(navigator.currentPage() + 1, navigator.currentLocation())
+
+    def _on_page_changed(self, page: int) -> None:
+        """Update page label when page changes."""
+        total = self.pdf_document.pageCount()
+        self.page_label.setText(f"Page: {page + 1} / {total}")
+
+    def _update_page_controls(self) -> None:
+        """Update page navigation controls after loading."""
+        total = self.pdf_document.pageCount()
+        current = self.pdf_view.pageNavigator().currentPage()
+        self.page_label.setText(f"Page: {current + 1} / {total}")
 
     def load_pdf(self, pdf_path: str) -> bool:
         """
@@ -85,6 +215,27 @@ class PDFViewerTab(QWidget):
             return False
 
         try:
+            # Load into QPdfDocument for native rendering
+            error = self.pdf_document.load(str(path))
+            if error != QPdfDocument.Error.None_:
+                logger.error(f"Failed to load PDF: {error}")
+                return False
+
+            self._pdf_path = pdf_path
+            self._update_page_controls()
+
+            # Also extract text for the Full Text tab
+            self._extract_text(pdf_path)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load PDF: {e}")
+            return False
+
+    def _extract_text(self, pdf_path: str) -> None:
+        """Extract text from PDF for the Full Text tab."""
+        try:
             import fitz  # PyMuPDF
 
             doc = fitz.open(pdf_path)
@@ -93,22 +244,14 @@ class PDFViewerTab(QWidget):
                 text_parts.append(f"--- Page {page_num} ---\n")
                 text_parts.append(page.get_text())
             doc.close()
-
-            self._pdf_path = pdf_path
             self._pdf_text = "\n".join(text_parts)
-            self.text_viewer.setPlainText(self._pdf_text)
-            return True
 
         except ImportError:
-            logger.error("PyMuPDF not installed. Install with: pip install pymupdf")
-            self.text_viewer.setPlainText(
-                "PDF viewing requires PyMuPDF.\n"
-                "Install with: pip install pymupdf"
-            )
-            return False
+            logger.warning("PyMuPDF not available for text extraction")
+            self._pdf_text = ""
         except Exception as e:
-            logger.error(f"Failed to load PDF: {e}")
-            return False
+            logger.warning(f"Failed to extract PDF text: {e}")
+            self._pdf_text = ""
 
     def get_text(self) -> str:
         """
@@ -132,7 +275,9 @@ class PDFViewerTab(QWidget):
         """Clear the PDF viewer."""
         self._pdf_path = None
         self._pdf_text = ""
-        self.text_viewer.clear()
+        self.pdf_document.close()
+        self.page_label.setText("Page: 0 / 0")
+        self.zoom_spinbox.setValue(self.ZOOM_DEFAULT)
 
 
 class FullTextTab(QWidget):
