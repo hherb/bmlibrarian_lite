@@ -25,9 +25,11 @@ from ..pdf_utils import generate_pdf_path
 from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
 
 if TYPE_CHECKING:
+    from ..config import LiteConfig
     from ..data_models import LiteDocument
     from ..quality.data_models import QualityFilter, QualityAssessment
     from ..quality.quality_manager import QualityManager
+    from ..storage import LiteStorage
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +448,198 @@ class QualityFilterWorker(QThread):
             logger.exception("Quality filtering failed")
             if not self._cancelled:
                 self.error.emit(str(e))
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+
+
+class IncrementalSearchWorker(QThread):
+    """
+    Background worker for incremental PubMed searches with deduplication.
+
+    Fetches documents in batches until:
+    - Target NEW documents reached, OR
+    - PubMed returns no more results, OR
+    - Maximum offset reached
+
+    This enables re-running a research question to find additional
+    documents that haven't been scored yet.
+
+    Signals:
+        progress: Emitted with (new_docs_found, target, message)
+        batch_complete: Emitted when a batch is fetched (batch_docs)
+        finished: Emitted when search completes (all_new_docs)
+        error: Emitted on error (error message)
+    """
+
+    progress = Signal(int, int, str)  # new_docs_found, target, message
+    batch_complete = Signal(list)  # batch of new LiteDocuments
+    finished = Signal(list)  # all new LiteDocuments
+    error = Signal(str)
+
+    def __init__(
+        self,
+        question: str,
+        pubmed_query: str,
+        target_new_docs: int,
+        already_scored_ids: set,
+        config: "LiteConfig",
+        storage: "LiteStorage",
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize the incremental search worker.
+
+        Args:
+            question: Natural language research question
+            pubmed_query: PubMed query string to execute
+            target_new_docs: Target number of new documents to find
+            already_scored_ids: Set of document IDs already scored
+            config: Lite configuration
+            storage: Storage layer for saving documents
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.question = question
+        self.pubmed_query = pubmed_query
+        self.target_new_docs = target_new_docs
+        self.already_scored_ids = already_scored_ids
+        self.config = config
+        self.storage = storage
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Execute incremental search in background thread."""
+        try:
+            from ..pubmed import PubMedSearchClient
+            from ..data_models import LiteDocument, DocumentSource
+            from ..constants import (
+                INCREMENTAL_SEARCH_BATCH_SIZE,
+                MAX_PUBMED_SEARCH_OFFSET,
+            )
+
+            client = PubMedSearchClient(
+                email=self.config.pubmed_email,
+            )
+
+            all_new_docs: List["LiteDocument"] = []
+            offset = 0
+            batch_size = INCREMENTAL_SEARCH_BATCH_SIZE
+
+            while len(all_new_docs) < self.target_new_docs and not self._cancelled:
+                # Check offset limit
+                if offset >= MAX_PUBMED_SEARCH_OFFSET:
+                    logger.info(
+                        f"Reached max offset {MAX_PUBMED_SEARCH_OFFSET}, stopping"
+                    )
+                    break
+
+                # Search with offset
+                self.progress.emit(
+                    len(all_new_docs),
+                    self.target_new_docs,
+                    f"Searching PubMed (offset {offset})...",
+                )
+
+                result = client.search_with_offset(
+                    query_string=self.pubmed_query,
+                    max_results=batch_size,
+                    start_offset=offset,
+                )
+
+                if not result.pmids:
+                    logger.info("No more results from PubMed")
+                    break
+
+                # Fetch article metadata
+                self.progress.emit(
+                    len(all_new_docs),
+                    self.target_new_docs,
+                    f"Fetching {len(result.pmids)} article details...",
+                )
+
+                articles = client.fetch_articles(result.pmids)
+
+                # Filter out already scored documents
+                batch_new_docs: List["LiteDocument"] = []
+                for article in articles:
+                    if self._cancelled:
+                        break
+
+                    doc_id = f"pmid-{article.pmid}"
+                    if doc_id in self.already_scored_ids:
+                        continue
+
+                    # Convert to LiteDocument
+                    doc = LiteDocument(
+                        id=doc_id,
+                        title=article.title,
+                        abstract=article.abstract,
+                        authors=article.authors,
+                        year=self._extract_year(article.publication_date),
+                        journal=article.publication,
+                        doi=article.doi,
+                        pmid=article.pmid,
+                        pmc_id=article.pmc_id,
+                        mesh_terms=article.mesh_terms,
+                        source=DocumentSource.PUBMED,
+                    )
+
+                    batch_new_docs.append(doc)
+                    all_new_docs.append(doc)
+
+                    # Stop if we've reached our target
+                    if len(all_new_docs) >= self.target_new_docs:
+                        break
+
+                if batch_new_docs:
+                    self.batch_complete.emit(batch_new_docs)
+
+                # Update progress
+                self.progress.emit(
+                    len(all_new_docs),
+                    self.target_new_docs,
+                    f"Found {len(all_new_docs)} new documents",
+                )
+
+                # Move to next batch
+                offset += batch_size
+
+                # If we got fewer results than batch size, we've exhausted results
+                if len(result.pmids) < batch_size:
+                    logger.info(
+                        f"Got {len(result.pmids)} < {batch_size}, "
+                        "results exhausted"
+                    )
+                    break
+
+            if not self._cancelled:
+                self.finished.emit(all_new_docs)
+
+        except Exception as e:
+            logger.exception("Incremental search failed")
+            if not self._cancelled:
+                self.error.emit(str(e))
+
+    def _extract_year(self, date_str: Optional[str]) -> Optional[int]:
+        """
+        Extract year from a date string.
+
+        Args:
+            date_str: Date string in various formats
+
+        Returns:
+            Year as integer or None
+        """
+        if not date_str:
+            return None
+        try:
+            # Try to extract year from YYYY-MM-DD or just YYYY
+            year_str = date_str.split("-")[0]
+            return int(year_str)
+        except (ValueError, IndexError):
+            return None
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""

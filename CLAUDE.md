@@ -93,12 +93,26 @@ python bmlibrarian_lite.py clear        # Clear all data
 
 ### GUI Structure (`gui/`)
 
-The PySide6 GUI uses a three-tab design:
+The PySide6 GUI uses a multi-tab design:
+- `ResearchQuestionsTab` - List past research questions, re-run with deduplication
 - `SystematicReviewTab` - Search PubMed, score documents, extract citations, generate reports
+- `AuditTrailTab` - Real-time workflow visibility
+- `ReportTab` - View and export generated reports
 - `DocumentInterrogationTab` - Load documents and perform Q&A
-- `AuditTrailTab` - Real-time workflow visibility (NEW)
 
-#### Audit Trail Tab (NEW)
+#### Research Questions Tab
+
+The Research Questions tab (`research_questions_tab.py`) enables re-running past searches:
+
+- **Question List**: Shows past research questions with metadata (last run, doc count, scored count)
+- **Incremental Search**: Re-runs PubMed query with offset pagination
+- **Deduplication**: Skips documents already scored for this question
+- **IncrementalSearchWorker**: Background worker for paginated search with progress
+
+**Key Signals:**
+- `new_documents_found(str, list)` - New documents found (question, documents)
+
+#### Audit Trail Tab
 
 The Audit Trail provides transparency into the systematic review workflow with three sub-tabs:
 
@@ -181,6 +195,12 @@ Key benchmarking constants:
 - `DEFAULT_MODEL_PRICING` - Fallback pricing for unknown models
 - `get_model_pricing(model_string)` - Get pricing for a model
 - `calculate_cost(model, input_tokens, output_tokens)` - Calculate cost in USD
+- `BENCHMARK_QUESTION_HASH_LENGTH` - Hash length for question matching (16)
+
+Key incremental search constants:
+- `INCREMENTAL_SEARCH_BATCH_SIZE` - Batch size for PubMed offset pagination (100)
+- `DEFAULT_TARGET_NEW_DOCUMENTS` - Default target new documents (50)
+- `MAX_PUBMED_SEARCH_OFFSET` - Maximum PubMed API offset (9999)
 
 ## Environment Variables
 

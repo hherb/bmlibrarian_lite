@@ -612,6 +612,20 @@ BENCHMARK_AGREEMENT_LOW = "#FFCDD2"     # < 75% agreement
 BENCHMARK_QUESTION_HASH_LENGTH = 16
 
 # =============================================================================
+# Incremental Search Settings
+# =============================================================================
+
+# Batch size for incremental PubMed searches
+# Each batch fetches this many results before checking for new documents
+INCREMENTAL_SEARCH_BATCH_SIZE = 100
+
+# Default target for new documents in incremental search
+DEFAULT_TARGET_NEW_DOCUMENTS = 50
+
+# Maximum offset for PubMed searches (API limit)
+MAX_PUBMED_SEARCH_OFFSET = 9999
+
+# =============================================================================
 # Model Pricing (per 1M tokens, USD)
 # =============================================================================
 

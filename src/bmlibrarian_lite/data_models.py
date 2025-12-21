@@ -725,3 +725,30 @@ class BenchmarkRun:
             started_at=parse_datetime(data.get("started_at")),
             completed_at=parse_datetime(data.get("completed_at")),
         )
+
+
+@dataclass
+class ResearchQuestionSummary:
+    """
+    Summary of a research question for the Research Questions tab.
+
+    Contains metadata about past runs of a research question including
+    the most recent PubMed query, document counts, and scoring status.
+
+    Attributes:
+        question: The natural language research question
+        question_hash: Normalized hash for matching variations
+        pubmed_query: Most recent PubMed query string used
+        last_run_at: When the question was last run
+        total_documents: Total documents found across all runs
+        scored_documents: Count of scored documents
+        run_count: Number of times this question has been run
+    """
+
+    question: str
+    question_hash: str
+    pubmed_query: str
+    last_run_at: datetime
+    total_documents: int = 0
+    scored_documents: int = 0
+    run_count: int = 1

@@ -386,6 +386,95 @@ class PubMedSearchClient:
         )
         return self.search(query, max_results=max_results)
 
+    def search_with_offset(
+        self,
+        query_string: str,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        start_offset: int = 0,
+        progress_callback: Optional[Callable[[str, str], None]] = None,
+    ) -> SearchResult:
+        """
+        Search with offset for paginated retrieval.
+
+        Useful for incremental searches where earlier results
+        have already been processed.
+
+        Args:
+            query_string: PubMed query string
+            max_results: Maximum results to retrieve from this offset
+            start_offset: Starting position in result set
+            progress_callback: Optional progress callback
+
+        Returns:
+            SearchResult with PMIDs starting from offset
+        """
+        query = PubMedQuery(
+            original_question=query_string,
+            query_string=query_string,
+        )
+
+        def report_progress(step: str, message: str) -> None:
+            logger.info(f"[{step}] {message}")
+            if progress_callback:
+                progress_callback(step, message)
+
+        # Validate offset
+        start_offset = max(0, min(start_offset, MAX_RESULTS_LIMIT - 1))
+
+        report_progress("search", f"Searching PubMed (offset {start_offset})...")
+
+        start_time = time.time()
+
+        # Build search parameters with offset
+        params = query.to_url_params()
+        params["retmax"] = min(max_results, MAX_RESULTS_LIMIT)
+        params["retstart"] = start_offset
+        params["sort"] = "relevance"
+
+        # Use POST for long queries
+        query_length = len(query.query_string)
+        method = "POST" if query_length > URL_LENGTH_POST_THRESHOLD else "GET"
+
+        response = self._make_request(ESEARCH_URL, params, method=method)
+
+        if not response:
+            return SearchResult(
+                query=query,
+                total_count=0,
+                retrieved_count=0,
+                search_time_seconds=time.time() - start_time,
+            )
+
+        try:
+            data = response.json()
+            result = data.get("esearchresult", {})
+
+            total_count = int(result.get("count", 0))
+            pmids = result.get("idlist", [])
+
+            search_time = time.time() - start_time
+            report_progress(
+                "complete",
+                f"Retrieved {len(pmids)} PMIDs (offset {start_offset}) in {search_time:.2f}s"
+            )
+
+            return SearchResult(
+                query=query,
+                total_count=total_count,
+                retrieved_count=len(pmids),
+                pmids=pmids,
+                search_time_seconds=search_time,
+            )
+
+        except Exception as e:
+            logger.error(f"Error parsing search results: {e}")
+            return SearchResult(
+                query=query,
+                total_count=0,
+                retrieved_count=0,
+                search_time_seconds=time.time() - start_time,
+            )
+
     def get_count(self, query: PubMedQuery) -> int:
         """
         Get the count of results for a query without retrieving PMIDs.

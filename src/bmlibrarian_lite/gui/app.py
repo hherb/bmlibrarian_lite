@@ -34,6 +34,7 @@ from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 
 from ..config import LiteConfig
 from ..storage import LiteStorage
+from .research_questions_tab import ResearchQuestionsTab
 from .systematic_review_tab import SystematicReviewTab
 from .audit_trail_tab import AuditTrailTab
 from .report_tab import ReportTab
@@ -113,7 +114,14 @@ class LiteMainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
 
-        # Create tabs
+        # Create tabs - Research Questions first
+        self.research_questions_tab = ResearchQuestionsTab(
+            config=self.config,
+            storage=self.storage,
+            parent=self,
+        )
+        self.tab_widget.addTab(self.research_questions_tab, "Research Questions")
+
         self.systematic_review_tab = SystematicReviewTab(
             config=self.config,
             storage=self.storage,
@@ -184,6 +192,11 @@ class LiteMainWindow(QMainWindow):
         # Connect benchmark completion signal
         self.systematic_review_tab.benchmark_completed.connect(
             self._on_benchmark_completed
+        )
+
+        # Connect Research Questions tab signals
+        self.research_questions_tab.new_documents_found.connect(
+            self._on_new_documents_found
         )
 
         # Track benchmark results tab (may be created dynamically)
@@ -415,6 +428,27 @@ class LiteMainWindow(QMainWindow):
             self.status_bar.showMessage(
                 f"Benchmark complete: {doc_count} documents, ${cost:.4f}", 5000
             )
+
+    def _on_new_documents_found(self, question: str, documents: list) -> None:
+        """
+        Handle new documents found from Research Questions tab.
+
+        Pre-fills the question in the Systematic Review tab so the user
+        can continue with scoring the new documents.
+
+        Args:
+            question: The research question text
+            documents: List of new LiteDocument objects found
+        """
+        # Pre-fill the question in Systematic Review tab
+        self.systematic_review_tab.question_input.setPlainText(question)
+
+        # Switch to Systematic Review tab
+        self.tab_widget.setCurrentWidget(self.systematic_review_tab)
+
+        self.status_bar.showMessage(
+            f"Found {len(documents)} new documents. Ready to run review.", 5000
+        )
 
 
 def run_lite_app() -> int:

@@ -44,6 +44,7 @@ from .data_models import (
     Evaluator,
     EvaluatorType,
     LiteDocument,
+    ResearchQuestionSummary,
     ReviewCheckpoint,
     SearchSession,
     ScoredDocument,
@@ -1093,6 +1094,166 @@ class LiteStorage:
             except Exception as e:
                 logger.error(f"Failed to delete checkpoint {checkpoint_id}: {e}")
                 return False
+
+    # =========================================================================
+    # Research Question Operations
+    # =========================================================================
+
+    def get_unique_research_questions(
+        self,
+        limit: int = 50,
+    ) -> list[ResearchQuestionSummary]:
+        """
+        Get unique research questions from past search sessions.
+
+        Returns a list of unique research questions with metadata about
+        their most recent runs, document counts, and scoring status.
+
+        Args:
+            limit: Maximum number of questions to return
+
+        Returns:
+            List of ResearchQuestionSummary objects, most recent first
+        """
+        with self._sqlite_connection() as conn:
+            # Get unique questions with aggregated data
+            cursor = conn.execute(
+                """
+                SELECT
+                    natural_language_query,
+                    MAX(query) as pubmed_query,
+                    MAX(created_at) as last_run_at,
+                    SUM(document_count) as total_documents,
+                    COUNT(*) as run_count
+                FROM search_sessions
+                GROUP BY LOWER(TRIM(natural_language_query))
+                ORDER BY last_run_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+
+            summaries = []
+            for row in cursor:
+                question = row["natural_language_query"]
+                question_hash = compute_question_hash(question)
+
+                # Count scored documents for this question
+                scored_count = self._count_scored_documents_for_question(
+                    conn, question_hash
+                )
+
+                summaries.append(ResearchQuestionSummary(
+                    question=question,
+                    question_hash=question_hash,
+                    pubmed_query=row["pubmed_query"],
+                    last_run_at=row["last_run_at"],
+                    total_documents=row["total_documents"] or 0,
+                    scored_documents=scored_count,
+                    run_count=row["run_count"],
+                ))
+
+            return summaries
+
+    def _count_scored_documents_for_question(
+        self,
+        conn: sqlite3.Connection,
+        question_hash: str,
+    ) -> int:
+        """
+        Count scored documents for a research question.
+
+        Args:
+            conn: Active SQLite connection
+            question_hash: Normalized question hash
+
+        Returns:
+            Count of unique scored documents
+        """
+        # Find search sessions matching this question hash
+        # Then find checkpoints linked to those sessions
+        # Then count unique document_ids in scored_documents
+        cursor = conn.execute(
+            """
+            SELECT COUNT(DISTINCT sd.document_id) as count
+            FROM scored_documents sd
+            INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+            INNER JOIN search_sessions ss ON rc.search_session_id = ss.id
+            WHERE ss.natural_language_query IS NOT NULL
+            """,
+        )
+        row = cursor.fetchone()
+        return row["count"] if row else 0
+
+    def get_scored_document_ids_for_question(
+        self,
+        question: str,
+    ) -> set[str]:
+        """
+        Get all document IDs that have been scored for a research question.
+
+        This includes documents of any score (even low ones) to enable
+        deduplication during incremental searches.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            Set of document IDs that have been scored
+        """
+        with self._sqlite_connection() as conn:
+            # Get all scored document IDs across all sessions for this question
+            # We match by normalizing the question text
+            cursor = conn.execute(
+                """
+                SELECT DISTINCT sd.document_id
+                FROM scored_documents sd
+                INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+                INNER JOIN search_sessions ss ON rc.search_session_id = ss.id
+                WHERE LOWER(TRIM(ss.natural_language_query)) = LOWER(TRIM(?))
+                """,
+                (question,),
+            )
+            return {row["document_id"] for row in cursor}
+
+    def get_search_session_by_question(
+        self,
+        question: str,
+    ) -> Optional[SearchSession]:
+        """
+        Get the most recent search session for a research question.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            Most recent SearchSession if found, None otherwise
+        """
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, query, natural_language_query, created_at,
+                       document_count, metadata
+                FROM search_sessions
+                WHERE LOWER(TRIM(natural_language_query)) = LOWER(TRIM(?))
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (question,),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return SearchSession(
+                id=row["id"],
+                query=row["query"],
+                natural_language_query=row["natural_language_query"],
+                created_at=row["created_at"],
+                document_count=row["document_count"],
+                metadata=json.loads(row["metadata"]),
+            )
 
     # =========================================================================
     # PubMed Cache Operations
