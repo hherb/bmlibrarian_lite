@@ -55,11 +55,11 @@ class ResearchQuestionsTab(QWidget):
         question_selected: Emitted when user selects a question for re-run
             Args: (question, pubmed_query)
         new_documents_found: Emitted when incremental search finds new docs
-            Args: (question, documents)
+            Args: (question, pubmed_query, documents)
     """
 
     question_selected = Signal(str, str)  # (question, pubmed_query)
-    new_documents_found = Signal(str, list)  # (question, List[LiteDocument])
+    new_documents_found = Signal(str, str, list)  # (question, pubmed_query, List[LiteDocument])
 
     def __init__(
         self,
@@ -314,8 +314,9 @@ class ResearchQuestionsTab(QWidget):
 
     def _on_search_finished(self, new_docs: list[LiteDocument]) -> None:
         """Handle search completion."""
-        question = self._get_selected_question()
-        question_text = question.question if question else ""
+        question_summary = self._get_selected_question()
+        question_text = question_summary.question if question_summary else ""
+        pubmed_query = question_summary.pubmed_query if question_summary else ""
 
         self._reset_ui()
         self._load_questions()  # Refresh the table
@@ -326,7 +327,7 @@ class ResearchQuestionsTab(QWidget):
                 "Switch to Systematic Review tab to score them."
             )
             # Emit signal for main window to handle
-            self.new_documents_found.emit(question_text, new_docs)
+            self.new_documents_found.emit(question_text, pubmed_query, new_docs)
 
             # Show info dialog
             QMessageBox.information(

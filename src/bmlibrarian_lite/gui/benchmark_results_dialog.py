@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -674,6 +675,8 @@ class BenchmarkResultsTab(QWidget):
     embedded as a tab in the main window, allowing users to switch
     between the systematic review and benchmark results freely.
 
+    Can be created empty and updated later with results.
+
     Signals:
         gold_standard_selected: Emitted when user selects a gold standard
             for a document (document_id, evaluator_name or None)
@@ -683,30 +686,98 @@ class BenchmarkResultsTab(QWidget):
 
     def __init__(
         self,
-        result: "BenchmarkResult",
+        result: Optional["BenchmarkResult"] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         """
         Initialize the benchmark results tab.
 
         Args:
-            result: Benchmark results to display
+            result: Optional benchmark results to display (empty state if None)
             parent: Optional parent widget
         """
         super().__init__(parent)
         self.result = result
         self._current_comparisons: List["DocumentComparison"] = []
+        self._content_widget: Optional[QWidget] = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         """Set up the tab UI."""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(scaled(12))
+        self._main_layout = QVBoxLayout(self)
+        self._main_layout.setSpacing(scaled(12))
+
+        if self.result is None:
+            self._show_empty_state()
+        else:
+            self._build_results_ui()
+
+    def _show_empty_state(self) -> None:
+        """Display empty state when no results are available."""
+        # Clear existing content
+        self._clear_content()
+
+        empty_label = QLabel(
+            "No benchmark results available.\n\n"
+            "Run a benchmark from the Systematic Review tab\n"
+            "or select a research question with existing results."
+        )
+        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_label.setStyleSheet("color: gray;")
+        self._main_layout.addWidget(empty_label)
+        self._content_widget = empty_label
+
+    def _clear_content(self) -> None:
+        """Clear all content from the main layout."""
+        while self._main_layout.count():
+            item = self._main_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                nested_layout = item.layout()
+                if nested_layout is not None:
+                    self._clear_layout(nested_layout)
+
+    def _clear_layout(self, layout: QLayout) -> None:
+        """Recursively clear a layout."""
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                nested_layout = item.layout()
+                if nested_layout is not None:
+                    self._clear_layout(nested_layout)
+
+    def update_result(self, result: Optional["BenchmarkResult"]) -> None:
+        """
+        Update the tab with new benchmark results.
+
+        Args:
+            result: New benchmark results to display, or None for empty state
+        """
+        self.result = result
+        self._current_comparisons = []
+        self._clear_content()
+        if result is None:
+            self._show_empty_state()
+        else:
+            self._build_results_ui()
+
+    def _build_results_ui(self) -> None:
+        """Build the results UI (called when result is available)."""
+        if self.result is None:
+            return
 
         # Header with summary
         header_layout = QVBoxLayout()
 
-        question_label = QLabel(f"<b>Question:</b> {self.result.question[:100]}...")
+        question_text = self.result.question
+        if len(question_text) > 100:
+            question_text = question_text[:100] + "..."
+        question_label = QLabel(f"<b>Question:</b> {question_text}")
         question_label.setWordWrap(True)
         header_layout.addWidget(question_label)
 
@@ -724,7 +795,7 @@ class BenchmarkResultsTab(QWidget):
         )
         header_layout.addWidget(summary_label)
 
-        layout.addLayout(header_layout)
+        self._main_layout.addLayout(header_layout)
 
         # Tab widget for different views
         tabs = QTabWidget()
@@ -745,7 +816,7 @@ class BenchmarkResultsTab(QWidget):
         details_tab = self._create_details_tab()
         tabs.addTab(details_tab, "Document Details")
 
-        layout.addWidget(tabs)
+        self._main_layout.addWidget(tabs)
 
         # Export button row (no Close button needed for tabs)
         button_layout = QHBoxLayout()
@@ -759,7 +830,9 @@ class BenchmarkResultsTab(QWidget):
         button_layout.addWidget(export_btn)
 
         button_layout.addStretch()
-        layout.addLayout(button_layout)
+        self._main_layout.addLayout(button_layout)
+
+        self._content_widget = tabs
 
     def _create_comparison_tab(self) -> QWidget:
         """Create the model comparison tab."""

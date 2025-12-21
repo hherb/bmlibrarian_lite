@@ -88,6 +88,8 @@ class WorkflowWorker(QThread):
         min_score: int = 3,
         quality_filter: Optional[QualityFilter] = None,
         quality_manager: Optional[QualityManager] = None,
+        preloaded_documents: Optional[List[LiteDocument]] = None,
+        pubmed_query: Optional[str] = None,
     ) -> None:
         """
         Initialize the workflow worker.
@@ -100,6 +102,8 @@ class WorkflowWorker(QThread):
             min_score: Minimum relevance score (1-5)
             quality_filter: Optional quality filter settings
             quality_manager: Optional quality manager for filtering
+            preloaded_documents: Optional documents to score (skip search if provided)
+            pubmed_query: Optional PubMed query (used when preloaded_documents provided)
         """
         super().__init__()
         self.question = question
@@ -109,6 +113,8 @@ class WorkflowWorker(QThread):
         self.min_score = min_score
         self.quality_filter = quality_filter
         self.quality_manager = quality_manager
+        self.preloaded_documents = preloaded_documents
+        self.pubmed_query = pubmed_query
         self._cancelled = False
 
     def run(self) -> None:
@@ -139,32 +145,43 @@ class WorkflowWorker(QThread):
                     "temperature": config.temperature,
                 }
 
-            # Step 1: Search PubMed
-            self.progress.emit("search", 0, 1)
-            search_agent = LiteSearchAgent(
-                config=self.config,
-                storage=self.storage,
-            )
-            session, documents = search_agent.search(
-                self.question,
-                max_results=self.max_results,
-            )
-
-            # Update metadata with search info
-            if session:
-                metadata.pubmed_query = session.query
-                metadata.pubmed_search_date = session.created_at
+            # Step 1: Search PubMed (or use preloaded documents)
+            if self.preloaded_documents:
+                # Use preloaded documents - skip the search step
+                documents = self.preloaded_documents
                 metadata.documents_retrieved = len(documents)
-                # Total available stored in session metadata if available
-                if hasattr(session, 'metadata') and session.metadata:
-                    metadata.total_results_available = session.metadata.get(
-                        'total_count', len(documents)
-                    )
-                else:
-                    metadata.total_results_available = len(documents)
-                self.query_generated.emit(session.query, session.natural_language_query)
+                metadata.total_results_available = len(documents)
+                if self.pubmed_query:
+                    metadata.pubmed_query = self.pubmed_query
+                    self.query_generated.emit(self.pubmed_query, self.question)
+                self.step_complete.emit("search", documents)
+            else:
+                # Run PubMed search
+                self.progress.emit("search", 0, 1)
+                search_agent = LiteSearchAgent(
+                    config=self.config,
+                    storage=self.storage,
+                )
+                session, documents = search_agent.search(
+                    self.question,
+                    max_results=self.max_results,
+                )
 
-            self.step_complete.emit("search", documents)
+                # Update metadata with search info
+                if session:
+                    metadata.pubmed_query = session.query
+                    metadata.pubmed_search_date = session.created_at
+                    metadata.documents_retrieved = len(documents)
+                    # Total available stored in session metadata if available
+                    if hasattr(session, 'metadata') and session.metadata:
+                        metadata.total_results_available = session.metadata.get(
+                            'total_count', len(documents)
+                        )
+                    else:
+                        metadata.total_results_available = len(documents)
+                    self.query_generated.emit(session.query, session.natural_language_query)
+
+                self.step_complete.emit("search", documents)
 
             if self._cancelled:
                 self.finished.emit("Workflow cancelled.", metadata)
@@ -388,6 +405,10 @@ class SystematicReviewTab(QWidget):
         self._all_citations: List[Citation] = []
         self._quality_assessments: Dict[str, QualityAssessment] = {}
 
+        # Pre-loaded documents from Research Questions tab (skip search if set)
+        self._preloaded_documents: Optional[List[LiteDocument]] = None
+        self._preloaded_pubmed_query: Optional[str] = None
+
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -507,7 +528,7 @@ class SystematicReviewTab(QWidget):
         # Emit workflow started signal for audit trail
         self.workflow_started.emit()
 
-        # Create and start worker
+        # Create and start worker (use preloaded documents if available)
         self._worker = WorkflowWorker(
             question=question,
             config=self.config,
@@ -516,6 +537,8 @@ class SystematicReviewTab(QWidget):
             min_score=self.min_score_spin.value(),
             quality_filter=quality_filter,
             quality_manager=self.quality_manager,
+            preloaded_documents=self._preloaded_documents,
+            pubmed_query=self._preloaded_pubmed_query,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.step_complete.connect(self._on_step_complete)
@@ -527,6 +550,10 @@ class SystematicReviewTab(QWidget):
         self._worker.document_scored.connect(self.document_scored)
         self._worker.citation_extracted.connect(self.citation_extracted)
         self._worker.quality_assessed.connect(self.quality_assessed)
+
+        # Clear preloaded documents after starting (only used once)
+        self._preloaded_documents = None
+        self._preloaded_pubmed_query = None
 
         self._worker.start()
 
@@ -710,20 +737,59 @@ class SystematicReviewTab(QWidget):
         """
         return self._quality_assessments.get(doc_id)
 
+    def set_preloaded_documents(
+        self,
+        documents: List[LiteDocument],
+        pubmed_query: Optional[str] = None,
+    ) -> None:
+        """
+        Set preloaded documents to use instead of running a PubMed search.
+
+        Call this before triggering the workflow to skip the search step.
+        The preloaded documents will be cleared after the workflow runs.
+
+        Args:
+            documents: Documents to score (already retrieved)
+            pubmed_query: Optional PubMed query string for metadata
+        """
+        self._preloaded_documents = documents
+        self._preloaded_pubmed_query = pubmed_query
+        doc_count = len(documents)
+        self.progress_label.setText(
+            f"{doc_count} documents ready to score. Click 'Run Review' to continue."
+        )
+
+    def clear_preloaded_documents(self) -> None:
+        """Clear any preloaded documents."""
+        self._preloaded_documents = None
+        self._preloaded_pubmed_query = None
+
     def _run_benchmark(self) -> None:
         """Open benchmark confirmation dialog and run benchmark if confirmed."""
-        if not self._scored_documents:
+        if not self._current_question:
+            self.progress_label.setText("No research question set for benchmarking")
+            return
+
+        # Get ALL documents for this question from storage (not just current run)
+        all_doc_ids = self.storage.get_scored_document_ids_for_question(
+            self._current_question
+        )
+        if not all_doc_ids:
             self.progress_label.setText("No scored documents available for benchmarking")
             return
 
-        # Get documents from scored documents
-        documents = [sd.document for sd in self._scored_documents]
+        # Fetch the actual documents
+        documents = self.storage.get_documents(list(all_doc_ids))
+        if not documents:
+            self.progress_label.setText("Could not retrieve documents for benchmarking")
+            return
 
         # Show confirmation dialog
         dialog = BenchmarkConfirmDialog(
             config=self.config,
             documents=documents,
             question=self._current_question,
+            storage=self.storage,
             parent=self,
         )
 

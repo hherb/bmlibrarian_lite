@@ -723,3 +723,29 @@ Evaluate the relevance of this document to the research question."""
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Failed to parse benchmark result: {e}")
             return None
+
+    def get_latest_benchmark_result_for_question(
+        self,
+        question: str,
+    ) -> Optional[BenchmarkResult]:
+        """
+        Get the most recent completed benchmark result for a research question.
+
+        Args:
+            question: Research question text
+
+        Returns:
+            Most recent BenchmarkResult if available, None otherwise
+        """
+        from ..data_models import BenchmarkStatus
+
+        runs = self.storage.get_benchmark_runs_by_question(
+            question,
+            status=BenchmarkStatus.COMPLETED,
+            limit=1,
+        )
+
+        if not runs:
+            return None
+
+        return self.get_benchmark_result(runs[0].id)

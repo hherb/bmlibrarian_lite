@@ -41,6 +41,7 @@ from .report_tab import ReportTab
 from .document_interrogation_tab import DocumentInterrogationTab
 from .settings_dialog import SettingsDialog
 from .benchmark_results_dialog import BenchmarkResultsTab
+from ..benchmarking import BenchmarkRunner
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,10 @@ class LiteMainWindow(QMainWindow):
         )
         self.tab_widget.addTab(self.interrogation_tab, "Document Interrogation")
 
+        # Benchmark Results tab (persistent, starts empty)
+        self.benchmark_tab = BenchmarkResultsTab(result=None, parent=self)
+        self.tab_widget.addTab(self.benchmark_tab, "Benchmark Results")
+
         # Connect report generation signal to display in Report tab
         self.systematic_review_tab.report_generated.connect(
             self._on_report_generated
@@ -199,8 +204,6 @@ class LiteMainWindow(QMainWindow):
             self._on_new_documents_found
         )
 
-        # Track benchmark results tab (may be created dynamically)
-        self._benchmark_tab: Optional[BenchmarkResultsTab] = None
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -402,27 +405,16 @@ class LiteMainWindow(QMainWindow):
         """
         Handle benchmark completion from systematic review.
 
-        Creates or updates the benchmark results tab and switches to it.
+        Updates the benchmark results tab and switches to it.
 
         Args:
             result: BenchmarkResult from the benchmark run
         """
-        # Remove existing benchmark tab if present
-        if self._benchmark_tab is not None:
-            index = self.tab_widget.indexOf(self._benchmark_tab)
-            if index >= 0:
-                self.tab_widget.removeTab(index)
-            self._benchmark_tab.deleteLater()
-            self._benchmark_tab = None
-
-        # Create new benchmark results tab
-        self._benchmark_tab = BenchmarkResultsTab(result, parent=self)
-
-        # Add tab after Document Interrogation (at the end)
-        self.tab_widget.addTab(self._benchmark_tab, "Benchmark Results")
+        # Update the persistent benchmark tab with new results
+        self.benchmark_tab.update_result(result)
 
         # Switch to the benchmark tab
-        self.tab_widget.setCurrentWidget(self._benchmark_tab)
+        self.tab_widget.setCurrentWidget(self.benchmark_tab)
 
         # Update status
         if hasattr(result, 'total_cost_usd'):
@@ -432,26 +424,63 @@ class LiteMainWindow(QMainWindow):
                 f"Benchmark complete: {doc_count} documents, ${cost:.4f}", 5000
             )
 
-    def _on_new_documents_found(self, question: str, documents: list) -> None:
+    def _on_new_documents_found(
+        self,
+        question: str,
+        pubmed_query: str,
+        documents: list,
+    ) -> None:
         """
         Handle new documents found from Research Questions tab.
 
-        Pre-fills the question in the Systematic Review tab so the user
-        can continue with scoring the new documents.
+        Pre-fills the question and preloads documents in the Systematic Review
+        tab so the user can continue with scoring without re-running the search.
+        Also loads existing benchmark results for this question if available.
 
         Args:
             question: The research question text
+            pubmed_query: The PubMed query string
             documents: List of new LiteDocument objects found
         """
         # Pre-fill the question in Systematic Review tab
         self.systematic_review_tab.question_input.setPlainText(question)
 
+        # Preload documents to skip search step
+        self.systematic_review_tab.set_preloaded_documents(documents, pubmed_query)
+
+        # Load existing benchmark results for this question if available
+        self._load_benchmark_results_for_question(question)
+
         # Switch to Systematic Review tab
         self.tab_widget.setCurrentWidget(self.systematic_review_tab)
 
         self.status_bar.showMessage(
-            f"Found {len(documents)} new documents. Ready to run review.", 5000
+            f"Found {len(documents)} new documents. Click 'Run Review' to score them.", 5000
         )
+
+    def _load_benchmark_results_for_question(self, question: str) -> None:
+        """
+        Load existing benchmark results for a question into the Benchmark tab.
+
+        Args:
+            question: The research question text
+        """
+        try:
+            runner = BenchmarkRunner(self.config, self.storage)
+            result = runner.get_latest_benchmark_result_for_question(question)
+
+            if result:
+                self.benchmark_tab.update_result(result)
+                logger.info(
+                    f"Loaded existing benchmark results for question: "
+                    f"{result.run_id} with {len(result.document_comparisons)} docs"
+                )
+            else:
+                # Clear the benchmark tab if no results exist
+                self.benchmark_tab.update_result(None)
+
+        except Exception as e:
+            logger.warning(f"Failed to load benchmark results: {e}")
 
 
 def run_lite_app() -> int:
