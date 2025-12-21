@@ -269,7 +269,7 @@ class ResearchQuestionsTab(QWidget):
             if 0 <= row < len(self._questions):
                 question = self._questions[row]
                 # Check if there are scored documents for benchmarking
-                has_scored = question.scored_count > 0
+                has_scored = question.scored_documents > 0
                 benchmarking_available = (
                     self.config.benchmark.enabled
                     and len(self.config.benchmark.models) > 0
