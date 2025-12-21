@@ -520,7 +520,7 @@ class IncrementalSearchWorker(QThread):
             )
 
             client = PubMedSearchClient(
-                email=self.config.pubmed_email,
+                email=self.config.pubmed.email,
             )
 
             all_new_docs: List["LiteDocument"] = []

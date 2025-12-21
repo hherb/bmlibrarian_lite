@@ -28,6 +28,7 @@ from .statistics import (
     compute_agreement_matrix,
     compute_document_comparison,
     compute_evaluator_stats,
+    compute_inclusion_agreement_matrix,
 )
 
 logger = logging.getLogger(__name__)
@@ -619,6 +620,7 @@ Evaluate the relevance of this document to the research question."""
             evaluator_scores[evaluator.display_name] = scores
 
         agreement_matrix = compute_agreement_matrix(evaluator_scores, tolerance=1)
+        inclusion_agreement_matrix = compute_inclusion_agreement_matrix(evaluator_scores)
 
         # Determine baseline evaluator name from config
         baseline_name = None
@@ -633,6 +635,7 @@ Evaluate the relevance of this document to the research question."""
             evaluator_stats=evaluator_stats,
             document_comparisons=document_comparisons,
             agreement_matrix=agreement_matrix,
+            inclusion_agreement_matrix=inclusion_agreement_matrix,
             total_duration_seconds=duration,
             baseline_evaluator_name=baseline_name,
         )
@@ -696,6 +699,14 @@ Evaluate the relevance of this document to the research question."""
                     parts = key_str.split("|", 1)
                     agreement_matrix[(parts[0], parts[1])] = value
 
+            # Reconstruct inclusion agreement matrix
+            raw_inclusion_matrix = data.get("inclusion_agreement_matrix", {})
+            inclusion_agreement_matrix: dict[tuple[str, str], float] = {}
+            for key_str, value in raw_inclusion_matrix.items():
+                if "|" in key_str:
+                    parts = key_str.split("|", 1)
+                    inclusion_agreement_matrix[(parts[0], parts[1])] = value
+
             return BenchmarkResult(
                 run_id=data["run_id"],
                 question=data["question"],
@@ -703,6 +714,8 @@ Evaluate the relevance of this document to the research question."""
                 evaluator_stats=evaluator_stats,
                 document_comparisons=document_comparisons,
                 agreement_matrix=agreement_matrix,
+                inclusion_agreement_matrix=inclusion_agreement_matrix,
+                inclusion_threshold=data.get("inclusion_threshold", 3),
                 total_duration_seconds=data["total_duration_seconds"],
                 created_at=datetime.fromisoformat(data["created_at"]),
             )

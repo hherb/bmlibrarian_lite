@@ -9,6 +9,7 @@ import statistics
 from typing import Optional
 
 from ..data_models import Evaluator, ScoredDocument
+from ..constants import DEFAULT_MIN_SCORE
 from .models import EvaluatorStats, DocumentComparison
 
 
@@ -153,6 +154,81 @@ def compute_agreement_matrix(
                 scores2 = evaluator_scores[name2]
                 matrix[(name1, name2)] = compute_agreement(
                     scores1, scores2, tolerance
+                )
+
+    return matrix
+
+
+def compute_inclusion_agreement(
+    scores1: list[int],
+    scores2: list[int],
+    inclusion_threshold: int = DEFAULT_MIN_SCORE,
+) -> float:
+    """
+    Compute inclusion decision agreement between two score lists.
+
+    Inclusion agreement measures whether evaluators agree on the binary
+    decision of including or excluding a document based on the threshold.
+    This is more clinically significant than score agreement since it
+    directly affects which documents appear in final results.
+
+    Args:
+        scores1: First evaluator's scores (ordered by document)
+        scores2: Second evaluator's scores (same order)
+        inclusion_threshold: Minimum score for document inclusion
+
+    Returns:
+        Inclusion agreement percentage (0.0 to 1.0)
+
+    Raises:
+        ValueError: If score lists have different lengths
+    """
+    if len(scores1) != len(scores2):
+        raise ValueError(
+            f"Score lists must have same length: {len(scores1)} vs {len(scores2)}"
+        )
+
+    if not scores1:
+        return 1.0  # Empty lists agree perfectly
+
+    agreements = sum(
+        1 for s1, s2 in zip(scores1, scores2)
+        if (s1 >= inclusion_threshold) == (s2 >= inclusion_threshold)
+    )
+
+    return agreements / len(scores1)
+
+
+def compute_inclusion_agreement_matrix(
+    evaluator_scores: dict[str, list[int]],
+    inclusion_threshold: int = DEFAULT_MIN_SCORE,
+) -> dict[tuple[str, str], float]:
+    """
+    Compute pairwise inclusion agreement matrix for all evaluators.
+
+    Unlike score agreement (within ±1), inclusion agreement measures whether
+    evaluators agree on the binary include/exclude decision. This is the most
+    clinically significant form of agreement.
+
+    Args:
+        evaluator_scores: Mapping of evaluator name to ordered score list
+        inclusion_threshold: Minimum score for document inclusion
+
+    Returns:
+        Dict with (name1, name2) tuple keys mapping to inclusion agreement percentage
+    """
+    evaluator_names = list(evaluator_scores.keys())
+    matrix: dict[tuple[str, str], float] = {}
+
+    for name1 in evaluator_names:
+        for name2 in evaluator_names:
+            if name1 == name2:
+                matrix[(name1, name2)] = 1.0  # Perfect self-agreement
+            else:
+                scores1 = evaluator_scores[name1]
+                scores2 = evaluator_scores[name2]
+                matrix[(name1, name2)] = compute_inclusion_agreement(
+                    scores1, scores2, inclusion_threshold
                 )
 
     return matrix

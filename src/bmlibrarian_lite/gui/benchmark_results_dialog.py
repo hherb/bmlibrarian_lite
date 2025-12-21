@@ -40,12 +40,160 @@ from ..constants import (
     BENCHMARK_AGREEMENT_HIGH,
     BENCHMARK_AGREEMENT_MEDIUM,
     BENCHMARK_AGREEMENT_LOW,
+    BENCHMARK_INCLUSION_DISAGREEMENT,
+    DEFAULT_MIN_SCORE,
 )
 
 if TYPE_CHECKING:
     from ..benchmarking.models import BenchmarkResult, EvaluatorStats, DocumentComparison
 
 logger = logging.getLogger(__name__)
+
+
+def _create_score_agreement_matrix_widget(
+    result: "BenchmarkResult",
+) -> QWidget:
+    """Create the score agreement matrix (±1 tolerance)."""
+    widget = QWidget()
+    layout = QVBoxLayout(widget)
+
+    evaluator_names = [s.evaluator.display_name for s in result.evaluator_stats]
+    n = len(evaluator_names)
+
+    table = QTableWidget()
+    table.setRowCount(n)
+    table.setColumnCount(n)
+    table.setHorizontalHeaderLabels(evaluator_names)
+    table.setVerticalHeaderLabels(evaluator_names)
+
+    for i, name1 in enumerate(evaluator_names):
+        for j, name2 in enumerate(evaluator_names):
+            if i == j:
+                item = QTableWidgetItem("100%")
+                item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
+            else:
+                key = (name1, name2)
+                alt_key = (name2, name1)
+                agreement = result.agreement_matrix.get(
+                    key, result.agreement_matrix.get(alt_key, 0.0)
+                )
+                pct = agreement * 100
+                item = QTableWidgetItem(f"{pct:.0f}%")
+
+                if pct >= 90:
+                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
+                elif pct >= 75:
+                    item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
+                else:
+                    item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
+
+            item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(i, j, item)
+
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    layout.addWidget(table)
+
+    legend_layout = QHBoxLayout()
+    legend_layout.addStretch()
+    for level, color in [
+        ("High (≥90%)", BENCHMARK_AGREEMENT_HIGH),
+        ("Medium (≥75%)", BENCHMARK_AGREEMENT_MEDIUM),
+        ("Low (<75%)", BENCHMARK_AGREEMENT_LOW),
+    ]:
+        label = QLabel(f"  {level}  ")
+        label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
+        legend_layout.addWidget(label)
+    legend_layout.addStretch()
+    layout.addLayout(legend_layout)
+
+    explanation = QLabel(
+        "<small>Score agreement: percentage of documents where "
+        "evaluators gave scores within ±1 of each other.</small>"
+    )
+    explanation.setWordWrap(True)
+    layout.addWidget(explanation)
+
+    return widget
+
+
+def _create_inclusion_agreement_matrix_widget(
+    result: "BenchmarkResult",
+) -> QWidget:
+    """Create the inclusion decision agreement matrix."""
+    widget = QWidget()
+    layout = QVBoxLayout(widget)
+
+    evaluator_names = [s.evaluator.display_name for s in result.evaluator_stats]
+    n = len(evaluator_names)
+
+    table = QTableWidget()
+    table.setRowCount(n)
+    table.setColumnCount(n)
+    table.setHorizontalHeaderLabels(evaluator_names)
+    table.setVerticalHeaderLabels(evaluator_names)
+
+    for i, name1 in enumerate(evaluator_names):
+        for j, name2 in enumerate(evaluator_names):
+            if i == j:
+                item = QTableWidgetItem("100%")
+                item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
+            else:
+                key = (name1, name2)
+                alt_key = (name2, name1)
+                agreement = result.inclusion_agreement_matrix.get(
+                    key, result.inclusion_agreement_matrix.get(alt_key, 0.0)
+                )
+                pct = agreement * 100
+                item = QTableWidgetItem(f"{pct:.0f}%")
+
+                if pct >= 95:
+                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
+                elif pct >= 85:
+                    item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
+                else:
+                    item.setBackground(QColor(BENCHMARK_INCLUSION_DISAGREEMENT))
+
+            item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(i, j, item)
+
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    layout.addWidget(table)
+
+    legend_layout = QHBoxLayout()
+    legend_layout.addStretch()
+    for level, color in [
+        ("High (≥95%)", BENCHMARK_AGREEMENT_HIGH),
+        ("Medium (≥85%)", BENCHMARK_AGREEMENT_MEDIUM),
+        ("Critical (<85%)", BENCHMARK_INCLUSION_DISAGREEMENT),
+    ]:
+        label = QLabel(f"  {level}  ")
+        label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
+        legend_layout.addWidget(label)
+    legend_layout.addStretch()
+    layout.addLayout(legend_layout)
+
+    inclusion_rate = result.inclusion_disagreement_rate * 100
+    threshold = result.inclusion_threshold
+    summary = QLabel(
+        f"<small><b>Inclusion threshold:</b> score ≥ {threshold} | "
+        f"<b>Documents with inclusion disagreement:</b> {inclusion_rate:.1f}%</small>"
+    )
+    summary.setWordWrap(True)
+    layout.addWidget(summary)
+
+    explanation = QLabel(
+        "<small><b>Inclusion agreement</b> measures whether evaluators agree on the "
+        "binary include/exclude decision. This is the most clinically significant metric - "
+        "disagreement means different models would produce different review results.</small>"
+    )
+    explanation.setWordWrap(True)
+    layout.addWidget(explanation)
+
+    return widget
 
 
 class BenchmarkResultsDialog(QDialog):
@@ -241,78 +389,20 @@ class BenchmarkResultsDialog(QDialog):
         return tab
 
     def _create_agreement_tab(self) -> QWidget:
-        """Create the agreement matrix tab."""
+        """Create the agreement matrix tab with sub-tabs for score and inclusion agreement."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Agreement matrix table
-        evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-        n = len(evaluator_names)
-
-        table = QTableWidget()
-        table.setRowCount(n)
-        table.setColumnCount(n)
-        table.setHorizontalHeaderLabels(evaluator_names)
-        table.setVerticalHeaderLabels(evaluator_names)
-
-        # Fill matrix
-        for i, name1 in enumerate(evaluator_names):
-            for j, name2 in enumerate(evaluator_names):
-                if i == j:
-                    # Diagonal - 100% agreement with self
-                    item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                else:
-                    # Get agreement value
-                    key = (name1, name2)
-                    alt_key = (name2, name1)
-                    agreement = self.result.agreement_matrix.get(
-                        key, self.result.agreement_matrix.get(alt_key, 0.0)
-                    )
-                    pct = agreement * 100
-
-                    item = QTableWidgetItem(f"{pct:.0f}%")
-
-                    # Color based on agreement level
-                    if pct >= 90:
-                        item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                    elif pct >= 75:
-                        item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
-                    else:
-                        item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
-
-                item.setTextAlignment(Qt.AlignCenter)
-                table.setItem(i, j, item)
-
-        # Configure table
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-
-        layout.addWidget(table)
-
-        # Legend
-        legend_layout = QHBoxLayout()
-        legend_layout.addStretch()
-        agreement_legend = [
-            ("High", BENCHMARK_AGREEMENT_HIGH),
-            ("Medium", BENCHMARK_AGREEMENT_MEDIUM),
-            ("Low", BENCHMARK_AGREEMENT_LOW),
-        ]
-        for level, color in agreement_legend:
-            label = QLabel(f"  {level}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
-            legend_layout.addWidget(label)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-
-        # Explanation
-        explanation = QLabel(
-            "<small>Agreement is calculated as the percentage of documents where "
-            "evaluators gave scores within ±1 of each other.</small>"
+        agreement_tabs = QTabWidget()
+        agreement_tabs.addTab(
+            _create_score_agreement_matrix_widget(self.result),
+            "Score Agreement (±1)"
         )
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
+        agreement_tabs.addTab(
+            _create_inclusion_agreement_matrix_widget(self.result),
+            "Inclusion Agreement"
+        )
+        layout.addWidget(agreement_tabs)
 
         return tab
 
@@ -380,10 +470,15 @@ class BenchmarkResultsDialog(QDialog):
         self.show_all_btn.clicked.connect(lambda: self._filter_documents("all"))
         filter_layout.addWidget(self.show_all_btn)
 
-        self.show_disagreements_btn = QPushButton("Disagreements Only")
+        self.show_disagreements_btn = QPushButton("Score Disagreements")
         self.show_disagreements_btn.setCheckable(True)
         self.show_disagreements_btn.clicked.connect(lambda: self._filter_documents("disagreements"))
         filter_layout.addWidget(self.show_disagreements_btn)
+
+        self.show_inclusion_btn = QPushButton("Inclusion Disagreements")
+        self.show_inclusion_btn.setCheckable(True)
+        self.show_inclusion_btn.clicked.connect(lambda: self._filter_documents("inclusion"))
+        filter_layout.addWidget(self.show_inclusion_btn)
 
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
@@ -431,11 +526,16 @@ class BenchmarkResultsDialog(QDialog):
             title_item.setToolTip(comparison.document.title)
             self.details_table.setItem(row, 0, title_item)
 
-            # Max difference
+            # Max difference - highlight inclusion disagreements more prominently
             max_diff = comparison.max_score_difference
-            diff_item = QTableWidgetItem(str(max_diff))
+            has_inclusion = comparison.has_inclusion_disagreement(self.result.inclusion_threshold)
+            diff_text = f"{max_diff}" + (" ⚠" if has_inclusion else "")
+            diff_item = QTableWidgetItem(diff_text)
             diff_item.setTextAlignment(Qt.AlignCenter)
-            if max_diff > 1:
+            if has_inclusion:
+                diff_item.setBackground(QColor(BENCHMARK_INCLUSION_DISAGREEMENT))
+                diff_item.setToolTip("Inclusion disagreement: models disagree on include/exclude")
+            elif max_diff > 1:
                 diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
             self.details_table.setItem(row, 1, diff_item)
 
@@ -451,19 +551,26 @@ class BenchmarkResultsDialog(QDialog):
 
     def _filter_documents(self, filter_type: str) -> None:
         """Filter documents in the details view."""
+        self.show_all_btn.setChecked(filter_type == "all")
+        self.show_disagreements_btn.setChecked(filter_type == "disagreements")
+        self.show_inclusion_btn.setChecked(filter_type == "inclusion")
+
         if filter_type == "all":
-            self.show_all_btn.setChecked(True)
-            self.show_disagreements_btn.setChecked(False)
             self._populate_details_table(self.result.document_comparisons)
-        else:
-            self.show_all_btn.setChecked(False)
-            self.show_disagreements_btn.setChecked(True)
-            # Filter to only disagreements (max_diff > 1)
+        elif filter_type == "disagreements":
+            # Filter to only score disagreements (max_diff > 1)
             disagreements = [
                 c for c in self.result.document_comparisons
                 if c.max_score_difference > 1
             ]
             self._populate_details_table(disagreements)
+        elif filter_type == "inclusion":
+            # Filter to only inclusion disagreements (most clinically significant)
+            inclusion_disagreements = [
+                c for c in self.result.document_comparisons
+                if c.has_inclusion_disagreement(self.result.inclusion_threshold)
+            ]
+            self._populate_details_table(inclusion_disagreements)
 
     def _on_document_double_clicked(self, row: int, col: int) -> None:
         """Handle document double-click to show explanations."""
@@ -746,78 +853,20 @@ class BenchmarkResultsTab(QWidget):
         return tab
 
     def _create_agreement_tab(self) -> QWidget:
-        """Create the agreement matrix tab."""
+        """Create the agreement matrix tab with sub-tabs for score and inclusion agreement."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Agreement matrix table
-        evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-        n = len(evaluator_names)
-
-        table = QTableWidget()
-        table.setRowCount(n)
-        table.setColumnCount(n)
-        table.setHorizontalHeaderLabels(evaluator_names)
-        table.setVerticalHeaderLabels(evaluator_names)
-
-        # Fill matrix
-        for i, name1 in enumerate(evaluator_names):
-            for j, name2 in enumerate(evaluator_names):
-                if i == j:
-                    # Diagonal - 100% agreement with self
-                    item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                else:
-                    # Get agreement value
-                    key = (name1, name2)
-                    alt_key = (name2, name1)
-                    agreement = self.result.agreement_matrix.get(
-                        key, self.result.agreement_matrix.get(alt_key, 0.0)
-                    )
-                    pct = agreement * 100
-
-                    item = QTableWidgetItem(f"{pct:.0f}%")
-
-                    # Color based on agreement level
-                    if pct >= 90:
-                        item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                    elif pct >= 75:
-                        item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
-                    else:
-                        item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
-
-                item.setTextAlignment(Qt.AlignCenter)
-                table.setItem(i, j, item)
-
-        # Configure table
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-
-        layout.addWidget(table)
-
-        # Legend
-        legend_layout = QHBoxLayout()
-        legend_layout.addStretch()
-        agreement_legend = [
-            ("High", BENCHMARK_AGREEMENT_HIGH),
-            ("Medium", BENCHMARK_AGREEMENT_MEDIUM),
-            ("Low", BENCHMARK_AGREEMENT_LOW),
-        ]
-        for level, color in agreement_legend:
-            label = QLabel(f"  {level}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
-            legend_layout.addWidget(label)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-
-        # Explanation
-        explanation = QLabel(
-            "<small>Agreement is calculated as the percentage of documents where "
-            "evaluators gave scores within ±1 of each other.</small>"
+        agreement_tabs = QTabWidget()
+        agreement_tabs.addTab(
+            _create_score_agreement_matrix_widget(self.result),
+            "Score Agreement (±1)"
         )
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
+        agreement_tabs.addTab(
+            _create_inclusion_agreement_matrix_widget(self.result),
+            "Inclusion Agreement"
+        )
+        layout.addWidget(agreement_tabs)
 
         return tab
 
@@ -885,10 +934,15 @@ class BenchmarkResultsTab(QWidget):
         self.show_all_btn.clicked.connect(lambda: self._filter_documents("all"))
         filter_layout.addWidget(self.show_all_btn)
 
-        self.show_disagreements_btn = QPushButton("Disagreements Only")
+        self.show_disagreements_btn = QPushButton("Score Disagreements")
         self.show_disagreements_btn.setCheckable(True)
         self.show_disagreements_btn.clicked.connect(lambda: self._filter_documents("disagreements"))
         filter_layout.addWidget(self.show_disagreements_btn)
+
+        self.show_inclusion_btn = QPushButton("Inclusion Disagreements")
+        self.show_inclusion_btn.setCheckable(True)
+        self.show_inclusion_btn.clicked.connect(lambda: self._filter_documents("inclusion"))
+        filter_layout.addWidget(self.show_inclusion_btn)
 
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
@@ -936,11 +990,16 @@ class BenchmarkResultsTab(QWidget):
             title_item.setToolTip(comparison.document.title)
             self.details_table.setItem(row, 0, title_item)
 
-            # Max difference
+            # Max difference - highlight inclusion disagreements more prominently
             max_diff = comparison.max_score_difference
-            diff_item = QTableWidgetItem(str(max_diff))
+            has_inclusion = comparison.has_inclusion_disagreement(self.result.inclusion_threshold)
+            diff_text = f"{max_diff}" + (" ⚠" if has_inclusion else "")
+            diff_item = QTableWidgetItem(diff_text)
             diff_item.setTextAlignment(Qt.AlignCenter)
-            if max_diff > 1:
+            if has_inclusion:
+                diff_item.setBackground(QColor(BENCHMARK_INCLUSION_DISAGREEMENT))
+                diff_item.setToolTip("Inclusion disagreement: models disagree on include/exclude")
+            elif max_diff > 1:
                 diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
             self.details_table.setItem(row, 1, diff_item)
 
@@ -956,19 +1015,26 @@ class BenchmarkResultsTab(QWidget):
 
     def _filter_documents(self, filter_type: str) -> None:
         """Filter documents in the details view."""
+        self.show_all_btn.setChecked(filter_type == "all")
+        self.show_disagreements_btn.setChecked(filter_type == "disagreements")
+        self.show_inclusion_btn.setChecked(filter_type == "inclusion")
+
         if filter_type == "all":
-            self.show_all_btn.setChecked(True)
-            self.show_disagreements_btn.setChecked(False)
             self._populate_details_table(self.result.document_comparisons)
-        else:
-            self.show_all_btn.setChecked(False)
-            self.show_disagreements_btn.setChecked(True)
-            # Filter to only disagreements (max_diff > 1)
+        elif filter_type == "disagreements":
+            # Filter to only score disagreements (max_diff > 1)
             disagreements = [
                 c for c in self.result.document_comparisons
                 if c.max_score_difference > 1
             ]
             self._populate_details_table(disagreements)
+        elif filter_type == "inclusion":
+            # Filter to only inclusion disagreements (most clinically significant)
+            inclusion_disagreements = [
+                c for c in self.result.document_comparisons
+                if c.has_inclusion_disagreement(self.result.inclusion_threshold)
+            ]
+            self._populate_details_table(inclusion_disagreements)
 
     def _on_document_double_clicked(self, row: int, col: int) -> None:
         """Handle document double-click to show explanations."""
