@@ -674,7 +674,7 @@ class SettingsDialog(QDialog):
         add_model_layout = QHBoxLayout()
         add_model_layout.addStretch()
         self.add_benchmark_model_btn = QPushButton("+ Add Model")
-        self.add_benchmark_model_btn.clicked.connect(self._add_benchmark_model)
+        self.add_benchmark_model_btn.clicked.connect(lambda: self._add_benchmark_model())
         add_model_layout.addWidget(self.add_benchmark_model_btn)
         models_layout.addLayout(add_model_layout)
 
