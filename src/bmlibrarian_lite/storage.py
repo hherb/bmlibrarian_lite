@@ -1150,7 +1150,7 @@ class LiteStorage:
 
                 # Count scored documents for this question
                 scored_count = self._count_scored_documents_for_question(
-                    conn, question_hash
+                    conn, question
                 )
 
                 summaries.append(ResearchQuestionSummary(
@@ -1168,29 +1168,28 @@ class LiteStorage:
     def _count_scored_documents_for_question(
         self,
         conn: sqlite3.Connection,
-        question_hash: str,
+        question: str,
     ) -> int:
         """
         Count scored documents for a research question.
 
         Args:
             conn: Active SQLite connection
-            question_hash: Normalized question hash
+            question: The research question text
 
         Returns:
             Count of unique scored documents
         """
-        # Find search sessions matching this question hash
-        # Then find checkpoints linked to those sessions
+        # Find checkpoints matching this question directly
         # Then count unique document_ids in scored_documents
         cursor = conn.execute(
             """
             SELECT COUNT(DISTINCT sd.document_id) as count
             FROM scored_documents sd
             INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
-            INNER JOIN search_sessions ss ON rc.search_session_id = ss.id
-            WHERE ss.natural_language_query IS NOT NULL
+            WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
             """,
+            (question,),
         )
         row = cursor.fetchone()
         return row["count"] if row else 0
@@ -1212,15 +1211,14 @@ class LiteStorage:
             Set of document IDs that have been scored
         """
         with self._sqlite_connection() as conn:
-            # Get all scored document IDs across all sessions for this question
-            # We match by normalizing the question text
+            # Get all scored document IDs across all checkpoints for this question
+            # We match by normalizing the question text in review_checkpoints
             cursor = conn.execute(
                 """
                 SELECT DISTINCT sd.document_id
                 FROM scored_documents sd
                 INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
-                INNER JOIN search_sessions ss ON rc.search_session_id = ss.id
-                WHERE LOWER(TRIM(ss.natural_language_query)) = LOWER(TRIM(?))
+                WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
                 """,
                 (question,),
             )

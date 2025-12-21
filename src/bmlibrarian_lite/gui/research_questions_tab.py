@@ -36,7 +36,7 @@ from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
 from ..data_models import LiteDocument, ResearchQuestionSummary
 from ..storage import LiteStorage
 from .workers import IncrementalSearchWorker
-from .benchmark_dialog import BenchmarkWorker, BenchmarkProgressDialog
+from .benchmark_dialog import BenchmarkWorker
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,6 @@ class ResearchQuestionsTab(QWidget):
         self._questions: list[ResearchQuestionSummary] = []
         self._worker: Optional[IncrementalSearchWorker] = None
         self._benchmark_worker: Optional[BenchmarkWorker] = None
-        self._benchmark_progress_dialog: Optional[BenchmarkProgressDialog] = None
 
         self._setup_ui()
         self._load_questions()
@@ -422,7 +421,7 @@ class ResearchQuestionsTab(QWidget):
 
         # Get benchmark models from config
         benchmark_models = [
-            model.model_string for model in self.config.benchmark.models
+            model.get_model_string() for model in self.config.benchmark.models
         ]
         if not benchmark_models:
             self.progress_label.setText("No benchmark models configured in settings")
@@ -435,13 +434,6 @@ class ResearchQuestionsTab(QWidget):
             f"Starting benchmark: {len(documents)} documents × "
             f"{len(benchmark_models)} models"
         )
-
-        # Show progress dialog
-        self._benchmark_progress_dialog = BenchmarkProgressDialog(
-            total_operations=total_ops,
-            parent=self,
-        )
-        self._benchmark_progress_dialog.cancelled.connect(self._cancel_benchmark)
 
         # Create and start worker
         self._benchmark_worker = BenchmarkWorker(
@@ -465,7 +457,6 @@ class ResearchQuestionsTab(QWidget):
         self.questions_table.setEnabled(False)
 
         self._benchmark_worker.start()
-        self._benchmark_progress_dialog.show()
 
     def _on_benchmark_progress(self, current: int, total: int, message: str) -> None:
         """Handle benchmark progress updates."""
@@ -474,19 +465,10 @@ class ResearchQuestionsTab(QWidget):
             self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-        # Update progress dialog
-        if self._benchmark_progress_dialog:
-            self._benchmark_progress_dialog.update_progress(current, message)
-
     def _on_benchmark_finished(self, result: object) -> None:
         """Handle benchmark completion."""
         self._reset_ui()
         self.progress_bar.setVisible(False)
-
-        # Close progress dialog
-        if self._benchmark_progress_dialog:
-            self._benchmark_progress_dialog.close()
-            self._benchmark_progress_dialog = None
 
         # Emit signal for main window to display results
         self.benchmark_completed.emit(result)
@@ -504,11 +486,6 @@ class ResearchQuestionsTab(QWidget):
         """Handle benchmark error."""
         self._reset_ui()
         self.progress_bar.setVisible(False)
-
-        # Close progress dialog
-        if self._benchmark_progress_dialog:
-            self._benchmark_progress_dialog.close()
-            self._benchmark_progress_dialog = None
 
         self.progress_label.setText(f"Benchmark error: {error_message}")
         QMessageBox.warning(
@@ -532,4 +509,3 @@ class ResearchQuestionsTab(QWidget):
             if self._benchmark_worker.isRunning():
                 self._benchmark_worker.wait(2000)
             self._benchmark_worker = None
-        self._benchmark_progress_dialog = None
