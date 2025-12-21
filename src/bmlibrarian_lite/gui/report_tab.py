@@ -33,7 +33,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig
 from ..storage import LiteStorage
-from ..data_models import LiteDocument, ScoredDocument, Citation
+from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
 from ..quality import QualityAssessment
 
 # Directory for auto-saved reports
@@ -92,6 +92,7 @@ class ReportTab(QWidget):
         self._quality_assessments: Dict[str, QualityAssessment] = {}
         self._current_report_path: Optional[Path] = None
         self._loaded_audit_data: Optional[Dict[str, Any]] = None
+        self._report_metadata: Optional[ReportMetadata] = None
 
         # Ensure reports directory exists
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -163,6 +164,7 @@ class ReportTab(QWidget):
         scored_documents: List[ScoredDocument],
         quality_assessments: Optional[Dict[str, QualityAssessment]] = None,
         quality_filter_settings: Optional[Dict[str, Any]] = None,
+        report_metadata: Optional[ReportMetadata] = None,
     ) -> None:
         """
         Display a report from the systematic review workflow.
@@ -175,6 +177,7 @@ class ReportTab(QWidget):
             scored_documents: Documents that passed scoring
             quality_assessments: Optional quality assessments by doc ID
             quality_filter_settings: Optional quality filter settings used
+            report_metadata: Optional metadata for reproducibility
         """
         self._current_report = report
         self._current_question = question
@@ -183,6 +186,7 @@ class ReportTab(QWidget):
         self._scored_documents = scored_documents
         self._quality_assessments = quality_assessments or {}
         self._quality_filter_settings = quality_filter_settings
+        self._report_metadata = report_metadata
 
         # Store citations by document ID
         self._citations_by_doc_id.clear()
@@ -404,12 +408,20 @@ class ReportTab(QWidget):
             # Build audit trail
             quality_filter_settings = getattr(self, '_quality_filter_settings', None) or {}
 
+            # Include methodology from report metadata if available
+            methodology = None
+            report_metadata = getattr(self, '_report_metadata', None)
+            if report_metadata:
+                methodology = report_metadata.to_dict()
+
             audit_data = {
                 "metadata": {
                     "timestamp": datetime.now().isoformat(),
                     "research_question": self._current_question,
                     "report_file": str(report_path),
+                    "version": methodology.get("version", 1) if methodology else 1,
                 },
+                "methodology": methodology,
                 "workflow_summary": {
                     "documents_searched": len(self._documents_found),
                     "documents_scored_relevant": len(self._scored_documents),

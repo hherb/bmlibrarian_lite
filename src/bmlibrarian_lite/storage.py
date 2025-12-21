@@ -159,7 +159,8 @@ class LiteStorage:
         Backfill question_hash for existing benchmark_runs.
 
         This migration runs on startup and populates the question_hash
-        column for any existing runs that don't have one.
+        column for any existing runs that don't have one. Also creates
+        the index on question_hash.
         """
         try:
             with self._sqlite_connection() as conn:
@@ -172,6 +173,15 @@ class LiteStorage:
                     )
                     conn.commit()
                     logger.info("Added question_hash column to benchmark_runs table")
+
+                # Create index on question_hash (safe to run multiple times)
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_benchmark_runs_question_hash
+                        ON benchmark_runs(question_hash)
+                    """
+                )
+                conn.commit()
 
                 # Backfill hashes for existing runs
                 cursor = conn.execute(
@@ -360,8 +370,8 @@ class LiteStorage:
             ON benchmark_runs(status);
         CREATE INDEX IF NOT EXISTS idx_benchmark_runs_task
             ON benchmark_runs(task_type);
-        CREATE INDEX IF NOT EXISTS idx_benchmark_runs_question_hash
-            ON benchmark_runs(question_hash);
+        -- Note: idx_benchmark_runs_question_hash is created in migration
+        -- to handle existing databases without the question_hash column
         """
 
     # =========================================================================

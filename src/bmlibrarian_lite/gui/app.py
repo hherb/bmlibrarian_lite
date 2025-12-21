@@ -286,6 +286,7 @@ class LiteMainWindow(QMainWindow):
         scored_documents: list,
         quality_assessments: dict,
         quality_filter_settings: dict,
+        report_metadata: object = None,
     ) -> None:
         """
         Handle report generation from systematic review.
@@ -300,6 +301,7 @@ class LiteMainWindow(QMainWindow):
             scored_documents: Documents that passed scoring
             quality_assessments: Quality assessments by doc ID
             quality_filter_settings: Quality filter settings used
+            report_metadata: Optional ReportMetadata for reproducibility
         """
         # Display report in the Report tab
         self.report_tab.display_report(
@@ -310,6 +312,7 @@ class LiteMainWindow(QMainWindow):
             scored_documents=scored_documents,
             quality_assessments=quality_assessments,
             quality_filter_settings=quality_filter_settings,
+            report_metadata=report_metadata,
         )
 
         # Switch to Report tab

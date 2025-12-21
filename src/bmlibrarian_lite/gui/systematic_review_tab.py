@@ -32,7 +32,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig
 from ..storage import LiteStorage
-from ..data_models import LiteDocument, ScoredDocument, Citation
+from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
 from ..agents import (
     LiteSearchAgent,
     LiteScoringAgent,
@@ -40,6 +40,7 @@ from ..agents import (
     LiteReportingAgent,
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
+from datetime import datetime
 
 from .quality_filter_panel import QualityFilterPanel
 from .quality_summary import QualitySummaryWidget
@@ -70,7 +71,7 @@ class WorkflowWorker(QThread):
     progress = Signal(str, int, int)  # step, current, total
     step_complete = Signal(str, object)  # step name, result
     error = Signal(str, str)  # step, error message
-    finished = Signal(str)  # final report
+    finished = Signal(str, object)  # final report, ReportMetadata
 
     # Granular signals for audit trail
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
@@ -113,6 +114,31 @@ class WorkflowWorker(QThread):
     def run(self) -> None:
         """Execute the systematic review workflow."""
         try:
+            # Initialize metadata for reproducibility tracking
+            metadata = ReportMetadata(
+                research_question=self.question,
+                min_score_threshold=self.min_score,
+                generated_at=datetime.now(),
+            )
+
+            # Collect model configs for tasks that will be used
+            task_ids = [
+                "query_conversion",
+                "document_scoring",
+                "citation_extraction",
+                "report_generation",
+            ]
+            if self.quality_filter and self.quality_manager:
+                task_ids.append("quality_assessment")
+
+            for task_id in task_ids:
+                config = self.config.models.get_task_config(task_id)
+                metadata.model_configs[task_id] = {
+                    "provider": config.provider,
+                    "model": config.model,
+                    "temperature": config.temperature,
+                }
+
             # Step 1: Search PubMed
             self.progress.emit("search", 0, 1)
             search_agent = LiteSearchAgent(
@@ -124,24 +150,45 @@ class WorkflowWorker(QThread):
                 max_results=self.max_results,
             )
 
-            # Emit query generated signal for audit trail
+            # Update metadata with search info
             if session:
+                metadata.pubmed_query = session.query
+                metadata.pubmed_search_date = session.created_at
+                metadata.documents_retrieved = len(documents)
+                # Total available stored in session metadata if available
+                if hasattr(session, 'metadata') and session.metadata:
+                    metadata.total_results_available = session.metadata.get(
+                        'total_count', len(documents)
+                    )
+                else:
+                    metadata.total_results_available = len(documents)
                 self.query_generated.emit(session.query, session.natural_language_query)
 
             self.step_complete.emit("search", documents)
 
             if self._cancelled:
-                self.finished.emit("Workflow cancelled.")
+                self.finished.emit("Workflow cancelled.", metadata)
                 return
 
             if not documents:
-                self.finished.emit("No documents found for this query.")
+                self.finished.emit("No documents found for this query.", metadata)
                 return
+
+            # Track original document count before quality filtering
+            original_doc_count = len(documents)
 
             # Step 2: Quality filtering (if enabled)
             if self.quality_filter and self.quality_manager:
                 # Only apply quality filter if minimum tier is set
                 if self.quality_filter.minimum_tier.value > 0:
+                    metadata.quality_filter_applied = True
+                    metadata.quality_filter_settings = {
+                        "minimum_tier": self.quality_filter.minimum_tier.name,
+                        "require_randomization": self.quality_filter.require_randomization,
+                        "require_blinding": self.quality_filter.require_blinding,
+                        "minimum_sample_size": self.quality_filter.minimum_sample_size,
+                    }
+
                     self.progress.emit("quality_filter", 0, len(documents))
 
                     def quality_progress(
@@ -163,15 +210,19 @@ class WorkflowWorker(QThread):
                     )
                     self.step_complete.emit("quality_filter", (filtered, assessments))
 
+                    # Track how many filtered by quality
+                    metadata.documents_filtered_by_quality = len(documents) - len(filtered)
+
                     if self._cancelled:
-                        self.finished.emit("Workflow cancelled.")
+                        self.finished.emit("Workflow cancelled.", metadata)
                         return
 
                     if not filtered:
                         self.finished.emit(
                             f"No documents passed quality filter. "
                             f"{len(documents)} documents were assessed but none met "
-                            f"the minimum quality requirements."
+                            f"the minimum quality requirements.",
+                            metadata,
                         )
                         return
 
@@ -182,7 +233,7 @@ class WorkflowWorker(QThread):
             scoring_agent = LiteScoringAgent(config=self.config)
 
             # Track scored documents for per-document signals
-            scored_docs_list: List[ScoredDocument] = []
+            all_scored_docs: List[ScoredDocument] = []
 
             def scoring_progress(current: int, total: int) -> None:
                 self.progress.emit("scoring", current, total)
@@ -194,20 +245,32 @@ class WorkflowWorker(QThread):
                 progress_callback=scoring_progress,
             )
 
-            # Emit per-document signals for audit trail
+            # Emit per-document signals for audit trail and collect all scores
             for scored_doc in scored_docs:
                 self.document_scored.emit(scored_doc)
+                all_scored_docs.append(scored_doc)
 
             self.step_complete.emit("scoring", scored_docs)
 
+            # Update metadata with scoring stats
+            metadata.documents_scored = len(all_scored_docs)
+            metadata.documents_accepted = len([d for d in all_scored_docs if d.score >= self.min_score])
+            metadata.documents_rejected = len([d for d in all_scored_docs if d.score < self.min_score])
+
+            # Calculate score distribution
+            for scored_doc in all_scored_docs:
+                score = scored_doc.score
+                metadata.score_distribution[score] = metadata.score_distribution.get(score, 0) + 1
+
             if self._cancelled:
-                self.finished.emit("Workflow cancelled.")
+                self.finished.emit("Workflow cancelled.", metadata)
                 return
 
             if not scored_docs:
                 self.finished.emit(
                     f"No documents scored {self.min_score} or higher. "
-                    "Try lowering the minimum score threshold."
+                    "Try lowering the minimum score threshold.",
+                    metadata,
                 )
                 return
 
@@ -230,17 +293,22 @@ class WorkflowWorker(QThread):
 
             self.step_complete.emit("citations", citations)
 
+            # Update metadata with citation stats
+            metadata.citations_extracted = len(citations)
+            unique_docs = set(c.document.id for c in citations)
+            metadata.unique_sources_cited = len(unique_docs)
+
             if self._cancelled:
-                self.finished.emit("Workflow cancelled.")
+                self.finished.emit("Workflow cancelled.", metadata)
                 return
 
-            # Step 4: Generate report
+            # Step 5: Generate report with metadata
             self.progress.emit("report", 0, 1)
             reporting_agent = LiteReportingAgent(config=self.config)
-            report = reporting_agent.generate_report(self.question, citations)
+            report = reporting_agent.generate_report(self.question, citations, metadata)
             self.step_complete.emit("report", report)
 
-            self.finished.emit(report)
+            self.finished.emit(report, metadata)
 
         except Exception as e:
             logger.exception("Workflow error")
@@ -273,8 +341,8 @@ class SystematicReviewTab(QWidget):
 
     # Emitted when a report is generated - contains all data needed for display
     # Args: report, question, citations, documents_found, scored_documents,
-    #       quality_assessments, quality_filter_settings
-    report_generated = Signal(str, str, list, list, list, dict, dict)
+    #       quality_assessments, quality_filter_settings, report_metadata
+    report_generated = Signal(str, str, list, list, list, dict, dict, object)
 
     # Audit Trail signals - emitted during workflow for real-time updates
     workflow_started = Signal()  # Emitted when workflow begins
@@ -539,11 +607,20 @@ class SystematicReviewTab(QWidget):
         self.progress_label.setText(f"Error in {step}: {message}")
         self._reset_ui()
 
-    def _on_finished(self, report: str) -> None:
-        """Handle workflow completion."""
+    def _on_finished(self, report: str, metadata: Optional[ReportMetadata] = None) -> None:
+        """
+        Handle workflow completion.
+
+        Args:
+            report: Generated report text
+            metadata: Report metadata for reproducibility
+        """
         self.progress_label.setText("Complete - Report generated")
         self.progress_bar.setValue(100)
         self._reset_ui()
+
+        # Store metadata for potential benchmark use
+        self._report_metadata = metadata
 
         # Emit workflow finished signal for audit trail
         self.workflow_finished.emit()
@@ -569,6 +646,7 @@ class SystematicReviewTab(QWidget):
             self._scored_documents,
             self._quality_assessments,
             quality_filter_settings,
+            metadata,
         )
 
     def _reset_ui(self) -> None:

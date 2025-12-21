@@ -6,9 +6,10 @@ professional research summary with proper attribution.
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
-from ..data_models import Citation
+from ..data_models import Citation, ReportMetadata
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class LiteReportingAgent(LiteBaseAgent):
         self,
         question: str,
         citations: list[Citation],
+        metadata: Optional[ReportMetadata] = None,
     ) -> str:
         """
         Generate a research report from citations.
@@ -63,12 +65,16 @@ class LiteReportingAgent(LiteBaseAgent):
         Args:
             question: Research question
             citations: List of citations to synthesize
+            metadata: Optional report metadata for methodology section
 
         Returns:
             Formatted research report as markdown
         """
         if not citations:
-            return self._generate_no_evidence_report(question)
+            report = self._generate_no_evidence_report(question)
+            if metadata:
+                report += "\n\n" + self.format_methodology_section(metadata)
+            return report
 
         # Format citations for the prompt
         formatted_citations = self._format_citations_for_prompt(citations)
@@ -99,6 +105,10 @@ This format is MANDATORY - do not use plain [Author, Year] citations."""
             # Add references section
             references = self._format_references(citations)
             full_report = f"{report}\n\n## References\n\n{references}"
+
+            # Add methodology section if metadata provided
+            if metadata:
+                full_report += "\n\n" + self.format_methodology_section(metadata)
 
             return full_report
 
@@ -290,3 +300,110 @@ Passage: "{citation.passage}"
                 for c in citations
             ],
         }
+
+    def format_methodology_section(self, metadata: ReportMetadata) -> str:
+        """
+        Format the methodology section for the report.
+
+        Creates a structured markdown section containing all workflow
+        parameters and statistics for reproducibility.
+
+        Args:
+            metadata: Report metadata with workflow details
+
+        Returns:
+            Formatted methodology section as markdown
+        """
+        lines = [
+            "---",
+            "",
+            "## Methodology",
+            "",
+            "### Search Strategy",
+            f"- **Research Question:** {metadata.research_question}",
+            f"- **PubMed Query:** `{metadata.pubmed_query}`",
+        ]
+
+        # Add search date if available
+        if metadata.pubmed_search_date:
+            date_str = metadata.pubmed_search_date.strftime("%Y-%m-%d")
+            lines.append(f"- **Search Date:** {date_str}")
+
+        lines.extend([
+            f"- **Total Results Available:** {metadata.total_results_available:,}",
+            f"- **Documents Retrieved:** {metadata.documents_retrieved:,}",
+            "",
+            "### Document Screening",
+            f"- **Scoring Threshold:** ≥{metadata.min_score_threshold}/5",
+            f"- **Documents Scored:** {metadata.documents_scored:,}",
+            f"- **Accepted:** {metadata.documents_accepted:,} | "
+            f"**Rejected:** {metadata.documents_rejected:,}",
+            "",
+        ])
+
+        # Add score distribution table
+        if metadata.score_distribution:
+            lines.extend([
+                "**Score Distribution:**",
+                "",
+                "| Score | Count |",
+                "|-------|-------|",
+            ])
+            for score in range(5, 0, -1):
+                count = metadata.score_distribution.get(score, 0)
+                lines.append(f"| {score}     | {count}     |")
+            lines.append("")
+
+        # Quality assessment section
+        lines.append("### Quality Assessment")
+        if metadata.quality_filter_applied:
+            lines.append(f"- **Filter Applied:** Yes")
+            if metadata.quality_filter_settings:
+                min_tier = metadata.quality_filter_settings.get("minimum_tier", "Unknown")
+                lines.append(f"- **Minimum Tier:** {min_tier}")
+            lines.append(
+                f"- **Documents Filtered:** {metadata.documents_filtered_by_quality:,}"
+            )
+        else:
+            lines.append("Quality filtering was not applied.")
+        lines.append("")
+
+        # AI models section
+        if metadata.model_configs:
+            lines.extend([
+                "### AI Models Used",
+                "",
+                "| Task | Provider | Model | Temperature |",
+                "|------|----------|-------|-------------|",
+            ])
+            # Define task display names
+            task_names = {
+                "query_conversion": "Query Generation",
+                "document_scoring": "Document Scoring",
+                "citation_extraction": "Citation Extraction",
+                "report_generation": "Report Generation",
+                "quality_assessment": "Quality Assessment",
+            }
+            for task_id, config in metadata.model_configs.items():
+                task_name = task_names.get(task_id, task_id.replace("_", " ").title())
+                provider = config.get("provider", "unknown")
+                model = config.get("model", "unknown")
+                temp = config.get("temperature", "default")
+                lines.append(f"| {task_name} | {provider} | {model} | {temp} |")
+            lines.append("")
+
+        # Citation summary
+        lines.extend([
+            "### Citation Summary",
+            f"- **Citations Extracted:** {metadata.citations_extracted:,}",
+            f"- **Unique Sources:** {metadata.unique_sources_cited:,}",
+            "",
+            "---",
+            f"*Report generated by BMLibrarian Lite*",
+        ])
+
+        # Add version and timestamp
+        timestamp = metadata.generated_at.strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"*Version {metadata.version} | Generated: {timestamp}*")
+
+        return "\n".join(lines)

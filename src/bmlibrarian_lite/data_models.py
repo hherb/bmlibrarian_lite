@@ -752,3 +752,128 @@ class ResearchQuestionSummary:
     total_documents: int = 0
     scored_documents: int = 0
     run_count: int = 1
+
+
+@dataclass
+class ReportMetadata:
+    """
+    Metadata for report reproducibility and versioning.
+
+    Captures all parameters and statistics from a systematic review
+    workflow for inclusion in the report methodology section.
+
+    Attributes:
+        version: Report version number (increments for re-runs)
+        generated_at: When the report was generated
+
+        research_question: The natural language research question
+        pubmed_query: PubMed query string used for search
+        pubmed_search_date: When the PubMed search was executed
+        total_results_available: Total results available in PubMed
+        documents_retrieved: Number of documents actually retrieved
+
+        documents_scored: Total documents that were scored
+        documents_accepted: Documents that met the score threshold
+        documents_rejected: Documents below the score threshold
+        min_score_threshold: Minimum relevance score used (1-5)
+        score_distribution: Count of documents at each score level
+
+        quality_filter_applied: Whether quality filtering was used
+        quality_filter_settings: Quality filter configuration
+        documents_filtered_by_quality: Documents removed by quality filter
+
+        model_configs: LLM configuration for each workflow task
+        citations_extracted: Total citation passages extracted
+        unique_sources_cited: Number of unique documents cited
+    """
+
+    # Version info
+    version: int = 1
+    generated_at: datetime = field(default_factory=datetime.now)
+
+    # Search info
+    research_question: str = ""
+    pubmed_query: str = ""
+    pubmed_search_date: Optional[datetime] = None
+    total_results_available: int = 0
+    documents_retrieved: int = 0
+
+    # Scoring info
+    documents_scored: int = 0
+    documents_accepted: int = 0
+    documents_rejected: int = 0
+    min_score_threshold: int = 3
+    score_distribution: dict[int, int] = field(default_factory=dict)
+
+    # Quality filter info
+    quality_filter_applied: bool = False
+    quality_filter_settings: Optional[dict[str, Any]] = None
+    documents_filtered_by_quality: int = 0
+
+    # LLM configuration by task
+    model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    # Citations info
+    citations_extracted: int = 0
+    unique_sources_cited: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "version": self.version,
+            "generated_at": self.generated_at.isoformat(),
+            "research_question": self.research_question,
+            "pubmed_query": self.pubmed_query,
+            "pubmed_search_date": (
+                self.pubmed_search_date.isoformat()
+                if self.pubmed_search_date
+                else None
+            ),
+            "total_results_available": self.total_results_available,
+            "documents_retrieved": self.documents_retrieved,
+            "documents_scored": self.documents_scored,
+            "documents_accepted": self.documents_accepted,
+            "documents_rejected": self.documents_rejected,
+            "min_score_threshold": self.min_score_threshold,
+            "score_distribution": self.score_distribution,
+            "quality_filter_applied": self.quality_filter_applied,
+            "quality_filter_settings": self.quality_filter_settings,
+            "documents_filtered_by_quality": self.documents_filtered_by_quality,
+            "model_configs": self.model_configs,
+            "citations_extracted": self.citations_extracted,
+            "unique_sources_cited": self.unique_sources_cited,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ReportMetadata":
+        """Create from dictionary."""
+        generated_at = data.get("generated_at")
+        if isinstance(generated_at, str):
+            generated_at = datetime.fromisoformat(generated_at)
+        elif generated_at is None:
+            generated_at = datetime.now()
+
+        search_date = data.get("pubmed_search_date")
+        if isinstance(search_date, str):
+            search_date = datetime.fromisoformat(search_date)
+
+        return cls(
+            version=data.get("version", 1),
+            generated_at=generated_at,
+            research_question=data.get("research_question", ""),
+            pubmed_query=data.get("pubmed_query", ""),
+            pubmed_search_date=search_date,
+            total_results_available=data.get("total_results_available", 0),
+            documents_retrieved=data.get("documents_retrieved", 0),
+            documents_scored=data.get("documents_scored", 0),
+            documents_accepted=data.get("documents_accepted", 0),
+            documents_rejected=data.get("documents_rejected", 0),
+            min_score_threshold=data.get("min_score_threshold", 3),
+            score_distribution=data.get("score_distribution", {}),
+            quality_filter_applied=data.get("quality_filter_applied", False),
+            quality_filter_settings=data.get("quality_filter_settings"),
+            documents_filtered_by_quality=data.get("documents_filtered_by_quality", 0),
+            model_configs=data.get("model_configs", {}),
+            citations_extracted=data.get("citations_extracted", 0),
+            unique_sources_cited=data.get("unique_sources_cited", 0),
+        )
