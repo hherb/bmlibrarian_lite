@@ -170,7 +170,7 @@ class ResearchQuestionsTab(QWidget):
         )
         # Only show if benchmarking is enabled
         self.benchmark_btn.setVisible(
-            self.config.benchmarking.enabled and len(self.config.benchmarking.models) > 0
+            self.config.benchmark.enabled and len(self.config.benchmark.models) > 0
         )
         target_layout.addWidget(self.benchmark_btn)
 
@@ -271,8 +271,8 @@ class ResearchQuestionsTab(QWidget):
                 # Check if there are scored documents for benchmarking
                 has_scored = question.scored_count > 0
                 benchmarking_available = (
-                    self.config.benchmarking.enabled
-                    and len(self.config.benchmarking.models) > 0
+                    self.config.benchmark.enabled
+                    and len(self.config.benchmark.models) > 0
                 )
                 self.benchmark_btn.setEnabled(has_scored and benchmarking_available)
                 self.progress_label.setText(
@@ -422,7 +422,7 @@ class ResearchQuestionsTab(QWidget):
 
         # Get benchmark models from config
         benchmark_models = [
-            model.model_string for model in self.config.benchmarking.models
+            model.model_string for model in self.config.benchmark.models
         ]
         if not benchmark_models:
             self.progress_label.setText("No benchmark models configured in settings")
