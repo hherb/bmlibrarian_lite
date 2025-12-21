@@ -345,6 +345,16 @@ class LiteStorage:
             completed_at TIMESTAMP
         );
 
+        -- Pivot table linking questions to documents found
+        CREATE TABLE IF NOT EXISTS question_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_hash TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            search_session_id TEXT,
+            found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(question_hash, document_id)
+        );
+
         -- Create indexes for common queries
         CREATE INDEX IF NOT EXISTS idx_search_sessions_created
             ON search_sessions(created_at);
@@ -372,6 +382,10 @@ class LiteStorage:
             ON benchmark_runs(task_type);
         -- Note: idx_benchmark_runs_question_hash is created in migration
         -- to handle existing databases without the question_hash column
+        CREATE INDEX IF NOT EXISTS idx_question_documents_question_hash
+            ON question_documents(question_hash);
+        CREATE INDEX IF NOT EXISTS idx_question_documents_document_id
+            ON question_documents(document_id);
         """
 
     # =========================================================================
@@ -1221,6 +1235,86 @@ class LiteStorage:
                 WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
                 """,
                 (question,),
+            )
+            return {row["document_id"] for row in cursor}
+
+    def add_question_documents(
+        self,
+        question: str,
+        document_ids: list[str],
+        search_session_id: Optional[str] = None,
+    ) -> int:
+        """
+        Record documents found for a research question.
+
+        Uses INSERT OR IGNORE to handle duplicates gracefully - if a document
+        was already found for this question, it won't be added again.
+
+        Args:
+            question: The research question text
+            document_ids: List of document IDs found
+            search_session_id: Optional search session that found these docs
+
+        Returns:
+            Number of new document associations added
+        """
+        from .benchmarking.statistics import compute_question_hash
+
+        question_hash = compute_question_hash(question)
+        added = 0
+
+        with self._sqlite_connection() as conn:
+            for doc_id in document_ids:
+                try:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO question_documents
+                        (question_hash, document_id, search_session_id)
+                        VALUES (?, ?, ?)
+                        """,
+                        (question_hash, doc_id, search_session_id),
+                    )
+                    if conn.total_changes > 0:
+                        added += 1
+                except Exception:
+                    # Ignore duplicates or other errors
+                    pass
+            conn.commit()
+
+        logger.debug(
+            f"Added {added} new document associations for question "
+            f"(hash: {question_hash[:8]}...)"
+        )
+        return added
+
+    def get_document_ids_for_question(
+        self,
+        question: str,
+    ) -> set[str]:
+        """
+        Get all document IDs that were found for a research question.
+
+        This returns ALL documents that were ever retrieved for this question,
+        regardless of whether they have been scored.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            Set of document IDs found for this question
+        """
+        from .benchmarking.statistics import compute_question_hash
+
+        question_hash = compute_question_hash(question)
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT DISTINCT document_id
+                FROM question_documents
+                WHERE question_hash = ?
+                """,
+                (question_hash,),
             )
             return {row["document_id"] for row in cursor}
 

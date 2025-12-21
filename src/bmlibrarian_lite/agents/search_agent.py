@@ -179,6 +179,15 @@ class LiteSearchAgent(LiteBaseAgent):
             document_count=len(documents),
         )
 
+        # Record document-question associations for later retrieval
+        if documents:
+            doc_ids = [doc.id for doc in documents]
+            self.storage.add_question_documents(
+                question=question,
+                document_ids=doc_ids,
+                search_session_id=session.id,
+            )
+
         logger.info(f"Cached {len(documents)} documents in session {session.id}")
         return session, documents
 
@@ -246,6 +255,16 @@ class LiteSearchAgent(LiteBaseAgent):
             natural_language_query=natural_language_query or pubmed_query,
             document_count=len(documents),
         )
+
+        # Record document-question associations for later retrieval
+        question = natural_language_query or pubmed_query
+        if documents:
+            doc_ids = [doc.id for doc in documents]
+            self.storage.add_question_documents(
+                question=question,
+                document_ids=doc_ids,
+                search_session_id=session.id,
+            )
 
         return session, documents
 

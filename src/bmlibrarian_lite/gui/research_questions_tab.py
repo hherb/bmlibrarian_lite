@@ -407,10 +407,15 @@ class ResearchQuestionsTab(QWidget):
         if not question:
             return
 
-        # Get all scored document IDs for this question
-        doc_ids = self.storage.get_scored_document_ids_for_question(question.question)
+        # Get all document IDs found for this question (not just scored)
+        doc_ids = self.storage.get_document_ids_for_question(question.question)
+
+        # Fall back to scored documents if pivot table is empty (legacy data)
         if not doc_ids:
-            self.progress_label.setText("No scored documents available for benchmarking")
+            doc_ids = self.storage.get_scored_document_ids_for_question(question.question)
+
+        if not doc_ids:
+            self.progress_label.setText("No documents available for benchmarking")
             return
 
         # Fetch the actual documents
