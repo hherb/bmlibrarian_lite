@@ -176,6 +176,7 @@ class BenchmarkRunner:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         reuse_existing: bool = True,
         existing_scores: Optional[list[ScoredDocument]] = None,
+        reuse_cross_run: bool = True,
     ) -> BenchmarkResult:
         """
         Execute a benchmark run.
@@ -184,8 +185,9 @@ class BenchmarkRunner:
             run_id: Benchmark run ID
             checkpoint_id: Checkpoint ID to associate scores with
             progress_callback: Called with (current, total, status_message)
-            reuse_existing: If True, reuse cached evaluations
+            reuse_existing: If True, reuse cached evaluations from this run
             existing_scores: Pre-existing scores to reuse (e.g., from initial scoring)
+            reuse_cross_run: If True, reuse scores from previous runs of same question
 
         Returns:
             Complete benchmark results
@@ -237,6 +239,20 @@ class BenchmarkRunner:
         baseline_model = self.config.models.get_model_string("document_scoring")
         logger.debug(f"Baseline model for initial scoring: {baseline_model}")
 
+        # Load scores from previous benchmark runs for same question
+        cross_run_scores: dict[str, dict[str, ScoredDocument]] = {}
+        if reuse_cross_run:
+            cross_run_scores = self.storage.get_all_scores_for_question(
+                question=run.question,
+                document_ids=run.document_ids,
+            )
+            if cross_run_scores:
+                total_cross_run = sum(len(d) for d in cross_run_scores.values())
+                logger.info(
+                    f"Found {total_cross_run} existing scores from previous runs "
+                    f"for {len(cross_run_scores)} evaluators"
+                )
+
         # Collect scores: evaluator_id -> document_id -> ScoredDocument
         all_scores: dict[str, dict[str, ScoredDocument]] = {}
 
@@ -285,7 +301,20 @@ class BenchmarkRunner:
                             self.storage.save_scored_document(reused, checkpoint_id)
                             continue
 
-                    # Check for existing evaluation in database
+                    # Check for cross-run scores from previous benchmarks
+                    if reuse_cross_run and evaluator.id in cross_run_scores:
+                        if document.id in cross_run_scores[evaluator.id]:
+                            existing = cross_run_scores[evaluator.id][document.id]
+                            logger.debug(
+                                f"Reusing cross-run score for {document.id} "
+                                f"by {evaluator.display_name}"
+                            )
+                            all_scores[evaluator.id][document.id] = existing
+                            # Save to storage with current checkpoint for consistency
+                            self.storage.save_scored_document(existing, checkpoint_id)
+                            continue
+
+                    # Check for existing evaluation in current checkpoint
                     if reuse_existing:
                         existing = self.storage.get_scored_document_by_evaluator(
                             document_id=document.id,
@@ -358,6 +387,7 @@ class BenchmarkRunner:
         name: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         existing_scores: Optional[list[ScoredDocument]] = None,
+        reuse_cross_run: bool = True,
     ) -> BenchmarkResult:
         """
         Convenience method to create and run a benchmark in one call.
@@ -370,6 +400,7 @@ class BenchmarkRunner:
             name: Optional benchmark name
             progress_callback: Progress callback
             existing_scores: Pre-existing scores to reuse for the baseline model
+            reuse_cross_run: If True, reuse scores from previous runs of same question
 
         Returns:
             Benchmark results
@@ -404,6 +435,7 @@ class BenchmarkRunner:
             checkpoint_id=checkpoint_id,
             progress_callback=progress_callback,
             existing_scores=existing_scores,
+            reuse_cross_run=reuse_cross_run,
         )
 
     def _score_document(

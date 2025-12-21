@@ -170,15 +170,50 @@ CREATE TABLE user_settings (
 );
 ```
 
+### `benchmark_runs`
+
+Tracks benchmark comparison runs across multiple evaluators.
+
+```sql
+CREATE TABLE benchmark_runs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,                     -- User-provided name
+    description TEXT,                       -- Optional description
+    question TEXT NOT NULL,                 -- Research question
+    question_hash TEXT,                     -- Normalized hash for question lookup
+    task_type TEXT NOT NULL,                -- e.g., "document_scoring"
+    evaluator_ids TEXT NOT NULL,            -- JSON array of evaluator IDs
+    document_ids TEXT NOT NULL,             -- JSON array of document IDs
+    status TEXT DEFAULT 'pending' CHECK (
+        status IN ('pending', 'running', 'completed', 'failed', 'cancelled')
+    ),
+    progress_current INTEGER DEFAULT 0,
+    progress_total INTEGER DEFAULT 0,
+    error_message TEXT,
+    results_summary TEXT,                   -- JSON with aggregated statistics
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP
+);
+```
+
+The `question_hash` column enables efficient lookup of benchmark runs by research question.
+It uses a normalized SHA-256 hash (16 hex chars) of the lowercase, whitespace-collapsed question text.
+
 ## Indexes
 
 ```sql
 CREATE INDEX idx_search_sessions_created ON search_sessions(created_at);
 CREATE INDEX idx_checkpoints_updated ON review_checkpoints(updated_at);
 CREATE INDEX idx_scored_docs_checkpoint ON scored_documents(checkpoint_id);
+CREATE INDEX idx_scored_docs_evaluator ON scored_documents(evaluator_id);
+CREATE INDEX idx_scored_docs_doc_eval ON scored_documents(document_id, evaluator_id);
 CREATE INDEX idx_citations_checkpoint ON citations(checkpoint_id);
 CREATE INDEX idx_pubmed_cache_expires ON pubmed_cache(expires_at);
 CREATE INDEX idx_interrogation_sessions_created ON interrogation_sessions(created_at);
+CREATE INDEX idx_benchmark_runs_status ON benchmark_runs(status);
+CREATE INDEX idx_benchmark_runs_task ON benchmark_runs(task_type);
+CREATE INDEX idx_benchmark_runs_question_hash ON benchmark_runs(question_hash);
 ```
 
 ## Data Models (Python)

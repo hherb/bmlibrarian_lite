@@ -18,6 +18,7 @@ Usage:
     results = storage.search_documents("query", embedding_function=embed_fn)
 """
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -31,6 +32,7 @@ from chromadb.config import Settings as ChromaSettings
 
 from .config import LiteConfig
 from .constants import (
+    BENCHMARK_QUESTION_HASH_LENGTH,
     CHROMA_CHUNKS_COLLECTION,
     CHROMA_DOCUMENTS_COLLECTION,
     PUBMED_CACHE_TTL_SECONDS,
@@ -49,6 +51,28 @@ from .data_models import (
 from .exceptions import ChromaDBError, SQLiteError, LiteStorageError
 
 logger = logging.getLogger(__name__)
+
+
+def compute_question_hash(question: str) -> str:
+    """
+    Compute deterministic hash for research question lookup.
+
+    Normalizes the question text (lowercase, whitespace-collapsed)
+    before hashing to handle minor variations.
+
+    Args:
+        question: Research question text
+
+    Returns:
+        Hex hash string of length BENCHMARK_QUESTION_HASH_LENGTH
+
+    Raises:
+        ValueError: If question is empty or None
+    """
+    if not question or not question.strip():
+        raise ValueError("Question cannot be empty")
+    normalized = " ".join(question.lower().strip().split())
+    return hashlib.sha256(normalized.encode()).hexdigest()[:BENCHMARK_QUESTION_HASH_LENGTH]
 
 
 class LiteStorage:
@@ -121,11 +145,51 @@ class LiteStorage:
             with self._sqlite_connection() as conn:
                 conn.executescript(self._get_sqlite_schema())
                 conn.commit()
+            # Run migrations for existing data
+            self._migrate_benchmark_question_hashes()
             logger.debug(f"SQLite initialized at {self._storage_config.sqlite_path}")
         except sqlite3.Error as e:
             raise SQLiteError(
                 f"Failed to initialize SQLite at {self._storage_config.sqlite_path}: {e}"
             ) from e
+
+    def _migrate_benchmark_question_hashes(self) -> None:
+        """
+        Backfill question_hash for existing benchmark_runs.
+
+        This migration runs on startup and populates the question_hash
+        column for any existing runs that don't have one.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                # Check if the column exists (handle old schema)
+                cursor = conn.execute("PRAGMA table_info(benchmark_runs)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "question_hash" not in columns:
+                    conn.execute(
+                        "ALTER TABLE benchmark_runs ADD COLUMN question_hash TEXT"
+                    )
+                    conn.commit()
+                    logger.info("Added question_hash column to benchmark_runs table")
+
+                # Backfill hashes for existing runs
+                cursor = conn.execute(
+                    "SELECT id, question FROM benchmark_runs WHERE question_hash IS NULL"
+                )
+                rows = cursor.fetchall()
+                if rows:
+                    for row in rows:
+                        question_hash = compute_question_hash(row["question"])
+                        conn.execute(
+                            "UPDATE benchmark_runs SET question_hash = ? WHERE id = ?",
+                            (question_hash, row["id"]),
+                        )
+                    conn.commit()
+                    logger.info(
+                        f"Backfilled question_hash for {len(rows)} existing benchmark runs"
+                    )
+        except sqlite3.Error as e:
+            logger.warning(f"Failed to migrate benchmark question hashes: {e}")
 
     @contextmanager
     def _sqlite_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -254,6 +318,7 @@ class LiteStorage:
             name TEXT NOT NULL,
             description TEXT,
             question TEXT NOT NULL,
+            question_hash TEXT,
             task_type TEXT NOT NULL,
             evaluator_ids TEXT NOT NULL,
             document_ids TEXT NOT NULL,
@@ -294,6 +359,8 @@ class LiteStorage:
             ON benchmark_runs(status);
         CREATE INDEX IF NOT EXISTS idx_benchmark_runs_task
             ON benchmark_runs(task_type);
+        CREATE INDEX IF NOT EXISTS idx_benchmark_runs_question_hash
+            ON benchmark_runs(question_hash);
         """
 
     # =========================================================================
@@ -1568,21 +1635,24 @@ class LiteStorage:
         run_id = str(uuid.uuid4())
         now = datetime.now()
         total = len(evaluator_ids) * len(document_ids)
+        question_hash = compute_question_hash(question)
 
         try:
             with self._sqlite_connection() as conn:
                 conn.execute(
                     """
                     INSERT INTO benchmark_runs
-                    (id, name, description, question, task_type, evaluator_ids,
-                     document_ids, status, progress_current, progress_total, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, name, description, question, question_hash, task_type,
+                     evaluator_ids, document_ids, status, progress_current,
+                     progress_total, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
                         name,
                         description,
                         question,
+                        question_hash,
                         task_type,
                         json.dumps(evaluator_ids),
                         json.dumps(document_ids),
@@ -1600,6 +1670,7 @@ class LiteStorage:
                 name=name,
                 description=description,
                 question=question,
+                question_hash=question_hash,
                 task_type=task_type,
                 evaluator_ids=evaluator_ids,
                 document_ids=document_ids,
@@ -1624,10 +1695,10 @@ class LiteStorage:
         with self._sqlite_connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT id, name, description, question, task_type, evaluator_ids,
-                       document_ids, status, progress_current, progress_total,
-                       error_message, results_summary, created_at, started_at,
-                       completed_at
+                SELECT id, name, description, question, question_hash, task_type,
+                       evaluator_ids, document_ids, status, progress_current,
+                       progress_total, error_message, results_summary, created_at,
+                       started_at, completed_at
                 FROM benchmark_runs
                 WHERE id = ?
                 """,
@@ -1643,6 +1714,7 @@ class LiteStorage:
                 name=row["name"],
                 description=row["description"],
                 question=row["question"],
+                question_hash=row["question_hash"],
                 task_type=row["task_type"],
                 evaluator_ids=json.loads(row["evaluator_ids"]),
                 document_ids=json.loads(row["document_ids"]),
@@ -1697,6 +1769,7 @@ class LiteStorage:
                     name=row["name"],
                     description=row["description"],
                     question=row["question"],
+                    question_hash=row["question_hash"],
                     task_type=row["task_type"],
                     evaluator_ids=json.loads(row["evaluator_ids"]),
                     document_ids=json.loads(row["document_ids"]),
@@ -1789,3 +1862,192 @@ class LiteStorage:
             except Exception as e:
                 logger.error(f"Failed to delete benchmark run {run_id}: {e}")
                 return False
+
+    def get_benchmark_runs_by_question(
+        self,
+        question: str,
+        status: Optional[BenchmarkStatus] = None,
+        limit: int = 50,
+    ) -> list[BenchmarkRun]:
+        """
+        Get benchmark runs for a specific research question.
+
+        Uses normalized question hash for efficient and consistent lookup,
+        handling minor variations in whitespace and capitalization.
+
+        Args:
+            question: Research question text
+            status: Optional filter by status (e.g., COMPLETED)
+            limit: Maximum number of runs to return
+
+        Returns:
+            List of matching benchmark runs, most recent first
+        """
+        question_hash = compute_question_hash(question)
+
+        query = "SELECT * FROM benchmark_runs WHERE question_hash = ?"
+        params: list[Any] = [question_hash]
+
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status.value)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+
+            runs = []
+            for row in cursor:
+                runs.append(BenchmarkRun(
+                    id=row["id"],
+                    name=row["name"],
+                    description=row["description"],
+                    question=row["question"],
+                    question_hash=row["question_hash"],
+                    task_type=row["task_type"],
+                    evaluator_ids=json.loads(row["evaluator_ids"]),
+                    document_ids=json.loads(row["document_ids"]),
+                    status=BenchmarkStatus(row["status"]),
+                    progress_current=row["progress_current"],
+                    progress_total=row["progress_total"],
+                    error_message=row["error_message"],
+                    results_summary=row["results_summary"],
+                    created_at=row["created_at"],
+                    started_at=row["started_at"],
+                    completed_at=row["completed_at"],
+                ))
+
+            return runs
+
+    def get_all_scores_for_question(
+        self,
+        question: str,
+        document_ids: Optional[list[str]] = None,
+    ) -> dict[str, dict[str, ScoredDocument]]:
+        """
+        Get all benchmark scores for a research question across all runs.
+
+        Aggregates scores from all completed benchmark runs for the
+        given question. For documents scored multiple times by the
+        same evaluator, returns the most recent score.
+
+        Args:
+            question: Research question text
+            document_ids: Optional filter to specific documents
+
+        Returns:
+            Nested dict: evaluator_id -> document_id -> ScoredDocument
+        """
+        # Get all completed runs for this question
+        runs = self.get_benchmark_runs_by_question(
+            question, status=BenchmarkStatus.COMPLETED
+        )
+
+        if not runs:
+            return {}
+
+        # Collect all checkpoint IDs from these runs
+        # Note: We need to find scored_documents associated with these runs
+        # The scored_documents are linked via checkpoint_id, and we store
+        # the evaluator_id with each score
+
+        # Get all evaluator IDs across all runs
+        all_evaluator_ids: set[str] = set()
+        for run in runs:
+            all_evaluator_ids.update(run.evaluator_ids)
+
+        # Build document filter if provided
+        doc_filter = set(document_ids) if document_ids else None
+
+        # Query scored documents for each evaluator
+        all_scores: dict[str, dict[str, ScoredDocument]] = {}
+
+        for evaluator_id in all_evaluator_ids:
+            evaluator = self.get_evaluator(evaluator_id)
+            if not evaluator:
+                continue
+
+            all_scores[evaluator_id] = {}
+
+            # Get all scores by this evaluator (most recent first)
+            with self._sqlite_connection() as conn:
+                query = """
+                    SELECT DISTINCT sd.document_id, sd.score, sd.explanation,
+                           sd.latency_ms, sd.tokens_input, sd.tokens_output,
+                           sd.cost_usd, sd.scored_at
+                    FROM scored_documents sd
+                    WHERE sd.evaluator_id = ?
+                    ORDER BY sd.scored_at DESC
+                """
+                cursor = conn.execute(query, (evaluator_id,))
+
+                seen_docs: set[str] = set()
+                for row in cursor:
+                    doc_id = row["document_id"]
+
+                    # Skip if we've already seen this doc (we want most recent)
+                    if doc_id in seen_docs:
+                        continue
+
+                    # Skip if not in document filter
+                    if doc_filter and doc_id not in doc_filter:
+                        continue
+
+                    seen_docs.add(doc_id)
+
+                    # Get the full document
+                    doc = self.get_document(doc_id)
+                    if not doc:
+                        continue
+
+                    all_scores[evaluator_id][doc_id] = ScoredDocument(
+                        document=doc,
+                        score=row["score"],
+                        explanation=row["explanation"],
+                        evaluator_id=evaluator_id,
+                        evaluator=evaluator,
+                        latency_ms=row["latency_ms"],
+                        tokens_input=row["tokens_input"],
+                        tokens_output=row["tokens_output"],
+                        cost_usd=row["cost_usd"],
+                        scored_at=row["scored_at"],
+                    )
+
+        return all_scores
+
+    def get_evaluators_for_question(
+        self,
+        question: str,
+    ) -> list[Evaluator]:
+        """
+        Get all evaluators that have scored documents for a question.
+
+        Args:
+            question: Research question text
+
+        Returns:
+            List of Evaluator objects that have contributed scores
+        """
+        # Get all completed runs for this question
+        runs = self.get_benchmark_runs_by_question(
+            question, status=BenchmarkStatus.COMPLETED
+        )
+
+        if not runs:
+            return []
+
+        # Collect all unique evaluator IDs
+        all_evaluator_ids: set[str] = set()
+        for run in runs:
+            all_evaluator_ids.update(run.evaluator_ids)
+
+        # Fetch evaluator objects
+        evaluators = []
+        for evaluator_id in all_evaluator_ids:
+            evaluator = self.get_evaluator(evaluator_id)
+            if evaluator:
+                evaluators.append(evaluator)
+
+        return evaluators

@@ -65,6 +65,7 @@ class BenchmarkWorker(QThread):
         models: List[str],
         checkpoint_id: Optional[str] = None,
         existing_scores: Optional[List[ScoredDocument]] = None,
+        reuse_cross_run: bool = True,
     ) -> None:
         """
         Initialize the benchmark worker.
@@ -77,6 +78,7 @@ class BenchmarkWorker(QThread):
             models: List of model strings (provider:model format)
             checkpoint_id: Optional checkpoint ID for storing results
             existing_scores: Pre-existing scores to reuse (e.g., from initial scoring)
+            reuse_cross_run: If True, reuse scores from previous runs of same question
         """
         super().__init__()
         self.config = config
@@ -86,6 +88,7 @@ class BenchmarkWorker(QThread):
         self.models = models
         self.checkpoint_id = checkpoint_id
         self.existing_scores = existing_scores
+        self.reuse_cross_run = reuse_cross_run
         self._cancelled = False
 
     def run(self) -> None:
@@ -108,6 +111,7 @@ class BenchmarkWorker(QThread):
                 checkpoint_id=self.checkpoint_id,
                 progress_callback=on_progress,
                 existing_scores=self.existing_scores,
+                reuse_cross_run=self.reuse_cross_run,
             )
 
             if not self._cancelled:
@@ -129,6 +133,7 @@ class BenchmarkConfirmDialog(QDialog):
 
     Shows:
     - List of models to benchmark
+    - Existing scores from previous runs (if any)
     - Cost estimation
     - Document count and sample options
     """
@@ -138,6 +143,7 @@ class BenchmarkConfirmDialog(QDialog):
         config: LiteConfig,
         documents: List[LiteDocument],
         question: str,
+        storage: Optional["LiteStorage"] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         """
@@ -147,13 +153,23 @@ class BenchmarkConfirmDialog(QDialog):
             config: Lite configuration
             documents: Documents to benchmark
             question: Research question
+            storage: Optional storage layer for checking existing scores
             parent: Optional parent widget
         """
         super().__init__(parent)
         self.config = config
         self.documents = documents
         self.question = question
+        self.storage = storage
         self._model_checkboxes: List[tuple[QCheckBox, BenchmarkModelConfig]] = []
+        self._existing_evaluators: List[Evaluator] = []
+        self.reuse_cross_run_check: Optional[QCheckBox] = None
+
+        # Check for existing scores
+        if self.storage:
+            self._existing_evaluators = self.storage.get_evaluators_for_question(
+                self.question
+            )
 
         self.setWindowTitle("Run Benchmark")
         self.setMinimumWidth(scaled(450))
@@ -173,6 +189,32 @@ class BenchmarkConfirmDialog(QDialog):
         # Documents info
         docs_label = QLabel(f"<b>Documents:</b> {len(self.documents)}")
         layout.addWidget(docs_label)
+
+        # Show existing scores if available
+        if self._existing_evaluators:
+            existing_names = [e.display_name for e in self._existing_evaluators]
+            existing_label = QLabel(
+                f"<span style='color: green;'><b>Existing scores found:</b> "
+                f"{len(self._existing_evaluators)} model(s) have previously "
+                f"scored documents for this question</span>"
+            )
+            existing_label.setWordWrap(True)
+            layout.addWidget(existing_label)
+
+            models_list = QLabel(
+                f"<small>Models: {', '.join(existing_names[:5])}"
+                f"{'...' if len(existing_names) > 5 else ''}</small>"
+            )
+            models_list.setWordWrap(True)
+            layout.addWidget(models_list)
+
+            # Reuse checkbox
+            self.reuse_cross_run_check = QCheckBox(
+                "Reuse scores from previous benchmark runs"
+            )
+            self.reuse_cross_run_check.setChecked(True)
+            self.reuse_cross_run_check.toggled.connect(self._update_cost_estimate)
+            layout.addWidget(self.reuse_cross_run_check)
 
         # Models selection
         models_group = QGroupBox("Models to Benchmark")
@@ -262,15 +304,34 @@ class BenchmarkConfirmDialog(QDialog):
             else self.sample_size_spin.value()
         )
 
+        # Check for reuse and existing evaluators
+        reuse_enabled = self.get_reuse_cross_run()
+        existing_model_strings = {
+            e.model_string for e in self._existing_evaluators if e.model_string
+        }
+
         # Estimate tokens per document (rough estimate)
         avg_input_tokens = 500  # System prompt + document context
         avg_output_tokens = 100  # Score + explanation
 
         lines = []
         total_cost = 0.0
+        reused_count = 0
 
         for model_string in selected_models:
             pricing = get_model_pricing(model_string)
+
+            # Check if this model has existing scores
+            if reuse_enabled and model_string in existing_model_strings:
+                reused_count += 1
+                model_name = (
+                    model_string.split(":", 1)[-1]
+                    if ":" in model_string
+                    else model_string
+                )
+                lines.append(f"• {model_name}: $0.00 (reusing existing)")
+                continue
+
             model_cost = calculate_cost(
                 model_string,
                 avg_input_tokens * doc_count,
@@ -279,14 +340,22 @@ class BenchmarkConfirmDialog(QDialog):
             total_cost += model_cost
 
             # Get short model name
-            model_name = model_string.split(":", 1)[-1] if ":" in model_string else model_string
+            model_name = (
+                model_string.split(":", 1)[-1]
+                if ":" in model_string
+                else model_string
+            )
             if pricing["input"] == 0 and pricing["output"] == 0:
                 lines.append(f"• {model_name}: $0.00 (local)")
             else:
                 lines.append(f"• {model_name}: ~${model_cost:.4f}")
 
         lines.append(f"\n<b>Total estimated cost: ~${total_cost:.4f}</b>")
-        lines.append(f"<small>({doc_count} documents × {len(selected_models)} models)</small>")
+        new_models = len(selected_models) - reused_count
+        lines.append(
+            f"<small>({doc_count} documents × {new_models} new models"
+            f"{f', {reused_count} reused' if reused_count > 0 else ''})</small>"
+        )
 
         self.cost_label.setText("<br>".join(lines))
 
@@ -307,6 +376,12 @@ class BenchmarkConfirmDialog(QDialog):
             import random
             sample_size = min(self.sample_size_spin.value(), len(self.documents))
             return random.sample(self.documents, sample_size)
+
+    def get_reuse_cross_run(self) -> bool:
+        """Get whether to reuse scores from previous benchmark runs."""
+        if self.reuse_cross_run_check is not None:
+            return self.reuse_cross_run_check.isChecked()
+        return True  # Default to True even if no checkbox exists
 
 
 class BenchmarkProgressDialog(QDialog):

@@ -619,6 +619,7 @@ class BenchmarkRun:
         name: User-provided name for the run
         description: Optional description
         question: Research question being evaluated
+        question_hash: Normalized hash of question for efficient lookup
         task_type: Type of task being benchmarked (e.g., document_scoring)
         evaluator_ids: List of evaluator IDs to compare
         document_ids: List of document IDs to evaluate
@@ -640,6 +641,7 @@ class BenchmarkRun:
     document_ids: list[str]
 
     description: Optional[str] = None
+    question_hash: Optional[str] = None
     status: BenchmarkStatus = BenchmarkStatus.PENDING
     progress_current: int = 0
     progress_total: int = 0
@@ -681,6 +683,7 @@ class BenchmarkRun:
             "name": self.name,
             "description": self.description,
             "question": self.question,
+            "question_hash": self.question_hash,
             "task_type": self.task_type,
             "evaluator_ids": self.evaluator_ids,
             "document_ids": self.document_ids,
@@ -709,6 +712,7 @@ class BenchmarkRun:
             name=data["name"],
             description=data.get("description"),
             question=data["question"],
+            question_hash=data.get("question_hash"),
             task_type=data["task_type"],
             evaluator_ids=data["evaluator_ids"],
             document_ids=data["document_ids"],

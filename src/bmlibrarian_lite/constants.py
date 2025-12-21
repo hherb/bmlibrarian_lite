@@ -607,6 +607,10 @@ BENCHMARK_AGREEMENT_HIGH = "#A5D6A7"    # >= 90% agreement
 BENCHMARK_AGREEMENT_MEDIUM = "#FFF9C4"  # >= 75% agreement
 BENCHMARK_AGREEMENT_LOW = "#FFCDD2"     # < 75% agreement
 
+# Question hash length for benchmark run lookup
+# 16 hex chars = 64 bits = sufficient for uniqueness while remaining readable
+BENCHMARK_QUESTION_HASH_LENGTH = 16
+
 # =============================================================================
 # Model Pricing (per 1M tokens, USD)
 # =============================================================================
