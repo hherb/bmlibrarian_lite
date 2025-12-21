@@ -36,6 +36,7 @@ from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
 from ..data_models import LiteDocument, ResearchQuestionSummary
 from ..storage import LiteStorage
 from .workers import IncrementalSearchWorker
+from .benchmark_dialog import BenchmarkWorker, BenchmarkProgressDialog
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +57,13 @@ class ResearchQuestionsTab(QWidget):
             Args: (question, pubmed_query)
         new_documents_found: Emitted when incremental search finds new docs
             Args: (question, pubmed_query, documents)
+        benchmark_completed: Emitted when benchmark run completes
+            Args: (BenchmarkResult)
     """
 
     question_selected = Signal(str, str)  # (question, pubmed_query)
     new_documents_found = Signal(str, str, list)  # (question, pubmed_query, List[LiteDocument])
+    benchmark_completed = Signal(object)  # BenchmarkResult
 
     def __init__(
         self,
@@ -80,6 +84,8 @@ class ResearchQuestionsTab(QWidget):
         self.storage = storage
         self._questions: list[ResearchQuestionSummary] = []
         self._worker: Optional[IncrementalSearchWorker] = None
+        self._benchmark_worker: Optional[BenchmarkWorker] = None
+        self._benchmark_progress_dialog: Optional[BenchmarkProgressDialog] = None
 
         self._setup_ui()
         self._load_questions()
@@ -155,6 +161,18 @@ class ResearchQuestionsTab(QWidget):
             "Search for new documents not yet scored for this question"
         )
         target_layout.addWidget(self.rerun_btn)
+
+        self.benchmark_btn = QPushButton("Run Benchmark")
+        self.benchmark_btn.setEnabled(False)
+        self.benchmark_btn.clicked.connect(self._on_benchmark_clicked)
+        self.benchmark_btn.setToolTip(
+            "Run all configured benchmark models on scored documents"
+        )
+        # Only show if benchmarking is enabled
+        self.benchmark_btn.setVisible(
+            self.config.benchmarking.enabled and len(self.config.benchmarking.models) > 0
+        )
+        target_layout.addWidget(self.benchmark_btn)
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setEnabled(False)
@@ -241,18 +259,29 @@ class ResearchQuestionsTab(QWidget):
     def _on_selection_changed(self) -> None:
         """Handle table selection change."""
         selected = self.questions_table.selectedItems()
-        has_selection = len(selected) > 0 and self._worker is None
+        is_idle = self._worker is None and self._benchmark_worker is None
+        has_selection = len(selected) > 0 and is_idle
         self.rerun_btn.setEnabled(has_selection)
 
+        # Enable benchmark button if question has scored documents
         if has_selection:
             row = self.questions_table.currentRow()
             if 0 <= row < len(self._questions):
                 question = self._questions[row]
+                # Check if there are scored documents for benchmarking
+                has_scored = question.scored_count > 0
+                benchmarking_available = (
+                    self.config.benchmarking.enabled
+                    and len(self.config.benchmarking.models) > 0
+                )
+                self.benchmark_btn.setEnabled(has_scored and benchmarking_available)
                 self.progress_label.setText(
                     f"Selected: {question.question[:80]}..."
                     if len(question.question) > 80
                     else f"Selected: {question.question}"
                 )
+        else:
+            self.benchmark_btn.setEnabled(False)
 
     def _get_selected_question(self) -> Optional[ResearchQuestionSummary]:
         """Get the currently selected question."""
@@ -360,8 +389,10 @@ class ResearchQuestionsTab(QWidget):
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.questions_table.setEnabled(True)
+        # Re-enable benchmark button based on selection
+        self._on_selection_changed()
 
-        # Clean up worker
+        # Clean up workers
         QTimer.singleShot(100, self._cleanup_worker)
 
     def _cleanup_worker(self) -> None:
@@ -370,3 +401,135 @@ class ResearchQuestionsTab(QWidget):
             if self._worker.isRunning():
                 self._worker.wait(2000)
             self._worker = None
+
+    def _on_benchmark_clicked(self) -> None:
+        """Handle benchmark button click."""
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        # Get all scored document IDs for this question
+        doc_ids = self.storage.get_scored_document_ids_for_question(question.question)
+        if not doc_ids:
+            self.progress_label.setText("No scored documents available for benchmarking")
+            return
+
+        # Fetch the actual documents
+        documents = self.storage.get_documents(list(doc_ids))
+        if not documents:
+            self.progress_label.setText("Could not retrieve documents for benchmarking")
+            return
+
+        # Get benchmark models from config
+        benchmark_models = [
+            model.model_string for model in self.config.benchmarking.models
+        ]
+        if not benchmark_models:
+            self.progress_label.setText("No benchmark models configured in settings")
+            return
+
+        # Calculate total operations for progress
+        total_ops = len(benchmark_models) * len(documents)
+
+        self.progress_label.setText(
+            f"Starting benchmark: {len(documents)} documents × "
+            f"{len(benchmark_models)} models"
+        )
+
+        # Show progress dialog
+        self._benchmark_progress_dialog = BenchmarkProgressDialog(
+            total_operations=total_ops,
+            parent=self,
+        )
+        self._benchmark_progress_dialog.cancelled.connect(self._cancel_benchmark)
+
+        # Create and start worker
+        self._benchmark_worker = BenchmarkWorker(
+            config=self.config,
+            storage=self.storage,
+            question=question.question,
+            documents=documents,
+            models=benchmark_models,
+            reuse_cross_run=True,
+        )
+        self._benchmark_worker.progress.connect(self._on_benchmark_progress)
+        self._benchmark_worker.finished.connect(self._on_benchmark_finished)
+        self._benchmark_worker.error.connect(self._on_benchmark_error)
+
+        # Update UI state
+        self.rerun_btn.setEnabled(False)
+        self.benchmark_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.questions_table.setEnabled(False)
+
+        self._benchmark_worker.start()
+        self._benchmark_progress_dialog.show()
+
+    def _on_benchmark_progress(self, current: int, total: int, message: str) -> None:
+        """Handle benchmark progress updates."""
+        if total > 0:
+            percent = int((current / total) * 100)
+            self.progress_bar.setValue(percent)
+        self.progress_label.setText(message)
+
+        # Update progress dialog
+        if self._benchmark_progress_dialog:
+            self._benchmark_progress_dialog.update_progress(current, message)
+
+    def _on_benchmark_finished(self, result: object) -> None:
+        """Handle benchmark completion."""
+        self._reset_ui()
+        self.progress_bar.setVisible(False)
+
+        # Close progress dialog
+        if self._benchmark_progress_dialog:
+            self._benchmark_progress_dialog.close()
+            self._benchmark_progress_dialog = None
+
+        # Emit signal for main window to display results
+        self.benchmark_completed.emit(result)
+
+        doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
+        model_count = len(result.evaluator_stats) if hasattr(result, 'evaluator_stats') else 0
+        self.progress_label.setText(
+            f"Benchmark complete: {doc_count} documents, {model_count} models"
+        )
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_benchmark_worker)
+
+    def _on_benchmark_error(self, error_message: str) -> None:
+        """Handle benchmark error."""
+        self._reset_ui()
+        self.progress_bar.setVisible(False)
+
+        # Close progress dialog
+        if self._benchmark_progress_dialog:
+            self._benchmark_progress_dialog.close()
+            self._benchmark_progress_dialog = None
+
+        self.progress_label.setText(f"Benchmark error: {error_message}")
+        QMessageBox.warning(
+            self,
+            "Benchmark Error",
+            f"An error occurred during benchmarking:\n\n{error_message}",
+        )
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_benchmark_worker)
+
+    def _cancel_benchmark(self) -> None:
+        """Cancel the running benchmark."""
+        if self._benchmark_worker:
+            self._benchmark_worker.cancel()
+            self.progress_label.setText("Cancelling benchmark...")
+
+    def _cleanup_benchmark_worker(self) -> None:
+        """Clean up benchmark worker after completion."""
+        if self._benchmark_worker is not None:
+            if self._benchmark_worker.isRunning():
+                self._benchmark_worker.wait(2000)
+            self._benchmark_worker = None
+        self._benchmark_progress_dialog = None

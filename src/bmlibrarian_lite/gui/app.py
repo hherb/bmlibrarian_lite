@@ -203,6 +203,9 @@ class LiteMainWindow(QMainWindow):
         self.research_questions_tab.new_documents_found.connect(
             self._on_new_documents_found
         )
+        self.research_questions_tab.benchmark_completed.connect(
+            self._on_benchmark_completed
+        )
 
 
         # Status bar
