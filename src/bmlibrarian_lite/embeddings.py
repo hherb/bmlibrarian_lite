@@ -150,7 +150,7 @@ class LiteEmbedder:
             return []
 
         # FastEmbed returns a generator of numpy arrays, convert to list of Python floats
-        # ChromaDB requires standard Python floats, not np.float32
+        # sqlite-vec requires standard Python floats, not np.float32
         embeddings = list(self._model.embed(texts))
 
         logger.debug(f"Generated {len(embeddings)} embeddings")

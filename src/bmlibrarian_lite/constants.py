@@ -16,14 +16,6 @@ from pathlib import Path
 DEFAULT_DATA_DIR = Path.home() / ".bmlibrarian_lite"
 
 # =============================================================================
-# ChromaDB Settings
-# =============================================================================
-
-# Collection names for ChromaDB
-CHROMA_DOCUMENTS_COLLECTION = "documents"
-CHROMA_CHUNKS_COLLECTION = "chunks"
-
-# =============================================================================
 # Embedding Model Settings
 # =============================================================================
 

@@ -2,7 +2,7 @@
 Lite document interrogation agent for Q&A.
 
 This agent enables interactive question-answering sessions with documents.
-Documents are chunked, embedded, and stored for semantic retrieval.
+Documents are chunked, embedded, and stored in SQLite for semantic retrieval.
 """
 
 import logging
@@ -12,7 +12,7 @@ from ..storage import LiteStorage
 from ..config import LiteConfig
 from ..data_models import LiteChunk
 from ..chunking import chunk_document_for_interrogation
-from ..chroma_embeddings import create_embedding_function, FastEmbedFunction
+from ..embeddings import LiteEmbedder
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class LiteInterrogationAgent(LiteBaseAgent):
 
     This agent:
     1. Loads and chunks documents
-    2. Stores chunks with embeddings in ChromaDB
+    2. Stores chunks with embeddings in SQLite (using sqlite-vec)
     3. Retrieves relevant chunks for questions
     4. Generates answers using LLM
 
@@ -72,9 +72,6 @@ class LiteInterrogationAgent(LiteBaseAgent):
     """
 
     TASK_ID = "document_qa"
-
-    # Collection name for document chunks
-    CHUNKS_COLLECTION = "document_chunks"
 
     def __init__(
         self,
@@ -93,21 +90,21 @@ class LiteInterrogationAgent(LiteBaseAgent):
         super().__init__(config=config, **kwargs)
         self.storage = storage or LiteStorage(self.config)
 
-        # Embedding function (lazy initialization)
-        self._embed_fn: Optional[FastEmbedFunction] = None
+        # Embedder (lazy initialization)
+        self._embedder: Optional[LiteEmbedder] = None
 
         # Current document being interrogated
         self._current_document_id: Optional[str] = None
         self._current_document_title: Optional[str] = None
 
     @property
-    def embed_fn(self) -> FastEmbedFunction:
-        """Get or create embedding function."""
-        if self._embed_fn is None:
-            self._embed_fn = create_embedding_function(
+    def embedder(self) -> LiteEmbedder:
+        """Get or create embedder."""
+        if self._embedder is None:
+            self._embedder = LiteEmbedder(
                 model_name=self.config.embeddings.model
             )
-        return self._embed_fn
+        return self._embedder
 
     def load_document(
         self,
@@ -141,21 +138,8 @@ class LiteInterrogationAgent(LiteBaseAgent):
         if not chunks:
             raise ValueError("Document produced no chunks - text may be too short")
 
-        # Get or create chunks collection
-        collection = self.storage.get_chunks_collection(self.embed_fn)
-
-        # Upsert chunks to ChromaDB
-        collection.upsert(
-            ids=[c.id for c in chunks],
-            documents=[c.text for c in chunks],
-            metadatas=[{
-                "document_id": c.document_id,
-                "chunk_index": c.chunk_index,
-                "title": title,
-                "start_char": c.start_char,
-                "end_char": c.end_char,
-            } for c in chunks],
-        )
+        # Store chunks with embeddings in SQLite
+        self.storage.add_chunks(chunks, embedding_function=self.embedder)
 
         self._current_document_id = chunks[0].document_id
         self._current_document_title = title
@@ -229,8 +213,6 @@ class LiteInterrogationAgent(LiteBaseAgent):
         if not doc_id:
             raise ValueError("No document loaded. Call load_document() first.")
 
-        collection = self.storage.get_chunks_collection(self.embed_fn)
-
         # Get queries (original + expansions)
         if use_query_expansion:
             queries = self._expand_query(question)
@@ -240,32 +222,29 @@ class LiteInterrogationAgent(LiteBaseAgent):
 
         # Collect chunks from all queries
         seen_chunk_ids: set[str] = set()
-        chunks_with_metadata: list[tuple[str, dict]] = []
+        chunks_with_metadata: list[tuple[LiteChunk, float]] = []
 
         for query in queries:
-            results = collection.query(
-                query_texts=[query],
+            results = self.storage.search_chunks(
+                query=query,
+                document_id=doc_id,
                 n_results=n_context_chunks,
-                where={"document_id": doc_id},
-                include=["documents", "metadatas"],
+                embedding_function=self.embedder,
             )
 
-            if results["documents"][0]:
-                for i, chunk_text in enumerate(results["documents"][0]):
-                    chunk_id = results["ids"][0][i]
-                    if chunk_id not in seen_chunk_ids:
-                        seen_chunk_ids.add(chunk_id)
-                        metadata = results["metadatas"][0][i]
-                        chunks_with_metadata.append((chunk_text, metadata))
+            for chunk, distance in results:
+                if chunk.id not in seen_chunk_ids:
+                    seen_chunk_ids.add(chunk.id)
+                    chunks_with_metadata.append((chunk, distance))
 
         if not chunks_with_metadata:
             return "No relevant content found in the document.", []
 
         # Sort chunks by their position in the document for coherent reading
-        chunks_with_metadata.sort(key=lambda x: x[1].get("chunk_index", 0))
+        chunks_with_metadata.sort(key=lambda x: x[0].chunk_index)
 
         # Build context from deduplicated, ordered chunks
-        context_chunks = [chunk for chunk, _ in chunks_with_metadata]
+        context_chunks = [chunk.text for chunk, _ in chunks_with_metadata]
         context = "\n\n---\n\n".join(context_chunks)
 
         # Generate answer
@@ -310,21 +289,15 @@ Answer the question based on the context above. If the context doesn't contain s
         if not doc_id:
             raise ValueError("No document loaded. Call load_document() first.")
 
-        # Get first N chunks (usually beginning of document)
-        collection = self.storage.get_chunks_collection(self.embed_fn)
+        # Get all chunks for this document
+        chunks = self.storage.get_chunks_for_document(doc_id)
 
-        results = collection.get(
-            where={"document_id": doc_id},
-            include=["documents", "metadatas"],
-        )
-
-        if not results["documents"]:
+        if not chunks:
             return "No document content available."
 
         # Sort by chunk index and get first N
-        chunks_with_idx = list(zip(results["documents"], results["metadatas"]))
-        chunks_with_idx.sort(key=lambda x: x[1].get("chunk_index", 0))
-        first_chunks = [c[0] for c in chunks_with_idx[:n_chunks]]
+        chunks.sort(key=lambda c: c.chunk_index)
+        first_chunks = [c.text for c in chunks[:n_chunks]]
 
         context = "\n\n".join(first_chunks)
 
@@ -359,17 +332,10 @@ Provide a brief summary of what this document appears to be about. Include the m
         if not doc_id:
             return
 
-        collection = self.storage.get_chunks_collection(self.embed_fn)
-
-        # Get all chunk IDs for this document
-        results = collection.get(
-            where={"document_id": doc_id},
-            include=[],
-        )
-
-        if results["ids"]:
-            collection.delete(ids=results["ids"])
-            logger.info(f"Cleared {len(results['ids'])} chunks for document {doc_id}")
+        # Delete all chunks for this document
+        deleted_count = self.storage.delete_chunks_for_document(doc_id)
+        if deleted_count > 0:
+            logger.info(f"Cleared {deleted_count} chunks for document {doc_id}")
 
         if doc_id == self._current_document_id:
             self._current_document_id = None
@@ -385,17 +351,12 @@ Provide a brief summary of what this document appears to be about. Include the m
         if not self._current_document_id:
             return None
 
-        collection = self.storage.get_chunks_collection(self.embed_fn)
-
-        results = collection.get(
-            where={"document_id": self._current_document_id},
-            include=["metadatas"],
-        )
+        chunk_count = self.storage.count_chunks_for_document(self._current_document_id)
 
         return {
             "document_id": self._current_document_id,
             "title": self._current_document_title,
-            "chunk_count": len(results["ids"]) if results["ids"] else 0,
+            "chunk_count": chunk_count,
         }
 
     def list_loaded_documents(self) -> list[dict]:
@@ -405,24 +366,4 @@ Provide a brief summary of what this document appears to be about. Include the m
         Returns:
             List of document info dictionaries
         """
-        collection = self.storage.get_chunks_collection(self.embed_fn)
-
-        # Get all unique document IDs
-        results = collection.get(include=["metadatas"])
-
-        if not results["metadatas"]:
-            return []
-
-        # Group by document_id
-        documents: dict[str, dict] = {}
-        for metadata in results["metadatas"]:
-            doc_id = metadata.get("document_id", "unknown")
-            if doc_id not in documents:
-                documents[doc_id] = {
-                    "document_id": doc_id,
-                    "title": metadata.get("title", "Unknown"),
-                    "chunk_count": 0,
-                }
-            documents[doc_id]["chunk_count"] += 1
-
-        return list(documents.values())
+        return self.storage.list_chunked_documents()

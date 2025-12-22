@@ -7,8 +7,7 @@ A simplified interface for:
 - Document interrogation (Q&A with loaded documents)
 
 Features:
-- ChromaDB for vector storage (embedded, no PostgreSQL)
-- SQLite for metadata (embedded)
+- SQLite with sqlite-vec for storage and vector search
 - FastEmbed for local embeddings (CPU-optimized, no PyTorch)
 - Anthropic Claude for LLM inference (online)
 - NCBI E-utilities for PubMed search (online)
@@ -49,11 +48,6 @@ import sys
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # Disable all telemetry - privacy is paramount
-# ChromaDB telemetry
-os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
-os.environ.setdefault("CHROMA_TELEMETRY", "false")
-# Posthog (used by ChromaDB)
-os.environ.setdefault("POSTHOG_DISABLED", "true")
 # HuggingFace telemetry
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("DO_NOT_TRACK", "1")

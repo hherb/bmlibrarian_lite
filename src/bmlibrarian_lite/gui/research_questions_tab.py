@@ -262,18 +262,19 @@ class ResearchQuestionsTab(QWidget):
         has_selection = len(selected) > 0 and is_idle
         self.rerun_btn.setEnabled(has_selection)
 
-        # Enable benchmark button if question has scored documents
+        # Enable benchmark button if question has documents available
         if has_selection:
             row = self.questions_table.currentRow()
             if 0 <= row < len(self._questions):
                 question = self._questions[row]
-                # Check if there are scored documents for benchmarking
-                has_scored = question.scored_documents > 0
+                # Check if there are documents available for benchmarking
+                # Documents can be benchmarked whether or not they've been scored before
+                has_documents = question.total_documents > 0
                 benchmarking_available = (
                     self.config.benchmark.enabled
                     and len(self.config.benchmark.models) > 0
                 )
-                self.benchmark_btn.setEnabled(has_scored and benchmarking_available)
+                self.benchmark_btn.setEnabled(has_documents and benchmarking_available)
                 self.progress_label.setText(
                     f"Selected: {question.question[:80]}..."
                     if len(question.question) > 80

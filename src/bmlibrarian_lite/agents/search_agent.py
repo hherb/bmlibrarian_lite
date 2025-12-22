@@ -2,7 +2,7 @@
 Lite search agent for PubMed queries.
 
 This agent handles converting natural language questions to PubMed queries,
-executing searches, and caching results in ChromaDB for semantic search.
+executing searches, and caching results in SQLite with vector embeddings.
 """
 
 import logging
@@ -16,7 +16,7 @@ from bmlibrarian_lite.pubmed import (
 from ..storage import LiteStorage
 from ..config import LiteConfig
 from ..data_models import LiteDocument, DocumentSource, SearchSession
-from ..chroma_embeddings import create_embedding_function, FastEmbedFunction
+from ..embeddings import LiteEmbedder
 from ..query_converter import LiteQueryConverter
 from .base import LiteBaseAgent
 
@@ -25,15 +25,15 @@ logger = logging.getLogger(__name__)
 
 class LiteSearchAgent(LiteBaseAgent):
     """
-    Search agent for PubMed queries with ChromaDB caching.
+    Search agent for PubMed queries with SQLite caching.
 
     Converts natural language queries to PubMed searches and caches
-    results in ChromaDB for semantic search.
+    results in SQLite with vector embeddings.
 
     This agent:
     1. Uses LLM to convert research questions to optimized PubMed queries
     2. Executes searches via the PubMed E-utilities API
-    3. Caches results in ChromaDB with embeddings for later retrieval
+    3. Caches results in SQLite with embeddings for later retrieval
     4. Provides semantic search over cached documents
 
     Attributes:
@@ -72,17 +72,17 @@ class LiteSearchAgent(LiteBaseAgent):
             model=self._get_model("query_conversion"),
         )
 
-        # Create embedding function (lazy initialization)
-        self._embed_fn: Optional[FastEmbedFunction] = None
+        # Create embedder (lazy initialization)
+        self._embedder: Optional[LiteEmbedder] = None
 
     @property
-    def embed_fn(self) -> FastEmbedFunction:
-        """Get or create embedding function."""
-        if self._embed_fn is None:
-            self._embed_fn = create_embedding_function(
+    def embedder(self) -> LiteEmbedder:
+        """Get or create embedder."""
+        if self._embedder is None:
+            self._embedder = LiteEmbedder(
                 model_name=self.config.embeddings.model
             )
-        return self._embed_fn
+        return self._embedder
 
     def convert_query(self, question: str) -> PubMedQuery:
         """
@@ -117,7 +117,7 @@ class LiteSearchAgent(LiteBaseAgent):
         1. Converts the question to a PubMed query
         2. Executes the search
         3. Fetches article metadata
-        4. Caches results in ChromaDB
+        4. Caches results in SQLite
 
         Args:
             question: Natural language research question
@@ -168,9 +168,9 @@ class LiteSearchAgent(LiteBaseAgent):
         if progress_callback:
             progress_callback(f"Caching {len(documents)} documents...")
 
-        # Store in ChromaDB with embeddings
+        # Store documents with embeddings
         if documents:
-            self.storage.add_documents(documents, embedding_function=self.embed_fn)
+            self.storage.add_documents(documents, embedding_function=self.embedder)
 
         # Create search session
         session = self.storage.create_search_session(
@@ -248,7 +248,7 @@ class LiteSearchAgent(LiteBaseAgent):
         if documents:
             if progress_callback:
                 progress_callback(f"Caching {len(documents)} documents...")
-            self.storage.add_documents(documents, embedding_function=self.embed_fn)
+            self.storage.add_documents(documents, embedding_function=self.embedder)
 
         session = self.storage.create_search_session(
             query=pubmed_query,
@@ -277,7 +277,7 @@ class LiteSearchAgent(LiteBaseAgent):
         Search cached documents by semantic similarity.
 
         Uses embeddings to find documents similar to the query
-        from the local ChromaDB cache.
+        from the local SQLite cache.
 
         Args:
             query: Search query (natural language)
@@ -291,7 +291,7 @@ class LiteSearchAgent(LiteBaseAgent):
         return self.storage.search_documents(
             query=query,
             n_results=n_results,
-            embedding_function=self.embed_fn,
+            embedding_function=self.embedder,
         )
 
     def get_document(self, document_id: str) -> Optional[LiteDocument]:

@@ -1,7 +1,7 @@
 """
 Unified storage layer for BMLibrarian Lite.
 
-Combines ChromaDB for vector storage and SQLite for structured metadata.
+Uses SQLite for all structured data and sqlite-vec for vector search.
 All data is persisted to the configured data directory.
 
 Usage:
@@ -22,19 +22,18 @@ import hashlib
 import json
 import logging
 import sqlite3
+import struct
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Generator, Optional
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+import sqlite_vec
 
 from .config import LiteConfig
 from .constants import (
     BENCHMARK_QUESTION_HASH_LENGTH,
-    CHROMA_CHUNKS_COLLECTION,
-    CHROMA_DOCUMENTS_COLLECTION,
+    DEFAULT_EMBEDDING_DIMENSIONS,
     PUBMED_CACHE_TTL_SECONDS,
 )
 from .data_models import (
@@ -43,13 +42,14 @@ from .data_models import (
     DocumentSource,
     Evaluator,
     EvaluatorType,
+    LiteChunk,
     LiteDocument,
     ResearchQuestionSummary,
     ReviewCheckpoint,
     SearchSession,
     ScoredDocument,
 )
-from .exceptions import ChromaDBError, SQLiteError, LiteStorageError
+from .exceptions import SQLiteError, LiteStorageError
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,8 @@ class LiteStorage:
     Unified storage layer for BMLibrarian Lite.
 
     Provides:
-    - ChromaDB collections for vector storage (documents, chunks)
-    - SQLite database for structured metadata (sessions, checkpoints)
+    - SQLite database for all structured data (documents, sessions, checkpoints)
+    - sqlite-vec extension for vector search
     - Unified API for all storage operations
 
     All data is persisted to ~/.bmlibrarian_lite/ by default.
@@ -101,43 +101,14 @@ class LiteStorage:
         # Ensure directories exist
         self.config.ensure_directories()
 
-        # Initialize ChromaDB
-        self._chroma_client = self._init_chroma()
-
-        # Initialize SQLite
+        # Initialize SQLite with sqlite-vec extension
         self._init_sqlite()
 
         logger.info(f"LiteStorage initialized at {self._storage_config.data_dir}")
 
-    def _init_chroma(self) -> chromadb.PersistentClient:
-        """
-        Initialize ChromaDB client with persistent storage.
-
-        Returns:
-            ChromaDB PersistentClient
-
-        Raises:
-            ChromaDBError: If ChromaDB initialization fails
-        """
-        try:
-            settings = ChromaSettings(
-                anonymized_telemetry=False,
-                allow_reset=True,
-            )
-            client = chromadb.PersistentClient(
-                path=str(self._storage_config.chroma_dir),
-                settings=settings,
-            )
-            logger.debug(f"ChromaDB initialized at {self._storage_config.chroma_dir}")
-            return client
-        except Exception as e:
-            raise ChromaDBError(
-                f"Failed to initialize ChromaDB at {self._storage_config.chroma_dir}: {e}"
-            ) from e
-
     def _init_sqlite(self) -> None:
         """
-        Initialize SQLite database with schema.
+        Initialize SQLite database with schema and sqlite-vec extension.
 
         Raises:
             SQLiteError: If SQLite initialization fails
@@ -145,6 +116,21 @@ class LiteStorage:
         try:
             with self._sqlite_connection() as conn:
                 conn.executescript(self._get_sqlite_schema())
+                # Create sqlite-vec virtual tables for document and chunk embeddings
+                conn.execute(
+                    f"""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
+                        embedding float[{DEFAULT_EMBEDDING_DIMENSIONS}]
+                    )
+                    """
+                )
+                conn.execute(
+                    f"""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                        embedding float[{DEFAULT_EMBEDDING_DIMENSIONS}]
+                    )
+                    """
+                )
                 conn.commit()
             # Run migrations for existing data
             self._migrate_benchmark_question_hashes()
@@ -205,16 +191,20 @@ class LiteStorage:
     @contextmanager
     def _sqlite_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """
-        Context manager for SQLite connections.
+        Context manager for SQLite connections with sqlite-vec extension.
 
         Yields:
-            SQLite connection with Row factory
+            SQLite connection with Row factory and sqlite-vec loaded
         """
         conn = sqlite3.connect(
             self._storage_config.sqlite_path,
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
         )
         conn.row_factory = sqlite3.Row
+        # Enable extension loading and load sqlite-vec
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
         try:
             yield conn
         finally:
@@ -230,6 +220,23 @@ class LiteStorage:
             SQL schema string
         """
         return """
+        -- Documents (authoritative source for document metadata)
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            abstract TEXT,
+            authors TEXT,  -- JSON array
+            year INTEGER,
+            journal TEXT,
+            doi TEXT,
+            pmid TEXT,
+            pmc_id TEXT,
+            url TEXT,
+            mesh_terms TEXT,  -- JSON array
+            source TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         -- Search sessions
         CREATE TABLE IF NOT EXISTS search_sessions (
             id TEXT PRIMARY KEY,
@@ -355,6 +362,19 @@ class LiteStorage:
             UNIQUE(question_hash, document_id)
         );
 
+        -- Document chunks for interrogation
+        CREATE TABLE IF NOT EXISTS chunks (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            title TEXT,
+            content TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            total_chunks INTEGER,
+            metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (source_id) REFERENCES documents(id)
+        );
+
         -- Create indexes for common queries
         CREATE INDEX IF NOT EXISTS idx_search_sessions_created
             ON search_sessions(created_at);
@@ -386,43 +406,50 @@ class LiteStorage:
             ON question_documents(question_hash);
         CREATE INDEX IF NOT EXISTS idx_question_documents_document_id
             ON question_documents(document_id);
+        CREATE INDEX IF NOT EXISTS idx_documents_pmid
+            ON documents(pmid);
+        CREATE INDEX IF NOT EXISTS idx_documents_doi
+            ON documents(doi);
+        CREATE INDEX IF NOT EXISTS idx_chunks_source_id
+            ON chunks(source_id);
         """
 
     # =========================================================================
-    # ChromaDB Collection Management
+    # Helper Functions for sqlite-vec
     # =========================================================================
 
-    def get_documents_collection(self, embedding_function: Any = None) -> Any:
+    @staticmethod
+    def _serialize_embedding(embedding: list[float]) -> bytes:
         """
-        Get or create the documents collection.
+        Serialize embedding to bytes for sqlite-vec storage.
 
         Args:
-            embedding_function: ChromaDB embedding function (e.g., FastEmbed)
+            embedding: List of floats
 
         Returns:
-            ChromaDB collection for documents
+            Packed bytes in float32 format
         """
-        return self._chroma_client.get_or_create_collection(
-            name=CHROMA_DOCUMENTS_COLLECTION,
-            embedding_function=embedding_function,
-            metadata={"description": "PubMed and local documents"},
-        )
+        return struct.pack(f"{len(embedding)}f", *embedding)
 
-    def get_chunks_collection(self, embedding_function: Any = None) -> Any:
+    def _get_document_rowid(self, conn: sqlite3.Connection, doc_id: str) -> Optional[int]:
         """
-        Get or create the chunks collection.
+        Get the rowid for a document from the vec_documents table.
 
         Args:
-            embedding_function: ChromaDB embedding function (e.g., FastEmbed)
+            conn: SQLite connection
+            doc_id: Document ID
 
         Returns:
-            ChromaDB collection for document chunks
+            Rowid if found, None otherwise
         """
-        return self._chroma_client.get_or_create_collection(
-            name=CHROMA_CHUNKS_COLLECTION,
-            embedding_function=embedding_function,
-            metadata={"description": "Document chunks for interrogation"},
+        # We use a mapping table or store doc_id -> rowid
+        # For simplicity, we use hash of doc_id as rowid
+        cursor = conn.execute(
+            "SELECT rowid FROM documents WHERE id = ?",
+            (doc_id,),
         )
+        row = cursor.fetchone()
+        return row[0] if row else None
 
     # =========================================================================
     # Document Operations
@@ -438,18 +465,18 @@ class LiteStorage:
 
         Args:
             document: Document to add
-            embedding_function: Optional embedding function
+            embedding_function: Embedding function that has embed_single() method
 
         Returns:
             Document ID
 
         Raises:
-            ChromaDBError: If ChromaDB upsert fails
+            SQLiteError: If database operation fails
 
         Example:
-            from bmlibrarian_lite.chroma_embeddings import create_embedding_function
+            from bmlibrarian_lite.embeddings import LiteEmbedder
 
-            embed_fn = create_embedding_function()
+            embedder = LiteEmbedder()
             doc = LiteDocument(
                 id="pmid-12345",
                 title="Example Study",
@@ -457,38 +484,62 @@ class LiteStorage:
                 authors=["Smith J", "Jones A"],
                 year=2023,
             )
-            doc_id = storage.add_document(doc, embedding_function=embed_fn)
+            doc_id = storage.add_document(doc, embedding_function=embedder)
         """
         try:
-            collection = self.get_documents_collection(embedding_function)
+            with self._sqlite_connection() as conn:
+                # Insert document metadata
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO documents
+                    (id, title, abstract, authors, year, journal, doi, pmid,
+                     pmc_id, url, mesh_terms, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        document.id,
+                        document.title,
+                        document.abstract,
+                        json.dumps(document.authors),
+                        document.year,
+                        document.journal,
+                        document.doi,
+                        document.pmid,
+                        document.pmc_id,
+                        document.url,
+                        json.dumps(document.mesh_terms),
+                        document.source.value,
+                    ),
+                )
 
-            metadata = {
-                "title": document.title,
-                "authors": json.dumps(document.authors),
-                "year": document.year or 0,
-                "journal": document.journal or "",
-                "doi": document.doi or "",
-                "pmid": document.pmid or "",
-                "pmc_id": document.pmc_id or "",
-                "url": document.url or "",
-                "mesh_terms": json.dumps(document.mesh_terms),
-                "source": document.source.value,
-            }
-            # Add custom metadata
-            for key, value in document.metadata.items():
-                if isinstance(value, (str, int, float, bool)):
-                    metadata[key] = value
+                # Get rowid for the document
+                cursor = conn.execute(
+                    "SELECT rowid FROM documents WHERE id = ?",
+                    (document.id,),
+                )
+                rowid = cursor.fetchone()[0]
 
-            collection.upsert(
-                ids=[document.id],
-                documents=[document.abstract],
-                metadatas=[metadata],
-            )
+                # Generate and store embedding if function provided
+                if embedding_function and document.abstract:
+                    embedding = embedding_function.embed_single(document.abstract)
+                    embedding_bytes = self._serialize_embedding(embedding)
 
-            logger.debug(f"Added document {document.id} to storage")
-            return document.id
-        except Exception as e:
-            raise ChromaDBError(f"Failed to add document {document.id}: {e}") from e
+                    # Delete existing embedding if any
+                    conn.execute(
+                        "DELETE FROM vec_documents WHERE rowid = ?",
+                        (rowid,),
+                    )
+                    # Insert new embedding
+                    conn.execute(
+                        "INSERT INTO vec_documents(rowid, embedding) VALUES (?, ?)",
+                        (rowid, embedding_bytes),
+                    )
+
+                conn.commit()
+                logger.debug(f"Added document {document.id} to storage")
+                return document.id
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Failed to add document {document.id}: {e}") from e
 
     def upsert_document(
         self,
@@ -499,7 +550,7 @@ class LiteStorage:
         Insert or update a document in the storage.
 
         This is an alias for add_document, which already performs upsert
-        operations at the ChromaDB level.
+        operations.
 
         Args:
             document: Document to insert or update
@@ -520,50 +571,88 @@ class LiteStorage:
 
         Args:
             documents: List of documents to add
-            embedding_function: Optional embedding function
+            embedding_function: Embedding function that has embed() method
 
         Returns:
             List of document IDs
 
         Raises:
-            ChromaDBError: If ChromaDB upsert fails
+            SQLiteError: If database operation fails
 
         Example:
             docs = [doc1, doc2, doc3]
-            ids = storage.add_documents(docs, embedding_function=embed_fn)
+            ids = storage.add_documents(docs, embedding_function=embedder)
             print(f"Added {len(ids)} documents")
         """
         if not documents:
             return []
 
         try:
-            collection = self.get_documents_collection(embedding_function)
+            with self._sqlite_connection() as conn:
+                ids = []
 
-            ids = [doc.id for doc in documents]
-            texts = [doc.abstract for doc in documents]
-            metadatas = []
+                # Batch insert documents
+                for doc in documents:
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO documents
+                        (id, title, abstract, authors, year, journal, doi, pmid,
+                         pmc_id, url, mesh_terms, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            doc.id,
+                            doc.title,
+                            doc.abstract,
+                            json.dumps(doc.authors),
+                            doc.year,
+                            doc.journal,
+                            doc.doi,
+                            doc.pmid,
+                            doc.pmc_id,
+                            doc.url,
+                            json.dumps(doc.mesh_terms),
+                            doc.source.value,
+                        ),
+                    )
+                    ids.append(doc.id)
 
-            for doc in documents:
-                metadata = {
-                    "title": doc.title,
-                    "authors": json.dumps(doc.authors),
-                    "year": doc.year or 0,
-                    "journal": doc.journal or "",
-                    "doi": doc.doi or "",
-                    "pmid": doc.pmid or "",
-                    "pmc_id": doc.pmc_id or "",
-                    "url": doc.url or "",
-                    "mesh_terms": json.dumps(doc.mesh_terms),
-                    "source": doc.source.value,
-                }
-                metadatas.append(metadata)
+                # Generate embeddings if function provided
+                if embedding_function:
+                    texts = [doc.abstract for doc in documents if doc.abstract]
+                    if texts:
+                        embeddings = embedding_function.embed(texts)
 
-            collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
+                        # Get rowids and insert embeddings
+                        text_idx = 0
+                        for doc in documents:
+                            if doc.abstract:
+                                cursor = conn.execute(
+                                    "SELECT rowid FROM documents WHERE id = ?",
+                                    (doc.id,),
+                                )
+                                rowid = cursor.fetchone()[0]
 
-            logger.info(f"Added {len(documents)} documents to storage")
-            return ids
-        except Exception as e:
-            raise ChromaDBError(f"Failed to add {len(documents)} documents: {e}") from e
+                                embedding_bytes = self._serialize_embedding(
+                                    embeddings[text_idx]
+                                )
+                                # Delete existing embedding if any
+                                conn.execute(
+                                    "DELETE FROM vec_documents WHERE rowid = ?",
+                                    (rowid,),
+                                )
+                                conn.execute(
+                                    "INSERT INTO vec_documents(rowid, embedding) "
+                                    "VALUES (?, ?)",
+                                    (rowid, embedding_bytes),
+                                )
+                                text_idx += 1
+
+                conn.commit()
+                logger.info(f"Added {len(documents)} documents to storage")
+                return ids
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Failed to add {len(documents)} documents: {e}") from e
 
     def get_document(
         self,
@@ -575,50 +664,54 @@ class LiteStorage:
 
         Args:
             document_id: Document ID to retrieve
-            embedding_function: Optional embedding function
+            embedding_function: Unused, kept for API compatibility
 
         Returns:
             Document if found, None otherwise
 
         Raises:
-            ChromaDBError: If ChromaDB query fails (not for missing documents)
+            SQLiteError: If database query fails
 
         Example:
-            doc = storage.get_document("pmid-12345678", embed_fn)
+            doc = storage.get_document("pmid-12345678")
             if doc:
                 print(f"Found: {doc.title}")
             else:
                 print("Document not found")
         """
         try:
-            collection = self.get_documents_collection(embedding_function)
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT id, title, abstract, authors, year, journal,
+                           doi, pmid, pmc_id, url, mesh_terms, source
+                    FROM documents
+                    WHERE id = ?
+                    """,
+                    (document_id,),
+                )
+                row = cursor.fetchone()
 
-            result = collection.get(
-                ids=[document_id],
-                include=["documents", "metadatas"],
-            )
+                if not row:
+                    return None
 
-            if not result["ids"]:
-                return None
-
-            metadata = result["metadatas"][0]
-            return LiteDocument(
-                id=document_id,
-                title=metadata.get("title", ""),
-                abstract=result["documents"][0],
-                authors=json.loads(metadata.get("authors", "[]")),
-                year=metadata.get("year") or None,
-                journal=metadata.get("journal") or None,
-                doi=metadata.get("doi") or None,
-                pmid=metadata.get("pmid") or None,
-                pmc_id=metadata.get("pmc_id") or None,
-                url=metadata.get("url") or None,
-                mesh_terms=json.loads(metadata.get("mesh_terms", "[]")),
-                source=DocumentSource(metadata.get("source", "pubmed")),
-            )
-        except Exception as e:
+                return LiteDocument(
+                    id=row["id"],
+                    title=row["title"],
+                    abstract=row["abstract"],
+                    authors=json.loads(row["authors"] or "[]"),
+                    year=row["year"],
+                    journal=row["journal"],
+                    doi=row["doi"],
+                    pmid=row["pmid"],
+                    pmc_id=row["pmc_id"],
+                    url=row["url"],
+                    mesh_terms=json.loads(row["mesh_terms"] or "[]"),
+                    source=DocumentSource(row["source"]),
+                )
+        except sqlite3.Error as e:
             logger.error(f"Failed to get document {document_id}: {e}")
-            raise ChromaDBError(f"Failed to get document {document_id}: {e}") from e
+            raise SQLiteError(f"Failed to get document {document_id}: {e}") from e
 
     def get_documents(
         self,
@@ -630,17 +723,17 @@ class LiteStorage:
 
         Args:
             document_ids: List of document IDs
-            embedding_function: Optional embedding function
+            embedding_function: Unused, kept for API compatibility
 
         Returns:
             List of found documents (may be fewer than requested)
 
         Raises:
-            ChromaDBError: If ChromaDB query fails
+            SQLiteError: If database query fails
 
         Example:
             ids = ["pmid-123", "pmid-456", "pmid-789"]
-            docs = storage.get_documents(ids, embed_fn)
+            docs = storage.get_documents(ids)
             for doc in docs:
                 print(f"{doc.id}: {doc.title}")
         """
@@ -648,35 +741,55 @@ class LiteStorage:
             return []
 
         try:
-            collection = self.get_documents_collection(embedding_function)
+            with self._sqlite_connection() as conn:
+                # Use parameterized query with placeholders
+                placeholders = ",".join("?" * len(document_ids))
+                cursor = conn.execute(
+                    f"""
+                    SELECT id, title, abstract, authors, year, journal,
+                           doi, pmid, pmc_id, url, mesh_terms, source
+                    FROM documents
+                    WHERE id IN ({placeholders})
+                    """,
+                    document_ids,
+                )
 
-            result = collection.get(
-                ids=document_ids,
-                include=["documents", "metadatas"],
-            )
+                documents = []
+                for row in cursor:
+                    documents.append(LiteDocument(
+                        id=row["id"],
+                        title=row["title"],
+                        abstract=row["abstract"],
+                        authors=json.loads(row["authors"] or "[]"),
+                        year=row["year"],
+                        journal=row["journal"],
+                        doi=row["doi"],
+                        pmid=row["pmid"],
+                        pmc_id=row["pmc_id"],
+                        url=row["url"],
+                        mesh_terms=json.loads(row["mesh_terms"] or "[]"),
+                        source=DocumentSource(row["source"]),
+                    ))
 
-            documents = []
-            for i, doc_id in enumerate(result["ids"]):
-                metadata = result["metadatas"][i]
-                documents.append(LiteDocument(
-                    id=doc_id,
-                    title=metadata.get("title", ""),
-                    abstract=result["documents"][i],
-                    authors=json.loads(metadata.get("authors", "[]")),
-                    year=metadata.get("year") or None,
-                    journal=metadata.get("journal") or None,
-                    doi=metadata.get("doi") or None,
-                    pmid=metadata.get("pmid") or None,
-                    pmc_id=metadata.get("pmc_id") or None,
-                    url=metadata.get("url") or None,
-                    mesh_terms=json.loads(metadata.get("mesh_terms", "[]")),
-                    source=DocumentSource(metadata.get("source", "pubmed")),
-                ))
-
-            return documents
-        except Exception as e:
+                return documents
+        except sqlite3.Error as e:
             logger.error(f"Failed to get documents: {e}")
-            raise ChromaDBError(f"Failed to get {len(document_ids)} documents: {e}") from e
+            raise SQLiteError(f"Failed to get {len(document_ids)} documents: {e}") from e
+
+    def get_all_document_ids(self) -> set[str]:
+        """
+        Get all document IDs in the database.
+
+        Returns:
+            Set of all document IDs
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute("SELECT id FROM documents")
+                return {row["id"] for row in cursor}
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get document IDs: {e}")
+            return set()
 
     def search_documents(
         self,
@@ -685,62 +798,75 @@ class LiteStorage:
         embedding_function: Any = None,
     ) -> list[LiteDocument]:
         """
-        Search documents by semantic similarity.
-
-        Uses ChromaDB's built-in vector search to find documents
-        with abstracts most similar to the query text.
+        Search documents by semantic similarity using sqlite-vec.
 
         Args:
             query: Search query (natural language)
             n_results: Maximum number of results
-            embedding_function: Optional embedding function
+            embedding_function: Embedding function with embed_single() method
 
         Returns:
             List of matching documents ordered by similarity
 
         Raises:
-            ChromaDBError: If ChromaDB query fails
+            SQLiteError: If database query fails
 
         Example:
             # Find documents about heart disease
             results = storage.search_documents(
                 query="cardiovascular disease treatment",
                 n_results=10,
-                embedding_function=embed_fn
+                embedding_function=embedder
             )
             for doc in results:
                 print(f"[{doc.year}] {doc.title}")
         """
+        if not embedding_function:
+            raise ValueError("embedding_function is required for semantic search")
+
         try:
-            collection = self.get_documents_collection(embedding_function)
+            # Generate query embedding
+            query_embedding = embedding_function.embed_single(query)
+            query_bytes = self._serialize_embedding(query_embedding)
 
-            results = collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                include=["documents", "metadatas", "distances"],
-            )
+            with self._sqlite_connection() as conn:
+                # KNN search using sqlite-vec
+                # Note: sqlite-vec requires k=? in WHERE clause, not LIMIT
+                cursor = conn.execute(
+                    """
+                    SELECT
+                        d.id, d.title, d.abstract, d.authors, d.year,
+                        d.journal, d.doi, d.pmid, d.pmc_id, d.url,
+                        d.mesh_terms, d.source,
+                        v.distance
+                    FROM vec_documents v
+                    JOIN documents d ON d.rowid = v.rowid
+                    WHERE v.embedding MATCH ? AND k = ?
+                    ORDER BY v.distance
+                    """,
+                    (query_bytes, n_results),
+                )
 
-            documents = []
-            for i, doc_id in enumerate(results["ids"][0]):
-                metadata = results["metadatas"][0][i]
-                documents.append(LiteDocument(
-                    id=doc_id,
-                    title=metadata.get("title", ""),
-                    abstract=results["documents"][0][i],
-                    authors=json.loads(metadata.get("authors", "[]")),
-                    year=metadata.get("year") or None,
-                    journal=metadata.get("journal") or None,
-                    doi=metadata.get("doi") or None,
-                    pmid=metadata.get("pmid") or None,
-                    pmc_id=metadata.get("pmc_id") or None,
-                    url=metadata.get("url") or None,
-                    mesh_terms=json.loads(metadata.get("mesh_terms", "[]")),
-                    source=DocumentSource(metadata.get("source", "pubmed")),
-                ))
+                documents = []
+                for row in cursor:
+                    documents.append(LiteDocument(
+                        id=row["id"],
+                        title=row["title"],
+                        abstract=row["abstract"],
+                        authors=json.loads(row["authors"] or "[]"),
+                        year=row["year"],
+                        journal=row["journal"],
+                        doi=row["doi"],
+                        pmid=row["pmid"],
+                        pmc_id=row["pmc_id"],
+                        url=row["url"],
+                        mesh_terms=json.loads(row["mesh_terms"] or "[]"),
+                        source=DocumentSource(row["source"]),
+                    ))
 
-            return documents
-        except Exception as e:
-            raise ChromaDBError(f"Semantic search failed for query: {e}") from e
+                return documents
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Semantic search failed for query: {e}") from e
 
     def delete_document(
         self,
@@ -752,20 +878,326 @@ class LiteStorage:
 
         Args:
             document_id: Document ID to delete
-            embedding_function: Optional embedding function
+            embedding_function: Unused, kept for API compatibility
 
         Returns:
             True if deleted, False otherwise
         """
-        collection = self.get_documents_collection(embedding_function)
-
         try:
-            collection.delete(ids=[document_id])
-            logger.debug(f"Deleted document {document_id}")
-            return True
-        except Exception as e:
+            with self._sqlite_connection() as conn:
+                # Get rowid first to delete from vec_documents
+                cursor = conn.execute(
+                    "SELECT rowid FROM documents WHERE id = ?",
+                    (document_id,),
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    rowid = row[0]
+                    # Delete from vec_documents first (foreign key would fail otherwise)
+                    conn.execute(
+                        "DELETE FROM vec_documents WHERE rowid = ?",
+                        (rowid,),
+                    )
+                    # Delete from documents
+                    conn.execute(
+                        "DELETE FROM documents WHERE id = ?",
+                        (document_id,),
+                    )
+                    conn.commit()
+                    logger.debug(f"Deleted document {document_id}")
+                    return True
+                return False
+        except sqlite3.Error as e:
             logger.error(f"Failed to delete document {document_id}: {e}")
             return False
+
+    # =========================================================================
+    # Chunk Operations (for document interrogation)
+    # =========================================================================
+
+    def add_chunks(
+        self,
+        chunks: list[LiteChunk],
+        embedding_function: Any = None,
+    ) -> list[str]:
+        """
+        Add document chunks with embeddings for interrogation.
+
+        Args:
+            chunks: List of LiteChunk objects
+            embedding_function: Embedding function with embed() method
+
+        Returns:
+            List of chunk IDs
+
+        Raises:
+            SQLiteError: If database operation fails
+        """
+        if not chunks:
+            return []
+
+        try:
+            with self._sqlite_connection() as conn:
+                chunk_ids = []
+                total_chunks = len(chunks)
+
+                for chunk in chunks:
+                    # Build metadata JSON
+                    metadata = json.dumps({
+                        "start_char": chunk.start_char,
+                        "end_char": chunk.end_char,
+                    })
+
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO chunks
+                        (id, source_id, title, content, chunk_index, total_chunks, metadata)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            chunk.id,
+                            chunk.document_id,
+                            getattr(chunk, "title", None),
+                            chunk.text,
+                            chunk.chunk_index,
+                            total_chunks,
+                            metadata,
+                        ),
+                    )
+                    chunk_ids.append(chunk.id)
+
+                # Generate embeddings if function provided
+                if embedding_function:
+                    contents = [c.text for c in chunks]
+                    embeddings = embedding_function.embed(contents)
+
+                    for i, chunk in enumerate(chunks):
+                        # Get rowid for the chunk
+                        cursor = conn.execute(
+                            "SELECT rowid FROM chunks WHERE id = ?",
+                            (chunk.id,),
+                        )
+                        rowid = cursor.fetchone()[0]
+
+                        embedding_bytes = self._serialize_embedding(embeddings[i])
+                        # Delete existing embedding if any
+                        conn.execute(
+                            "DELETE FROM vec_chunks WHERE rowid = ?",
+                            (rowid,),
+                        )
+                        conn.execute(
+                            "INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)",
+                            (rowid, embedding_bytes),
+                        )
+
+                conn.commit()
+                source_id = chunks[0].document_id if chunks else "unknown"
+                logger.debug(f"Added {len(chunks)} chunks for document {source_id}")
+                return chunk_ids
+        except sqlite3.Error as e:
+            source_id = chunks[0].document_id if chunks else "unknown"
+            raise SQLiteError(f"Failed to add chunks for {source_id}: {e}") from e
+
+    def search_chunks(
+        self,
+        query: str,
+        document_id: Optional[str] = None,
+        n_results: int = 5,
+        embedding_function: Any = None,
+    ) -> list[tuple[LiteChunk, float]]:
+        """
+        Search chunks by semantic similarity using sqlite-vec.
+
+        Args:
+            query: Search query
+            document_id: Optional document ID to filter by
+            n_results: Maximum results to return
+            embedding_function: Embedding function with embed_single() method
+
+        Returns:
+            List of (LiteChunk, distance) tuples
+
+        Raises:
+            SQLiteError: If database query fails
+        """
+        if not embedding_function:
+            raise ValueError("embedding_function is required for semantic search")
+
+        try:
+            query_embedding = embedding_function.embed_single(query)
+            query_bytes = self._serialize_embedding(query_embedding)
+
+            with self._sqlite_connection() as conn:
+                # Note: sqlite-vec requires k=? in WHERE clause, not LIMIT
+                if document_id:
+                    cursor = conn.execute(
+                        """
+                        SELECT
+                            c.id, c.source_id, c.title, c.content, c.chunk_index,
+                            c.total_chunks, c.metadata, v.distance
+                        FROM vec_chunks v
+                        JOIN chunks c ON c.rowid = v.rowid
+                        WHERE v.embedding MATCH ? AND k = ? AND c.source_id = ?
+                        ORDER BY v.distance
+                        """,
+                        (query_bytes, n_results, document_id),
+                    )
+                else:
+                    cursor = conn.execute(
+                        """
+                        SELECT
+                            c.id, c.source_id, c.title, c.content, c.chunk_index,
+                            c.total_chunks, c.metadata, v.distance
+                        FROM vec_chunks v
+                        JOIN chunks c ON c.rowid = v.rowid
+                        WHERE v.embedding MATCH ? AND k = ?
+                        ORDER BY v.distance
+                        """,
+                        (query_bytes, n_results),
+                    )
+
+                results = []
+                for row in cursor:
+                    metadata = json.loads(row["metadata"] or "{}")
+                    chunk = LiteChunk(
+                        id=row["id"],
+                        document_id=row["source_id"],
+                        text=row["content"],
+                        chunk_index=row["chunk_index"],
+                        start_char=metadata.get("start_char", 0),
+                        end_char=metadata.get("end_char", 0),
+                    )
+                    results.append((chunk, row["distance"]))
+
+                return results
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Chunk search failed: {e}") from e
+
+    def get_chunks_for_document(self, document_id: str) -> list[LiteChunk]:
+        """
+        Get all chunks for a document.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            List of LiteChunk objects ordered by chunk_index
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT id, source_id, content, chunk_index, total_chunks, metadata
+                    FROM chunks
+                    WHERE source_id = ?
+                    ORDER BY chunk_index
+                    """,
+                    (document_id,),
+                )
+
+                chunks = []
+                for row in cursor:
+                    metadata = json.loads(row["metadata"] or "{}")
+                    chunks.append(LiteChunk(
+                        id=row["id"],
+                        document_id=row["source_id"],
+                        text=row["content"],
+                        chunk_index=row["chunk_index"],
+                        start_char=metadata.get("start_char", 0),
+                        end_char=metadata.get("end_char", 0),
+                    ))
+                return chunks
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get chunks for {document_id}: {e}")
+            return []
+
+    def delete_chunks_for_document(self, document_id: str) -> int:
+        """
+        Delete all chunks for a document.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            Number of chunks deleted
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                # Get rowids to delete from vec_chunks
+                cursor = conn.execute(
+                    "SELECT rowid FROM chunks WHERE source_id = ?",
+                    (document_id,),
+                )
+                rowids = [row[0] for row in cursor]
+
+                # Delete embeddings
+                for rowid in rowids:
+                    conn.execute(
+                        "DELETE FROM vec_chunks WHERE rowid = ?",
+                        (rowid,),
+                    )
+
+                # Delete chunks
+                conn.execute(
+                    "DELETE FROM chunks WHERE source_id = ?",
+                    (document_id,),
+                )
+                conn.commit()
+                logger.debug(f"Deleted {len(rowids)} chunks for document {document_id}")
+                return len(rowids)
+        except sqlite3.Error as e:
+            logger.error(f"Failed to delete chunks for {document_id}: {e}")
+            return 0
+
+    def count_chunks_for_document(self, source_id: str) -> int:
+        """
+        Count chunks for a document.
+
+        Args:
+            source_id: Source document ID
+
+        Returns:
+            Number of chunks
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM chunks WHERE source_id = ?",
+                    (source_id,),
+                )
+                return cursor.fetchone()[0]
+        except sqlite3.Error:
+            return 0
+
+    def list_chunked_documents(self) -> list[dict]:
+        """
+        List all documents that have chunks stored.
+
+        Returns:
+            List of dictionaries with document_id, title, and chunk_count
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT source_id, title, COUNT(*) as chunk_count
+                    FROM chunks
+                    GROUP BY source_id, title
+                    ORDER BY source_id
+                    """
+                )
+                return [
+                    {
+                        "document_id": row["source_id"],
+                        "title": row["title"],
+                        "chunk_count": row["chunk_count"],
+                    }
+                    for row in cursor
+                ]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to list chunked documents: {e}")
+            return []
 
     # =========================================================================
     # Search Session Operations
@@ -1258,8 +1690,6 @@ class LiteStorage:
         Returns:
             Number of new document associations added
         """
-        from .benchmarking.statistics import compute_question_hash
-
         question_hash = compute_question_hash(question)
         added = 0
 
@@ -1303,8 +1733,6 @@ class LiteStorage:
         Returns:
             Set of document IDs found for this question
         """
-        from .benchmarking.statistics import compute_question_hash
-
         question_hash = compute_question_hash(question)
 
         with self._sqlite_connection() as conn:
@@ -1436,10 +1864,13 @@ class LiteStorage:
         Returns:
             Dictionary with storage statistics
         """
-        doc_collection = self.get_documents_collection()
-        chunk_collection = self.get_chunks_collection()
-
         with self._sqlite_connection() as conn:
+            documents = conn.execute(
+                "SELECT COUNT(*) FROM documents"
+            ).fetchone()[0]
+            chunks = conn.execute(
+                "SELECT COUNT(*) FROM chunks"
+            ).fetchone()[0]
             sessions = conn.execute(
                 "SELECT COUNT(*) FROM search_sessions"
             ).fetchone()[0]
@@ -1448,8 +1879,8 @@ class LiteStorage:
             ).fetchone()[0]
 
         return {
-            "documents": doc_collection.count(),
-            "chunks": chunk_collection.count(),
+            "documents": documents,
+            "chunks": chunks,
             "search_sessions": sessions,
             "checkpoints": checkpoints,
             "data_dir": str(self._storage_config.data_dir),
@@ -1470,19 +1901,13 @@ class LiteStorage:
         if not confirm:
             raise ValueError("Must pass confirm=True to clear all data")
 
-        # Reset ChromaDB collections
-        try:
-            self._chroma_client.delete_collection(CHROMA_DOCUMENTS_COLLECTION)
-        except ValueError:
-            pass  # Collection doesn't exist
-        try:
-            self._chroma_client.delete_collection(CHROMA_CHUNKS_COLLECTION)
-        except ValueError:
-            pass  # Collection doesn't exist
-
-        # Clear SQLite tables
+        # Clear all SQLite tables including documents and vector embeddings
         with self._sqlite_connection() as conn:
             conn.executescript("""
+                DELETE FROM vec_documents;
+                DELETE FROM vec_chunks;
+                DELETE FROM chunks;
+                DELETE FROM documents;
                 DELETE FROM citations;
                 DELETE FROM scored_documents;
                 DELETE FROM review_checkpoints;
@@ -1490,6 +1915,7 @@ class LiteStorage:
                 DELETE FROM pubmed_cache;
                 DELETE FROM interrogation_sessions;
                 DELETE FROM user_settings;
+                DELETE FROM question_documents;
             """)
             conn.commit()
 
@@ -1762,7 +2188,7 @@ class LiteStorage:
             if not row:
                 return None
 
-            # Get the full document from ChromaDB
+            # Get the full document
             doc = self.get_document(row["document_id"])
             if not doc:
                 return None

@@ -116,6 +116,7 @@ class WorkflowWorker(QThread):
         self.preloaded_documents = preloaded_documents
         self.pubmed_query = pubmed_query
         self._cancelled = False
+        self._checkpoint_id: Optional[str] = None
 
     def run(self) -> None:
         """Execute the systematic review workflow."""
@@ -247,25 +248,48 @@ class WorkflowWorker(QThread):
                     documents = filtered
 
             # Step 3: Score documents
-            scoring_agent = LiteScoringAgent(config=self.config)
+            # Create checkpoint BEFORE scoring so we can persist results immediately
+            checkpoint = self.storage.create_checkpoint(
+                research_question=self.question,
+            )
+            self._checkpoint_id = checkpoint.id
 
-            # Track scored documents for per-document signals
-            all_scored_docs: List[ScoredDocument] = []
-
-            def scoring_progress(current: int, total: int) -> None:
-                self.progress.emit("scoring", current, total)
-
-            scored_docs = scoring_agent.score_documents(
-                self.question,
-                documents,
-                min_score=self.min_score,
-                progress_callback=scoring_progress,
+            # Record document-question associations for all documents being scored
+            doc_ids = [doc.id for doc in documents]
+            self.storage.add_question_documents(
+                question=self.question,
+                document_ids=doc_ids,
             )
 
-            # Emit per-document signals for audit trail and collect all scores
-            for scored_doc in scored_docs:
+            scoring_agent = LiteScoringAgent(config=self.config)
+
+            # Score documents one at a time, persisting and emitting immediately
+            all_scored_docs: List[ScoredDocument] = []
+            scored_docs: List[ScoredDocument] = []
+            total = len(documents)
+
+            for i, doc in enumerate(documents):
+                if self._cancelled:
+                    break
+
+                self.progress.emit("scoring", i + 1, total)
+
+                # Score single document
+                scored_doc = scoring_agent.score_document(self.question, doc)
+
+                # Persist immediately to database (crash-safe)
+                self.storage.save_scored_document(scored_doc, checkpoint.id)
+
+                # Emit signal immediately for GUI update
                 self.document_scored.emit(scored_doc)
+
+                # Track for metadata and downstream processing
                 all_scored_docs.append(scored_doc)
+                if scored_doc.score >= self.min_score:
+                    scored_docs.append(scored_doc)
+
+            # Sort by score descending for downstream use
+            scored_docs.sort(key=lambda x: x.score, reverse=True)
 
             self.step_complete.emit("scoring", scored_docs)
 

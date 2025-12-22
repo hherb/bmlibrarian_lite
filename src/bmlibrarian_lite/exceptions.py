@@ -7,7 +7,6 @@ enabling precise error handling and meaningful error messages.
 Exception Hierarchy:
     LiteError (base)
     ├── LiteStorageError
-    │   ├── ChromaDBError
     │   └── SQLiteError
     ├── EmbeddingError
     ├── ConfigurationError
@@ -15,14 +14,12 @@ Exception Hierarchy:
     └── LLMError
 
 Usage:
-    from bmlibrarian_lite.exceptions import ChromaDBError, SQLiteError
+    from bmlibrarian_lite.exceptions import SQLiteError
 
     try:
         storage.add_document(doc)
-    except ChromaDBError as e:
-        logger.error(f"Vector storage failed: {e}")
     except SQLiteError as e:
-        logger.error(f"Metadata storage failed: {e}")
+        logger.error(f"Storage operation failed: {e}")
 """
 
 
@@ -47,7 +44,6 @@ class LiteStorageError(LiteError):
     """
     Base exception for storage operations.
 
-    Covers both ChromaDB and SQLite failures.
     Use more specific subclasses when the storage type is known.
 
     Example:
@@ -55,25 +51,6 @@ class LiteStorageError(LiteError):
             storage.add_document(doc)
         except LiteStorageError as e:
             logger.error(f"Storage operation failed: {e}")
-    """
-
-    pass
-
-
-class ChromaDBError(LiteStorageError):
-    """
-    ChromaDB-specific storage error.
-
-    Raised when ChromaDB operations fail, including:
-    - Collection creation/access
-    - Document upsert/query/delete
-    - Embedding storage
-
-    Example:
-        try:
-            collection.upsert(ids=[doc_id], documents=[text])
-        except chromadb.errors.ChromaError as e:
-            raise ChromaDBError(f"Failed to upsert document: {e}") from e
     """
 
     pass

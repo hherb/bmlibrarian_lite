@@ -322,11 +322,6 @@ class StorageConfig:
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
 
     @property
-    def chroma_dir(self) -> Path:
-        """Directory for ChromaDB storage."""
-        return self.data_dir / "chroma_db"
-
-    @property
     def sqlite_path(self) -> Path:
         """Path to SQLite database file."""
         return self.data_dir / SQLITE_DATABASE_NAME
@@ -709,7 +704,6 @@ class LiteConfig:
         """Create all required directories if they don't exist."""
         directories = [
             self.storage.data_dir,
-            self.storage.chroma_dir,
             self.storage.reviews_dir,
             self.storage.exports_dir,
             self.storage.cache_dir,

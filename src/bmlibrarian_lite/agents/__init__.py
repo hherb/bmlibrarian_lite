@@ -2,7 +2,7 @@
 Lite agents for BMLibrarian Lite.
 
 This module provides simplified, stateless agents that work without PostgreSQL,
-using ChromaDB and SQLite for persistence and online LLM providers for inference.
+using SQLite (with sqlite-vec) for persistence and online LLM providers for inference.
 
 Agents:
     LiteBaseAgent: Base class with LLM communication

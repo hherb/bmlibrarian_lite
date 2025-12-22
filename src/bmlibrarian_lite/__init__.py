@@ -6,13 +6,12 @@ A simplified interface for:
 - Document interrogation (Q&A with loaded documents)
 
 Features:
-- ChromaDB for vector storage (embedded, no PostgreSQL)
-- SQLite for metadata (embedded)
+- SQLite with sqlite-vec for storage and vector search
 - FastEmbed for local embeddings (CPU-optimized, no PyTorch)
 - Anthropic Claude or Ollama for LLM inference
 - NCBI E-utilities for PubMed search (online)
 
-No PostgreSQL required.
+No PostgreSQL or external databases required.
 """
 
 from .config import LiteConfig
