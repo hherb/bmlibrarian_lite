@@ -375,6 +375,26 @@ class LiteStorage:
             FOREIGN KEY (source_id) REFERENCES documents(id)
         );
 
+        -- Study classifications (linked to documents and evaluators)
+        CREATE TABLE IF NOT EXISTS study_classifications (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            study_design TEXT NOT NULL,
+            is_randomized INTEGER,
+            is_blinded TEXT,
+            sample_size INTEGER,
+            confidence REAL NOT NULL,
+            raw_response TEXT,
+            evaluator_id TEXT,
+            latency_ms INTEGER,
+            tokens_input INTEGER,
+            tokens_output INTEGER,
+            cost_usd REAL,
+            classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES documents(id),
+            FOREIGN KEY (evaluator_id) REFERENCES evaluators(id)
+        );
+
         -- Create indexes for common queries
         CREATE INDEX IF NOT EXISTS idx_search_sessions_created
             ON search_sessions(created_at);
@@ -412,6 +432,12 @@ class LiteStorage:
             ON documents(doi);
         CREATE INDEX IF NOT EXISTS idx_chunks_source_id
             ON chunks(source_id);
+        CREATE INDEX IF NOT EXISTS idx_study_classifications_document
+            ON study_classifications(document_id);
+        CREATE INDEX IF NOT EXISTS idx_study_classifications_evaluator
+            ON study_classifications(evaluator_id);
+        CREATE INDEX IF NOT EXISTS idx_study_classifications_doc_eval
+            ON study_classifications(document_id, evaluator_id);
         """
 
     # =========================================================================
@@ -1785,6 +1811,83 @@ class LiteStorage:
                 metadata=json.loads(row["metadata"]),
             )
 
+    def delete_research_question(self, question: str) -> bool:
+        """
+        Delete a research question and all associated data.
+
+        This removes:
+        - All review checkpoints for this question
+        - All scored documents for those checkpoints
+        - All citations for those checkpoints
+        - All question_documents associations
+
+        Note: Documents themselves are NOT deleted as they may be shared
+        across multiple questions.
+
+        Args:
+            question: The research question text to delete
+
+        Returns:
+            True if deletion was successful
+        """
+        question_hash = compute_question_hash(question)
+
+        with self._sqlite_connection() as conn:
+            # Get all checkpoint IDs for this question
+            cursor = conn.execute(
+                """
+                SELECT id FROM review_checkpoints
+                WHERE LOWER(TRIM(research_question)) = LOWER(TRIM(?))
+                """,
+                (question,),
+            )
+            checkpoint_ids = [row["id"] for row in cursor]
+
+            deleted_scored = 0
+            deleted_citations = 0
+            deleted_checkpoints = 0
+
+            # Delete scored documents and citations for each checkpoint
+            for checkpoint_id in checkpoint_ids:
+                cursor = conn.execute(
+                    "DELETE FROM scored_documents WHERE checkpoint_id = ?",
+                    (checkpoint_id,),
+                )
+                deleted_scored += cursor.rowcount
+
+                cursor = conn.execute(
+                    "DELETE FROM citations WHERE checkpoint_id = ?",
+                    (checkpoint_id,),
+                )
+                deleted_citations += cursor.rowcount
+
+            # Delete the checkpoints
+            cursor = conn.execute(
+                """
+                DELETE FROM review_checkpoints
+                WHERE LOWER(TRIM(research_question)) = LOWER(TRIM(?))
+                """,
+                (question,),
+            )
+            deleted_checkpoints = cursor.rowcount
+
+            # Delete question_documents associations
+            cursor = conn.execute(
+                "DELETE FROM question_documents WHERE question_hash = ?",
+                (question_hash,),
+            )
+            deleted_associations = cursor.rowcount
+
+            conn.commit()
+
+            logger.info(
+                f"Deleted research question: {deleted_checkpoints} checkpoints, "
+                f"{deleted_scored} scored docs, {deleted_citations} citations, "
+                f"{deleted_associations} doc associations"
+            )
+
+            return deleted_checkpoints > 0 or deleted_associations > 0
+
     # =========================================================================
     # PubMed Cache Operations
     # =========================================================================
@@ -2290,6 +2393,211 @@ class LiteStorage:
                 ))
 
             return results
+
+    # =========================================================================
+    # Study Classification Operations
+    # =========================================================================
+
+    def save_study_classification(
+        self,
+        document_id: str,
+        classification: "StudyClassification",
+        evaluator_id: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        tokens_input: Optional[int] = None,
+        tokens_output: Optional[int] = None,
+        cost_usd: Optional[float] = None,
+    ) -> str:
+        """
+        Save a study classification with evaluator tracking.
+
+        Args:
+            document_id: Document ID
+            classification: StudyClassification from the classifier
+            evaluator_id: Optional evaluator ID (for benchmarking)
+            latency_ms: Optional latency in milliseconds
+            tokens_input: Optional input token count
+            tokens_output: Optional output token count
+            cost_usd: Optional cost in USD
+
+        Returns:
+            Classification ID
+
+        Raises:
+            SQLiteError: If database operation fails
+        """
+        classification_id = str(uuid.uuid4())
+
+        try:
+            with self._sqlite_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO study_classifications
+                    (id, document_id, study_design, is_randomized, is_blinded,
+                     sample_size, confidence, raw_response, evaluator_id,
+                     latency_ms, tokens_input, tokens_output, cost_usd)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        classification_id,
+                        document_id,
+                        classification.study_design.value,
+                        1 if classification.is_randomized else (0 if classification.is_randomized is False else None),
+                        classification.is_blinded,
+                        classification.sample_size,
+                        classification.confidence,
+                        classification.raw_response,
+                        evaluator_id,
+                        latency_ms,
+                        tokens_input,
+                        tokens_output,
+                        cost_usd,
+                    ),
+                )
+                conn.commit()
+
+            logger.debug(
+                f"Saved study classification {classification_id} for {document_id}: "
+                f"{classification.study_design.value}"
+            )
+            return classification_id
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Failed to save study classification: {e}") from e
+
+    def get_study_classification(
+        self,
+        document_id: str,
+        evaluator_id: Optional[str] = None,
+    ) -> Optional["StudyClassification"]:
+        """
+        Get the most recent study classification for a document.
+
+        Args:
+            document_id: Document ID
+            evaluator_id: Optional evaluator ID filter
+
+        Returns:
+            StudyClassification if found, None otherwise
+        """
+        from .quality.data_models import StudyClassification, StudyDesign
+
+        query = """
+            SELECT * FROM study_classifications
+            WHERE document_id = ?
+        """
+        params: list[Any] = [document_id]
+
+        if evaluator_id is not None:
+            query += " AND evaluator_id = ?"
+            params.append(evaluator_id)
+
+        query += " ORDER BY classified_at DESC LIMIT 1"
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return StudyClassification(
+                study_design=StudyDesign(row["study_design"]),
+                is_randomized=bool(row["is_randomized"]) if row["is_randomized"] is not None else None,
+                is_blinded=row["is_blinded"],
+                sample_size=row["sample_size"],
+                confidence=row["confidence"],
+                raw_response=row["raw_response"],
+            )
+
+    def get_study_classification_by_evaluator(
+        self,
+        document_id: str,
+        evaluator_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Get a study classification by document ID and evaluator ID.
+
+        Returns full classification data including metrics for benchmarking.
+
+        Args:
+            document_id: Document ID
+            evaluator_id: Evaluator ID
+
+        Returns:
+            Dictionary with classification data if found, None otherwise
+        """
+        query = """
+            SELECT sc.*, e.type as eval_type, e.display_name, e.provider,
+                   e.model_name, e.temperature as eval_temp
+            FROM study_classifications sc
+            LEFT JOIN evaluators e ON sc.evaluator_id = e.id
+            WHERE sc.document_id = ? AND sc.evaluator_id = ?
+            ORDER BY sc.classified_at DESC LIMIT 1
+        """
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, (document_id, evaluator_id))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return dict(row)
+
+    def get_study_classifications_for_document(
+        self,
+        document_id: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Get all study classifications for a document.
+
+        Useful for comparing classifications from different evaluators.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            List of classification dictionaries
+        """
+        query = """
+            SELECT sc.*, e.type as eval_type, e.display_name, e.provider,
+                   e.model_name
+            FROM study_classifications sc
+            LEFT JOIN evaluators e ON sc.evaluator_id = e.id
+            WHERE sc.document_id = ?
+            ORDER BY sc.classified_at DESC
+        """
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, (document_id,))
+            return [dict(row) for row in cursor]
+
+    def delete_study_classifications_for_document(
+        self,
+        document_id: str,
+        evaluator_id: Optional[str] = None,
+    ) -> int:
+        """
+        Delete study classifications for a document.
+
+        Args:
+            document_id: Document ID
+            evaluator_id: Optional evaluator ID filter
+
+        Returns:
+            Number of classifications deleted
+        """
+        query = "DELETE FROM study_classifications WHERE document_id = ?"
+        params: list[Any] = [document_id]
+
+        if evaluator_id is not None:
+            query += " AND evaluator_id = ?"
+            params.append(evaluator_id)
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, params)
+            conn.commit()
+            return cursor.rowcount
 
     # =========================================================================
     # Benchmark Run Operations

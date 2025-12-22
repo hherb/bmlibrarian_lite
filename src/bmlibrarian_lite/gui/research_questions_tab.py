@@ -13,12 +13,14 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -35,7 +37,7 @@ from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
 from ..data_models import LiteDocument, ResearchQuestionSummary
 from ..storage import LiteStorage
-from .workers import IncrementalSearchWorker
+from .workers import IncrementalSearchWorker, ReclassifyWorker, RescoreWorker
 from .benchmark_dialog import BenchmarkWorker
 
 logger = logging.getLogger(__name__)
@@ -85,8 +87,11 @@ class ResearchQuestionsTab(QWidget):
         self._questions: list[ResearchQuestionSummary] = []
         self._worker: Optional[IncrementalSearchWorker] = None
         self._benchmark_worker: Optional[BenchmarkWorker] = None
+        self._reclassify_worker: Optional[ReclassifyWorker] = None
+        self._rescore_worker: Optional[RescoreWorker] = None
 
         self._setup_ui()
+        self._setup_context_menu()
         self._load_questions()
 
     def _setup_ui(self) -> None:
@@ -202,6 +207,98 @@ class ResearchQuestionsTab(QWidget):
         self.empty_label.setStyleSheet("color: gray;")
         self.empty_label.setVisible(False)
         layout.addWidget(self.empty_label)
+
+    def _setup_context_menu(self) -> None:
+        """Set up the right-click context menu for the questions table."""
+        self.questions_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.questions_table.customContextMenuRequested.connect(
+            self._show_context_menu
+        )
+
+    def _show_context_menu(self, position: QPoint) -> None:
+        """
+        Show context menu at the given position.
+
+        Args:
+            position: Position where the menu should appear
+        """
+        # Only show menu if a row is selected
+        item = self.questions_table.itemAt(position)
+        if not item:
+            return
+
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        # Check if any worker is running
+        is_busy = (
+            self._worker is not None
+            or self._benchmark_worker is not None
+            or self._reclassify_worker is not None
+            or self._rescore_worker is not None
+        )
+
+        menu = QMenu(self)
+
+        # Re-classify action
+        reclassify_action = QAction("Re-classify Documents", self)
+        reclassify_action.setToolTip(
+            "Re-run study design classification for all documents"
+        )
+        reclassify_action.triggered.connect(self._on_reclassify_clicked)
+        reclassify_action.setEnabled(
+            not is_busy and question.total_documents > 0
+        )
+        menu.addAction(reclassify_action)
+
+        # Re-score action
+        rescore_action = QAction("Re-score Documents", self)
+        rescore_action.setToolTip(
+            "Re-run relevance scoring for all documents"
+        )
+        rescore_action.triggered.connect(self._on_rescore_clicked)
+        rescore_action.setEnabled(
+            not is_busy and question.total_documents > 0
+        )
+        menu.addAction(rescore_action)
+
+        menu.addSeparator()
+
+        # Re-run search action (same as button)
+        rerun_action = QAction("Re-run Search", self)
+        rerun_action.setToolTip(
+            "Search for new documents not yet scored"
+        )
+        rerun_action.triggered.connect(self._on_rerun_clicked)
+        rerun_action.setEnabled(not is_busy)
+        menu.addAction(rerun_action)
+
+        # Run benchmark action (if enabled)
+        if self.config.benchmark.enabled and len(self.config.benchmark.models) > 0:
+            benchmark_action = QAction("Run Benchmark", self)
+            benchmark_action.setToolTip(
+                "Compare multiple models on scored documents"
+            )
+            benchmark_action.triggered.connect(self._on_benchmark_clicked)
+            benchmark_action.setEnabled(
+                not is_busy and question.total_documents > 0
+            )
+            menu.addAction(benchmark_action)
+
+        menu.addSeparator()
+
+        # Delete action
+        delete_action = QAction("Delete Question", self)
+        delete_action.setToolTip(
+            "Delete this research question and all associated data"
+        )
+        delete_action.triggered.connect(self._on_delete_clicked)
+        delete_action.setEnabled(not is_busy)
+        menu.addAction(delete_action)
+
+        # Show the menu at the cursor position
+        menu.exec(self.questions_table.viewport().mapToGlobal(position))
 
     def _load_questions(self) -> None:
         """Load research questions from storage."""
@@ -515,3 +612,291 @@ class ResearchQuestionsTab(QWidget):
             if self._benchmark_worker.isRunning():
                 self._benchmark_worker.wait(2000)
             self._benchmark_worker = None
+
+    # -------------------------------------------------------------------------
+    # Re-classify handlers
+    # -------------------------------------------------------------------------
+
+    def _on_reclassify_clicked(self) -> None:
+        """Handle re-classify context menu action."""
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        # Get document IDs for this question
+        doc_ids = self.storage.get_document_ids_for_question(question.question)
+        if not doc_ids:
+            # Fall back to scored documents for legacy data
+            doc_ids = self.storage.get_scored_document_ids_for_question(
+                question.question
+            )
+
+        if not doc_ids:
+            self.progress_label.setText("No documents found for this question")
+            return
+
+        # Fetch the actual documents
+        documents = self.storage.get_documents(list(doc_ids))
+        if not documents:
+            self.progress_label.setText("Could not retrieve documents")
+            return
+
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Re-classify Documents",
+            f"Re-run study design classification for {len(documents)} documents?\n\n"
+            "This will update the study type (RCT, cohort, etc.) for each document.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Start reclassify worker
+        self._reclassify_worker = ReclassifyWorker(
+            config=self.config,
+            storage=self.storage,
+            documents=documents,
+            parent=self,
+        )
+        self._reclassify_worker.progress.connect(self._on_reclassify_progress)
+        self._reclassify_worker.finished.connect(self._on_reclassify_finished)
+        self._reclassify_worker.error.connect(self._on_reclassify_error)
+
+        # Update UI state
+        self._set_busy_state(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Re-classifying documents...")
+
+        self._reclassify_worker.start()
+
+    def _on_reclassify_progress(
+        self, current: int, total: int, message: str
+    ) -> None:
+        """Handle reclassify progress updates."""
+        if total > 0:
+            percent = int((current / total) * 100)
+            self.progress_bar.setValue(percent)
+        self.progress_label.setText(message)
+
+    def _on_reclassify_finished(self, success_count: int, fail_count: int) -> None:
+        """Handle reclassify completion."""
+        self._reset_ui()
+        self._load_questions()  # Refresh the table
+
+        self.progress_label.setText(
+            f"Re-classification complete: {success_count} succeeded, "
+            f"{fail_count} failed"
+        )
+
+        if fail_count > 0:
+            QMessageBox.warning(
+                self,
+                "Re-classification Complete",
+                f"Re-classified {success_count} documents.\n"
+                f"{fail_count} documents failed classification.",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Re-classification Complete",
+                f"Successfully re-classified {success_count} documents.",
+            )
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_reclassify_worker)
+
+    def _on_reclassify_error(self, error_message: str) -> None:
+        """Handle reclassify error."""
+        self._reset_ui()
+        self.progress_label.setText(f"Re-classify error: {error_message}")
+
+        QMessageBox.warning(
+            self,
+            "Re-classification Error",
+            f"An error occurred during re-classification:\n\n{error_message}",
+        )
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_reclassify_worker)
+
+    def _cleanup_reclassify_worker(self) -> None:
+        """Clean up reclassify worker after completion."""
+        if self._reclassify_worker is not None:
+            if self._reclassify_worker.isRunning():
+                self._reclassify_worker.wait(2000)
+            self._reclassify_worker = None
+
+    # -------------------------------------------------------------------------
+    # Re-score handlers
+    # -------------------------------------------------------------------------
+
+    def _on_rescore_clicked(self) -> None:
+        """Handle re-score context menu action."""
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        # Get document IDs for this question
+        doc_ids = self.storage.get_document_ids_for_question(question.question)
+        if not doc_ids:
+            # Fall back to scored documents for legacy data
+            doc_ids = self.storage.get_scored_document_ids_for_question(
+                question.question
+            )
+
+        if not doc_ids:
+            self.progress_label.setText("No documents found for this question")
+            return
+
+        # Fetch the actual documents
+        documents = self.storage.get_documents(list(doc_ids))
+        if not documents:
+            self.progress_label.setText("Could not retrieve documents")
+            return
+
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Re-score Documents",
+            f"Re-run relevance scoring for {len(documents)} documents?\n\n"
+            "This will update the relevance score (1-5) for each document.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Start rescore worker
+        self._rescore_worker = RescoreWorker(
+            config=self.config,
+            storage=self.storage,
+            question=question.question,
+            documents=documents,
+            parent=self,
+        )
+        self._rescore_worker.progress.connect(self._on_rescore_progress)
+        self._rescore_worker.finished.connect(self._on_rescore_finished)
+        self._rescore_worker.error.connect(self._on_rescore_error)
+
+        # Update UI state
+        self._set_busy_state(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Re-scoring documents...")
+
+        self._rescore_worker.start()
+
+    def _on_rescore_progress(self, current: int, total: int, message: str) -> None:
+        """Handle rescore progress updates."""
+        if total > 0:
+            percent = int((current / total) * 100)
+            self.progress_bar.setValue(percent)
+        self.progress_label.setText(message)
+
+    def _on_rescore_finished(self, success_count: int, fail_count: int) -> None:
+        """Handle rescore completion."""
+        self._reset_ui()
+        self._load_questions()  # Refresh the table
+
+        self.progress_label.setText(
+            f"Re-scoring complete: {success_count} succeeded, {fail_count} failed"
+        )
+
+        if fail_count > 0:
+            QMessageBox.warning(
+                self,
+                "Re-scoring Complete",
+                f"Re-scored {success_count} documents.\n"
+                f"{fail_count} documents failed scoring.",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Re-scoring Complete",
+                f"Successfully re-scored {success_count} documents.",
+            )
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_rescore_worker)
+
+    def _on_rescore_error(self, error_message: str) -> None:
+        """Handle rescore error."""
+        self._reset_ui()
+        self.progress_label.setText(f"Re-score error: {error_message}")
+
+        QMessageBox.warning(
+            self,
+            "Re-scoring Error",
+            f"An error occurred during re-scoring:\n\n{error_message}",
+        )
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_rescore_worker)
+
+    def _cleanup_rescore_worker(self) -> None:
+        """Clean up rescore worker after completion."""
+        if self._rescore_worker is not None:
+            if self._rescore_worker.isRunning():
+                self._rescore_worker.wait(2000)
+            self._rescore_worker = None
+
+    # -------------------------------------------------------------------------
+    # Delete handler
+    # -------------------------------------------------------------------------
+
+    def _on_delete_clicked(self) -> None:
+        """Handle delete context menu action."""
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        # Confirm with user
+        reply = QMessageBox.warning(
+            self,
+            "Delete Research Question",
+            f"Delete this research question and all associated data?\n\n"
+            f"Question: {question.question[:100]}...\n\n"
+            f"This will remove:\n"
+            f"• {question.scored_documents} scored document records\n"
+            f"• All associated citations\n"
+            f"• All review checkpoints\n\n"
+            "Documents themselves are preserved for other questions.\n"
+            "This action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            # Delete the question and associated data
+            self.storage.delete_research_question(question.question)
+            self._load_questions()  # Refresh the table
+            self.progress_label.setText("Research question deleted")
+
+        except Exception as e:
+            logger.exception("Failed to delete research question")
+            QMessageBox.warning(
+                self,
+                "Delete Error",
+                f"Failed to delete research question:\n\n{e}",
+            )
+
+    # -------------------------------------------------------------------------
+    # Helper methods
+    # -------------------------------------------------------------------------
+
+    def _set_busy_state(self, busy: bool) -> None:
+        """
+        Set the UI to busy or ready state.
+
+        Args:
+            busy: True to disable controls, False to enable
+        """
+        self.rerun_btn.setEnabled(not busy)
+        self.benchmark_btn.setEnabled(not busy)
+        self.cancel_btn.setEnabled(busy)
+        self.questions_table.setEnabled(not busy)

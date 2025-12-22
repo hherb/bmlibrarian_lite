@@ -7,6 +7,9 @@ Provides QThread-based workers for long-running operations:
 - FulltextDiscoveryWorker: Discover full-text via Europe PMC XML or PDF
 - OpenAthensAuthWorker: Handle OpenAthens institutional authentication
 - QualityFilterWorker: Filter documents by quality criteria
+- IncrementalSearchWorker: Search for new documents incrementally
+- ReclassifyWorker: Re-run study design classification
+- RescoreWorker: Re-run relevance scoring
 
 These workers allow the main GUI thread to remain responsive while
 background operations execute.
@@ -640,6 +643,206 @@ class IncrementalSearchWorker(QThread):
             return int(year_str)
         except (ValueError, IndexError):
             return None
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+
+
+class ReclassifyWorker(QThread):
+    """
+    Background worker for re-running study design classification.
+
+    Re-classifies all provided documents using the study classifier,
+    updating the stored quality assessments.
+
+    Signals:
+        progress: Emitted with (current, total, message) during classification
+        finished: Emitted with (success_count, fail_count) when complete
+        error: Emitted with error message on failure
+    """
+
+    progress = Signal(int, int, str)  # current, total, message
+    finished = Signal(int, int)  # success_count, fail_count
+    error = Signal(str)
+
+    def __init__(
+        self,
+        config: "LiteConfig",
+        storage: "LiteStorage",
+        documents: List["LiteDocument"],
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize the reclassify worker.
+
+        Args:
+            config: Lite configuration
+            storage: Storage layer for saving results
+            documents: List of documents to reclassify
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.config = config
+        self.storage = storage
+        self.documents = documents
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Execute re-classification in background thread."""
+        try:
+            from ..quality.study_classifier import LiteStudyClassifier
+            from ..quality.data_models import StudyDesign
+
+            classifier = LiteStudyClassifier(config=self.config)
+
+            success_count = 0
+            fail_count = 0
+            total = len(self.documents)
+
+            for i, doc in enumerate(self.documents):
+                if self._cancelled:
+                    break
+
+                self.progress.emit(
+                    i + 1,
+                    total,
+                    f"Classifying {i + 1}/{total}: {doc.title[:50]}...",
+                )
+
+                try:
+                    classification = classifier.classify(doc)
+
+                    # Check if classification succeeded
+                    if classification.study_design != StudyDesign.UNKNOWN:
+                        # Save to database
+                        self.storage.save_study_classification(
+                            document_id=doc.id,
+                            classification=classification,
+                        )
+                        success_count += 1
+                        logger.info(
+                            f"Classified {doc.id}: {classification.study_design.value} "
+                            f"(confidence: {classification.confidence:.2f})"
+                        )
+                    else:
+                        fail_count += 1
+                        logger.warning(
+                            f"Classification failed for {doc.id}: "
+                            f"UNKNOWN design with confidence {classification.confidence}"
+                        )
+
+                except Exception as e:
+                    fail_count += 1
+                    logger.warning(
+                        f"Failed to classify document {doc.id}: {e}"
+                    )
+
+            if not self._cancelled:
+                self.finished.emit(success_count, fail_count)
+
+        except Exception as e:
+            logger.exception("Reclassification failed")
+            if not self._cancelled:
+                self.error.emit(str(e))
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+
+
+class RescoreWorker(QThread):
+    """
+    Background worker for re-running relevance scoring.
+
+    Re-scores all provided documents using the scoring agent,
+    updating the stored scored documents.
+
+    Signals:
+        progress: Emitted with (current, total, message) during scoring
+        finished: Emitted with (success_count, fail_count) when complete
+        error: Emitted with error message on failure
+    """
+
+    progress = Signal(int, int, str)  # current, total, message
+    finished = Signal(int, int)  # success_count, fail_count
+    error = Signal(str)
+
+    def __init__(
+        self,
+        config: "LiteConfig",
+        storage: "LiteStorage",
+        question: str,
+        documents: List["LiteDocument"],
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize the rescore worker.
+
+        Args:
+            config: Lite configuration
+            storage: Storage layer for saving results
+            question: Research question for scoring context
+            documents: List of documents to rescore
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.config = config
+        self.storage = storage
+        self.question = question
+        self.documents = documents
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Execute re-scoring in background thread."""
+        try:
+            from ..agents.scoring_agent import LiteScoringAgent
+
+            scoring_agent = LiteScoringAgent(config=self.config)
+
+            success_count = 0
+            fail_count = 0
+            total = len(self.documents)
+
+            # Get or create a checkpoint for this re-scoring run
+            checkpoint = self.storage.create_checkpoint(
+                research_question=self.question,
+            )
+
+            for i, doc in enumerate(self.documents):
+                if self._cancelled:
+                    break
+
+                self.progress.emit(
+                    i + 1,
+                    total,
+                    f"Scoring {i + 1}/{total}: {doc.title[:50]}...",
+                )
+
+                try:
+                    scored_doc = scoring_agent.score_document(
+                        self.question, doc
+                    )
+
+                    # Save the scored document to storage
+                    self.storage.save_scored_document(
+                        scored_doc, checkpoint.id
+                    )
+                    success_count += 1
+
+                except Exception as e:
+                    fail_count += 1
+                    logger.warning(
+                        f"Failed to score document {doc.id}: {e}"
+                    )
+
+            if not self._cancelled:
+                self.finished.emit(success_count, fail_count)
+
+        except Exception as e:
+            logger.exception("Re-scoring failed")
+            if not self._cancelled:
+                self.error.emit(str(e))
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""

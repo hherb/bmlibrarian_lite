@@ -12,6 +12,7 @@ literature review sections.
 
 import json
 import logging
+import re
 import time
 import warnings
 from typing import Optional, Callable
@@ -422,7 +423,10 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
 
             # Security: Additional validation after cleaning
             if not cleaned or not cleaned.strip():
-                logger.warning(f"Document {doc_id}: Empty response after cleaning")
+                logger.warning(
+                    f"Document {doc_id}: Empty response after cleaning. "
+                    f"Raw response was: {repr(response[:500]) if response else 'None/empty'}"
+                )
                 return StudyClassification(
                     study_design=StudyDesign.UNKNOWN,
                     confidence=0.0,
@@ -474,7 +478,12 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
 
     def _clean_json_response(self, response: str) -> str:
         """
-        Clean LLM response by removing markdown code blocks.
+        Clean LLM response by extracting JSON content.
+
+        Handles multiple formats:
+        1. Pure JSON response
+        2. JSON wrapped in markdown code blocks
+        3. JSON embedded in conversational text
 
         Args:
             response: Raw response string
@@ -482,17 +491,43 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         Returns:
             Cleaned JSON string
         """
+        if not response:
+            return ""
+
         cleaned = response.strip()
-        if cleaned.startswith("```"):
-            # Remove opening code block
+
+        # Try 1: If it starts with { or [, it's likely already JSON
+        if cleaned.startswith("{") or cleaned.startswith("["):
+            return cleaned
+
+        # Try 2: Extract from markdown code blocks
+        if "```" in cleaned:
             parts = cleaned.split("```")
-            if len(parts) >= 2:
-                cleaned = parts[1]
+            for part in parts:
+                part = part.strip()
                 # Remove language identifier if present
-                if cleaned.startswith("json"):
-                    cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
-        return cleaned
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                elif part.startswith("JSON"):
+                    part = part[4:].strip()
+                # Check if this part looks like JSON
+                if part.startswith("{") or part.startswith("["):
+                    return part
+
+        # Try 3: Find JSON object anywhere in the response using regex
+        # Look for { ... } pattern (greedy match for outermost braces)
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned)
+        if json_match:
+            return json_match.group(0)
+
+        # Try 4: More aggressive - find first { and last }
+        first_brace = cleaned.find("{")
+        last_brace = cleaned.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            return cleaned[first_brace:last_brace + 1]
+
+        # Nothing found - return empty
+        return ""
 
     def _parse_study_design(self, design_str: str) -> StudyDesign:
         """

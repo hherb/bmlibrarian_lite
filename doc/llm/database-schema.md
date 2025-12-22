@@ -120,6 +120,39 @@ CREATE TABLE citations (
 );
 ```
 
+### `study_classifications`
+
+Stores study design classifications from LLM classifiers.
+
+```sql
+CREATE TABLE study_classifications (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,              -- Reference to document
+    study_design TEXT NOT NULL,             -- Study design enum value
+    is_randomized INTEGER,                  -- 1=yes, 0=no, NULL=unknown
+    is_blinded TEXT,                        -- none/single/double/triple
+    sample_size INTEGER,                    -- Number of participants
+    confidence REAL NOT NULL,               -- Classification confidence (0-1)
+    raw_response TEXT,                      -- Raw LLM response for debugging
+    evaluator_id TEXT,                      -- FK to evaluators (for benchmarking)
+    latency_ms INTEGER,                     -- Classification latency
+    tokens_input INTEGER,                   -- Input tokens used
+    tokens_output INTEGER,                  -- Output tokens used
+    cost_usd REAL,                          -- Cost in USD
+    classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (document_id) REFERENCES documents(id),
+    FOREIGN KEY (evaluator_id) REFERENCES evaluators(id)
+);
+```
+
+Study design values:
+- `systematic_review`, `meta_analysis`: Tier 5 - Synthesis
+- `rct`, `guideline`: Tier 4 - Experimental
+- `cohort_prospective`, `cohort_retrospective`, `case_control`: Tier 3 - Controlled
+- `cross_sectional`: Tier 2 - Observational
+- `case_series`, `case_report`, `editorial`, `letter`, `comment`: Tier 1 - Anecdotal
+- `other`, `unknown`: Unclassified
+
 ### `interrogation_sessions`
 
 Tracks document Q&A sessions.
@@ -214,6 +247,9 @@ CREATE INDEX idx_interrogation_sessions_created ON interrogation_sessions(create
 CREATE INDEX idx_benchmark_runs_status ON benchmark_runs(status);
 CREATE INDEX idx_benchmark_runs_task ON benchmark_runs(task_type);
 CREATE INDEX idx_benchmark_runs_question_hash ON benchmark_runs(question_hash);
+CREATE INDEX idx_study_classifications_document ON study_classifications(document_id);
+CREATE INDEX idx_study_classifications_evaluator ON study_classifications(evaluator_id);
+CREATE INDEX idx_study_classifications_doc_eval ON study_classifications(document_id, evaluator_id);
 ```
 
 ## Data Models (Python)
