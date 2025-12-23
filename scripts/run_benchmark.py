@@ -34,7 +34,7 @@ from typing import Optional
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from bmlibrarian_lite.config import LiteConfig
+from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.llm import LLMClient
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
@@ -132,6 +132,7 @@ def get_already_scored_doc_ids(
 
 def score_documents_for_question(
     storage: LiteStorage,
+    config: LiteConfig,
     llm_client: LLMClient,
     question: str,
     evaluator: Evaluator,
@@ -143,6 +144,7 @@ def score_documents_for_question(
 
     Args:
         storage: Storage instance
+        config: LiteConfig with model settings (should have document_scoring task configured)
         llm_client: LLM client for scoring
         question: Research question
         evaluator: Evaluator to use
@@ -203,9 +205,9 @@ def score_documents_for_question(
         },
     )
 
-    # Create scoring agent
+    # Create scoring agent with the pre-configured config
     scoring_agent = LiteScoringAgent(
-        config=LiteConfig.load(),
+        config=config,
         llm_client=llm_client,
     )
 
@@ -288,9 +290,19 @@ def run_benchmark(
     storage = LiteStorage(config)
 
     # Get temperature and max_tokens from task type config
-    scoring_config = LLM_TASK_TYPES.get("document_scoring", {})
-    temperature = scoring_config.get("default_temperature", 0.1)
-    max_tokens = scoring_config.get("default_max_tokens", 256)
+    scoring_defaults = LLM_TASK_TYPES.get("document_scoring", {})
+    temperature = scoring_defaults.get("default_temperature", 0.1)
+    max_tokens = scoring_defaults.get("default_max_tokens", 256)
+
+    # Override the document_scoring task config to use the benchmark model
+    # This ensures the scoring agent uses the model specified on the command line
+    config.models.tasks["document_scoring"] = TaskModelConfig(
+        provider=provider,
+        model=model_name,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    logger.info(f"Configured document_scoring task to use {provider}:{model_name}")
 
     # Create evaluator
     evaluator = Evaluator.from_model_config(
@@ -324,10 +336,6 @@ def run_benchmark(
 
     # Create LLM client
     llm_client = LLMClient()
-
-    # Override model in client
-    llm_client.provider = provider
-    llm_client.model = model_name
 
     # Summary statistics
     total_stats = {
@@ -366,6 +374,7 @@ def run_benchmark(
         # Score documents
         stats = score_documents_for_question(
             storage=storage,
+            config=config,
             llm_client=llm_client,
             question=question,
             evaluator=evaluator,
