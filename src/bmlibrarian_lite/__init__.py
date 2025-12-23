@@ -35,7 +35,7 @@ from .exceptions import (
 )
 from .pdf_discovery import PDFDiscoverer, PDFSource, DiscoveryResult, close_browser_session
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 
 def main() -> int:

@@ -19,8 +19,8 @@ src_dir = project_root / "src"
 block_cipher = None
 
 # Collect all modules from packages that have complex structures
-chromadb_datas, chromadb_binaries, chromadb_hiddenimports = collect_all('chromadb')
 fastembed_datas, fastembed_binaries, fastembed_hiddenimports = collect_all('fastembed')
+sqlite_vec_datas, sqlite_vec_binaries, sqlite_vec_hiddenimports = collect_all('sqlite_vec')
 onnxruntime_hiddenimports = collect_submodules('onnxruntime')
 
 # Hidden imports required for the application
@@ -69,8 +69,8 @@ hidden_imports = [
 ]
 
 # Add collected hidden imports
-hidden_imports.extend(chromadb_hiddenimports)
 hidden_imports.extend(fastembed_hiddenimports)
+hidden_imports.extend(sqlite_vec_hiddenimports)
 hidden_imports.extend(onnxruntime_hiddenimports)
 
 # Data files to include
@@ -82,13 +82,13 @@ datas = [
 ]
 
 # Add collected data files
-datas.extend(chromadb_datas)
 datas.extend(fastembed_datas)
+datas.extend(sqlite_vec_datas)
 
 # Binary files (native libraries)
 binaries = []
-binaries.extend(chromadb_binaries)
 binaries.extend(fastembed_binaries)
+binaries.extend(sqlite_vec_binaries)
 
 a = Analysis(
     [str(project_root / "scripts" / "run_gui.py")],
@@ -151,12 +151,12 @@ app = BUNDLE(
     name="BMLibrarian Lite.app",
     icon="assets/icon.icns",
     bundle_identifier="me.proton.bmlibrarian.lite",
-    version="0.1.0",
+    version="0.2.0",
     info_plist={
         "CFBundleName": "BMLibrarian Lite",
         "CFBundleDisplayName": "BMLibrarian Lite",
-        "CFBundleShortVersionString": "0.1.0",
-        "CFBundleVersion": "0.1.0",
+        "CFBundleShortVersionString": "0.2.0",
+        "CFBundleVersion": "0.2.0",
         "CFBundleIdentifier": "me.proton.bmlibrarian.lite",
         "CFBundlePackageType": "APPL",
         "CFBundleSignature": "????",

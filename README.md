@@ -6,7 +6,7 @@
 
 A lightweight biomedical literature research tool - no PostgreSQL required.
 
-BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database nor a powerful GPU and fast memory for local AI. It uses only the PubMed E-utilities API for searching and fetching article metadata instead of a local database. It uses ChromaDB for vector storage and SQLite for metadata, making it easy to install and use on any machine. Also, in order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows to use cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference. Using local models with ollama is optional.
+BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database nor a powerful GPU and fast memory for local AI. It uses only the PubMed E-utilities API for searching and fetching article metadata instead of a local database. It uses SQLite with sqlite-vec for vector storage and metadata, making it easy to install and use on any machine. Also, in order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows to use cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference. Using local models with ollama is optional.
 
 
 ## Features
@@ -15,9 +15,11 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 - **Document Interrogation**: Interactive Q&A with loaded documents
 - **PDF Discovery & Download**: Automatic PDF retrieval from PubMed Central, Unpaywall, and DOI resolution
 - **Quality Assessment**: Automated study quality evaluation with evidence grading
+- **Multi-Model Benchmarking**: Compare LLM models on relevance scoring and quality classification
+- **Research Questions Management**: Save, re-run, and manage past research questions
 - **Audit Trail**: Real-time visibility into the review workflow with LLM reasoning transparency
 - **Multiple LLM Providers**: Support for both Anthropic Claude (online) and Ollama (local)
-- **Embedded Storage**: ChromaDB + SQLite - no external database needed
+- **Unified SQLite Storage**: Single database for metadata and vector embeddings - no external database needed
 - **Cross-Platform GUI**: PySide6-based desktop application
 
 ## Quick Start
@@ -110,6 +112,31 @@ bmll --version
 5. **Extract citations** from high-scoring documents
 6. **Generate a report** synthesizing the evidence
 
+### Research Questions Tab
+
+The Research Questions tab helps you manage and revisit past research:
+
+- **View past questions**: See all research questions with document counts and scores
+- **Re-run searches**: Incrementally search for new documents with automatic deduplication
+- **Context menu actions**: Re-classify study designs, re-score relevance, or delete questions
+- **Run benchmarks**: Compare model performance directly from saved questions
+
+### Multi-Model Benchmarking
+
+Compare how different LLM models perform on your documents:
+
+- **Relevance Score Benchmarking**: Compare scoring consistency across models
+  - Agreement matrices showing model-to-model consistency
+  - Score distribution analysis
+  - Cost and latency tracking per model
+
+- **Quality Assessment Benchmarking**: Compare study design classification
+  - Design agreement matrix
+  - Tier agreement for quality levels
+  - Document-level disagreement highlighting
+
+Access benchmarking from the Systematic Review tab after scoring documents.
+
 ### Audit Trail
 
 The Audit Trail tab provides real-time visibility into the systematic review workflow:
@@ -189,7 +216,7 @@ You can also use the model string format: `anthropic:claude-sonnet-4-20250514` o
 
 ### Dependencies
 
-- **chromadb**: Vector storage
+- **sqlite-vec**: Vector similarity search extension for SQLite
 - **fastembed**: CPU-optimized embeddings
 - **anthropic**: Claude API client
 - **ollama**: Ollama API client
@@ -202,11 +229,14 @@ BMLibrarian Lite is designed for ease of use and portability:
 
 | Feature | BMLibrarian | BMLibrarian Lite |
 |---------|-------------|------------------|
-| Database | PostgreSQL + pgvector | ChromaDB + SQLite |
+| Database | PostgreSQL + pgvector | SQLite + sqlite-vec |
 | Embeddings | Ollama (local) | FastEmbed (CPU) |
 | PDF Discovery | Full (Unpaywall, PMC, OpenAthens) | Included (PMC, Unpaywall, DOI) |
 | Multi-Agent Workflow | Full orchestration | Simplified workflow |
-| Audit Trail | N/A | Real-time workflow visibility |
+| Plugin System | Lab plugins (PRISMA2020, etc.) | N/A |
+| Multi-Model Benchmarking | N/A | Compare LLM models on scoring & classification |
+| Research Question Management | N/A | Save, re-run, and manage past questions |
+| Audit Trail | Detailed/granular | Real-time workflow visibility |
 | Installation | Complex | Simple `pip install` |
 
 ## Documentation
