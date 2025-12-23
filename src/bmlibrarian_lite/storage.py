@@ -134,6 +134,7 @@ class LiteStorage:
                 conn.commit()
             # Run migrations for existing data
             self._migrate_benchmark_question_hashes()
+            self._migrate_scored_documents_constraint()
             logger.debug(f"SQLite initialized at {self._storage_config.sqlite_path}")
         except sqlite3.Error as e:
             raise SQLiteError(
@@ -187,6 +188,72 @@ class LiteStorage:
                     )
         except sqlite3.Error as e:
             logger.warning(f"Failed to migrate benchmark question hashes: {e}")
+
+    def _migrate_scored_documents_constraint(self) -> None:
+        """
+        Migrate scored_documents table to allow negative error codes.
+
+        The original CHECK constraint was `score BETWEEN 1 AND 5` which
+        prevented storing error codes (negative values). This migration
+        recreates the table with the new constraint `score BETWEEN -100 AND 5`.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                # Check if migration is needed by examining table SQL
+                cursor = conn.execute(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='scored_documents'"
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    # Table doesn't exist yet, will be created with new schema
+                    return
+
+                table_sql = row["sql"]
+                # Check if old constraint exists
+                if "score BETWEEN 1 AND 5" not in table_sql:
+                    # Already migrated or different constraint
+                    return
+
+                logger.info(
+                    "Migrating scored_documents table to allow negative error codes"
+                )
+
+                # Recreate table with new constraint (SQLite table rebuild)
+                conn.execute("ALTER TABLE scored_documents RENAME TO _scored_documents_old")
+                conn.execute(
+                    """
+                    CREATE TABLE scored_documents (
+                        id TEXT PRIMARY KEY,
+                        checkpoint_id TEXT NOT NULL,
+                        document_id TEXT NOT NULL,
+                        score INTEGER NOT NULL CHECK (score BETWEEN -100 AND 5),
+                        explanation TEXT,
+                        evaluator_id TEXT,
+                        latency_ms INTEGER,
+                        tokens_input INTEGER,
+                        tokens_output INTEGER,
+                        cost_usd REAL,
+                        scored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (checkpoint_id) REFERENCES review_checkpoints(id),
+                        FOREIGN KEY (evaluator_id) REFERENCES evaluators(id)
+                    )
+                    """
+                )
+                # Copy existing data
+                conn.execute(
+                    """
+                    INSERT INTO scored_documents
+                    SELECT * FROM _scored_documents_old
+                    """
+                )
+                # Drop old table
+                conn.execute("DROP TABLE _scored_documents_old")
+                conn.commit()
+                logger.info("Successfully migrated scored_documents table")
+
+        except sqlite3.Error as e:
+            logger.warning(f"Failed to migrate scored_documents constraint: {e}")
 
     @contextmanager
     def _sqlite_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -282,7 +349,7 @@ class LiteStorage:
             id TEXT PRIMARY KEY,
             checkpoint_id TEXT NOT NULL,
             document_id TEXT NOT NULL,
-            score INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
+            score INTEGER NOT NULL CHECK (score BETWEEN -100 AND 5),
             explanation TEXT,
             evaluator_id TEXT,
             latency_ms INTEGER,

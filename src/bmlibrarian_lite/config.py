@@ -430,6 +430,9 @@ class BenchmarkConfig:
     default_sample_mode: str = "all"
     default_sample_size: int = 10
     tasks: list[str] = field(default_factory=lambda: ["document_scoring"])
+    # Quality benchmark settings
+    quality_enabled: bool = False
+    quality_task_type: str = "study_classification"  # or "quality_assessment"
 
     def __post_init__(self) -> None:
         """Initialize with default models if empty."""
@@ -470,6 +473,8 @@ class BenchmarkConfig:
             "default_sample_mode": self.default_sample_mode,
             "default_sample_size": self.default_sample_size,
             "tasks": self.tasks,
+            "quality_enabled": self.quality_enabled,
+            "quality_task_type": self.quality_task_type,
         }
 
     @classmethod
@@ -487,6 +492,8 @@ class BenchmarkConfig:
             default_sample_mode=data.get("default_sample_mode", "all"),
             default_sample_size=int(data.get("default_sample_size", 10)),
             tasks=data.get("tasks", ["document_scoring"]),
+            quality_enabled=bool(data.get("quality_enabled", False)),
+            quality_task_type=data.get("quality_task_type", "study_classification"),
         )
         return config
 

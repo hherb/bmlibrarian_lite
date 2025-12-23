@@ -8,6 +8,8 @@ This classifier focuses on determining what study design THIS paper used,
 ignoring any other studies mentioned in the abstract. This distinction is
 critical because documents often reference other study types in their
 literature review sections.
+
+Includes robust retry logic using tenacity for handling API failures and timeouts.
 """
 
 import json
@@ -32,11 +34,9 @@ from ..constants import (
     ABSTRACT_CHUNK_SIZE,
     ABSTRACT_CHUNK_OVERLAP,
     CLASSIFICATION_MAX_RETRIES,
-    CLASSIFICATION_RETRY_BASE_DELAY,
-    CLASSIFICATION_RETRY_BACKOFF_MULTIPLIER,
-    CLASSIFICATION_RETRY_JITTER_FACTOR,
 )
-from ..utils import _calculate_delay_with_jitter
+from ..exceptions import JSONParseError, RetryExhaustedError
+from ..utils import llm_retry, classify_llm_exception
 from .data_models import StudyDesign, StudyClassification
 
 logger = logging.getLogger(__name__)
@@ -687,7 +687,7 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         doc_id: str | int,
     ) -> StudyClassification:
         """
-        Classify document with retry logic for transient failures.
+        Classify document with tenacity-based retry logic for transient failures.
 
         Uses exponential backoff with jitter to prevent thundering herd
         effects when multiple clients retry simultaneously (golden rule 22).
@@ -699,40 +699,48 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         Returns:
             StudyClassification result
         """
-        last_error: Optional[Exception] = None
+        try:
+            return self._classify_with_tenacity_retry(document)
+        except RetryExhaustedError as e:
+            logger.error(
+                f"Document {doc_id}: All {CLASSIFICATION_MAX_RETRIES} "
+                f"classification attempts failed. Last error: {e.last_error}"
+            )
+            return StudyClassification(
+                study_design=StudyDesign.UNKNOWN,
+                confidence=0.0,
+                raw_response=f"All retries failed: {e.last_error}",
+            )
+        except Exception as e:
+            error_code = classify_llm_exception(e)
+            logger.error(
+                f"Document {doc_id}: Classification failed with "
+                f"{error_code.name}: {e}"
+            )
+            return StudyClassification(
+                study_design=StudyDesign.UNKNOWN,
+                confidence=0.0,
+                raw_response=f"Classification failed: {e}",
+            )
 
-        for attempt in range(CLASSIFICATION_MAX_RETRIES):
-            try:
-                result = self.classify(document)
+    @llm_retry(max_retries=CLASSIFICATION_MAX_RETRIES)
+    def _classify_with_tenacity_retry(
+        self,
+        document: LiteDocument,
+    ) -> StudyClassification:
+        """
+        Internal method that performs classification with tenacity retry logic.
 
-                # If classification succeeded (even with UNKNOWN), return it
-                # We only retry on actual exceptions, not low-confidence results
-                return result
+        This method is decorated with @llm_retry to automatically retry
+        on API failures, timeouts, and connection errors.
 
-            except Exception as e:
-                last_error = e
-                if attempt < CLASSIFICATION_MAX_RETRIES - 1:
-                    # Calculate delay with jitter (golden rule 22)
-                    delay = _calculate_delay_with_jitter(
-                        base_delay=CLASSIFICATION_RETRY_BASE_DELAY,
-                        attempt=attempt,
-                        exponential_base=CLASSIFICATION_RETRY_BACKOFF_MULTIPLIER,
-                        jitter_factor=CLASSIFICATION_RETRY_JITTER_FACTOR,
-                    )
-                    logger.warning(
-                        f"Document {doc_id}: Classification attempt {attempt + 1} "
-                        f"failed: {e}. Retrying in {delay:.1f}s..."
-                    )
-                    time.sleep(delay)
-                else:
-                    logger.error(
-                        f"Document {doc_id}: All {CLASSIFICATION_MAX_RETRIES} "
-                        f"classification attempts failed. Last error: {e}"
-                    )
+        Args:
+            document: Document to classify
 
-        # All retries exhausted - return unknown classification
-        return StudyClassification(
-            study_design=StudyDesign.UNKNOWN,
-            confidence=0.0,
-            raw_response=f"All retries failed: {last_error}",
-        )
+        Returns:
+            StudyClassification result
+
+        Raises:
+            RetryExhaustedError: If all retries exhausted
+        """
+        return self.classify(document)

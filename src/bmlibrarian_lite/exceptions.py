@@ -183,3 +183,67 @@ class RetryExhaustedError(NetworkError):
         super().__init__(message)
         self.attempts = attempts
         self.last_error = last_error
+
+
+class JSONParseError(LLMError):
+    """
+    JSON parsing failed for LLM response.
+
+    Raised when the LLM returns a response that cannot be parsed as JSON,
+    including malformed JSON or unexpected response format.
+
+    Example:
+        raise JSONParseError(
+            "Failed to parse scoring response",
+            raw_response=llm_response,
+        )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        raw_response: str | None = None,
+    ) -> None:
+        """
+        Initialize JSON parse error.
+
+        Args:
+            message: Error message
+            raw_response: The raw LLM response that failed to parse
+        """
+        super().__init__(message)
+        self.raw_response = raw_response
+
+
+class APIError(LLMError):
+    """
+    LLM API call failed.
+
+    Raised when an LLM API call fails due to network issues, rate limiting,
+    authentication errors, or other API-level failures.
+
+    Example:
+        raise APIError(
+            "Anthropic API request failed",
+            status_code=429,
+            is_retryable=True,
+        )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        is_retryable: bool = True,
+    ) -> None:
+        """
+        Initialize API error.
+
+        Args:
+            message: Error message
+            status_code: HTTP status code if available
+            is_retryable: Whether this error can be retried
+        """
+        super().__init__(message)
+        self.status_code = status_code
+        self.is_retryable = is_retryable

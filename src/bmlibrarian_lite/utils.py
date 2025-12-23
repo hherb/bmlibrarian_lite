@@ -3,6 +3,7 @@ Utility functions for BMLibrarian Lite.
 
 Provides common utilities including:
 - Retry logic with exponential backoff for network operations
+- Tenacity-based retry decorators for LLM API calls
 - Performance metrics collection
 - Timing utilities
 
@@ -13,6 +14,11 @@ Usage:
     @retry_with_backoff(max_retries=3)
     def fetch_data():
         return requests.get(url)
+
+    # Tenacity-based retry for LLM calls
+    @llm_retry()
+    def call_llm():
+        return client.chat(messages)
 
     # Metrics collection
     metrics = MetricsCollector()
@@ -32,13 +38,28 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Generator, TypeVar
 
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential_jitter,
+    retry_if_exception_type,
+    before_sleep_log,
+    RetryError,
+)
+
 from .constants import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_RETRY_BASE_DELAY,
     DEFAULT_RETRY_MAX_DELAY,
     DEFAULT_RETRY_JITTER_FACTOR,
 )
-from .exceptions import NetworkError, RetryExhaustedError
+from .exceptions import (
+    NetworkError,
+    RetryExhaustedError,
+    APIError,
+    JSONParseError,
+    LLMError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +280,210 @@ def retry_async_with_backoff(
 
         return wrapper
     return decorator
+
+
+# =============================================================================
+# Tenacity-Based LLM Retry Logic
+# =============================================================================
+
+
+# Define retryable exception types for LLM operations
+LLM_RETRYABLE_EXCEPTIONS = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+    APIError,
+)
+
+# JSON parse errors should NOT be retried by default (LLM needs different prompting)
+# But can be enabled if needed
+
+
+def llm_retry(
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    initial_delay: float = DEFAULT_RETRY_BASE_DELAY,
+    max_delay: float = DEFAULT_RETRY_MAX_DELAY,
+    jitter: float = 1.0,
+    retry_on_json_error: bool = False,
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """
+    Tenacity-based retry decorator for LLM API calls.
+
+    Provides robust retry logic with exponential backoff and jitter,
+    specifically designed for LLM API operations. Uses the tenacity library
+    for more sophisticated retry handling.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds (default: 1.0)
+        max_delay: Maximum delay between retries (default: 10.0)
+        jitter: Jitter in seconds to add randomness (default: 1.0)
+        retry_on_json_error: Whether to retry on JSON parse errors (default: False)
+
+    Returns:
+        Decorated function with retry logic
+
+    Raises:
+        RetryExhaustedError: When all retry attempts fail
+
+    Example:
+        @llm_retry(max_retries=3)
+        def score_document(doc):
+            response = llm_client.chat(messages)
+            return parse_response(response)
+
+        # With JSON retry enabled
+        @llm_retry(retry_on_json_error=True)
+        def extract_citations(doc):
+            response = llm_client.chat(messages)
+            return json.loads(response)
+    """
+    # Build the exception types to retry
+    retry_exceptions: tuple[type[Exception], ...] = LLM_RETRYABLE_EXCEPTIONS
+    if retry_on_json_error:
+        retry_exceptions = retry_exceptions + (JSONParseError,)
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        # Create the tenacity retry wrapper
+        @retry(
+            stop=stop_after_attempt(max_retries + 1),
+            wait=wait_exponential_jitter(
+                initial=initial_delay,
+                max=max_delay,
+                jitter=jitter,
+            ),
+            retry=retry_if_exception_type(retry_exceptions),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=False,  # Don't reraise - we handle it ourselves
+        )
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            return func(*args, **kwargs)
+
+        # Add a wrapper to convert RetryError to our custom exception
+        @functools.wraps(func)
+        def outer_wrapper(*args: Any, **kwargs: Any) -> T:
+            try:
+                return wrapper(*args, **kwargs)
+            except RetryError as e:
+                # Extract the last exception from the retry attempts
+                last_exception = e.last_attempt.exception()
+                raise RetryExhaustedError(
+                    f"{func.__name__} failed after {max_retries + 1} attempts",
+                    attempts=max_retries + 1,
+                    last_error=last_exception,
+                ) from e
+
+        return outer_wrapper
+
+    return decorator
+
+
+def is_retryable_exception(exc: Exception) -> bool:
+    """
+    Check if an exception is retryable.
+
+    Args:
+        exc: The exception to check
+
+    Returns:
+        True if the exception should trigger a retry
+
+    Example:
+        try:
+            response = llm_client.chat(messages)
+        except Exception as e:
+            if is_retryable_exception(e):
+                # Retry the operation
+                ...
+    """
+    # Check for known retryable exception types
+    if isinstance(exc, LLM_RETRYABLE_EXCEPTIONS):
+        return True
+
+    # Check for APIError with retryable flag
+    if isinstance(exc, APIError) and exc.is_retryable:
+        return True
+
+    # Check for common HTTP error patterns in error messages
+    error_msg = str(exc).lower()
+    retryable_patterns = [
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "rate limit",
+        "429",  # Too Many Requests
+        "500",  # Internal Server Error
+        "502",  # Bad Gateway
+        "503",  # Service Unavailable
+        "504",  # Gateway Timeout
+    ]
+    return any(pattern in error_msg for pattern in retryable_patterns)
+
+
+def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
+    """
+    Classify an exception into an EvaluationErrorCode.
+
+    Args:
+        exc: The exception to classify
+
+    Returns:
+        Appropriate EvaluationErrorCode for the exception
+
+    Example:
+        try:
+            response = llm_client.chat(messages)
+        except Exception as e:
+            error_code = classify_llm_exception(e)
+            return ScoredDocument(score=error_code.value, ...)
+    """
+    from .data_models import EvaluationErrorCode
+
+    # Check specific exception types first
+    if isinstance(exc, JSONParseError):
+        return EvaluationErrorCode.JSON_PARSE_ERROR
+
+    if isinstance(exc, APIError):
+        if exc.status_code == 401 or exc.status_code == 403:
+            return EvaluationErrorCode.API_AUTH_ERROR
+        if exc.status_code == 429:
+            return EvaluationErrorCode.API_RATE_LIMIT
+        if exc.status_code and exc.status_code >= 500:
+            return EvaluationErrorCode.API_SERVER_ERROR
+        return EvaluationErrorCode.API_CONNECTION_ERROR
+
+    if isinstance(exc, RetryExhaustedError):
+        return EvaluationErrorCode.RETRY_EXHAUSTED
+
+    if isinstance(exc, TimeoutError):
+        return EvaluationErrorCode.API_TIMEOUT
+
+    if isinstance(exc, (ConnectionError, OSError)):
+        return EvaluationErrorCode.API_CONNECTION_ERROR
+
+    # Check error message patterns
+    error_msg = str(exc).lower()
+
+    if "timeout" in error_msg:
+        return EvaluationErrorCode.API_TIMEOUT
+
+    if "rate limit" in error_msg or "429" in error_msg:
+        return EvaluationErrorCode.API_RATE_LIMIT
+
+    if "json" in error_msg or "parse" in error_msg:
+        return EvaluationErrorCode.JSON_PARSE_ERROR
+
+    if "empty" in error_msg and "response" in error_msg:
+        return EvaluationErrorCode.EMPTY_RESPONSE
+
+    if "auth" in error_msg or "401" in error_msg or "403" in error_msg:
+        return EvaluationErrorCode.API_AUTH_ERROR
+
+    if "connect" in error_msg or "connection" in error_msg:
+        return EvaluationErrorCode.API_CONNECTION_ERROR
+
+    return EvaluationErrorCode.UNKNOWN_ERROR
 
 
 # =============================================================================

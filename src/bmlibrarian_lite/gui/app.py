@@ -41,6 +41,7 @@ from .report_tab import ReportTab
 from .document_interrogation_tab import DocumentInterrogationTab
 from .settings_dialog import SettingsDialog
 from .benchmark_results_dialog import BenchmarkResultsTab
+from .quality_benchmark_results_dialog import QualityBenchmarkResultsTab
 from ..benchmarking import BenchmarkRunner
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,10 @@ class LiteMainWindow(QMainWindow):
         self.benchmark_tab = BenchmarkResultsTab(result=None, parent=self)
         self.tab_widget.addTab(self.benchmark_tab, "Benchmark Results")
 
+        # Quality Benchmark Results tab (persistent, starts empty)
+        self.quality_benchmark_tab = QualityBenchmarkResultsTab(result=None, parent=self)
+        self.tab_widget.addTab(self.quality_benchmark_tab, "Quality Benchmark")
+
         # Connect report generation signal to display in Report tab
         self.systematic_review_tab.report_generated.connect(
             self._on_report_generated
@@ -197,6 +202,11 @@ class LiteMainWindow(QMainWindow):
         # Connect benchmark completion signal
         self.systematic_review_tab.benchmark_completed.connect(
             self._on_benchmark_completed
+        )
+
+        # Connect quality benchmark completion signal
+        self.systematic_review_tab.quality_benchmark_completed.connect(
+            self._on_quality_benchmark_completed
         )
 
         # Connect Research Questions tab signals
@@ -425,6 +435,31 @@ class LiteMainWindow(QMainWindow):
             doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
             self.status_bar.showMessage(
                 f"Benchmark complete: {doc_count} documents, ${cost:.4f}", 5000
+            )
+
+    def _on_quality_benchmark_completed(self, result: object) -> None:
+        """
+        Handle quality benchmark completion from systematic review.
+
+        Updates the quality benchmark results tab and switches to it.
+
+        Args:
+            result: QualityBenchmarkResult from the benchmark run
+        """
+        # Update the persistent quality benchmark tab with new results
+        self.quality_benchmark_tab.update_result(result)
+
+        # Switch to the quality benchmark tab
+        self.tab_widget.setCurrentWidget(self.quality_benchmark_tab)
+
+        # Update status
+        if hasattr(result, 'total_cost_usd'):
+            cost = result.total_cost_usd
+            doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
+            task_type = getattr(result, 'task_type', 'unknown')
+            self.status_bar.showMessage(
+                f"Quality benchmark ({task_type}) complete: {doc_count} documents, ${cost:.4f}",
+                5000
             )
 
     def _on_new_documents_found(

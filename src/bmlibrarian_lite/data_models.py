@@ -25,6 +25,74 @@ class DocumentSource(Enum):
     LOCAL_TEXT = "local_text"
 
 
+class EvaluationErrorCode(Enum):
+    """
+    Error codes for evaluation failures.
+
+    Negative values indicate failure types, allowing the score field
+    to signal errors while maintaining the expected int type.
+
+    Usage:
+        if scored_doc.score < 0:
+            error_code = EvaluationErrorCode(scored_doc.score)
+            handle_error(error_code)
+    """
+
+    # Success (not an error)
+    SUCCESS = 0
+
+    # API/Network errors (-1 to -10)
+    API_TIMEOUT = -1
+    API_RATE_LIMIT = -2
+    API_AUTH_ERROR = -3
+    API_CONNECTION_ERROR = -4
+    API_SERVER_ERROR = -5
+
+    # Response parsing errors (-11 to -20)
+    JSON_PARSE_ERROR = -11
+    INVALID_RESPONSE_FORMAT = -12
+    EMPTY_RESPONSE = -13
+    RESPONSE_TOO_LARGE = -14
+
+    # Retry exhaustion (-21 to -30)
+    RETRY_EXHAUSTED = -21
+
+    # General errors (-31 to -40)
+    UNKNOWN_ERROR = -31
+    INVALID_INPUT = -32
+
+    @property
+    def is_retryable(self) -> bool:
+        """Check if this error type can be retried."""
+        retryable_codes = {
+            self.API_TIMEOUT,
+            self.API_RATE_LIMIT,
+            self.API_CONNECTION_ERROR,
+            self.API_SERVER_ERROR,
+        }
+        return self in retryable_codes
+
+    @property
+    def description(self) -> str:
+        """Get human-readable description of the error."""
+        descriptions = {
+            self.SUCCESS: "Success",
+            self.API_TIMEOUT: "API request timed out",
+            self.API_RATE_LIMIT: "API rate limit exceeded",
+            self.API_AUTH_ERROR: "API authentication failed",
+            self.API_CONNECTION_ERROR: "Failed to connect to API",
+            self.API_SERVER_ERROR: "API server error",
+            self.JSON_PARSE_ERROR: "Failed to parse JSON response",
+            self.INVALID_RESPONSE_FORMAT: "Invalid response format",
+            self.EMPTY_RESPONSE: "Empty response received",
+            self.RESPONSE_TOO_LARGE: "Response exceeded size limit",
+            self.RETRY_EXHAUSTED: "All retry attempts exhausted",
+            self.UNKNOWN_ERROR: "Unknown error occurred",
+            self.INVALID_INPUT: "Invalid input provided",
+        }
+        return descriptions.get(self, "Unknown error")
+
+
 class EvaluatorType(Enum):
     """Type of evaluator that produced an evaluation."""
 

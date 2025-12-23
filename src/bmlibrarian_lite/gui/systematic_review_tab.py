@@ -46,6 +46,11 @@ from .quality_filter_panel import QualityFilterPanel
 from .quality_summary import QualitySummaryWidget
 from .workers import QualityFilterWorker
 from .benchmark_dialog import BenchmarkConfirmDialog, BenchmarkProgressDialog, BenchmarkWorker
+from .quality_benchmark_dialog import (
+    QualityBenchmarkConfirmDialog,
+    QualityBenchmarkProgressDialog,
+    QualityBenchmarkWorker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -396,6 +401,7 @@ class SystematicReviewTab(QWidget):
 
     # Benchmark signal - emitted when benchmark completes
     benchmark_completed = Signal(object)  # BenchmarkResult
+    quality_benchmark_completed = Signal(object)  # QualityBenchmarkResult
 
     def __init__(
         self,
@@ -418,6 +424,8 @@ class SystematicReviewTab(QWidget):
         self._quality_worker: Optional[QualityFilterWorker] = None
         self._benchmark_worker: Optional[BenchmarkWorker] = None
         self._benchmark_progress_dialog: Optional[BenchmarkProgressDialog] = None
+        self._quality_benchmark_worker: Optional[QualityBenchmarkWorker] = None
+        self._quality_benchmark_progress_dialog: Optional[QualityBenchmarkProgressDialog] = None
         self._current_question: str = ""
 
         # Quality manager for document assessment
@@ -493,6 +501,16 @@ class SystematicReviewTab(QWidget):
         self.benchmark_btn.setVisible(False)
         self.benchmark_btn.setEnabled(False)
         options_layout.addWidget(self.benchmark_btn)
+
+        # Quality benchmark button (only visible when quality benchmarking is enabled)
+        self.quality_benchmark_btn = QPushButton("Quality Benchmark")
+        self.quality_benchmark_btn.clicked.connect(self._run_quality_benchmark)
+        self.quality_benchmark_btn.setToolTip(
+            "Compare multiple models on quality classification"
+        )
+        self.quality_benchmark_btn.setVisible(False)
+        self.quality_benchmark_btn.setEnabled(False)
+        options_layout.addWidget(self.quality_benchmark_btn)
 
         question_layout.addLayout(options_layout)
         layout.addWidget(question_group)
@@ -648,6 +666,15 @@ class SystematicReviewTab(QWidget):
                 self.benchmark_btn.setText(f"Run Benchmark ({model_count} models)")
                 self.benchmark_btn.setVisible(True)
                 self.benchmark_btn.setEnabled(True)
+
+            # Show quality benchmark button if quality benchmarking is enabled
+            if self.config.benchmark.quality_enabled and scored:
+                model_count = len(self.config.benchmark.get_enabled_models())
+                self.quality_benchmark_btn.setText(
+                    f"Quality Benchmark ({model_count} models)"
+                )
+                self.quality_benchmark_btn.setVisible(True)
+                self.quality_benchmark_btn.setEnabled(True)
         elif step == "citations":
             citations: List[Citation] = result
             self._all_citations = citations
@@ -917,3 +944,149 @@ class SystematicReviewTab(QWidget):
                 self._benchmark_worker.wait(2000)
             self._benchmark_worker = None
         self._benchmark_progress_dialog = None
+
+    def _run_quality_benchmark(self) -> None:
+        """Open quality benchmark confirmation dialog and run if confirmed."""
+        if not self._current_question:
+            self.progress_label.setText("No research question set for benchmarking")
+            return
+
+        # Get ALL documents for this question from storage
+        all_doc_ids = self.storage.get_scored_document_ids_for_question(
+            self._current_question
+        )
+        if not all_doc_ids:
+            self.progress_label.setText("No scored documents available for benchmarking")
+            return
+
+        # Fetch the actual documents
+        documents = self.storage.get_documents(list(all_doc_ids))
+        if not documents:
+            self.progress_label.setText("Could not retrieve documents for benchmarking")
+            return
+
+        # Show confirmation dialog
+        dialog = QualityBenchmarkConfirmDialog(
+            config=self.config,
+            documents=documents,
+            question=self._current_question,
+            storage=self.storage,
+            parent=self,
+        )
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        # Get selected models and documents
+        selected_models = dialog.get_selected_models()
+        benchmark_documents = dialog.get_documents_to_benchmark()
+        task_type = dialog.get_task_type()
+        reuse_cross_run = dialog.get_reuse_cross_run()
+
+        if not selected_models:
+            self.progress_label.setText("No models selected for benchmarking")
+            return
+
+        if not benchmark_documents:
+            self.progress_label.setText("No documents selected for benchmarking")
+            return
+
+        # Disable quality benchmark button during run
+        self.quality_benchmark_btn.setEnabled(False)
+
+        # Calculate total operations for progress
+        total_ops = len(selected_models) * len(benchmark_documents)
+
+        # Show progress dialog
+        self._quality_benchmark_progress_dialog = QualityBenchmarkProgressDialog(
+            total_operations=total_ops,
+            task_type=task_type,
+            parent=self,
+        )
+        self._quality_benchmark_progress_dialog.cancelled.connect(
+            self._cancel_quality_benchmark
+        )
+
+        # Create and start worker with any existing assessments from quality filter
+        self._quality_benchmark_worker = QualityBenchmarkWorker(
+            config=self.config,
+            storage=self.storage,
+            question=self._current_question,
+            documents=benchmark_documents,
+            models=selected_models,
+            task_type=task_type,
+            existing_assessments=self._quality_assessments,
+            reuse_cross_run=reuse_cross_run,
+        )
+        self._quality_benchmark_worker.progress.connect(
+            self._on_quality_benchmark_progress
+        )
+        self._quality_benchmark_worker.finished.connect(
+            self._on_quality_benchmark_finished
+        )
+        self._quality_benchmark_worker.error.connect(
+            self._on_quality_benchmark_error
+        )
+        self._quality_benchmark_worker.start()
+
+        # Show the progress dialog
+        self._quality_benchmark_progress_dialog.show()
+
+    def _cancel_quality_benchmark(self) -> None:
+        """Cancel the running quality benchmark."""
+        if self._quality_benchmark_worker:
+            self._quality_benchmark_worker.cancel()
+            self.progress_label.setText("Quality benchmark cancelled")
+        self.quality_benchmark_btn.setEnabled(True)
+
+    def _on_quality_benchmark_progress(
+        self, current: int, total: int, message: str
+    ) -> None:
+        """Handle quality benchmark progress updates."""
+        if self._quality_benchmark_progress_dialog:
+            self._quality_benchmark_progress_dialog.update_progress(
+                current, total, message
+            )
+
+    def _on_quality_benchmark_finished(self, result: object) -> None:
+        """Handle quality benchmark completion."""
+        if self._quality_benchmark_progress_dialog:
+            self._quality_benchmark_progress_dialog.close()
+
+        self.quality_benchmark_btn.setEnabled(True)
+
+        # Log summary
+        if hasattr(result, 'total_cost_usd'):
+            cost = result.total_cost_usd
+            self.progress_label.setText(
+                f"Quality benchmark complete - Total cost: ${cost:.4f}"
+            )
+            logger.info(f"Quality benchmark completed: {result}")
+
+            # Emit signal to show results (handled by main window)
+            self.quality_benchmark_completed.emit(result)
+        else:
+            self.progress_label.setText("Quality benchmark complete")
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_quality_benchmark_worker)
+
+    def _on_quality_benchmark_error(self, error_message: str) -> None:
+        """Handle quality benchmark error."""
+        if self._quality_benchmark_progress_dialog:
+            self._quality_benchmark_progress_dialog.close()
+
+        self.progress_label.setText(f"Quality benchmark error: {error_message}")
+        self.quality_benchmark_btn.setEnabled(True)
+        logger.error(f"Quality benchmark error: {error_message}")
+
+        # Clean up worker
+        QTimer.singleShot(100, self._cleanup_quality_benchmark_worker)
+
+    def _cleanup_quality_benchmark_worker(self) -> None:
+        """Clean up quality benchmark worker after completion."""
+        if self._quality_benchmark_worker is not None:
+            if self._quality_benchmark_worker.isRunning():
+                self._quality_benchmark_worker.wait(2000)
+            self._quality_benchmark_worker = None
+        self._quality_benchmark_progress_dialog = None

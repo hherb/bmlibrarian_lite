@@ -5,6 +5,8 @@ Provides comprehensive assessment including bias risk, strengths,
 and limitations. This is optional and used when detailed assessment
 is requested for high-value documents.
 
+Includes robust retry logic using tenacity for handling API failures and timeouts.
+
 Cost: ~$0.003 per document
 """
 
@@ -20,6 +22,8 @@ from ..constants import (
     QUALITY_LLM_TEMPERATURE,
     QUALITY_ASSESSOR_MAX_TOKENS,
 )
+from ..exceptions import JSONParseError, RetryExhaustedError
+from ..utils import llm_retry, classify_llm_exception
 from .data_models import (
     StudyDesign,
     QualityTier,
@@ -78,12 +82,17 @@ class LiteQualityAgent(LiteBaseAgent):
         """
         Perform detailed quality assessment on a document.
 
+        Uses tenacity-based retry logic for API failures. On complete failure
+        after all retries, returns QualityAssessment.unclassified().
+
         Args:
             document: The document to assess
 
         Returns:
-            QualityAssessment with full details
+            QualityAssessment with full details, or unclassified on failure
         """
+        doc_id = getattr(document, "id", None) or getattr(document, "pmid", "unknown")
+
         # Prepare prompt with abstract (allow more text for detailed analysis)
         abstract = (document.abstract or "")[:4000]
         title = document.title or "Untitled"
@@ -120,22 +129,51 @@ Return JSON:
 
 Focus on THIS study's methodology, not studies it references."""
 
-        try:
-            messages = [
-                self._create_system_message(ASSESSMENT_SYSTEM_PROMPT),
-                self._create_user_message(prompt),
-            ]
-            response = self._chat(
-                messages=messages,
-                temperature=QUALITY_LLM_TEMPERATURE,
-                max_tokens=QUALITY_ASSESSOR_MAX_TOKENS,
-                json_mode=True,
-            )
-            return self._parse_response(response)
+        messages = [
+            self._create_system_message(ASSESSMENT_SYSTEM_PROMPT),
+            self._create_user_message(prompt),
+        ]
 
-        except Exception as e:
-            logger.error(f"Quality assessment failed for document: {e}")
+        try:
+            return self._assess_with_retry(messages)
+        except RetryExhaustedError as e:
+            logger.error(
+                f"Document {doc_id}: Quality assessment failed after all retries: {e}"
+            )
             return QualityAssessment.unclassified()
+        except Exception as e:
+            error_code = classify_llm_exception(e)
+            logger.error(
+                f"Document {doc_id}: Quality assessment failed with "
+                f"{error_code.name}: {e}"
+            )
+            return QualityAssessment.unclassified()
+
+    @llm_retry(max_retries=3, retry_on_json_error=True)
+    def _assess_with_retry(self, messages: list) -> QualityAssessment:
+        """
+        Internal method that performs quality assessment with retry logic.
+
+        This method is decorated with @llm_retry to automatically retry
+        on API failures and JSON parse errors.
+
+        Args:
+            messages: LLM messages for assessment
+
+        Returns:
+            QualityAssessment with parsed results
+
+        Raises:
+            JSONParseError: If response cannot be parsed
+            RetryExhaustedError: If all retries exhausted
+        """
+        response = self._chat(
+            messages=messages,
+            temperature=QUALITY_LLM_TEMPERATURE,
+            max_tokens=QUALITY_ASSESSOR_MAX_TOKENS,
+            json_mode=True,
+        )
+        return self._parse_response(response)
 
     def _parse_response(self, response: str) -> QualityAssessment:
         """
@@ -146,10 +184,19 @@ Focus on THIS study's methodology, not studies it references."""
 
         Returns:
             Parsed QualityAssessment
+
+        Raises:
+            JSONParseError: If response cannot be parsed as valid JSON
         """
         try:
             # Clean response
             cleaned = self._clean_json_response(response)
+            if not cleaned:
+                raise JSONParseError(
+                    "Empty response after cleaning",
+                    raw_response=response,
+                )
+
             data = json.loads(cleaned)
 
             # Parse study design
@@ -196,7 +243,10 @@ Focus on THIS study's methodology, not studies it references."""
 
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse JSON response: {e}")
-            return QualityAssessment.unclassified()
+            raise JSONParseError(
+                f"Failed to parse JSON response: {e}",
+                raw_response=response,
+            ) from e
 
     def _clean_json_response(self, response: str) -> str:
         """

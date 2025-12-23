@@ -4,6 +4,8 @@ Lite citation extraction agent.
 This agent extracts relevant passages from documents that help answer
 a research question. It identifies specific quotes and findings that
 can be used as citations in a research report.
+
+Includes robust retry logic using tenacity for handling API failures and timeouts.
 """
 
 import json
@@ -11,7 +13,9 @@ import logging
 import re
 from typing import Optional, Callable
 
-from ..data_models import Citation, ScoredDocument
+from ..data_models import Citation, ScoredDocument, EvaluationErrorCode
+from ..exceptions import JSONParseError, RetryExhaustedError
+from ..utils import llm_retry, classify_llm_exception
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -65,12 +69,16 @@ class LiteCitationAgent(LiteBaseAgent):
         """
         Extract citations from a scored document.
 
+        Uses tenacity-based retry logic for API failures. On complete failure
+        after all retries, returns an empty list rather than a fallback
+        citation, allowing the caller to handle the error appropriately.
+
         Args:
             question: Research question
             scored_doc: Document with relevance score
 
         Returns:
-            List of extracted citations
+            List of extracted citations. Empty list on failure.
         """
         doc = scored_doc.document
 
@@ -93,8 +101,7 @@ Extract the most relevant passages that help answer the research question."""
         ]
 
         try:
-            response = self._chat(messages, temperature=0.1, json_mode=True)
-            passages = self._parse_citation_response(response)
+            passages = self._extract_with_retry(messages)
 
             citations = []
             for passage in passages:
@@ -108,16 +115,48 @@ Extract the most relevant passages that help answer the research question."""
 
             return citations
 
+        except RetryExhaustedError as e:
+            logger.error(
+                f"Document {doc.id}: Citation extraction failed after all retries: {e}"
+            )
+            return []
         except Exception as e:
-            logger.error(f"Failed to extract citations from {doc.id}: {e}")
-            # Return a basic citation using the abstract
-            truncated = doc.abstract[:500] if len(doc.abstract) > 500 else doc.abstract
-            return [Citation(
-                document=doc,
-                passage=truncated,
-                relevance_score=scored_doc.score,
-                context="Full abstract (extraction failed)",
-            )]
+            error_code = classify_llm_exception(e)
+            logger.error(
+                f"Document {doc.id}: Citation extraction failed with "
+                f"{error_code.name}: {e}"
+            )
+            return []
+
+    @llm_retry(max_retries=3, retry_on_json_error=True)
+    def _extract_with_retry(self, messages: list) -> list[dict]:
+        """
+        Internal method that performs citation extraction with retry logic.
+
+        This method is decorated with @llm_retry to automatically retry
+        on API failures and JSON parse errors.
+
+        Args:
+            messages: LLM messages for extraction
+
+        Returns:
+            List of passage dictionaries with 'text' and optional 'relevance'
+
+        Raises:
+            JSONParseError: If response cannot be parsed
+            RetryExhaustedError: If all retries exhausted
+        """
+        response = self._chat(messages, temperature=0.1, json_mode=True)
+        passages = self._parse_citation_response(response)
+
+        # If we got no passages, it might be a parse failure - retry
+        if not passages:
+            raise JSONParseError(
+                "No passages extracted from response",
+                raw_response=response,
+            )
+
+        return passages
 
     def extract_all_citations(
         self,
@@ -129,6 +168,9 @@ Extract the most relevant passages that help answer the research question."""
         """
         Extract citations from all scored documents.
 
+        Documents that fail extraction are skipped and logged.
+        The method continues processing remaining documents.
+
         Args:
             question: Research question
             scored_documents: Documents to extract from
@@ -139,6 +181,8 @@ Extract the most relevant passages that help answer the research question."""
             List of all extracted citations
         """
         all_citations = []
+        failed_count = 0
+        # Filter out documents with negative scores (error codes) and below threshold
         eligible = [d for d in scored_documents if d.score >= min_score]
         total = len(eligible)
 
@@ -149,15 +193,29 @@ Extract the most relevant passages that help answer the research question."""
                 progress_callback(i + 1, total)
 
             citations = self.extract_citations(question, scored_doc)
-            all_citations.extend(citations)
 
-            logger.debug(
-                f"Extracted {len(citations)} citations from {scored_doc.document.id}"
+            if not citations:
+                failed_count += 1
+                logger.warning(
+                    f"Document {scored_doc.document.id}: No citations extracted "
+                    f"({i+1}/{total})"
+                )
+            else:
+                all_citations.extend(citations)
+                logger.debug(
+                    f"Extracted {len(citations)} citations from "
+                    f"{scored_doc.document.id}"
+                )
+
+        if failed_count > 0:
+            logger.warning(
+                f"Citation extraction complete: {len(all_citations)} citations from "
+                f"{total - failed_count} documents, {failed_count} failed"
             )
-
-        logger.info(
-            f"Extracted {len(all_citations)} total citations from {total} documents"
-        )
+        else:
+            logger.info(
+                f"Extracted {len(all_citations)} total citations from {total} documents"
+            )
         return all_citations
 
     def _parse_citation_response(self, response: str) -> list[dict]:

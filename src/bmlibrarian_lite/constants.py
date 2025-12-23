@@ -607,6 +607,19 @@ BENCHMARK_INCLUSION_DISAGREEMENT = "#EF5350"  # Red - critical disagreement
 # 16 hex chars = 64 bits = sufficient for uniqueness while remaining readable
 BENCHMARK_QUESTION_HASH_LENGTH = 16
 
+# Quality benchmark agreement thresholds
+# Design agreement requires exact match (stricter)
+QUALITY_BENCHMARK_DESIGN_AGREEMENT_HIGH = 0.80   # >= 80% exact design match
+QUALITY_BENCHMARK_DESIGN_AGREEMENT_MEDIUM = 0.60  # >= 60% exact design match
+
+# Tier agreement allows ±1 tier difference (more lenient)
+QUALITY_BENCHMARK_TIER_AGREEMENT_HIGH = 0.90     # >= 90% within ±1 tier
+QUALITY_BENCHMARK_TIER_AGREEMENT_MEDIUM = 0.75   # >= 75% within ±1 tier
+
+# Quality benchmark task type identifiers
+QUALITY_BENCHMARK_TASK_CLASSIFICATION = "study_classification"
+QUALITY_BENCHMARK_TASK_ASSESSMENT = "quality_assessment"
+
 # =============================================================================
 # Incremental Search Settings
 # =============================================================================
