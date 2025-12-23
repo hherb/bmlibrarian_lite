@@ -97,42 +97,50 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
     """
     Collect all scores from all evaluators across all questions.
 
+    This queries the scored_documents table directly to find ALL scores,
+    not just those from formal benchmark runs.
+
     Returns:
         Dict mapping evaluator_name -> EvaluatorScoreData
     """
-    # Get all research questions that have benchmark runs
+    # Get all research questions
     questions = storage.get_unique_research_questions(limit=1000)
 
     all_evaluator_scores: dict[str, dict[str, int]] = defaultdict(dict)
     evaluator_id_map: dict[str, str] = {}
 
-    print(f"Found {len(questions)} research questions with benchmark data")
+    print(f"Found {len(questions)} research questions in database")
 
+    # Get all evaluators that have scores
+    evaluators = storage.get_evaluators()
+    print(f"Found {len(evaluators)} evaluators with scores")
+
+    for evaluator in evaluators:
+        evaluator_id_map[evaluator.display_name] = evaluator.id
+
+    # For each question, get all document IDs and then query scores
     for q_summary in questions:
         question = q_summary.question
+        doc_ids = storage.get_document_ids_for_question(question)
 
-        # Get all scores for this question
-        scores_by_evaluator = storage.get_all_scores_for_question(question)
-
-        if not scores_by_evaluator:
+        if not doc_ids:
             continue
 
-        for evaluator_id, doc_scores in scores_by_evaluator.items():
-            evaluator = storage.get_evaluator(evaluator_id)
-            if not evaluator:
-                continue
-
-            evaluator_name = evaluator.display_name
-            evaluator_id_map[evaluator_name] = evaluator_id
-
-            for doc_id, scored_doc in doc_scores.items():
-                # Only include valid scores (1-5)
-                if 1 <= scored_doc.score <= 5:
-                    all_evaluator_scores[evaluator_name][doc_id] = scored_doc.score
+        # For each evaluator, check for scores on these documents
+        for evaluator in evaluators:
+            for doc_id in doc_ids:
+                scored_doc = storage.get_scored_document_by_evaluator(
+                    doc_id, evaluator.id
+                )
+                if scored_doc and 1 <= scored_doc.score <= 5:
+                    all_evaluator_scores[evaluator.display_name][doc_id] = scored_doc.score
 
     # Convert to EvaluatorScoreData
     result = {}
     for evaluator_name, doc_scores in all_evaluator_scores.items():
+        if not doc_scores:
+            continue  # Skip evaluators with no valid scores
+
         doc_ids = list(doc_scores.keys())
         scores = [doc_scores[doc_id] for doc_id in doc_ids]
         result[evaluator_name] = EvaluatorScoreData(
