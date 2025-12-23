@@ -128,7 +128,7 @@ LLM_TASK_TYPES = {
         "description": "Score document relevance (1-5 scale)",
         "category": "analysis",
         "default_temperature": 0.1,
-        "default_max_tokens": 256,
+        "default_max_tokens": 512,
         "complexity": "medium",
         "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
     },

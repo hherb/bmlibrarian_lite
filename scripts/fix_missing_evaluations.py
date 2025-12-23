@@ -23,6 +23,7 @@ Examples:
 
 import argparse
 import logging
+import sqlite3
 import sys
 import time
 from datetime import datetime
@@ -30,6 +31,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from tqdm import tqdm
+
+# Register adapters/converters for datetime to avoid Python 3.12 deprecation warning
+sqlite3.register_adapter(datetime, lambda dt: dt.isoformat())
+sqlite3.register_converter("TIMESTAMP", lambda b: datetime.fromisoformat(b.decode()))
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -107,11 +112,11 @@ def get_failed_evaluations(
     # Query for all negative scores from this evaluator
     query = """
         SELECT sd.document_id, sd.score, sd.explanation, sd.scored_at,
-               c.research_question
+               rc.research_question
         FROM scored_documents sd
-        JOIN checkpoints c ON sd.checkpoint_id = c.id
+        JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
         WHERE sd.evaluator_id = ? AND sd.score < 0
-        ORDER BY c.research_question, sd.scored_at DESC
+        ORDER BY rc.research_question, sd.scored_at DESC
     """
 
     failed = []

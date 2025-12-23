@@ -235,18 +235,39 @@ Evaluate the relevance of this document to the research question."""
             Dictionary with 'score', 'explanation', and optionally 'parse_failed'.
             If 'parse_failed' is True, the caller should consider retrying.
         """
-        # Try to parse as JSON
+        # Try to parse as JSON - handle nested objects
         try:
-            # Extract JSON from response (handles markdown code blocks)
-            json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                score = int(data.get("score", 1))
-                score = max(1, min(5, score))  # Clamp to 1-5
-                return {
-                    "score": score,
-                    "explanation": data.get("explanation", ""),
-                }
+            # Find the outermost JSON object by matching balanced braces
+            start_idx = response.find("{")
+            if start_idx != -1:
+                # Find matching closing brace
+                depth = 0
+                end_idx = start_idx
+                for i, char in enumerate(response[start_idx:], start_idx):
+                    if char == "{":
+                        depth += 1
+                    elif char == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = i + 1
+                            break
+
+                if depth == 0 and end_idx > start_idx:
+                    json_str = response[start_idx:end_idx]
+                    data = json.loads(json_str)
+                    score = int(data.get("score", 1))
+                    score = max(1, min(5, score))  # Clamp to 1-5
+
+                    # Handle explanation that might be a nested object
+                    explanation = data.get("explanation", "")
+                    if isinstance(explanation, dict):
+                        # Convert nested explanation to string
+                        explanation = json.dumps(explanation)
+
+                    return {
+                        "score": score,
+                        "explanation": explanation,
+                    }
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
