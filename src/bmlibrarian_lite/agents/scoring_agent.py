@@ -126,7 +126,7 @@ Evaluate the relevance of this document to the research question."""
                 explanation=f"Scoring failed: {error_code.description}",
             )
 
-    @llm_retry(max_retries=3)
+    @llm_retry(max_retries=3, retry_on_json_error=True)
     def _score_with_retry(self, messages: list) -> dict:
         """
         Internal method that performs the actual scoring with retry logic.

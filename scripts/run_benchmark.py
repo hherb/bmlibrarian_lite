@@ -31,6 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from tqdm import tqdm
+
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -48,12 +50,16 @@ from bmlibrarian_lite.constants import (
     calculate_cost,
 )
 
-# Configure logging
+# Configure logging - suppress HTTP request noise for clean progress bars
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+# Suppress httpx/httpcore logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def parse_model_string(model_string: str) -> tuple[str, str]:
@@ -138,6 +144,8 @@ def score_documents_for_question(
     evaluator: Evaluator,
     documents: list[LiteDocument],
     force_rerun: bool = False,
+    model_string: str = "",
+    doc_progress_bar: Optional[tqdm] = None,
 ) -> dict:
     """
     Score documents for a single research question.
@@ -150,6 +158,8 @@ def score_documents_for_question(
         evaluator: Evaluator to use
         documents: Documents to score
         force_rerun: If True, re-score even if already scored
+        model_string: Model string for progress bar display
+        doc_progress_bar: Optional tqdm progress bar for document scoring
 
     Returns:
         Dict with scoring statistics
@@ -166,7 +176,6 @@ def score_documents_for_question(
     }
 
     if not documents:
-        logger.info(f"  No documents found for question")
         return stats
 
     # Check which documents are already scored
@@ -179,20 +188,12 @@ def score_documents_for_question(
         )
         stats["already_scored"] = len(already_scored_ids)
 
-        if already_scored_ids:
-            logger.info(
-                f"  Skipping {len(already_scored_ids)} already-scored documents"
-            )
-
     # Filter to documents that need scoring
     docs_to_score = [d for d in documents if d.id not in already_scored_ids]
     stats["skipped"] = len(already_scored_ids)
 
     if not docs_to_score:
-        logger.info(f"  All documents already scored")
         return stats
-
-    logger.info(f"  Scoring {len(docs_to_score)} documents...")
 
     # Create checkpoint for this scoring run
     checkpoint = storage.create_checkpoint(
@@ -211,8 +212,13 @@ def score_documents_for_question(
         llm_client=llm_client,
     )
 
+    # Update progress bar total and reset
+    if doc_progress_bar is not None:
+        doc_progress_bar.reset(total=len(docs_to_score))
+        doc_progress_bar.set_description(f"Scoring [{model_string}]")
+
     # Score each document
-    for i, doc in enumerate(docs_to_score):
+    for doc in docs_to_score:
         start_time = time.time()
 
         try:
@@ -244,26 +250,38 @@ def score_documents_for_question(
                 stats["newly_scored"] += 1
                 stats["total_cost_usd"] += cost
                 stats["total_latency_ms"] += latency_ms
-                logger.debug(
-                    f"    [{i+1}/{len(docs_to_score)}] {doc.id[:8]}... "
-                    f"score={scored_doc.score} ({latency_ms}ms)"
-                )
             else:
                 stats["failed"] += 1
-                logger.warning(
-                    f"    [{i+1}/{len(docs_to_score)}] {doc.id[:8]}... "
-                    f"FAILED (error code: {scored_doc.score})"
-                )
 
-        except Exception as e:
+        except Exception:
             stats["failed"] += 1
-            logger.error(f"    [{i+1}/{len(docs_to_score)}] {doc.id[:8]}... ERROR: {e}")
 
-        # Progress update every 10 documents
-        if (i + 1) % 10 == 0:
-            logger.info(f"    Progress: {i+1}/{len(docs_to_score)} documents scored")
+        # Update progress bar
+        if doc_progress_bar is not None:
+            doc_progress_bar.update(1)
 
     return stats
+
+
+def format_duration(seconds: float) -> str:
+    """
+    Format duration in seconds to human-readable string.
+
+    Args:
+        seconds: Duration in seconds
+
+    Returns:
+        Formatted string like "1h 23m 45s" or "5m 30s" or "45s"
+    """
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if hours > 0:
+        return f"{hours}h {minutes}m {secs}s"
+    elif minutes > 0:
+        return f"{minutes}m {secs}s"
+    else:
+        return f"{secs}s"
 
 
 def run_benchmark(
@@ -281,9 +299,12 @@ def run_benchmark(
         question_filter: Optional comma-separated substrings to filter questions
         dry_run: If True, only show what would be done
     """
+    # Track total time
+    start_time = time.time()
+
     # Parse and validate model string
     provider, model_name = parse_model_string(model_string)
-    logger.info(f"Model: {provider}:{model_name}")
+    print(f"Model: {model_string}")
 
     # Load config and storage
     config = LiteConfig.load()
@@ -303,7 +324,6 @@ def run_benchmark(
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    logger.info(f"Configured document_scoring task to use {provider}:{model_name}")
 
     # Create evaluator
     evaluator = Evaluator.from_model_config(
@@ -313,11 +333,11 @@ def run_benchmark(
         max_tokens=max_tokens,
     )
     storage.upsert_evaluator(evaluator)
-    logger.info(f"Evaluator ID: {evaluator.id}")
+    print(f"Evaluator ID: {evaluator.id}")
 
     # Get all research questions
     questions = storage.get_unique_research_questions(limit=1000)
-    logger.info(f"Found {len(questions)} research questions in database")
+    print(f"Found {len(questions)} research questions in database")
 
     # Apply question filter if specified
     if question_filter:
@@ -327,12 +347,10 @@ def run_benchmark(
             if any(term in q.question.lower() for term in filter_terms):
                 filtered.append(q)
         questions = filtered
-        logger.info(
-            f"Filtered to {len(questions)} questions matching: {question_filter}"
-        )
+        print(f"Filtered to {len(questions)} questions matching: {question_filter}")
 
     if not questions:
-        logger.warning("No questions to process")
+        print("No questions to process")
         return
 
     # Create LLM client
@@ -349,24 +367,40 @@ def run_benchmark(
         "total_latency_ms": 0,
     }
 
+    print()  # Blank line before progress bars
+
+    # Create progress bars
+    question_pbar = tqdm(
+        questions,
+        desc="Questions",
+        unit="q",
+        position=0,
+        leave=True,
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+    )
+    doc_pbar = tqdm(
+        total=0,
+        desc=f"Scoring [{model_string}]",
+        unit="doc",
+        position=1,
+        leave=False,
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+    )
+
     # Process each question
-    for i, q_summary in enumerate(questions):
+    for q_summary in question_pbar:
         question = q_summary.question
-        logger.info(f"\n[{i+1}/{len(questions)}] Question: {question[:70]}...")
+        # Truncate question for display
+        display_question = question[:60] + "..." if len(question) > 60 else question
+        question_pbar.set_description(f"Q: {display_question}")
 
         # Get documents for this question
         documents = get_documents_for_question(storage, question)
-        logger.info(f"  Found {len(documents)} documents")
 
         if dry_run:
             # Check how many would be scored
             already_scored = get_already_scored_doc_ids(
                 storage, evaluator.id, [d.id for d in documents]
-            )
-            to_score = len(documents) - len(already_scored)
-            logger.info(
-                f"  [DRY RUN] Would score {to_score} documents "
-                f"({len(already_scored)} already scored)"
             )
             total_stats["total_documents"] += len(documents)
             total_stats["already_scored"] += len(already_scored)
@@ -381,6 +415,8 @@ def run_benchmark(
             evaluator=evaluator,
             documents=documents,
             force_rerun=force_rerun,
+            model_string=model_string,
+            doc_progress_bar=doc_pbar,
         )
 
         # Update totals
@@ -392,11 +428,12 @@ def run_benchmark(
         total_stats["total_cost_usd"] += stats["total_cost_usd"]
         total_stats["total_latency_ms"] += stats["total_latency_ms"]
 
-        # Log question summary
-        logger.info(
-            f"  Completed: {stats['newly_scored']} new, "
-            f"{stats['already_scored']} cached, {stats['failed']} failed"
-        )
+    # Close progress bars
+    doc_pbar.close()
+    question_pbar.close()
+
+    # Calculate total elapsed time
+    elapsed_time = time.time() - start_time
 
     # Final summary
     print("\n" + "=" * 70)
@@ -413,6 +450,7 @@ def run_benchmark(
         avg_latency = total_stats["total_latency_ms"] / total_stats["newly_scored"]
         print(f"Average latency: {avg_latency:.0f}ms")
         print(f"Estimated cost: ${total_stats['total_cost_usd']:.4f}")
+    print(f"Total time: {format_duration(elapsed_time)}")
     print("=" * 70)
 
 
