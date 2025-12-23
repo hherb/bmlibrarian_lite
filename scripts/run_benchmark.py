@@ -287,6 +287,7 @@ def run_benchmark(
 
     # Load config and storage
     config = LiteConfig.load()
+    config.load_env()  # Load API keys from .env file
     storage = LiteStorage(config)
 
     # Get temperature and max_tokens from task type config
