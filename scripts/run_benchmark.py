@@ -114,22 +114,29 @@ def get_already_scored_doc_ids(
     storage: LiteStorage,
     evaluator_id: str,
     document_ids: list[str],
+    research_question: str,
 ) -> set[str]:
     """
-    Find which documents have already been scored by this evaluator.
+    Find which documents have already been scored by this evaluator for this question.
+
+    A score is always relative to a specific research question - the same document
+    may have different relevance scores for different questions.
 
     Args:
         storage: Storage instance
         evaluator_id: Evaluator ID to check
         document_ids: Document IDs to check
+        research_question: The research question context
 
     Returns:
-        Set of document IDs that already have scores
+        Set of document IDs that already have scores for this question
     """
     already_scored = set()
 
     for doc_id in document_ids:
-        existing = storage.get_scored_document_by_evaluator(doc_id, evaluator_id)
+        existing = storage.get_scored_document_for_question(
+            doc_id, evaluator_id, research_question
+        )
         if existing and existing.score > 0:  # Valid score (not error code)
             already_scored.add(doc_id)
 
@@ -184,7 +191,7 @@ def score_documents_for_question(
 
     if not force_rerun:
         already_scored_ids = get_already_scored_doc_ids(
-            storage, evaluator.id, doc_ids
+            storage, evaluator.id, doc_ids, question
         )
         stats["already_scored"] = len(already_scored_ids)
 
@@ -398,9 +405,9 @@ def run_benchmark(
         documents = get_documents_for_question(storage, question)
 
         if dry_run:
-            # Check how many would be scored
+            # Check how many would be scored for this question
             already_scored = get_already_scored_doc_ids(
-                storage, evaluator.id, [d.id for d in documents]
+                storage, evaluator.id, [d.id for d in documents], question
             )
             total_stats["total_documents"] += len(documents)
             total_stats["already_scored"] += len(already_scored)

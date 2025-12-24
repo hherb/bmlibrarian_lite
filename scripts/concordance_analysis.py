@@ -55,6 +55,9 @@ class EvaluatorScoreData:
     total_documents: int
     scores: list[int]
     document_ids: list[str]
+    latencies_ms: list[Optional[int]]  # Latency per document (ms)
+    total_latency_ms: int = 0  # Total latency across all documents
+    avg_latency_ms: float = 0.0  # Average ms per document
 
 
 @dataclass
@@ -72,6 +75,16 @@ class PairwiseConcordance:
 
 
 @dataclass
+class EvaluatorTimingData:
+    """Timing statistics for an evaluator."""
+
+    evaluator_name: str
+    total_documents: int
+    total_latency_ms: int
+    avg_latency_ms: float
+
+
+@dataclass
 class ConcordanceReport:
     """Complete concordance report across all questions."""
 
@@ -85,6 +98,7 @@ class ConcordanceReport:
     inclusion_agreement_matrix: dict[tuple[str, str], float]
     pairwise_concordances: list[PairwiseConcordance]
     reference_concordance_summary: dict[str, dict[str, float]]
+    evaluator_timing: dict[str, EvaluatorTimingData]  # Timing data per evaluator
 
 
 def is_reference_model(evaluator_name: str) -> bool:
@@ -106,7 +120,9 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
     # Get all research questions
     questions = storage.get_unique_research_questions(limit=1000)
 
+    # Store both score and latency per document
     all_evaluator_scores: dict[str, dict[str, int]] = defaultdict(dict)
+    all_evaluator_latencies: dict[str, dict[str, Optional[int]]] = defaultdict(dict)
     evaluator_id_map: dict[str, str] = {}
 
     print(f"Found {len(questions)} research questions in database")
@@ -126,29 +142,44 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
         if not doc_ids:
             continue
 
-        # For each evaluator, check for scores on these documents
+        # For each evaluator, check for scores on these documents FOR THIS QUESTION
         for evaluator in evaluators:
             for doc_id in doc_ids:
-                scored_doc = storage.get_scored_document_by_evaluator(
-                    doc_id, evaluator.id
+                scored_doc = storage.get_scored_document_for_question(
+                    doc_id, evaluator.id, question
                 )
                 if scored_doc and 1 <= scored_doc.score <= 5:
-                    all_evaluator_scores[evaluator.display_name][doc_id] = scored_doc.score
+                    # Use composite key (doc_id, question) to track question-specific scores
+                    score_key = f"{doc_id}|{question[:50]}"
+                    all_evaluator_scores[evaluator.display_name][score_key] = scored_doc.score
+                    all_evaluator_latencies[evaluator.display_name][score_key] = scored_doc.latency_ms
 
     # Convert to EvaluatorScoreData
+    # Note: Keys are now composite "doc_id|question" to ensure question-specific scores
     result = {}
     for evaluator_name, doc_scores in all_evaluator_scores.items():
         if not doc_scores:
             continue  # Skip evaluators with no valid scores
 
-        doc_ids = list(doc_scores.keys())
-        scores = [doc_scores[doc_id] for doc_id in doc_ids]
+        # score_keys are composite keys: "doc_id|question"
+        score_keys = list(doc_scores.keys())
+        scores = [doc_scores[key] for key in score_keys]
+        latencies = [all_evaluator_latencies[evaluator_name].get(key) for key in score_keys]
+
+        # Calculate total and average latency (only from non-None values)
+        valid_latencies = [lat for lat in latencies if lat is not None]
+        total_latency = sum(valid_latencies) if valid_latencies else 0
+        avg_latency = total_latency / len(valid_latencies) if valid_latencies else 0.0
+
         result[evaluator_name] = EvaluatorScoreData(
             evaluator_name=evaluator_name,
             evaluator_id=evaluator_id_map[evaluator_name],
             total_documents=len(scores),
             scores=scores,
-            document_ids=doc_ids,
+            document_ids=score_keys,  # Composite keys for question-specific tracking
+            latencies_ms=latencies,
+            total_latency_ms=total_latency,
+            avg_latency_ms=avg_latency,
         )
 
     return result
@@ -260,6 +291,16 @@ def build_concordance_report(
     for data in evaluator_data.values():
         unique_doc_ids.update(data.document_ids)
 
+    # Build timing data for each evaluator
+    evaluator_timing: dict[str, EvaluatorTimingData] = {}
+    for name, data in evaluator_data.items():
+        evaluator_timing[name] = EvaluatorTimingData(
+            evaluator_name=name,
+            total_documents=data.total_documents,
+            total_latency_ms=data.total_latency_ms,
+            avg_latency_ms=data.avg_latency_ms,
+        )
+
     return ConcordanceReport(
         generated_at=datetime.now().isoformat(),
         total_questions=len(unique_doc_ids),  # Approximation
@@ -271,6 +312,7 @@ def build_concordance_report(
         inclusion_agreement_matrix=inclusion_agreement_matrix,
         pairwise_concordances=pairwise_concordances,
         reference_concordance_summary=reference_summary,
+        evaluator_timing=evaluator_timing,
     )
 
 
@@ -307,12 +349,12 @@ def format_matrix_table(
 def format_reference_summary(report: ConcordanceReport) -> str:
     """Format reference model concordance summary."""
     lines = [
-        f"\n{'=' * 80}",
+        f"\n{'=' * 120}",
         "CONCORDANCE WITH REFERENCE MODELS (Claude Opus/Sonnet)",
-        "=" * 80,
+        "=" * 120,
         "",
-        f"{'Model':<40} | {'Ref Model':<25} | {'Score Agr':>10} | {'Incl Agr':>10}",
-        "-" * 95,
+        f"{'Model':<40} | {'Ref Model':<25} | {'Score Agr':>10} | {'Incl Agr':>10} | {'Total (s)':>12} | {'s/doc':>8}",
+        "-" * 120,
     ]
 
     # Sort by average concordance with reference models
@@ -327,12 +369,25 @@ def format_reference_summary(report: ConcordanceReport) -> str:
 
     for model_name in sorted_models:
         ref_data = report.reference_concordance_summary[model_name]
+        timing = report.evaluator_timing.get(model_name)
+
         for i, (ref_model, metrics) in enumerate(sorted(ref_data.items())):
             display_name = model_name if i == 0 else ""
+            # Only show timing on first row for this model
+            if i == 0 and timing and timing.total_latency_ms > 0:
+                total_secs = timing.total_latency_ms / 1000
+                avg_secs = timing.avg_latency_ms / 1000
+                total_time_str = f"{total_secs:>12,.1f}"
+                avg_time_str = f"{avg_secs:>8.1f}"
+            else:
+                total_time_str = f"{'':>12}"
+                avg_time_str = f"{'':>8}"
+
             lines.append(
                 f"{display_name:<40} | {ref_model:<25} | "
                 f"{metrics['score_agreement'] * 100:>9.1f}% | "
-                f"{metrics['inclusion_agreement'] * 100:>9.1f}%"
+                f"{metrics['inclusion_agreement'] * 100:>9.1f}% | "
+                f"{total_time_str} | {avg_time_str}"
             )
         if len(ref_data) > 1:
             avg_score = sum(d["score_agreement"] for d in ref_data.values()) / len(
@@ -343,7 +398,8 @@ def format_reference_summary(report: ConcordanceReport) -> str:
             )
             lines.append(
                 f"{'':<40} | {'[Average]':<25} | "
-                f"{avg_score * 100:>9.1f}% | {avg_incl * 100:>9.1f}%"
+                f"{avg_score * 100:>9.1f}% | {avg_incl * 100:>9.1f}% | "
+                f"{'':>12} | {'':>8}"
             )
         lines.append("")
 
@@ -380,14 +436,16 @@ def export_to_csv(report: ConcordanceReport, output_dir: Path) -> None:
             writer.writerow(row)
     print(f"Wrote: {incl_csv}")
 
-    # Reference summary
+    # Reference summary with timing
     ref_csv = output_dir / "reference_concordance.csv"
     with open(ref_csv, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(
-            ["Model", "Reference Model", "Score Agreement", "Inclusion Agreement"]
+            ["Model", "Reference Model", "Score Agreement", "Inclusion Agreement",
+             "Total Documents", "Total Time (s)", "Time per Doc (s)"]
         )
         for model_name, ref_data in report.reference_concordance_summary.items():
+            timing = report.evaluator_timing.get(model_name)
             for ref_model, metrics in ref_data.items():
                 writer.writerow(
                     [
@@ -395,6 +453,9 @@ def export_to_csv(report: ConcordanceReport, output_dir: Path) -> None:
                         ref_model,
                         f"{metrics['score_agreement']:.4f}",
                         f"{metrics['inclusion_agreement']:.4f}",
+                        timing.total_documents if timing else "",
+                        f"{timing.total_latency_ms / 1000:.1f}" if timing else "",
+                        f"{timing.avg_latency_ms / 1000:.1f}" if timing else "",
                     ]
                 )
     print(f"Wrote: {ref_csv}")
@@ -432,6 +493,14 @@ def export_to_json(report: ConcordanceReport, output_dir: Path) -> None:
             for pc in report.pairwise_concordances
         ],
         "reference_concordance_summary": report.reference_concordance_summary,
+        "evaluator_timing": {
+            name: {
+                "total_documents": timing.total_documents,
+                "total_time_seconds": timing.total_latency_ms / 1000,
+                "time_per_doc_seconds": timing.avg_latency_ms / 1000,
+            }
+            for name, timing in report.evaluator_timing.items()
+        },
     }
 
     json_path = output_dir / "concordance_report.json"
@@ -471,8 +540,8 @@ def export_to_markdown(
             "",
             "Models ranked by score agreement with Claude Opus/Sonnet:",
             "",
-            "| Model | Reference Model | Score Agreement | Inclusion Agreement |",
-            "|-------|-----------------|----------------:|--------------------:|",
+            "| Model | Reference Model | Score Agreement | Inclusion Agreement | Total (s) | s/doc |",
+            "|-------|-----------------|----------------:|--------------------:|----------:|------:|",
         ])
 
         # Sort by average concordance
@@ -487,11 +556,24 @@ def export_to_markdown(
 
         for model_name in sorted_models:
             ref_data = report.reference_concordance_summary[model_name]
-            for ref_model, metrics in sorted(ref_data.items()):
+            timing = report.evaluator_timing.get(model_name)
+
+            for i, (ref_model, metrics) in enumerate(sorted(ref_data.items())):
                 score_pct = metrics["score_agreement"] * 100
                 incl_pct = metrics["inclusion_agreement"] * 100
+
+                # Only show timing on first row for this model
+                if i == 0 and timing and timing.total_latency_ms > 0:
+                    total_secs = timing.total_latency_ms / 1000
+                    avg_secs = timing.avg_latency_ms / 1000
+                    total_str = f"{total_secs:,.1f}"
+                    avg_str = f"{avg_secs:.1f}"
+                else:
+                    total_str = ""
+                    avg_str = ""
+
                 lines.append(
-                    f"| {model_name} | {ref_model} | {score_pct:.1f}% | {incl_pct:.1f}% |"
+                    f"| {model_name} | {ref_model} | {score_pct:.1f}% | {incl_pct:.1f}% | {total_str} | {avg_str} |"
                 )
 
         lines.append("")
@@ -642,7 +724,13 @@ def main() -> None:
 
     print(f"\nFound scores from {len(evaluator_data)} evaluators:")
     for name, data in sorted(evaluator_data.items()):
-        print(f"  - {name}: {data.total_documents} documents")
+        if data.total_latency_ms > 0:
+            total_secs = data.total_latency_ms / 1000
+            avg_secs = data.avg_latency_ms / 1000
+            print(f"  - {name}: {data.total_documents} documents, "
+                  f"{total_secs:,.1f}s total, {avg_secs:.1f}s/doc")
+        else:
+            print(f"  - {name}: {data.total_documents} documents (no timing data)")
 
     print("\nBuilding concordance report...")
     report = build_concordance_report(evaluator_data, args.inclusion_threshold)

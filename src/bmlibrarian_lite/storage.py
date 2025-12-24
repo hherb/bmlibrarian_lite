@@ -30,6 +30,14 @@ from typing import Any, Generator, Optional
 
 import sqlite_vec
 
+# Register adapters/converters for datetime to avoid Python 3.12 deprecation warning
+# The default converter expects space-separated format, but we use ISO format with 'T'
+sqlite3.register_adapter(datetime, lambda dt: dt.isoformat())
+sqlite3.register_converter(
+    "TIMESTAMP",
+    lambda b: datetime.fromisoformat(b.decode().replace(" ", "T"))
+)
+
 from .config import LiteConfig
 from .constants import (
     BENCHMARK_QUESTION_HASH_LENGTH,
@@ -2460,6 +2468,81 @@ class LiteStorage:
                 ))
 
             return results
+
+    def get_scored_document_for_question(
+        self,
+        document_id: str,
+        evaluator_id: str,
+        research_question: str,
+    ) -> Optional[ScoredDocument]:
+        """
+        Get a scored document for a specific evaluator AND research question.
+
+        This ensures scores are question-specific - a document may be scored
+        differently by the same evaluator for different research questions.
+
+        Args:
+            document_id: Document ID
+            evaluator_id: Evaluator ID
+            research_question: Research question text
+
+        Returns:
+            ScoredDocument if found, None otherwise
+        """
+        # Query joins scored_documents with review_checkpoints to filter by question
+        query = """
+            SELECT sd.*, e.type as eval_type, e.display_name, e.provider,
+                   e.model_name, e.temperature as eval_temp, e.max_tokens as eval_max,
+                   e.top_p, e.top_k
+            FROM scored_documents sd
+            JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+            LEFT JOIN evaluators e ON sd.evaluator_id = e.id
+            WHERE sd.document_id = ?
+              AND sd.evaluator_id = ?
+              AND LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
+            ORDER BY sd.scored_at DESC
+            LIMIT 1
+        """
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, (document_id, evaluator_id, research_question))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            # Get the full document
+            doc = self.get_document(row["document_id"])
+            if not doc:
+                return None
+
+            # Build evaluator if present
+            evaluator = None
+            if row["evaluator_id"] and row["eval_type"]:
+                evaluator = Evaluator(
+                    id=row["evaluator_id"],
+                    type=EvaluatorType(row["eval_type"]),
+                    display_name=row["display_name"],
+                    provider=row["provider"],
+                    model_name=row["model_name"],
+                    temperature=row["eval_temp"],
+                    max_tokens=row["eval_max"],
+                    top_p=row["top_p"],
+                    top_k=row["top_k"],
+                )
+
+            return ScoredDocument(
+                document=doc,
+                score=row["score"],
+                explanation=row["explanation"],
+                evaluator_id=row["evaluator_id"],
+                evaluator=evaluator,
+                latency_ms=row["latency_ms"],
+                tokens_input=row["tokens_input"],
+                tokens_output=row["tokens_output"],
+                cost_usd=row["cost_usd"],
+                scored_at=row["scored_at"],
+            )
 
     # =========================================================================
     # Study Classification Operations
