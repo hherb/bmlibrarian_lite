@@ -292,19 +292,9 @@ class ReviewDocumentCard(QFrame):
         self.score_input.score_changed.connect(self._on_score_changed)
         title_row.addWidget(self.score_input)
 
-        # Title
-        title_label = QLabel(self.document.title)
-        title_label.setWordWrap(True)
-        font = QFont()
-        font.setPointSize(scaled(10))
-        font.setBold(True)
-        title_label.setFont(font)
-        title_label.setStyleSheet("color: #1a1a1a; background: transparent;")
-        title_row.addWidget(title_label, stretch=1)
-
-        # Expand/collapse button
-        self.expand_btn = QPushButton("Show Abstract")
-        self.expand_btn.setFixedWidth(scaled(100))
+        # Expand/collapse button - placed right next to score input for less mouse movement
+        self.expand_btn = QPushButton("Abstract")
+        self.expand_btn.setFixedWidth(scaled(70))
         self.expand_btn.clicked.connect(self._toggle_expanded)
         self.expand_btn.setStyleSheet("""
             QPushButton {
@@ -312,12 +302,27 @@ class ReviewDocumentCard(QFrame):
                 border: none;
                 border-radius: 4px;
                 padding: 4px 8px;
+                font-size: 9pt;
             }
             QPushButton:hover {
                 background-color: #d0d0d0;
             }
         """)
         title_row.addWidget(self.expand_btn)
+
+        # Title - clickable to toggle abstract
+        self.title_label = QLabel(self.document.title)
+        self.title_label.setWordWrap(True)
+        font = QFont()
+        font.setPointSize(scaled(10))
+        font.setBold(True)
+        self.title_label.setFont(font)
+        self.title_label.setStyleSheet(
+            "color: #1a1a1a; background: transparent; cursor: pointer;"
+        )
+        self.title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.title_label.mousePressEvent = lambda _: self._toggle_expanded()
+        title_row.addWidget(self.title_label, stretch=1)
 
         header_layout.addLayout(title_row)
 
@@ -386,7 +391,7 @@ class ReviewDocumentCard(QFrame):
                 QTextEdit {
                     background-color: #FAFAFA;
                     color: #333;
-                    font-size: 10pt;
+                    font-size: 12pt;
                     padding: 4px;
                     border: none;
                 }
