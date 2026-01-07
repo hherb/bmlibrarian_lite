@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QWidget,
 )
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
@@ -666,7 +666,9 @@ class SettingsDialog(QDialog):
 
         self.benchmark_models_container = QWidget()
         self.benchmark_models_layout = QVBoxLayout(self.benchmark_models_container)
-        self.benchmark_models_layout.setSpacing(scaled(4))
+        self.benchmark_models_layout.setSpacing(scaled(8))
+        self.benchmark_models_layout.setContentsMargins(0, 0, 0, 0)
+        self.benchmark_models_layout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.benchmark_models_container)
         models_layout.addWidget(scroll)
 
@@ -729,26 +731,29 @@ class SettingsDialog(QDialog):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(scaled(8))
 
-        # Enable checkbox
+        # Enable checkbox (fixed width, left aligned)
         enable_check = QCheckBox()
         enable_check.setChecked(enabled)
         enable_check.setToolTip("Include this model in benchmarks")
+        enable_check.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         row_layout.addWidget(enable_check)
 
-        # Provider combo
+        # Provider combo (fixed width, left aligned)
         provider_combo = QComboBox()
         provider_combo.addItems(["anthropic", "ollama"])
         provider_combo.setCurrentText(provider)
-        provider_combo.setFixedWidth(scaled(90))
+        provider_combo.setFixedWidth(scaled(100))
+        provider_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         provider_combo.currentTextChanged.connect(
             lambda p, pc=provider_combo, mc=None: self._on_benchmark_provider_changed(pc, mc)
         )
         row_layout.addWidget(provider_combo)
 
-        # Model combo
+        # Model combo (expanding to fill available width)
         model_combo = QComboBox()
         model_combo.setEditable(True)
-        model_combo.setMinimumWidth(scaled(180))
+        model_combo.setMinimumWidth(scaled(200))
+        model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         # Populate with cached models
         models = self._available_models.get(provider, [])
         if models:
@@ -767,18 +772,19 @@ class SettingsDialog(QDialog):
             lambda p: self._on_benchmark_provider_changed(provider_combo, model_combo)
         )
 
-        # Baseline checkbox
+        # Baseline checkbox (fixed width)
         baseline_check = QCheckBox("Baseline")
         baseline_check.setChecked(is_baseline)
         baseline_check.setToolTip("Use as baseline for comparison")
+        baseline_check.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         baseline_check.toggled.connect(
             lambda checked, bc=baseline_check: self._on_baseline_changed(bc, checked)
         )
         row_layout.addWidget(baseline_check)
 
-        # Remove button
+        # Remove button (fixed width)
         remove_btn = QPushButton("×")
-        remove_btn.setFixedWidth(scaled(24))
+        remove_btn.setFixedSize(scaled(28), scaled(28))
         remove_btn.setToolTip("Remove this model")
         remove_btn.clicked.connect(lambda: self._remove_benchmark_model(row))
         row_layout.addWidget(remove_btn)
