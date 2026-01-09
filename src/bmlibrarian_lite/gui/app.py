@@ -216,7 +216,9 @@ class LiteMainWindow(QMainWindow):
         self.research_questions_tab.benchmark_completed.connect(
             self._on_benchmark_completed
         )
-
+        self.research_questions_tab.question_selected.connect(
+            self._on_question_selected
+        )
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -519,6 +521,99 @@ class LiteMainWindow(QMainWindow):
 
         except Exception as e:
             logger.warning(f"Failed to load benchmark results: {e}")
+
+    def _on_question_selected(
+        self,
+        question: str,
+        pubmed_query: str,
+    ) -> None:
+        """
+        Handle research question selection from Research Questions tab.
+
+        Loads all related data from database and populates all tabs:
+        - Systematic Review tab (pre-fills question)
+        - Audit Trail tab (documents, scores, citations, quality)
+        - Report tab (displays saved report)
+        - Benchmark tab (loads benchmark results)
+
+        Args:
+            question: The research question text
+            pubmed_query: The associated PubMed query
+        """
+        try:
+            # 1. Get checkpoint with report
+            checkpoint = self.storage.get_checkpoint_for_question(question)
+            if not checkpoint or not checkpoint.report:
+                self.status_bar.showMessage(
+                    "No report found for this question. Run the review first.",
+                    5000
+                )
+                return
+
+            # 2. Load all documents found for this question
+            doc_ids = self.storage.get_document_ids_for_question(question)
+            documents_found = [
+                self.storage.get_document(doc_id)
+                for doc_id in doc_ids
+            ]
+            documents_found = [d for d in documents_found if d is not None]
+
+            # 3. Load all scored documents
+            scored_documents = self.storage.get_scored_documents_for_question(question)
+
+            # 4. Load all citations
+            citations = self.storage.get_citations_for_question(question)
+
+            # 5. Load quality assessments
+            quality_assessments = self.storage.get_quality_assessments_for_question(
+                question
+            )
+
+            # 6. Pre-fill Systematic Review tab with the question
+            self.systematic_review_tab.question_input.setPlainText(question)
+
+            # 7. Clear and populate Audit Trail tab
+            self.audit_trail_tab.clear()
+            self.audit_trail_tab.on_query_generated(pubmed_query, question)
+            self.audit_trail_tab.on_documents_found(documents_found)
+
+            for scored_doc in scored_documents:
+                self.audit_trail_tab.on_document_scored(scored_doc)
+
+            for doc_id, assessment in quality_assessments.items():
+                self.audit_trail_tab.on_quality_assessed(doc_id, assessment)
+
+            for citation in citations:
+                self.audit_trail_tab.on_citation_extracted(citation)
+
+            self.audit_trail_tab.on_workflow_finished()
+
+            # 8. Display report in Report tab
+            self.report_tab.display_report(
+                report=checkpoint.report,
+                question=question,
+                citations=citations,
+                documents_found=documents_found,
+                scored_documents=scored_documents,
+                quality_assessments=quality_assessments,
+                quality_filter_settings={},  # Not stored in checkpoint
+            )
+
+            # 9. Load benchmark results if available
+            self._load_benchmark_results_for_question(question)
+
+            # 10. Switch to Report tab
+            self.tab_widget.setCurrentWidget(self.report_tab)
+
+            self.status_bar.showMessage(
+                f"Loaded question with {len(scored_documents)} scored docs, "
+                f"{len(citations)} citations",
+                5000
+            )
+
+        except Exception as e:
+            logger.exception("Failed to load research question data")
+            self.status_bar.showMessage(f"Error loading data: {e}", 5000)
 
 
 def run_lite_app() -> int:

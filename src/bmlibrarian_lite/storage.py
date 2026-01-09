@@ -1620,6 +1620,47 @@ class LiteStorage:
 
             return checkpoints
 
+    def get_checkpoint_for_question(
+        self,
+        question: str,
+    ) -> Optional[ReviewCheckpoint]:
+        """
+        Get the most recent checkpoint for a research question.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            Most recent ReviewCheckpoint if found, None otherwise
+        """
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, research_question, created_at, updated_at, step,
+                       search_session_id, report, metadata
+                FROM review_checkpoints
+                WHERE LOWER(TRIM(research_question)) = LOWER(TRIM(?))
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (question,),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return ReviewCheckpoint(
+                id=row["id"],
+                research_question=row["research_question"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                step=row["step"],
+                search_session_id=row["search_session_id"],
+                report=row["report"],
+                metadata=json.loads(row["metadata"]),
+            )
+
     def delete_checkpoint(self, checkpoint_id: str) -> bool:
         """
         Delete a checkpoint and associated data.
@@ -2544,6 +2585,177 @@ class LiteStorage:
                 scored_at=row["scored_at"],
             )
 
+    def get_scored_documents_for_question(
+        self,
+        question: str,
+        min_score: Optional[int] = None,
+    ) -> list[ScoredDocument]:
+        """
+        Get all scored documents for a research question.
+
+        Args:
+            question: The research question text
+            min_score: Optional minimum score filter
+
+        Returns:
+            List of ScoredDocument objects sorted by score descending
+        """
+        with self._sqlite_connection() as conn:
+            # Build query with optional score filter
+            query = """
+                SELECT DISTINCT
+                    sd.document_id, sd.score, sd.explanation, sd.evaluator_id,
+                    sd.latency_ms, sd.tokens_input, sd.tokens_output,
+                    sd.cost_usd, sd.scored_at,
+                    e.type as eval_type, e.display_name, e.provider,
+                    e.model_name, e.temperature as eval_temp, e.max_tokens as eval_max,
+                    e.top_p, e.top_k
+                FROM scored_documents sd
+                INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+                LEFT JOIN evaluators e ON sd.evaluator_id = e.id
+                WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
+            """
+            params: list = [question]
+
+            if min_score is not None:
+                query += " AND sd.score >= ?"
+                params.append(min_score)
+
+            query += " ORDER BY sd.score DESC, sd.scored_at DESC"
+
+            cursor = conn.execute(query, params)
+
+            results: list[ScoredDocument] = []
+            seen_docs: set[str] = set()
+
+            for row in cursor:
+                doc_id = row["document_id"]
+
+                # Skip duplicates (keep most recent)
+                if doc_id in seen_docs:
+                    continue
+                seen_docs.add(doc_id)
+
+                # Get the full document
+                doc = self.get_document(doc_id)
+                if not doc:
+                    continue
+
+                # Build evaluator if present
+                evaluator = None
+                if row["evaluator_id"] and row["eval_type"]:
+                    evaluator = Evaluator(
+                        id=row["evaluator_id"],
+                        type=EvaluatorType(row["eval_type"]),
+                        display_name=row["display_name"],
+                        provider=row["provider"],
+                        model_name=row["model_name"],
+                        temperature=row["eval_temp"],
+                        max_tokens=row["eval_max"],
+                        top_p=row["top_p"],
+                        top_k=row["top_k"],
+                    )
+
+                results.append(ScoredDocument(
+                    document=doc,
+                    score=row["score"],
+                    explanation=row["explanation"],
+                    evaluator_id=row["evaluator_id"],
+                    evaluator=evaluator,
+                    latency_ms=row["latency_ms"],
+                    tokens_input=row["tokens_input"],
+                    tokens_output=row["tokens_output"],
+                    cost_usd=row["cost_usd"],
+                    scored_at=row["scored_at"],
+                ))
+
+            return results
+
+    # =========================================================================
+    # Citation Operations
+    # =========================================================================
+
+    def save_citation(
+        self,
+        citation: "Citation",
+        checkpoint_id: str,
+    ) -> str:
+        """
+        Save a citation to the database.
+
+        Args:
+            citation: Citation to save
+            checkpoint_id: Associated checkpoint ID
+
+        Returns:
+            Citation ID
+        """
+        citation_id = str(uuid.uuid4())
+
+        with self._sqlite_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO citations
+                (id, checkpoint_id, document_id, passage, relevance_score, context)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    citation_id,
+                    checkpoint_id,
+                    citation.document.id,
+                    citation.passage,
+                    citation.relevance_score,
+                    citation.context,
+                ),
+            )
+            conn.commit()
+
+        logger.debug(f"Saved citation {citation_id} for document {citation.document.id}")
+        return citation_id
+
+    def get_citations_for_question(
+        self,
+        question: str,
+    ) -> list["Citation"]:
+        """
+        Get all citations for a research question.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            List of Citation objects
+        """
+        from .data_models import Citation
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT c.document_id, c.passage, c.relevance_score, c.context
+                FROM citations c
+                INNER JOIN review_checkpoints rc ON c.checkpoint_id = rc.id
+                WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
+                ORDER BY c.relevance_score DESC
+                """,
+                (question,),
+            )
+
+            results: list[Citation] = []
+            for row in cursor:
+                # Get the full document
+                doc = self.get_document(row["document_id"])
+                if not doc:
+                    continue
+
+                results.append(Citation(
+                    document=doc,
+                    passage=row["passage"],
+                    relevance_score=row["relevance_score"],
+                    context=row["context"],
+                ))
+
+            return results
+
     # =========================================================================
     # Study Classification Operations
     # =========================================================================
@@ -2748,6 +2960,38 @@ class LiteStorage:
             cursor = conn.execute(query, params)
             conn.commit()
             return cursor.rowcount
+
+    def get_quality_assessments_for_question(
+        self,
+        question: str,
+    ) -> dict[str, "QualityAssessment"]:
+        """
+        Get quality assessments for all documents in a research question.
+
+        Converts stored StudyClassification data to QualityAssessment objects.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            Dictionary mapping document ID to QualityAssessment
+        """
+        from .quality.data_models import QualityAssessment
+
+        # Get all document IDs for this question
+        doc_ids = self.get_document_ids_for_question(question)
+
+        if not doc_ids:
+            return {}
+
+        result: dict[str, QualityAssessment] = {}
+
+        for doc_id in doc_ids:
+            classification = self.get_study_classification(doc_id)
+            if classification:
+                result[doc_id] = QualityAssessment.from_classification(classification)
+
+        return result
 
     # =========================================================================
     # Benchmark Run Operations

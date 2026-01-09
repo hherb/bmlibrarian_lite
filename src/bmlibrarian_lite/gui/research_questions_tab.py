@@ -158,6 +158,14 @@ class ResearchQuestionsTab(QWidget):
 
         target_layout.addStretch()
 
+        self.load_btn = QPushButton("Load")
+        self.load_btn.setEnabled(False)
+        self.load_btn.clicked.connect(self._on_load_clicked)
+        self.load_btn.setToolTip(
+            "Load the saved report and data for this question"
+        )
+        target_layout.addWidget(self.load_btn)
+
         self.rerun_btn = QPushButton("Re-run Search")
         self.rerun_btn.setEnabled(False)
         self.rerun_btn.clicked.connect(self._on_rerun_clicked)
@@ -377,8 +385,12 @@ class ResearchQuestionsTab(QWidget):
                     if len(question.question) > 80
                     else f"Selected: {question.question}"
                 )
+
+                # Enable Load button if question has scored documents (has a report)
+                self.load_btn.setEnabled(question.scored_documents > 0)
         else:
             self.benchmark_btn.setEnabled(False)
+            self.load_btn.setEnabled(False)
 
     def _get_selected_question(self) -> Optional[ResearchQuestionSummary]:
         """Get the currently selected question."""
@@ -386,6 +398,15 @@ class ResearchQuestionsTab(QWidget):
         if 0 <= row < len(self._questions):
             return self._questions[row]
         return None
+
+    def _on_load_clicked(self) -> None:
+        """Handle Load button click to load question data into other tabs."""
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        # Emit signal to load question data into other tabs
+        self.question_selected.emit(question.question, question.pubmed_query)
 
     def _on_rerun_clicked(self) -> None:
         """Handle re-run button click."""

@@ -333,8 +333,9 @@ class WorkflowWorker(QThread):
                 progress_callback=citation_progress,
             )
 
-            # Emit per-citation signals for audit trail
+            # Emit per-citation signals for audit trail and save to database
             for citation in citations:
+                self.storage.save_citation(citation, checkpoint.id)
                 self.citation_extracted.emit(citation)
 
             self.step_complete.emit("citations", citations)
@@ -353,6 +354,13 @@ class WorkflowWorker(QThread):
             reporting_agent = LiteReportingAgent(config=self.config)
             report = reporting_agent.generate_report(self.question, citations, metadata)
             self.step_complete.emit("report", report)
+
+            # Save report to checkpoint for later retrieval
+            self.storage.update_checkpoint(
+                checkpoint_id=checkpoint.id,
+                report=report,
+                step="complete",
+            )
 
             self.finished.emit(report, metadata)
 
