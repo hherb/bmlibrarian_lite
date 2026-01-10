@@ -40,11 +40,33 @@ struct MedicalFactCheckerApp: App {
         }
     }()
 
+    /// Currently selected document for reference popup (shared via environment).
+    @State private var selectedReferenceDocument: Document?
+    @State private var showingReferenceSheet = false
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(AppSettings.shared)
+                .environment(\.openURL, OpenURLAction { url in
+                    // Intercept our custom docref:// URLs
+                    if url.scheme == "docref" {
+                        NotificationCenter.default.post(
+                            name: .documentReferenceClicked,
+                            object: nil,
+                            userInfo: ["url": url]
+                        )
+                        return .handled
+                    }
+                    return .systemAction
+                })
         }
         .modelContainer(sharedModelContainer)
     }
+}
+
+// MARK: - Notification for Reference Clicks
+
+extension Notification.Name {
+    static let documentReferenceClicked = Notification.Name("documentReferenceClicked")
 }

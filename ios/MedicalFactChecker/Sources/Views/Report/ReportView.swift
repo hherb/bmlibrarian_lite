@@ -385,6 +385,11 @@ struct MarkdownReportView: View {
                 renderBlock(block)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .documentReferenceClicked)) { notification in
+            if let url = notification.userInfo?["url"] as? URL {
+                handleReferenceTap(url)
+            }
+        }
         .sheet(isPresented: $showingDocumentDetail) {
             if let doc = selectedDocument {
                 DocumentDetailSheet(document: doc)
@@ -562,10 +567,6 @@ struct MarkdownReportView: View {
         let attributed = parseInlineFormatting(text)
         Text(attributed)
             .font(.body)
-            .environment(\.openURL, OpenURLAction { url in
-                handleReferenceTap(url)
-                return .handled
-            })
     }
 
     /// Parse inline formatting (bold, italic) and references into AttributedString.

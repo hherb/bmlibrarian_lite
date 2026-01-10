@@ -44,6 +44,7 @@ final class FactCheckWorkflow {
     var onComplete: ((EvidenceReport) -> Void)?
     var onError: ((Error) -> Void)?
     var onBudgetExceeded: ((String) -> Void)?
+    var onSmartSearchActivated: ((String) -> Void)?  // Alternative query message
 
     // MARK: - Monthly Usage Tracking
 
@@ -180,17 +181,42 @@ final class FactCheckWorkflow {
                 let needed = settings.minRelevantDocuments
                 let available = session.totalPubMedResults - session.currentSearchOffset
 
-                if relevant < needed && available > 0 {
-                    // Prompt user to fetch more
-                    session.currentStep = .awaitingUserDecision
-                    try? modelContext.save()
+                if relevant < needed {
+                    // Try smart search first if not already enabled
+                    if !session.smartSearchEnabled && relevant < smartSearchThreshold {
+                        updateProgress(.searchingPubMed, "Insufficient results, activating smart search...")
+                        try await executeSmartSearch()
 
-                    awaitingUserDecision = true
-                    userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
-                    onNeedMoreDocuments?(relevant, needed, available)
+                        // Re-check after smart search
+                        let relevantAfterSmart = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+                        if relevantAfterSmart >= needed {
+                            // Smart search found enough, proceed to citations
+                            session.currentStep = .extractingCitations
+                            try? modelContext.save()
+                        } else if available > 0 {
+                            // Still not enough, prompt user for more from original query
+                            session.currentStep = .awaitingUserDecision
+                            try? modelContext.save()
 
-                    isRunning = false
-                    return  // Wait for user decision
+                            awaitingUserDecision = true
+                            userDecisionPrompt = "Found \(relevantAfterSmart) relevant document(s) after smart search. Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more from original query?"
+                            onNeedMoreDocuments?(relevantAfterSmart, needed, available)
+
+                            isRunning = false
+                            return
+                        }
+                    } else if available > 0 {
+                        // Smart search already tried or threshold met, prompt user
+                        session.currentStep = .awaitingUserDecision
+                        try? modelContext.save()
+
+                        awaitingUserDecision = true
+                        userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
+                        onNeedMoreDocuments?(relevant, needed, available)
+
+                        isRunning = false
+                        return  // Wait for user decision
+                    }
                 }
             }
 
@@ -634,13 +660,15 @@ final class FactCheckWorkflow {
 
     private func formatReferences(_ documents: [Document]) -> String {
         documents.enumerated().map { index, doc in
-            var ref = "\(index + 1). \(doc.formattedAuthors)"
+            var ref = "**\(index + 1).** "
+            ref += "**\(doc.formattedAuthors)"
             if let year = doc.year { ref += " (\(year))" }
-            ref += ". \(doc.title)"
+            ref += ".** "
+            ref += "\(doc.title)"
             if let journal = doc.journal { ref += ". *\(journal)*" }
             ref += ". PMID: \(doc.pmid)"
             return ref
-        }.joined(separator: "\n")
+        }.joined(separator: "\n\n")
     }
 
     private func generateNoEvidenceReport(claim: String) -> String {
@@ -668,6 +696,224 @@ final class FactCheckWorkflow {
         ---
         *No citations available*
         """
+    }
+
+    // MARK: - Smart Search
+
+    /// Minimum relevant documents before triggering smart search
+    private let smartSearchThreshold = 3
+
+    /// Generate alternative search queries when initial search yields insufficient results.
+    private func generateAlternativeQueries() async throws -> [String] {
+        guard let session = session, let llmService = llmService else { return [] }
+
+        try checkBudget()
+
+        let prompt = """
+        The following medical question did not return enough relevant results with the initial PubMed search.
+
+        Question: \(session.claim)
+        Initial query: \(session.pubmedQuery ?? "N/A")
+        Results found: \(session.totalPubMedResults)
+        Relevant documents: \(session.relevantDocumentsFound)
+
+        Analyze the question and suggest 2-4 alternative search strategies. Consider:
+        1. If comparing two treatments/medications, search for each one separately
+        2. Use different synonyms or related terms
+        3. Break compound questions into simpler components
+        4. Try broader or narrower search terms
+        5. Focus on key outcomes or mechanisms
+
+        For comparison questions (e.g., "A vs B for condition C"), generate separate queries like:
+        - "A AND condition C AND outcome"
+        - "B AND condition C AND outcome"
+
+        Output a JSON array of alternative PubMed query strings. Each query should:
+        - Be a valid PubMed search syntax
+        - Include "AND hasabstract" at the end
+        - Be different from the original query
+
+        Respond with ONLY a JSON array of strings, nothing else:
+        ["query1 AND hasabstract", "query2 AND hasabstract"]
+        """
+
+        let messages = [LLMService.userMessage(prompt)]
+        let (response, usage) = try await llmService.chat(
+            messages: messages,
+            temperature: 0.3,
+            maxTokens: 512,
+            jsonMode: true
+        )
+
+        recordUsage(usage, operationType: "smart_search")
+
+        // Parse the JSON array
+        let queries = ResponseParser.parseStringArray(response)
+        return queries
+    }
+
+    /// Execute smart search with alternative queries.
+    private func executeSmartSearch() async throws {
+        guard let session = session else { return }
+
+        // Generate alternative queries
+        updateProgress(.searchingPubMed, "Generating alternative search strategies...")
+        let alternatives = try await generateAlternativeQueries()
+
+        guard !alternatives.isEmpty else {
+            // No alternatives generated, continue with what we have
+            return
+        }
+
+        // Store alternatives in session
+        session.alternativeQueries = try? JSONEncoder().encode(alternatives).base64EncodedString()
+        session.smartSearchEnabled = true
+        session.currentAlternativeQueryIndex = 0
+
+        // Track already-fetched PMIDs
+        let existingPmids = Set(session.documents.map { $0.pmid })
+        session.fetchedPmids = existingPmids.joined(separator: ",")
+
+        onSmartSearchActivated?("Trying \(alternatives.count) alternative search strategies...")
+
+        // Execute each alternative query
+        for (index, query) in alternatives.enumerated() {
+            try checkBudget()
+
+            session.currentAlternativeQueryIndex = index
+            updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(query.prefix(50))...")
+
+            try await executeAlternativeQuery(query)
+
+            // Check if we now have enough relevant documents
+            let relevant = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+            if relevant >= settings.minRelevantDocuments {
+                updateProgress(.searchingPubMed, "Found enough relevant documents with smart search")
+                break
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    /// Execute a single alternative query, avoiding duplicates.
+    private func executeAlternativeQuery(_ query: String) async throws {
+        guard let session = session, let pubmedService = pubmedService else { return }
+
+        // Get already-fetched PMIDs
+        let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
+
+        let result = try await pubmedService.search(
+            query: query,
+            maxResults: settings.batchSize,
+            offset: 0
+        )
+
+        // Filter out already-fetched PMIDs
+        let newPmids = result.pmids.filter { !fetchedPmidSet.contains($0) }
+
+        guard !newPmids.isEmpty else {
+            return  // No new results from this query
+        }
+
+        // Fetch article metadata
+        let articles = try await pubmedService.fetchArticles(
+            pmids: newPmids,
+            batchNumber: session.batchesFetched + 1,
+            basePosition: session.documentsFound
+        )
+
+        // Create Document objects
+        for article in articles {
+            let document = Document(
+                pmid: article.pmid,
+                title: article.title,
+                abstract: article.abstract,
+                authors: article.authors,
+                batchNumber: article.batchNumber,
+                resultPosition: article.resultPosition
+            )
+            document.year = article.year
+            document.journal = article.journal
+            document.doi = article.doi
+            document.pmcId = article.pmcId
+            document.meshTerms = article.meshTerms
+            document.publicationDate = article.publicationDate
+            document.session = session
+
+            modelContext.insert(document)
+        }
+
+        // Update tracking
+        session.documentsFound += articles.count
+        session.batchesFetched += 1
+
+        // Update fetched PMIDs
+        var updatedPmids = fetchedPmidSet
+        newPmids.forEach { updatedPmids.insert($0) }
+        session.fetchedPmids = updatedPmids.joined(separator: ",")
+
+        try? modelContext.save()
+
+        // Score the new documents
+        try await scoreNewDocuments(articles.map { $0.pmid })
+    }
+
+    /// Score only specific documents (by PMID).
+    private func scoreNewDocuments(_ pmids: [String]) async throws {
+        guard let session = session, let llmService = llmService else { return }
+
+        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil }
+
+        for document in docsToScore {
+            try checkBudget()
+
+            let prompt = """
+            Evaluate how relevant this document is to the following medical claim.
+
+            Claim: \(session.claim)
+
+            Document Title: \(document.title)
+            Authors: \(document.formattedAuthors)
+            Year: \(document.year ?? 0)
+            Journal: \(document.journal ?? "Unknown")
+
+            Abstract:
+            \(document.abstract)
+
+            Score on a scale of 1-5:
+            - 5: Directly addresses the claim with strong evidence
+            - 4: Highly relevant, provides substantial supporting information
+            - 3: Moderately relevant, contains useful related information
+            - 2: Marginally relevant, tangentially related
+            - 1: Not relevant to the claim
+
+            Respond in JSON format only:
+            {"score": <1-5>, "explanation": "<brief explanation>"}
+            """
+
+            let messages = [LLMService.userMessage(prompt)]
+            let (response, usage) = try await llmService.chat(
+                messages: messages,
+                temperature: 0.1,
+                maxTokens: 256,
+                jsonMode: true
+            )
+
+            recordUsage(usage, operationType: "scoring")
+
+            let parsed = ResponseParser.parseScoreResponse(response)
+            document.relevanceScore = parsed.score
+            document.scoreExplanation = parsed.explanation
+            document.scoredAt = Date()
+
+            session.documentsScored += 1
+            if parsed.score >= settings.minScoreThreshold {
+                session.relevantDocumentsFound += 1
+            }
+
+            try? modelContext.save()
+        }
     }
 
     private func updateProgress(_ step: WorkflowStep, _ message: String) {

@@ -168,6 +168,43 @@ enum ResponseParser {
         return .insufficientEvidence
     }
 
+    // MARK: - Array Parsing
+
+    /// Parse an array of strings from an LLM response.
+    ///
+    /// Expected JSON format: `["string1", "string2", ...]`
+    ///
+    /// - Parameter response: Raw JSON string from LLM.
+    /// - Returns: Array of strings, or empty array if parsing fails.
+    static func parseStringArray(_ response: String) -> [String] {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Try to extract JSON array
+        var jsonString = trimmed
+
+        // Handle markdown code blocks
+        if let codeBlockMatch = trimmed.range(of: "```(?:json)?\\s*([\\s\\S]*?)```",
+                                               options: .regularExpression) {
+            jsonString = trimmed[codeBlockMatch]
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Find array bounds
+        if let startIndex = jsonString.firstIndex(of: "["),
+           let endIndex = jsonString.lastIndex(of: "]") {
+            jsonString = String(jsonString[startIndex...endIndex])
+        }
+
+        guard let data = jsonString.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [String] else {
+            return []
+        }
+
+        return array.filter { !$0.isEmpty }
+    }
+
     // MARK: - Helpers
 
     /// Clamp a score to the valid range of 1-5.
