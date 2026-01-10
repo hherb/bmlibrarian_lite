@@ -263,7 +263,7 @@ struct DocumentCard: View {
                         .foregroundColor(.secondary)
 
                     if let journal = document.journal, let year = document.year {
-                        Text("\(journal), \(year)")
+                        Text(verbatim: "\(journal), \(year)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -352,7 +352,7 @@ struct ScoreBadge: View {
     }
 }
 
-/// Simple markdown text renderer.
+/// Markdown text renderer with proper line break handling.
 struct MarkdownText: View {
     let content: String
 
@@ -361,13 +361,35 @@ struct MarkdownText: View {
     }
 
     var body: some View {
-        if let attributed = try? AttributedString(markdown: content) {
+        let normalizedContent = normalizeLineBreaks(content)
+
+        if let attributed = try? AttributedString(
+            markdown: normalizedContent,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        ) {
             Text(attributed)
                 .font(.body)
         } else {
-            Text(content)
+            // Fallback: render as plain text with line breaks
+            Text(normalizedContent)
                 .font(.body)
         }
+    }
+
+    /// Normalize various line break formats for proper markdown rendering.
+    private func normalizeLineBreaks(_ text: String) -> String {
+        var result = text
+        // Convert escaped newlines from JSON to actual newlines
+        result = result.replacingOccurrences(of: "\\n", with: "\n")
+        // Ensure headers have space after
+        result = result.replacingOccurrences(of: "##", with: "\n\n##")
+        // Clean up multiple newlines
+        while result.contains("\n\n\n") {
+            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

@@ -12,8 +12,7 @@ struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FactCheckSession.createdAt, order: .reverse) private var sessions: [FactCheckSession]
 
-    @State private var selectedSession: FactCheckSession?
-    @State private var showingReport = false
+    @State private var selectedReport: EvidenceReport?
 
     var body: some View {
         NavigationStack {
@@ -26,9 +25,8 @@ struct HistoryView: View {
                             SessionRow(session: session)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    if session.report != nil {
-                                        selectedSession = session
-                                        showingReport = true
+                                    if let report = session.report {
+                                        selectedReport = report
                                     }
                                 }
                         }
@@ -43,10 +41,8 @@ struct HistoryView: View {
                     EditButton()
                 }
             }
-            .sheet(isPresented: $showingReport) {
-                if let session = selectedSession, let report = session.report {
-                    ReportView(report: report)
-                }
+            .sheet(item: $selectedReport) { report in
+                ReportView(report: report)
             }
         }
     }

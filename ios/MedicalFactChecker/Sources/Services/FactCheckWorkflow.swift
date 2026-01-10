@@ -501,13 +501,17 @@ final class FactCheckWorkflow {
         3. Discusses the evidence briefly with inline citations [Author, Year]
         4. Notes any important limitations
 
-        Use markdown format for the full report.
+        IMPORTANT: Use proper markdown with:
+        - ## Headers for sections
+        - **Bold** for emphasis
+        - Bullet points with -
+        - Blank lines between paragraphs (use \\n\\n in JSON)
 
         Respond in JSON format only:
         {
             "verdict": "<one of: Supported, Partially Supported, Not Supported, Insufficient Evidence, Conflicting Evidence>",
             "summary": "<2-3 sentence summary>",
-            "full_report": "<full markdown report with citations>"
+            "full_report": "<markdown report with proper line breaks using \\n\\n between sections>"
         }
         """
 
