@@ -11,6 +11,7 @@ import SwiftData
 struct FactCheckView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppSettings.self) private var settings
+    @FocusState private var isTextEditorFocused: Bool
 
     @State private var claimText = ""
     @State private var workflow: FactCheckWorkflow?
@@ -33,7 +34,11 @@ struct FactCheckView: View {
                         claimText: $claimText,
                         isRunning: workflow?.isRunning ?? false,
                         canSubmit: canSubmit,
-                        onSubmit: startFactCheck
+                        isTextEditorFocused: $isTextEditorFocused,
+                        onSubmit: {
+                            isTextEditorFocused = false
+                            startFactCheck()
+                        }
                     )
 
                     // Budget Display
@@ -58,7 +63,18 @@ struct FactCheckView: View {
                 }
                 .padding()
             }
+            .onTapGesture {
+                isTextEditorFocused = false
+            }
             .navigationTitle("Medical Fact Check")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isTextEditorFocused = false
+                    }
+                }
+            }
             .sheet(isPresented: $showingReport) {
                 if let report = completedReport {
                     ReportView(report: report)
@@ -128,6 +144,7 @@ struct ClaimInputSection: View {
     @Binding var claimText: String
     let isRunning: Bool
     let canSubmit: Bool
+    var isTextEditorFocused: FocusState<Bool>.Binding
     let onSubmit: () -> Void
 
     var body: some View {
@@ -142,6 +159,7 @@ struct ClaimInputSection: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.secondary.opacity(0.3))
                 )
+                .focused(isTextEditorFocused)
                 .disabled(isRunning)
 
             Text("Examples: \"Vitamin D reduces COVID-19 severity\" or \"Is aspirin effective for preventing heart attacks?\"")
