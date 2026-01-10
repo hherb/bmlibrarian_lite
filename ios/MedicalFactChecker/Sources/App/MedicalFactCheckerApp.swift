@@ -27,6 +27,15 @@ struct MedicalFactCheckerApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
+            // Print detailed error information
+            print("❌ ModelContainer creation failed:")
+            print("Error: \(error)")
+            print("Localized description: \(error.localizedDescription)")
+            if let nsError = error as NSError? {
+                print("Domain: \(nsError.domain)")
+                print("Code: \(nsError.code)")
+                print("UserInfo: \(nsError.userInfo)")
+            }
             fatalError("Could not create ModelContainer: \(error)")
         }
     }()
