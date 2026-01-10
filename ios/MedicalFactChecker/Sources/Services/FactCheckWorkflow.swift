@@ -63,7 +63,7 @@ final class FactCheckWorkflow {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
-            pubmedService = PubMedService(settings: settings)
+            pubmedService = PubMedService.create(from: settings)
         } catch {
             onError?(error)
             return
@@ -92,7 +92,7 @@ final class FactCheckWorkflow {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
-            pubmedService = PubMedService(settings: settings)
+            pubmedService = PubMedService.create(from: settings)
         } catch {
             onError?(error)
             return

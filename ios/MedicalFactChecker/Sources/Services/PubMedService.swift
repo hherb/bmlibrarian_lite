@@ -44,10 +44,10 @@ actor PubMedService {
     }
 
     /// Create service from current app settings.
-    convenience init(settings: AppSettings) {
+    static func create(from settings: AppSettings) -> PubMedService {
         let email = settings.ncbiEmail.isEmpty ? nil : settings.ncbiEmail
         let apiKey = settings.ncbiAPIKey.isEmpty ? nil : settings.ncbiAPIKey
-        self.init(email: email, apiKey: apiKey)
+        return PubMedService(email: email, apiKey: apiKey)
     }
 
     // MARK: - Search
