@@ -38,14 +38,14 @@ actor LLMService {
     }
 
     /// Create service from current app settings.
-    convenience init(settings: AppSettings) throws {
+    static func create(from settings: AppSettings) throws -> LLMService {
         guard let url = URL(string: settings.llmBaseURL) else {
             throw LLMError.invalidConfiguration("Invalid base URL")
         }
         guard !settings.llmAPIKey.isEmpty else {
             throw LLMError.invalidConfiguration("API key not set")
         }
-        self.init(baseURL: url, apiKey: settings.llmAPIKey, model: settings.llmModel)
+        return LLMService(baseURL: url, apiKey: settings.llmAPIKey, model: settings.llmModel)
     }
 
     // MARK: - Configuration Updates

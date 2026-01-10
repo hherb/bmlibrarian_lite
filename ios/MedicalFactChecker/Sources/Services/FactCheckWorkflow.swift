@@ -62,7 +62,7 @@ final class FactCheckWorkflow {
     func startFactCheck(claim: String) async {
         // Initialize services
         do {
-            llmService = try LLMService(settings: settings)
+            llmService = try LLMService.create(from: settings)
             pubmedService = PubMedService(settings: settings)
         } catch {
             onError?(error)
@@ -91,7 +91,7 @@ final class FactCheckWorkflow {
     func resumeSession(_ session: FactCheckSession) async {
         // Initialize services
         do {
-            llmService = try LLMService(settings: settings)
+            llmService = try LLMService.create(from: settings)
             pubmedService = PubMedService(settings: settings)
         } catch {
             onError?(error)
