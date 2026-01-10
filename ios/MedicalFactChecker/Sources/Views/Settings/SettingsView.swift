@@ -72,6 +72,25 @@ struct SettingsView: View {
                     Text("Control how many documents to fetch per batch and the minimum relevance threshold.")
                 }
 
+                // Scoring Settings
+                Section {
+                    Toggle("Enable Embedding Scoring", isOn: $settings.embeddingScoringEnabled)
+
+                    if settings.embeddingScoringEnabled {
+                        HStack {
+                            Image(systemName: EmbeddingService.isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(EmbeddingService.isAvailable ? .green : .red)
+                            Text(EmbeddingService.isAvailable ? "Embeddings available" : "Embeddings unavailable")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Scoring Methods")
+                } footer: {
+                    Text("When enabled, documents are scored using both LLM and on-device semantic similarity. This allows comparing the two methods without API cost for embedding scores.")
+                }
+
                 // Budget Settings
                 Section {
                     HStack {

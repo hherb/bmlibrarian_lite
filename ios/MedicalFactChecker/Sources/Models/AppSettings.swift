@@ -96,6 +96,13 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(minScoreThreshold, forKey: Keys.minScoreThreshold) }
     }
 
+    // MARK: - Embedding Scoring
+
+    /// Enable semantic similarity scoring using NLEmbedding (alongside LLM scoring).
+    var embeddingScoringEnabled: Bool {
+        didSet { UserDefaults.standard.set(embeddingScoringEnabled, forKey: Keys.embeddingScoringEnabled) }
+    }
+
     // MARK: - Budget Settings
 
     /// Maximum cost (USD) per fact-check run.
@@ -123,6 +130,7 @@ final class AppSettings {
         self.batchSize = defaults.object(forKey: Keys.batchSize) as? Int ?? 20
         self.minRelevantDocuments = defaults.object(forKey: Keys.minRelevantDocuments) as? Int ?? 5
         self.minScoreThreshold = defaults.object(forKey: Keys.minScoreThreshold) as? Int ?? 3
+        self.embeddingScoringEnabled = defaults.bool(forKey: Keys.embeddingScoringEnabled)
 
         self.maxRunBudgetUSD = defaults.object(forKey: Keys.maxRunBudgetUSD) as? Double ?? 1.0
         self.monthlyBudgetUSD = defaults.object(forKey: Keys.monthlyBudgetUSD) as? Double ?? 10.0
@@ -139,6 +147,7 @@ final class AppSettings {
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
+        static let embeddingScoringEnabled = "embedding_scoring_enabled"
         static let maxRunBudgetUSD = "max_run_budget_usd"
         static let monthlyBudgetUSD = "monthly_budget_usd"
     }
@@ -167,6 +176,7 @@ final class AppSettings {
         batchSize = 20
         minRelevantDocuments = 5
         minScoreThreshold = 3
+        embeddingScoringEnabled = false
         maxRunBudgetUSD = 1.0
         monthlyBudgetUSD = 10.0
     }
