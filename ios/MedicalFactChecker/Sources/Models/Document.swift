@@ -53,6 +53,9 @@ final class Document {
     ///
     /// Mapping thresholds tuned for typical sentence embedding similarity:
     /// - < 0.3: Score 1, 0.3-0.45: Score 2, 0.45-0.55: Score 3, 0.55-0.7: Score 4, >= 0.7: Score 5
+    ///
+    /// Note: This logic mirrors `EmbeddingService.normalizeToRelevanceScale()`.
+    /// Duplicated here to avoid service dependency in the model layer.
     var embeddingScoreNormalized: Int? {
         guard let score = embeddingScore else { return nil }
         switch score {

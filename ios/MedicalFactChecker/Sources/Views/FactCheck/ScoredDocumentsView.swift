@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 
 /// Section displaying scored documents with both LLM and embedding scores.
 ///
@@ -58,7 +57,10 @@ struct ScoredDocumentsView: View {
     }
 }
 
-/// Row displaying a single document with its scores.
+/// Expandable row displaying a single document with its LLM and embedding scores.
+///
+/// Shows title, reference, and score badges in collapsed state.
+/// Expands to show abstract, LLM reasoning, score comparison, and metadata.
 struct DocumentScoreRow: View {
     let document: Document
     let showEmbeddingScore: Bool
@@ -168,31 +170,14 @@ struct DocumentScoreRow: View {
     }
 
     private func scoreComparisonView(llmScore: Int, embScore: Int) -> some View {
-        let difference = abs(llmScore - embScore)
-        let agreement: String
-        let color: Color
-
-        switch difference {
-        case 0:
-            agreement = "Perfect agreement"
-            color = .green
-        case 1:
-            agreement = "Close agreement"
-            color = .blue
-        case 2:
-            agreement = "Moderate disagreement"
-            color = .orange
-        default:
-            agreement = "Strong disagreement"
-            color = .red
-        }
+        let result = ScoreAgreement.compute(llmScore: llmScore, embScore: embScore)
 
         return HStack {
-            Image(systemName: difference <= 1 ? "checkmark.circle" : "exclamationmark.triangle")
-                .foregroundColor(color)
-            Text(agreement)
+            Image(systemName: result.icon)
+                .foregroundColor(result.color)
+            Text(result.label)
                 .font(.caption)
-                .foregroundColor(color)
+                .foregroundColor(result.color)
 
             Spacer()
 
@@ -203,7 +188,7 @@ struct DocumentScoreRow: View {
             }
         }
         .padding(8)
-        .background(color.opacity(0.1))
+        .background(result.color.opacity(0.1))
         .cornerRadius(6)
     }
 
@@ -236,10 +221,18 @@ struct DocumentScoreRow: View {
     }
 }
 
-/// Badge displaying a score value.
+/// Compact badge displaying a numeric score with a label.
+///
+/// Used to show LLM and embedding scores side-by-side for comparison.
+/// Displays a dash when score is nil, indicating not yet scored.
 struct ScoreBadge: View {
+    /// The score to display (1-5), or nil if not scored.
     let score: Int?
+
+    /// Short label displayed below the score (e.g., "LLM", "Emb").
     let label: String
+
+    /// Background color for the badge.
     let color: Color
 
     var body: some View {
@@ -262,6 +255,40 @@ struct ScoreBadge: View {
         .frame(width: 36, height: 40)
         .background(score != nil ? color : Color.gray)
         .cornerRadius(6)
+    }
+}
+
+// MARK: - Score Agreement Helper
+
+/// Pure function container for computing score agreement between LLM and embedding scores.
+enum ScoreAgreement {
+    /// Result of a score agreement computation.
+    struct Result {
+        let label: String
+        let color: Color
+        let icon: String
+        let difference: Int
+    }
+
+    /// Compute the agreement level between LLM and embedding scores.
+    ///
+    /// - Parameters:
+    ///   - llmScore: LLM relevance score (1-5).
+    ///   - embScore: Normalized embedding score (1-5).
+    /// - Returns: Agreement result with label, color, icon, and raw difference.
+    static func compute(llmScore: Int, embScore: Int) -> Result {
+        let difference = abs(llmScore - embScore)
+
+        switch difference {
+        case 0:
+            return Result(label: "Perfect agreement", color: .green, icon: "checkmark.circle", difference: difference)
+        case 1:
+            return Result(label: "Close agreement", color: .blue, icon: "checkmark.circle", difference: difference)
+        case 2:
+            return Result(label: "Moderate disagreement", color: .orange, icon: "exclamationmark.triangle", difference: difference)
+        default:
+            return Result(label: "Strong disagreement", color: .red, icon: "exclamationmark.triangle", difference: difference)
+        }
     }
 }
 
