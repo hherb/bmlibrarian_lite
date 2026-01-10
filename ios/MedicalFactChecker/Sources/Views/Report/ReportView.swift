@@ -69,7 +69,10 @@ struct ReportView: View {
                         Text("Detailed Report")
                             .font(.headline)
 
-                        MarkdownText(report.fullReport)
+                        MarkdownReportView(
+                            report.fullReport,
+                            documents: report.session?.documents ?? []
+                        )
                     }
 
                     // Reviewed Documents Section
@@ -352,29 +355,364 @@ struct ScoreBadge: View {
     }
 }
 
-/// Markdown text renderer with proper line break handling.
-struct MarkdownText: View {
-    let content: String
+/// A parsed reference from the markdown text.
+struct ParsedReference: Identifiable {
+    let id = UUID()
+    let text: String  // e.g., "Smith et al., 2021"
+    let range: Range<String.Index>
+}
 
-    init(_ content: String) {
+/// Markdown text renderer with clickable references.
+///
+/// Parses markdown and detects reference patterns like [Author, Year] or [Author et al., Year],
+/// making them tappable to show document details.
+struct MarkdownReportView: View {
+    let content: String
+    let documents: [Document]
+
+    @State private var selectedDocument: Document?
+    @State private var showingDocumentDetail = false
+
+    init(_ content: String, documents: [Document] = []) {
         self.content = content
+        self.documents = documents
     }
 
     var body: some View {
-        let normalizedContent = normalizeLineBreaks(content)
+        VStack(alignment: .leading, spacing: 0) {
+            let blocks = parseMarkdownBlocks(content)
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                renderBlock(block)
+            }
+        }
+        .sheet(isPresented: $showingDocumentDetail) {
+            if let doc = selectedDocument {
+                DocumentDetailSheet(document: doc)
+            }
+        }
+    }
 
+    // MARK: - Block Parsing
+
+    private enum MarkdownBlock {
+        case heading(level: Int, text: String)
+        case paragraph(text: String)
+        case listItem(text: String, ordered: Bool, number: Int?)
+        case empty
+    }
+
+    private func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
+        let normalized = normalizeLineBreaks(text)
+        let lines = normalized.components(separatedBy: "\n")
+        var blocks: [MarkdownBlock] = []
+        var currentParagraph: [String] = []
+        var listNumber = 0
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.isEmpty {
+                // Flush current paragraph
+                if !currentParagraph.isEmpty {
+                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                    currentParagraph = []
+                }
+                listNumber = 0
+                continue
+            }
+
+            // Check for headers
+            if let headingMatch = parseHeading(trimmed) {
+                if !currentParagraph.isEmpty {
+                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                    currentParagraph = []
+                }
+                blocks.append(headingMatch)
+                listNumber = 0
+                continue
+            }
+
+            // Check for list items
+            if let listMatch = parseListItem(trimmed, currentNumber: &listNumber) {
+                if !currentParagraph.isEmpty {
+                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                    currentParagraph = []
+                }
+                blocks.append(listMatch)
+                continue
+            }
+
+            // Regular text - accumulate into paragraph
+            currentParagraph.append(trimmed)
+        }
+
+        // Flush remaining paragraph
+        if !currentParagraph.isEmpty {
+            blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+        }
+
+        return blocks
+    }
+
+    private func parseHeading(_ line: String) -> MarkdownBlock? {
+        if line.hasPrefix("### ") {
+            return .heading(level: 3, text: String(line.dropFirst(4)))
+        } else if line.hasPrefix("## ") {
+            return .heading(level: 2, text: String(line.dropFirst(3)))
+        } else if line.hasPrefix("# ") {
+            return .heading(level: 1, text: String(line.dropFirst(2)))
+        }
+        return nil
+    }
+
+    private func parseListItem(_ line: String, currentNumber: inout Int) -> MarkdownBlock? {
+        // Unordered list: - item or * item
+        if line.hasPrefix("- ") {
+            currentNumber = 0
+            return .listItem(text: String(line.dropFirst(2)), ordered: false, number: nil)
+        }
+        if line.hasPrefix("* ") {
+            currentNumber = 0
+            return .listItem(text: String(line.dropFirst(2)), ordered: false, number: nil)
+        }
+
+        // Ordered list: 1. item
+        if let match = parseOrderedListItem(line) {
+            currentNumber += 1
+            return .listItem(text: match, ordered: true, number: currentNumber)
+        }
+
+        return nil
+    }
+
+    /// Parse ordered list item like "1. text"
+    private func parseOrderedListItem(_ line: String) -> String? {
+        let pattern = "^\\d+\\.\\s+(.+)$"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                  in: line,
+                  range: NSRange(line.startIndex..., in: line)
+              ),
+              let textRange = Range(match.range(at: 1), in: line) else {
+            return nil
+        }
+        return String(line[textRange])
+    }
+
+    // MARK: - Block Rendering
+
+    @ViewBuilder
+    private func renderBlock(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            renderHeading(level: level, text: text)
+        case .paragraph(let text):
+            renderParagraph(text)
+        case .listItem(let text, let ordered, let number):
+            renderListItem(text: text, ordered: ordered, number: number)
+        case .empty:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func renderHeading(level: Int, text: String) -> some View {
+        let font: Font = switch level {
+        case 1: .title.bold()
+        case 2: .title2.bold()
+        default: .title3.bold()
+        }
+
+        Text(text)
+            .font(font)
+            .padding(.top, level == 1 ? 16 : 12)
+            .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private func renderParagraph(_ text: String) -> some View {
+        renderRichText(text)
+            .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func renderListItem(text: String, ordered: Bool, number: Int?) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if ordered, let num = number {
+                Text("\(num).")
+                    .font(.body)
+                    .fontWeight(.semibold)
+                    .frame(width: 24, alignment: .trailing)
+            } else {
+                Text("•")
+                    .font(.body)
+                    .fontWeight(.bold)
+                    .frame(width: 24, alignment: .trailing)
+            }
+            renderRichText(text)
+        }
+        .padding(.vertical, 2)
+        .padding(.leading, 8)
+    }
+
+    // MARK: - Rich Text with References
+
+    @ViewBuilder
+    private func renderRichText(_ text: String) -> some View {
+        let attributed = parseInlineFormatting(text)
+        Text(attributed)
+            .font(.body)
+            .environment(\.openURL, OpenURLAction { url in
+                handleReferenceTap(url)
+                return .handled
+            })
+    }
+
+    /// Parse inline formatting (bold, italic) and references into AttributedString.
+    ///
+    /// Supports two reference formats:
+    /// 1. New format with embedded ID: [Author, Year](doc:pmid-12345678)
+    /// 2. Legacy format without ID: [Author, Year]
+    private func parseInlineFormatting(_ text: String) -> AttributedString {
+        var result = AttributedString()
+
+        // Pattern for references with embedded document ID: [Author, Year](doc:pmid-12345678)
+        // Also matches legacy format: [Author, Year] (without the doc: link)
+        // Group 1: display text (e.g., "Smith et al., 2021")
+        // Group 2: optional document ID (e.g., "pmid-12345678")
+        let referencePattern = "\\[([^\\]]+?,\\s*\\d{4}[a-z]?)\\](?:\\(doc:([^)]+)\\))?"
+        guard let regex = try? NSRegularExpression(pattern: referencePattern) else {
+            return parseBasicFormatting(text)
+        }
+
+        var currentIndex = text.startIndex
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: nsRange)
+
+        for match in matches {
+            guard let fullRange = Range(match.range, in: text),
+                  let displayRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+
+            // Add text before the reference
+            if fullRange.lowerBound > currentIndex {
+                let beforeText = String(text[currentIndex..<fullRange.lowerBound])
+                result.append(parseBasicFormatting(beforeText))
+            }
+
+            // Extract display text and optional document ID
+            let displayText = String(text[displayRange])
+            let documentId: String?
+            if match.range(at: 2).location != NSNotFound,
+               let idRange = Range(match.range(at: 2), in: text) {
+                documentId = String(text[idRange])
+            } else {
+                documentId = nil
+            }
+
+            // Add the reference as a tappable link
+            var refAttr = AttributedString("[\(displayText)]")
+            refAttr.foregroundColor = Color.accentColor
+            refAttr.underlineStyle = Text.LineStyle.single
+
+            // Use document ID if available, otherwise fall back to display text for lookup
+            let linkValue: String
+            if let docId = documentId {
+                linkValue = "id:\(docId)"
+            } else {
+                let encoded = displayText.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed) ?? displayText
+                linkValue = "ref:\(encoded)"
+            }
+
+            if let url = URL(string: "docref://\(linkValue)") {
+                refAttr.link = url
+            }
+            result.append(refAttr)
+
+            currentIndex = fullRange.upperBound
+        }
+
+        // Add remaining text
+        if currentIndex < text.endIndex {
+            let remainingText = String(text[currentIndex...])
+            result.append(parseBasicFormatting(remainingText))
+        }
+
+        return result
+    }
+
+    /// Parse basic inline formatting (bold, italic) without references.
+    private func parseBasicFormatting(_ text: String) -> AttributedString {
+        // Try to parse as markdown for bold/italic
         if let attributed = try? AttributedString(
-            markdown: normalizedContent,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
-            Text(attributed)
-                .font(.body)
-        } else {
-            // Fallback: render as plain text with line breaks
-            Text(normalizedContent)
-                .font(.body)
+            return attributed
+        }
+        return AttributedString(text)
+    }
+
+    private func handleReferenceTap(_ url: URL) {
+        guard url.scheme == "docref",
+              let host = url.host else {
+            return
+        }
+
+        // Parse the link value: either "id:pmid-12345678" or "ref:Author%20et%20al.%2C%202021"
+        if host.hasPrefix("id:") {
+            // Direct ID lookup
+            let documentId = String(host.dropFirst(3))
+            if let doc = findDocumentById(documentId) {
+                selectedDocument = doc
+                showingDocumentDetail = true
+            }
+        } else if host.hasPrefix("ref:") {
+            // Legacy reference text lookup
+            let refText = String(host.dropFirst(4)).removingPercentEncoding ?? ""
+            if let doc = findDocumentByReference(refText) {
+                selectedDocument = doc
+                showingDocumentDetail = true
+            }
+        }
+    }
+
+    /// Find a document by its unique ID.
+    private func findDocumentById(_ documentId: String) -> Document? {
+        return documents.first { $0.id == documentId }
+    }
+
+    /// Find a document by reference text (legacy fallback).
+    ///
+    /// Used when document ID is not embedded in the reference.
+    private func findDocumentByReference(_ reference: String) -> Document? {
+        // Parse reference: "Smith et al., 2021" or "Smith, 2021"
+        let parts = reference.components(separatedBy: ",")
+        guard parts.count >= 2 else { return nil }
+
+        let authorPart = parts[0].trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: " et al.", with: "")
+            .lowercased()
+        let yearPart = parts.last?.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: .letters) // Remove any suffix like "a", "b"
+
+        guard let yearString = yearPart, let year = Int(yearString) else {
+            return nil
+        }
+
+        // Find document with matching author and year
+        return documents.first { doc in
+            guard doc.year == year else { return false }
+
+            // Check if any author's last name matches
+            for author in doc.authors {
+                let lastName = author.components(separatedBy: " ").first?.lowercased() ?? ""
+                if lastName == authorPart || author.lowercased().contains(authorPart) {
+                    return true
+                }
+            }
+            return false
         }
     }
 
@@ -383,13 +721,148 @@ struct MarkdownText: View {
         var result = text
         // Convert escaped newlines from JSON to actual newlines
         result = result.replacingOccurrences(of: "\\n", with: "\n")
-        // Ensure headers have space after
-        result = result.replacingOccurrences(of: "##", with: "\n\n##")
         // Clean up multiple newlines
         while result.contains("\n\n\n") {
             result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
         }
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Sheet showing document details when a reference is tapped.
+struct DocumentDetailSheet: View {
+    let document: Document
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Title
+                    Text(document.title)
+                        .font(.headline)
+
+                    // Authors
+                    Text(document.formattedAuthors)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    // Journal and Year
+                    if let journal = document.journal {
+                        HStack {
+                            Text(journal)
+                                .italic()
+                            if let year = document.year {
+                                Text("(\(year))")
+                            }
+                        }
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    }
+
+                    Divider()
+
+                    // Relevance Score
+                    if let score = document.relevanceScore {
+                        HStack {
+                            Text("Relevance Score:")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            ScoreBadge(score: score)
+                        }
+
+                        if let explanation = document.scoreExplanation {
+                            Text(explanation)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        }
+
+                        Divider()
+                    }
+
+                    // Abstract
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Abstract")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        Text(document.abstract)
+                            .font(.body)
+                    }
+
+                    // Citations from this document
+                    if !document.citations.isEmpty {
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Key Passages")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            ForEach(document.citations, id: \.id) { citation in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("\"\(citation.passage)\"")
+                                        .font(.body)
+                                        .italic()
+
+                                    if let context = citation.context {
+                                        Text(context)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.accentColor.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
+
+                    // PubMed Link
+                    Divider()
+
+                    Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
+                        HStack {
+                            Image(systemName: "link")
+                            Text("View on PubMed")
+                        }
+                        .font(.subheadline)
+                    }
+
+                    if let doi = document.doi {
+                        Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                            HStack {
+                                Image(systemName: "doc.text")
+                                Text("View via DOI")
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Reference Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+/// Legacy markdown text renderer for backwards compatibility.
+struct MarkdownText: View {
+    let content: String
+
+    init(_ content: String) {
+        self.content = content
+    }
+
+    var body: some View {
+        MarkdownReportView(content, documents: [])
     }
 }
 
@@ -420,4 +893,29 @@ struct MarkdownText: View {
     )
 
     return ReportView(report: report)
+}
+
+#Preview("Markdown with clickable refs") {
+    MarkdownReportView(
+        """
+        ## Clinical Evidence
+
+        Evidence suggests that perindopril provides cardiovascular protection [Taddei, 2016](doc:pmid-27354252).
+
+        ### Dose-Dependent Effects
+
+        The effectiveness of ACE inhibitors is dose dependent [Charpiot et al., 1993](doc:pmid-8280156), with recommendations that full-dose therapy leads to improved outcomes.
+
+        ### Experimental Evidence
+
+        1. Both perindopril and aerobic training reduced arterial stiffness [Miotto et al., 2023](doc:pmid-36889392)
+        2. Animal models support these findings
+
+        **Key findings:**
+        - Improved vascular compliance
+        - Reduced target organ damage
+        """,
+        documents: []
+    )
+    .padding()
 }

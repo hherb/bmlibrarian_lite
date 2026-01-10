@@ -498,8 +498,14 @@ final class FactCheckWorkflow {
         Write an evidence report that:
         1. States a verdict: Supported, Partially Supported, Not Supported, Insufficient Evidence, or Conflicting Evidence
         2. Provides a 2-3 sentence summary of the key findings
-        3. Discusses the evidence briefly with inline citations [Author, Year]
+        3. Discusses the evidence briefly with inline citations
         4. Notes any important limitations
+
+        CRITICAL - Citation format:
+        Use this EXACT format for all inline citations: [Author, Year](doc:ID)
+        Example: [Smith et al., 2021](doc:pmid-12345678)
+        The ID must be copied EXACTLY from the "ID:" field provided for each citation above.
+        Do NOT invent or modify IDs - use only the IDs provided.
 
         IMPORTANT: Use proper markdown with:
         - ## Headers for sections
@@ -616,7 +622,8 @@ final class FactCheckWorkflow {
         for (index, citation) in citations.enumerated() {
             guard let doc = citation.document else { continue }
             result += """
-            [\(index + 1)] \(doc.formattedAuthors) (\(doc.year ?? 0))
+            [\(index + 1)] ID: \(doc.id)
+            Authors: \(doc.formattedAuthors) (\(doc.year ?? 0))
             Title: \(doc.title)
             Passage: "\(citation.passage)"
 
