@@ -1,0 +1,149 @@
+//
+//  FactCheckSession.swift
+//  MedicalFactChecker
+//
+//  Main session model tracking a fact-check workflow.
+//
+
+import Foundation
+import SwiftData
+
+/// A fact-checking session for a single medical claim.
+///
+/// Tracks the entire workflow from claim input through report generation,
+/// including all fetched documents, scores, citations, and cost tracking.
+@Model
+final class FactCheckSession {
+    // MARK: - Identification
+
+    @Attribute(.unique) var id: UUID
+    var claim: String
+    var pubmedQuery: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    // MARK: - Workflow State
+
+    var currentStep: WorkflowStep
+    var errorMessage: String?
+    var stopReason: StopReason?
+
+    // MARK: - Search State (for batch pagination)
+
+    /// Total results available in PubMed for this query.
+    var totalPubMedResults: Int
+
+    /// Current offset for next batch fetch.
+    var currentSearchOffset: Int
+
+    /// Number of batches fetched so far.
+    var batchesFetched: Int
+
+    // MARK: - Progress Tracking
+
+    var documentsFound: Int
+    var documentsScored: Int
+    var relevantDocumentsFound: Int
+    var citationsExtracted: Int
+
+    // MARK: - Cost Tracking
+
+    /// Total input tokens used in this session.
+    var totalInputTokens: Int
+
+    /// Total output tokens used in this session.
+    var totalOutputTokens: Int
+
+    /// Estimated cost in USD for this session.
+    var estimatedCostUSD: Double
+
+    // MARK: - Relationships
+
+    @Relationship(deleteRule: .cascade, inverse: \Document.session)
+    var documents: [Document]
+
+    @Relationship(deleteRule: .cascade, inverse: \EvidenceReport.session)
+    var report: EvidenceReport?
+
+    // MARK: - Initialization
+
+    init(claim: String) {
+        self.id = UUID()
+        self.claim = claim
+        self.createdAt = Date()
+        self.updatedAt = Date()
+        self.currentStep = .idle
+        self.documents = []
+        self.totalPubMedResults = 0
+        self.currentSearchOffset = 0
+        self.batchesFetched = 0
+        self.documentsFound = 0
+        self.documentsScored = 0
+        self.relevantDocumentsFound = 0
+        self.citationsExtracted = 0
+        self.totalInputTokens = 0
+        self.totalOutputTokens = 0
+        self.estimatedCostUSD = 0.0
+    }
+
+    // MARK: - Computed Properties
+
+    /// Check if more documents can be fetched from PubMed.
+    var canFetchMoreDocuments: Bool {
+        currentSearchOffset < totalPubMedResults
+    }
+
+    /// Documents that have been scored with relevance >= threshold.
+    var relevantDocuments: [Document] {
+        documents.filter { $0.isRelevant }
+    }
+
+    /// Documents that haven't been scored yet.
+    var unscoredDocuments: [Document] {
+        documents.filter { $0.relevanceScore == nil }
+    }
+
+    /// Progress percentage (0-100) for the current workflow.
+    var progressPercent: Double {
+        guard documentsFound > 0 else { return 0 }
+        let scoringProgress = Double(documentsScored) / Double(documentsFound)
+        let citationProgress = relevantDocumentsFound > 0
+            ? Double(citationsExtracted) / Double(relevantDocumentsFound)
+            : 0
+
+        switch currentStep {
+        case .idle:
+            return 0
+        case .convertingQuery:
+            return 5
+        case .searchingPubMed:
+            return 10
+        case .scoringDocuments:
+            return 10 + (scoringProgress * 50)
+        case .awaitingUserDecision:
+            return 60
+        case .extractingCitations:
+            return 60 + (citationProgress * 25)
+        case .generatingReport:
+            return 90
+        case .completed:
+            return 100
+        case .failed, .budgetExceeded:
+            return 0
+        }
+    }
+
+    // MARK: - Methods
+
+    /// Record token usage and update cost estimate.
+    func recordUsage(inputTokens: Int, outputTokens: Int, model: String) {
+        totalInputTokens += inputTokens
+        totalOutputTokens += outputTokens
+        estimatedCostUSD += CostCalculator.calculateCost(
+            model: model,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens
+        )
+        updatedAt = Date()
+    }
+}

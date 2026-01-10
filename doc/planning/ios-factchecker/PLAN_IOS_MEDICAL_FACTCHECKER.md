@@ -20,11 +20,13 @@ App Output: Evidence Report
 
 ### In Scope (v1.0)
 - Single medical statement/question input
-- PubMed search via E-utilities API
+- PubMed search via E-utilities API (sorted by relevance, then date descending)
+- **Batch pagination**: Configurable batch size (default 20), continue fetching if MIN_RELEVANT not met
 - Document relevance scoring (1-5 scale)
 - Citation passage extraction
 - Evidence synthesis report with verdict
 - OpenAI-compatible API (configurable endpoint, model, API key)
+- **Cost/token budget limits**: Per-run max and monthly total budget tracking
 - Offline persistence of past queries and reports
 - iPad and iPhone support
 
@@ -35,6 +37,35 @@ App Output: Evidence Report
 - Full-text PDF retrieval
 - Quality assessment tiers
 - User accounts / cloud sync
+
+---
+
+## Key User-Configurable Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `batchSize` | 20 | Documents to fetch per PubMed batch |
+| `minRelevantDocuments` | 5 | Minimum high-scoring docs before prompting for more |
+| `minScoreThreshold` | 3 | Score threshold for "relevant" (1-5 scale) |
+| `maxRunBudgetUSD` | 1.00 | Maximum cost per fact-check run |
+| `monthlyBudgetUSD` | 10.00 | Monthly spending limit |
+| `llmBaseURL` | https://api.openai.com/v1 | OpenAI-compatible endpoint |
+| `llmModel` | gpt-4o-mini | Model name |
+
+### Batch Pagination Flow
+
+```
+1. User enters claim
+2. Convert to PubMed query
+3. Fetch batch 1 (N documents, sorted by relevance+date)
+4. Score documents
+5. Count relevant docs (score >= threshold)
+6. IF relevant_count < MIN_RELEVANT AND more docs available:
+   → Prompt user: "Found X relevant documents. Fetch next N?"
+   → User accepts → fetch batch 2, repeat from step 4
+   → User declines → continue with current docs
+7. Extract citations from relevant docs
+8. Generate report
 
 ---
 
