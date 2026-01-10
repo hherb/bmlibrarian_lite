@@ -176,7 +176,7 @@ final class FactCheckWorkflow {
 
             // Check if we need more documents
             if session.currentStep == .scoringDocuments {
-                let relevant = session.relevantDocuments.count
+                let relevant = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
                 let needed = settings.minRelevantDocuments
                 let available = session.totalPubMedResults - session.currentSearchOffset
 
@@ -385,8 +385,10 @@ final class FactCheckWorkflow {
 
             recordUsage(usage, operationType: "scoring")
 
-            // Parse response
-            let (score, explanation) = parseScoreResponse(response)
+            // Parse response using ResponseParser
+            let parsed = ResponseParser.parseScoreResponse(response)
+            let score = parsed.score
+            let explanation = parsed.explanation
             document.relevanceScore = score
             document.scoreExplanation = explanation
             document.scoredAt = Date()
@@ -403,7 +405,9 @@ final class FactCheckWorkflow {
     private func extractCitations() async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let relevantDocs = session.relevantDocuments.filter { $0.citations.isEmpty }
+        let relevantDocs = session.documents.filter {
+            $0.meetsThreshold(settings.minScoreThreshold) && $0.citations.isEmpty
+        }
         let total = relevantDocs.count
 
         for (index, document) in relevantDocs.enumerated() {
@@ -440,8 +444,8 @@ final class FactCheckWorkflow {
 
             recordUsage(usage, operationType: "citation")
 
-            // Parse passages
-            let passages = parsePassagesResponse(response)
+            // Parse passages using ResponseParser
+            let passages = ResponseParser.parsePassagesResponse(response)
             for passage in passages {
                 let citation = Citation(passage: passage.text, context: passage.relevance)
                 citation.document = document
@@ -485,7 +489,7 @@ final class FactCheckWorkflow {
 
         Claim: \(session.claim)
 
-        Evidence from \(allCitations.count) citation(s) across \(session.relevantDocuments.count) document(s):
+        Evidence from \(allCitations.count) citation(s) across \(session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count) document(s):
 
         \(citationsText)
 
@@ -515,17 +519,18 @@ final class FactCheckWorkflow {
 
         recordUsage(usage, operationType: "report")
 
-        // Parse report
-        let (verdict, summary, fullReport) = parseReportResponse(response)
+        // Parse report using ResponseParser
+        let parsedReport = ResponseParser.parseReportResponse(response)
         let uniqueSources = Set(allCitations.compactMap { $0.document?.pmid }).count
 
         // Add references section
-        let references = formatReferences(session.relevantDocuments)
-        let completeReport = fullReport + "\n\n## References\n\n" + references
+        let relevantDocsForRefs = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }
+        let references = formatReferences(relevantDocsForRefs)
+        let completeReport = parsedReport.fullReport + "\n\n## References\n\n" + references
 
         let report = EvidenceReport(
-            verdict: verdict,
-            summary: summary,
+            verdict: parsedReport.verdict,
+            summary: parsedReport.summary,
             fullReport: completeReport,
             citationCount: allCitations.count,
             uniqueSourceCount: uniqueSources,
@@ -596,55 +601,6 @@ final class FactCheckWorkflow {
         } catch {
             monthlyUsedUSD = 0
         }
-    }
-
-    // MARK: - Response Parsing
-
-    private func parseScoreResponse(_ response: String) -> (Int, String) {
-        guard let data = response.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let score = json["score"] as? Int,
-              let explanation = json["explanation"] as? String else {
-            return (1, "Failed to parse score")
-        }
-        return (min(5, max(1, score)), explanation)
-    }
-
-    private func parsePassagesResponse(_ response: String) -> [(text: String, relevance: String)] {
-        guard let data = response.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let passages = json["passages"] as? [[String: String]] else {
-            return []
-        }
-
-        return passages.compactMap { dict in
-            guard let text = dict["text"], let relevance = dict["relevance"] else {
-                return nil
-            }
-            return (text, relevance)
-        }
-    }
-
-    private func parseReportResponse(_ response: String) -> (Verdict, String, String) {
-        guard let data = response.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let verdictStr = json["verdict"] as? String,
-              let summary = json["summary"] as? String,
-              let fullReport = json["full_report"] as? String else {
-            return (.insufficientEvidence, "Failed to generate report", "Error parsing LLM response")
-        }
-
-        let verdict = parseVerdict(verdictStr)
-        return (verdict, summary, fullReport)
-    }
-
-    private func parseVerdict(_ string: String) -> Verdict {
-        let normalized = string.lowercased()
-        if normalized.contains("partially") { return .partiallySupported }
-        if normalized.contains("supported") && !normalized.contains("not") { return .supported }
-        if normalized.contains("not supported") { return .notSupported }
-        if normalized.contains("conflicting") { return .conflicting }
-        return .insufficientEvidence
     }
 
     // MARK: - Formatting Helpers

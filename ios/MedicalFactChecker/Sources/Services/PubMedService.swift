@@ -54,13 +54,15 @@ actor PubMedService {
 
     /// Search PubMed with a query string.
     ///
-    /// Results are sorted by relevance, then by publication date (newest first).
+    /// Results are sorted by relevance. Within relevance tiers, newer articles
+    /// tend to rank higher due to PubMed's algorithm.
     ///
     /// - Parameters:
     ///   - query: PubMed search query string.
     ///   - maxResults: Maximum results to return in this batch.
     ///   - offset: Starting position in the result set (for pagination).
     /// - Returns: Search result with PMIDs and total count.
+    /// - Throws: `PubMedError.searchFailed` if the request fails.
     func search(
         query: String,
         maxResults: Int = 20,
@@ -75,8 +77,7 @@ actor PubMedService {
             URLQueryItem(name: "retmax", value: String(maxResults)),
             URLQueryItem(name: "retstart", value: String(offset)),
             URLQueryItem(name: "retmode", value: "json"),
-            URLQueryItem(name: "sort", value: "relevance"),  // Primary sort: relevance
-            URLQueryItem(name: "datetype", value: "pdat"),    // Secondary sort: publication date
+            URLQueryItem(name: "sort", value: "relevance"),
         ]
 
         addAuthParams(&components)
@@ -226,7 +227,10 @@ struct ESearchResult: Codable {
 // MARK: - XML Parser
 
 /// Parser for PubMed XML responses.
-class PubMedXMLParser: NSObject, XMLParserDelegate {
+///
+/// Extracts article metadata including title, abstract, authors, journal,
+/// publication date, DOI, PMC ID, and MeSH terms from PubMed efetch XML.
+final class PubMedXMLParser: NSObject, XMLParserDelegate {
     private let parser: XMLParser
     private let batchNumber: Int
     private let basePosition: Int
@@ -241,7 +245,14 @@ class PubMedXMLParser: NSObject, XMLParserDelegate {
     private var inAbstract = false
     private var inAuthor = false
     private var abstractLabel: String?
+    private var currentArticleIdType: String?
 
+    /// Initialize the parser with XML data.
+    ///
+    /// - Parameters:
+    ///   - data: Raw XML data from PubMed efetch.
+    ///   - batchNumber: Which batch this is (1-indexed).
+    ///   - basePosition: Starting position in overall results.
     init(data: Data, batchNumber: Int, basePosition: Int) {
         self.parser = XMLParser(data: data)
         self.batchNumber = batchNumber
@@ -250,6 +261,10 @@ class PubMedXMLParser: NSObject, XMLParserDelegate {
         parser.delegate = self
     }
 
+    /// Parse the XML and return article metadata.
+    ///
+    /// - Returns: Array of parsed article metadata.
+    /// - Throws: `PubMedError.xmlParseError` if parsing fails.
     func parse() throws -> [ArticleMetadata] {
         guard parser.parse() else {
             throw PubMedError.xmlParseError(parser.parserError?.localizedDescription ?? "Unknown error")
@@ -279,6 +294,11 @@ class PubMedXMLParser: NSObject, XMLParserDelegate {
 
         case "Author":
             inAuthor = true
+
+        case "ArticleId":
+            // Track the IdType attribute for DOI/PMC extraction
+            currentArticleIdType = attributeDict["IdType"]
+
         default:
             break
         }
@@ -349,8 +369,18 @@ class PubMedXMLParser: NSObject, XMLParserDelegate {
             }
 
         case "ArticleId":
-            // DOI and PMC ID are handled via attributes in start element
-            break
+            // Extract DOI and PMC ID based on IdType attribute
+            if let idType = currentArticleIdType {
+                switch idType.lowercased() {
+                case "doi":
+                    article.doi = text
+                case "pmc":
+                    article.pmcId = text
+                default:
+                    break
+                }
+            }
+            currentArticleIdType = nil
 
         case "DescriptorName":
             article.meshTerms.append(text)

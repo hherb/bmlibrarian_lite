@@ -164,53 +164,90 @@ actor LLMService {
 
 // MARK: - Supporting Types
 
-/// A chat message for the LLM API.
+/// A chat message for the OpenAI-compatible API.
+///
+/// Represents a single message in the conversation history.
 struct ChatMessage: Codable, Sendable {
+    /// Role of the message sender: "system", "user", or "assistant".
     let role: String
+
+    /// Content of the message.
     let content: String
 }
 
-/// Request body for chat completions.
+/// Request body for chat completions endpoint.
+///
+/// Conforms to the OpenAI chat completions API specification.
 struct ChatCompletionRequest: Codable {
+    /// Model identifier (e.g., "gpt-4o-mini").
     let model: String
+
+    /// Conversation messages in order.
     let messages: [ChatMessage]
+
+    /// Sampling temperature (0.0-2.0). Lower = more deterministic.
     let temperature: Double?
+
+    /// Maximum tokens to generate in the response.
     let maxTokens: Int?
+
+    /// Optional response format specification.
     let responseFormat: ResponseFormat?
 }
 
-/// Response format specification.
+/// Response format specification for structured output.
 struct ResponseFormat: Codable {
+    /// Format type: "text" or "json_object".
     let type: String
 }
 
-/// Response from chat completions API.
+/// Response from the chat completions API.
 struct ChatCompletionResponse: Codable {
+    /// List of completion choices (usually just one).
     let choices: [Choice]
+
+    /// Token usage statistics (may be nil for some providers).
     let usage: APIUsage?
 }
 
-/// A choice in the chat completion response.
+/// A single choice from the completion response.
 struct Choice: Codable {
+    /// The generated message.
     let message: ChatMessage
+
+    /// Reason the generation stopped: "stop", "length", etc.
     let finishReason: String?
 }
 
-/// Token usage from the API response.
+/// Token usage statistics from the API.
 struct APIUsage: Codable {
+    /// Tokens in the input prompt.
     let promptTokens: Int
+
+    /// Tokens in the generated completion.
     let completionTokens: Int
+
+    /// Total tokens used (prompt + completion).
     let totalTokens: Int
 }
 
-/// Processed usage record for tracking.
+/// Processed usage record for internal tracking.
+///
+/// Provides a simplified view of token usage with cost calculation.
 struct LLMUsage: Sendable {
+    /// Model used for this request.
     let model: String
+
+    /// Number of input tokens.
     let inputTokens: Int
+
+    /// Number of output tokens.
     let outputTokens: Int
 
+    /// Total tokens used.
     var totalTokens: Int { inputTokens + outputTokens }
 
+    /// Estimated cost in USD based on model pricing.
     var estimatedCostUSD: Double {
         CostCalculator.calculateCost(
             model: model,

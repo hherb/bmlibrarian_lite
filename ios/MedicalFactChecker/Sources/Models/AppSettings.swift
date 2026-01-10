@@ -10,8 +10,8 @@ import SwiftUI
 
 /// User-configurable settings for the app.
 ///
-/// Uses @AppStorage for automatic persistence to UserDefaults.
-/// Sensitive values (API key) stored in Keychain.
+/// Uses UserDefaults for persistence and Keychain for sensitive values.
+/// API keys are cached in memory to avoid repeated Keychain access.
 @Observable
 final class AppSettings {
     // MARK: - Singleton
@@ -30,10 +30,25 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(llmModel, forKey: Keys.llmModel) }
     }
 
+    /// Cached LLM API key (stored in Keychain, cached in memory).
+    private var _llmAPIKeyCache: String?
+
     /// API key (stored in Keychain, not UserDefaults).
+    ///
+    /// Cached in memory after first access to avoid Keychain latency.
     var llmAPIKey: String {
-        get { KeychainHelper.load(key: Keys.llmAPIKey) ?? "" }
-        set { KeychainHelper.save(key: Keys.llmAPIKey, value: newValue) }
+        get {
+            if let cached = _llmAPIKeyCache {
+                return cached
+            }
+            let loaded = KeychainHelper.load(key: Keys.llmAPIKey) ?? ""
+            _llmAPIKeyCache = loaded
+            return loaded
+        }
+        set {
+            _llmAPIKeyCache = newValue
+            KeychainHelper.save(key: Keys.llmAPIKey, value: newValue)
+        }
     }
 
     // MARK: - PubMed Configuration
@@ -43,10 +58,25 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(ncbiEmail, forKey: Keys.ncbiEmail) }
     }
 
+    /// Cached NCBI API key.
+    private var _ncbiAPIKeyCache: String?
+
     /// NCBI API key for higher rate limits (optional).
+    ///
+    /// Cached in memory after first access to avoid Keychain latency.
     var ncbiAPIKey: String {
-        get { KeychainHelper.load(key: Keys.ncbiAPIKey) ?? "" }
-        set { KeychainHelper.save(key: Keys.ncbiAPIKey, value: newValue) }
+        get {
+            if let cached = _ncbiAPIKeyCache {
+                return cached
+            }
+            let loaded = KeychainHelper.load(key: Keys.ncbiAPIKey) ?? ""
+            _ncbiAPIKeyCache = loaded
+            return loaded
+        }
+        set {
+            _ncbiAPIKeyCache = newValue
+            KeychainHelper.save(key: Keys.ncbiAPIKey, value: newValue)
+        }
     }
 
     // MARK: - Search Settings

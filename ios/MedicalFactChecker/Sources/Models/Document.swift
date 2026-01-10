@@ -102,10 +102,22 @@ final class Document {
         return "\(authorPart), \(yearPart)"
     }
 
-    /// Check if document meets relevance threshold (score >= 3).
+    /// Check if document meets relevance threshold.
+    ///
+    /// Uses hardcoded threshold of 3 for SwiftData compatibility.
+    /// The workflow uses `AppSettings.minScoreThreshold` for filtering.
     var isRelevant: Bool {
         guard let score = relevanceScore else { return false }
         return score >= 3
+    }
+
+    /// Check if document meets a specific score threshold.
+    ///
+    /// - Parameter threshold: Minimum score to consider relevant (1-5).
+    /// - Returns: True if scored and score >= threshold.
+    func meetsThreshold(_ threshold: Int) -> Bool {
+        guard let score = relevanceScore else { return false }
+        return score >= threshold
     }
 
     /// Check if document has been scored.
