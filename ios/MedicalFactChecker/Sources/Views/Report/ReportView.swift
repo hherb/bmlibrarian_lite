@@ -22,15 +22,30 @@ struct ReportView: View {
                         Spacer()
                     }
 
-                    // Claim (if available from session)
-                    if let claim = report.session?.claim {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Claim")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(claim)
-                                .font(.body)
-                                .italic()
+                    // Claim and Query (if available from session)
+                    if let session = report.session {
+                        VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Claim")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(session.claim)
+                                    .font(.body)
+                                    .italic()
+                            }
+
+                            if let query = session.pubmedQuery {
+                                Divider()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("PubMed Query")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(query)
+                                        .font(.caption)
+                                        .fontDesign(.monospaced)
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
                         }
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,6 +70,13 @@ struct ReportView: View {
                             .font(.headline)
 
                         MarkdownText(report.fullReport)
+                    }
+
+                    // Reviewed Documents Section
+                    if let session = report.session, !session.documents.isEmpty {
+                        ReviewedDocumentsSection(documents: session.documents.sorted {
+                            ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
+                        })
                     }
 
                     // Statistics
@@ -189,6 +211,144 @@ struct CostSection: View {
         .padding()
         .background(Color.secondary.opacity(0.1))
         .cornerRadius(10)
+    }
+}
+
+struct ReviewedDocumentsSection: View {
+    let documents: [Document]
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: { withAnimation { isExpanded.toggle() } }) {
+                HStack {
+                    Text("Reviewed Documents (\(documents.count))")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ForEach(documents, id: \.pmid) { document in
+                    DocumentCard(document: document)
+                }
+            }
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.1))
+        .cornerRadius(10)
+    }
+}
+
+struct DocumentCard: View {
+    let document: Document
+    @State private var showAbstract = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Header with score badge
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(document.title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+
+                    Text(document.formattedAuthors)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if let journal = document.journal, let year = document.year {
+                        Text("\(journal), \(year)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if let score = document.relevanceScore {
+                    ScoreBadge(score: score)
+                }
+            }
+
+            // Score explanation
+            if let explanation = document.scoreExplanation, !explanation.isEmpty {
+                Text(explanation)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .italic()
+                    .padding(.top, 2)
+            }
+
+            // Expandable abstract
+            Button(action: { withAnimation { showAbstract.toggle() } }) {
+                HStack {
+                    Text(showAbstract ? "Hide Abstract" : "Show Abstract")
+                        .font(.caption)
+                    Image(systemName: showAbstract ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                }
+                .foregroundColor(.accentColor)
+            }
+            .buttonStyle(.plain)
+
+            if showAbstract {
+                Text(document.abstract)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
+            }
+
+            // Citations from this document
+            if !document.citations.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Key Passages:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+
+                    ForEach(document.citations, id: \.id) { citation in
+                        Text("\"\(citation.passage)\"")
+                            .font(.caption)
+                            .italic()
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 8)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding()
+        .background(Color.white.opacity(0.5))
+        .cornerRadius(8)
+    }
+}
+
+struct ScoreBadge: View {
+    let score: Int
+
+    var body: some View {
+        Text("\(score)")
+            .font(.caption)
+            .fontWeight(.bold)
+            .foregroundColor(.white)
+            .frame(width: 28, height: 28)
+            .background(scoreColor)
+            .clipShape(Circle())
+    }
+
+    private var scoreColor: Color {
+        switch score {
+        case 5: return .green
+        case 4: return Color(red: 0.4, green: 0.7, blue: 0.3)
+        case 3: return .orange
+        case 2: return Color(red: 0.9, green: 0.5, blue: 0.2)
+        default: return .red
+        }
     }
 }
 

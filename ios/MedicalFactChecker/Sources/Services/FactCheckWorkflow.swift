@@ -246,18 +246,20 @@ final class FactCheckWorkflow {
         try checkBudget()
 
         let prompt = """
-        Convert this medical claim/question into a concise PubMed search query.
+        Convert this medical claim/question into a PubMed search query.
 
         Claim: \(session.claim)
 
         Instructions:
-        1. Identify 2-4 key medical concepts
-        2. Use MeSH terms where appropriate
-        3. Keep the query focused and under 200 characters
-        4. Include "hasabstract" filter
-        5. Focus on terms that will find relevant clinical evidence
+        1. Extract 2-3 key medical concepts (drug names, conditions, treatments)
+        2. Use simple keyword combinations with AND/OR operators
+        3. Be inclusive rather than restrictive - use synonyms and alternative spellings
+        4. Do NOT use overly specific MeSH qualifiers that limit results
+        5. Example format: (term1 OR synonym1) AND (term2 OR synonym2)
 
-        Output ONLY the PubMed query string, nothing else.
+        IMPORTANT: Generate a query that will find relevant articles. Avoid being too restrictive.
+
+        Output ONLY the PubMed query string, nothing else. No explanation.
         """
 
         let messages = [LLMService.userMessage(prompt)]
