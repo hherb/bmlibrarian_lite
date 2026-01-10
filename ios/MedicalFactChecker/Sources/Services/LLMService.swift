@@ -64,7 +64,7 @@ actor LLMService {
     ///   - messages: Array of chat messages.
     ///   - temperature: Sampling temperature (0.0-2.0).
     ///   - maxTokens: Maximum tokens in response.
-    ///   - jsonMode: Whether to request JSON output format.
+    ///   - jsonMode: Ignored - included for API compatibility. Request JSON in prompts instead.
     /// - Returns: Tuple of (response content, usage statistics).
     func chat(
         messages: [ChatMessage],
@@ -79,12 +79,14 @@ actor LLMService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // Note: jsonMode parameter is ignored - response_format is not universally supported
+        // (e.g., Anthropic API doesn't support it). Prompts should request JSON explicitly.
         let body = ChatCompletionRequest(
             model: model,
             messages: messages,
             temperature: temperature,
             maxTokens: maxTokens,
-            responseFormat: jsonMode ? ResponseFormat(type: "json_object") : nil
+            responseFormat: nil
         )
 
         let encoder = JSONEncoder()
