@@ -87,3 +87,22 @@ temp/
 # Lock files (keep uv.lock if using uv)
 # uv.lock
 .claude/settings.local.json
+
+# iOS/Xcode
+ios/**/.build/
+ios/**/.swiftpm/
+*.xcuserstate
+xcuserdata/
+*.xcworkspacedata
+*.xccheckout
+*.xcscmblueprint
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Research outputs (generated)
+concordance_output/
+research_report_*.md
