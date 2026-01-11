@@ -440,6 +440,39 @@ private struct ArticleBuilder {
     }
 }
 
+// MARK: - PubMed Filters
+
+/// Pre-defined PubMed search filters for common use cases.
+enum PubMedFilters {
+    /// Filter to exclude non-clinical publication types.
+    ///
+    /// Excludes news, editorials, letters, comments, errata, and other non-research content
+    /// that lacks substantive clinical evidence. This helps focus results on:
+    /// - Clinical trials
+    /// - Systematic reviews and meta-analyses
+    /// - Observational studies
+    /// - Case reports (minimal clinical evidence but sometimes useful)
+    ///
+    /// Publication types excluded:
+    /// - News, Newspaper Article
+    /// - Editorial, Comment, Letter
+    /// - Published Erratum, Retracted Publication
+    /// - Biography, Historical Article, Personal Narrative
+    /// - Directory, Guideline (non-research)
+    static let clinicalPublicationFilter = """
+        NOT (News[pt] OR "Newspaper Article"[pt] OR Editorial[pt] OR Letter[pt] \
+        OR Comment[pt] OR "Published Erratum"[pt] OR Biography[pt] \
+        OR "Historical Article"[pt] OR "Personal Narrative"[pt] \
+        OR Directory[pt] OR "Retracted Publication"[pt])
+        """
+
+    /// Filter for high-quality evidence only (RCTs, systematic reviews, meta-analyses).
+    static let highQualityEvidenceFilter = """
+        (Randomized Controlled Trial[pt] OR "Systematic Review"[pt] \
+        OR "Meta-Analysis"[pt] OR "Clinical Trial"[pt])
+        """
+}
+
 // MARK: - Errors
 
 enum PubMedError: LocalizedError {
