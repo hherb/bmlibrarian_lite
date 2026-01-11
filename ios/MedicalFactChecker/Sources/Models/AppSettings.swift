@@ -184,8 +184,14 @@ final class AppSettings {
     // MARK: - Validation
 
     /// Check if LLM is properly configured.
+    ///
+    /// Validates that required settings are present based on the selected provider.
+    /// Providers like Ollama don't require an API key.
     var isLLMConfigured: Bool {
-        !llmBaseURL.isEmpty && !llmModel.isEmpty && !llmAPIKey.isEmpty
+        let hasBaseURL = !llmBaseURL.isEmpty
+        let hasModel = !llmModel.isEmpty
+        let hasAPIKeyIfRequired = !selectedProvider.requiresAPIKey || !llmAPIKey.isEmpty
+        return hasBaseURL && hasModel && hasAPIKeyIfRequired
     }
 
     /// Check if settings are valid for running a fact-check.
