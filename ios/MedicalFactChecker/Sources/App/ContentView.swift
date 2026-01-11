@@ -20,6 +20,9 @@ struct ContentView: View {
     @State private var hasAcceptedDisclaimer = UserDefaults.standard.bool(forKey: "hasAcceptedDisclaimer")
     @State private var currentReport: EvidenceReport?
 
+    /// Tracks which tabs have been visited for lazy loading.
+    @State private var visitedTabs: Set<AppTab> = [.check]
+
     var body: some View {
         if hasAcceptedDisclaimer {
             mainTabView
@@ -33,6 +36,7 @@ struct ContentView: View {
             FactCheckView(
                 onReportGenerated: { report in
                     currentReport = report
+                    visitedTabs.insert(.report)
                     selectedTab = .report
                 }
             )
@@ -41,23 +45,32 @@ struct ContentView: View {
             }
             .tag(AppTab.check)
 
-            ReportTabView(report: currentReport)
-                .tabItem {
-                    Label("Report", systemImage: "doc.text")
-                }
-                .tag(AppTab.report)
+            LazyTabContent(tab: .report, visitedTabs: $visitedTabs) {
+                ReportTabView(report: currentReport)
+            }
+            .tabItem {
+                Label("Report", systemImage: "doc.text")
+            }
+            .tag(AppTab.report)
 
-            HistoryView()
-                .tabItem {
-                    Label("History", systemImage: "clock")
-                }
-                .tag(AppTab.history)
+            LazyTabContent(tab: .history, visitedTabs: $visitedTabs) {
+                HistoryView()
+            }
+            .tabItem {
+                Label("History", systemImage: "clock")
+            }
+            .tag(AppTab.history)
 
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
-                .tag(AppTab.settings)
+            LazyTabContent(tab: .settings, visitedTabs: $visitedTabs) {
+                SettingsView()
+            }
+            .tabItem {
+                Label("Settings", systemImage: "gear")
+            }
+            .tag(AppTab.settings)
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            visitedTabs.insert(newTab)
         }
     }
 
@@ -65,6 +78,27 @@ struct ContentView: View {
         UserDefaults.standard.set(true, forKey: "hasAcceptedDisclaimer")
         withAnimation {
             hasAcceptedDisclaimer = true
+        }
+    }
+}
+
+// MARK: - Lazy Tab Content
+
+/// Wrapper that defers rendering of tab content until the tab is first visited.
+///
+/// This prevents unnecessary initialization of views (like SettingsView calling
+/// `loadModels()`) before the user actually navigates to that tab.
+struct LazyTabContent<Content: View>: View {
+    let tab: AppTab
+    @Binding var visitedTabs: Set<AppTab>
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if visitedTabs.contains(tab) {
+            content()
+        } else {
+            // Placeholder shown briefly before tab is visited
+            Color.clear
         }
     }
 }
