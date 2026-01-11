@@ -29,13 +29,13 @@ struct MacFactCheckView: View {
         HSplitView {
             // Left column: Input and controls
             leftColumn
-                .frame(minWidth: 400, idealWidth: 500, maxWidth: 600)
+                .frame(minWidth: MacLayout.leftColumnMinWidth, idealWidth: MacLayout.leftColumnIdealWidth, maxWidth: MacLayout.leftColumnMaxWidth)
 
             // Right column: Documents and results
             rightColumn
-                .frame(minWidth: 400)
+                .frame(minWidth: MacLayout.rightColumnMinWidth)
         }
-        .frame(minHeight: 500)
+        .frame(minHeight: MacLayout.viewMinHeight)
         .alert("Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -47,7 +47,7 @@ struct MacFactCheckView: View {
 
     private var leftColumn: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: MacSpacing.xLarge) {
                 // Header
                 Text("Medical Fact Check")
                     .font(.largeTitle)
@@ -83,9 +83,9 @@ struct MacFactCheckView: View {
                     )
                 }
 
-                Spacer(minLength: 20)
+                Spacer(minLength: MacSpacing.xLarge)
             }
-            .padding(24)
+            .padding(MacSpacing.xxLarge)
         }
         .background(Color(NSColor.controlBackgroundColor))
     }
@@ -110,8 +110,8 @@ struct MacFactCheckView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.horizontal, MacSpacing.xLarge)
+            .padding(.vertical, MacSpacing.large)
             .background(Color(NSColor.controlBackgroundColor))
 
             Divider()
@@ -130,10 +130,10 @@ struct MacFactCheckView: View {
     }
 
     private var emptyDocumentsState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: MacSpacing.large) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
+                .font(.system(size: MacIconSize.emptyStateMedium))
+                .foregroundColor(.secondary.opacity(MacOpacity.half))
 
             Text("No Documents Yet")
                 .font(.title3)
@@ -143,7 +143,7 @@ struct MacFactCheckView: View {
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
+                .frame(maxWidth: MacLayout.emptyStateMaxWidth)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -187,12 +187,12 @@ struct MacFactCheckView: View {
 /// Warning banner displayed when LLM is not configured.
 struct MacConfigurationWarningView: View {
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: MacSpacing.standard) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.title2)
                 .foregroundColor(.orange)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text("LLM Not Configured")
                     .font(.headline)
                 Text("Open Settings to configure your LLM API before fact-checking.")
@@ -209,9 +209,9 @@ struct MacConfigurationWarningView: View {
             }
             .buttonStyle(.bordered)
         }
-        .padding(16)
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(10)
+        .padding(MacSpacing.large)
+        .background(Color.orange.opacity(MacOpacity.subtle))
+        .cornerRadius(MacCornerRadius.large)
     }
 }
 
@@ -229,19 +229,19 @@ struct MacClaimInputSection: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MacSpacing.standard) {
             Text("Enter a medical claim or question")
                 .font(.headline)
 
             TextEditor(text: $claimText)
                 .font(.body)
-                .frame(minHeight: 120, maxHeight: 200)
+                .frame(minHeight: MacLayout.textEditorMinHeight, maxHeight: MacLayout.textEditorMaxHeight)
                 .scrollContentBackground(.hidden)
-                .padding(12)
+                .padding(MacSpacing.standard)
                 .background(Color(NSColor.textBackgroundColor))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.3))
+                    RoundedRectangle(cornerRadius: MacCornerRadius.standard)
+                        .stroke(Color.secondary.opacity(MacOpacity.muted))
                 )
                 .disabled(isRunning)
 
@@ -251,17 +251,17 @@ struct MacClaimInputSection: View {
 
             HStack {
                 Button(action: onSubmit) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: MacSpacing.medium) {
                         if isRunning {
                             ProgressView()
-                                .scaleEffect(0.7)
+                                .scaleEffect(MacScale.progressViewMedium)
                                 .progressViewStyle(CircularProgressViewStyle())
                         } else {
                             Image(systemName: "magnifyingglass")
                         }
                         Text(isRunning ? "Checking..." : "Check Evidence")
                     }
-                    .frame(minWidth: 140)
+                    .frame(minWidth: MacLayout.submitButtonMinWidth)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -289,8 +289,8 @@ struct MacBudgetDisplayView: View {
     @State private var monthlyUsed: Double = 0
 
     var body: some View {
-        HStack(spacing: 24) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: MacSpacing.sectionSpacing) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text("Monthly Budget")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -299,11 +299,11 @@ struct MacBudgetDisplayView: View {
             }
 
             ProgressView(value: min(monthlyUsed / settings.monthlyBudgetUSD, 1.0))
-                .frame(width: 100)
+                .frame(width: MacLayout.budgetProgressWidth)
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: MacSpacing.xSmall) {
                 Text("Per-run limit")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -311,12 +311,12 @@ struct MacBudgetDisplayView: View {
                     .font(.headline)
             }
         }
-        .padding(16)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-        .cornerRadius(10)
+        .padding(MacSpacing.large)
+        .background(Color(NSColor.controlBackgroundColor).opacity(MacOpacity.half))
+        .cornerRadius(MacCornerRadius.large)
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.secondary.opacity(0.2))
+            RoundedRectangle(cornerRadius: MacCornerRadius.large)
+                .stroke(Color.secondary.opacity(MacOpacity.border))
         )
         .onAppear(perform: loadMonthlyUsage)
     }
@@ -341,7 +341,7 @@ struct MacProgressSection: View {
     let workflow: FactCheckWorkflow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: MacSpacing.large) {
             // Step indicators
             HStack(spacing: 0) {
                 ForEach(Array(mainSteps.enumerated()), id: \.element) { index, step in
@@ -366,7 +366,7 @@ struct MacProgressSection: View {
                 Text("\(Int(workflow.session?.progressPercent ?? 0))%")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .frame(width: 40, alignment: .trailing)
+                    .frame(width: MacLayout.percentageWidth, alignment: .trailing)
             }
 
             // Status message
@@ -381,16 +381,16 @@ struct MacProgressSection: View {
                     Text("Cost: \(CostCalculator.formatCost(session.estimatedCostUSD))")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(4)
+                        .padding(.horizontal, MacSpacing.medium)
+                        .padding(.vertical, MacSpacing.xSmall)
+                        .background(Color.secondary.opacity(MacOpacity.subtle))
+                        .cornerRadius(MacCornerRadius.small)
                 }
             }
         }
-        .padding(16)
-        .background(Color.accentColor.opacity(0.05))
-        .cornerRadius(10)
+        .padding(MacSpacing.large)
+        .background(Color.accentColor.opacity(MacOpacity.veryLight))
+        .cornerRadius(MacCornerRadius.large)
     }
 
     private var mainSteps: [WorkflowStep] {
@@ -417,15 +417,15 @@ struct MacStepIndicator: View {
     let currentStep: WorkflowStep
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: MacSpacing.small) {
             Circle()
                 .fill(color)
-                .frame(width: 16, height: 16)
+                .frame(width: MacIconSize.stepIndicatorSize, height: MacIconSize.stepIndicatorSize)
                 .overlay {
                     if step == currentStep {
                         Circle()
-                            .stroke(color.opacity(0.3), lineWidth: 3)
-                            .frame(width: 24, height: 24)
+                            .stroke(color.opacity(MacOpacity.muted), lineWidth: 3)
+                            .frame(width: MacIconSize.stepIndicatorRingSize, height: MacIconSize.stepIndicatorRingSize)
                     }
                 }
 
@@ -439,7 +439,7 @@ struct MacStepIndicator: View {
         let stepOrder = WorkflowStep.allCases
         guard let currentIndex = stepOrder.firstIndex(of: currentStep),
               let stepIndex = stepOrder.firstIndex(of: step) else {
-            return .gray.opacity(0.3)
+            return .gray.opacity(MacOpacity.muted)
         }
 
         if step == currentStep {
@@ -447,7 +447,7 @@ struct MacStepIndicator: View {
         } else if stepIndex < currentIndex {
             return .green
         } else {
-            return .gray.opacity(0.3)
+            return .gray.opacity(MacOpacity.muted)
         }
     }
 
@@ -470,10 +470,10 @@ struct MacStepConnector: View {
 
     var body: some View {
         Rectangle()
-            .fill(isPast ? Color.green : Color.gray.opacity(0.3))
-            .frame(height: 2)
-            .frame(maxWidth: 40)
-            .padding(.bottom, 20) // Align with circles
+            .fill(isPast ? Color.green : Color.gray.opacity(MacOpacity.muted))
+            .frame(height: MacIconSize.stepConnectorHeight)
+            .frame(maxWidth: MacIconSize.stepConnectorMaxWidth)
+            .padding(.bottom, MacIconSize.stepConnectorOffset) // Align with circles
     }
 }
 
@@ -489,8 +489,8 @@ struct MacUserDecisionSection: View {
     let onProceed: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 12) {
+        VStack(spacing: MacSpacing.large) {
+            HStack(spacing: MacSpacing.standard) {
                 Image(systemName: "questionmark.circle.fill")
                     .font(.title2)
                     .foregroundColor(.orange)
@@ -501,7 +501,7 @@ struct MacUserDecisionSection: View {
                 Spacer()
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: MacSpacing.standard) {
                 Button("Fetch More Documents") {
                     onContinue()
                 }
@@ -513,9 +513,9 @@ struct MacUserDecisionSection: View {
                 .buttonStyle(.bordered)
             }
         }
-        .padding(16)
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(10)
+        .padding(MacSpacing.large)
+        .background(Color.orange.opacity(MacOpacity.subtle))
+        .cornerRadius(MacCornerRadius.large)
     }
 }
 

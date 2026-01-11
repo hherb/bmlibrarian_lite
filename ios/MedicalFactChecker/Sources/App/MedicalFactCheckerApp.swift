@@ -65,8 +65,3 @@ struct MedicalFactCheckerApp: App {
     }
 }
 
-// MARK: - Notification for Reference Clicks
-
-extension Notification.Name {
-    static let documentReferenceClicked = Notification.Name("documentReferenceClicked")
-}

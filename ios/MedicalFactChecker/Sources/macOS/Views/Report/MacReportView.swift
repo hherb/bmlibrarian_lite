@@ -33,15 +33,15 @@ struct MacReportView: View {
         VStack(spacing: 0) {
             // Toolbar
             reportToolbar(report)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, MacSpacing.xLarge)
+                .padding(.vertical, MacSpacing.standard)
                 .background(Color(NSColor.controlBackgroundColor))
 
             Divider()
 
             // Report content
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: MacSpacing.sectionSpacing) {
                     // Verdict badge
                     HStack {
                         Spacer()
@@ -76,8 +76,8 @@ struct MacReportView: View {
                     // Footer
                     footerSection(report)
                 }
-                .frame(maxWidth: 900)
-                .padding(32)
+                .frame(maxWidth: MacLayout.maxContentWidth)
+                .padding(MacSpacing.section)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -92,10 +92,10 @@ struct MacReportView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: MacSpacing.xLarge) {
             Image(systemName: "doc.text")
-                .font(.system(size: 72))
-                .foregroundColor(.secondary.opacity(0.4))
+                .font(.system(size: MacIconSize.emptyStateLarge))
+                .foregroundColor(.secondary.opacity(MacOpacity.faded))
 
             Text("No Report Yet")
                 .font(.title)
@@ -111,7 +111,7 @@ struct MacReportView: View {
     // MARK: - Toolbar
 
     private func reportToolbar(_ report: EvidenceReport) -> some View {
-        HStack(spacing: 16) {
+        HStack(spacing: MacSpacing.large) {
             Text("Evidence Report")
                 .font(.title2)
                 .fontWeight(.bold)
@@ -142,7 +142,7 @@ struct MacReportView: View {
                     Label("Print...", systemImage: "printer")
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: MacSpacing.xSmall) {
                     Image(systemName: "square.and.arrow.up")
                     Text("Export")
                 }
@@ -164,8 +164,8 @@ struct MacReportView: View {
     // MARK: - Sections
 
     private func claimSection(_ session: FactCheckSession) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: MacSpacing.large) {
+            VStack(alignment: .leading, spacing: MacSpacing.small) {
                 Text("Claim")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -176,7 +176,7 @@ struct MacReportView: View {
             }
 
             if let query = session.pubmedQuery {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: MacSpacing.small) {
                     Text("PubMed Query")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -189,30 +189,30 @@ struct MacReportView: View {
                 }
             }
         }
-        .padding(20)
+        .padding(MacSpacing.xLarge)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
+        .cornerRadius(MacCornerRadius.xLarge)
     }
 
     private func summarySection(_ report: EvidenceReport) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
             Text("Summary")
                 .font(.title3)
                 .fontWeight(.semibold)
 
             Text(report.summary)
                 .font(.body)
-                .lineSpacing(4)
+                .lineSpacing(MacSpacing.xSmall)
         }
-        .padding(20)
+        .padding(MacSpacing.xLarge)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.08))
-        .cornerRadius(12)
+        .background(Color.accentColor.opacity(MacOpacity.light))
+        .cornerRadius(MacCornerRadius.xLarge)
     }
 
     private func detailedReportSection(_ report: EvidenceReport) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MacSpacing.standard) {
             Text("Detailed Analysis")
                 .font(.title3)
                 .fontWeight(.semibold)
@@ -234,26 +234,26 @@ struct MacReportView: View {
     }
 
     private func statisticsSection(_ report: EvidenceReport) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MacSpacing.standard) {
             Text("Statistics")
                 .font(.title3)
                 .fontWeight(.semibold)
 
-            HStack(spacing: 32) {
+            HStack(spacing: MacSpacing.statItemSpacing) {
                 MacStatItem(icon: "doc.text", value: "\(report.documentsReviewed)", label: "Documents Reviewed")
                 MacStatItem(icon: "checkmark.circle", value: "\(report.uniqueSourceCount)", label: "Relevant Sources")
                 MacStatItem(icon: "quote.bubble", value: "\(report.citationCount)", label: "Citations Extracted")
             }
         }
-        .padding(20)
+        .padding(MacSpacing.xLarge)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
+        .cornerRadius(MacCornerRadius.xLarge)
     }
 
     private func costSection(_ session: FactCheckSession) -> some View {
-        HStack(spacing: 32) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: MacSpacing.statItemSpacing) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text("API Cost")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -262,7 +262,7 @@ struct MacReportView: View {
                     .fontWeight(.medium)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text("Tokens Used")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -273,13 +273,13 @@ struct MacReportView: View {
 
             Spacer()
         }
-        .padding(20)
+        .padding(MacSpacing.xLarge)
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
+        .cornerRadius(MacCornerRadius.xLarge)
     }
 
     private func footerSection(_ report: EvidenceReport) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: MacSpacing.large) {
             Divider()
 
             Text(report.generationFootnote)
@@ -287,12 +287,12 @@ struct MacReportView: View {
                 .foregroundColor(.secondary)
 
             // Disclaimer
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: MacSpacing.standard) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.title3)
                     .foregroundColor(.orange)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                     Text("Important Disclaimer")
                         .font(.headline)
 
@@ -301,9 +301,9 @@ struct MacReportView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(16)
-            .background(Color.orange.opacity(0.1))
-            .cornerRadius(8)
+            .padding(MacSpacing.large)
+            .background(Color.orange.opacity(MacOpacity.subtle))
+            .cornerRadius(MacCornerRadius.standard)
         }
     }
 
@@ -433,13 +433,13 @@ struct MacStatItem: View {
     let label: String
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: MacSpacing.standard) {
             Image(systemName: icon)
                 .font(.title2)
                 .foregroundColor(.accentColor)
-                .frame(width: 32)
+                .frame(width: MacIconSize.iconFrame)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: MacSpacing.xxSmall) {
                 Text(value)
                     .font(.title2)
                     .fontWeight(.bold)
@@ -451,14 +451,20 @@ struct MacStatItem: View {
     }
 }
 
+/// Expandable section displaying reviewed documents in the report.
+///
+/// Shows a collapsible list of documents with scores, allowing users to click
+/// to view full document details.
 struct MacReviewedDocumentsSection: View {
+    /// The documents to display.
     let documents: [Document]
+    /// Callback when a document is selected.
     let onDocumentSelected: (Document) -> Void
 
     @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MacSpacing.standard) {
             Button(action: { withAnimation { isExpanded.toggle() } }) {
                 HStack {
                     Text("Reviewed Documents (\(documents.count))")
@@ -473,7 +479,7 @@ struct MacReviewedDocumentsSection: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: MacSpacing.listItemSpacing) {
                     ForEach(documents, id: \.pmid) { document in
                         MacReviewedDocumentRow(document: document)
                             .onTapGesture {
@@ -483,23 +489,27 @@ struct MacReviewedDocumentsSection: View {
                 }
             }
         }
-        .padding(20)
+        .padding(MacSpacing.xLarge)
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
+        .cornerRadius(MacCornerRadius.xLarge)
     }
 }
 
+/// A single row displaying a reviewed document's summary.
+///
+/// Shows the document's score badge, title, and authors in a compact format.
 struct MacReviewedDocumentRow: View {
+    /// The document to display.
     let document: Document
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: MacSpacing.standard) {
             if let score = document.relevanceScore {
                 MacScoreBadge(score: score)
-                    .frame(width: 32, height: 32)
+                    .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text(document.title)
                     .font(.body)
                     .fontWeight(.medium)
@@ -516,16 +526,21 @@ struct MacReviewedDocumentRow: View {
             Image(systemName: "chevron.right")
                 .foregroundColor(.secondary)
         }
-        .padding(12)
+        .padding(MacSpacing.standard)
         .background(Color(NSColor.textBackgroundColor))
-        .cornerRadius(8)
+        .cornerRadius(MacCornerRadius.standard)
         .contentShape(Rectangle())
     }
 }
 
 /// Markdown renderer for macOS reports.
+///
+/// Parses markdown content and renders it as styled SwiftUI views,
+/// including support for clickable document references.
 struct MacMarkdownReportView: View {
+    /// The markdown content to render.
     let content: String
+    /// Documents for reference linking.
     let documents: [Document]
 
     init(_ content: String, documents: [Document] = []) {
@@ -534,7 +549,7 @@ struct MacMarkdownReportView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
             let blocks = parseMarkdownBlocks(content)
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 renderBlock(block)
@@ -651,34 +666,34 @@ struct MacMarkdownReportView: View {
 
         Text(text)
             .font(font)
-            .padding(.top, level == 1 ? 16 : 12)
-            .padding(.bottom, 6)
+            .padding(.top, level == 1 ? MacSpacing.large : MacSpacing.standard)
+            .padding(.bottom, MacSpacing.small)
     }
 
     @ViewBuilder
     private func renderParagraph(_ text: String) -> some View {
         renderRichText(text)
-            .padding(.vertical, 4)
+            .padding(.vertical, MacSpacing.xSmall)
     }
 
     @ViewBuilder
     private func renderListItem(text: String, ordered: Bool, number: Int?) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: MacSpacing.medium) {
             if ordered, let num = number {
                 Text("\(num).")
                     .font(.body)
                     .fontWeight(.semibold)
-                    .frame(width: 24, alignment: .trailing)
+                    .frame(width: MacIconSize.listNumberWidth, alignment: .trailing)
             } else {
                 Text("•")
                     .font(.body)
                     .fontWeight(.bold)
-                    .frame(width: 24, alignment: .trailing)
+                    .frame(width: MacIconSize.listNumberWidth, alignment: .trailing)
             }
             renderRichText(text)
         }
-        .padding(.vertical, 2)
-        .padding(.leading, 8)
+        .padding(.vertical, MacSpacing.xxSmall)
+        .padding(.leading, MacSpacing.medium)
     }
 
     @ViewBuilder
@@ -770,7 +785,11 @@ struct MacMarkdownReportView: View {
 }
 
 /// Document detail sheet for macOS.
+///
+/// Shows full document details including title, authors, abstract, score,
+/// citations, and links to external resources.
 struct MacDocumentDetailSheet: View {
+    /// The document to display.
     let document: Document
     @Environment(\.dismiss) private var dismiss
 
@@ -785,14 +804,14 @@ struct MacDocumentDetailSheet: View {
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(20)
+            .padding(MacSpacing.xLarge)
             .background(Color(NSColor.controlBackgroundColor))
 
             Divider()
 
             // Content
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: MacSpacing.xLarge) {
                     // Title
                     Text(document.title)
                         .font(.title3)
@@ -822,7 +841,7 @@ struct MacDocumentDetailSheet: View {
 
                     // Score
                     if let score = document.relevanceScore {
-                        HStack(spacing: 12) {
+                        HStack(spacing: MacSpacing.standard) {
                             Text("Relevance Score:")
                                 .fontWeight(.medium)
                             MacScoreBadge(score: score)
@@ -839,7 +858,7 @@ struct MacDocumentDetailSheet: View {
                     }
 
                     // Abstract
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: MacSpacing.medium) {
                         Text("Abstract")
                             .font(.headline)
                         Text(document.abstract)
@@ -851,12 +870,12 @@ struct MacDocumentDetailSheet: View {
                     if !document.citations.isEmpty {
                         Divider()
 
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: MacSpacing.standard) {
                             Text("Key Passages")
                                 .font(.headline)
 
                             ForEach(document.citations, id: \.id) { citation in
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                                     Text("\"\(citation.passage)\"")
                                         .font(.body)
                                         .italic()
@@ -868,9 +887,9 @@ struct MacDocumentDetailSheet: View {
                                             .foregroundColor(.secondary)
                                     }
                                 }
-                                .padding(12)
-                                .background(Color.accentColor.opacity(0.1))
-                                .cornerRadius(8)
+                                .padding(MacSpacing.standard)
+                                .background(Color.accentColor.opacity(MacOpacity.subtle))
+                                .cornerRadius(MacCornerRadius.standard)
                             }
                         }
                     }
@@ -878,9 +897,9 @@ struct MacDocumentDetailSheet: View {
                     Divider()
 
                     // Links
-                    HStack(spacing: 16) {
+                    HStack(spacing: MacSpacing.large) {
                         Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                            HStack(spacing: 4) {
+                            HStack(spacing: MacSpacing.xSmall) {
                                 Image(systemName: "link")
                                 Text("View on PubMed")
                             }
@@ -888,7 +907,7 @@ struct MacDocumentDetailSheet: View {
 
                         if let doi = document.doi {
                             Link(destination: URL(string: "https://doi.org/\(doi)")!) {
-                                HStack(spacing: 4) {
+                                HStack(spacing: MacSpacing.xSmall) {
                                     Image(systemName: "doc.text")
                                     Text("View via DOI")
                                 }
@@ -903,10 +922,10 @@ struct MacDocumentDetailSheet: View {
                             .textSelection(.enabled)
                     }
                 }
-                .padding(24)
+                .padding(MacSpacing.xxLarge)
             }
         }
-        .frame(minWidth: 600, minHeight: 500)
+        .frame(minWidth: MacLayout.documentSheetMinWidth, minHeight: MacLayout.documentSheetMinHeight)
     }
 }
 

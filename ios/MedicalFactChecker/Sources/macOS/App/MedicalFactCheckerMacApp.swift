@@ -61,7 +61,7 @@ struct MedicalFactCheckerMacApp: App {
         }
         .modelContainer(sharedModelContainer)
         .windowStyle(.automatic)
-        .defaultSize(width: 1200, height: 800)
+        .defaultSize(width: MacLayout.defaultWindowWidth, height: MacLayout.defaultWindowHeight)
         .commands {
             CommandGroup(replacing: .newItem) { }
 

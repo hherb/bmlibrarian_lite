@@ -42,11 +42,11 @@ struct MacHistoryView: View {
         HSplitView {
             // Left: Session list
             sessionList
-                .frame(minWidth: 400, idealWidth: 500)
+                .frame(minWidth: MacLayout.leftColumnMinWidth, idealWidth: MacLayout.leftColumnIdealWidth)
 
             // Right: Session detail
             sessionDetail
-                .frame(minWidth: 300)
+                .frame(minWidth: MacLayout.detailColumnMinWidth)
         }
     }
 
@@ -68,11 +68,11 @@ struct MacHistoryView: View {
                         .foregroundColor(.secondary)
                     TextField("Search claims...", text: $searchText)
                         .textFieldStyle(.plain)
-                        .frame(width: 200)
+                        .frame(width: MacLayout.searchFieldWidth)
                 }
-                .padding(6)
+                .padding(MacSpacing.small)
                 .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(6)
+                .cornerRadius(MacCornerRadius.medium)
 
                 // Delete button
                 if selectedSession != nil {
@@ -83,8 +83,8 @@ struct MacHistoryView: View {
                     .help("Delete selected session")
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, MacSpacing.xLarge)
+            .padding(.vertical, MacSpacing.standard)
             .background(Color(NSColor.controlBackgroundColor))
 
             Divider()
@@ -119,10 +119,10 @@ struct MacHistoryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: MacSpacing.large) {
             Image(systemName: "clock")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.4))
+                .font(.system(size: MacIconSize.emptyStateMedium))
+                .foregroundColor(.secondary.opacity(MacOpacity.faded))
 
             Text(searchText.isEmpty ? "No Fact Checks Yet" : "No Results Found")
                 .font(.title3)
@@ -148,10 +148,10 @@ struct MacHistoryView: View {
                 }
             })
         } else {
-            VStack(spacing: 16) {
+            VStack(spacing: MacSpacing.large) {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 48))
-                    .foregroundColor(.secondary.opacity(0.4))
+                    .font(.system(size: MacIconSize.emptyStateMedium))
+                    .foregroundColor(.secondary.opacity(MacOpacity.faded))
 
                 Text("Select a Session")
                     .font(.title3)
@@ -161,7 +161,7 @@ struct MacHistoryView: View {
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 200)
+                    .frame(maxWidth: MacLayout.searchFieldWidth)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -185,18 +185,22 @@ struct MacHistoryView: View {
 
 // MARK: - Session Row
 
+/// A single row displaying a fact-check session in the history list.
+///
+/// Shows the claim text, verdict or status badge, document statistics, and timestamp.
 struct MacSessionRow: View {
+    /// The session to display.
     let session: FactCheckSession
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
             // Claim
             Text(session.claim)
                 .font(.body)
                 .lineLimit(2)
 
             // Status and metadata
-            HStack(spacing: 12) {
+            HStack(spacing: MacSpacing.standard) {
                 // Verdict or status badge
                 if let report = session.report {
                     MacSmallVerdictBadge(verdict: report.verdict)
@@ -208,7 +212,7 @@ struct MacSessionRow: View {
 
                 // Stats
                 if let report = session.report {
-                    HStack(spacing: 8) {
+                    HStack(spacing: MacSpacing.medium) {
                         Label("\(report.documentsReviewed)", systemImage: "doc.text")
                         Label("\(report.citationCount)", systemImage: "quote.bubble")
                     }
@@ -222,7 +226,7 @@ struct MacSessionRow: View {
                     .foregroundColor(.secondary)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, MacSpacing.medium)
     }
 }
 
@@ -256,31 +260,37 @@ struct MacStatusBadge: View {
                     .foregroundColor(.red)
             } else if !step.isTerminal {
                 ProgressView()
-                    .scaleEffect(0.6)
+                    .scaleEffect(MacScale.progressViewSmall)
             }
 
             Text(step.displayName)
                 .font(.caption)
                 .foregroundColor(step.isTerminal && step != .completed ? .red : .secondary)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(6)
+        .padding(.horizontal, MacSpacing.medium)
+        .padding(.vertical, MacSpacing.xSmall)
+        .background(Color.secondary.opacity(MacOpacity.subtle))
+        .cornerRadius(MacCornerRadius.medium)
     }
 }
 
 // MARK: - Session Detail View
 
+/// Detail view showing comprehensive information about a fact-check session.
+///
+/// Displays the session's claim, PubMed query, status, statistics, and provides
+/// a button to view the generated report.
 struct MacSessionDetailView: View {
+    /// The session to display.
     let session: FactCheckSession
+    /// Callback when the user wants to view the report.
     let onViewReport: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: MacSpacing.xLarge) {
                 // Header
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: MacSpacing.medium) {
                     Text("Session Details")
                         .font(.title2)
                         .fontWeight(.bold)
@@ -293,7 +303,7 @@ struct MacSessionDetailView: View {
                 Divider()
 
                 // Claim
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: MacSpacing.small) {
                     Text("Claim")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -305,7 +315,7 @@ struct MacSessionDetailView: View {
 
                 // Query
                 if let query = session.pubmedQuery {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: MacSpacing.small) {
                         Text("PubMed Query")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -321,7 +331,7 @@ struct MacSessionDetailView: View {
                 Divider()
 
                 // Status
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: MacSpacing.medium) {
                     Text("Status")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -338,13 +348,13 @@ struct MacSessionDetailView: View {
                 if session.documents.count > 0 {
                     Divider()
 
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: MacSpacing.standard) {
                         Text("Statistics")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .textCase(.uppercase)
 
-                        HStack(spacing: 24) {
+                        HStack(spacing: MacSpacing.sectionSpacing) {
                             MacDetailStatItem(
                                 value: "\(session.documents.count)",
                                 label: "Documents"
@@ -359,7 +369,7 @@ struct MacSessionDetailView: View {
                             )
                         }
 
-                        HStack(spacing: 24) {
+                        HStack(spacing: MacSpacing.sectionSpacing) {
                             MacDetailStatItem(
                                 value: CostCalculator.formatCost(session.estimatedCostUSD),
                                 label: "Cost"
@@ -387,20 +397,25 @@ struct MacSessionDetailView: View {
                     .controlSize(.large)
                 }
 
-                Spacer(minLength: 20)
+                Spacer(minLength: MacSpacing.xLarge)
             }
-            .padding(20)
+            .padding(MacSpacing.xLarge)
         }
         .background(Color(NSColor.controlBackgroundColor))
     }
 }
 
+/// Displays a single statistic value with a label.
+///
+/// Used in the session detail view to show document counts, cost, and tokens.
 struct MacDetailStatItem: View {
+    /// The statistic value to display.
     let value: String
+    /// The label describing the statistic.
     let label: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: MacSpacing.xxSmall) {
             Text(value)
                 .font(.title3)
                 .fontWeight(.bold)

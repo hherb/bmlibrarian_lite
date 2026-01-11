@@ -65,7 +65,7 @@ struct MacContentView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+        .navigationSplitViewColumnWidth(min: MacLayout.sidebarMinWidth, ideal: MacLayout.sidebarIdealWidth, max: MacLayout.sidebarMaxWidth)
     }
 
     @ViewBuilder
@@ -109,18 +109,18 @@ struct MacDisclaimerView: View {
     let onAccept: () -> Void
 
     var body: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: MacSpacing.section) {
             Spacer()
 
             Image(systemName: "cross.case.circle")
-                .font(.system(size: 80))
+                .font(.system(size: MacIconSize.disclaimerIcon))
                 .foregroundColor(.accentColor)
 
             Text("Medical Fact Checker")
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: MacSpacing.large) {
                 DisclaimerPoint(
                     icon: "exclamationmark.triangle.fill",
                     color: .orange,
@@ -149,40 +149,47 @@ struct MacDisclaimerView: View {
                     description: "Your queries are sent to LLM providers for processing. No personal health data is stored externally."
                 )
             }
-            .frame(maxWidth: 600)
-            .padding(.horizontal, 40)
+            .frame(maxWidth: MacLayout.disclaimerMaxContentWidth)
+            .padding(.horizontal, MacSpacing.disclaimer)
 
             Spacer()
 
             Button(action: onAccept) {
                 Text("I Understand - Continue")
                     .font(.headline)
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, MacSpacing.disclaimer)
+                    .padding(.vertical, MacSpacing.standard)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
             Spacer()
         }
-        .frame(minWidth: 700, minHeight: 600)
+        .frame(minWidth: MacLayout.disclaimerMinWidth, minHeight: MacLayout.disclaimerMinHeight)
     }
 }
 
+/// A single disclaimer point with icon, title, and description.
+///
+/// Used in the disclaimer view to display important information to the user.
 struct DisclaimerPoint: View {
+    /// The SF Symbol name for the icon.
     let icon: String
+    /// The color for the icon.
     let color: Color
+    /// The title text.
     let title: String
+    /// The description text.
     let description: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: MacSpacing.large) {
             Image(systemName: icon)
                 .font(.title2)
                 .foregroundColor(color)
-                .frame(width: 30)
+                .frame(width: MacIconSize.disclaimerIconFrame)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text(title)
                     .font(.headline)
                 Text(description)

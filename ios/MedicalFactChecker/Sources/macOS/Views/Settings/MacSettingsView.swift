@@ -42,7 +42,7 @@ struct MacSettingsView: View {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 550, height: 450)
+        .frame(width: MacLayout.settingsWindowWidth, height: MacLayout.settingsWindowHeight)
     }
 }
 
@@ -108,10 +108,10 @@ struct LLMSettingsTab: View {
                                     Text("Recommended")
                                         .font(.caption2)
                                         .foregroundColor(.white)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
+                                        .padding(.horizontal, MacSpacing.small)
+                                        .padding(.vertical, MacSpacing.xxSmall)
                                         .background(Color.blue)
-                                        .cornerRadius(4)
+                                        .cornerRadius(MacCornerRadius.small)
                                 }
                             }
                             .tag(model.id)
@@ -331,7 +331,7 @@ struct BudgetSettingsTab: View {
                     Spacer()
                     TextField("USD", value: $settings.maxRunBudgetUSD, format: .currency(code: "USD"))
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 100)
+                        .frame(width: MacLayout.currencyFieldWidth)
                 }
 
                 HStack {
@@ -339,7 +339,7 @@ struct BudgetSettingsTab: View {
                     Spacer()
                     TextField("USD", value: $settings.monthlyBudgetUSD, format: .currency(code: "USD"))
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 100)
+                        .frame(width: MacLayout.currencyFieldWidth)
                 }
 
                 Text("The app will stop when these limits are reached.")
@@ -366,7 +366,7 @@ struct BudgetSettingsTab: View {
             }
 
             Section("Model Pricing") {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: MacSpacing.medium) {
                     Text("Prices are per 1 million tokens.")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -472,11 +472,11 @@ struct AboutTab: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: MacSpacing.sectionSpacing) {
             // App icon and name
-            VStack(spacing: 8) {
+            VStack(spacing: MacSpacing.medium) {
                 Image(systemName: "cross.case.circle.fill")
-                    .font(.system(size: 64))
+                    .font(.system(size: MacIconSize.aboutIcon))
                     .foregroundColor(.accentColor)
 
                 Text("Medical Fact Checker")
@@ -489,7 +489,7 @@ struct AboutTab: View {
             }
 
             Divider()
-                .frame(width: 200)
+                .frame(width: MacLayout.searchFieldWidth)
 
             // Description
             Text("AI-powered medical claim verification using PubMed literature and large language models.")
@@ -499,7 +499,7 @@ struct AboutTab: View {
                 .frame(maxWidth: 350)
 
             // Links
-            VStack(spacing: 8) {
+            VStack(spacing: MacSpacing.medium) {
                 Link(destination: URL(string: "https://github.com/hherb/bmlibrarian_lite")!) {
                     HStack {
                         Image(systemName: "link")
@@ -523,7 +523,7 @@ struct AboutTab: View {
             }
             .padding(.bottom)
         }
-        .padding(32)
+        .padding(MacSpacing.section)
     }
 }
 

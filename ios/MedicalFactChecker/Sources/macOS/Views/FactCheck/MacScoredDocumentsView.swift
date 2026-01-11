@@ -39,15 +39,15 @@ struct MacScoredDocumentsView: View {
         VStack(spacing: 0) {
             // Toolbar
             toolbar
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.horizontal, MacSpacing.large)
+                .padding(.vertical, MacSpacing.medium)
                 .background(Color(NSColor.controlBackgroundColor))
 
             Divider()
 
             // Documents list
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: MacSpacing.cardSpacing) {
                     ForEach(scoredDocuments, id: \.id) { document in
                         MacDocumentCard(
                             document: document,
@@ -65,13 +65,13 @@ struct MacScoredDocumentsView: View {
                         )
                     }
                 }
-                .padding(16)
+                .padding(MacSpacing.large)
             }
         }
     }
 
     private var toolbar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: MacSpacing.large) {
             // Sort picker
             Picker("Sort by", selection: $sortOrder) {
                 ForEach(DocumentSortOrder.allCases) { order in
@@ -79,7 +79,7 @@ struct MacScoredDocumentsView: View {
                 }
             }
             .pickerStyle(.menu)
-            .frame(width: 140)
+            .frame(width: MacLayout.sortPickerWidth)
 
             // Filter picker
             Picker("Min score", selection: $filterThreshold) {
@@ -90,7 +90,7 @@ struct MacScoredDocumentsView: View {
                 Text("5 only").tag(5)
             }
             .pickerStyle(.menu)
-            .frame(width: 100)
+            .frame(width: MacLayout.filterPickerWidth)
 
             Spacer()
 
@@ -128,33 +128,33 @@ struct MacDocumentCard: View {
             // Expanded content
             if isExpanded {
                 Divider()
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, MacSpacing.large)
 
                 expandedContent
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
+        .cornerRadius(MacCornerRadius.standard)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.2))
+            RoundedRectangle(cornerRadius: MacCornerRadius.standard)
+                .stroke(Color.secondary.opacity(MacOpacity.border))
         )
     }
 
     private var cardHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: MacSpacing.large) {
             // Score badge
             if let score = document.relevanceScore {
                 MacScoreBadge(score: score)
             }
 
             // Title and metadata
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text(document.title)
                     .font(.headline)
                     .lineLimit(isExpanded ? nil : 2)
 
-                HStack(spacing: 8) {
+                HStack(spacing: MacSpacing.medium) {
                     Text(document.formattedAuthors)
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -175,7 +175,7 @@ struct MacDocumentCard: View {
 
             // Embedding score (if enabled)
             if showEmbeddingScore {
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: MacSpacing.xxSmall) {
                     Text("Embed")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -191,14 +191,14 @@ struct MacDocumentCard: View {
                 .foregroundColor(.secondary)
                 .font(.caption)
         }
-        .padding(16)
+        .padding(MacSpacing.large)
     }
 
     private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: MacSpacing.large) {
             // Score explanation
             if let explanation = document.scoreExplanation, !explanation.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                     Text("Relevance Explanation")
                         .font(.caption)
                         .fontWeight(.medium)
@@ -210,7 +210,7 @@ struct MacDocumentCard: View {
             }
 
             // Abstract
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text("Abstract")
                     .font(.caption)
                     .fontWeight(.medium)
@@ -222,14 +222,14 @@ struct MacDocumentCard: View {
 
             // Citations
             if !document.citations.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: MacSpacing.medium) {
                     Text("Key Passages (\(document.citations.count))")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
 
                     ForEach(document.citations, id: \.id) { citation in
-                        HStack(alignment: .top, spacing: 8) {
+                        HStack(alignment: .top, spacing: MacSpacing.medium) {
                             Image(systemName: "quote.opening")
                                 .font(.caption)
                                 .foregroundColor(.accentColor)
@@ -239,17 +239,17 @@ struct MacDocumentCard: View {
                                 .italic()
                                 .textSelection(.enabled)
                         }
-                        .padding(12)
-                        .background(Color.accentColor.opacity(0.05))
-                        .cornerRadius(6)
+                        .padding(MacSpacing.standard)
+                        .background(Color.accentColor.opacity(MacOpacity.veryLight))
+                        .cornerRadius(MacCornerRadius.medium)
                     }
                 }
             }
 
             // Links
-            HStack(spacing: 16) {
+            HStack(spacing: MacSpacing.large) {
                 Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: MacSpacing.xSmall) {
                         Image(systemName: "link")
                         Text("PubMed")
                     }
@@ -258,7 +258,7 @@ struct MacDocumentCard: View {
 
                 if let doi = document.doi {
                     Link(destination: URL(string: "https://doi.org/\(doi)")!) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: MacSpacing.xSmall) {
                             Image(systemName: "doc.text")
                             Text("DOI")
                         }
@@ -274,7 +274,7 @@ struct MacDocumentCard: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(16)
+        .padding(MacSpacing.large)
     }
 
     private var embeddingColor: Color {
