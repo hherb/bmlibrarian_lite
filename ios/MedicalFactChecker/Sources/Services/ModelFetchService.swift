@@ -573,7 +573,13 @@ actor ModelFetchService {
 
     /// Fetch models from local Ollama server.
     private func fetchOllamaModels(baseURL: String?) async throws -> [LLMModel] {
-        let url = URL(string: baseURL ?? "http://localhost:11434")!
+        // Ollama's native API is at /api/tags, not the OpenAI-compatible /v1 endpoint
+        // Strip /v1 suffix if present to get the base Ollama URL
+        var ollamaBaseURL = baseURL ?? "http://localhost:11434"
+        if ollamaBaseURL.hasSuffix("/v1") {
+            ollamaBaseURL = String(ollamaBaseURL.dropLast(3))
+        }
+        let url = URL(string: ollamaBaseURL)!
             .appendingPathComponent("api/tags")
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
@@ -600,10 +606,16 @@ actor ModelFetchService {
     }
 
     /// Format Ollama model name for display.
+    ///
+    /// Preserves the full model name including quantization and parameter info
+    /// (e.g., "llama3.2:8b-q4_0" stays as "llama3.2:8b-q4_0").
+    /// Only strips ":latest" suffix as it's redundant.
     private func formatOllamaModelName(_ name: String) -> String {
-        // Remove tag if present (e.g., "llama3.2:latest" -> "llama3.2")
-        let baseName = name.components(separatedBy: ":").first ?? name
-        return baseName.capitalized
+        // Only strip ":latest" suffix as it's the default and adds no info
+        if name.hasSuffix(":latest") {
+            return String(name.dropLast(7))
+        }
+        return name
     }
 }
 

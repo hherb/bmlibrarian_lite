@@ -606,10 +606,16 @@ actor ModelFetchService {
     }
 
     /// Format Ollama model name for display.
+    ///
+    /// Preserves the full model name including quantization and parameter info
+    /// (e.g., "llama3.2:8b-q4_0" stays as "llama3.2:8b-q4_0").
+    /// Only strips ":latest" suffix as it's redundant.
     private func formatOllamaModelName(_ name: String) -> String {
-        // Remove tag if present (e.g., "llama3.2:latest" -> "llama3.2")
-        let baseName = name.components(separatedBy: ":").first ?? name
-        return baseName.capitalized
+        // Only strip ":latest" suffix as it's the default and adds no info
+        if name.hasSuffix(":latest") {
+            return String(name.dropLast(7))
+        }
+        return name
     }
 }
 

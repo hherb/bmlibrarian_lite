@@ -54,7 +54,8 @@ actor LLMService {
         guard let url = URL(string: settings.llmBaseURL) else {
             throw LLMError.invalidConfiguration("Invalid base URL")
         }
-        guard !settings.llmAPIKey.isEmpty else {
+        // Only require API key for providers that need it (not Ollama)
+        if settings.selectedProvider.requiresAPIKey && settings.llmAPIKey.isEmpty {
             throw LLMError.invalidConfiguration("API key not set")
         }
         return LLMService(baseURL: url, apiKey: settings.llmAPIKey, model: settings.llmModel)

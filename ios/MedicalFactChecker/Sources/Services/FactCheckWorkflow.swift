@@ -305,11 +305,17 @@ final class FactCheckWorkflow {
         // Record usage
         recordUsage(usage, operationType: "query_conversion")
 
-        // Clean up response
+        // Clean up response and add filters
         var query = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Require abstract for quality content
         if !query.lowercased().contains("hasabstract") {
             query += " AND hasabstract"
         }
+
+        // Exclude non-clinical publication types (news, editorials, letters, etc.)
+        // These add noise without substantive clinical evidence
+        query += " " + PubMedFilters.clinicalPublicationFilter
 
         session.pubmedQuery = query
         try? modelContext.save()
