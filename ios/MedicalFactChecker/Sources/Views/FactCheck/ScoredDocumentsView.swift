@@ -111,7 +111,7 @@ struct DocumentScoreRow: View {
     private var scoresColumn: some View {
         VStack(spacing: 4) {
             // LLM Score
-            ScoreBadge(
+            LabeledScoreBadge(
                 score: document.relevanceScore,
                 label: "LLM",
                 color: scoreColor(for: document.relevanceScore)
@@ -119,7 +119,7 @@ struct DocumentScoreRow: View {
 
             // Embedding Score (if enabled and available)
             if showEmbeddingScore {
-                ScoreBadge(
+                LabeledScoreBadge(
                     score: document.embeddingScoreNormalized,
                     label: "Emb",
                     color: scoreColor(for: document.embeddingScoreNormalized)
@@ -225,7 +225,7 @@ struct DocumentScoreRow: View {
 ///
 /// Used to show LLM and embedding scores side-by-side for comparison.
 /// Displays a dash when score is nil, indicating not yet scored.
-struct ScoreBadge: View {
+struct LabeledScoreBadge: View {
     /// The score to display (1-5), or nil if not scored.
     let score: Int?
 

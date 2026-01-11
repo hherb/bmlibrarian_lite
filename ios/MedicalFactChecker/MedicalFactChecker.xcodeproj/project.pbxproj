@@ -3,15 +3,12 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		/* App */
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
-
-		/* Models */
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
 		A1000004001 /* Citation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004000 /* Citation.swift */; };
 		A1000005001 /* Document.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000005000 /* Document.swift */; };
@@ -19,36 +16,26 @@
 		A1000007001 /* EvidenceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000007000 /* EvidenceReport.swift */; };
 		A1000008001 /* FactCheckSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000008000 /* FactCheckSession.swift */; };
 		A1000009001 /* UsageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000009000 /* UsageRecord.swift */; };
-
-		/* Services */
 		A1000010001 /* FactCheckWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000010000 /* FactCheckWorkflow.swift */; };
 		A1000011001 /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000011000 /* LLMService.swift */; };
 		A1000012001 /* PubMedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000012000 /* PubMedService.swift */; };
-
-		/* Utilities */
 		A1000013001 /* CostCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000013000 /* CostCalculator.swift */; };
 		A1000014001 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014000 /* KeychainHelper.swift */; };
 		A1000015001 /* ResponseParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000015000 /* ResponseParser.swift */; };
-
-		/* Views */
 		A1000016001 /* FactCheckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000016000 /* FactCheckView.swift */; };
 		A1000017001 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000017000 /* HistoryView.swift */; };
 		A1000018001 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000018000 /* ReportView.swift */; };
 		A1000019001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000019000 /* SettingsView.swift */; };
-
-		/* Assets */
+		A1000022001 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000022000 /* EmbeddingService.swift */; };
+		A1000023001 /* ScoredDocumentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000023000 /* ScoredDocumentsView.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A1000000000 /* MedicalFactChecker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MedicalFactChecker.app; sourceTree = BUILT_PRODUCTS_DIR; };
-
-		/* App */
 		A1000001000 /* MedicalFactCheckerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerApp.swift; sourceTree = "<group>"; };
 		A1000002000 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-
-		/* Models */
 		A1000003000 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		A1000004000 /* Citation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Citation.swift; sourceTree = "<group>"; };
 		A1000005000 /* Document.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Document.swift; sourceTree = "<group>"; };
@@ -56,24 +43,18 @@
 		A1000007000 /* EvidenceReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceReport.swift; sourceTree = "<group>"; };
 		A1000008000 /* FactCheckSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactCheckSession.swift; sourceTree = "<group>"; };
 		A1000009000 /* UsageRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageRecord.swift; sourceTree = "<group>"; };
-
-		/* Services */
 		A1000010000 /* FactCheckWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactCheckWorkflow.swift; sourceTree = "<group>"; };
 		A1000011000 /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
 		A1000012000 /* PubMedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubMedService.swift; sourceTree = "<group>"; };
-
-		/* Utilities */
 		A1000013000 /* CostCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostCalculator.swift; sourceTree = "<group>"; };
 		A1000014000 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A1000015000 /* ResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseParser.swift; sourceTree = "<group>"; };
-
-		/* Views */
 		A1000016000 /* FactCheckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactCheckView.swift; sourceTree = "<group>"; };
 		A1000017000 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		A1000018000 /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
 		A1000019000 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-
-		/* Assets */
+		A1000022000 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
+		A1000023000 /* ScoredDocumentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoredDocumentsView.swift; sourceTree = "<group>"; };
 		A1000020000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000021000 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -137,6 +118,7 @@
 		A1000000023 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A1000022000 /* EmbeddingService.swift */,
 				A1000010000 /* FactCheckWorkflow.swift */,
 				A1000011000 /* LLMService.swift */,
 				A1000012000 /* PubMedService.swift */,
@@ -177,6 +159,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000016000 /* FactCheckView.swift */,
+				A1000023000 /* ScoredDocumentsView.swift */,
 			);
 			path = FactCheck;
 			sourceTree = "<group>";
@@ -241,7 +224,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					A1000000001 = {
 						CreatedOnToolsVersion = 15.0;
@@ -249,7 +232,6 @@
 				};
 			};
 			buildConfigurationList = A1000000005 /* Build configuration list for PBXProject "MedicalFactChecker" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -257,6 +239,7 @@
 				Base,
 			);
 			mainGroup = A1000000010;
+			preferredProjectObjectVersion = 77;
 			productRefGroup = A1000000030 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -302,6 +285,8 @@
 				A1000017001 /* HistoryView.swift in Sources */,
 				A1000018001 /* ReportView.swift in Sources */,
 				A1000019001 /* SettingsView.swift in Sources */,
+				A1000022001 /* EmbeddingService.swift in Sources */,
+				A1000023001 /* ScoredDocumentsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -343,6 +328,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -366,6 +352,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -407,6 +394,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -423,6 +411,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_VERSION = 5.0;
 				VALIDATE_PRODUCT = YES;
