@@ -13,12 +13,13 @@ struct FactCheckView: View {
     @Environment(AppSettings.self) private var settings
     @FocusState private var isTextEditorFocused: Bool
 
+    /// Callback when a report is generated (navigates to Report tab).
+    var onReportGenerated: ((EvidenceReport) -> Void)?
+
     @State private var claimText = ""
     @State private var workflow: FactCheckWorkflow?
-    @State private var showingReport = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    @State private var completedReport: EvidenceReport?
 
     var body: some View {
         NavigationStack {
@@ -84,11 +85,6 @@ struct FactCheckView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingReport) {
-                if let report = completedReport {
-                    ReportView(report: report)
-                }
-            }
             .alert("Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -111,8 +107,7 @@ struct FactCheckView: View {
 
         // Set up callbacks
         newWorkflow.onComplete = { report in
-            completedReport = report
-            showingReport = true
+            onReportGenerated?(report)
         }
 
         newWorkflow.onError = { error in
@@ -359,7 +354,7 @@ struct UserDecisionSection: View {
 }
 
 #Preview {
-    FactCheckView()
+    FactCheckView(onReportGenerated: nil)
         .modelContainer(for: [
             FactCheckSession.self,
             Document.self,

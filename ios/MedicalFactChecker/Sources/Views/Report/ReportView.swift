@@ -8,6 +8,164 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Report Content View (Tab-friendly)
+
+/// Full-screen report view designed for use in a dedicated tab.
+///
+/// Unlike `ReportView` (which is for sheets), this view:
+/// - Uses full screen width on iPad
+/// - Has no "Done" dismiss button
+/// - Integrates with tab-based navigation
+struct ReportContentView: View {
+    let report: EvidenceReport
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var showingPDFExportSheet = false
+    @State private var selectedPaperSize: PaperSize = PDFExporter.preferredPaperSize
+    @State private var pdfData: Data?
+    @State private var isGeneratingPDF = false
+
+    /// Maximum content width for readability on wide screens.
+    private var maxContentWidth: CGFloat {
+        horizontalSizeClass == .regular ? 800 : .infinity
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                reportContent
+            }
+            .navigationTitle("Evidence Report")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    shareMenu
+                }
+            }
+            .sheet(isPresented: $showingPDFExportSheet) {
+                PDFExportSheet(
+                    report: report,
+                    selectedPaperSize: $selectedPaperSize,
+                    pdfData: $pdfData,
+                    isGenerating: $isGeneratingPDF
+                )
+            }
+        }
+    }
+
+    private var reportContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Verdict Badge
+            HStack {
+                Spacer()
+                VerdictBadge(verdict: report.verdict)
+                Spacer()
+            }
+
+            // Claim and Query (if available from session)
+            if let session = report.session {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Claim")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(session.claim)
+                            .font(.body)
+                            .italic()
+                    }
+
+                    if let query = session.pubmedQuery {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("PubMed Query")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(query)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .foregroundColor(.accentColor)
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(10)
+            }
+
+            // Summary
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Summary")
+                    .font(.headline)
+                Text(report.summary)
+                    .font(.body)
+            }
+            .padding()
+            .background(Color.accentColor.opacity(0.1))
+            .cornerRadius(10)
+
+            // Full Report (Markdown)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Detailed Report")
+                    .font(.headline)
+
+                MarkdownReportView(
+                    report.fullReport,
+                    documents: report.session?.documents ?? []
+                )
+            }
+
+            // Reviewed Documents Section
+            if let session = report.session, !session.documents.isEmpty {
+                ReviewedDocumentsSection(documents: session.documents.sorted {
+                    ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
+                })
+            }
+
+            // Statistics
+            StatisticsSection(report: report)
+
+            // Cost (if session available)
+            if let session = report.session {
+                CostSection(session: session)
+            }
+
+            // Generation footnote and disclaimer
+            FootnoteSection(report: report)
+        }
+        .frame(maxWidth: maxContentWidth)
+        .padding()
+        .frame(maxWidth: .infinity)
+    }
+
+    private var shareMenu: some View {
+        Menu {
+            // Plain text share
+            ShareLink(
+                item: report.plainTextReport,
+                subject: Text("Medical Fact Check Report"),
+                message: Text("Evidence report for: \(report.session?.claim ?? "Unknown claim")")
+            ) {
+                Label("Share as Text", systemImage: "doc.text")
+            }
+
+            // PDF export
+            Button {
+                showingPDFExportSheet = true
+            } label: {
+                Label("Export as PDF", systemImage: "doc.richtext")
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+        }
+    }
+}
+
+// MARK: - Report View (Sheet)
+
+/// Report view designed for sheet presentation.
+///
+/// Includes a "Done" button for dismissing the sheet.
+/// For tab-based display, use `ReportContentView` instead.
 struct ReportView: View {
     let report: EvidenceReport
     @Environment(\.dismiss) private var dismiss
