@@ -32,14 +32,40 @@ final class Document {
 
     // MARK: - Scoring
 
-    /// Relevance score (1-5 scale), nil if not yet scored.
+    /// LLM relevance score (1-5 scale), nil if not yet scored.
     var relevanceScore: Int?
 
     /// LLM explanation for the relevance score.
     var scoreExplanation: String?
 
-    /// When the document was scored.
+    /// When the document was scored by LLM.
     var scoredAt: Date?
+
+    // MARK: - Embedding Scoring
+
+    /// Semantic similarity score (0.0-1.0 scale) from NLEmbedding.
+    ///
+    /// Computed using cosine similarity between the claim and document text.
+    /// Nil if embedding scoring is disabled or not yet computed.
+    var embeddingScore: Double?
+
+    /// Embedding score converted to 1-5 scale for comparison with LLM score.
+    ///
+    /// Mapping thresholds tuned for typical sentence embedding similarity:
+    /// - < 0.3: Score 1, 0.3-0.45: Score 2, 0.45-0.55: Score 3, 0.55-0.7: Score 4, >= 0.7: Score 5
+    ///
+    /// Note: This logic mirrors `EmbeddingService.normalizeToRelevanceScale()`.
+    /// Duplicated here to avoid service dependency in the model layer.
+    var embeddingScoreNormalized: Int? {
+        guard let score = embeddingScore else { return nil }
+        switch score {
+        case ..<0.3: return 1
+        case 0.3..<0.45: return 2
+        case 0.45..<0.55: return 3
+        case 0.55..<0.7: return 4
+        default: return 5
+        }
+    }
 
     // MARK: - Batch Tracking
 

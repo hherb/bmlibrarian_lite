@@ -167,12 +167,17 @@ final class FactCheckWorkflow {
                 try await searchPubMed()
             }
 
-            // Step 3: Score documents
+            // Step 3: Score documents (LLM + optional embedding)
             if session.currentStep == .searchingPubMed {
                 session.currentStep = .scoringDocuments
                 try? modelContext.save()
 
                 try await scoreDocuments()
+
+                // Compute embedding scores if enabled
+                if settings.embeddingScoringEnabled {
+                    await computeEmbeddingScores()
+                }
             }
 
             // Check if we need more documents
@@ -428,6 +433,37 @@ final class FactCheckWorkflow {
 
             try? modelContext.save()
         }
+    }
+
+    /// Compute embedding-based similarity scores for all documents.
+    ///
+    /// Uses Apple's NLEmbedding for fast, on-device semantic similarity.
+    /// Runs after LLM scoring to provide a comparison metric.
+    private func computeEmbeddingScores() async {
+        guard let session = session else { return }
+
+        let unscoredDocs = session.documents.filter { $0.embeddingScore == nil }
+        guard !unscoredDocs.isEmpty else { return }
+
+        updateProgress(.scoringDocuments, "Computing embedding scores...")
+
+        // Prepare documents for batch scoring
+        let documentsData = unscoredDocs.map { doc in
+            (title: doc.title, abstract: doc.abstract)
+        }
+
+        // Compute scores in batch (more efficient)
+        let scores = EmbeddingService.scoreDocuments(
+            claim: session.claim,
+            documents: documentsData
+        )
+
+        // Apply scores to documents
+        for (index, document) in unscoredDocs.enumerated() {
+            document.embeddingScore = scores[index]
+        }
+
+        try? modelContext.save()
     }
 
     private func extractCitations() async throws {

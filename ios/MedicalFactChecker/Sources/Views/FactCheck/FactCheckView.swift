@@ -57,6 +57,15 @@ struct FactCheckView: View {
                                 onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
                             )
                         }
+
+                        // Scored Documents Section
+                        if let session = workflow.session,
+                           !session.documents.filter({ $0.isScored }).isEmpty {
+                            ScoredDocumentsView(
+                                documents: session.documents.filter { $0.isScored },
+                                showEmbeddingScores: settings.embeddingScoringEnabled
+                            )
+                        }
                     }
 
                     Spacer(minLength: 20)

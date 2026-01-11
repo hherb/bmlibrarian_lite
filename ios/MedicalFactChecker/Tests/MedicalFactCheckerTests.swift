@@ -129,3 +129,92 @@ final class VerdictTests: XCTestCase {
         XCTAssertEqual(Verdict.partiallySupported.rawValue, "Partially Supported")
     }
 }
+
+final class EmbeddingServiceTests: XCTestCase {
+
+    func testNormalizeToRelevanceScale() {
+        // Test score normalization thresholds
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.0), 1)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.29), 1)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.30), 2)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.44), 2)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.45), 3)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.54), 3)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.55), 4)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.69), 4)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(0.70), 5)
+        XCTAssertEqual(EmbeddingService.normalizeToRelevanceScale(1.0), 5)
+    }
+
+    func testSimilarityIsSymmetric() {
+        // If embeddings are available, test that similarity is symmetric
+        guard EmbeddingService.isAvailable else {
+            // Skip test if embeddings not available (e.g., on some simulators)
+            return
+        }
+
+        let text1 = "Vitamin D supplementation for COVID-19 treatment"
+        let text2 = "Effect of cholecalciferol on coronavirus infection"
+
+        let score1 = EmbeddingService.computeSimilarity(claim: text1, documentText: text2)
+        let score2 = EmbeddingService.computeSimilarity(claim: text2, documentText: text1)
+
+        // Scores should be nearly identical (allowing for floating point differences)
+        if let s1 = score1, let s2 = score2 {
+            XCTAssertEqual(s1, s2, accuracy: 0.001)
+        }
+    }
+
+    func testSimilarTextHasHigherScore() {
+        guard EmbeddingService.isAvailable else { return }
+
+        let claim = "Aspirin prevents heart attacks"
+        let related = "Aspirin reduces the risk of cardiovascular events and heart attacks"
+        let unrelated = "The weather forecast for tomorrow shows rain"
+
+        let relatedScore = EmbeddingService.computeSimilarity(claim: claim, documentText: related)
+        let unrelatedScore = EmbeddingService.computeSimilarity(claim: claim, documentText: unrelated)
+
+        // Related text should score higher than unrelated
+        if let rel = relatedScore, let unrel = unrelatedScore {
+            XCTAssertGreaterThan(rel, unrel)
+        }
+    }
+
+    func testBatchScoring() {
+        guard EmbeddingService.isAvailable else { return }
+
+        let claim = "Coffee consumption and health benefits"
+        let documents = [
+            (title: "Effects of caffeine on cardiovascular health", abstract: "This study examines..."),
+            (title: "Coffee and longevity: A meta-analysis", abstract: "We analyzed..."),
+            (title: "Unrelated topic about geology", abstract: "Rock formations..."),
+        ]
+
+        let scores = EmbeddingService.scoreDocuments(claim: claim, documents: documents)
+
+        // Should return scores for all documents
+        XCTAssertEqual(scores.count, 3)
+
+        // All scores should be non-nil when embeddings are available
+        for score in scores {
+            XCTAssertNotNil(score)
+            if let s = score {
+                XCTAssertGreaterThanOrEqual(s, 0.0)
+                XCTAssertLessThanOrEqual(s, 1.0)
+            }
+        }
+    }
+
+    func testScoreRangeValid() {
+        guard EmbeddingService.isAvailable else { return }
+
+        let claim = "Medical treatment efficacy"
+        let document = "Study of drug effectiveness in clinical trials"
+
+        if let score = EmbeddingService.computeSimilarity(claim: claim, documentText: document) {
+            XCTAssertGreaterThanOrEqual(score, 0.0)
+            XCTAssertLessThanOrEqual(score, 1.0)
+        }
+    }
+}
