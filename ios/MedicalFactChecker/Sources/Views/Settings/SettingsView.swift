@@ -11,39 +11,143 @@ import SwiftData
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
 
     @State private var apiKey = ""
     @State private var ncbiAPIKey = ""
     @State private var showingSaveConfirmation = false
     @State private var monthlyUsage: Double = 0
+    @State private var showingCustomConfig = false
 
     var body: some View {
         @Bindable var settings = settings
 
         NavigationStack {
             Form {
-                // LLM Configuration
+                // LLM Provider Selection
                 Section {
-                    TextField("Base URL", text: $settings.llmBaseURL)
-                        .textContentType(.URL)
-                        .autocapitalization(.none)
-                        .keyboardType(.URL)
-
-                    TextField("Model Name", text: $settings.llmModel)
-                        .autocapitalization(.none)
-
-                    SecureField("API Key", text: $apiKey)
-                        .textContentType(.password)
-
-                    Button("Save API Key") {
-                        settings.llmAPIKey = apiKey
-                        showingSaveConfirmation = true
+                    Picker("Provider", selection: $settings.selectedProvider) {
+                        ForEach(LLMProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
                     }
-                    .disabled(apiKey.isEmpty)
+
+                    Text(settings.selectedProvider.providerDescription)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 } header: {
-                    Text("LLM API Configuration")
+                    Text("LLM Provider")
                 } footer: {
-                    Text("Configure your OpenAI-compatible API endpoint. Examples: OpenAI, Anthropic, local LLM server.")
+                    if settings.selectedProvider == .anthropic {
+                        Text("Recommended: Tested and works well with this app.")
+                    }
+                }
+
+                // Model Selection (for non-custom providers)
+                if settings.selectedProvider != .custom {
+                    Section {
+                        if settings.selectedProvider.models.isEmpty {
+                            Text("Enter model name manually below")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Picker("Model", selection: $settings.llmModel) {
+                                ForEach(settings.selectedProvider.models) { model in
+                                    VStack(alignment: .leading) {
+                                        HStack {
+                                            Text(model.displayName)
+                                            if model.isRecommended {
+                                                Text("Recommended")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.white)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Color.blue)
+                                                    .cornerRadius(4)
+                                            }
+                                        }
+                                    }
+                                    .tag(model.id)
+                                }
+                            }
+
+                            if let selectedModel = settings.selectedProvider.models.first(where: { $0.id == settings.llmModel }) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(selectedModel.description)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(selectedModel.priceDescription)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        // For Ollama, allow custom model names
+                        if settings.selectedProvider == .ollama {
+                            TextField("Or enter model name", text: $settings.llmModel)
+                                .autocapitalization(.none)
+                        }
+                    } header: {
+                        Text("Model")
+                    }
+                }
+
+                // API Key Section
+                Section {
+                    if settings.selectedProvider.requiresAPIKey {
+                        SecureField("API Key", text: $apiKey)
+                            .textContentType(.password)
+
+                        Button("Save API Key") {
+                            settings.llmAPIKey = apiKey
+                            showingSaveConfirmation = true
+                        }
+                        .disabled(apiKey.isEmpty)
+
+                        if let apiKeyURL = settings.selectedProvider.apiKeyURL {
+                            Button {
+                                openURL(apiKeyURL)
+                            } label: {
+                                HStack {
+                                    Text("Get API Key")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                            }
+                        }
+                    } else {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("No API key required")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Authentication")
+                } footer: {
+                    if settings.selectedProvider == .ollama {
+                        Text("Make sure Ollama is running on your Mac at the configured URL.")
+                    }
+                }
+
+                // Custom/Advanced Configuration
+                Section {
+                    DisclosureGroup("Advanced Configuration", isExpanded: $showingCustomConfig) {
+                        TextField("Base URL", text: $settings.llmBaseURL)
+                            .textContentType(.URL)
+                            .autocapitalization(.none)
+                            .keyboardType(.URL)
+
+                        if settings.selectedProvider == .custom {
+                            TextField("Model Name", text: $settings.llmModel)
+                                .autocapitalization(.none)
+                        }
+                    }
+                } footer: {
+                    if settings.selectedProvider != .custom {
+                        Text("Only modify if you need a custom endpoint.")
+                    }
                 }
 
                 // Search Settings
@@ -173,6 +277,7 @@ struct SettingsView: View {
                         settings.resetToDefaults()
                         apiKey = ""
                         ncbiAPIKey = ""
+                        showingCustomConfig = false
                     }
                 } header: {
                     Text("About")
@@ -196,6 +301,8 @@ struct SettingsView: View {
         apiKey = settings.llmAPIKey
         ncbiAPIKey = settings.ncbiAPIKey
         loadMonthlyUsage()
+        // Auto-expand custom config for custom provider
+        showingCustomConfig = settings.selectedProvider == .custom
     }
 
     private func loadMonthlyUsage() {

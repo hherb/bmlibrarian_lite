@@ -20,6 +20,21 @@ final class AppSettings {
 
     // MARK: - LLM Configuration
 
+    /// Selected LLM provider.
+    var selectedProvider: LLMProvider {
+        didSet {
+            UserDefaults.standard.set(selectedProvider.rawValue, forKey: Keys.selectedProvider)
+            // Auto-update base URL when provider changes (except for custom)
+            if selectedProvider != .custom {
+                llmBaseURL = selectedProvider.baseURL
+                // Set default model for the new provider
+                if let defaultModel = selectedProvider.defaultModel {
+                    llmModel = defaultModel.id
+                }
+            }
+        }
+    }
+
     /// Base URL for the OpenAI-compatible API.
     var llmBaseURL: String {
         didSet { UserDefaults.standard.set(llmBaseURL, forKey: Keys.llmBaseURL) }
@@ -120,11 +135,24 @@ final class AppSettings {
     private init() {
         let defaults = UserDefaults.standard
 
-        // Load values with defaults
-        self.llmBaseURL = defaults.string(forKey: Keys.llmBaseURL)
-            ?? "https://api.openai.com/v1"
-        self.llmModel = defaults.string(forKey: Keys.llmModel)
-            ?? "gpt-4o-mini"
+        // Load provider (default to Anthropic as recommended)
+        if let providerString = defaults.string(forKey: Keys.selectedProvider),
+           let provider = LLMProvider(rawValue: providerString) {
+            self.selectedProvider = provider
+        } else {
+            // Migration: detect provider from existing URL if available
+            let existingURL = defaults.string(forKey: Keys.llmBaseURL) ?? ""
+            self.selectedProvider = Self.detectProvider(from: existingURL) ?? .anthropic
+        }
+
+        // Load LLM configuration with provider-aware defaults
+        let defaultURL = selectedProvider.baseURL.isEmpty
+            ? "https://api.anthropic.com/v1"
+            : selectedProvider.baseURL
+        let defaultModel = selectedProvider.defaultModel?.id ?? "claude-sonnet-4-20250514"
+
+        self.llmBaseURL = defaults.string(forKey: Keys.llmBaseURL) ?? defaultURL
+        self.llmModel = defaults.string(forKey: Keys.llmModel) ?? defaultModel
         self.ncbiEmail = defaults.string(forKey: Keys.ncbiEmail) ?? ""
 
         self.batchSize = defaults.object(forKey: Keys.batchSize) as? Int ?? 20
@@ -139,6 +167,7 @@ final class AppSettings {
     // MARK: - Keys
 
     private enum Keys {
+        static let selectedProvider = "selected_provider"
         static let llmBaseURL = "llm_base_url"
         static let llmModel = "llm_model"
         static let llmAPIKey = "llm_api_key"
@@ -155,8 +184,14 @@ final class AppSettings {
     // MARK: - Validation
 
     /// Check if LLM is properly configured.
+    ///
+    /// Validates that required settings are present based on the selected provider.
+    /// Providers like Ollama don't require an API key.
     var isLLMConfigured: Bool {
-        !llmBaseURL.isEmpty && !llmModel.isEmpty && !llmAPIKey.isEmpty
+        let hasBaseURL = !llmBaseURL.isEmpty
+        let hasModel = !llmModel.isEmpty
+        let hasAPIKeyIfRequired = !selectedProvider.requiresAPIKey || !llmAPIKey.isEmpty
+        return hasBaseURL && hasModel && hasAPIKeyIfRequired
     }
 
     /// Check if settings are valid for running a fact-check.
@@ -168,8 +203,9 @@ final class AppSettings {
 
     /// Reset all settings to defaults.
     func resetToDefaults() {
-        llmBaseURL = "https://api.openai.com/v1"
-        llmModel = "gpt-4o-mini"
+        selectedProvider = .anthropic
+        llmBaseURL = LLMProvider.anthropic.baseURL
+        llmModel = LLMProvider.anthropic.defaultModel?.id ?? "claude-sonnet-4-20250514"
         llmAPIKey = ""
         ncbiEmail = ""
         ncbiAPIKey = ""
@@ -179,5 +215,33 @@ final class AppSettings {
         embeddingScoringEnabled = false
         maxRunBudgetUSD = 1.0
         monthlyBudgetUSD = 10.0
+    }
+
+    // MARK: - Provider Detection
+
+    /// Detect provider from an existing base URL for migration.
+    ///
+    /// - Parameter url: The base URL string.
+    /// - Returns: The detected provider, or nil if unknown.
+    private static func detectProvider(from url: String) -> LLMProvider? {
+        let lowercased = url.lowercased()
+
+        if lowercased.contains("anthropic.com") {
+            return .anthropic
+        } else if lowercased.contains("openai.com") {
+            return .openai
+        } else if lowercased.contains("deepseek.com") {
+            return .deepseek
+        } else if lowercased.contains("groq.com") {
+            return .groq
+        } else if lowercased.contains("mistral.ai") {
+            return .mistral
+        } else if lowercased.contains("localhost") || lowercased.contains("127.0.0.1") {
+            return .ollama
+        } else if !url.isEmpty {
+            return .custom
+        }
+
+        return nil
     }
 }
