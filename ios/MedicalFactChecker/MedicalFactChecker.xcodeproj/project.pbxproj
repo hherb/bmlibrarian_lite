@@ -28,6 +28,7 @@
 		A1000019001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000019000 /* SettingsView.swift */; };
 		A1000022001 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000022000 /* EmbeddingService.swift */; };
 		A1000023001 /* ScoredDocumentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000023000 /* ScoredDocumentsView.swift */; };
+		A1000024001 /* LLMProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000024000 /* LLMProvider.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -55,6 +56,7 @@
 		A1000019000 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A1000022000 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
 		A1000023000 /* ScoredDocumentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoredDocumentsView.swift; sourceTree = "<group>"; };
+		A1000024000 /* LLMProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMProvider.swift; sourceTree = "<group>"; };
 		A1000020000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000021000 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -110,6 +112,7 @@
 				A1000006000 /* Enums.swift */,
 				A1000007000 /* EvidenceReport.swift */,
 				A1000008000 /* FactCheckSession.swift */,
+				A1000024000 /* LLMProvider.swift */,
 				A1000009000 /* UsageRecord.swift */,
 			);
 			path = Models;
@@ -287,6 +290,7 @@
 				A1000019001 /* SettingsView.swift in Sources */,
 				A1000022001 /* EmbeddingService.swift in Sources */,
 				A1000023001 /* ScoredDocumentsView.swift in Sources */,
+				A1000024001 /* LLMProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
