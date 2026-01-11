@@ -226,36 +226,31 @@ struct MacSessionRow: View {
     }
 }
 
+/// Compact verdict badge for list rows.
 struct MacSmallVerdictBadge: View {
+    /// The verdict to display.
     let verdict: Verdict
 
     var body: some View {
+        let color = MacColors.verdictColor(for: verdict)
         Text(verdict.rawValue)
             .font(.caption)
             .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(backgroundColor.opacity(0.15))
-            .foregroundColor(backgroundColor)
-            .cornerRadius(6)
-    }
-
-    private var backgroundColor: Color {
-        switch verdict {
-        case .supported: return .green
-        case .partiallySupported: return .orange
-        case .notSupported: return .red
-        case .insufficientEvidence: return .gray
-        case .conflicting: return .purple
-        }
+            .padding(.horizontal, MacSpacing.medium)
+            .padding(.vertical, MacSpacing.xSmall)
+            .background(color.opacity(MacOpacity.badgeBackground))
+            .foregroundColor(color)
+            .cornerRadius(MacCornerRadius.medium)
     }
 }
 
+/// Badge displaying workflow step status.
 struct MacStatusBadge: View {
+    /// The workflow step to display.
     let step: WorkflowStep
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: MacSpacing.xSmall) {
             if step == .failed || step == .budgetExceeded {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)

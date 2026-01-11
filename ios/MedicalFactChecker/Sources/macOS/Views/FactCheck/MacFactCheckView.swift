@@ -184,6 +184,7 @@ struct MacFactCheckView: View {
 
 // MARK: - Subviews
 
+/// Warning banner displayed when LLM is not configured.
 struct MacConfigurationWarningView: View {
     var body: some View {
         HStack(spacing: 12) {
@@ -214,10 +215,17 @@ struct MacConfigurationWarningView: View {
     }
 }
 
+/// Text input section for entering medical claims.
+///
+/// Includes a multiline text editor with example hints and a submit button.
 struct MacClaimInputSection: View {
+    /// The claim text binding.
     @Binding var claimText: String
+    /// Whether a fact-check is currently running.
     let isRunning: Bool
+    /// Whether the submit button should be enabled.
     let canSubmit: Bool
+    /// Callback when the user submits the claim.
     let onSubmit: () -> Void
 
     var body: some View {
@@ -271,6 +279,9 @@ struct MacClaimInputSection: View {
     }
 }
 
+/// Displays current budget usage and limits.
+///
+/// Shows monthly spending progress and per-run budget limits.
 struct MacBudgetDisplayView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
@@ -322,7 +333,11 @@ struct MacBudgetDisplayView: View {
     }
 }
 
+/// Progress display showing workflow steps and completion percentage.
+///
+/// Displays a horizontal step indicator, progress bar, and status message.
 struct MacProgressSection: View {
+    /// The workflow being monitored.
     let workflow: FactCheckWorkflow
 
     var body: some View {
@@ -332,9 +347,7 @@ struct MacProgressSection: View {
                 ForEach(Array(mainSteps.enumerated()), id: \.element) { index, step in
                     MacStepIndicator(
                         step: step,
-                        currentStep: workflow.session?.currentStep ?? .idle,
-                        isFirst: index == 0,
-                        isLast: index == mainSteps.count - 1
+                        currentStep: workflow.session?.currentStep ?? .idle
                     )
 
                     if index < mainSteps.count - 1 {
@@ -394,11 +407,14 @@ struct MacProgressSection: View {
     }
 }
 
+/// Individual step indicator in the progress display.
+///
+/// Shows a colored circle representing the step's status (pending, current, or completed).
 struct MacStepIndicator: View {
+    /// The workflow step this indicator represents.
     let step: WorkflowStep
+    /// The current step in the workflow.
     let currentStep: WorkflowStep
-    let isFirst: Bool
-    let isLast: Bool
 
     var body: some View {
         VStack(spacing: 6) {
@@ -447,7 +463,9 @@ struct MacStepIndicator: View {
     }
 }
 
+/// Horizontal connector line between step indicators.
 struct MacStepConnector: View {
+    /// Whether this connector represents a completed transition.
     let isPast: Bool
 
     var body: some View {
@@ -459,9 +477,15 @@ struct MacStepConnector: View {
     }
 }
 
+/// Prompt for user decision during workflow pause.
+///
+/// Displayed when the workflow needs user input to continue (e.g., fetch more documents).
 struct MacUserDecisionSection: View {
+    /// The prompt message to display.
     let prompt: String
+    /// Callback when user chooses to continue fetching.
     let onContinue: () -> Void
+    /// Callback when user chooses to proceed with current documents.
     let onProceed: () -> Void
 
     var body: some View {

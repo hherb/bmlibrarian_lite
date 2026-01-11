@@ -102,6 +102,7 @@ struct MacScoredDocumentsView: View {
     }
 }
 
+/// Sort order options for document list.
 enum DocumentSortOrder: String, CaseIterable, Identifiable {
     case score = "Score"
     case year = "Year"
@@ -277,19 +278,15 @@ struct MacDocumentCard: View {
     }
 
     private var embeddingColor: Color {
-        let score = document.embeddingScoreNormalized
-        switch score {
-        case 5: return .green
-        case 4: return Color(red: 0.4, green: 0.7, blue: 0.3)
-        case 3: return .orange
-        case 2: return Color(red: 0.9, green: 0.5, blue: 0.2)
-        default: return .red
-        }
+        MacColors.scoreColor(for: document.embeddingScoreNormalized)
     }
 }
 
-/// Score badge optimized for macOS.
+/// Score badge displaying a relevance score (1-5) with color coding.
+///
+/// Colors range from red (1) through orange (2-3) to green (4-5).
 struct MacScoreBadge: View {
+    /// The relevance score to display.
     let score: Int
 
     var body: some View {
@@ -297,19 +294,9 @@ struct MacScoreBadge: View {
             .font(.title3)
             .fontWeight(.bold)
             .foregroundColor(.white)
-            .frame(width: 36, height: 36)
-            .background(scoreColor)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var scoreColor: Color {
-        switch score {
-        case 5: return .green
-        case 4: return Color(red: 0.4, green: 0.7, blue: 0.3)
-        case 3: return .orange
-        case 2: return Color(red: 0.9, green: 0.5, blue: 0.2)
-        default: return .red
-        }
+            .frame(width: MacIconSize.scoreBadgeSize, height: MacIconSize.scoreBadgeSize)
+            .background(MacColors.scoreColor(for: score))
+            .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
     }
 }
 

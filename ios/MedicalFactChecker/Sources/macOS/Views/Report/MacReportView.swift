@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import PDFKit
 
 /// macOS report view with optimized layout for larger screens.
 ///
@@ -18,7 +19,6 @@ struct MacReportView: View {
     let report: EvidenceReport?
 
     @State private var selectedDocument: Document?
-    @State private var showingSavePanel = false
     @State private var exportFormat: ExportFormat = .pdf
 
     var body: some View {
@@ -404,34 +404,32 @@ enum ExportFormat {
 
 // MARK: - Supporting Views
 
+/// Large verdict badge for report headers.
+///
+/// Displays the verdict with appropriate color coding in a pill shape.
 struct MacVerdictBadge: View {
+    /// The verdict to display.
     let verdict: Verdict
 
     var body: some View {
         Text(verdict.rawValue)
             .font(.title2)
             .fontWeight(.bold)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            .background(backgroundColor)
+            .padding(.horizontal, MacSpacing.xxLarge)
+            .padding(.vertical, MacSpacing.standard)
+            .background(MacColors.verdictColor(for: verdict))
             .foregroundColor(.white)
-            .cornerRadius(30)
-    }
-
-    private var backgroundColor: Color {
-        switch verdict {
-        case .supported: return .green
-        case .partiallySupported: return .orange
-        case .notSupported: return .red
-        case .insufficientEvidence: return .gray
-        case .conflicting: return .purple
-        }
+            .cornerRadius(MacCornerRadius.pill)
     }
 }
 
+/// Displays a statistic with icon, value, and label.
 struct MacStatItem: View {
+    /// SF Symbol name for the icon.
     let icon: String
+    /// The statistic value to display.
     let value: String
+    /// Description label for the statistic.
     let label: String
 
     var body: some View {
@@ -911,9 +909,6 @@ struct MacDocumentDetailSheet: View {
         .frame(minWidth: 600, minHeight: 500)
     }
 }
-
-// Import PDFDocument for printing
-import PDFKit
 
 #Preview {
     let report = EvidenceReport(
