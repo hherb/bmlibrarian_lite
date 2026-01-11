@@ -81,6 +81,8 @@ final class FactCheckWorkflow {
 
         // Create new session
         let newSession = FactCheckSession(claim: claim)
+        newSession.modelName = settings.llmModel
+        newSession.providerName = settings.selectedProvider.displayName
         modelContext.insert(newSession)
         try? modelContext.save()
 

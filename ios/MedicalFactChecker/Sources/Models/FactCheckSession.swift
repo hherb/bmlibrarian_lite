@@ -71,6 +71,14 @@ final class FactCheckSession {
     /// Estimated cost in USD for this session.
     var estimatedCostUSD: Double
 
+    // MARK: - Model Information
+
+    /// The LLM model used for this session (e.g., "claude-sonnet-4-20250514").
+    var modelName: String?
+
+    /// The LLM provider used for this session (e.g., "anthropic").
+    var providerName: String?
+
     // MARK: - Relationships
 
     @Relationship(deleteRule: .cascade, inverse: \Document.session)

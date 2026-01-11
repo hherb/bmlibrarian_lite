@@ -69,6 +69,24 @@ final class EvidenceReport {
 
     // MARK: - Computed Properties
 
+    /// A footnote describing how this report was generated.
+    var generationFootnote: String {
+        var parts: [String] = []
+
+        // Model and provider info
+        if let model = session?.modelName, let provider = session?.providerName {
+            parts.append("Generated using \(model) by \(provider)")
+        } else if let model = session?.modelName {
+            parts.append("Generated using \(model)")
+        }
+
+        // Search statistics
+        parts.append("Search limited to \(documentsReviewed) documents")
+        parts.append("\(uniqueSourceCount) scored as relevant")
+
+        return parts.joined(separator: ", ") + "."
+    }
+
     /// Plain text version of the report for sharing.
     var plainTextReport: String {
         """
@@ -87,6 +105,10 @@ final class EvidenceReport {
         ---
         Based on \(uniqueSourceCount) sources, \(citationCount) citations.
         \(documentsReviewed) documents reviewed.
+
+        \(generationFootnote)
+
+        DISCLAIMER: This report is for informational purposes only and should not be used for self-diagnosis or treatment. Always consult qualified healthcare professionals for medical advice.
         """
     }
 }

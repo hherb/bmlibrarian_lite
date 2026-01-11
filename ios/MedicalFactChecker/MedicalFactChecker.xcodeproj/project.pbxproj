@@ -29,6 +29,9 @@
 		A1000022001 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000022000 /* EmbeddingService.swift */; };
 		A1000023001 /* ScoredDocumentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000023000 /* ScoredDocumentsView.swift */; };
 		A1000024001 /* LLMProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000024000 /* LLMProvider.swift */; };
+		A1000025001 /* DisclaimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000025000 /* DisclaimerView.swift */; };
+		A1000026001 /* PrintableReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000026000 /* PrintableReportView.swift */; };
+		A1000027001 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000027000 /* PDFExporter.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -57,6 +60,9 @@
 		A1000022000 /* EmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingService.swift; sourceTree = "<group>"; };
 		A1000023000 /* ScoredDocumentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoredDocumentsView.swift; sourceTree = "<group>"; };
 		A1000024000 /* LLMProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMProvider.swift; sourceTree = "<group>"; };
+		A1000025000 /* DisclaimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisclaimerView.swift; sourceTree = "<group>"; };
+		A1000026000 /* PrintableReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintableReportView.swift; sourceTree = "<group>"; };
+		A1000027000 /* PDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExporter.swift; sourceTree = "<group>"; };
 		A1000020000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000021000 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -134,6 +140,7 @@
 			children = (
 				A1000013000 /* CostCalculator.swift */,
 				A1000014000 /* KeychainHelper.swift */,
+				A1000027000 /* PDFExporter.swift */,
 				A1000015000 /* ResponseParser.swift */,
 			);
 			path = Utilities;
@@ -144,10 +151,19 @@
 			children = (
 				A1000000027 /* FactCheck */,
 				A1000000028 /* History */,
+				A100000002B /* Onboarding */,
 				A1000000029 /* Report */,
 				A100000002A /* Settings */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A100000002B /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				A1000025000 /* DisclaimerView.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 		A1000000026 /* Preview Content */ = {
@@ -179,6 +195,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000018000 /* ReportView.swift */,
+				A1000026000 /* PrintableReportView.swift */,
 			);
 			path = Report;
 			sourceTree = "<group>";
@@ -291,6 +308,9 @@
 				A1000022001 /* EmbeddingService.swift in Sources */,
 				A1000023001 /* ScoredDocumentsView.swift in Sources */,
 				A1000024001 /* LLMProvider.swift in Sources */,
+				A1000025001 /* DisclaimerView.swift in Sources */,
+				A1000026001 /* PrintableReportView.swift in Sources */,
+				A1000027001 /* PDFExporter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

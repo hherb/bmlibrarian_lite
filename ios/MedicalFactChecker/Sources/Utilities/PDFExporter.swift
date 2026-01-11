@@ -47,18 +47,13 @@ struct PDFExporter {
         renderer.scale = 2.0  // High resolution for print quality
 
         // Generate PDF
-        var pdfData = Data()
+        let pdfData = NSMutableData()
 
         renderer.render { size, context in
-            // Calculate number of pages needed
-            let pageHeight = paperSize.size.height
-            let contentHeight = size.height
-            let pageCount = max(1, Int(ceil(contentHeight / pageHeight)))
-
             // Create PDF with proper page size
             var box = CGRect(origin: .zero, size: paperSize.size)
 
-            guard let consumer = CGDataConsumer(data: pdfData as! CFMutableData),
+            guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
                   let pdfContext = CGContext(consumer: consumer, mediaBox: &box, nil) else {
                 return
             }
@@ -71,7 +66,7 @@ struct PDFExporter {
             pdfContext.closePDF()
         }
 
-        return pdfData.isEmpty ? nil : pdfData
+        return pdfData.length > 0 ? pdfData as Data : nil
     }
 
     /// Generate a PDF using UIKit's graphics renderer for better pagination.
