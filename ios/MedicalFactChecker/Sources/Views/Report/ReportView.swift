@@ -618,16 +618,17 @@ struct MarkdownReportView: View {
             refAttr.underlineStyle = Text.LineStyle.single
 
             // Use document ID if available, otherwise fall back to display text for lookup
-            let linkValue: String
+            // URL format: docref://lookup?type=id&value=pmid-12345 or docref://lookup?type=ref&value=encoded-ref
             if let docId = documentId {
-                linkValue = "id:\(docId)"
+                let encoded = docId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? docId
+                if let url = URL(string: "docref://lookup?type=id&value=\(encoded)") {
+                    refAttr.link = url
+                }
             } else {
-                let encoded = displayText.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed) ?? displayText
-                linkValue = "ref:\(encoded)"
-            }
-
-            if let url = URL(string: "docref://\(linkValue)") {
-                refAttr.link = url
+                let encoded = displayText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? displayText
+                if let url = URL(string: "docref://lookup?type=ref&value=\(encoded)") {
+                    refAttr.link = url
+                }
             }
             result.append(refAttr)
 
@@ -656,22 +657,32 @@ struct MarkdownReportView: View {
     }
 
     private func handleReferenceTap(_ url: URL) {
-        guard url.scheme == "docref",
-              let host = url.host else {
+        guard url.scheme == "docref" else {
             return
         }
 
-        // Parse the link value: either "id:pmid-12345678" or "ref:Author%20et%20al.%2C%202021"
-        if host.hasPrefix("id:") {
+        // Parse query parameters: docref://lookup?type=id&value=pmid-12345
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            return
+        }
+
+        let type = queryItems.first { $0.name == "type" }?.value
+        let value = queryItems.first { $0.name == "value" }?.value
+
+        guard let lookupType = type, let lookupValue = value else {
+            return
+        }
+
+        if lookupType == "id" {
             // Direct ID lookup
-            let documentId = String(host.dropFirst(3))
-            if let doc = findDocumentById(documentId) {
+            if let doc = findDocumentById(lookupValue) {
                 selectedDocument = doc
                 showingDocumentDetail = true
             }
-        } else if host.hasPrefix("ref:") {
+        } else if lookupType == "ref" {
             // Legacy reference text lookup
-            let refText = String(host.dropFirst(4)).removingPercentEncoding ?? ""
+            let refText = lookupValue.removingPercentEncoding ?? lookupValue
             if let doc = findDocumentByReference(refText) {
                 selectedDocument = doc
                 showingDocumentDetail = true
