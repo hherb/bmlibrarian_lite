@@ -135,22 +135,25 @@ final class AppSettings {
     private init() {
         let defaults = UserDefaults.standard
 
-        // Load provider (default to Anthropic as recommended)
+        // Determine provider first (need local variable before any self access)
+        let detectedProvider: LLMProvider
         if let providerString = defaults.string(forKey: Keys.selectedProvider),
            let provider = LLMProvider(rawValue: providerString) {
-            self.selectedProvider = provider
+            detectedProvider = provider
         } else {
             // Migration: detect provider from existing URL if available
             let existingURL = defaults.string(forKey: Keys.llmBaseURL) ?? ""
-            self.selectedProvider = Self.detectProvider(from: existingURL) ?? .anthropic
+            detectedProvider = Self.detectProvider(from: existingURL) ?? .anthropic
         }
 
-        // Load LLM configuration with provider-aware defaults
-        let defaultURL = selectedProvider.baseURL.isEmpty
+        // Calculate provider-aware defaults using local variable
+        let defaultURL = detectedProvider.baseURL.isEmpty
             ? "https://api.anthropic.com/v1"
-            : selectedProvider.baseURL
-        let defaultModel = selectedProvider.defaultModel?.id ?? "claude-sonnet-4-20250514"
+            : detectedProvider.baseURL
+        let defaultModel = detectedProvider.defaultModel?.id ?? "claude-sonnet-4-20250514"
 
+        // Initialize all stored properties
+        self.selectedProvider = detectedProvider
         self.llmBaseURL = defaults.string(forKey: Keys.llmBaseURL) ?? defaultURL
         self.llmModel = defaults.string(forKey: Keys.llmModel) ?? defaultModel
         self.ncbiEmail = defaults.string(forKey: Keys.ncbiEmail) ?? ""
