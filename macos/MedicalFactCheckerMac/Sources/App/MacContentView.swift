@@ -37,6 +37,9 @@ struct MacContentView: View {
     @State private var currentReport: EvidenceReport?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+    /// The active fact-check workflow (persisted across tab switches).
+    @State private var activeWorkflow: FactCheckWorkflow?
+
     var body: some View {
         if hasAcceptedDisclaimer {
             mainNavigationView
@@ -73,6 +76,7 @@ struct MacContentView: View {
         switch selectedNavItem {
         case .factCheck:
             MacFactCheckView(
+                workflow: $activeWorkflow,
                 onReportGenerated: { report in
                     currentReport = report
                     selectedNavItem = .report

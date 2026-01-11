@@ -17,11 +17,13 @@ struct MacFactCheckView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppSettings.self) private var settings
 
+    /// Binding to the workflow (owned by parent to persist across tab switches).
+    @Binding var workflow: FactCheckWorkflow?
+
     /// Callback when a report is generated (navigates to Report view).
     var onReportGenerated: ((EvidenceReport) -> Void)?
 
     @State private var claimText = ""
-    @State private var workflow: FactCheckWorkflow?
     @State private var showingError = false
     @State private var errorMessage = ""
 
@@ -387,6 +389,23 @@ struct MacProgressSection: View {
                         .cornerRadius(MacCornerRadius.small)
                 }
             }
+
+            // Generated PubMed query (show once generated)
+            if let query = workflow.session?.pubmedQuery, !query.isEmpty {
+                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                    Text("PubMed Query:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    Text(query)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .padding(MacSpacing.medium)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(MacOpacity.subtle))
+                        .cornerRadius(MacCornerRadius.small)
+                }
+            }
         }
         .padding(MacSpacing.large)
         .background(Color.accentColor.opacity(MacOpacity.veryLight))
@@ -520,7 +539,8 @@ struct MacUserDecisionSection: View {
 }
 
 #Preview {
-    MacFactCheckView(onReportGenerated: nil)
+    @Previewable @State var previewWorkflow: FactCheckWorkflow? = nil
+    MacFactCheckView(workflow: $previewWorkflow, onReportGenerated: nil)
         .modelContainer(for: [
             FactCheckSession.self,
             Document.self,

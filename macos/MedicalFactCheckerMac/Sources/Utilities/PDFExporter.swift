@@ -105,11 +105,12 @@ struct PDFExporter {
 
         // MARK: - Text Drawing Helpers
 
-        func drawText(_ text: String, font: NSFont, color: NSColor = .black, maxWidth: CGFloat? = nil) -> CGFloat {
+        func drawText(_ text: String, font: NSFont, color: NSColor = .black, maxWidth: CGFloat? = nil, wrapByCharacter: Bool = false) -> CGFloat {
             startNewPageIfNeeded()
 
             let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.lineBreakMode = .byWordWrapping
+            // Use character wrapping for code/monospace text, word wrapping otherwise
+            paragraphStyle.lineBreakMode = wrapByCharacter ? .byCharWrapping : .byWordWrapping
 
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
@@ -120,7 +121,7 @@ struct PDFExporter {
             let width = maxWidth ?? contentRect.width
             let boundingRect = text.boundingRect(
                 with: CGSize(width: width, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine],
                 attributes: attributes,
                 context: nil
             )
@@ -372,7 +373,9 @@ struct PDFExporter {
             if let query = session.pubmedQuery {
                 _ = drawText("PubMed Query", font: .boldSystemFont(ofSize: 11), color: .gray)
                 addSpacing(2)
-                _ = drawText(query, font: NSFont(name: "Menlo", size: 9) ?? .systemFont(ofSize: 9), color: .systemBlue)
+                // Use a slightly smaller monospace font with character wrapping for long queries
+                let monoFont = NSFont(name: "Menlo", size: 8) ?? .monospacedSystemFont(ofSize: 8, weight: .regular)
+                _ = drawText(query, font: monoFont, color: .systemBlue, wrapByCharacter: true)
             }
             addSpacing(15)
         }
