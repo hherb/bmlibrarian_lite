@@ -573,7 +573,13 @@ actor ModelFetchService {
 
     /// Fetch models from local Ollama server.
     private func fetchOllamaModels(baseURL: String?) async throws -> [LLMModel] {
-        let url = URL(string: baseURL ?? "http://localhost:11434")!
+        // Ollama's native API is at /api/tags, not the OpenAI-compatible /v1 endpoint
+        // Strip /v1 suffix if present to get the base Ollama URL
+        var ollamaBaseURL = baseURL ?? "http://localhost:11434"
+        if ollamaBaseURL.hasSuffix("/v1") {
+            ollamaBaseURL = String(ollamaBaseURL.dropLast(3))
+        }
+        let url = URL(string: ollamaBaseURL)!
             .appendingPathComponent("api/tags")
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
