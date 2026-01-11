@@ -11,10 +11,16 @@ import UIKit
 struct ReportView: View {
     let report: EvidenceReport
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingPDFExportSheet = false
     @State private var selectedPaperSize: PaperSize = PDFExporter.preferredPaperSize
     @State private var pdfData: Data?
     @State private var isGeneratingPDF = false
+
+    /// Maximum content width for readability on wide screens.
+    private var maxContentWidth: CGFloat {
+        horizontalSizeClass == .regular ? 800 : .infinity
+    }
 
     var body: some View {
         NavigationStack {
@@ -98,7 +104,9 @@ struct ReportView: View {
                     // Generation footnote and disclaimer
                     FootnoteSection(report: report)
                 }
+                .frame(maxWidth: maxContentWidth)
                 .padding()
+                .frame(maxWidth: .infinity)
             }
             .navigationTitle("Evidence Report")
             .navigationBarTitleDisplayMode(.inline)

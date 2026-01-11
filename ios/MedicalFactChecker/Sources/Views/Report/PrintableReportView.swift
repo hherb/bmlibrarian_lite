@@ -7,34 +7,7 @@
 
 import SwiftUI
 
-/// Paper size options for PDF export.
-enum PaperSize: String, CaseIterable, Identifiable {
-    case a4 = "A4"
-    case letter = "US Letter"
-
-    var id: String { rawValue }
-
-    /// Page dimensions in points (72 points per inch).
-    var size: CGSize {
-        switch self {
-        case .a4:
-            // A4: 210 x 297 mm = 595.28 x 841.89 points
-            return CGSize(width: 595.28, height: 841.89)
-        case .letter:
-            // US Letter: 8.5 x 11 inches = 612 x 792 points
-            return CGSize(width: 612, height: 792)
-        }
-    }
-
-    /// Content area with margins.
-    var contentSize: CGSize {
-        let margin: CGFloat = 50
-        return CGSize(
-            width: size.width - (margin * 2),
-            height: size.height - (margin * 2)
-        )
-    }
-}
+// Note: PaperSize enum is defined in PDFExporter.swift
 
 /// A non-interactive report view designed for PDF export.
 ///
