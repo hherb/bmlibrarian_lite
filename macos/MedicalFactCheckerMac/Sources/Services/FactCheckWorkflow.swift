@@ -1,0 +1,1049 @@
+//
+//  FactCheckWorkflow.swift
+//  MedicalFactChecker
+//
+//  Orchestrates the fact-checking workflow with batch pagination and budget tracking.
+//
+
+import Foundation
+import SwiftData
+
+/// Orchestrates the fact-checking workflow from claim input to report generation.
+///
+/// Features:
+/// - Batch pagination with user prompts to fetch more documents
+/// - Budget tracking (per-run and monthly limits)
+/// - Resumable state (persisted after each step)
+/// - Progress reporting via callbacks
+@Observable
+@MainActor
+final class FactCheckWorkflow {
+    // MARK: - Dependencies
+
+    private var llmService: LLMService?
+    private var pubmedService: PubMedService?
+    private let modelContext: ModelContext
+    private let settings: AppSettings
+
+    // MARK: - State
+
+    private(set) var session: FactCheckSession?
+    private(set) var isRunning = false
+    private(set) var progressMessage = ""
+
+    /// Set to true when waiting for user decision on fetching more docs.
+    private(set) var awaitingUserDecision = false
+
+    /// Message to display when awaiting user decision.
+    private(set) var userDecisionPrompt = ""
+
+    // MARK: - Callbacks
+
+    var onProgress: ((WorkflowStep, String) -> Void)?
+    var onNeedMoreDocuments: ((Int, Int, Int) -> Void)?  // (relevant, needed, available)
+    var onComplete: ((EvidenceReport) -> Void)?
+    var onError: ((Error) -> Void)?
+    var onBudgetExceeded: ((String) -> Void)?
+    var onSmartSearchActivated: ((String) -> Void)?  // Alternative query message
+
+    // MARK: - Monthly Usage Tracking
+
+    private var monthlyUsedUSD: Double = 0
+
+    // MARK: - Initialization
+
+    init(modelContext: ModelContext, settings: AppSettings = .shared) {
+        self.modelContext = modelContext
+        self.settings = settings
+    }
+
+    // MARK: - Main Entry Points
+
+    /// Start a new fact-check for the given claim.
+    func startFactCheck(claim: String) async {
+        // Initialize services
+        do {
+            llmService = try LLMService.create(from: settings)
+            pubmedService = PubMedService.create(from: settings)
+        } catch {
+            onError?(error)
+            return
+        }
+
+        // Load monthly usage
+        await loadMonthlyUsage()
+
+        // Check monthly budget
+        if monthlyUsedUSD >= settings.monthlyBudgetUSD {
+            onBudgetExceeded?("Monthly budget of \(CostCalculator.formatCost(settings.monthlyBudgetUSD)) exceeded")
+            return
+        }
+
+        // Create new session
+        let newSession = FactCheckSession(claim: claim)
+        newSession.modelName = settings.llmModel
+        newSession.providerName = settings.selectedProvider.displayName
+        modelContext.insert(newSession)
+        try? modelContext.save()
+
+        self.session = newSession
+        await runWorkflow()
+    }
+
+    /// Resume an existing session.
+    func resumeSession(_ session: FactCheckSession) async {
+        // Initialize services
+        do {
+            llmService = try LLMService.create(from: settings)
+            pubmedService = PubMedService.create(from: settings)
+        } catch {
+            onError?(error)
+            return
+        }
+
+        await loadMonthlyUsage()
+        self.session = session
+        await runWorkflow()
+    }
+
+    /// User approved fetching more documents.
+    func continueWithMoreDocuments() async {
+        awaitingUserDecision = false
+        userDecisionPrompt = ""
+
+        guard let session = session else { return }
+        session.currentStep = .searchingPubMed
+        try? modelContext.save()
+
+        await runWorkflow()
+    }
+
+    /// User declined fetching more documents - proceed with current results.
+    func proceedWithCurrentDocuments() async {
+        awaitingUserDecision = false
+        userDecisionPrompt = ""
+
+        guard let session = session else { return }
+
+        // Skip to citation extraction
+        session.currentStep = .extractingCitations
+        try? modelContext.save()
+
+        await runWorkflow()
+    }
+
+    /// Cancel the current workflow.
+    func cancel() {
+        guard let session = session else { return }
+
+        session.currentStep = .failed
+        session.errorMessage = "Cancelled by user"
+        session.stopReason = .userCancelled
+        try? modelContext.save()
+
+        isRunning = false
+        awaitingUserDecision = false
+    }
+
+    // MARK: - Workflow Execution
+
+    private func runWorkflow() async {
+        guard let session = session else { return }
+        isRunning = true
+
+        do {
+            // Step 1: Convert claim to PubMed query
+            if session.currentStep == .idle {
+                session.currentStep = .convertingQuery
+                try? modelContext.save()
+
+                updateProgress(.convertingQuery, "Analyzing claim...")
+                try await convertClaimToQuery()
+            }
+
+            // Step 2: Search PubMed (may loop for batch pagination)
+            if session.currentStep == .convertingQuery || session.currentStep == .searchingPubMed {
+                session.currentStep = .searchingPubMed
+                try? modelContext.save()
+
+                try await searchPubMed()
+            }
+
+            // Step 3: Score documents (LLM + optional embedding)
+            if session.currentStep == .searchingPubMed {
+                session.currentStep = .scoringDocuments
+                try? modelContext.save()
+
+                try await scoreDocuments()
+
+                // Compute embedding scores if enabled
+                if settings.embeddingScoringEnabled {
+                    await computeEmbeddingScores()
+                }
+            }
+
+            // Check if we need more documents
+            if session.currentStep == .scoringDocuments {
+                let relevant = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+                let needed = settings.minRelevantDocuments
+                let available = session.totalPubMedResults - session.currentSearchOffset
+
+                if relevant < needed {
+                    // Try smart search first if not already enabled
+                    if !session.smartSearchEnabled && relevant < smartSearchThreshold {
+                        updateProgress(.searchingPubMed, "Insufficient results, activating smart search...")
+                        try await executeSmartSearch()
+
+                        // Re-check after smart search
+                        let relevantAfterSmart = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+                        if relevantAfterSmart >= needed {
+                            // Smart search found enough, proceed to citations
+                            session.currentStep = .extractingCitations
+                            try? modelContext.save()
+                        } else if available > 0 {
+                            // Still not enough, prompt user for more from original query
+                            session.currentStep = .awaitingUserDecision
+                            try? modelContext.save()
+
+                            awaitingUserDecision = true
+                            userDecisionPrompt = "Found \(relevantAfterSmart) relevant document(s) after smart search. Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more from original query?"
+                            onNeedMoreDocuments?(relevantAfterSmart, needed, available)
+
+                            isRunning = false
+                            return
+                        }
+                    } else if available > 0 {
+                        // Smart search already tried or threshold met, prompt user
+                        session.currentStep = .awaitingUserDecision
+                        try? modelContext.save()
+
+                        awaitingUserDecision = true
+                        userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
+                        onNeedMoreDocuments?(relevant, needed, available)
+
+                        isRunning = false
+                        return  // Wait for user decision
+                    }
+                }
+            }
+
+            // Step 4: Extract citations
+            if session.currentStep == .scoringDocuments || session.currentStep == .awaitingUserDecision {
+                session.currentStep = .extractingCitations
+                try? modelContext.save()
+
+                try await extractCitations()
+            }
+
+            // Step 5: Generate report
+            if session.currentStep == .extractingCitations {
+                session.currentStep = .generatingReport
+                try? modelContext.save()
+
+                updateProgress(.generatingReport, "Synthesizing evidence...")
+                try await generateReport()
+            }
+
+            // Complete
+            session.currentStep = .completed
+            session.stopReason = .completed
+            session.updatedAt = Date()
+            try? modelContext.save()
+
+            if let report = session.report {
+                onComplete?(report)
+            }
+
+        } catch let error as BudgetError {
+            session.currentStep = .budgetExceeded
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .budgetExceeded
+            try? modelContext.save()
+            onBudgetExceeded?(error.localizedDescription)
+        } catch {
+            session.currentStep = .failed
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .apiError
+            try? modelContext.save()
+            onError?(error)
+        }
+
+        isRunning = false
+    }
+
+    // MARK: - Step Implementations
+
+    private func convertClaimToQuery() async throws {
+        guard let session = session, let llmService = llmService else { return }
+
+        try checkBudget()
+
+        let prompt = """
+        Convert this medical claim/question into a PubMed search query.
+
+        Claim: \(session.claim)
+
+        Instructions:
+        1. Extract 2-3 key medical concepts (drug names, conditions, treatments)
+        2. Use simple keyword combinations with AND/OR operators
+        3. Be inclusive rather than restrictive - use synonyms and alternative spellings
+        4. Do NOT use overly specific MeSH qualifiers that limit results
+        5. Example format: (term1 OR synonym1) AND (term2 OR synonym2)
+
+        IMPORTANT: Generate a query that will find relevant articles. Avoid being too restrictive.
+
+        Output ONLY the PubMed query string, nothing else. No explanation.
+        """
+
+        let messages = [LLMService.userMessage(prompt)]
+        let (response, usage) = try await llmService.chat(
+            messages: messages,
+            temperature: 0.1,
+            maxTokens: 256
+        )
+
+        // Record usage
+        recordUsage(usage, operationType: "query_conversion")
+
+        // Clean up response
+        var query = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.lowercased().contains("hasabstract") {
+            query += " AND hasabstract"
+        }
+
+        session.pubmedQuery = query
+        try? modelContext.save()
+    }
+
+    private func searchPubMed() async throws {
+        guard let session = session,
+              let pubmedService = pubmedService,
+              let query = session.pubmedQuery else { return }
+
+        let batchNumber = session.batchesFetched + 1
+        updateProgress(.searchingPubMed, "Searching PubMed (batch \(batchNumber))...")
+
+        let result = try await pubmedService.search(
+            query: query,
+            maxResults: settings.batchSize,
+            offset: session.currentSearchOffset
+        )
+
+        // Update session state
+        session.totalPubMedResults = result.totalCount
+        session.currentSearchOffset = result.nextOffset
+        session.batchesFetched = batchNumber
+
+        if result.pmids.isEmpty {
+            if session.documents.isEmpty {
+                throw PubMedError.noResults
+            }
+            return  // No more results, proceed with what we have
+        }
+
+        updateProgress(.searchingPubMed, "Fetching \(result.pmids.count) article details...")
+
+        // Fetch article metadata
+        let articles = try await pubmedService.fetchArticles(
+            pmids: result.pmids,
+            batchNumber: batchNumber,
+            basePosition: session.documentsFound
+        )
+
+        // Create Document objects
+        for article in articles {
+            let document = Document(
+                pmid: article.pmid,
+                title: article.title,
+                abstract: article.abstract,
+                authors: article.authors,
+                batchNumber: article.batchNumber,
+                resultPosition: article.resultPosition
+            )
+            document.year = article.year
+            document.journal = article.journal
+            document.doi = article.doi
+            document.pmcId = article.pmcId
+            document.meshTerms = article.meshTerms
+            document.publicationDate = article.publicationDate
+            document.session = session
+
+            modelContext.insert(document)
+        }
+
+        session.documentsFound += articles.count
+        try? modelContext.save()
+    }
+
+    private func scoreDocuments() async throws {
+        guard let session = session, let llmService = llmService else { return }
+
+        let unscoredDocs = session.unscoredDocuments
+        let total = unscoredDocs.count
+
+        for (index, document) in unscoredDocs.enumerated() {
+            try checkBudget()
+
+            updateProgress(.scoringDocuments, "Scoring document \(index + 1)/\(total)...")
+
+            let prompt = """
+            Evaluate how relevant this document is to the following medical claim.
+
+            Claim: \(session.claim)
+
+            Document Title: \(document.title)
+            Authors: \(document.formattedAuthors)
+            Year: \(document.year ?? 0)
+            Journal: \(document.journal ?? "Unknown")
+
+            Abstract:
+            \(document.abstract)
+
+            Score on a scale of 1-5:
+            - 5: Directly addresses the claim with strong evidence
+            - 4: Highly relevant, provides substantial supporting information
+            - 3: Moderately relevant, contains useful related information
+            - 2: Marginally relevant, tangentially related
+            - 1: Not relevant to the claim
+
+            Respond in JSON format only:
+            {"score": <1-5>, "explanation": "<brief explanation>"}
+            """
+
+            let messages = [LLMService.userMessage(prompt)]
+            let (response, usage) = try await llmService.chat(
+                messages: messages,
+                temperature: 0.1,
+                maxTokens: 256,
+                jsonMode: true
+            )
+
+            recordUsage(usage, operationType: "scoring")
+
+            // Parse response using ResponseParser
+            let parsed = ResponseParser.parseScoreResponse(response)
+            let score = parsed.score
+            let explanation = parsed.explanation
+            document.relevanceScore = score
+            document.scoreExplanation = explanation
+            document.scoredAt = Date()
+
+            session.documentsScored += 1
+            if score >= settings.minScoreThreshold {
+                session.relevantDocumentsFound += 1
+            }
+
+            try? modelContext.save()
+        }
+    }
+
+    /// Compute embedding-based similarity scores for all documents using HyDE.
+    ///
+    /// Uses Hypothetical Document Embedding (HyDE) approach:
+    /// 1. Generate a hypothetical abstract that would answer the claim
+    /// 2. Embed that hypothetical abstract
+    /// 3. Compare against actual document abstracts
+    ///
+    /// This produces better similarity scores than comparing short claims to long abstracts.
+    private func computeEmbeddingScores() async {
+        guard let session = session else {
+            print("[Embedding] No session available")
+            return
+        }
+
+        let unscoredDocs = session.documents.filter { $0.embeddingScore == nil }
+        guard !unscoredDocs.isEmpty else {
+            print("[Embedding] No unscored documents found")
+            return
+        }
+
+        print("[Embedding] Computing scores for \(unscoredDocs.count) documents using HyDE")
+        updateProgress(.scoringDocuments, "Generating hypothetical document...")
+
+        // Generate HyDE - a hypothetical abstract that would answer the claim
+        let hydeText: String
+        do {
+            hydeText = try await generateHypotheticalDocument(for: session.claim)
+            print("[Embedding] HyDE generated (\(hydeText.count) chars)")
+        } catch {
+            print("[Embedding] HyDE generation failed: \(error), falling back to raw claim")
+            hydeText = session.claim
+        }
+
+        updateProgress(.scoringDocuments, "Computing embedding scores...")
+
+        // Prepare documents for batch scoring
+        let documentsData = unscoredDocs.map { doc in
+            (title: doc.title, abstract: doc.abstract)
+        }
+
+        // Compute scores using HyDE text instead of raw claim
+        let scores = EmbeddingService.scoreDocuments(
+            claim: hydeText,
+            documents: documentsData
+        )
+
+        // Apply scores to documents
+        var successCount = 0
+        var failCount = 0
+        for (index, document) in unscoredDocs.enumerated() {
+            if let score = scores[index] {
+                document.embeddingScore = score
+                successCount += 1
+                print("[Embedding] Doc \(document.pmid): score=\(score), normalized=\(document.embeddingScoreNormalized ?? -1)")
+            } else {
+                failCount += 1
+                print("[Embedding] Doc \(document.pmid): failed to compute score")
+            }
+        }
+
+        print("[Embedding] Completed: \(successCount) success, \(failCount) failed")
+        try? modelContext.save()
+    }
+
+    /// Generate a hypothetical document (HyDE) for embedding comparison.
+    ///
+    /// Creates a synthetic abstract that would ideally answer the medical claim,
+    /// providing richer semantic content for embedding comparison.
+    ///
+    /// - Parameter claim: The medical claim to generate a hypothetical document for.
+    /// - Returns: A hypothetical abstract text.
+    private func generateHypotheticalDocument(for claim: String) async throws -> String {
+        guard let llmService = llmService else {
+            throw LLMError.invalidConfiguration("LLM service not initialized")
+        }
+
+        let prompt = """
+        Generate a hypothetical medical research abstract that would directly address and provide evidence for the following claim or question.
+
+        Claim: \(claim)
+
+        Write a realistic abstract (150-250 words) that:
+        - Has a clear objective related to the claim
+        - Describes methods briefly
+        - States specific findings with numbers/percentages where appropriate
+        - Draws a conclusion about the claim
+
+        Output ONLY the abstract text, no title or labels. Write as if this were a real published study.
+        """
+
+        let messages = [LLMService.userMessage(prompt)]
+        let (response, usage) = try await llmService.chat(
+            messages: messages,
+            temperature: 0.7,
+            maxTokens: 512
+        )
+
+        // Record usage for budget tracking
+        recordUsage(usage, operationType: "hyde_generation")
+
+        return response.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func extractCitations() async throws {
+        guard let session = session, let llmService = llmService else { return }
+
+        let relevantDocs = session.documents.filter {
+            $0.meetsThreshold(settings.minScoreThreshold) && $0.citations.isEmpty
+        }
+        let total = relevantDocs.count
+
+        for (index, document) in relevantDocs.enumerated() {
+            try checkBudget()
+
+            updateProgress(.extractingCitations, "Extracting citations \(index + 1)/\(total)...")
+
+            let prompt = """
+            Extract 1-2 key passages from this abstract that are most relevant to the claim.
+
+            Claim: \(session.claim)
+
+            Document: \(document.title) (\(document.formattedAuthors), \(document.year ?? 0))
+
+            Abstract:
+            \(document.abstract)
+
+            Extract exact or close quotes that:
+            1. Directly address the claim
+            2. Contain specific findings, data, or conclusions
+            3. Could be quoted in an evidence summary
+
+            Respond in JSON format only:
+            {"passages": [{"text": "<quote>", "relevance": "<why relevant>"}]}
+            """
+
+            let messages = [LLMService.userMessage(prompt)]
+            let (response, usage) = try await llmService.chat(
+                messages: messages,
+                temperature: 0.1,
+                maxTokens: 512,
+                jsonMode: true
+            )
+
+            recordUsage(usage, operationType: "citation")
+
+            // Parse passages using ResponseParser
+            let passages = ResponseParser.parsePassagesResponse(response)
+            for passage in passages {
+                let citation = Citation(passage: passage.text, context: passage.relevance)
+                citation.document = document
+                modelContext.insert(citation)
+                session.citationsExtracted += 1
+            }
+
+            try? modelContext.save()
+        }
+    }
+
+    private func generateReport() async throws {
+        guard let session = session, let llmService = llmService else { return }
+
+        try checkBudget()
+
+        let allCitations = session.documents.flatMap { $0.citations }
+
+        // Handle no evidence case
+        guard !allCitations.isEmpty else {
+            let report = EvidenceReport(
+                verdict: .insufficientEvidence,
+                summary: "No relevant evidence was found in the medical literature for this claim.",
+                fullReport: generateNoEvidenceReport(claim: session.claim),
+                citationCount: 0,
+                uniqueSourceCount: 0,
+                documentsReviewed: session.documentsScored
+            )
+            report.session = session
+            modelContext.insert(report)
+            session.report = report
+            try? modelContext.save()
+            return
+        }
+
+        // Format citations for the prompt
+        let citationsText = formatCitationsForPrompt(allCitations)
+
+        let prompt = """
+        You are a medical evidence synthesizer. Analyze the following evidence to evaluate a medical claim.
+
+        Claim: \(session.claim)
+
+        Evidence from \(allCitations.count) citation(s) across \(session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count) document(s):
+
+        \(citationsText)
+
+        Write an evidence report that:
+        1. States a verdict: Supported, Partially Supported, Not Supported, Insufficient Evidence, or Conflicting Evidence
+        2. Provides a 2-3 sentence summary of the key findings
+        3. Discusses the evidence briefly with inline citations
+        4. Notes any important limitations
+
+        CRITICAL - Citation format:
+        Use this EXACT format for all inline citations: [Author, Year](doc:ID)
+        Example: [Smith et al., 2021](doc:pmid-12345678)
+        The ID must be copied EXACTLY from the "ID:" field provided for each citation above.
+        Do NOT invent or modify IDs - use only the IDs provided.
+
+        IMPORTANT: Use proper markdown with:
+        - ## Headers for sections
+        - **Bold** for emphasis
+        - Bullet points with -
+        - Blank lines between paragraphs (use \\n\\n in JSON)
+
+        Respond in JSON format only:
+        {
+            "verdict": "<one of: Supported, Partially Supported, Not Supported, Insufficient Evidence, Conflicting Evidence>",
+            "summary": "<2-3 sentence summary>",
+            "full_report": "<markdown report with proper line breaks using \\n\\n between sections>"
+        }
+        """
+
+        let messages = [LLMService.userMessage(prompt)]
+        let (response, usage) = try await llmService.chat(
+            messages: messages,
+            temperature: 0.3,
+            maxTokens: 2048,
+            jsonMode: true
+        )
+
+        recordUsage(usage, operationType: "report")
+
+        // Parse report using ResponseParser
+        let parsedReport = ResponseParser.parseReportResponse(response)
+        let uniqueSources = Set(allCitations.compactMap { $0.document?.pmid }).count
+
+        // Add references section
+        let relevantDocsForRefs = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }
+        let references = formatReferences(relevantDocsForRefs)
+        let completeReport = parsedReport.fullReport + "\n\n## References\n\n" + references
+
+        let report = EvidenceReport(
+            verdict: parsedReport.verdict,
+            summary: parsedReport.summary,
+            fullReport: completeReport,
+            citationCount: allCitations.count,
+            uniqueSourceCount: uniqueSources,
+            documentsReviewed: session.documentsScored
+        )
+        report.session = session
+        modelContext.insert(report)
+        session.report = report
+        try? modelContext.save()
+    }
+
+    // MARK: - Budget Management
+
+    private func checkBudget() throws {
+        guard let session = session else { return }
+
+        // Check per-run budget
+        if session.estimatedCostUSD >= settings.maxRunBudgetUSD {
+            throw BudgetError.runBudgetExceeded(
+                used: session.estimatedCostUSD,
+                limit: settings.maxRunBudgetUSD
+            )
+        }
+
+        // Check monthly budget
+        let totalMonthly = monthlyUsedUSD + session.estimatedCostUSD
+        if totalMonthly >= settings.monthlyBudgetUSD {
+            throw BudgetError.monthlyBudgetExceeded(
+                used: totalMonthly,
+                limit: settings.monthlyBudgetUSD
+            )
+        }
+    }
+
+    private func recordUsage(_ usage: LLMUsage, operationType: String) {
+        guard let session = session else { return }
+
+        // Update session totals
+        session.recordUsage(
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            model: settings.llmModel
+        )
+
+        // Create usage record for monthly tracking
+        let record = UsageRecord(
+            sessionId: session.id,
+            model: settings.llmModel,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            costUSD: usage.estimatedCostUSD,
+            operationType: operationType
+        )
+        modelContext.insert(record)
+
+        try? modelContext.save()
+    }
+
+    private func loadMonthlyUsage() async {
+        let monthKey = UsageRecord.currentMonthKey
+        let descriptor = FetchDescriptor<UsageRecord>(
+            predicate: #Predicate { $0.monthKey == monthKey }
+        )
+
+        do {
+            let records = try modelContext.fetch(descriptor)
+            monthlyUsedUSD = records.reduce(0) { $0 + $1.costUSD }
+        } catch {
+            monthlyUsedUSD = 0
+        }
+    }
+
+    // MARK: - Formatting Helpers
+
+    private func formatCitationsForPrompt(_ citations: [Citation]) -> String {
+        var result = ""
+        for (index, citation) in citations.enumerated() {
+            guard let doc = citation.document else { continue }
+            result += """
+            [\(index + 1)] ID: \(doc.id)
+            Authors: \(doc.formattedAuthors) (\(doc.year ?? 0))
+            Title: \(doc.title)
+            Passage: "\(citation.passage)"
+
+            """
+        }
+        return result
+    }
+
+    private func formatReferences(_ documents: [Document]) -> String {
+        documents.enumerated().map { index, doc in
+            var ref = "**\(index + 1).** "
+            ref += "**\(doc.formattedAuthors)"
+            if let year = doc.year { ref += " (\(year))" }
+            ref += ".** "
+            ref += "\(doc.title)"
+            if let journal = doc.journal { ref += ". *\(journal)*" }
+            ref += ". PMID: \(doc.pmid)"
+            return ref
+        }.joined(separator: "\n\n")
+    }
+
+    private func generateNoEvidenceReport(claim: String) -> String {
+        """
+        ## Evidence Report
+
+        **Claim:** \(claim)
+
+        **Verdict:** Insufficient Evidence
+
+        No relevant evidence was found in the searched medical literature for this claim.
+
+        ### Possible Reasons
+
+        1. The topic may have limited published research
+        2. The search terms may need refinement
+        3. The claim may be too specific or novel
+
+        ### Recommendations
+
+        - Try rephrasing the claim with different medical terms
+        - Consider searching for related topics
+        - Consult specialized medical databases
+
+        ---
+        *No citations available*
+        """
+    }
+
+    // MARK: - Smart Search
+
+    /// Minimum relevant documents before triggering smart search
+    private let smartSearchThreshold = 3
+
+    /// Generate alternative search queries when initial search yields insufficient results.
+    private func generateAlternativeQueries() async throws -> [String] {
+        guard let session = session, let llmService = llmService else { return [] }
+
+        try checkBudget()
+
+        let prompt = """
+        The following medical question did not return enough relevant results with the initial PubMed search.
+
+        Question: \(session.claim)
+        Initial query: \(session.pubmedQuery ?? "N/A")
+        Results found: \(session.totalPubMedResults)
+        Relevant documents: \(session.relevantDocumentsFound)
+
+        Analyze the question and suggest 2-4 alternative search strategies. Consider:
+        1. If comparing two treatments/medications, search for each one separately
+        2. Use different synonyms or related terms
+        3. Break compound questions into simpler components
+        4. Try broader or narrower search terms
+        5. Focus on key outcomes or mechanisms
+
+        For comparison questions (e.g., "A vs B for condition C"), generate separate queries like:
+        - "A AND condition C AND outcome"
+        - "B AND condition C AND outcome"
+
+        Output a JSON array of alternative PubMed query strings. Each query should:
+        - Be a valid PubMed search syntax
+        - Include "AND hasabstract" at the end
+        - Be different from the original query
+
+        Respond with ONLY a JSON array of strings, nothing else:
+        ["query1 AND hasabstract", "query2 AND hasabstract"]
+        """
+
+        let messages = [LLMService.userMessage(prompt)]
+        let (response, usage) = try await llmService.chat(
+            messages: messages,
+            temperature: 0.3,
+            maxTokens: 512,
+            jsonMode: true
+        )
+
+        recordUsage(usage, operationType: "smart_search")
+
+        // Parse the JSON array
+        let queries = ResponseParser.parseStringArray(response)
+        return queries
+    }
+
+    /// Execute smart search with alternative queries.
+    private func executeSmartSearch() async throws {
+        guard let session = session else { return }
+
+        // Generate alternative queries
+        updateProgress(.searchingPubMed, "Generating alternative search strategies...")
+        let alternatives = try await generateAlternativeQueries()
+
+        guard !alternatives.isEmpty else {
+            // No alternatives generated, continue with what we have
+            return
+        }
+
+        // Store alternatives in session
+        session.alternativeQueries = try? JSONEncoder().encode(alternatives).base64EncodedString()
+        session.smartSearchEnabled = true
+        session.currentAlternativeQueryIndex = 0
+
+        // Track already-fetched PMIDs
+        let existingPmids = Set(session.documents.map { $0.pmid })
+        session.fetchedPmids = existingPmids.joined(separator: ",")
+
+        onSmartSearchActivated?("Trying \(alternatives.count) alternative search strategies...")
+
+        // Execute each alternative query
+        for (index, query) in alternatives.enumerated() {
+            try checkBudget()
+
+            session.currentAlternativeQueryIndex = index
+            updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(query.prefix(50))...")
+
+            try await executeAlternativeQuery(query)
+
+            // Check if we now have enough relevant documents
+            let relevant = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+            if relevant >= settings.minRelevantDocuments {
+                updateProgress(.searchingPubMed, "Found enough relevant documents with smart search")
+                break
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    /// Execute a single alternative query, avoiding duplicates.
+    private func executeAlternativeQuery(_ query: String) async throws {
+        guard let session = session, let pubmedService = pubmedService else { return }
+
+        // Get already-fetched PMIDs
+        let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
+
+        let result = try await pubmedService.search(
+            query: query,
+            maxResults: settings.batchSize,
+            offset: 0
+        )
+
+        // Filter out already-fetched PMIDs
+        let newPmids = result.pmids.filter { !fetchedPmidSet.contains($0) }
+
+        guard !newPmids.isEmpty else {
+            return  // No new results from this query
+        }
+
+        // Fetch article metadata
+        let articles = try await pubmedService.fetchArticles(
+            pmids: newPmids,
+            batchNumber: session.batchesFetched + 1,
+            basePosition: session.documentsFound
+        )
+
+        // Create Document objects
+        for article in articles {
+            let document = Document(
+                pmid: article.pmid,
+                title: article.title,
+                abstract: article.abstract,
+                authors: article.authors,
+                batchNumber: article.batchNumber,
+                resultPosition: article.resultPosition
+            )
+            document.year = article.year
+            document.journal = article.journal
+            document.doi = article.doi
+            document.pmcId = article.pmcId
+            document.meshTerms = article.meshTerms
+            document.publicationDate = article.publicationDate
+            document.session = session
+
+            modelContext.insert(document)
+        }
+
+        // Update tracking
+        session.documentsFound += articles.count
+        session.batchesFetched += 1
+
+        // Update fetched PMIDs
+        var updatedPmids = fetchedPmidSet
+        newPmids.forEach { updatedPmids.insert($0) }
+        session.fetchedPmids = updatedPmids.joined(separator: ",")
+
+        try? modelContext.save()
+
+        // Score the new documents
+        try await scoreNewDocuments(articles.map { $0.pmid })
+    }
+
+    /// Score only specific documents (by PMID).
+    private func scoreNewDocuments(_ pmids: [String]) async throws {
+        guard let session = session, let llmService = llmService else { return }
+
+        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil }
+
+        for document in docsToScore {
+            try checkBudget()
+
+            let prompt = """
+            Evaluate how relevant this document is to the following medical claim.
+
+            Claim: \(session.claim)
+
+            Document Title: \(document.title)
+            Authors: \(document.formattedAuthors)
+            Year: \(document.year ?? 0)
+            Journal: \(document.journal ?? "Unknown")
+
+            Abstract:
+            \(document.abstract)
+
+            Score on a scale of 1-5:
+            - 5: Directly addresses the claim with strong evidence
+            - 4: Highly relevant, provides substantial supporting information
+            - 3: Moderately relevant, contains useful related information
+            - 2: Marginally relevant, tangentially related
+            - 1: Not relevant to the claim
+
+            Respond in JSON format only:
+            {"score": <1-5>, "explanation": "<brief explanation>"}
+            """
+
+            let messages = [LLMService.userMessage(prompt)]
+            let (response, usage) = try await llmService.chat(
+                messages: messages,
+                temperature: 0.1,
+                maxTokens: 256,
+                jsonMode: true
+            )
+
+            recordUsage(usage, operationType: "scoring")
+
+            let parsed = ResponseParser.parseScoreResponse(response)
+            document.relevanceScore = parsed.score
+            document.scoreExplanation = parsed.explanation
+            document.scoredAt = Date()
+
+            session.documentsScored += 1
+            if parsed.score >= settings.minScoreThreshold {
+                session.relevantDocumentsFound += 1
+            }
+
+            try? modelContext.save()
+        }
+    }
+
+    private func updateProgress(_ step: WorkflowStep, _ message: String) {
+        progressMessage = message
+        onProgress?(step, message)
+    }
+}
+
+// MARK: - Budget Errors
+
+enum BudgetError: LocalizedError {
+    case runBudgetExceeded(used: Double, limit: Double)
+    case monthlyBudgetExceeded(used: Double, limit: Double)
+
+    var errorDescription: String? {
+        switch self {
+        case .runBudgetExceeded(let used, let limit):
+            return "Run budget exceeded: \(CostCalculator.formatCost(used)) used of \(CostCalculator.formatCost(limit)) limit"
+        case .monthlyBudgetExceeded(let used, let limit):
+            return "Monthly budget exceeded: \(CostCalculator.formatCost(used)) used of \(CostCalculator.formatCost(limit)) limit"
+        }
+    }
+}
