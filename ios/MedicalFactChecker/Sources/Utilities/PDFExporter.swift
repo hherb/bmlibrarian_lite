@@ -219,11 +219,110 @@ struct PDFExporter {
                 currentY += badgeHeight + 10
             }
 
+            // MARK: - Markdown Rendering Helpers
+
+            /// Render markdown text with proper formatting for headers, bold, lists, etc.
+            func drawMarkdown(_ markdown: String) {
+                let normalizedText = normalizeLineBreaks(markdown)
+                let blocks = parseMarkdownBlocks(normalizedText)
+
+                for block in blocks {
+                    switch block {
+                    case .heading(let level, let text):
+                        addSpacing(level == 1 ? 12 : 8)
+                        let font: UIFont = switch level {
+                        case 1: .boldSystemFont(ofSize: 16)
+                        case 2: .boldSystemFont(ofSize: 14)
+                        default: .boldSystemFont(ofSize: 12)
+                        }
+                        _ = drawText(text, font: font)
+                        addSpacing(4)
+
+                    case .paragraph(let text):
+                        let cleanedText = convertReferencesToPlainText(text)
+                        _ = drawFormattedText(cleanedText, baseFont: .systemFont(ofSize: 11))
+                        addSpacing(6)
+
+                    case .listItem(let text, let ordered, let number):
+                        let cleanedText = convertReferencesToPlainText(text)
+                        let bullet = ordered ? "\(number ?? 1)." : "•"
+                        _ = drawFormattedText("\(bullet) \(cleanedText)", baseFont: .systemFont(ofSize: 11))
+                        addSpacing(3)
+                    }
+                }
+            }
+
+            /// Draw text with inline bold formatting preserved.
+            func drawFormattedText(_ text: String, baseFont: UIFont) -> CGFloat {
+                startNewPageIfNeeded()
+
+                let attributedString = NSMutableAttributedString()
+                let paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.lineBreakMode = .byWordWrapping
+
+                // Parse bold markers and create attributed string
+                var remaining = text
+                while !remaining.isEmpty {
+                    if let boldStart = remaining.range(of: "**") {
+                        // Add text before bold marker
+                        let beforeBold = String(remaining[..<boldStart.lowerBound])
+                        if !beforeBold.isEmpty {
+                            attributedString.append(NSAttributedString(
+                                string: beforeBold,
+                                attributes: [.font: baseFont, .paragraphStyle: paragraphStyle]
+                            ))
+                        }
+
+                        // Find closing bold marker
+                        let afterStart = remaining[boldStart.upperBound...]
+                        if let boldEnd = afterStart.range(of: "**") {
+                            let boldText = String(afterStart[..<boldEnd.lowerBound])
+                            let boldFont = UIFont.boldSystemFont(ofSize: baseFont.pointSize)
+                            attributedString.append(NSAttributedString(
+                                string: boldText,
+                                attributes: [.font: boldFont, .paragraphStyle: paragraphStyle]
+                            ))
+                            remaining = String(afterStart[boldEnd.upperBound...])
+                        } else {
+                            // No closing marker, treat as regular text
+                            remaining = String(remaining[boldStart.upperBound...])
+                        }
+                    } else {
+                        // No more bold markers
+                        attributedString.append(NSAttributedString(
+                            string: remaining,
+                            attributes: [.font: baseFont, .paragraphStyle: paragraphStyle]
+                        ))
+                        remaining = ""
+                    }
+                }
+
+                let boundingRect = attributedString.boundingRect(
+                    with: CGSize(width: contentRect.width, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    context: nil
+                )
+
+                ensureSpace(for: boundingRect.height)
+
+                let drawRect = CGRect(
+                    x: contentRect.minX,
+                    y: currentY,
+                    width: contentRect.width,
+                    height: boundingRect.height
+                )
+
+                attributedString.draw(with: drawRect, options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
+
+                currentY += boundingRect.height
+                return boundingRect.height
+            }
+
             // MARK: - Render Report Content
 
             // Header
             startNewPageIfNeeded()
-            _ = drawText("Medical Fact Check Report", font: .boldSystemFont(ofSize: 18))
+            _ = drawText("Medical Fact Check Report", font: .boldSystemFont(ofSize: 20))
             _ = drawText("Generated: \(report.generatedAt.formatted(date: .abbreviated, time: .shortened))",
                         font: .systemFont(ofSize: 10), color: .gray)
             addSpacing(15)
@@ -241,13 +340,13 @@ struct PDFExporter {
 
             // Claim
             if let session = report.session {
-                _ = drawText("Claim", font: .boldSystemFont(ofSize: 12), color: .darkGray)
+                _ = drawText("Claim", font: .boldSystemFont(ofSize: 14), color: .darkGray)
                 addSpacing(4)
                 _ = drawText(session.claim, font: .italicSystemFont(ofSize: 12))
                 addSpacing(8)
 
                 if let query = session.pubmedQuery {
-                    _ = drawText("PubMed Query", font: .boldSystemFont(ofSize: 10), color: .gray)
+                    _ = drawText("PubMed Query", font: .boldSystemFont(ofSize: 11), color: .gray)
                     addSpacing(2)
                     _ = drawText(query, font: UIFont(name: "Menlo", size: 9) ?? .systemFont(ofSize: 9), color: .systemBlue)
                 }
@@ -257,26 +356,23 @@ struct PDFExporter {
             drawDivider()
 
             // Summary
-            _ = drawText("Summary", font: .boldSystemFont(ofSize: 14))
+            _ = drawText("Summary", font: .boldSystemFont(ofSize: 16))
             addSpacing(6)
             _ = drawText(report.summary, font: .systemFont(ofSize: 11))
             addSpacing(15)
 
             drawDivider()
 
-            // Detailed Report
-            _ = drawText("Detailed Analysis", font: .boldSystemFont(ofSize: 14))
+            // Detailed Report - now with proper markdown rendering
+            _ = drawText("Detailed Analysis", font: .boldSystemFont(ofSize: 16))
             addSpacing(8)
-
-            // Render markdown as plain text
-            let plainReport = convertMarkdownToPlainText(report.fullReport)
-            _ = drawText(plainReport, font: .systemFont(ofSize: 11))
+            drawMarkdown(report.fullReport)
             addSpacing(15)
 
             drawDivider()
 
             // Statistics
-            _ = drawText("Statistics", font: .boldSystemFont(ofSize: 14))
+            _ = drawText("Statistics", font: .boldSystemFont(ofSize: 16))
             addSpacing(6)
             _ = drawText("Documents Reviewed: \(report.documentsReviewed)", font: .systemFont(ofSize: 11))
             _ = drawText("Relevant Sources: \(report.uniqueSourceCount)", font: .systemFont(ofSize: 11))
@@ -290,24 +386,25 @@ struct PDFExporter {
 
                 if !relevantDocs.isEmpty {
                     drawDivider()
-                    _ = drawText("Reviewed Documents", font: .boldSystemFont(ofSize: 14))
+                    _ = drawText("Reviewed Documents", font: .boldSystemFont(ofSize: 16))
                     addSpacing(8)
 
-                    for doc in relevantDocs.prefix(10) {
-                        ensureSpace(for: 50)
+                    for doc in relevantDocs {
+                        // Estimate height needed for this document entry
+                        let estimatedHeight: CGFloat = 70
+                        ensureSpace(for: estimatedHeight)
+
                         _ = drawText("• \(doc.title)", font: .boldSystemFont(ofSize: 10))
                         _ = drawText("  \(doc.formattedAuthors)", font: .systemFont(ofSize: 9), color: .darkGray)
                         if let journal = doc.journal, let year = doc.year {
                             _ = drawText("  \(journal), \(year) • PMID: \(doc.pmid)", font: .systemFont(ofSize: 9), color: .gray)
+                        } else {
+                            _ = drawText("  PMID: \(doc.pmid)", font: .systemFont(ofSize: 9), color: .gray)
                         }
                         if let score = doc.relevanceScore {
                             _ = drawText("  Relevance Score: \(score)/5", font: .systemFont(ofSize: 9), color: .systemBlue)
                         }
-                        addSpacing(6)
-                    }
-
-                    if relevantDocs.count > 10 {
-                        _ = drawText("+ \(relevantDocs.count - 10) additional relevant documents", font: .italicSystemFont(ofSize: 9), color: .gray)
+                        addSpacing(8)
                     }
                     addSpacing(15)
                 }
@@ -322,7 +419,7 @@ struct PDFExporter {
             addSpacing(10)
 
             // Disclaimer
-            _ = drawText("⚠️ Important Disclaimer", font: .boldSystemFont(ofSize: 10), color: .systemOrange)
+            _ = drawText("Important Disclaimer", font: .boldSystemFont(ofSize: 11), color: .systemOrange)
             addSpacing(4)
             _ = drawText(
                 "This report is generated by AI and is intended for informational purposes only. " +
@@ -340,60 +437,144 @@ struct PDFExporter {
         return data
     }
 
-    /// Convert markdown text to plain text, preserving structure.
-    private static func convertMarkdownToPlainText(_ markdown: String) -> String {
-        var result = markdown
+    // MARK: - Markdown Parsing Types
 
-        // Convert escaped newlines
+    /// Block types for markdown parsing.
+    private enum MarkdownBlock {
+        case heading(level: Int, text: String)
+        case paragraph(text: String)
+        case listItem(text: String, ordered: Bool, number: Int?)
+    }
+
+    // MARK: - Markdown Parsing
+
+    /// Normalize line breaks in markdown text.
+    private static func normalizeLineBreaks(_ text: String) -> String {
+        var result = text
         result = result.replacingOccurrences(of: "\\n", with: "\n")
+        while result.contains("\n\n\n") {
+            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-        // Remove reference links: [Author, Year](doc:pmid-12345) -> Author, Year (PMID: 12345)
-        let refPattern = "\\[([^\\]]+)\\]\\(doc:pmid-(\\d+)\\)"
-        if let regex = try? NSRegularExpression(pattern: refPattern) {
+    /// Parse markdown text into structured blocks.
+    private static func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
+        let lines = text.components(separatedBy: "\n")
+        var blocks: [MarkdownBlock] = []
+        var currentParagraph: [String] = []
+        var listNumber = 0
+
+        func flushParagraph() {
+            if !currentParagraph.isEmpty {
+                blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                currentParagraph = []
+            }
+        }
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.isEmpty {
+                flushParagraph()
+                listNumber = 0
+                continue
+            }
+
+            // Headers
+            if trimmed.hasPrefix("### ") {
+                flushParagraph()
+                blocks.append(.heading(level: 3, text: String(trimmed.dropFirst(4))))
+                listNumber = 0
+                continue
+            }
+            if trimmed.hasPrefix("## ") {
+                flushParagraph()
+                blocks.append(.heading(level: 2, text: String(trimmed.dropFirst(3))))
+                listNumber = 0
+                continue
+            }
+            if trimmed.hasPrefix("# ") {
+                flushParagraph()
+                blocks.append(.heading(level: 1, text: String(trimmed.dropFirst(2))))
+                listNumber = 0
+                continue
+            }
+
+            // Unordered list
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                flushParagraph()
+                blocks.append(.listItem(text: String(trimmed.dropFirst(2)), ordered: false, number: nil))
+                listNumber = 0
+                continue
+            }
+
+            // Ordered list
+            if let match = parseOrderedListItem(trimmed) {
+                flushParagraph()
+                listNumber += 1
+                blocks.append(.listItem(text: match, ordered: true, number: listNumber))
+                continue
+            }
+
+            currentParagraph.append(trimmed)
+        }
+
+        flushParagraph()
+        return blocks
+    }
+
+    /// Parse an ordered list item line.
+    private static func parseOrderedListItem(_ line: String) -> String? {
+        let pattern = "^\\d+\\.\\s+(.+)$"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let textRange = Range(match.range(at: 1), in: line) else {
+            return nil
+        }
+        return String(line[textRange])
+    }
+
+    /// Convert interactive references to plain text with PMIDs.
+    ///
+    /// Converts `[Author, Year](doc:pmid-12345)` to `Author, Year (PMID: 12345)`.
+    private static func convertReferencesToPlainText(_ text: String) -> String {
+        var result = text
+
+        // Pattern for references with document ID: [Author, Year](doc:pmid-12345)
+        let patternWithId = "\\[([^\\]]+)\\]\\(doc:pmid-(\\d+)\\)"
+        if let regex = try? NSRegularExpression(pattern: patternWithId) {
+            let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(
                 in: result,
-                range: NSRange(result.startIndex..., in: result),
+                range: range,
                 withTemplate: "$1 (PMID: $2)"
             )
         }
 
-        // Remove generic doc links: [text](doc:id) -> text
-        let genericDocPattern = "\\[([^\\]]+)\\]\\(doc:[^)]+\\)"
-        if let regex = try? NSRegularExpression(pattern: genericDocPattern) {
+        // Pattern for references with generic doc ID: [Author, Year](doc:id)
+        let patternGenericId = "\\[([^\\]]+)\\]\\(doc:[^)]+\\)"
+        if let regex = try? NSRegularExpression(pattern: patternGenericId) {
+            let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(
                 in: result,
-                range: NSRange(result.startIndex..., in: result),
+                range: range,
                 withTemplate: "$1"
             )
         }
 
-        // Remove other markdown links: [text](url) -> text
+        // Remove remaining markdown link syntax: [text](url) -> text
         let linkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
         if let regex = try? NSRegularExpression(pattern: linkPattern) {
+            let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(
                 in: result,
-                range: NSRange(result.startIndex..., in: result),
+                range: range,
                 withTemplate: "$1"
             )
         }
 
-        // Convert headers to uppercase with newlines
-        result = result.replacingOccurrences(of: "### ", with: "\n")
-        result = result.replacingOccurrences(of: "## ", with: "\n")
-        result = result.replacingOccurrences(of: "# ", with: "\n")
-
-        // Remove bold/italic markers
-        result = result.replacingOccurrences(of: "**", with: "")
-        result = result.replacingOccurrences(of: "__", with: "")
-        result = result.replacingOccurrences(of: "*", with: "")
-        result = result.replacingOccurrences(of: "_", with: "")
-
-        // Clean up multiple newlines
-        while result.contains("\n\n\n") {
-            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
-        }
-
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result
     }
 
     /// Create a temporary file URL for the PDF.
