@@ -31,6 +31,12 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 - **Clickable Citations**: Tap references in reports to view source document details
 - **Smart Search**: Automatic alternative query generation when initial results are insufficient
 
+### macOS App (Swift/SwiftUI)
+- **Standalone Project**: Separate Xcode project designed for platform-specific evolution
+- **Native macOS UI**: Optimized layouts for larger screens with keyboard navigation
+- **PDF Export**: Native AppKit-based PDF generation with A4/Letter paper sizes
+- **Future-Ready**: Architecture prepared for local LLM processing and PostgreSQL backend
+
 ## Quick Start
 
 ### Desktop Installation
@@ -124,6 +130,25 @@ The iOS app is located in `ios/MedicalFactChecker/`. To build:
   - NCBI email for PubMed API
   - Per-run and monthly budget limits
   - Enable/disable embedding scoring
+
+### macOS App
+
+The macOS app is a separate project located in `macos/MedicalFactCheckerMac/`. To build:
+
+1. **Open in Xcode**: Open `macos/MedicalFactCheckerMac/MedicalFactCheckerMac.xcodeproj`
+2. **Configure signing**: Set your development team in project settings
+3. **Build and run**: Select "My Mac" as the target and build
+
+**Or build from command line:**
+```bash
+cd macos/MedicalFactCheckerMac
+xcodebuild -project MedicalFactCheckerMac.xcodeproj \
+           -scheme MedicalFactCheckerMac \
+           -configuration Debug \
+           build
+```
+
+The macOS app shares the same core functionality as iOS but is designed to evolve independently with features like local LLM support and PostgreSQL backend.
 
 ## Usage
 
@@ -264,18 +289,22 @@ You can also use the model string format: `anthropic:claude-sonnet-4-20250514` o
 
 BMLibrarian Lite is designed for ease of use and portability:
 
-| Feature | BMLibrarian | BMLibrarian Lite Desktop | BMLibrarian Lite iOS |
-|---------|-------------|--------------------------|----------------------|
-| Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData |
-| Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding |
-| PDF Discovery | Full | Included | N/A |
-| Multi-Agent Workflow | Full orchestration | Simplified workflow | Streamlined |
-| Plugin System | Lab plugins | N/A | N/A |
-| Multi-Model Benchmarking | N/A | Included | N/A |
-| Research Questions | N/A | Save & re-run | History view |
-| Budget Controls | N/A | N/A | Per-run & monthly |
-| HyDE Embedding | N/A | N/A | Included |
-| Installation | Complex | `pip install` | Xcode build |
+| Feature | BMLibrarian | Desktop (Python) | iOS App | macOS App |
+|---------|-------------|------------------|---------|-----------|
+| Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData | SwiftData* |
+| Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding | Apple NLEmbedding |
+| PDF Discovery | Full | Included | N/A | N/A |
+| PDF Export | N/A | N/A | Included | Included |
+| Multi-Agent Workflow | Full orchestration | Simplified | Streamlined | Streamlined |
+| Plugin System | Lab plugins | N/A | N/A | N/A |
+| Multi-Model Benchmarking | N/A | Included | N/A | N/A |
+| Research Questions | N/A | Save & re-run | History view | History view |
+| Budget Controls | N/A | N/A | Per-run & monthly | Per-run & monthly |
+| HyDE Embedding | N/A | N/A | Included | Included |
+| Local LLM Support | N/A | Ollama | N/A | Planned |
+| Installation | Complex | `pip install` | Xcode build | Xcode build |
+
+*macOS app is designed to support PostgreSQL backend in future versions.
 
 ## Documentation
 
