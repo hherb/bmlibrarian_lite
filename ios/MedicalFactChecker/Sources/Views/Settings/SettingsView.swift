@@ -50,7 +50,22 @@ struct SettingsView: View {
                             Text("Enter model name manually below")
                                 .foregroundColor(.secondary)
                         } else {
-                            Picker("Model", selection: $settings.llmModel) {
+                            // Use a computed binding that ensures the selection is always valid
+                            let modelBinding = Binding<String>(
+                                get: {
+                                    // If current model is valid for this provider, use it
+                                    if settings.selectedProvider.models.contains(where: { $0.id == settings.llmModel }) {
+                                        return settings.llmModel
+                                    }
+                                    // Otherwise return the default model for this provider
+                                    return settings.selectedProvider.defaultModel?.id ?? settings.llmModel
+                                },
+                                set: { newValue in
+                                    settings.llmModel = newValue
+                                }
+                            )
+
+                            Picker("Model", selection: modelBinding) {
                                 ForEach(settings.selectedProvider.models) { model in
                                     VStack(alignment: .leading) {
                                         HStack {

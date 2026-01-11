@@ -9,9 +9,21 @@ import Foundation
 
 /// Service for interacting with OpenAI-compatible LLM APIs.
 ///
-/// Handles chat completions with automatic token tracking and cost calculation.
+/// Handles chat completions with automatic token tracking, cost calculation,
+/// and retry logic with exponential backoff for transient failures.
 /// Thread-safe using Swift's actor model.
 actor LLMService {
+    // MARK: - Constants
+
+    /// Maximum number of retry attempts for failed requests.
+    private static let maxRetries = 3
+
+    /// Base delay in seconds for exponential backoff.
+    private static let baseDelaySeconds: Double = 1.0
+
+    /// Maximum delay in seconds between retries.
+    private static let maxDelaySeconds: Double = 10.0
+
     // MARK: - Configuration
 
     private var baseURL: URL
@@ -58,7 +70,10 @@ actor LLMService {
 
     // MARK: - Chat Completion
 
-    /// Send a chat completion request to the LLM.
+    /// Send a chat completion request to the LLM with automatic retry.
+    ///
+    /// Retries up to `maxRetries` times with exponential backoff for transient failures
+    /// (network errors, rate limits, server errors).
     ///
     /// - Parameters:
     ///   - messages: Array of chat messages.
@@ -71,6 +86,43 @@ actor LLMService {
         temperature: Double = 0.1,
         maxTokens: Int = 1024,
         jsonMode: Bool = false
+    ) async throws -> (content: String, usage: LLMUsage) {
+        var lastError: Error?
+
+        for attempt in 0..<Self.maxRetries {
+            do {
+                return try await performChatRequest(
+                    messages: messages,
+                    temperature: temperature,
+                    maxTokens: maxTokens
+                )
+            } catch {
+                lastError = error
+
+                // Check if error is retryable
+                guard isRetryableError(error) else {
+                    print("[LLMService] Non-retryable error: \(error.localizedDescription)")
+                    throw error
+                }
+
+                // Don't retry after the last attempt
+                if attempt < Self.maxRetries - 1 {
+                    let delay = calculateBackoffDelay(attempt: attempt)
+                    print("[LLMService] Attempt \(attempt + 1) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", delay))s...")
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            }
+        }
+
+        print("[LLMService] All \(Self.maxRetries) attempts failed")
+        throw lastError ?? LLMError.invalidResponse
+    }
+
+    /// Perform the actual chat request without retry logic.
+    private func performChatRequest(
+        messages: [ChatMessage],
+        temperature: Double,
+        maxTokens: Int
     ) async throws -> (content: String, usage: LLMUsage) {
         let endpoint = baseURL.appendingPathComponent("chat/completions")
 
@@ -128,6 +180,82 @@ actor LLMService {
         onUsageRecorded?(usage)
 
         return (content, usage)
+    }
+
+    // MARK: - Retry Helpers
+
+    /// Determine if an error is retryable.
+    ///
+    /// Retryable errors include:
+    /// - Network/connection errors
+    /// - Rate limiting (429)
+    /// - Server errors (500, 502, 503, 504)
+    /// - Timeouts
+    ///
+    /// Non-retryable errors include:
+    /// - Authentication errors (401, 403)
+    /// - Bad request (400)
+    /// - Not found (404)
+    /// - Invalid configuration
+    private func isRetryableError(_ error: Error) -> Bool {
+        // Check for URL errors (network issues, timeouts)
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                return true
+            default:
+                return false
+            }
+        }
+
+        // Check for LLM-specific errors
+        if let llmError = error as? LLMError {
+            switch llmError {
+            case .httpError(let statusCode):
+                return isRetryableStatusCode(statusCode)
+            case .apiError(let statusCode, _):
+                return isRetryableStatusCode(statusCode)
+            case .invalidResponse, .emptyResponse:
+                // These might be transient issues
+                return true
+            case .invalidConfiguration, .parseError:
+                // These won't be fixed by retrying
+                return false
+            }
+        }
+
+        // Default: retry for unknown errors (could be transient)
+        return true
+    }
+
+    /// Check if an HTTP status code is retryable.
+    private func isRetryableStatusCode(_ statusCode: Int) -> Bool {
+        switch statusCode {
+        case 429:  // Rate limited
+            return true
+        case 500, 502, 503, 504:  // Server errors
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Calculate backoff delay with exponential increase and jitter.
+    ///
+    /// - Parameter attempt: The current attempt number (0-indexed).
+    /// - Returns: Delay in seconds before the next retry.
+    private func calculateBackoffDelay(attempt: Int) -> Double {
+        // Exponential backoff: base * 2^attempt
+        let exponentialDelay = Self.baseDelaySeconds * pow(2.0, Double(attempt))
+
+        // Cap at maximum delay
+        let cappedDelay = min(exponentialDelay, Self.maxDelaySeconds)
+
+        // Add jitter (±25%) to prevent thundering herd
+        let jitter = cappedDelay * Double.random(in: -0.25...0.25)
+
+        return cappedDelay + jitter
     }
 
     /// Convenience method that returns just the content string.

@@ -119,10 +119,19 @@ enum ResponseParser {
 
         guard let data = jsonString.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Log the parsing failure for debugging
+            print("[ResponseParser] Failed to parse report JSON")
+            print("[ResponseParser] Raw response length: \(response.count)")
+            print("[ResponseParser] Extracted JSON length: \(jsonString.count)")
+            if response.count < 2000 {
+                print("[ResponseParser] Raw response: \(response)")
+            } else {
+                print("[ResponseParser] Raw response (first 500 chars): \(String(response.prefix(500)))")
+            }
             return ParsedReport(
                 verdict: .insufficientEvidence,
                 summary: "Failed to generate report",
-                fullReport: "Error parsing LLM response"
+                fullReport: "Error parsing LLM response. The model may have returned an unexpected format."
             )
         }
 
@@ -221,13 +230,14 @@ enum ResponseParser {
     /// - Pure JSON
     /// - JSON wrapped in markdown code blocks (```json ... ```)
     /// - JSON with leading/trailing text
+    /// - Nested or malformed JSON with extra braces
     ///
     /// - Parameter response: Raw LLM response.
     /// - Returns: Extracted JSON string, or original if no JSON found.
     static func extractJSON(from response: String) -> String {
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Try to find JSON in markdown code block
+        // Try to find JSON in markdown code block first (most reliable)
         if let codeBlockMatch = trimmed.range(of: "```(?:json)?\\s*([\\s\\S]*?)```",
                                                options: .regularExpression) {
             let content = trimmed[codeBlockMatch]
@@ -236,10 +246,18 @@ enum ResponseParser {
                 .replacingOccurrences(of: "```json", with: "")
                 .replacingOccurrences(of: "```", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return stripped
+            // Verify it's valid JSON before returning
+            if isValidJSON(stripped) {
+                return stripped
+            }
         }
 
-        // Try to find JSON object by looking for { ... }
+        // Try to find balanced JSON object using brace matching
+        if let jsonString = extractBalancedJSON(from: trimmed) {
+            return jsonString
+        }
+
+        // Fallback: simple first-brace to last-brace extraction
         if let startIndex = trimmed.firstIndex(of: "{"),
            let endIndex = trimmed.lastIndex(of: "}") {
             return String(trimmed[startIndex...endIndex])
@@ -247,5 +265,77 @@ enum ResponseParser {
 
         // Return original if no JSON pattern found
         return trimmed
+    }
+
+    /// Extract a balanced JSON object from a string by matching braces.
+    ///
+    /// Handles cases where the response contains multiple JSON objects or nested braces.
+    ///
+    /// - Parameter string: The string to extract JSON from.
+    /// - Returns: The extracted JSON string, or nil if no valid JSON found.
+    private static func extractBalancedJSON(from string: String) -> String? {
+        guard let startIndex = string.firstIndex(of: "{") else {
+            return nil
+        }
+
+        var braceCount = 0
+        var inString = false
+        var escapeNext = false
+        var endIndex: String.Index?
+
+        for index in string.indices[startIndex...] {
+            let char = string[index]
+
+            if escapeNext {
+                escapeNext = false
+                continue
+            }
+
+            if char == "\\" && inString {
+                escapeNext = true
+                continue
+            }
+
+            if char == "\"" {
+                inString = !inString
+                continue
+            }
+
+            if !inString {
+                if char == "{" {
+                    braceCount += 1
+                } else if char == "}" {
+                    braceCount -= 1
+                    if braceCount == 0 {
+                        endIndex = index
+                        break
+                    }
+                }
+            }
+        }
+
+        guard let finalEnd = endIndex else {
+            return nil
+        }
+
+        let jsonString = String(string[startIndex...finalEnd])
+
+        // Verify it's valid JSON before returning
+        if isValidJSON(jsonString) {
+            return jsonString
+        }
+
+        return nil
+    }
+
+    /// Check if a string is valid JSON.
+    ///
+    /// - Parameter string: The string to validate.
+    /// - Returns: True if the string is valid JSON.
+    private static func isValidJSON(_ string: String) -> Bool {
+        guard let data = string.data(using: .utf8) else {
+            return false
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
     }
 }
