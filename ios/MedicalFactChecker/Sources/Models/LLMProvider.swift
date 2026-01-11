@@ -11,6 +11,9 @@ import Foundation
 ///
 /// Each provider has a base URL and a list of available models.
 /// Use `.custom` for self-hosted or unlisted providers.
+///
+/// Models can be fetched dynamically using `ModelFetchService.shared.fetchModels(for:)`.
+/// The `fallbackModels` property provides hardcoded models when API fetching fails.
 enum LLMProvider: String, CaseIterable, Identifiable, Codable {
     case anthropic
     case openai
@@ -48,51 +51,86 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Available models for this provider.
-    var models: [LLMModel] {
+    /// Fallback models for this provider (used when API fetching fails).
+    ///
+    /// These are hardcoded models that serve as fallbacks when dynamic
+    /// model fetching is not available or fails.
+    /// Last updated: January 2026
+    var fallbackModels: [LLMModel] {
         switch self {
         case .anthropic:
             return [
+                // Claude 4.5 Series (Latest - January 2026)
                 LLMModel(
-                    id: "claude-sonnet-4-20250514",
-                    displayName: "Claude Sonnet 4",
+                    id: "claude-sonnet-4-5-20250929",
+                    displayName: "Claude Sonnet 4.5",
                     description: "Best balance of speed and intelligence",
                     inputPrice: 3.00,
                     outputPrice: 15.00,
                     isRecommended: true
                 ),
                 LLMModel(
-                    id: "claude-3-5-sonnet-20241022",
-                    displayName: "Claude 3.5 Sonnet",
-                    description: "Fast and capable",
+                    id: "claude-haiku-4-5-20251001",
+                    displayName: "Claude Haiku 4.5",
+                    description: "Fastest with near-frontier intelligence",
+                    inputPrice: 1.00,
+                    outputPrice: 5.00
+                ),
+                LLMModel(
+                    id: "claude-opus-4-5-20251101",
+                    displayName: "Claude Opus 4.5",
+                    description: "Maximum intelligence, premium model",
+                    inputPrice: 5.00,
+                    outputPrice: 25.00
+                ),
+                // Legacy models still available
+                LLMModel(
+                    id: "claude-sonnet-4-20250514",
+                    displayName: "Claude Sonnet 4",
+                    description: "Previous generation Sonnet",
                     inputPrice: 3.00,
                     outputPrice: 15.00
                 ),
                 LLMModel(
-                    id: "claude-3-5-haiku-20241022",
-                    displayName: "Claude 3.5 Haiku",
-                    description: "Fastest, most affordable",
-                    inputPrice: 0.80,
-                    outputPrice: 4.00
-                ),
-                LLMModel(
-                    id: "claude-3-haiku-20240307",
-                    displayName: "Claude 3 Haiku",
-                    description: "Budget-friendly option",
-                    inputPrice: 0.25,
-                    outputPrice: 1.25
+                    id: "claude-3-7-sonnet-20250219",
+                    displayName: "Claude 3.7 Sonnet",
+                    description: "Older Sonnet model",
+                    inputPrice: 3.00,
+                    outputPrice: 15.00
                 ),
             ]
 
         case .openai:
             return [
+                // GPT-5 Series (Latest - January 2026)
+                LLMModel(
+                    id: "gpt-5.2",
+                    displayName: "GPT-5.2",
+                    description: "Flagship model for coding and agents",
+                    inputPrice: 2.00,
+                    outputPrice: 8.00,
+                    isRecommended: true
+                ),
+                LLMModel(
+                    id: "o4-mini",
+                    displayName: "o4-mini",
+                    description: "Fast, cost-efficient reasoning",
+                    inputPrice: 1.10,
+                    outputPrice: 4.40
+                ),
+                LLMModel(
+                    id: "o3",
+                    displayName: "o3",
+                    description: "Reasoning for complex tasks",
+                    inputPrice: 2.00,
+                    outputPrice: 8.00
+                ),
                 LLMModel(
                     id: "gpt-4o",
                     displayName: "GPT-4o",
-                    description: "Most capable OpenAI model",
+                    description: "Capable multimodal model",
                     inputPrice: 2.50,
-                    outputPrice: 10.00,
-                    isRecommended: true
+                    outputPrice: 10.00
                 ),
                 LLMModel(
                     id: "gpt-4o-mini",
@@ -101,50 +139,52 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
                     inputPrice: 0.15,
                     outputPrice: 0.60
                 ),
-                LLMModel(
-                    id: "gpt-4-turbo",
-                    displayName: "GPT-4 Turbo",
-                    description: "Powerful with large context",
-                    inputPrice: 10.00,
-                    outputPrice: 30.00
-                ),
-                LLMModel(
-                    id: "gpt-3.5-turbo",
-                    displayName: "GPT-3.5 Turbo",
-                    description: "Legacy model, very fast",
-                    inputPrice: 0.50,
-                    outputPrice: 1.50
-                ),
             ]
 
         case .deepseek:
             return [
+                // DeepSeek V3.2 (Latest - January 2026)
                 LLMModel(
                     id: "deepseek-chat",
-                    displayName: "DeepSeek Chat",
+                    displayName: "DeepSeek V3.2 (Chat)",
                     description: "General purpose, very affordable",
-                    inputPrice: 0.14,
-                    outputPrice: 0.28,
+                    inputPrice: 0.28,
+                    outputPrice: 0.42,
                     isRecommended: true
                 ),
                 LLMModel(
-                    id: "deepseek-coder",
-                    displayName: "DeepSeek Coder",
-                    description: "Optimized for code tasks",
-                    inputPrice: 0.14,
-                    outputPrice: 0.28
+                    id: "deepseek-reasoner",
+                    displayName: "DeepSeek V3.2 (Reasoner)",
+                    description: "Step-by-step reasoning mode",
+                    inputPrice: 0.28,
+                    outputPrice: 0.42
                 ),
             ]
 
         case .groq:
             return [
+                // Llama 4 Series (Latest - January 2026)
+                LLMModel(
+                    id: "llama-4-maverick-17b-128e-instruct",
+                    displayName: "Llama 4 Maverick",
+                    description: "High quality, 400B total params",
+                    inputPrice: 0.50,
+                    outputPrice: 0.77,
+                    isRecommended: true
+                ),
+                LLMModel(
+                    id: "llama-4-scout-17b-16e-instruct",
+                    displayName: "Llama 4 Scout",
+                    description: "Fast multimodal, 109B params",
+                    inputPrice: 0.11,
+                    outputPrice: 0.34
+                ),
                 LLMModel(
                     id: "llama-3.3-70b-versatile",
                     displayName: "Llama 3.3 70B",
-                    description: "Most capable Llama model",
+                    description: "Versatile previous gen model",
                     inputPrice: 0.59,
-                    outputPrice: 0.79,
-                    isRecommended: true
+                    outputPrice: 0.79
                 ),
                 LLMModel(
                     id: "llama-3.1-8b-instant",
@@ -153,38 +193,39 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
                     inputPrice: 0.05,
                     outputPrice: 0.08
                 ),
-                LLMModel(
-                    id: "mixtral-8x7b-32768",
-                    displayName: "Mixtral 8x7B",
-                    description: "Good balance of speed and quality",
-                    inputPrice: 0.24,
-                    outputPrice: 0.24
-                ),
             ]
 
         case .mistral:
             return [
+                // Mistral Latest (January 2026)
                 LLMModel(
-                    id: "mistral-large-latest",
-                    displayName: "Mistral Large",
-                    description: "Most capable Mistral model",
-                    inputPrice: 4.00,
-                    outputPrice: 12.00,
+                    id: "mistral-large-3-25-12",
+                    displayName: "Mistral Large 3",
+                    description: "State-of-the-art multimodal",
+                    inputPrice: 0.50,
+                    outputPrice: 1.50,
                     isRecommended: true
                 ),
                 LLMModel(
-                    id: "mistral-medium-latest",
-                    displayName: "Mistral Medium",
-                    description: "Balanced performance",
-                    inputPrice: 2.70,
-                    outputPrice: 8.10
+                    id: "mistral-medium-3-1-25-08",
+                    displayName: "Mistral Medium 3.1",
+                    description: "Balanced performance and cost",
+                    inputPrice: 0.40,
+                    outputPrice: 2.00
+                ),
+                LLMModel(
+                    id: "codestral-25-08",
+                    displayName: "Codestral",
+                    description: "Optimized for code",
+                    inputPrice: 0.20,
+                    outputPrice: 0.60
                 ),
                 LLMModel(
                     id: "mistral-small-latest",
                     displayName: "Mistral Small",
                     description: "Fast and affordable",
-                    inputPrice: 1.00,
-                    outputPrice: 3.00
+                    inputPrice: 0.10,
+                    outputPrice: 0.30
                 ),
             ]
 
@@ -233,9 +274,17 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Available models for this provider.
+    ///
+    /// This property returns the fallback models synchronously.
+    /// For dynamic model fetching, use `ModelFetchService.shared.fetchModels(for:)`.
+    var models: [LLMModel] {
+        fallbackModels
+    }
+
     /// Default model for this provider.
     var defaultModel: LLMModel? {
-        models.first { $0.isRecommended } ?? models.first
+        fallbackModels.first { $0.isRecommended } ?? fallbackModels.first
     }
 
     /// Whether the provider requires an API key.
@@ -243,6 +292,14 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .ollama: return false
         case .custom: return true  // May or may not, but assume yes
+        default: return true
+        }
+    }
+
+    /// Whether this provider supports dynamic model fetching.
+    var supportsDynamicModelFetching: Bool {
+        switch self {
+        case .custom: return false
         default: return true
         }
     }
@@ -271,11 +328,11 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         case .anthropic:
             return "Claude models by Anthropic. Tested and recommended for this app."
         case .openai:
-            return "GPT models including the powerful GPT-4o family."
+            return "GPT-5 and o-series reasoning models."
         case .deepseek:
-            return "High-quality models at very affordable prices."
+            return "DeepSeek V3.2 - high quality at very affordable prices."
         case .groq:
-            return "Ultra-fast inference for open-source models."
+            return "Ultra-fast inference for Llama 4 and other open models."
         case .mistral:
             return "European AI with strong multilingual support."
         case .ollama:

@@ -10,36 +10,52 @@ import Foundation
 /// Calculator for estimating LLM API costs.
 ///
 /// Prices are per 1 million tokens. Update these values as pricing changes.
+/// Last updated: January 2026
 enum CostCalculator {
     // MARK: - Pricing (per 1M tokens, USD)
 
     /// Known model pricing configurations.
+    /// Prices are per 1 million tokens (input, output) in USD.
     private static let modelPricing: [String: (input: Double, output: Double)] = [
-        // OpenAI models
+        // OpenAI models (January 2026)
+        "gpt-5.2": (2.00, 8.00),
+        "gpt-5.2-pro": (24.00, 96.00),
+        "gpt-5.1": (2.00, 8.00),
+        "gpt-5": (2.00, 8.00),
+        "o4-mini": (1.10, 4.40),
+        "o3": (2.00, 8.00),
+        "o3-pro": (24.00, 96.00),
         "gpt-4o": (2.50, 10.00),
         "gpt-4o-mini": (0.15, 0.60),
+        "gpt-4.1": (2.00, 8.00),
+        "gpt-4.1-mini": (0.40, 1.60),
         "gpt-4-turbo": (10.00, 30.00),
-        "gpt-4": (30.00, 60.00),
-        "gpt-3.5-turbo": (0.50, 1.50),
 
-        // Anthropic models
-        "claude-3-opus": (15.00, 75.00),
-        "claude-3-sonnet": (3.00, 15.00),
+        // Anthropic models (January 2026)
+        "claude-opus-4-5": (5.00, 25.00),
+        "claude-sonnet-4-5": (3.00, 15.00),
+        "claude-haiku-4-5": (1.00, 5.00),
+        "claude-opus-4-1": (15.00, 75.00),
+        "claude-opus-4": (15.00, 75.00),
+        "claude-sonnet-4": (3.00, 15.00),
+        "claude-3-7-sonnet": (3.00, 15.00),
         "claude-3-haiku": (0.25, 1.25),
-        "claude-3-5-sonnet": (3.00, 15.00),
 
-        // DeepSeek models
-        "deepseek-chat": (0.14, 0.28),
-        "deepseek-coder": (0.14, 0.28),
+        // DeepSeek models (January 2026)
+        "deepseek-chat": (0.28, 0.42),
+        "deepseek-reasoner": (0.28, 0.42),
 
-        // Mistral models
-        "mistral-large": (4.00, 12.00),
-        "mistral-medium": (2.70, 8.10),
-        "mistral-small": (1.00, 3.00),
-        "mistral-tiny": (0.25, 0.25),
+        // Mistral models (January 2026)
+        "mistral-large-3": (0.50, 1.50),
+        "mistral-medium-3": (0.40, 2.00),
+        "mistral-small": (0.10, 0.30),
+        "codestral": (0.20, 0.60),
+        "pixtral": (0.40, 1.20),
 
-        // Groq models (often free/cheap)
-        "llama-3.1-70b": (0.59, 0.79),
+        // Groq models (January 2026)
+        "llama-4-maverick": (0.50, 0.77),
+        "llama-4-scout": (0.11, 0.34),
+        "llama-3.3-70b": (0.59, 0.79),
         "llama-3.1-8b": (0.05, 0.08),
         "mixtral-8x7b": (0.24, 0.24),
     ]

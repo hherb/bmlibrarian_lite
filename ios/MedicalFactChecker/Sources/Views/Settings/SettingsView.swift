@@ -19,6 +19,11 @@ struct SettingsView: View {
     @State private var monthlyUsage: Double = 0
     @State private var showingCustomConfig = false
 
+    // Dynamic model loading state
+    @State private var availableModels: [LLMModel] = []
+    @State private var isLoadingModels = false
+    @State private var modelLoadError: String?
+
     var body: some View {
         @Bindable var settings = settings
 
@@ -46,7 +51,15 @@ struct SettingsView: View {
                 // Model Selection (for non-custom providers)
                 if settings.selectedProvider != .custom {
                     Section {
-                        if settings.selectedProvider.models.isEmpty {
+                        if isLoadingModels {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Loading models...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if displayModels.isEmpty {
                             Text("Enter model name manually below")
                                 .foregroundColor(.secondary)
                         } else {
@@ -54,11 +67,13 @@ struct SettingsView: View {
                             let modelBinding = Binding<String>(
                                 get: {
                                     // If current model is valid for this provider, use it
-                                    if settings.selectedProvider.models.contains(where: { $0.id == settings.llmModel }) {
+                                    if displayModels.contains(where: { $0.id == settings.llmModel }) {
                                         return settings.llmModel
                                     }
                                     // Otherwise return the default model for this provider
-                                    return settings.selectedProvider.defaultModel?.id ?? settings.llmModel
+                                    return displayModels.first { $0.isRecommended }?.id
+                                        ?? displayModels.first?.id
+                                        ?? settings.llmModel
                                 },
                                 set: { newValue in
                                     settings.llmModel = newValue
@@ -66,7 +81,7 @@ struct SettingsView: View {
                             )
 
                             Picker("Model", selection: modelBinding) {
-                                ForEach(settings.selectedProvider.models) { model in
+                                ForEach(displayModels) { model in
                                     VStack(alignment: .leading) {
                                         HStack {
                                             Text(model.displayName)
@@ -85,7 +100,7 @@ struct SettingsView: View {
                                 }
                             }
 
-                            if let selectedModel = settings.selectedProvider.models.first(where: { $0.id == settings.llmModel }) {
+                            if let selectedModel = displayModels.first(where: { $0.id == settings.llmModel }) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(selectedModel.description)
                                         .font(.caption)
@@ -93,6 +108,30 @@ struct SettingsView: View {
                                     Text(selectedModel.priceDescription)
                                         .font(.caption)
                                         .foregroundColor(.secondary)
+                                }
+                            }
+
+                            // Show error if dynamic fetch failed
+                            if let error = modelLoadError {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text("Using fallback models: \(error)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            // Refresh button
+                            if settings.selectedProvider.supportsDynamicModelFetching && !apiKey.isEmpty {
+                                Button {
+                                    Task { await loadModels() }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "arrow.clockwise")
+                                        Text("Refresh Models")
+                                    }
+                                    .font(.caption)
                                 }
                             }
                         }
@@ -307,7 +346,22 @@ struct SettingsView: View {
             .onAppear {
                 loadCurrentValues()
             }
+            .onChange(of: settings.selectedProvider) { _, _ in
+                // Clear cached models and reload when provider changes
+                availableModels = []
+                modelLoadError = nil
+                Task { await loadModels() }
+            }
         }
+    }
+
+    // MARK: - Computed Properties
+
+    /// Models to display in the picker.
+    ///
+    /// Returns dynamically fetched models if available, otherwise falls back to provider defaults.
+    private var displayModels: [LLMModel] {
+        availableModels.isEmpty ? settings.selectedProvider.fallbackModels : availableModels
     }
 
     // MARK: - Helpers
@@ -318,6 +372,39 @@ struct SettingsView: View {
         loadMonthlyUsage()
         // Auto-expand custom config for custom provider
         showingCustomConfig = settings.selectedProvider == .custom
+        // Load models for current provider
+        Task { await loadModels() }
+    }
+
+    /// Load available models for the current provider.
+    private func loadModels() async {
+        guard settings.selectedProvider.supportsDynamicModelFetching else {
+            availableModels = []
+            return
+        }
+
+        isLoadingModels = true
+        modelLoadError = nil
+
+        do {
+            let models = await ModelFetchService.shared.fetchModels(
+                for: settings.selectedProvider,
+                apiKey: apiKey.isEmpty ? nil : apiKey,
+                baseURL: settings.llmBaseURL
+            )
+
+            await MainActor.run {
+                if models.isEmpty {
+                    // API returned empty, use fallback
+                    availableModels = settings.selectedProvider.fallbackModels
+                    modelLoadError = "No models returned from API"
+                } else {
+                    availableModels = models
+                    modelLoadError = nil
+                }
+                isLoadingModels = false
+            }
+        }
     }
 
     private func loadMonthlyUsage() {
@@ -361,15 +448,30 @@ struct SettingsView: View {
 // MARK: - Model Pricing View
 
 struct ModelPricingView: View {
-    private let models: [(name: String, input: Double, output: Double)] = [
-        ("gpt-4o-mini", 0.15, 0.60),
-        ("gpt-4o", 2.50, 10.00),
-        ("gpt-3.5-turbo", 0.50, 1.50),
-        ("claude-3-haiku", 0.25, 1.25),
-        ("claude-3-sonnet", 3.00, 15.00),
-        ("deepseek-chat", 0.14, 0.28),
-        ("mistral-small", 1.00, 3.00),
-        ("llama-3.1-8b", 0.05, 0.08),
+    /// Current model pricing (January 2026).
+    private let modelGroups: [(provider: String, models: [(name: String, input: Double, output: Double)])] = [
+        ("Anthropic (Claude)", [
+            ("Claude Sonnet 4.5", 3.00, 15.00),
+            ("Claude Haiku 4.5", 1.00, 5.00),
+            ("Claude Opus 4.5", 5.00, 25.00),
+        ]),
+        ("OpenAI", [
+            ("GPT-5.2", 2.00, 8.00),
+            ("o4-mini", 1.10, 4.40),
+            ("GPT-4o Mini", 0.15, 0.60),
+        ]),
+        ("DeepSeek", [
+            ("DeepSeek V3.2", 0.28, 0.42),
+        ]),
+        ("Groq", [
+            ("Llama 4 Maverick", 0.50, 0.77),
+            ("Llama 4 Scout", 0.11, 0.34),
+            ("Llama 3.1 8B", 0.05, 0.08),
+        ]),
+        ("Mistral", [
+            ("Mistral Large 3", 0.50, 1.50),
+            ("Mistral Small", 0.10, 0.30),
+        ]),
     ]
 
     var body: some View {
@@ -380,19 +482,21 @@ struct ModelPricingView: View {
                     .foregroundColor(.secondary)
             }
 
-            Section("Common Models") {
-                ForEach(models, id: \.name) { model in
-                    HStack {
-                        Text(model.name)
-                            .font(.body)
-                        Spacer()
-                        VStack(alignment: .trailing) {
-                            Text("$\(model.input, specifier: "%.2f") in")
-                                .font(.caption)
-                            Text("$\(model.output, specifier: "%.2f") out")
-                                .font(.caption)
+            ForEach(modelGroups, id: \.provider) { group in
+                Section(group.provider) {
+                    ForEach(group.models, id: \.name) { model in
+                        HStack {
+                            Text(model.name)
+                                .font(.body)
+                            Spacer()
+                            VStack(alignment: .trailing) {
+                                Text("$\(model.input, specifier: "%.2f") in")
+                                    .font(.caption)
+                                Text("$\(model.output, specifier: "%.2f") out")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.secondary)
                         }
-                        .foregroundColor(.secondary)
                     }
                 }
             }
@@ -402,12 +506,16 @@ struct ModelPricingView: View {
                     .font(.subheadline)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    CostEstimateRow(model: "gpt-4o-mini", cost: "$0.001 - $0.003")
-                    CostEstimateRow(model: "gpt-4o", cost: "$0.02 - $0.05")
-                    CostEstimateRow(model: "claude-3-haiku", cost: "$0.002 - $0.005")
+                    CostEstimateRow(model: "Claude Sonnet 4.5", cost: "$0.01 - $0.03")
+                    CostEstimateRow(model: "GPT-4o Mini", cost: "$0.001 - $0.003")
+                    CostEstimateRow(model: "DeepSeek V3.2", cost: "$0.002 - $0.005")
+                    CostEstimateRow(model: "Llama 4 Scout (Groq)", cost: "$0.001 - $0.003")
                 }
             } header: {
                 Text("Cost Estimates")
+            } footer: {
+                Text("Prices last updated January 2026. Check provider websites for current pricing.")
+                    .font(.caption2)
             }
         }
         .navigationTitle("Model Pricing")

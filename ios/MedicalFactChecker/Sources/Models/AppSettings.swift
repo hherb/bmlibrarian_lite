@@ -150,7 +150,7 @@ final class AppSettings {
         let defaultURL = detectedProvider.baseURL.isEmpty
             ? "https://api.anthropic.com/v1"
             : detectedProvider.baseURL
-        let defaultModel = detectedProvider.defaultModel?.id ?? "claude-sonnet-4-20250514"
+        let defaultModel = detectedProvider.defaultModel?.id ?? "claude-sonnet-4-5-20250929"
 
         // Initialize all stored properties
         self.selectedProvider = detectedProvider
@@ -208,7 +208,7 @@ final class AppSettings {
     func resetToDefaults() {
         selectedProvider = .anthropic
         llmBaseURL = LLMProvider.anthropic.baseURL
-        llmModel = LLMProvider.anthropic.defaultModel?.id ?? "claude-sonnet-4-20250514"
+        llmModel = LLMProvider.anthropic.defaultModel?.id ?? "claude-sonnet-4-5-20250929"
         llmAPIKey = ""
         ncbiEmail = ""
         ncbiAPIKey = ""
