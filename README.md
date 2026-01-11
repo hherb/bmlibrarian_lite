@@ -11,6 +11,7 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 
 ## Features
 
+### Desktop Application (Python/PySide6)
 - **Systematic Literature Review**: Search PubMed, score documents, extract citations, and generate reports
 - **Document Interrogation**: Interactive Q&A with loaded documents
 - **PDF Discovery & Download**: Automatic PDF retrieval from PubMed Central, Unpaywall, and DOI resolution
@@ -20,11 +21,19 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 - **Audit Trail**: Real-time visibility into the review workflow with LLM reasoning transparency
 - **Multiple LLM Providers**: Support for both Anthropic Claude (online) and Ollama (local)
 - **Unified SQLite Storage**: Single database for metadata and vector embeddings - no external database needed
-- **Cross-Platform GUI**: PySide6-based desktop application
+
+### iOS App (Swift/SwiftUI)
+- **Medical Fact Checker**: Native iOS app for fact-checking medical claims on-the-go
+- **Dual Scoring System**: LLM-based relevance scoring plus on-device NLEmbedding semantic similarity
+- **HyDE Enhancement**: Hypothetical Document Embedding for improved semantic matching
+- **Budget Controls**: Per-run and monthly spending limits with real-time cost tracking
+- **SwiftData Persistence**: Local storage of sessions, documents, citations, and reports
+- **Clickable Citations**: Tap references in reports to view source document details
+- **Smart Search**: Automatic alternative query generation when initial results are insufficient
 
 ## Quick Start
 
-### Installation
+### Desktop Installation
 
 **From PyPI (recommended):**
 
@@ -101,6 +110,21 @@ bmll clear
 bmll --version
 ```
 
+### iOS App
+
+The iOS app is located in `ios/MedicalFactChecker/`. To build:
+
+1. **Open in Xcode**: Open `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`
+2. **Configure signing**: Set your development team in project settings
+3. **Build and run**: Select your target device/simulator and build
+
+**Configuration in iOS:**
+- Open Settings tab to configure:
+  - LLM API endpoint and key (OpenAI-compatible APIs)
+  - NCBI email for PubMed API
+  - Per-run and monthly budget limits
+  - Enable/disable embedding scoring
+
 ## Usage
 
 ### Systematic Review Workflow
@@ -149,6 +173,19 @@ The Audit Trail tab provides real-time visibility into the systematic review wor
 - **Citations Tab**: View extracted citation passages with highlighting
 
 Right-click any document card to send it to the Document Interrogator for deeper analysis.
+
+### iOS Medical Fact Checker
+
+1. **Enter a medical claim or question** (e.g., "Vitamin D reduces COVID-19 severity")
+2. **Tap "Check Evidence"** to start the workflow
+3. **Review scored documents** with dual LLM/Embedding scores
+4. **View the evidence report** with verdict and supporting citations
+5. **Tap citations** to view source document details
+
+**Score Comparison:**
+- LLM scores use AI reasoning about document relevance
+- Embedding scores use on-device NLEmbedding with HyDE (Hypothetical Document Embedding)
+- Agreement indicators show when scores align or differ
 
 ### Document Interrogation
 
@@ -227,17 +264,18 @@ You can also use the model string format: `anthropic:claude-sonnet-4-20250514` o
 
 BMLibrarian Lite is designed for ease of use and portability:
 
-| Feature | BMLibrarian | BMLibrarian Lite |
-|---------|-------------|------------------|
-| Database | PostgreSQL + pgvector | SQLite + sqlite-vec |
-| Embeddings | Ollama (local) | FastEmbed (CPU) |
-| PDF Discovery | Full (Unpaywall, PMC, OpenAthens) | Included (PMC, Unpaywall, DOI) |
-| Multi-Agent Workflow | Full orchestration | Simplified workflow |
-| Plugin System | Lab plugins (PRISMA2020, etc.) | N/A |
-| Multi-Model Benchmarking | N/A | Compare LLM models on scoring & classification |
-| Research Question Management | N/A | Save, re-run, and manage past questions |
-| Audit Trail | Detailed/granular | Real-time workflow visibility |
-| Installation | Complex | Simple `pip install` |
+| Feature | BMLibrarian | BMLibrarian Lite Desktop | BMLibrarian Lite iOS |
+|---------|-------------|--------------------------|----------------------|
+| Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData |
+| Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding |
+| PDF Discovery | Full | Included | N/A |
+| Multi-Agent Workflow | Full orchestration | Simplified workflow | Streamlined |
+| Plugin System | Lab plugins | N/A | N/A |
+| Multi-Model Benchmarking | N/A | Included | N/A |
+| Research Questions | N/A | Save & re-run | History view |
+| Budget Controls | N/A | N/A | Per-run & monthly |
+| HyDE Embedding | N/A | N/A | Included |
+| Installation | Complex | `pip install` | Xcode build |
 
 ## Documentation
 

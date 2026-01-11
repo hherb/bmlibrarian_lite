@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BMLibrarian Lite is a lightweight biomedical literature research tool that provides AI-powered systematic review and document interrogation capabilities. It uses ChromaDB + SQLite for storage (no PostgreSQL), FastEmbed for CPU-optimized embeddings, and supports Anthropic Claude or Ollama for LLM inference.
+BMLibrarian Lite is a lightweight biomedical literature research tool that provides AI-powered systematic review and document interrogation capabilities. The project includes:
+
+1. **Desktop Application** (Python/PySide6): Uses SQLite + sqlite-vec for storage, FastEmbed for CPU-optimized embeddings, and supports Anthropic Claude or Ollama for LLM inference.
+
+2. **iOS App** (Swift/SwiftUI): Native mobile app for medical fact-checking with SwiftData persistence, Apple NLEmbedding for on-device semantic similarity, and OpenAI-compatible LLM API support.
 
 ## Common Commands
 
@@ -223,6 +227,91 @@ doc/
 │   └── golden_rules.md     # Coding standards
 └── planning/       # Planning documents
 ```
+
+## iOS App Architecture (`ios/MedicalFactChecker/`)
+
+The iOS app is a native SwiftUI application for medical fact-checking.
+
+### Project Structure
+
+```
+ios/MedicalFactChecker/
+├── Sources/
+│   ├── App/
+│   │   ├── MedicalFactCheckerApp.swift  # App entry point, URL handling
+│   │   └── ContentView.swift             # Tab-based navigation
+│   ├── Models/
+│   │   ├── AppSettings.swift            # UserDefaults + Keychain settings
+│   │   ├── FactCheckSession.swift       # @Model for workflow sessions
+│   │   ├── Document.swift               # @Model for PubMed documents
+│   │   ├── Citation.swift               # @Model for extracted citations
+│   │   ├── EvidenceReport.swift         # @Model for generated reports
+│   │   └── UsageRecord.swift            # @Model for budget tracking
+│   ├── Services/
+│   │   ├── FactCheckWorkflow.swift      # Main workflow orchestration
+│   │   ├── LLMService.swift             # OpenAI-compatible API client
+│   │   ├── PubMedService.swift          # NCBI E-utilities integration
+│   │   └── EmbeddingService.swift       # Apple NLEmbedding scoring
+│   ├── Views/
+│   │   ├── FactCheck/
+│   │   │   ├── FactCheckView.swift      # Main fact-checking UI
+│   │   │   └── ScoredDocumentsView.swift # Document cards with dual scores
+│   │   ├── Report/
+│   │   │   └── ReportView.swift         # Evidence report with clickable refs
+│   │   ├── History/
+│   │   │   └── HistoryView.swift        # Past session browser
+│   │   └── Settings/
+│   │       └── SettingsView.swift       # Configuration UI
+│   └── Utilities/
+│       ├── CostCalculator.swift         # Token cost estimation
+│       ├── KeychainHelper.swift         # Secure credential storage
+│       └── ResponseParser.swift         # LLM response parsing
+└── Tests/
+    └── MedicalFactCheckerTests.swift
+```
+
+### Key iOS Patterns
+
+**SwiftData Models**
+- All data models use `@Model` macro for SwiftData persistence
+- Relationships use `@Relationship` with cascade delete rules
+- `Document.embeddingScore` is a stored property; `embeddingScoreNormalized` is computed
+
+**SwiftUI Observation**
+- Use `@Bindable` for SwiftData models in views that need to observe property changes
+- Use `@Environment(AppSettings.self)` for accessing shared settings
+- Use `sheet(item:)` instead of `sheet(isPresented:)` for proper item binding
+
+**Embedding Scoring with HyDE**
+- `EmbeddingService` uses Apple's `NLEmbedding.sentenceEmbedding(for: .english)`
+- HyDE (Hypothetical Document Embedding) generates a synthetic abstract before embedding
+- Raw scores (0.0-1.0) are normalized to 1-5 scale for comparison with LLM scores
+
+**Workflow Steps** (in `FactCheckWorkflow`)
+1. `convertingQuery` - LLM converts claim to PubMed query
+2. `searchingPubMed` - Fetch documents via NCBI E-utilities
+3. `scoringDocuments` - LLM scores relevance + optional HyDE embedding scores
+4. `extractingCitations` - Extract key passages from relevant documents
+5. `generatingReport` - Synthesize evidence report with verdict
+
+**Budget Management**
+- `AppSettings.maxRunBudgetUSD` - Per-run spending limit
+- `AppSettings.monthlyBudgetUSD` - Monthly spending cap
+- `UsageRecord` @Model tracks token usage per session
+- `CostCalculator` estimates costs based on model pricing
+
+**Reference Clicks in Reports**
+- References use custom URL scheme: `docref://lookup?type=id&value=pmid-12345`
+- `MarkdownReportView` parses references and makes them tappable
+- Notification-based handling via `documentReferenceClicked`
+
+### iOS Code Style
+
+- **Docstrings**: Use `///` documentation comments on all public types and methods
+- **MARK comments**: Use `// MARK: -` to organize code sections
+- **Property wrappers**: Prefer `@Bindable` for observed SwiftData models
+- **Error handling**: Use `do/catch` with appropriate error types
+- **Async/await**: Use Swift concurrency for all async operations
 
 ## Related Documentation
 
