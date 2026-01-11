@@ -62,7 +62,7 @@ struct FactCheckView: View {
                         if let session = workflow.session,
                            !session.documents.filter({ $0.isScored }).isEmpty {
                             ScoredDocumentsView(
-                                documents: session.documents.filter { $0.isScored },
+                                session: session,
                                 showEmbeddingScores: settings.embeddingScoringEnabled
                             )
                         }

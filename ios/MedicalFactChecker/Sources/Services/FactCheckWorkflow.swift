@@ -435,15 +435,38 @@ final class FactCheckWorkflow {
         }
     }
 
-    /// Compute embedding-based similarity scores for all documents.
+    /// Compute embedding-based similarity scores for all documents using HyDE.
     ///
-    /// Uses Apple's NLEmbedding for fast, on-device semantic similarity.
-    /// Runs after LLM scoring to provide a comparison metric.
+    /// Uses Hypothetical Document Embedding (HyDE) approach:
+    /// 1. Generate a hypothetical abstract that would answer the claim
+    /// 2. Embed that hypothetical abstract
+    /// 3. Compare against actual document abstracts
+    ///
+    /// This produces better similarity scores than comparing short claims to long abstracts.
     private func computeEmbeddingScores() async {
-        guard let session = session else { return }
+        guard let session = session else {
+            print("[Embedding] No session available")
+            return
+        }
 
         let unscoredDocs = session.documents.filter { $0.embeddingScore == nil }
-        guard !unscoredDocs.isEmpty else { return }
+        guard !unscoredDocs.isEmpty else {
+            print("[Embedding] No unscored documents found")
+            return
+        }
+
+        print("[Embedding] Computing scores for \(unscoredDocs.count) documents using HyDE")
+        updateProgress(.scoringDocuments, "Generating hypothetical document...")
+
+        // Generate HyDE - a hypothetical abstract that would answer the claim
+        let hydeText: String
+        do {
+            hydeText = try await generateHypotheticalDocument(for: session.claim)
+            print("[Embedding] HyDE generated (\(hydeText.count) chars)")
+        } catch {
+            print("[Embedding] HyDE generation failed: \(error), falling back to raw claim")
+            hydeText = session.claim
+        }
 
         updateProgress(.scoringDocuments, "Computing embedding scores...")
 
@@ -452,18 +475,67 @@ final class FactCheckWorkflow {
             (title: doc.title, abstract: doc.abstract)
         }
 
-        // Compute scores in batch (more efficient)
+        // Compute scores using HyDE text instead of raw claim
         let scores = EmbeddingService.scoreDocuments(
-            claim: session.claim,
+            claim: hydeText,
             documents: documentsData
         )
 
         // Apply scores to documents
+        var successCount = 0
+        var failCount = 0
         for (index, document) in unscoredDocs.enumerated() {
-            document.embeddingScore = scores[index]
+            if let score = scores[index] {
+                document.embeddingScore = score
+                successCount += 1
+                print("[Embedding] Doc \(document.pmid): score=\(score), normalized=\(document.embeddingScoreNormalized ?? -1)")
+            } else {
+                failCount += 1
+                print("[Embedding] Doc \(document.pmid): failed to compute score")
+            }
         }
 
+        print("[Embedding] Completed: \(successCount) success, \(failCount) failed")
         try? modelContext.save()
+    }
+
+    /// Generate a hypothetical document (HyDE) for embedding comparison.
+    ///
+    /// Creates a synthetic abstract that would ideally answer the medical claim,
+    /// providing richer semantic content for embedding comparison.
+    ///
+    /// - Parameter claim: The medical claim to generate a hypothetical document for.
+    /// - Returns: A hypothetical abstract text.
+    private func generateHypotheticalDocument(for claim: String) async throws -> String {
+        guard let llmService = llmService else {
+            throw LLMError.invalidConfiguration("LLM service not initialized")
+        }
+
+        let prompt = """
+        Generate a hypothetical medical research abstract that would directly address and provide evidence for the following claim or question.
+
+        Claim: \(claim)
+
+        Write a realistic abstract (150-250 words) that:
+        - Has a clear objective related to the claim
+        - Describes methods briefly
+        - States specific findings with numbers/percentages where appropriate
+        - Draws a conclusion about the claim
+
+        Output ONLY the abstract text, no title or labels. Write as if this were a real published study.
+        """
+
+        let messages = [LLMService.userMessage(prompt)]
+        let (response, usage) = try await llmService.chat(
+            messages: messages,
+            temperature: 0.7,
+            maxTokens: 512
+        )
+
+        // Record usage for budget tracking
+        recordUsage(usage, operationType: "hyde_generation")
+
+        return response.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func extractCitations() async throws {

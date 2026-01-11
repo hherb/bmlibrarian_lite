@@ -371,7 +371,6 @@ struct MarkdownReportView: View {
     let documents: [Document]
 
     @State private var selectedDocument: Document?
-    @State private var showingDocumentDetail = false
 
     init(_ content: String, documents: [Document] = []) {
         self.content = content
@@ -390,10 +389,8 @@ struct MarkdownReportView: View {
                 handleReferenceTap(url)
             }
         }
-        .sheet(isPresented: $showingDocumentDetail) {
-            if let doc = selectedDocument {
-                DocumentDetailSheet(document: doc)
-            }
+        .sheet(item: $selectedDocument) { doc in
+            DocumentDetailSheet(document: doc)
         }
     }
 
@@ -656,6 +653,12 @@ struct MarkdownReportView: View {
         return AttributedString(text)
     }
 
+    /// Handle taps on document references in the report.
+    ///
+    /// Parses the custom `docref://` URL scheme and looks up the referenced document
+    /// to display in a detail sheet.
+    ///
+    /// - Parameter url: The tapped URL (expected scheme: `docref://`).
     private func handleReferenceTap(_ url: URL) {
         guard url.scheme == "docref" else {
             return
@@ -676,21 +679,18 @@ struct MarkdownReportView: View {
 
         if lookupType == "id" {
             // Direct ID lookup
-            if let doc = findDocumentById(lookupValue) {
-                selectedDocument = doc
-                showingDocumentDetail = true
-            }
+            selectedDocument = findDocumentById(lookupValue)
         } else if lookupType == "ref" {
             // Legacy reference text lookup
             let refText = lookupValue.removingPercentEncoding ?? lookupValue
-            if let doc = findDocumentByReference(refText) {
-                selectedDocument = doc
-                showingDocumentDetail = true
-            }
+            selectedDocument = findDocumentByReference(refText)
         }
     }
 
     /// Find a document by its unique ID.
+    ///
+    /// - Parameter documentId: The document's unique identifier (e.g., "pmid-12345678").
+    /// - Returns: The matching document, or nil if not found.
     private func findDocumentById(_ documentId: String) -> Document? {
         return documents.first { $0.id == documentId }
     }
@@ -698,6 +698,10 @@ struct MarkdownReportView: View {
     /// Find a document by reference text (legacy fallback).
     ///
     /// Used when document ID is not embedded in the reference.
+    /// Parses author name and year from formats like "Smith et al., 2021" or "Smith, 2021".
+    ///
+    /// - Parameter reference: The reference text to parse.
+    /// - Returns: The matching document, or nil if not found.
     private func findDocumentByReference(_ reference: String) -> Document? {
         // Parse reference: "Smith et al., 2021" or "Smith, 2021"
         let parts = reference.components(separatedBy: ",")
@@ -729,6 +733,12 @@ struct MarkdownReportView: View {
     }
 
     /// Normalize various line break formats for proper markdown rendering.
+    ///
+    /// Converts escaped newlines (`\\n`) to actual newlines and collapses
+    /// multiple consecutive newlines into double newlines.
+    ///
+    /// - Parameter text: The raw text to normalize.
+    /// - Returns: Normalized text with consistent line breaks.
     private func normalizeLineBreaks(_ text: String) -> String {
         var result = text
         // Convert escaped newlines from JSON to actual newlines

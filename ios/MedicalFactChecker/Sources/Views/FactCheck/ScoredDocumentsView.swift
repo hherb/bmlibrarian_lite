@@ -5,6 +5,7 @@
 //  View for displaying scored documents with LLM and embedding scores.
 //
 
+import SwiftData
 import SwiftUI
 
 /// Section displaying scored documents with both LLM and embedding scores.
@@ -12,10 +13,15 @@ import SwiftUI
 /// Shows a collapsible list of documents sorted by relevance score.
 /// Each document displays both scoring methods for comparison.
 struct ScoredDocumentsView: View {
-    let documents: [Document]
+    let session: FactCheckSession
     let showEmbeddingScores: Bool
 
     @State private var isExpanded = false
+
+    /// Scored documents from the session, computed to trigger observation.
+    private var scoredDocuments: [Document] {
+        session.documents.filter { $0.isScored }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -27,7 +33,7 @@ struct ScoredDocumentsView: View {
 
                     Spacer()
 
-                    Text("\(documents.count)")
+                    Text("\(scoredDocuments.count)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
@@ -39,7 +45,7 @@ struct ScoredDocumentsView: View {
 
             if isExpanded {
                 // Sort by LLM relevance score, highest first
-                let sortedDocs = documents.sorted {
+                let sortedDocs = scoredDocuments.sorted {
                     ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
                 }
 
@@ -62,7 +68,7 @@ struct ScoredDocumentsView: View {
 /// Shows title, reference, and score badges in collapsed state.
 /// Expands to show abstract, LLM reasoning, score comparison, and metadata.
 struct DocumentScoreRow: View {
-    let document: Document
+    @Bindable var document: Document
     let showEmbeddingScore: Bool
 
     @State private var isExpanded = false
@@ -108,6 +114,7 @@ struct DocumentScoreRow: View {
 
     // MARK: - Subviews
 
+    /// Column displaying LLM and embedding score badges vertically.
     private var scoresColumn: some View {
         VStack(spacing: 4) {
             // LLM Score
@@ -128,6 +135,7 @@ struct DocumentScoreRow: View {
         }
     }
 
+    /// Expanded content showing abstract, LLM reasoning, score comparison, and metadata.
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
@@ -169,6 +177,12 @@ struct DocumentScoreRow: View {
         }
     }
 
+    /// View showing agreement level between LLM and embedding scores.
+    ///
+    /// - Parameters:
+    ///   - llmScore: The LLM relevance score (1-5).
+    ///   - embScore: The normalized embedding score (1-5).
+    /// - Returns: A view displaying agreement label, icon, and raw embedding score.
     private func scoreComparisonView(llmScore: Int, embScore: Int) -> some View {
         let result = ScoreAgreement.compute(llmScore: llmScore, embScore: embScore)
 
@@ -192,6 +206,7 @@ struct DocumentScoreRow: View {
         .cornerRadius(6)
     }
 
+    /// Row displaying journal and PMID metadata.
     private var metadataView: some View {
         HStack(spacing: 12) {
             if let journal = document.journal {
@@ -209,6 +224,10 @@ struct DocumentScoreRow: View {
 
     // MARK: - Helpers
 
+    /// Returns the appropriate color for a relevance score.
+    ///
+    /// - Parameter score: The score (1-5), or nil if not scored.
+    /// - Returns: Color ranging from red (1) to green (5), gray if nil.
     private func scoreColor(for score: Int?) -> Color {
         guard let score = score else { return .gray }
         switch score {
