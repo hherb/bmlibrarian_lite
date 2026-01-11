@@ -117,11 +117,12 @@ struct DocumentScoreRow: View {
     /// Column displaying LLM and embedding score badges vertically.
     private var scoresColumn: some View {
         VStack(spacing: 4) {
-            // LLM Score
+            // LLM Score (shows "?" if parse failed)
             LabeledScoreBadge(
                 score: document.relevanceScore,
                 label: "LLM",
-                color: scoreColor(for: document.relevanceScore)
+                color: scoreColor(for: document.relevanceScore),
+                parseFailed: document.scoreParseFailed
             )
 
             // Embedding Score (if enabled and available)
@@ -243,7 +244,7 @@ struct DocumentScoreRow: View {
 /// Compact badge displaying a numeric score with a label.
 ///
 /// Used to show LLM and embedding scores side-by-side for comparison.
-/// Displays a dash when score is nil, indicating not yet scored.
+/// Displays a dash when score is nil (not yet scored) or "?" if parsing failed.
 struct LabeledScoreBadge: View {
     /// The score to display (1-5), or nil if not scored.
     let score: Int?
@@ -254,10 +255,18 @@ struct LabeledScoreBadge: View {
     /// Background color for the badge.
     let color: Color
 
+    /// If true and score is nil, shows "?" instead of "-" to indicate parse failure.
+    var parseFailed: Bool = false
+
     var body: some View {
         VStack(spacing: 2) {
             if let score = score {
                 Text("\(score)")
+                    .font(.system(.headline, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+            } else if parseFailed {
+                Text("?")
                     .font(.system(.headline, design: .rounded))
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -272,8 +281,18 @@ struct LabeledScoreBadge: View {
                 .foregroundColor(.white.opacity(0.8))
         }
         .frame(width: 36, height: 40)
-        .background(score != nil ? color : Color.gray)
+        .background(backgroundColor)
         .cornerRadius(6)
+    }
+
+    private var backgroundColor: Color {
+        if score != nil {
+            return color
+        } else if parseFailed {
+            return .orange  // Amber/orange to indicate uncertain status
+        } else {
+            return .gray
+        }
     }
 }
 

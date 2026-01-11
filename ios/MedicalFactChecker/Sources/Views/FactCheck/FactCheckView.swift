@@ -260,7 +260,24 @@ struct ProgressSection: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Cost so far
+            // Generated PubMed query (show once generated)
+            if let query = workflow.session?.pubmedQuery, !query.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PubMed Query:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    Text(query)
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+
+            // Cost so far (only show if non-zero)
             if let session = workflow.session, session.estimatedCostUSD > 0 {
                 Text("Cost so far: \(CostCalculator.formatCost(session.estimatedCostUSD))")
                     .font(.caption)

@@ -71,9 +71,10 @@ enum CostCalculator {
     ///   - model: The model name (e.g., "gpt-4o-mini").
     ///   - inputTokens: Number of input tokens.
     ///   - outputTokens: Number of output tokens.
+    ///   - provider: Optional provider to help determine if local model (free).
     /// - Returns: Estimated cost in USD.
-    static func calculateCost(model: String, inputTokens: Int, outputTokens: Int) -> Double {
-        let pricing = getPricing(for: model)
+    static func calculateCost(model: String, inputTokens: Int, outputTokens: Int, provider: LLMProvider? = nil) -> Double {
+        let pricing = getPricing(for: model, provider: provider)
 
         let inputCost = Double(inputTokens) * pricing.input / 1_000_000
         let outputCost = Double(outputTokens) * pricing.output / 1_000_000
@@ -81,18 +82,36 @@ enum CostCalculator {
         return inputCost + outputCost
     }
 
+    /// Common Ollama/local model name patterns (free inference).
+    private static let localModelPatterns: [String] = [
+        "llama", "mistral", "mixtral", "phi", "gemma", "qwen", "codellama",
+        "vicuna", "orca", "wizard", "falcon", "starcoder", "deepseek-coder",
+        "neural-chat", "starling", "dolphin", "openchat", "zephyr", "solar",
+        "yi", "command-r", "nous-hermes", "tinyllama", "stablelm"
+    ]
+
     /// Get pricing for a model, with fallback to default.
     ///
     /// - Parameter model: The model name.
+    /// - Parameter provider: Optional provider to help determine if local model.
     /// - Returns: Tuple of (input price, output price) per 1M tokens.
-    static func getPricing(for model: String) -> (input: Double, output: Double) {
-        // Normalize model name (remove provider prefix, lowercase)
-        let normalizedModel = model
-            .lowercased()
-            .components(separatedBy: "/").last ?? model
-            .components(separatedBy: ":").last ?? model
+    static func getPricing(for model: String, provider: LLMProvider? = nil) -> (input: Double, output: Double) {
+        // Check if this is a local/Ollama model (free)
+        if provider == .ollama {
+            return (0, 0)
+        }
 
-        // Check for exact match
+        // Normalize model name (remove provider prefix, lowercase)
+        // Note: .components() returns empty array for empty strings, so use if-let chain
+        var normalizedModel = model.lowercased()
+        if let lastSlashComponent = normalizedModel.components(separatedBy: "/").last, !lastSlashComponent.isEmpty {
+            normalizedModel = lastSlashComponent
+        }
+        if let lastColonComponent = normalizedModel.components(separatedBy: ":").last, !lastColonComponent.isEmpty {
+            normalizedModel = lastColonComponent
+        }
+
+        // Check for exact match in known pricing
         if let pricing = modelPricing[normalizedModel] {
             return pricing
         }
@@ -101,6 +120,13 @@ enum CostCalculator {
         for (key, pricing) in modelPricing {
             if normalizedModel.hasPrefix(key) || normalizedModel.contains(key) {
                 return pricing
+            }
+        }
+
+        // Check if this looks like a local/Ollama model (free)
+        for pattern in localModelPatterns {
+            if normalizedModel.hasPrefix(pattern) || normalizedModel.contains(pattern) {
+                return (0, 0)
             }
         }
 

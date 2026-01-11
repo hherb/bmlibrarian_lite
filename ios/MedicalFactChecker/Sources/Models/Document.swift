@@ -39,7 +39,7 @@ final class Document {
 
     // MARK: - Scoring
 
-    /// LLM relevance score (1-5 scale), nil if not yet scored.
+    /// LLM relevance score (1-5 scale), nil if not yet scored or if scoring failed.
     var relevanceScore: Int?
 
     /// LLM explanation for the relevance score.
@@ -47,6 +47,9 @@ final class Document {
 
     /// When the document was scored by LLM.
     var scoredAt: Date?
+
+    /// True if LLM scoring was attempted but failed to parse after all retries.
+    var scoreParseFailed: Bool = false
 
     // MARK: - Embedding Scoring
 
@@ -153,9 +156,9 @@ final class Document {
         return score >= threshold
     }
 
-    /// Check if document has been scored.
+    /// Check if document has been scored (or scoring was attempted but failed).
     var isScored: Bool {
-        relevanceScore != nil
+        relevanceScore != nil || scoreParseFailed
     }
 
     /// Full citation string for references section.

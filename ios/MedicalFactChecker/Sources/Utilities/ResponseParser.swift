@@ -12,6 +12,18 @@ import Foundation
 /// All functions are pure, stateless, and easily testable.
 enum ResponseParser {
 
+    // MARK: - Score Parsing Result
+
+    /// Result of parsing a score response.
+    struct ScoreParseResult {
+        /// Parsed score (1-5), nil if parsing failed.
+        let score: Int?
+        /// Explanation from the LLM, or error message if parsing failed.
+        let explanation: String
+        /// True if parsing succeeded.
+        var success: Bool { score != nil }
+    }
+
     // MARK: - Score Parsing
 
     /// Parse a relevance score response from the LLM.
@@ -21,14 +33,14 @@ enum ResponseParser {
     /// extra text around JSON, and markdown code blocks.
     ///
     /// - Parameter response: Raw JSON string from LLM.
-    /// - Returns: Tuple of (score clamped to 1-5, explanation).
-    static func parseScoreResponse(_ response: String) -> (score: Int, explanation: String) {
+    /// - Returns: ScoreParseResult with optional score and explanation.
+    static func parseScoreResponse(_ response: String) -> ScoreParseResult {
         // Try to extract JSON from the response (handles markdown code blocks, extra text)
         let jsonString = extractJSON(from: response)
 
         guard let data = jsonString.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return (1, "Failed to parse JSON response")
+            return ScoreParseResult(score: nil, explanation: "Failed to parse JSON response")
         }
 
         // Parse score - handle Int, Double, or String
@@ -40,7 +52,7 @@ enum ResponseParser {
         } else if let strScore = json["score"] as? String, let parsed = Int(strScore) {
             score = parsed
         } else {
-            return (1, "Failed to parse score value")
+            return ScoreParseResult(score: nil, explanation: "Failed to parse score value")
         }
 
         // Parse explanation - be lenient
@@ -49,7 +61,7 @@ enum ResponseParser {
             ?? json["reason"] as? String
             ?? "No explanation provided"
 
-        return (clampScore(score), explanation)
+        return ScoreParseResult(score: clampScore(score), explanation: explanation)
     }
 
     // MARK: - Citation Parsing

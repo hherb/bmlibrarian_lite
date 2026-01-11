@@ -387,6 +387,12 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
+    /// Maximum retries for JSON parse failures when scoring documents.
+    private static let maxParseRetries = 3
+
+    /// Base delay in seconds for exponential backoff on parse failures.
+    private static let parseRetryBaseDelay: Double = 1.0
+
     private func scoreDocuments() async throws {
         guard let session = session, let llmService = llmService else { return }
 
@@ -423,26 +429,61 @@ final class FactCheckWorkflow {
             """
 
             let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 256,
-                jsonMode: true
-            )
 
-            recordUsage(usage, operationType: "scoring")
+            // Retry loop for parse failures with exponential backoff
+            var parseResult: ResponseParser.ScoreParseResult?
+            var lastParseError: String = ""
 
-            // Parse response using ResponseParser
-            let parsed = ResponseParser.parseScoreResponse(response)
-            let score = parsed.score
-            let explanation = parsed.explanation
-            document.relevanceScore = score
-            document.scoreExplanation = explanation
-            document.scoredAt = Date()
+            for attempt in 0..<Self.maxParseRetries {
+                let (response, usage) = try await llmService.chat(
+                    messages: messages,
+                    temperature: 0.1,
+                    maxTokens: 256,
+                    jsonMode: true
+                )
 
-            session.documentsScored += 1
-            if score >= settings.minScoreThreshold {
-                session.relevantDocumentsFound += 1
+                recordUsage(usage, operationType: "scoring")
+
+                // Parse response using ResponseParser
+                let parsed = ResponseParser.parseScoreResponse(response)
+
+                if parsed.success {
+                    parseResult = parsed
+                    break
+                }
+
+                // Parse failed, log and retry
+                lastParseError = parsed.explanation
+                print("[Scoring] Parse attempt \(attempt + 1)/\(Self.maxParseRetries) failed: \(lastParseError)")
+
+                if attempt < Self.maxParseRetries - 1 {
+                    // Exponential backoff with jitter
+                    let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
+                    let jitter = delay * Double.random(in: -0.25...0.25)
+                    let totalDelay = delay + jitter
+                    print("[Scoring] Retrying in \(String(format: "%.1f", totalDelay))s...")
+                    try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
+                }
+            }
+
+            // Process result
+            if let result = parseResult, let score = result.score {
+                document.relevanceScore = score
+                document.scoreExplanation = result.explanation
+                document.scoredAt = Date()
+
+                session.documentsScored += 1
+                if score >= settings.minScoreThreshold {
+                    session.relevantDocumentsFound += 1
+                }
+            } else {
+                // All retries failed - mark as parse failed
+                print("[Scoring] All \(Self.maxParseRetries) parse attempts failed for document \(document.pmid)")
+                document.scoreParseFailed = true
+                document.scoreExplanation = lastParseError
+                document.scoredAt = Date()
+
+                session.documentsScored += 1  // Count as scored (attempted)
             }
 
             try? modelContext.save()
@@ -985,7 +1026,7 @@ final class FactCheckWorkflow {
     private func scoreNewDocuments(_ pmids: [String]) async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil }
+        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed }
 
         for document in docsToScore {
             try checkBudget()
@@ -1015,23 +1056,58 @@ final class FactCheckWorkflow {
             """
 
             let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 256,
-                jsonMode: true
-            )
 
-            recordUsage(usage, operationType: "scoring")
+            // Retry loop for parse failures with exponential backoff
+            var parseResult: ResponseParser.ScoreParseResult?
+            var lastParseError: String = ""
 
-            let parsed = ResponseParser.parseScoreResponse(response)
-            document.relevanceScore = parsed.score
-            document.scoreExplanation = parsed.explanation
-            document.scoredAt = Date()
+            for attempt in 0..<Self.maxParseRetries {
+                let (response, usage) = try await llmService.chat(
+                    messages: messages,
+                    temperature: 0.1,
+                    maxTokens: 256,
+                    jsonMode: true
+                )
 
-            session.documentsScored += 1
-            if parsed.score >= settings.minScoreThreshold {
-                session.relevantDocumentsFound += 1
+                recordUsage(usage, operationType: "scoring")
+
+                let parsed = ResponseParser.parseScoreResponse(response)
+
+                if parsed.success {
+                    parseResult = parsed
+                    break
+                }
+
+                // Parse failed, log and retry
+                lastParseError = parsed.explanation
+                print("[Scoring] Parse attempt \(attempt + 1)/\(Self.maxParseRetries) failed: \(lastParseError)")
+
+                if attempt < Self.maxParseRetries - 1 {
+                    let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
+                    let jitter = delay * Double.random(in: -0.25...0.25)
+                    let totalDelay = delay + jitter
+                    try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
+                }
+            }
+
+            // Process result
+            if let result = parseResult, let score = result.score {
+                document.relevanceScore = score
+                document.scoreExplanation = result.explanation
+                document.scoredAt = Date()
+
+                session.documentsScored += 1
+                if score >= settings.minScoreThreshold {
+                    session.relevantDocumentsFound += 1
+                }
+            } else {
+                // All retries failed - mark as parse failed
+                print("[Scoring] All \(Self.maxParseRetries) parse attempts failed for document \(document.pmid)")
+                document.scoreParseFailed = true
+                document.scoreExplanation = lastParseError
+                document.scoredAt = Date()
+
+                session.documentsScored += 1
             }
 
             try? modelContext.save()
