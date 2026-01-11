@@ -140,17 +140,87 @@ enum ResponseParser {
         let summary = json["summary"] as? String
             ?? json["brief"] as? String
             ?? "No summary available"
-        let fullReport = json["full_report"] as? String
-            ?? json["fullReport"] as? String
-            ?? json["report"] as? String
-            ?? json["detailed_report"] as? String
-            ?? "No detailed report available"
+
+        // Handle full_report - it might be a string or a nested object
+        let fullReport = extractReportContent(from: json)
 
         return ParsedReport(
             verdict: parseVerdict(verdictStr),
             summary: summary,
             fullReport: fullReport
         )
+    }
+
+    // MARK: - Report Content Extraction
+
+    /// Extract report content from JSON, handling various formats.
+    ///
+    /// Some LLMs return full_report as a string, others as a nested object
+    /// with section keys. This function handles both cases.
+    ///
+    /// - Parameter json: The parsed JSON dictionary.
+    /// - Returns: The report content as a string.
+    private static func extractReportContent(from json: [String: Any]) -> String {
+        // Try common field names as strings first
+        let fieldNames = ["full_report", "fullReport", "report", "detailed_report"]
+
+        for fieldName in fieldNames {
+            // Check if it's a string
+            if let stringValue = json[fieldName] as? String {
+                return stringValue
+            }
+
+            // Check if it's a nested object (some LLMs structure the report as an object)
+            if let objectValue = json[fieldName] as? [String: Any] {
+                return convertNestedReportToString(objectValue)
+            }
+        }
+
+        return "No detailed report available"
+    }
+
+    /// Convert a nested report object to a markdown string.
+    ///
+    /// Handles cases where the LLM returns the report as a structured object like:
+    /// ```json
+    /// {
+    ///     "full_report": {
+    ///         "## Section 1": "content...",
+    ///         "## Section 2": "content..."
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// - Parameter object: The nested report object.
+    /// - Returns: Formatted markdown string.
+    private static func convertNestedReportToString(_ object: [String: Any]) -> String {
+        var result = ""
+
+        // Sort keys to maintain consistent order
+        let sortedKeys = object.keys.sorted()
+
+        for key in sortedKeys {
+            let value = object[key]
+
+            // If the key looks like a markdown header, use it as-is
+            let header = key.hasPrefix("#") ? key : "## \(key)"
+
+            if let stringValue = value as? String {
+                result += "\(header)\n\n\(stringValue)\n\n"
+            } else if let arrayValue = value as? [String] {
+                result += "\(header)\n\n"
+                for item in arrayValue {
+                    result += "- \(item)\n"
+                }
+                result += "\n"
+            } else if let nestedObject = value as? [String: Any] {
+                // Recursively handle nested objects
+                result += "\(header)\n\n"
+                result += convertNestedReportToString(nestedObject)
+            }
+        }
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Verdict Parsing

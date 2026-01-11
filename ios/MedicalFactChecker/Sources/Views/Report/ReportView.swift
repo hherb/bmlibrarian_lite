@@ -6,10 +6,15 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ReportView: View {
     let report: EvidenceReport
     @Environment(\.dismiss) private var dismiss
+    @State private var showingPDFExportSheet = false
+    @State private var selectedPaperSize: PaperSize = PDFExporter.preferredPaperSize
+    @State private var pdfData: Data?
+    @State private var isGeneratingPDF = false
 
     var body: some View {
         NavigationStack {
@@ -99,15 +104,182 @@ struct ReportView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
-                    ShareLink(
-                        item: report.plainTextReport,
-                        subject: Text("Medical Fact Check Report"),
-                        message: Text("Evidence report for: \(report.session?.claim ?? "Unknown claim")")
-                    )
+                    Menu {
+                        // Plain text share
+                        ShareLink(
+                            item: report.plainTextReport,
+                            subject: Text("Medical Fact Check Report"),
+                            message: Text("Evidence report for: \(report.session?.claim ?? "Unknown claim")")
+                        ) {
+                            Label("Share as Text", systemImage: "doc.text")
+                        }
+
+                        // PDF export
+                        Button {
+                            showingPDFExportSheet = true
+                        } label: {
+                            Label("Export as PDF", systemImage: "doc.richtext")
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingPDFExportSheet) {
+                PDFExportSheet(
+                    report: report,
+                    selectedPaperSize: $selectedPaperSize,
+                    pdfData: $pdfData,
+                    isGenerating: $isGeneratingPDF
+                )
+            }
+        }
+    }
+}
+
+// MARK: - PDF Export Sheet
+
+/// Sheet for selecting paper size and exporting PDF.
+struct PDFExportSheet: View {
+    let report: EvidenceReport
+    @Binding var selectedPaperSize: PaperSize
+    @Binding var pdfData: Data?
+    @Binding var isGenerating: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var pdfURL: URL?
+    @State private var showingShareSheet = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                // Paper Size Selection
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Paper Size")
+                        .font(.headline)
+
+                    Picker("Paper Size", selection: $selectedPaperSize) {
+                        ForEach(PaperSize.allCases) { size in
+                            Text(size.rawValue).tag(size)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding()
+
+                // Preview info
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.richtext")
+                        .font(.system(size: 60))
+                        .foregroundColor(.accentColor)
+
+                    Text("Medical Fact Check Report")
+                        .font(.headline)
+
+                    Text("Generated \(report.generatedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if let claim = report.session?.claim {
+                        Text(claim)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .padding(.horizontal)
+                    }
+                }
+                .padding()
+
+                Spacer()
+
+                // Error message
+                if let error = errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .padding()
+                }
+
+                // Generate and Share Button
+                Button {
+                    generateAndSharePDF()
+                } label: {
+                    HStack {
+                        if isGenerating {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Text(isGenerating ? "Generating..." : "Generate & Share PDF")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(isGenerating ? Color.gray : Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+                .disabled(isGenerating)
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+            .navigationTitle("Export PDF")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showingShareSheet) {
+                if let url = pdfURL {
+                    ShareSheet(items: [url])
                 }
             }
         }
     }
+
+    private func generateAndSharePDF() {
+        isGenerating = true
+        errorMessage = nil
+
+        // Save paper size preference
+        PDFExporter.preferredPaperSize = selectedPaperSize
+
+        Task {
+            // Generate PDF with pagination
+            if let data = PDFExporter.generatePDFWithPagination(for: report, paperSize: selectedPaperSize) {
+                pdfData = data
+
+                // Save to temporary file
+                if let url = PDFExporter.savePDFToTemporaryFile(data, for: report) {
+                    pdfURL = url
+                    isGenerating = false
+                    showingShareSheet = true
+                } else {
+                    errorMessage = "Failed to save PDF file"
+                    isGenerating = false
+                }
+            } else {
+                errorMessage = "Failed to generate PDF"
+                isGenerating = false
+            }
+        }
+    }
+}
+
+// MARK: - Share Sheet (UIKit wrapper)
+
+/// UIKit share sheet wrapper for SwiftUI.
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Subviews
