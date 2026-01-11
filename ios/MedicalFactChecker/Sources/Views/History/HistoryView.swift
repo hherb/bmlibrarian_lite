@@ -95,10 +95,16 @@ struct SessionRow: View {
 
                 Spacer()
 
-                // Date
-                Text(session.createdAt, style: .relative)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                // Date - use relative for active sessions, fixed for completed
+                if session.currentStep.isProcessing {
+                    Text(session.createdAt, style: .relative)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(session.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             // Stats (if completed)
@@ -149,7 +155,10 @@ struct StatusBadge: View {
             if step == .failed || step == .budgetExceeded {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-            } else if !step.isTerminal {
+            } else if step.isPaused {
+                Image(systemName: step == .awaitingUserDecision ? "pause.circle" : "circle")
+                    .foregroundColor(.secondary)
+            } else if step.isProcessing {
                 ProgressView()
                     .scaleEffect(0.6)
             }

@@ -308,6 +308,12 @@ final class FactCheckWorkflow {
         // Clean up response and add filters
         var query = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Validate we got a real query from the LLM
+        if query.isEmpty {
+            // Fallback: use claim as simple search terms
+            query = session.claim
+        }
+
         // Require abstract for quality content
         if !query.lowercased().contains("hasabstract") {
             query += " AND hasabstract"

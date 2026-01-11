@@ -43,6 +43,22 @@ enum WorkflowStep: String, Codable, CaseIterable {
             return false
         }
     }
+
+    /// Whether this step is waiting for user input (not actively processing).
+    var isPaused: Bool {
+        switch self {
+        case .idle, .awaitingUserDecision:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether this step should show a progress spinner.
+    /// True for active processing states, false for terminal, paused, or idle states.
+    var isProcessing: Bool {
+        !isTerminal && !isPaused
+    }
 }
 
 /// Evidence verdict for the fact-check report.
