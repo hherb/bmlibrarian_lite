@@ -32,6 +32,7 @@
 		A1000025001 /* DisclaimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000025000 /* DisclaimerView.swift */; };
 		A1000026001 /* PrintableReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000026000 /* PrintableReportView.swift */; };
 		A1000027001 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000027000 /* PDFExporter.swift */; };
+		A1000028001 /* ModelFetchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000028000 /* ModelFetchService.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -63,6 +64,7 @@
 		A1000025000 /* DisclaimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisclaimerView.swift; sourceTree = "<group>"; };
 		A1000026000 /* PrintableReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintableReportView.swift; sourceTree = "<group>"; };
 		A1000027000 /* PDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExporter.swift; sourceTree = "<group>"; };
+		A1000028000 /* ModelFetchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelFetchService.swift; sourceTree = "<group>"; };
 		A1000020000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000021000 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -130,6 +132,7 @@
 				A1000022000 /* EmbeddingService.swift */,
 				A1000010000 /* FactCheckWorkflow.swift */,
 				A1000011000 /* LLMService.swift */,
+				A1000028000 /* ModelFetchService.swift */,
 				A1000012000 /* PubMedService.swift */,
 			);
 			path = Services;
@@ -311,6 +314,7 @@
 				A1000025001 /* DisclaimerView.swift in Sources */,
 				A1000026001 /* PrintableReportView.swift in Sources */,
 				A1000027001 /* PDFExporter.swift in Sources */,
+				A1000028001 /* ModelFetchService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
