@@ -143,10 +143,8 @@ struct MacDocumentCard: View {
 
     private var cardHeader: some View {
         HStack(alignment: .top, spacing: MacSpacing.large) {
-            // Score badge
-            if let score = document.relevanceScore {
-                MacScoreBadge(score: score)
-            }
+            // Score badge (shows "?" for failed scores)
+            MacScoreBadge(score: document.relevanceScore)
 
             // Title and metadata
             VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
@@ -285,18 +283,31 @@ struct MacDocumentCard: View {
 /// Score badge displaying a relevance score (1-5) with color coding.
 ///
 /// Colors range from red (1) through orange (2-3) to green (4-5).
+/// Displays "?" for nil scores (parsing failures).
 struct MacScoreBadge: View {
-    /// The relevance score to display.
-    let score: Int
+    /// The relevance score to display (nil for failed scores).
+    let score: Int?
 
     var body: some View {
-        Text("\(score)")
-            .font(.title3)
-            .fontWeight(.bold)
-            .foregroundColor(.white)
-            .frame(width: MacIconSize.scoreBadgeSize, height: MacIconSize.scoreBadgeSize)
-            .background(MacColors.scoreColor(for: score))
-            .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
+        Group {
+            if let score = score {
+                Text("\(score)")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: MacIconSize.scoreBadgeSize, height: MacIconSize.scoreBadgeSize)
+                    .background(MacColors.scoreColor(for: score))
+                    .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
+            } else {
+                Text("?")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: MacIconSize.scoreBadgeSize, height: MacIconSize.scoreBadgeSize)
+                    .background(Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
+            }
+        }
     }
 }
 

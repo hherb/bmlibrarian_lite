@@ -14,6 +14,26 @@ enum ResponseParser {
 
     // MARK: - Score Parsing
 
+    /// Result of parsing a score response.
+    struct ScoreResult {
+        /// The parsed score (1-5), or nil if parsing failed.
+        let score: Int?
+        /// Explanation for the score, or error message if parsing failed.
+        let explanation: String
+        /// Whether parsing failed (for retry logic).
+        let parseFailed: Bool
+
+        /// Convenience for successful parses.
+        static func success(score: Int, explanation: String) -> ScoreResult {
+            ScoreResult(score: score, explanation: explanation, parseFailed: false)
+        }
+
+        /// Convenience for failed parses.
+        static func failure(_ message: String) -> ScoreResult {
+            ScoreResult(score: nil, explanation: message, parseFailed: true)
+        }
+    }
+
     /// Parse a relevance score response from the LLM.
     ///
     /// Expected JSON format: `{"score": 1-5, "explanation": "..."}`
@@ -21,14 +41,19 @@ enum ResponseParser {
     /// extra text around JSON, and markdown code blocks.
     ///
     /// - Parameter response: Raw JSON string from LLM.
-    /// - Returns: Tuple of (score clamped to 1-5, explanation).
-    static func parseScoreResponse(_ response: String) -> (score: Int, explanation: String) {
+    /// - Returns: ScoreResult with score (nil if failed), explanation, and parseFailed flag.
+    static func parseScoreResponse(_ response: String) -> ScoreResult {
         // Try to extract JSON from the response (handles markdown code blocks, extra text)
         let jsonString = extractJSON(from: response)
 
-        guard let data = jsonString.data(using: .utf8),
+        // Try to fix common JSON issues from local models
+        let fixedJSON = fixJSONString(jsonString)
+
+        guard let data = fixedJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return (1, "Failed to parse JSON response")
+            // Log for debugging
+            print("[ResponseParser] Failed to parse JSON. Raw response: \(response.prefix(200))")
+            return .failure("Failed to parse JSON response")
         }
 
         // Parse score - handle Int, Double, or String
@@ -40,7 +65,14 @@ enum ResponseParser {
         } else if let strScore = json["score"] as? String, let parsed = Int(strScore) {
             score = parsed
         } else {
-            return (1, "Failed to parse score value")
+            print("[ResponseParser] Failed to parse score value from: \(json)")
+            return .failure("Failed to parse score value")
+        }
+
+        // Validate score is in expected range
+        guard score >= 1 && score <= 5 else {
+            print("[ResponseParser] Score out of range: \(score)")
+            return .failure("Score \(score) out of valid range (1-5)")
         }
 
         // Parse explanation - be lenient
@@ -49,7 +81,36 @@ enum ResponseParser {
             ?? json["reason"] as? String
             ?? "No explanation provided"
 
-        return (clampScore(score), explanation)
+        return .success(score: clampScore(score), explanation: explanation)
+    }
+
+    /// Fix common JSON issues from local models.
+    ///
+    /// Handles:
+    /// - Trailing commas before closing braces
+    /// - Single quotes instead of double quotes
+    /// - Unescaped newlines in strings
+    ///
+    /// - Parameter json: The JSON string to fix.
+    /// - Returns: Fixed JSON string.
+    private static func fixJSONString(_ json: String) -> String {
+        var fixed = json
+
+        // Remove trailing commas before closing braces/brackets
+        // e.g., {"score": 3,} -> {"score": 3}
+        fixed = fixed.replacingOccurrences(
+            of: ",\\s*([}\\]])",
+            with: "$1",
+            options: .regularExpression
+        )
+
+        // Replace single quotes with double quotes (only outside of already double-quoted strings)
+        // This is tricky, so only do simple cases
+        if !fixed.contains("\"") && fixed.contains("'") {
+            fixed = fixed.replacingOccurrences(of: "'", with: "\"")
+        }
+
+        return fixed
     }
 
     // MARK: - Citation Parsing

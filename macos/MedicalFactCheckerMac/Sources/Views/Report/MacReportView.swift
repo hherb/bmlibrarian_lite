@@ -504,10 +504,9 @@ struct MacReviewedDocumentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: MacSpacing.standard) {
-            if let score = document.relevanceScore {
-                MacScoreBadge(score: score)
-                    .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
-            }
+            // Show score badge (displays "?" for failed scores)
+            MacScoreBadge(score: document.relevanceScore)
+                .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
 
             VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text(document.title)
@@ -839,23 +838,21 @@ struct MacDocumentDetailSheet: View {
 
                     Divider()
 
-                    // Score
-                    if let score = document.relevanceScore {
-                        HStack(spacing: MacSpacing.standard) {
-                            Text("Relevance Score:")
-                                .fontWeight(.medium)
-                            MacScoreBadge(score: score)
-                        }
-
-                        if let explanation = document.scoreExplanation {
-                            Text(explanation)
-                                .font(.body)
-                                .italic()
-                                .foregroundColor(.secondary)
-                        }
-
-                        Divider()
+                    // Score (shows "?" for failed scores)
+                    HStack(spacing: MacSpacing.standard) {
+                        Text("Relevance Score:")
+                            .fontWeight(.medium)
+                        MacScoreBadge(score: document.relevanceScore)
                     }
+
+                    if let explanation = document.scoreExplanation {
+                        Text(explanation)
+                            .font(.body)
+                            .italic()
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider()
 
                     // Abstract
                     VStack(alignment: .leading, spacing: MacSpacing.medium) {

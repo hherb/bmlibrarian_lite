@@ -467,6 +467,9 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
+    /// Maximum number of retries for failed JSON parsing in scoring.
+    private let maxScoringRetries = 3
+
     private func scoreDocuments() async throws {
         guard let session = session, let llmService = llmService else { return }
 
@@ -478,55 +481,113 @@ final class FactCheckWorkflow {
 
             updateProgress(.scoringDocuments, "Scoring document \(index + 1)/\(total)...")
 
-            let prompt = """
-            Evaluate how relevant this document is to the following medical claim.
-
-            Claim: \(session.claim)
-
-            Document Title: \(document.title)
-            Authors: \(document.formattedAuthors)
-            Year: \(document.year ?? 0)
-            Journal: \(document.journal ?? "Unknown")
-
-            Abstract:
-            \(document.abstract)
-
-            Score on a scale of 1-5:
-            - 5: Directly addresses the claim with strong evidence
-            - 4: Highly relevant, provides substantial supporting information
-            - 3: Moderately relevant, contains useful related information
-            - 2: Marginally relevant, tangentially related
-            - 1: Not relevant to the claim
-
-            Respond in JSON format only:
-            {"score": <1-5>, "explanation": "<brief explanation>"}
-            """
-
-            let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 256,
-                jsonMode: true
+            // Score with retry logic
+            let result = await scoreDocumentWithRetry(
+                document: document,
+                claim: session.claim,
+                llmService: llmService
             )
 
-            recordUsage(usage, operationType: "scoring")
-
-            // Parse response using ResponseParser
-            let parsed = ResponseParser.parseScoreResponse(response)
-            let score = parsed.score
-            let explanation = parsed.explanation
-            document.relevanceScore = score
-            document.scoreExplanation = explanation
+            document.relevanceScore = result.score
+            document.scoreExplanation = result.explanation
             document.scoredAt = Date()
 
             session.documentsScored += 1
-            if score >= settings.minScoreThreshold {
+            if let score = result.score, score >= settings.minScoreThreshold {
                 session.relevantDocumentsFound += 1
             }
 
             try? modelContext.save()
         }
+    }
+
+    /// Score a single document with retry logic for JSON parsing failures.
+    ///
+    /// - Parameters:
+    ///   - document: The document to score.
+    ///   - claim: The medical claim to evaluate against.
+    ///   - llmService: The LLM service to use.
+    /// - Returns: ScoreResult with score (nil if all retries failed) and explanation.
+    private func scoreDocumentWithRetry(
+        document: Document,
+        claim: String,
+        llmService: LLMService
+    ) async -> ResponseParser.ScoreResult {
+        // Use a structured prompt that works well with local models
+        let prompt = """
+        You are evaluating medical document relevance. Score this document for the claim below.
+
+        CLAIM: \(claim)
+
+        DOCUMENT:
+        Title: \(document.title)
+        Authors: \(document.formattedAuthors)
+        Year: \(document.year ?? 0)
+        Journal: \(document.journal ?? "Unknown")
+
+        Abstract:
+        \(document.abstract)
+
+        SCORING CRITERIA:
+        5 = Directly addresses the claim with strong evidence
+        4 = Highly relevant, provides substantial supporting information
+        3 = Moderately relevant, contains useful related information
+        2 = Marginally relevant, tangentially related
+        1 = Not relevant to the claim
+
+        OUTPUT FORMAT - respond with ONLY this JSON, nothing else:
+        {"score": NUMBER, "explanation": "TEXT"}
+
+        Where NUMBER is 1-5 and TEXT is a brief explanation (1-2 sentences).
+        """
+
+        var lastError = "Unknown error"
+
+        for attempt in 1...maxScoringRetries {
+            do {
+                let messages = [LLMService.userMessage(prompt)]
+                let (response, usage) = try await llmService.chat(
+                    messages: messages,
+                    temperature: 0.1,
+                    maxTokens: 256,
+                    jsonMode: true
+                )
+
+                recordUsage(usage, operationType: "scoring")
+
+                let parsed = ResponseParser.parseScoreResponse(response)
+
+                if !parsed.parseFailed {
+                    // Success!
+                    if attempt > 1 {
+                        print("[Scoring] Document \(document.pmid): succeeded on attempt \(attempt)")
+                    }
+                    return parsed
+                }
+
+                // Parse failed, will retry
+                lastError = parsed.explanation
+                print("[Scoring] Document \(document.pmid): parse failed (attempt \(attempt)/\(maxScoringRetries)): \(lastError)")
+
+                if attempt < maxScoringRetries {
+                    // Brief delay before retry
+                    try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+                }
+
+            } catch {
+                lastError = error.localizedDescription
+                print("[Scoring] Document \(document.pmid): API error (attempt \(attempt)/\(maxScoringRetries)): \(lastError)")
+
+                if attempt < maxScoringRetries {
+                    // Brief delay before retry
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1 second
+                }
+            }
+        }
+
+        // All retries exhausted
+        print("[Scoring] Document \(document.pmid): all \(maxScoringRetries) retries exhausted")
+        return .failure("Scoring failed after \(maxScoringRetries) attempts: \(lastError)")
     }
 
     /// Compute embedding-based similarity scores for all documents using HyDE.
@@ -1070,47 +1131,19 @@ final class FactCheckWorkflow {
         for document in docsToScore {
             try checkBudget()
 
-            let prompt = """
-            Evaluate how relevant this document is to the following medical claim.
-
-            Claim: \(session.claim)
-
-            Document Title: \(document.title)
-            Authors: \(document.formattedAuthors)
-            Year: \(document.year ?? 0)
-            Journal: \(document.journal ?? "Unknown")
-
-            Abstract:
-            \(document.abstract)
-
-            Score on a scale of 1-5:
-            - 5: Directly addresses the claim with strong evidence
-            - 4: Highly relevant, provides substantial supporting information
-            - 3: Moderately relevant, contains useful related information
-            - 2: Marginally relevant, tangentially related
-            - 1: Not relevant to the claim
-
-            Respond in JSON format only:
-            {"score": <1-5>, "explanation": "<brief explanation>"}
-            """
-
-            let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 256,
-                jsonMode: true
+            // Reuse the retry logic from main scoring
+            let result = await scoreDocumentWithRetry(
+                document: document,
+                claim: session.claim,
+                llmService: llmService
             )
 
-            recordUsage(usage, operationType: "scoring")
-
-            let parsed = ResponseParser.parseScoreResponse(response)
-            document.relevanceScore = parsed.score
-            document.scoreExplanation = parsed.explanation
+            document.relevanceScore = result.score
+            document.scoreExplanation = result.explanation
             document.scoredAt = Date()
 
             session.documentsScored += 1
-            if parsed.score >= settings.minScoreThreshold {
+            if let score = result.score, score >= settings.minScoreThreshold {
                 session.relevantDocumentsFound += 1
             }
 
