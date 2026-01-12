@@ -223,17 +223,7 @@ struct MacDocumentCard: View {
                 }
             }
 
-            // Abstract - rendered as markdown
-            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
-                Text("Abstract")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-                MacAbstractView(text: document.abstract)
-                    .textSelection(.enabled)
-            }
-
-            // Citations
+            // Citations (Key Passages) - shown before abstract
             if !document.citations.isEmpty {
                 VStack(alignment: .leading, spacing: MacSpacing.medium) {
                     Text("Key Passages (\(document.citations.count))")
@@ -257,6 +247,16 @@ struct MacDocumentCard: View {
                         .cornerRadius(MacCornerRadius.medium)
                     }
                 }
+            }
+
+            // Abstract - rendered as markdown
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                Text("Abstract")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                MacAbstractView(text: document.abstract)
+                    .textSelection(.enabled)
             }
 
             // Links
