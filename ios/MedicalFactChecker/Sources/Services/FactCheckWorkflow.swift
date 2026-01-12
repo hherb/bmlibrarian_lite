@@ -716,7 +716,7 @@ final class FactCheckWorkflow {
             let (response, usage) = try await llmService.chat(
                 messages: messages,
                 temperature: 0.1,
-                maxTokens: 2048,
+                maxTokens: 4096,
                 jsonMode: true
             )
 
@@ -890,7 +890,8 @@ final class FactCheckWorkflow {
         session.recordUsage(
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
-            model: settings.llmModel
+            model: settings.llmModel,
+            provider: usage.provider
         )
 
         // Create usage record for monthly tracking

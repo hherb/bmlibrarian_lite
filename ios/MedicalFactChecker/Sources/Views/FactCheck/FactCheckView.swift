@@ -378,9 +378,9 @@ struct UserDecisionSection: View {
     @Previewable @State var workflow: FactCheckWorkflow? = nil
 
     FactCheckView(
+        onReportGenerated: nil,
         claimText: $claimText,
-        workflow: $workflow,
-        onReportGenerated: nil
+        workflow: $workflow
     )
     .modelContainer(for: [
         FactCheckSession.self,

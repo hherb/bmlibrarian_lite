@@ -82,27 +82,19 @@ enum CostCalculator {
         return inputCost + outputCost
     }
 
-    /// Common Ollama/local model name patterns (free inference).
-    private static let localModelPatterns: [String] = [
-        "llama", "mistral", "mixtral", "phi", "gemma", "qwen", "codellama",
-        "vicuna", "orca", "wizard", "falcon", "starcoder", "deepseek-coder",
-        "neural-chat", "starling", "dolphin", "openchat", "zephyr", "solar",
-        "yi", "command-r", "nous-hermes", "tinyllama", "stablelm"
-    ]
-
     /// Get pricing for a model, with fallback to default.
     ///
-    /// - Parameter model: The model name.
-    /// - Parameter provider: Optional provider to help determine if local model.
+    /// - Parameters:
+    ///   - model: The model name.
+    ///   - provider: Optional provider to help determine if local model.
     /// - Returns: Tuple of (input price, output price) per 1M tokens.
     static func getPricing(for model: String, provider: LLMProvider? = nil) -> (input: Double, output: Double) {
-        // Check if this is a local/Ollama model (free)
-        if provider == .ollama {
+        // Ollama models are free unless they end with ':cloud'
+        if provider == .ollama && !model.lowercased().hasSuffix(":cloud") {
             return (0, 0)
         }
 
         // Normalize model name (remove provider prefix, lowercase)
-        // Note: .components() returns empty array for empty strings, so use if-let chain
         var normalizedModel = model.lowercased()
         if let lastSlashComponent = normalizedModel.components(separatedBy: "/").last, !lastSlashComponent.isEmpty {
             normalizedModel = lastSlashComponent
@@ -120,13 +112,6 @@ enum CostCalculator {
         for (key, pricing) in modelPricing {
             if normalizedModel.hasPrefix(key) || normalizedModel.contains(key) {
                 return pricing
-            }
-        }
-
-        // Check if this looks like a local/Ollama model (free)
-        for pattern in localModelPatterns {
-            if normalizedModel.hasPrefix(pattern) || normalizedModel.contains(pattern) {
-                return (0, 0)
             }
         }
 

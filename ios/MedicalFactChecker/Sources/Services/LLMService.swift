@@ -29,6 +29,7 @@ actor LLMService {
     private var baseURL: URL
     private var apiKey: String
     private var model: String
+    private var provider: LLMProvider?
     private let session: URLSession
 
     // MARK: - Usage Tracking
@@ -38,10 +39,11 @@ actor LLMService {
 
     // MARK: - Initialization
 
-    init(baseURL: URL, apiKey: String, model: String) {
+    init(baseURL: URL, apiKey: String, model: String, provider: LLMProvider? = nil) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
+        self.provider = provider
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60
@@ -58,15 +60,21 @@ actor LLMService {
         if settings.selectedProvider.requiresAPIKey && settings.llmAPIKey.isEmpty {
             throw LLMError.invalidConfiguration("API key not set")
         }
-        return LLMService(baseURL: url, apiKey: settings.llmAPIKey, model: settings.llmModel)
+        return LLMService(
+            baseURL: url,
+            apiKey: settings.llmAPIKey,
+            model: settings.llmModel,
+            provider: settings.selectedProvider
+        )
     }
 
     // MARK: - Configuration Updates
 
-    func updateConfiguration(baseURL: URL, apiKey: String, model: String) {
+    func updateConfiguration(baseURL: URL, apiKey: String, model: String, provider: LLMProvider? = nil) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
+        self.provider = provider
     }
 
     // MARK: - Chat Completion
@@ -173,6 +181,7 @@ actor LLMService {
         // Create usage record
         let usage = LLMUsage(
             model: model,
+            provider: provider,
             inputTokens: result.usage?.promptTokens ?? 0,
             outputTokens: result.usage?.completionTokens ?? 0
         )
@@ -369,6 +378,9 @@ struct LLMUsage: Sendable {
     /// Model used for this request.
     let model: String
 
+    /// Provider used for this request.
+    let provider: LLMProvider?
+
     /// Number of input tokens.
     let inputTokens: Int
 
@@ -383,7 +395,8 @@ struct LLMUsage: Sendable {
         CostCalculator.calculateCost(
             model: model,
             inputTokens: inputTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            provider: provider
         )
     }
 }

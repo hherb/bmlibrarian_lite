@@ -38,13 +38,13 @@ struct ContentView: View {
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
             FactCheckView(
-                claimText: $factCheckClaimText,
-                workflow: $factCheckWorkflow,
                 onReportGenerated: { report in
                     currentReport = report
                     visitedTabs.insert(.report)
                     selectedTab = .report
-                }
+                },
+                claimText: $factCheckClaimText,
+                workflow: $factCheckWorkflow
             )
             .tabItem {
                 Label("Check", systemImage: "checkmark.shield")

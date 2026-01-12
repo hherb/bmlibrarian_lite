@@ -160,13 +160,14 @@ final class FactCheckSession {
     // MARK: - Methods
 
     /// Record token usage and update cost estimate.
-    func recordUsage(inputTokens: Int, outputTokens: Int, model: String) {
+    func recordUsage(inputTokens: Int, outputTokens: Int, model: String, provider: LLMProvider? = nil) {
         totalInputTokens += inputTokens
         totalOutputTokens += outputTokens
         estimatedCostUSD += CostCalculator.calculateCost(
             model: model,
             inputTokens: inputTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            provider: provider
         )
         updatedAt = Date()
     }
