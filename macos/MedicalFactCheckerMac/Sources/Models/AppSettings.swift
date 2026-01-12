@@ -45,24 +45,53 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(llmModel, forKey: Keys.llmModel) }
     }
 
-    /// Cached LLM API key (stored in Keychain, cached in memory).
-    private var _llmAPIKeyCache: String?
+    /// Cached LLM API keys per provider (stored in Keychain, cached in memory).
+    private var _providerAPIKeyCache: [LLMProvider: String] = [:]
 
-    /// API key (stored in Keychain, not UserDefaults).
+    /// API key for the currently selected provider (stored in Keychain, not UserDefaults).
     ///
+    /// Keys are stored separately per provider so switching providers preserves each key.
     /// Cached in memory after first access to avoid Keychain latency.
     var llmAPIKey: String {
         get {
-            if let cached = _llmAPIKeyCache {
-                return cached
-            }
-            let loaded = KeychainHelper.load(key: Keys.llmAPIKey) ?? ""
-            _llmAPIKeyCache = loaded
-            return loaded
+            apiKey(for: selectedProvider)
         }
         set {
-            _llmAPIKeyCache = newValue
-            KeychainHelper.save(key: Keys.llmAPIKey, value: newValue)
+            setAPIKey(newValue, for: selectedProvider)
+        }
+    }
+
+    /// Get the API key for a specific provider.
+    ///
+    /// - Parameter provider: The LLM provider.
+    /// - Returns: The stored API key, or empty string if none.
+    func apiKey(for provider: LLMProvider) -> String {
+        if let cached = _providerAPIKeyCache[provider] {
+            return cached
+        }
+        let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
+        let loaded = KeychainHelper.load(key: keychainKey) ?? ""
+        _providerAPIKeyCache[provider] = loaded
+        return loaded
+    }
+
+    /// Set the API key for a specific provider.
+    ///
+    /// - Parameters:
+    ///   - key: The API key to store.
+    ///   - provider: The LLM provider.
+    func setAPIKey(_ key: String, for provider: LLMProvider) {
+        _providerAPIKeyCache[provider] = key
+        let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
+        KeychainHelper.save(key: keychainKey, value: key)
+    }
+
+    /// Clear all stored API keys for all providers.
+    private func clearAllAPIKeys() {
+        _providerAPIKeyCache.removeAll()
+        for provider in LLMProvider.allCases {
+            let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
+            KeychainHelper.delete(key: keychainKey)
         }
     }
 
@@ -165,6 +194,31 @@ final class AppSettings {
 
         self.maxRunBudgetUSD = defaults.object(forKey: Keys.maxRunBudgetUSD) as? Double ?? 1.0
         self.monthlyBudgetUSD = defaults.object(forKey: Keys.monthlyBudgetUSD) as? Double ?? 10.0
+
+        // Migrate legacy single API key to per-provider storage
+        migrateLegacyAPIKeyIfNeeded(for: detectedProvider)
+    }
+
+    /// Migrate legacy single API key to the per-provider storage format.
+    ///
+    /// This runs once to move any existing API key from the old single-key storage
+    /// to the new per-provider format. The key is assigned to the detected provider.
+    private func migrateLegacyAPIKeyIfNeeded(for provider: LLMProvider) {
+        let defaults = UserDefaults.standard
+
+        // Skip if already migrated
+        guard !defaults.bool(forKey: Keys.apiKeyMigrated) else { return }
+
+        // Check for legacy key
+        if let legacyKey = KeychainHelper.load(key: Keys.llmAPIKeyLegacy), !legacyKey.isEmpty {
+            // Save to new per-provider key
+            setAPIKey(legacyKey, for: provider)
+            // Delete legacy key
+            KeychainHelper.delete(key: Keys.llmAPIKeyLegacy)
+        }
+
+        // Mark as migrated
+        defaults.set(true, forKey: Keys.apiKeyMigrated)
     }
 
     // MARK: - Keys
@@ -173,7 +227,9 @@ final class AppSettings {
         static let selectedProvider = "selected_provider"
         static let llmBaseURL = "llm_base_url"
         static let llmModel = "llm_model"
-        static let llmAPIKey = "llm_api_key"
+        static let llmAPIKeyPrefix = "llm_api_key_"
+        static let llmAPIKeyLegacy = "llm_api_key"
+        static let apiKeyMigrated = "api_key_migrated_v1"
         static let ncbiEmail = "ncbi_email"
         static let ncbiAPIKey = "ncbi_api_key"
         static let batchSize = "batch_size"
@@ -209,7 +265,7 @@ final class AppSettings {
         selectedProvider = .anthropic
         llmBaseURL = LLMProvider.anthropic.baseURL
         llmModel = LLMProvider.anthropic.defaultModel?.id ?? "claude-sonnet-4-5-20250929"
-        llmAPIKey = ""
+        clearAllAPIKeys()
         ncbiEmail = ""
         ncbiAPIKey = ""
         batchSize = 20
