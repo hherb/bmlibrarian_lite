@@ -744,6 +744,14 @@ final class FactCheckWorkflow {
 
             // Parse passages using ResponseParser
             let passages = ResponseParser.parsePassagesResponse(response)
+
+            if passages.isEmpty {
+                print("[Citation] Warning: No passages extracted from document \(document.pmid)")
+                print("[Citation] Response (first 500 chars): \(String(response.prefix(500)))")
+            } else {
+                print("[Citation] Extracted \(passages.count) passage(s) from document \(document.pmid)")
+            }
+
             for passage in passages {
                 let citation = Citation(passage: passage.text, context: passage.relevance)
                 citation.document = document
@@ -761,13 +769,19 @@ final class FactCheckWorkflow {
         try checkBudget()
 
         let allCitations = session.documents.flatMap { $0.citations }
+        let relevantDocCount = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
 
-        // Handle no evidence case
+        // Handle no evidence case - distinguish between no relevant docs vs extraction failure
         guard !allCitations.isEmpty else {
+            let (summary, fullReport) = generateNoEvidenceContent(
+                claim: session.claim,
+                hadRelevantDocuments: relevantDocCount > 0,
+                relevantDocCount: relevantDocCount
+            )
             let report = EvidenceReport(
                 verdict: .insufficientEvidence,
-                summary: "No relevant evidence was found in the medical literature for this claim.",
-                fullReport: generateNoEvidenceReport(claim: session.claim),
+                summary: summary,
+                fullReport: fullReport,
                 citationCount: 0,
                 uniqueSourceCount: 0,
                 documentsReviewed: session.documentsScored
@@ -957,31 +971,75 @@ final class FactCheckWorkflow {
         }.joined(separator: "\n\n")
     }
 
-    private func generateNoEvidenceReport(claim: String) -> String {
-        """
-        ## Evidence Report
+    /// Generate content for the no-evidence report, distinguishing between
+    /// no relevant documents found vs citation extraction failure.
+    ///
+    /// - Parameters:
+    ///   - claim: The medical claim being evaluated.
+    ///   - hadRelevantDocuments: True if relevant documents were found but citation extraction failed.
+    ///   - relevantDocCount: Number of documents that met the relevance threshold.
+    /// - Returns: Tuple of (summary, fullReport) strings.
+    private func generateNoEvidenceContent(
+        claim: String,
+        hadRelevantDocuments: Bool,
+        relevantDocCount: Int
+    ) -> (summary: String, fullReport: String) {
+        if hadRelevantDocuments {
+            // Relevant documents were found but citation extraction failed
+            let summary = "Citation extraction failed for \(relevantDocCount) relevant document(s). Please review the scored documents manually or try again."
+            let fullReport = """
+            ## Evidence Report
 
-        **Claim:** \(claim)
+            **Claim:** \(claim)
 
-        **Verdict:** Insufficient Evidence
+            **Verdict:** Insufficient Evidence
 
-        No relevant evidence was found in the searched medical literature for this claim.
+            \(relevantDocCount) relevant document(s) were found during the search, but citation extraction was unable to identify specific passages from them. This may be due to:
 
-        ### Possible Reasons
+            1. API or network errors during citation extraction
+            2. Documents having abstracts that are difficult to parse
+            3. Temporary service issues
+            4. The LLM returning responses in an unexpected format
 
-        1. The topic may have limited published research
-        2. The search terms may need refinement
-        3. The claim may be too specific or novel
+            ### Recommendations
 
-        ### Recommendations
+            - Review the scored documents shown above - they contain relevant information
+            - Try running the search again
+            - If the problem persists, check for network connectivity issues
 
-        - Try rephrasing the claim with different medical terms
-        - Consider searching for related topics
-        - Consult specialized medical databases
+            ---
+            *No citations extracted*
+            """
+            return (summary, fullReport)
+        } else {
+            // No relevant documents were found
+            let summary = "No relevant evidence was found in the medical literature for this claim."
+            let fullReport = """
+            ## Evidence Report
 
-        ---
-        *No citations available*
-        """
+            **Claim:** \(claim)
+
+            **Verdict:** Insufficient Evidence
+
+            No relevant evidence was found in the searched medical literature for this claim.
+
+            ### Possible Reasons
+
+            1. The topic may have limited published research
+            2. The search terms may need refinement
+            3. The claim may be too specific or novel
+
+            ### Recommendations
+
+            - Try rephrasing the claim with different medical terms
+            - Consider searching for related topics
+            - Consult specialized medical databases
+
+            ---
+            *No citations available*
+            """
+            return (summary, fullReport)
+        }
     }
 
     // MARK: - Smart Search

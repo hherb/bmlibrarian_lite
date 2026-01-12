@@ -71,7 +71,15 @@ class LiteReportingAgent(LiteBaseAgent):
             Formatted research report as markdown
         """
         if not citations:
-            report = self._generate_no_evidence_report(question)
+            # Check if we had relevant documents but citation extraction failed
+            had_relevant_docs = (
+                metadata is not None
+                and metadata.documents_accepted > 0
+            )
+            report = self._generate_no_evidence_report(
+                question,
+                citation_extraction_failed=had_relevant_docs,
+            )
             if metadata:
                 report += "\n\n" + self.format_methodology_section(metadata)
             return report
@@ -160,16 +168,43 @@ Write a brief summary (approximately {max_length} characters) of the key finding
             logger.error(f"Failed to generate summary: {e}")
             return f"Error generating summary: {str(e)}"
 
-    def _generate_no_evidence_report(self, question: str) -> str:
+    def _generate_no_evidence_report(
+        self,
+        question: str,
+        citation_extraction_failed: bool = False,
+    ) -> str:
         """
-        Generate a report when no evidence is found.
+        Generate a report when no citations are available.
 
         Args:
             question: Research question
+            citation_extraction_failed: True if relevant documents were found
+                but citation extraction failed for all of them
 
         Returns:
-            Report text explaining no evidence was found
+            Report text explaining the situation
         """
+        if citation_extraction_failed:
+            return f"""## Research Summary
+
+**Research Question:** {question}
+
+Relevant documents were found during the search, but citation extraction was unable to identify specific passages from them. This may be due to:
+
+1. API or network errors during citation extraction
+2. Documents having abstracts that are difficult to parse
+3. Temporary service issues
+
+### Recommendations
+
+- Try running the search again
+- Review the scored documents in the Audit Trail to see what was found
+- If the problem persists, check the application logs for errors
+
+---
+
+*No citations extracted*
+"""
         return f"""## Research Summary
 
 **Research Question:** {question}
