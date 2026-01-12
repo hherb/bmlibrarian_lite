@@ -244,7 +244,7 @@ struct PrintableReportView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     if let journal = document.journal, let year = document.year {
-                        Text("\(journal), \(year)")
+                        Text(verbatim: "\(journal), \(year)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }

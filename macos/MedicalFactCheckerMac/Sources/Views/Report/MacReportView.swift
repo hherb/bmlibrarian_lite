@@ -829,7 +829,7 @@ struct MacDocumentDetailSheet: View {
                             Text(journal)
                                 .italic()
                             if let year = document.year {
-                                Text("(\(year))")
+                                Text(verbatim: "(\(year))")
                             }
                         }
                         .font(.body)

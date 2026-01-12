@@ -161,7 +161,7 @@ struct MacDocumentCard: View {
                     if let journal = document.journal, let year = document.year {
                         Text("•")
                             .foregroundColor(.secondary)
-                        Text("\(journal), \(year)")
+                        Text(verbatim: "\(journal), \(year)")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
