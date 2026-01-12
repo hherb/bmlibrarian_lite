@@ -180,6 +180,20 @@ enum MacColors {
         case .conflicting: return .purple
         }
     }
+
+    // MARK: - LLM Reasoning Colors
+
+    /// Background color for LLM reasoning/explanation blocks.
+    static let reasoningBackground = Color(red: 0.98, green: 0.97, blue: 0.93)
+
+    /// Border color for LLM reasoning blocks.
+    static let reasoningBorder = Color(red: 0.85, green: 0.82, blue: 0.72)
+
+    /// Text color for LLM reasoning content.
+    static let reasoningText = Color(red: 0.35, green: 0.35, blue: 0.35)
+
+    /// Accent color for LLM reasoning icon.
+    static let reasoningAccent = Color(red: 0.6, green: 0.55, blue: 0.4)
 }
 
 // MARK: - PDF Export Constants

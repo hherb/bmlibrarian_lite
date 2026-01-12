@@ -194,27 +194,42 @@ struct MacDocumentCard: View {
 
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: MacSpacing.large) {
-            // Score explanation
+            // Score explanation - visually distinct with background and quote styling
             if let explanation = document.scoreExplanation, !explanation.isEmpty {
                 VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                     Text("Relevance Explanation")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
-                    Text(explanation)
-                        .font(.body)
-                        .italic()
+
+                    HStack(alignment: .top, spacing: MacSpacing.medium) {
+                        Image(systemName: "brain.head.profile")
+                            .font(.body)
+                            .foregroundColor(MacColors.reasoningAccent)
+
+                        Text(explanation)
+                            .font(.body)
+                            .italic()
+                            .foregroundColor(MacColors.reasoningText)
+                    }
+                    .padding(MacSpacing.standard)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(MacColors.reasoningBackground)
+                    .cornerRadius(MacCornerRadius.standard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MacCornerRadius.standard)
+                            .stroke(MacColors.reasoningBorder, lineWidth: 1)
+                    )
                 }
             }
 
-            // Abstract
+            // Abstract - rendered as markdown
             VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text("Abstract")
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
-                Text(document.abstract)
-                    .font(.body)
+                MacAbstractView(text: document.abstract)
                     .textSelection(.enabled)
             }
 
@@ -308,6 +323,46 @@ struct MacScoreBadge: View {
                     .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
             }
         }
+    }
+}
+
+// MARK: - Abstract View with Markdown Support
+
+/// View that renders abstract text with markdown formatting support.
+///
+/// Handles common markdown patterns found in PubMed abstracts like
+/// bold section headers (e.g., **OBJECTIVE:**) and emphasis.
+struct MacAbstractView: View {
+    /// The abstract text to render.
+    let text: String
+
+    var body: some View {
+        if let attributed = parseAbstractMarkdown(text) {
+            Text(attributed)
+                .font(.body)
+        } else {
+            Text(text)
+                .font(.body)
+        }
+    }
+
+    /// Parses markdown in abstract text and returns an AttributedString.
+    ///
+    /// Handles common patterns in PubMed abstracts:
+    /// - **SECTION:** headers (bold)
+    /// - *emphasis* text (italic)
+    ///
+    /// - Parameter text: The abstract text to parse.
+    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
+    private func parseAbstractMarkdown(_ text: String) -> AttributedString? {
+        // Try native markdown parsing first
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return nil
     }
 }
 

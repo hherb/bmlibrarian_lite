@@ -141,29 +141,42 @@ struct DocumentScoreRow: View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
 
-            // Abstract
-            if !document.abstract.isEmpty {
-                Text("Abstract")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
-
-                Text(document.abstract)
-                    .font(.caption)
-                    .lineLimit(10)
-            }
-
-            // Score explanation
+            // Score explanation - visually distinct with background and icon
             if let explanation = document.scoreExplanation {
                 Text("LLM Reasoning")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
 
-                Text(explanation)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.caption)
+                        .foregroundColor(ReasoningColors.accent)
+
+                    Text(explanation)
+                        .font(.caption)
+                        .italic()
+                        .foregroundColor(ReasoningColors.text)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ReasoningColors.background)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(ReasoningColors.border, lineWidth: 1)
+                )
+            }
+
+            // Abstract - rendered with markdown
+            if !document.abstract.isEmpty {
+                Text("Abstract")
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundColor(.secondary)
-                    .italic()
+
+                AbstractTextView(text: document.abstract)
+                    .lineLimit(10)
             }
 
             // Score comparison (if both available)
@@ -330,13 +343,68 @@ enum ScoreAgreement {
     }
 }
 
+// MARK: - Reasoning Colors
+
+/// Colors for LLM reasoning/explanation display.
+///
+/// Provides a visually distinct style for AI-generated explanations
+/// to help users distinguish them from source text like abstracts.
+enum ReasoningColors {
+    /// Background color for reasoning blocks (warm off-white).
+    static let background = Color(red: 0.98, green: 0.97, blue: 0.93)
+
+    /// Border color for reasoning blocks.
+    static let border = Color(red: 0.85, green: 0.82, blue: 0.72)
+
+    /// Text color for reasoning content.
+    static let text = Color(red: 0.35, green: 0.35, blue: 0.35)
+
+    /// Accent color for reasoning icon.
+    static let accent = Color(red: 0.6, green: 0.55, blue: 0.4)
+}
+
+// MARK: - Abstract Text View
+
+/// View that renders abstract text with markdown formatting support.
+///
+/// Handles common markdown patterns found in PubMed abstracts like
+/// bold section headers (e.g., **OBJECTIVE:**) and emphasis.
+struct AbstractTextView: View {
+    /// The abstract text to render.
+    let text: String
+
+    var body: some View {
+        if let attributed = parseAbstractMarkdown(text) {
+            Text(attributed)
+                .font(.caption)
+        } else {
+            Text(text)
+                .font(.caption)
+        }
+    }
+
+    /// Parses markdown in abstract text and returns an AttributedString.
+    ///
+    /// - Parameter text: The abstract text to parse.
+    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
+    private func parseAbstractMarkdown(_ text: String) -> AttributedString? {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return nil
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
     let doc = Document(
         pmid: "12345678",
         title: "Effect of Vitamin D Supplementation on COVID-19 Outcomes: A Meta-Analysis",
-        abstract: "Background: Vitamin D has been proposed to have immunomodulatory effects..."
+        abstract: "**Background:** Vitamin D has been proposed to have immunomodulatory effects..."
     )
     doc.relevanceScore = 4
     doc.scoreExplanation = "This meta-analysis directly addresses vitamin D supplementation and COVID-19 outcomes."
