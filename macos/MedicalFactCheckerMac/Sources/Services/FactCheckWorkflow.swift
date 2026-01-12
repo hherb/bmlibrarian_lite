@@ -528,9 +528,11 @@ final class FactCheckWorkflow {
         Abstract:
         \(document.abstract)
 
+        IMPORTANT: Relevance means how useful the document is for ANSWERING the research question or EVALUATING the claim. Evidence that REFUTES or contradicts the claim is EQUALLY valuable as evidence that supports it. A study showing negative results is highly relevant if it directly addresses the claim.
+
         SCORING CRITERIA:
-        5 = Directly addresses the claim with strong evidence
-        4 = Highly relevant, provides substantial supporting information
+        5 = Directly addresses the claim with strong evidence (supporting OR refuting)
+        4 = Highly relevant, provides substantial information about the claim (positive or negative findings)
         3 = Moderately relevant, contains useful related information
         2 = Marginally relevant, tangentially related
         1 = Not relevant to the claim
