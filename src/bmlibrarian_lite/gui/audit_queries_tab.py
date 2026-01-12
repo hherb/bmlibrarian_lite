@@ -105,9 +105,14 @@ class QueryCard(QFrame):
         header.setStyleSheet("color: #1976D2;")
         layout.addWidget(header)
 
-        # Query text (PubMed format)
+        # Query text (PubMed format) - selectable for copy/paste
         self.query_label = QLabel(self.pubmed_query)
         self.query_label.setWordWrap(True)
+        self.query_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        self.query_label.setCursor(Qt.CursorShape.IBeamCursor)
         self.query_label.setStyleSheet(
             "color: #333; font-family: monospace; font-size: 10pt; "
             f"background-color: #F5F5F5; padding: {scaled(8)}px; "

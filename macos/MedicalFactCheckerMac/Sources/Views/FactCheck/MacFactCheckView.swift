@@ -400,6 +400,7 @@ struct MacProgressSection: View {
                     Text(query)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.primary)
+                        .textSelection(.enabled)
                         .padding(MacSpacing.medium)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.secondary.opacity(MacOpacity.subtle))

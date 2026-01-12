@@ -16,8 +16,10 @@ struct FactCheckView: View {
     /// Callback when a report is generated (navigates to Report tab).
     var onReportGenerated: ((EvidenceReport) -> Void)?
 
-    @State private var claimText = ""
-    @State private var workflow: FactCheckWorkflow?
+    /// Bindings to preserve state across tab switches (passed from parent).
+    @Binding var claimText: String
+    @Binding var workflow: FactCheckWorkflow?
+
     @State private var showingError = false
     @State private var errorMessage = ""
 
@@ -270,6 +272,7 @@ struct ProgressSection: View {
                     Text(query)
                         .font(.caption)
                         .foregroundColor(.primary)
+                        .textSelection(.enabled)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.secondary.opacity(0.1))
@@ -371,13 +374,20 @@ struct UserDecisionSection: View {
 }
 
 #Preview {
-    FactCheckView(onReportGenerated: nil)
-        .modelContainer(for: [
-            FactCheckSession.self,
-            Document.self,
-            Citation.self,
-            EvidenceReport.self,
-            UsageRecord.self,
-        ], inMemory: true)
-        .environment(AppSettings.shared)
+    @Previewable @State var claimText = ""
+    @Previewable @State var workflow: FactCheckWorkflow? = nil
+
+    FactCheckView(
+        claimText: $claimText,
+        workflow: $workflow,
+        onReportGenerated: nil
+    )
+    .modelContainer(for: [
+        FactCheckSession.self,
+        Document.self,
+        Citation.self,
+        EvidenceReport.self,
+        UsageRecord.self,
+    ], inMemory: true)
+    .environment(AppSettings.shared)
 }

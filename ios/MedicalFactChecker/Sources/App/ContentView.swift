@@ -23,6 +23,10 @@ struct ContentView: View {
     /// Tracks which tabs have been visited for lazy loading.
     @State private var visitedTabs: Set<AppTab> = [.check]
 
+    /// Preserved state for FactCheckView to survive tab switches.
+    @State private var factCheckClaimText: String = ""
+    @State private var factCheckWorkflow: FactCheckWorkflow?
+
     var body: some View {
         if hasAcceptedDisclaimer {
             mainTabView
@@ -34,6 +38,8 @@ struct ContentView: View {
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
             FactCheckView(
+                claimText: $factCheckClaimText,
+                workflow: $factCheckWorkflow,
                 onReportGenerated: { report in
                     currentReport = report
                     visitedTabs.insert(.report)
