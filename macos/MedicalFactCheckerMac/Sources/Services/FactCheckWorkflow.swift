@@ -551,7 +551,7 @@ final class FactCheckWorkflow {
                 let (response, usage) = try await llmService.chat(
                     messages: messages,
                     temperature: 0.1,
-                    maxTokens: 256,
+                    maxTokens: 512,
                     jsonMode: true
                 )
 
