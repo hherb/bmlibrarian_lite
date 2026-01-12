@@ -274,6 +274,13 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
 
     // MARK: - XMLParserDelegate
 
+    /// Elements that contain text content we want to capture.
+    /// Text is only reset when starting these elements, not embedded formatting tags.
+    private static let textContentElements: Set<String> = [
+        "PMID", "ArticleTitle", "AbstractText", "LastName", "ForeName",
+        "Title", "Year", "ArticleId", "DescriptorName"
+    ]
+
     func parser(
         _ parser: XMLParser,
         didStartElement elementName: String,
@@ -282,7 +289,13 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
         attributes attributeDict: [String: String] = [:]
     ) {
         currentElement = elementName
-        currentText = ""
+
+        // Only reset text for elements we capture content from.
+        // This preserves text when embedded formatting tags (i, b, sub, sup, etc.)
+        // appear within AbstractText or other content elements.
+        if Self.textContentElements.contains(elementName) {
+            currentText = ""
+        }
 
         switch elementName {
         case "PubmedArticle":
