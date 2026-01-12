@@ -278,53 +278,133 @@ final class FactCheckWorkflow {
 
         try checkBudget()
 
+        // Use structured JSON prompt similar to Python version for better local model compatibility
         let prompt = """
-        Convert this medical claim/question into a PubMed search query.
+        Convert this research question into a concise PubMed search query.
 
-        Claim: \(session.claim)
+        Research Question: \(session.claim)
 
         Instructions:
-        1. Extract 2-3 key medical concepts (drug names, conditions, treatments)
-        2. Use simple keyword combinations with AND/OR operators
-        3. Be inclusive rather than restrictive - use synonyms and alternative spellings
-        4. Do NOT use overly specific MeSH qualifiers that limit results
-        5. Example format: (term1 OR synonym1) AND (term2 OR synonym2)
+        1. Identify 2-3 key concepts from the question
+        2. For each concept, provide 1-2 MeSH terms and 1-2 keywords
+        3. Keep it CONCISE - fewer specific terms work better than many broad terms
+        4. DO NOT add filters like hasabstract or publication type filters - those will be added automatically
 
-        IMPORTANT: Generate a query that will find relevant articles. Avoid being too restrictive.
+        Output ONLY valid JSON in this exact format:
+        {
+          "concepts": [
+            {"name": "concept1", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]},
+            {"name": "concept2", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]}
+          ]
+        }
 
-        Output ONLY the PubMed query string, nothing else. No explanation.
+        Example for "amlodipine improves arterial stiffness":
+        {
+          "concepts": [
+            {"name": "amlodipine", "mesh_terms": ["Amlodipine"], "keywords": ["amlodipine"]},
+            {"name": "arterial stiffness", "mesh_terms": ["Vascular Stiffness"], "keywords": ["arterial stiffness", "pulse wave velocity"]}
+          ]
+        }
+
+        Generate JSON for the research question:
         """
 
         let messages = [LLMService.userMessage(prompt)]
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.1,
-            maxTokens: 256
+            maxTokens: 512,
+            jsonMode: true
         )
 
         // Record usage
         recordUsage(usage, operationType: "query_conversion")
 
-        // Clean up response and add filters
-        var query = response.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Validate we got a real query from the LLM
-        if query.isEmpty {
-            // Fallback: use claim as simple search terms
-            query = session.claim
-        }
-
-        // Require abstract for quality content
-        if !query.lowercased().contains("hasabstract") {
-            query += " AND hasabstract"
-        }
-
-        // Exclude non-clinical publication types (news, editorials, letters, etc.)
-        // These add noise without substantive clinical evidence
-        query += " " + PubMedFilters.clinicalPublicationFilter
+        // Parse JSON response and build query
+        let query = buildQueryFromJSON(response, claim: session.claim)
 
         session.pubmedQuery = query
         try? modelContext.save()
+    }
+
+    /// Build a PubMed query string from JSON response.
+    private func buildQueryFromJSON(_ response: String, claim: String) -> String {
+        // Try to parse JSON
+        guard let data = response.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let concepts = json["concepts"] as? [[String: Any]],
+              !concepts.isEmpty else {
+            // Fallback: try to extract JSON from markdown blocks
+            if let extracted = extractJSONFromResponse(response),
+               let data = extracted.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let concepts = json["concepts"] as? [[String: Any]],
+               !concepts.isEmpty {
+                return buildQueryFromConcepts(concepts)
+            }
+            // Final fallback: use claim as simple search
+            return "\(claim) AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
+        }
+
+        return buildQueryFromConcepts(concepts)
+    }
+
+    /// Extract JSON from a response that may have markdown wrapping.
+    private func extractJSONFromResponse(_ response: String) -> String? {
+        // Try markdown code block
+        if let range = response.range(of: "```json"),
+           let endRange = response.range(of: "```", range: range.upperBound..<response.endIndex) {
+            let jsonStr = String(response[range.upperBound..<endRange.lowerBound])
+            return jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Try plain code block
+        if let range = response.range(of: "```"),
+           let endRange = response.range(of: "```", range: range.upperBound..<response.endIndex) {
+            let jsonStr = String(response[range.upperBound..<endRange.lowerBound])
+            return jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Try to find JSON object
+        if let start = response.firstIndex(of: "{"),
+           let end = response.lastIndex(of: "}") {
+            return String(response[start...end])
+        }
+        return nil
+    }
+
+    /// Build query string from parsed concepts.
+    private func buildQueryFromConcepts(_ concepts: [[String: Any]]) -> String {
+        var conceptClauses: [String] = []
+
+        for concept in concepts {
+            var terms: [String] = []
+
+            // Add MeSH terms
+            if let meshTerms = concept["mesh_terms"] as? [String] {
+                for term in meshTerms.prefix(2) {
+                    terms.append("\"\(term)\"[MeSH]")
+                }
+            }
+
+            // Add keywords
+            if let keywords = concept["keywords"] as? [String] {
+                for keyword in keywords.prefix(3) {
+                    terms.append("\(keyword)[tiab]")
+                }
+            }
+
+            if !terms.isEmpty {
+                let clause = "(" + terms.joined(separator: " OR ") + ")"
+                conceptClauses.append(clause)
+            }
+        }
+
+        guard !conceptClauses.isEmpty else {
+            return "AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
+        }
+
+        // Join concepts with AND, add filters
+        let baseQuery = conceptClauses.joined(separator: " AND ")
+        return "\(baseQuery) AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
     }
 
     private func searchPubMed() async throws {
