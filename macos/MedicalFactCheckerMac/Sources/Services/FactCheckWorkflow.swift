@@ -719,12 +719,17 @@ final class FactCheckWorkflow {
             \(document.abstract)
 
             Extract exact or close quotes that:
-            1. Directly address the claim
+            1. Directly address the claim (whether supporting OR refuting it)
             2. Contain specific findings, data, or conclusions
             3. Could be quoted in an evidence summary
 
+            For each passage, also identify:
+            - Whether the finding SUPPORTS or REFUTES the claim (or is NEUTRAL/UNCLEAR)
+            - The study type if identifiable (e.g., systematic review, meta-analysis, RCT, cohort study, case-control, case report, narrative review)
+            - Sample size if mentioned (e.g., "n=500", "1,234 participants")
+
             Respond in JSON format only:
-            {"passages": [{"text": "<quote>", "relevance": "<why relevant>"}]}
+            {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
             """
 
             let messages = [LLMService.userMessage(prompt)]
@@ -786,11 +791,27 @@ final class FactCheckWorkflow {
 
         \(citationsText)
 
+        EVIDENCE WEIGHING PRINCIPLES:
+        When synthesizing evidence, consider both supporting AND refuting findings. Evidence quality hierarchy (highest to lowest):
+        1. Systematic reviews and meta-analyses (strongest - synthesize multiple studies)
+        2. Randomized controlled trials (RCTs) - especially large, well-designed ones
+        3. Cohort studies (prospective stronger than retrospective)
+        4. Case-control studies
+        5. Case series and case reports (weakest)
+        6. Narrative reviews and expert opinion
+
+        Also consider:
+        - Sample size: Larger studies (thousands) carry more weight than small ones (dozens)
+        - A single high-quality RCT can outweigh multiple observational studies
+        - If high-quality evidence conflicts with lower-quality evidence, prioritize the higher-quality
+        - Report the balance of evidence fairly - if most evidence refutes the claim, the verdict should reflect that
+
         Write an evidence report that:
         1. States a verdict: Supported, Partially Supported, Not Supported, Insufficient Evidence, or Conflicting Evidence
         2. Provides a 2-3 sentence summary of the key findings
-        3. Discusses the evidence briefly with inline citations
+        3. Discusses the evidence briefly with inline citations, noting study quality where relevant
         4. Notes any important limitations
+        5. If evidence conflicts, explain which findings carry more weight and why
 
         CRITICAL - Citation format:
         Use this EXACT format for all inline citations: [Author, Year](doc:ID)
