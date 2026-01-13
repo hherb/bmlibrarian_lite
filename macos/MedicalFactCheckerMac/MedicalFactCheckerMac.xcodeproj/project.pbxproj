@@ -33,6 +33,7 @@
 		A1000024 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
 		A1000025 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
 		A1000026 /* ResponseParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026; };
+		A1000029 /* StringArrayTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000032; };
 		A1000027 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000027; };
 		A1000028 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000028; };
 /* End PBXBuildFile section */
@@ -69,6 +70,7 @@
 		A2000029 /* MedicalFactCheckerMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MedicalFactCheckerMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000031 /* MedicalFactCheckerMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MedicalFactCheckerMac.entitlements; sourceTree = "<group>"; };
+		A2000032 /* StringArrayTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringArrayTransformer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -195,6 +197,7 @@
 				A2000024 /* NotificationNames.swift */,
 				A2000025 /* PDFExporter.swift */,
 				A2000026 /* ResponseParser.swift */,
+				A2000032 /* StringArrayTransformer.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -311,6 +314,7 @@
 				A1000024 /* NotificationNames.swift in Sources */,
 				A1000025 /* PDFExporter.swift in Sources */,
 				A1000026 /* ResponseParser.swift in Sources */,
+				A1000029 /* StringArrayTransformer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
