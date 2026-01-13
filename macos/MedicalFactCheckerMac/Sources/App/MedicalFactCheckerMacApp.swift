@@ -14,6 +14,9 @@ import SwiftData
 @main
 struct MedicalFactCheckerMacApp: App {
     var sharedModelContainer: ModelContainer = {
+        // Register custom transformer before creating the container
+        StringArrayTransformer.register()
+
         let schema = Schema([
             FactCheckSession.self,
             Document.self,

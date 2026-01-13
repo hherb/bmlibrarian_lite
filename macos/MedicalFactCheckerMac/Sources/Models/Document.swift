@@ -23,7 +23,7 @@ final class Document {
     // MARK: - Metadata
 
     /// Document authors (stored as transformable for CoreData compatibility).
-    @Attribute(.transformable(by: NSValueTransformerName.secureUnarchiveFromDataTransformerName.rawValue))
+    @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
     var authors: [String]
 
     var year: Int?
@@ -32,7 +32,7 @@ final class Document {
     var pmcId: String?
 
     /// MeSH terms for the document (stored as transformable for CoreData compatibility).
-    @Attribute(.transformable(by: NSValueTransformerName.secureUnarchiveFromDataTransformerName.rawValue))
+    @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
     var meshTerms: [String]
 
     var publicationDate: String?
