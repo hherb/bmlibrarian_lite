@@ -15,18 +15,55 @@ import PDFKit
 /// - Wide, readable content area with maximum width constraint
 /// - Toolbar with export options (PDF, text, print)
 /// - Keyboard shortcuts for common actions
+/// - Supports fetching more evidence via the optional workflow parameter
 struct MacReportView: View {
     let report: EvidenceReport?
+    var workflow: FactCheckWorkflow?
 
     @State private var selectedDocument: Document?
     @State private var exportFormat: ExportFormat = .pdf
 
+    /// Whether more evidence can be fetched for this session.
+    private var canGetMoreEvidence: Bool {
+        report?.session?.canGetMoreEvidence ?? false
+    }
+
+    /// Whether the workflow is currently running (fetching more evidence).
+    private var isFetchingEvidence: Bool {
+        workflow?.isRunning ?? false
+    }
+
     var body: some View {
         if let report = report {
-            reportContent(report)
+            ZStack {
+                reportContent(report)
+
+                // Progress overlay when fetching more evidence
+                if isFetchingEvidence {
+                    fetchingProgressOverlay
+                }
+            }
         } else {
             emptyState
         }
+    }
+
+    /// Overlay shown when fetching more evidence.
+    private var fetchingProgressOverlay: some View {
+        VStack(spacing: MacSpacing.large) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text(workflow?.progressMessage ?? "Fetching more evidence...")
+                .font(.headline)
+            if let session = report?.session {
+                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(MacSpacing.xxLarge)
+        .background(.regularMaterial)
+        .cornerRadius(MacCornerRadius.xLarge)
     }
 
     private func reportContent(_ report: EvidenceReport) -> some View {
@@ -71,6 +108,11 @@ struct MacReportView: View {
                     // Cost
                     if let session = report.session {
                         costSection(session)
+                    }
+
+                    // Get More Evidence
+                    if workflow != nil && canGetMoreEvidence {
+                        getMoreEvidenceSection(report.session)
                     }
 
                     // Footer
@@ -276,6 +318,63 @@ struct MacReportView: View {
         .padding(MacSpacing.xLarge)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(MacCornerRadius.xLarge)
+    }
+
+    private func getMoreEvidenceSection(_ session: FactCheckSession?) -> some View {
+        VStack(alignment: .leading, spacing: MacSpacing.standard) {
+            HStack {
+                Image(systemName: "plus.magnifyingglass")
+                    .font(.title3)
+                    .foregroundColor(.accentColor)
+                Text("Need More Evidence?")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+            }
+
+            Text(availableSourcesText(for: session))
+                .font(.body)
+                .foregroundColor(.secondary)
+
+            Button(action: {
+                Task {
+                    await workflow?.fetchMoreEvidence()
+                }
+            }) {
+                HStack {
+                    if isFetchingEvidence {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    Text(isFetchingEvidence ? "Fetching..." : "Get More Evidence")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isFetchingEvidence)
+        }
+        .padding(MacSpacing.xLarge)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(MacOpacity.light))
+        .cornerRadius(MacCornerRadius.xLarge)
+    }
+
+    /// Description of what evidence sources are available.
+    private func availableSourcesText(for session: FactCheckSession?) -> String {
+        guard let session = session else { return "" }
+
+        if session.canFetchMoreDocuments {
+            let remaining = session.remainingPubMedResults
+            if !session.smartSearchEnabled {
+                return "\(remaining) more results available from PubMed, plus smart search with alternative queries"
+            } else {
+                return "\(remaining) more results available from PubMed"
+            }
+        } else if !session.smartSearchEnabled {
+            return "Smart search available - will try alternative query strategies"
+        } else {
+            return "All evidence sources have been exhausted"
+        }
     }
 
     private func footerSection(_ report: EvidenceReport) -> some View {
