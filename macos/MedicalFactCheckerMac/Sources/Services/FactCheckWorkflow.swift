@@ -216,11 +216,8 @@ final class FactCheckWorkflow {
             updateProgress(.fetchingMoreEvidence, "Extracting citations from new documents...")
             try await extractCitations()
 
-            // Step 3: Delete existing report
-            if let existingReport = session.report {
-                modelContext.delete(existingReport)
-                session.report = nil
-            }
+            // Step 3: Preserve existing report reference for recovery on error
+            let previousReport = session.report
 
             // Step 4: Regenerate report with all evidence
             session.currentStep = .generatingReport
@@ -228,6 +225,11 @@ final class FactCheckWorkflow {
 
             updateProgress(.generatingReport, "Regenerating report with additional evidence...")
             try await generateReport()
+
+            // Step 5: Delete old report only after new one succeeds
+            if let oldReport = previousReport {
+                modelContext.delete(oldReport)
+            }
 
             // Complete
             session.currentStep = .completed
@@ -246,7 +248,8 @@ final class FactCheckWorkflow {
             try? modelContext.save()
             onBudgetExceeded?(error.localizedDescription)
         } catch {
-            // Restore to completed state on error (report still exists)
+            // Restore to completed state on error - original report is preserved
+            // since we only delete it after successful regeneration
             session.currentStep = .completed
             session.errorMessage = error.localizedDescription
             try? modelContext.save()
