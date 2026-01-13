@@ -197,35 +197,42 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
 
         case .mistral:
             return [
-                // Mistral Latest (January 2026)
+                // Mistral Latest (January 2026) - using -latest suffixes for API compatibility
                 LLMModel(
-                    id: "mistral-large-3-25-12",
-                    displayName: "Mistral Large 3",
-                    description: "State-of-the-art multimodal",
-                    inputPrice: 0.50,
-                    outputPrice: 1.50,
+                    id: "mistral-large-latest",
+                    displayName: "Mistral Large",
+                    description: "State-of-the-art flagship model",
+                    inputPrice: 2.00,
+                    outputPrice: 6.00,
                     isRecommended: true
                 ),
                 LLMModel(
-                    id: "mistral-medium-3-1-25-08",
-                    displayName: "Mistral Medium 3.1",
+                    id: "mistral-medium-latest",
+                    displayName: "Mistral Medium",
                     description: "Balanced performance and cost",
-                    inputPrice: 0.40,
-                    outputPrice: 2.00
-                ),
-                LLMModel(
-                    id: "codestral-25-08",
-                    displayName: "Codestral",
-                    description: "Optimized for code",
-                    inputPrice: 0.20,
-                    outputPrice: 0.60
+                    inputPrice: 2.70,
+                    outputPrice: 8.10
                 ),
                 LLMModel(
                     id: "mistral-small-latest",
                     displayName: "Mistral Small",
                     description: "Fast and affordable",
-                    inputPrice: 0.10,
-                    outputPrice: 0.30
+                    inputPrice: 0.20,
+                    outputPrice: 0.60
+                ),
+                LLMModel(
+                    id: "codestral-latest",
+                    displayName: "Codestral",
+                    description: "Optimized for code generation",
+                    inputPrice: 0.30,
+                    outputPrice: 0.90
+                ),
+                LLMModel(
+                    id: "open-mistral-nemo",
+                    displayName: "Mistral Nemo",
+                    description: "Open-weight 12B model",
+                    inputPrice: 0.15,
+                    outputPrice: 0.15
                 ),
             ]
 

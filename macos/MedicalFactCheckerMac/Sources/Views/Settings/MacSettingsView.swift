@@ -58,6 +58,14 @@ struct LLMSettingsTab: View {
     @State private var isLoadingModels = false
     @State private var modelLoadError: String?
     @State private var showingSaveConfirmation = false
+    @State private var isTestingAPI = false
+    @State private var apiTestResult: APITestResult?
+
+    /// Result of an API connection test.
+    private enum APITestResult {
+        case success(String)
+        case failure(String)
+    }
 
     var body: some View {
         @Bindable var settings = settings
@@ -160,11 +168,44 @@ struct LLMSettingsTab: View {
                         }
                         .disabled(apiKey.isEmpty)
 
+                        Button {
+                            Task { await testAPIConnection() }
+                        } label: {
+                            if isTestingAPI {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Text("Test Connection")
+                            }
+                        }
+                        .disabled(apiKey.isEmpty || isTestingAPI)
+
                         if let url = settings.selectedProvider.apiKeyURL {
                             Button("Get API Key") {
                                 openURL(url)
                             }
                         }
+                    }
+
+                    // Show test result
+                    if let result = apiTestResult {
+                        HStack {
+                            switch result {
+                            case .success(let message):
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Success: \(message)")
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            case .failure(let error):
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.red)
+                                Text("Error: \(error)")
+                                    .foregroundColor(.red)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .font(.caption)
                     }
                 } else {
                     HStack {
@@ -208,7 +249,12 @@ struct LLMSettingsTab: View {
             apiKey = settings.llmAPIKey
             Task { await loadModels() }
         }
-        .onChange(of: settings.selectedProvider) { _, _ in
+        .onChange(of: settings.selectedProvider) { _, newProvider in
+            // Load API key for the new provider
+            apiKey = settings.apiKey(for: newProvider)
+            // Clear test result when provider changes
+            apiTestResult = nil
+            // Clear models and reload
             availableModels = []
             modelLoadError = nil
             Task { await loadModels() }
@@ -247,6 +293,43 @@ struct LLMSettingsTab: View {
                 availableModels = models
             }
             isLoadingModels = false
+        }
+    }
+
+    /// Test the API connection with the current settings.
+    private func testAPIConnection() async {
+        guard let url = URL(string: settings.llmBaseURL) else {
+            await MainActor.run {
+                apiTestResult = .failure("Invalid base URL")
+            }
+            return
+        }
+
+        await MainActor.run {
+            isTestingAPI = true
+            apiTestResult = nil
+        }
+
+        do {
+            let response = try await LLMService.testConnection(
+                baseURL: url,
+                apiKey: apiKey,
+                model: settings.llmModel
+            )
+            await MainActor.run {
+                isTestingAPI = false
+                apiTestResult = .success(response.prefix(50).trimmingCharacters(in: .whitespacesAndNewlines))
+                // Save the API key on successful test
+                settings.llmAPIKey = apiKey
+            }
+            // Clear cache and refresh models on success
+            await ModelFetchService.shared.clearCache(for: settings.selectedProvider)
+            await loadModels()
+        } catch {
+            await MainActor.run {
+                isTestingAPI = false
+                apiTestResult = .failure(error.localizedDescription)
+            }
         }
     }
 }

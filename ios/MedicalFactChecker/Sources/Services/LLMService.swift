@@ -300,6 +300,33 @@ actor LLMService {
     static func assistantMessage(_ content: String) -> ChatMessage {
         ChatMessage(role: "assistant", content: content)
     }
+
+    // MARK: - API Testing
+
+    /// Test the API connection with a minimal request.
+    ///
+    /// Sends a simple "Hello" message to verify the API key and endpoint are valid.
+    /// Uses minimal tokens to reduce cost.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The API base URL.
+    ///   - apiKey: The API key to test.
+    ///   - model: The model to use for the test.
+    /// - Returns: A success message with the model's response.
+    /// - Throws: LLMError if the test fails.
+    static func testConnection(
+        baseURL: URL,
+        apiKey: String,
+        model: String
+    ) async throws -> String {
+        let service = LLMService(baseURL: baseURL, apiKey: apiKey, model: model)
+        let (response, _) = try await service.chat(
+            messages: [userMessage("Say 'OK' if you can read this.")],
+            temperature: 0.0,
+            maxTokens: 10
+        )
+        return response
+    }
 }
 
 // MARK: - Supporting Types
