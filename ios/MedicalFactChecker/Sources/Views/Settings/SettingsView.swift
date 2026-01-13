@@ -318,12 +318,29 @@ struct SettingsView: View {
                     Text("Cost Information")
                 }
 
+                // Help & Documentation
+                Section {
+                    NavigationLink {
+                        HelpView()
+                    } label: {
+                        Label("Help & Documentation", systemImage: "questionmark.circle")
+                    }
+
+                    NavigationLink {
+                        PrivacyView()
+                    } label: {
+                        Label("Privacy Policy", systemImage: "hand.raised")
+                    }
+                } header: {
+                    Text("Information")
+                }
+
                 // About
                 Section {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text("1.1.0")
                             .foregroundColor(.secondary)
                     }
 

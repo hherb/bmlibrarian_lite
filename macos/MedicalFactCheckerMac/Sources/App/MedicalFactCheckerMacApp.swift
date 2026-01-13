@@ -10,7 +10,7 @@ import SwiftData
 
 /// Main macOS app entry point.
 ///
-/// Configures SwiftData persistence, window management, and the Settings scene.
+/// Configures SwiftData persistence, window management, Help menu, and the Settings scene.
 @main
 struct MedicalFactCheckerMacApp: App {
     var sharedModelContainer: ModelContainer = {
@@ -73,6 +73,11 @@ struct MedicalFactCheckerMacApp: App {
                     // Placeholder for update checking
                 }
             }
+
+            // Help menu commands
+            CommandGroup(replacing: .help) {
+                HelpMenuCommands()
+            }
         }
 
         #if os(macOS)
@@ -81,6 +86,59 @@ struct MedicalFactCheckerMacApp: App {
                 .environment(AppSettings.shared)
                 .modelContainer(sharedModelContainer)
         }
+
+        // Help window
+        Window("Help", id: "help-window") {
+            MacHelpWindowView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
+        // Privacy window
+        Window("Privacy Policy", id: "privacy-window") {
+            MacPrivacyWindowView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
+        // Acknowledgments window
+        Window("Acknowledgments", id: "acknowledgments-window") {
+            MacAcknowledgmentsWindowView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
         #endif
+    }
+}
+
+// MARK: - Help Menu Commands
+
+/// View containing Help menu command buttons.
+///
+/// Uses @Environment(\.openWindow) to open auxiliary windows.
+struct HelpMenuCommands: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Medical Fact Checker Help") {
+            openWindow(id: "help-window")
+        }
+        .keyboardShortcut("?", modifiers: .command)
+
+        Divider()
+
+        Button("Privacy Policy") {
+            openWindow(id: "privacy-window")
+        }
+
+        Button("Acknowledgments") {
+            openWindow(id: "acknowledgments-window")
+        }
+
+        Divider()
+
+        Link("PubMed Website", destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/")!)
+
+        Link("Report an Issue...", destination: URL(string: "https://github.com/hherb/bmlibrarian_lite/issues")!)
     }
 }
