@@ -154,6 +154,14 @@ actor LLMService {
         encoder.keyEncodingStrategy = .convertToSnakeCase
         request.httpBody = try encoder.encode(body)
 
+        // Debug: log the request body
+        #if DEBUG
+        if let requestBody = request.httpBody,
+           let requestString = String(data: requestBody, encoding: .utf8) {
+            print("[LLMService] Request to \(endpoint): \(requestString)")
+        }
+        #endif
+
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -161,11 +169,23 @@ actor LLMService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // Try to parse error message
-            if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorBody["error"] as? [String: Any],
-               let message = error["message"] as? String {
-                throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
+            // Try to parse error message - support multiple error formats
+            if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                // OpenAI/Mistral format: {"error": {"message": "..."}}
+                if let error = errorBody["error"] as? [String: Any],
+                   let message = error["message"] as? String {
+                    print("[LLMService] API error \(httpResponse.statusCode): \(message)")
+                    throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
+                }
+                // Alternative format: {"message": "..."}
+                if let message = errorBody["message"] as? String {
+                    print("[LLMService] API error \(httpResponse.statusCode): \(message)")
+                    throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
+                }
+                // Log the raw error body for debugging
+                print("[LLMService] API error \(httpResponse.statusCode), body: \(errorBody)")
+            } else if let rawBody = String(data: data, encoding: .utf8) {
+                print("[LLMService] API error \(httpResponse.statusCode), raw: \(rawBody)")
             }
             throw LLMError.httpError(statusCode: httpResponse.statusCode)
         }
