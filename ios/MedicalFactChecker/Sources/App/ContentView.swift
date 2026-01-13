@@ -52,7 +52,7 @@ struct ContentView: View {
             .tag(AppTab.check)
 
             LazyTabContent(tab: .report, visitedTabs: $visitedTabs) {
-                ReportTabView(report: currentReport)
+                ReportTabView(report: currentReport, workflow: factCheckWorkflow)
             }
             .tabItem {
                 Label("Report", systemImage: "doc.text")
@@ -114,12 +114,14 @@ struct LazyTabContent<Content: View>: View {
 /// A wrapper view for displaying reports in a dedicated tab.
 ///
 /// Shows the full report when available, or an empty state when no report exists.
+/// Passes the workflow to enable "Get More Evidence" functionality.
 struct ReportTabView: View {
     let report: EvidenceReport?
+    var workflow: FactCheckWorkflow?
 
     var body: some View {
         if let report = report {
-            ReportContentView(report: report)
+            ReportContentView(report: report, workflow: workflow)
         } else {
             emptyState
         }
