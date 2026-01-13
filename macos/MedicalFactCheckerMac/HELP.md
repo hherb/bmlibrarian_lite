@@ -4,18 +4,18 @@ Welcome to Medical Fact Checker, an AI-powered tool for evaluating medical claim
 
 ---
 
-## Table of Contents
+## Contents
 
-1. [Overview](#overview)
-2. [Important Limitations](#important-limitations)
-3. [Getting Started](#getting-started)
-4. [How It Works](#how-it-works)
-5. [Understanding Your Results](#understanding-your-results)
-6. [Settings Explained](#settings-explained)
-7. [Cost Management](#cost-management)
-8. [Tips for Best Results](#tips-for-best-results)
-9. [Frequently Asked Questions](#frequently-asked-questions)
-10. [Privacy & Data](#privacy--data)
+- Overview
+- Important Limitations
+- Getting Started
+- How It Works
+- Understanding Your Results
+- Settings Explained
+- Cost Management
+- Tips for Best Results
+- Frequently Asked Questions
+- Privacy & Data
 
 ---
 
@@ -435,7 +435,7 @@ Enable it if you want to compare scoring methods or catch potential AI errors.
 - No data is collected by the app developers
 - Use Ollama for complete privacy (no external API calls)
 
-See the [Privacy Policy](PRIVACY.md) for complete details.
+See the Privacy Policy in Settings for complete details.
 
 ### How do I delete my data?
 
