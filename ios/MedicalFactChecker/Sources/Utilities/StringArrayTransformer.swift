@@ -28,6 +28,18 @@ final class StringArrayTransformer: NSSecureUnarchiveFromDataTransformer {
         [NSArray.self, NSString.self]
     }
 
+    /// The class of the value returned by the transformer.
+    ///
+    /// Required for proper SwiftData/CoreData integration.
+    override class func transformedValueClass() -> AnyClass {
+        NSArray.self
+    }
+
+    /// Indicates whether the transformer can reverse transformations.
+    override class func allowsReverseTransformation() -> Bool {
+        true
+    }
+
     /// Register this transformer with the system.
     ///
     /// Call this once at app startup before creating the ModelContainer.
