@@ -16,6 +16,7 @@ enum WorkflowStep: String, Codable, CaseIterable {
     case awaitingUserDecision  // Waiting for user to approve fetching more docs
     case extractingCitations
     case generatingReport
+    case fetchingMoreEvidence  // Fetching additional evidence after report generation
     case completed
     case failed
     case budgetExceeded
@@ -29,6 +30,7 @@ enum WorkflowStep: String, Codable, CaseIterable {
         case .awaitingUserDecision: return "Awaiting decision..."
         case .extractingCitations: return "Extracting citations..."
         case .generatingReport: return "Generating report..."
+        case .fetchingMoreEvidence: return "Fetching more evidence..."
         case .completed: return "Complete"
         case .failed: return "Failed"
         case .budgetExceeded: return "Budget exceeded"

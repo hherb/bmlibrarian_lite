@@ -117,6 +117,20 @@ final class FactCheckSession {
         currentSearchOffset < totalPubMedResults
     }
 
+    /// Check if more evidence can be gathered (either more PubMed results or smart search available).
+    ///
+    /// Returns true if:
+    /// - More documents available in current PubMed query, OR
+    /// - Smart search hasn't been tried yet (can generate alternative queries)
+    var canGetMoreEvidence: Bool {
+        canFetchMoreDocuments || !smartSearchEnabled
+    }
+
+    /// Number of additional PubMed results available to fetch.
+    var remainingPubMedResults: Int {
+        max(0, totalPubMedResults - currentSearchOffset)
+    }
+
     /// Documents that have been scored with relevance >= threshold.
     var relevantDocuments: [Document] {
         documents.filter { $0.isRelevant }
@@ -150,6 +164,8 @@ final class FactCheckSession {
             return 60 + (citationProgress * 25)
         case .generatingReport:
             return 90
+        case .fetchingMoreEvidence:
+            return 50  // Mid-progress for additional evidence fetch
         case .completed:
             return 100
         case .failed, .budgetExceeded:

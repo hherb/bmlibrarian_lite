@@ -145,6 +145,117 @@ final class FactCheckWorkflow {
         awaitingUserDecision = false
     }
 
+    // MARK: - Fetch More Evidence
+
+    /// Fetch additional evidence after initial report generation.
+    ///
+    /// This method allows users to gather more evidence when the initial report
+    /// seems incomplete. It will:
+    /// 1. Fetch more documents from PubMed (if available) or try smart search
+    /// 2. Score only the newly fetched documents
+    /// 3. Extract citations from new relevant documents
+    /// 4. Regenerate the report with all accumulated evidence
+    ///
+    /// Can be called multiple times until PubMed is exhausted and smart search has been tried.
+    func fetchMoreEvidence() async {
+        guard let session = session else { return }
+
+        // Initialize services if needed
+        if llmService == nil || pubmedService == nil {
+            do {
+                llmService = try LLMService.create(from: settings)
+                pubmedService = PubMedService.create(from: settings)
+            } catch {
+                onError?(error)
+                return
+            }
+        }
+
+        // Load monthly usage
+        await loadMonthlyUsage()
+
+        // Check monthly budget
+        if monthlyUsedUSD >= settings.monthlyBudgetUSD {
+            onBudgetExceeded?("Monthly budget of \(CostCalculator.formatCost(settings.monthlyBudgetUSD)) exceeded")
+            return
+        }
+
+        isRunning = true
+        session.currentStep = .fetchingMoreEvidence
+        try? modelContext.save()
+
+        do {
+            // Step 1: Fetch more documents
+            if session.canFetchMoreDocuments {
+                // More results available from original query
+                updateProgress(.fetchingMoreEvidence, "Fetching more documents from PubMed...")
+                try await searchPubMed()
+
+                // Score new documents
+                updateProgress(.fetchingMoreEvidence, "Scoring new documents...")
+                try await scoreDocuments()
+
+                // Compute embedding scores if enabled
+                if settings.embeddingScoringEnabled {
+                    await computeEmbeddingScores()
+                }
+            } else if !session.smartSearchEnabled {
+                // PubMed exhausted but smart search not tried - try alternative queries
+                updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
+                try await executeSmartSearch()
+            } else {
+                // Both exhausted - nothing more we can do
+                print("[FetchMoreEvidence] No more evidence sources available")
+                session.currentStep = .completed
+                try? modelContext.save()
+                isRunning = false
+                return
+            }
+
+            // Step 2: Extract citations from new relevant documents only
+            updateProgress(.fetchingMoreEvidence, "Extracting citations from new documents...")
+            try await extractCitations()
+
+            // Step 3: Delete existing report
+            if let existingReport = session.report {
+                modelContext.delete(existingReport)
+                session.report = nil
+            }
+
+            // Step 4: Regenerate report with all evidence
+            session.currentStep = .generatingReport
+            try? modelContext.save()
+
+            updateProgress(.generatingReport, "Regenerating report with additional evidence...")
+            try await generateReport()
+
+            // Complete
+            session.currentStep = .completed
+            session.stopReason = .completed
+            session.updatedAt = Date()
+            try? modelContext.save()
+
+            if let report = session.report {
+                onComplete?(report)
+            }
+
+        } catch let error as BudgetError {
+            session.currentStep = .budgetExceeded
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .budgetExceeded
+            try? modelContext.save()
+            onBudgetExceeded?(error.localizedDescription)
+        } catch {
+            // Restore to completed state on error (report still exists)
+            session.currentStep = .completed
+            session.errorMessage = error.localizedDescription
+            try? modelContext.save()
+            onError?(error)
+        }
+
+        isRunning = false
+    }
+
     // MARK: - Workflow Execution
 
     private func runWorkflow() async {

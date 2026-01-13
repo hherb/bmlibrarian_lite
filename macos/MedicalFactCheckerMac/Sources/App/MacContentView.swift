@@ -83,7 +83,7 @@ struct MacContentView: View {
                 }
             )
         case .report:
-            MacReportView(report: currentReport)
+            MacReportView(report: currentReport, workflow: activeWorkflow)
         case .history:
             MacHistoryView(
                 onReportSelected: { report in
