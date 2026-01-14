@@ -59,10 +59,28 @@ struct MacOnboardingView: View {
             description: "Receive a verdict (Supported, Not Supported, etc.) along with a detailed summary and clickable references to original PubMed articles."
         ),
         MacOnboardingPage(
+            icon: "key.fill",
+            iconColors: [.orange, .red],
+            title: "You'll Need an API Key",
+            description: "This app uses AI language models (like ChatGPT) to analyze research. These services require an API key - a unique password that identifies you to the AI provider."
+        ),
+        MacOnboardingPage(
+            icon: "dollarsign.circle.fill",
+            iconColors: [.green, .mint],
+            title: "How Pricing Works",
+            description: "AI providers charge per \"token\" (roughly 4 characters). A typical fact-check costs $0.01-$0.05. You control spending with budget limits in Settings."
+        ),
+        MacOnboardingPage(
+            icon: "star.fill",
+            iconColors: [.yellow, .orange],
+            title: "Start Free with Mistral",
+            description: "Mistral offers free API credits to get started! Visit console.mistral.ai, create an account, and generate an API key. Then select \"Mistral\" as your provider in Settings."
+        ),
+        MacOnboardingPage(
             icon: "gear.badge.checkmark",
             iconColors: [.gray, .secondary],
-            title: "Configure in Settings",
-            description: "Choose your AI provider (Anthropic, OpenAI, etc.), set budget limits, and customize search parameters. An API key is required for most providers."
+            title: "Quick Setup",
+            description: "In Settings: 1) Select your Provider (e.g., Mistral), 2) Paste your API key, 3) Click \"Save API Key\". That's it - you're ready to fact-check!"
         ),
     ]
 
