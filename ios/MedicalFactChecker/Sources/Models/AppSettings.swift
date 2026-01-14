@@ -140,6 +140,18 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(minScoreThreshold, forKey: Keys.minScoreThreshold) }
     }
 
+    // MARK: - Search Provider Settings
+
+    /// Selected search provider for literature searches.
+    var selectedSearchProvider: SearchProvider {
+        didSet { UserDefaults.standard.set(selectedSearchProvider.rawValue, forKey: Keys.selectedSearchProvider) }
+    }
+
+    /// Whether to include preprints when using Europe PMC.
+    var includePreprints: Bool {
+        didSet { UserDefaults.standard.set(includePreprints, forKey: Keys.includePreprints) }
+    }
+
     // MARK: - Embedding Scoring
 
     /// Enable semantic similarity scoring using NLEmbedding (alongside LLM scoring).
@@ -190,6 +202,16 @@ final class AppSettings {
         self.batchSize = defaults.object(forKey: Keys.batchSize) as? Int ?? 20
         self.minRelevantDocuments = defaults.object(forKey: Keys.minRelevantDocuments) as? Int ?? 5
         self.minScoreThreshold = defaults.object(forKey: Keys.minScoreThreshold) as? Int ?? 3
+
+        // Search provider settings
+        if let providerString = defaults.string(forKey: Keys.selectedSearchProvider),
+           let searchProvider = SearchProvider(rawValue: providerString) {
+            self.selectedSearchProvider = searchProvider
+        } else {
+            self.selectedSearchProvider = .pubmed
+        }
+        self.includePreprints = defaults.bool(forKey: Keys.includePreprints)
+
         self.embeddingScoringEnabled = defaults.bool(forKey: Keys.embeddingScoringEnabled)
 
         self.maxRunBudgetUSD = defaults.object(forKey: Keys.maxRunBudgetUSD) as? Double ?? 1.0
@@ -235,9 +257,26 @@ final class AppSettings {
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
+        static let selectedSearchProvider = "selected_search_provider"
+        static let includePreprints = "include_preprints"
         static let embeddingScoringEnabled = "embedding_scoring_enabled"
         static let maxRunBudgetUSD = "max_run_budget_usd"
         static let monthlyBudgetUSD = "monthly_budget_usd"
+    }
+
+    // MARK: - Search Options Builder
+
+    /// Build SearchOptions from current settings.
+    ///
+    /// - Parameter overrideProvider: Optional provider to use instead of the selected one.
+    /// - Returns: Configured search options.
+    func buildSearchOptions(overrideProvider: SearchProvider? = nil) -> SearchOptions {
+        SearchOptions(
+            provider: overrideProvider ?? selectedSearchProvider,
+            includePreprints: includePreprints,
+            maxResults: batchSize,
+            offset: 0
+        )
     }
 
     // MARK: - Validation
@@ -271,6 +310,8 @@ final class AppSettings {
         batchSize = 20
         minRelevantDocuments = 5
         minScoreThreshold = 3
+        selectedSearchProvider = .pubmed
+        includePreprints = false
         embeddingScoringEnabled = false
         maxRunBudgetUSD = 1.0
         monthlyBudgetUSD = 10.0
