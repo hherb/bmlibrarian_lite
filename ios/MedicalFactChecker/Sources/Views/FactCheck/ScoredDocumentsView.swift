@@ -66,12 +66,20 @@ struct ScoredDocumentsView: View {
 /// Expandable row displaying a single document with its LLM and embedding scores.
 ///
 /// Shows title, reference, and score badges in collapsed state.
-/// Expands to show abstract, LLM reasoning, score comparison, and metadata.
+/// Expands to show abstract, LLM reasoning, score comparison, metadata, and full-text options.
 struct DocumentScoreRow: View {
     @Bindable var document: Document
     let showEmbeddingScore: Bool
 
     @State private var isExpanded = false
+
+    // Full-text retrieval state
+    @State private var isLoadingFullText = false
+    @State private var fullTextError: String?
+    @State private var showFullTextViewer = false
+    @State private var fullTextResult: FullTextResult?
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -110,6 +118,27 @@ struct DocumentScoreRow: View {
         .padding(12)
         .background(Color(.systemBackground))
         .cornerRadius(8)
+        .sheet(isPresented: $showFullTextViewer) {
+            fullTextViewerSheet
+        }
+    }
+
+    // MARK: - Full Text Viewer Sheet
+
+    /// Sheet content for displaying full text.
+    @ViewBuilder
+    private var fullTextViewerSheet: some View {
+        if let result = fullTextResult {
+            FullTextViewer(document: document, result: result)
+        } else if let content = document.fullTextContent {
+            FullTextViewer(
+                document: document,
+                result: FullTextResult(
+                    content: .markdown(content),
+                    source: FullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
+                )
+            )
+        }
     }
 
     // MARK: - Subviews
@@ -188,6 +217,134 @@ struct DocumentScoreRow: View {
 
             // Metadata
             metadataView
+
+            Divider()
+
+            // Full Text
+            fullTextSection
+        }
+    }
+
+    // MARK: - Full Text Section
+
+    /// Section for full-text retrieval button and status.
+    @ViewBuilder
+    private var fullTextSection: some View {
+        if document.hasFullText {
+            // Already have full text - show view button
+            HStack {
+                Button(action: { showFullTextViewer = true }) {
+                    Label("View Full Text", systemImage: "doc.text")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+
+                if let source = document.fullTextSource,
+                   let fullTextSource = FullTextSource(rawValue: source) {
+                    FullTextSourceBadge(source: fullTextSource)
+                }
+            }
+        } else if document.fullTextUnavailable {
+            // Already tried, not available
+            fullTextUnavailableView
+        } else {
+            // Not yet attempted
+            fullTextFetchView
+        }
+    }
+
+    /// View shown when full text was attempted but not available.
+    private var fullTextUnavailableView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundColor(.orange)
+            Text("Full text not available")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Spacer()
+
+            // Still offer to open in browser
+            if let doi = document.doi,
+               let url = PlatformHelper.doiURL(for: doi) {
+                Link(destination: url) {
+                    Label("Open Publisher", systemImage: "safari")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    /// View for fetching full text when not yet attempted.
+    private var fullTextFetchView: some View {
+        HStack(spacing: 12) {
+            Button(action: fetchFullText) {
+                if isLoadingFullText {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else {
+                    Label("Get Full Text", systemImage: "arrow.down.doc")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isLoadingFullText)
+            .accessibilityHint("Downloads the full text of this article if available")
+
+            if let error = fullTextError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    // MARK: - Full Text Fetching
+
+    /// Fetch full text for the document.
+    private func fetchFullText() {
+        isLoadingFullText = true
+        fullTextError = nil
+
+        Task {
+            do {
+                let service = FullTextService.create(from: .shared)
+                let result = try await service.fetchFullText(for: document)
+
+                await MainActor.run {
+                    // Update document model
+                    switch result.content {
+                    case .markdown(let content):
+                        document.fullTextContent = content
+                    case .pdfURL(let url):
+                        document.fullTextPDFPath = url.absoluteString
+                    case .webURL:
+                        // Don't store - just open
+                        break
+                    }
+                    document.fullTextSource = result.source.rawValue
+                    document.fullTextFetchedAt = Date()
+
+                    fullTextResult = result
+                    isLoadingFullText = false
+
+                    // For web URLs, open directly instead of showing viewer
+                    if case .webURL(let url) = result.content {
+                        openURL(url)
+                    } else {
+                        showFullTextViewer = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    if case FullTextError.noFullTextAvailable = error {
+                        document.fullTextUnavailable = true
+                    }
+                    fullTextError = error.localizedDescription
+                    isLoadingFullText = false
+                }
+            }
         }
     }
 
