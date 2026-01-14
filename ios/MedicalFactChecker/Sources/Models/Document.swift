@@ -85,6 +85,24 @@ final class Document {
     /// Position within the PubMed results (0-indexed).
     var resultPosition: Int
 
+    // MARK: - Full Text
+
+    /// The full text content (markdown format for XML sources, nil for PDF-only).
+    var fullTextContent: String?
+
+    /// URL to the locally cached PDF file, if available.
+    var fullTextPDFPath: String?
+
+    /// Source of the full text (for display and debugging).
+    /// Values: "europepmc", "unpaywall", "doi"
+    var fullTextSource: String?
+
+    /// When the full text was fetched.
+    var fullTextFetchedAt: Date?
+
+    /// True if full text fetch was attempted but no source was available.
+    var fullTextUnavailable: Bool = false
+
     // MARK: - Relationships
 
     var session: FactCheckSession?
@@ -159,6 +177,29 @@ final class Document {
     /// Check if document has been scored (or scoring was attempted but failed).
     var isScored: Bool {
         relevanceScore != nil || scoreParseFailed
+    }
+
+    // MARK: - Full Text Computed Properties
+
+    /// Whether full text is available for this document.
+    var hasFullText: Bool {
+        fullTextContent != nil || fullTextPDFPath != nil
+    }
+
+    /// Whether we've already tried to fetch full text (success or failure).
+    var fullTextAttempted: Bool {
+        fullTextFetchedAt != nil || fullTextUnavailable
+    }
+
+    /// Display name for the full text source.
+    var fullTextSourceDisplay: String? {
+        guard let source = fullTextSource else { return nil }
+        switch source {
+        case "europepmc": return "Europe PMC"
+        case "unpaywall": return "Unpaywall"
+        case "doi": return "Publisher"
+        default: return source.capitalized
+        }
     }
 
     /// Full citation string for references section.
