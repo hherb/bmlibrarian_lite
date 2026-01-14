@@ -15,6 +15,10 @@ struct OnboardingPage: Identifiable {
     let iconColors: [Color]
     let title: String
     let description: String
+    /// Optional URL link to display below the description.
+    var linkURL: URL? = nil
+    /// Text to display for the link button.
+    var linkText: String? = nil
 }
 
 /// Swipeable onboarding view shown on first launch.
@@ -75,7 +79,9 @@ struct OnboardingView: View {
             icon: "star.fill",
             iconColors: [.yellow, .orange],
             title: "Start Free with Mistral",
-            description: "Mistral offers free API credits to get started! Visit console.mistral.ai, create an account, and generate an API key. Then select \"Mistral\" as your provider in Settings."
+            description: "Mistral offers free API credits to get started! Create a new account or sign in with Apple/Google. Once logged in, generate an API key and select \"Mistral\" as your provider in Settings.",
+            linkURL: URL(string: "https://console.mistral.ai"),
+            linkText: "Open console.mistral.ai"
         ),
         OnboardingPage(
             icon: "gear.badge.checkmark",
@@ -196,6 +202,19 @@ struct OnboardingPageView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Optional link button
+            if let url = page.linkURL, let text = page.linkText {
+                Link(destination: url) {
+                    HStack(spacing: 6) {
+                        Text(text)
+                            .fontWeight(.semibold)
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .foregroundColor(.accentColor)
+                }
+                .padding(.top, 8)
+            }
 
             Spacer()
             Spacer()
