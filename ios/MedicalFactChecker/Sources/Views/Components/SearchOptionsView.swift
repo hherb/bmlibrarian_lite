@@ -163,39 +163,16 @@ struct SearchOptionsView: View {
     /// - Returns: A styled badge view.
     private func providerBadge(for provider: SearchProvider) -> some View {
         HStack(spacing: 4) {
-            providerIcon(for: provider)
+            Image(systemName: provider.iconName)
+                .font(.caption)
             Text(provider.displayName)
                 .font(.caption)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(providerColor(for: provider).opacity(0.15))
-        .foregroundColor(providerColor(for: provider))
+        .background(provider.themeColor.opacity(0.15))
+        .foregroundColor(provider.themeColor)
         .cornerRadius(6)
-    }
-
-    /// Icon for a search provider.
-    ///
-    /// - Parameter provider: The search provider.
-    /// - Returns: An image view with the appropriate icon.
-    private func providerIcon(for provider: SearchProvider) -> some View {
-        Image(systemName: provider.iconName)
-            .font(.caption)
-    }
-
-    /// Color associated with a search provider.
-    ///
-    /// - Parameter provider: The search provider.
-    /// - Returns: The provider's theme color.
-    private func providerColor(for provider: SearchProvider) -> Color {
-        switch provider {
-        case .pubmed:
-            return .blue
-        case .europePMC:
-            return .green
-        case .both:
-            return .purple
-        }
     }
 
     // MARK: - Actions
@@ -204,34 +181,6 @@ struct SearchOptionsView: View {
     private func toggleExpanded() {
         withAnimation(.easeInOut(duration: SearchOptionsConstants.animationDuration)) {
             isExpanded.toggle()
-        }
-    }
-}
-
-// MARK: - SearchProvider Extension
-
-extension SearchProvider {
-    /// System image name for the provider icon.
-    var iconName: String {
-        switch self {
-        case .pubmed:
-            return "building.columns"
-        case .europePMC:
-            return "globe.europe.africa"
-        case .both:
-            return "arrow.triangle.merge"
-        }
-    }
-
-    /// Detailed description for the help text.
-    var description: String {
-        switch self {
-        case .pubmed:
-            return "Search the US National Library of Medicine's PubMed database. Best for comprehensive medical literature coverage."
-        case .europePMC:
-            return "Search Europe PMC, which includes PubMed plus additional European sources and preprints."
-        case .both:
-            return "Search both PubMed and Europe PMC simultaneously. Results are deduplicated. Best for comprehensive coverage."
         }
     }
 }

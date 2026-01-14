@@ -7,6 +7,32 @@
 
 import SwiftUI
 
+// MARK: - Constants
+
+/// Constants for document source badge UI.
+private enum DocumentSourceBadgeConstants {
+    /// Font size for provider icon.
+    static let iconFontSize: CGFloat = 8
+
+    /// Font size for provider abbreviation.
+    static let abbreviationFontSize: CGFloat = 9
+
+    /// Font size for preprint label.
+    static let preprintFontSize: CGFloat = 7
+
+    /// Horizontal padding for badge.
+    static let badgeHorizontalPadding: CGFloat = 6
+
+    /// Vertical padding for badge.
+    static let badgeVerticalPadding: CGFloat = 3
+
+    /// Corner radius for badge.
+    static let badgeCornerRadius: CGFloat = 4
+
+    /// Background opacity for badge.
+    static let badgeBackgroundOpacity: CGFloat = 0.12
+}
+
 /// Badge showing the search provider source of a document.
 ///
 /// Displays a small colored badge with the provider name, helping users
@@ -32,28 +58,28 @@ struct DocumentSourceBadge: View {
         HStack(spacing: 4) {
             // Provider icon
             Image(systemName: provider.iconName)
-                .font(.system(size: 8))
+                .font(.system(size: DocumentSourceBadgeConstants.iconFontSize))
 
             // Provider abbreviation
             Text(abbreviation)
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(size: DocumentSourceBadgeConstants.abbreviationFontSize, weight: .medium))
 
             // Preprint indicator
             if isPreprint {
                 Text("PPR")
-                    .font(.system(size: 7, weight: .bold))
+                    .font(.system(size: DocumentSourceBadgeConstants.preprintFontSize, weight: .bold))
                     .foregroundColor(.white)
-                    .padding(.horizontal, 3)
+                    .padding(.horizontal, DocumentSourceBadgeConstants.badgeVerticalPadding)
                     .padding(.vertical, 1)
                     .background(Color.orange)
-                    .cornerRadius(3)
+                    .cornerRadius(DocumentSourceBadgeConstants.badgeVerticalPadding)
             }
         }
-        .foregroundColor(badgeColor)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(badgeColor.opacity(0.12))
-        .cornerRadius(4)
+        .foregroundColor(provider.themeColor)
+        .padding(.horizontal, DocumentSourceBadgeConstants.badgeHorizontalPadding)
+        .padding(.vertical, DocumentSourceBadgeConstants.badgeVerticalPadding)
+        .background(provider.themeColor.opacity(DocumentSourceBadgeConstants.badgeBackgroundOpacity))
+        .cornerRadius(DocumentSourceBadgeConstants.badgeCornerRadius)
     }
 
     // MARK: - Private Properties
@@ -67,18 +93,6 @@ struct DocumentSourceBadge: View {
             return "EPMC"
         case .both:
             return "Both"
-        }
-    }
-
-    /// Color for the badge based on provider.
-    private var badgeColor: Color {
-        switch provider {
-        case .pubmed:
-            return .blue
-        case .europePMC:
-            return .green
-        case .both:
-            return .purple
         }
     }
 }

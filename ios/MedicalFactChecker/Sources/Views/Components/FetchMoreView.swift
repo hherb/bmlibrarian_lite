@@ -22,6 +22,15 @@ private enum FetchMoreConstants {
 
     /// Step size for batch stepper.
     static let batchStepSize = 5
+
+    /// Scale for button progress spinner.
+    static let buttonProgressScale: CGFloat = 0.8
+
+    /// Corner radius for the main container.
+    static let containerCornerRadius: CGFloat = 12
+
+    /// Corner radius for the button.
+    static let buttonCornerRadius: CGFloat = 10
 }
 
 /// View for fetching additional documents from search providers.
@@ -78,7 +87,7 @@ struct FetchMoreView: View {
         }
         .padding()
         .background(backgroundGradient)
-        .cornerRadius(12)
+        .cornerRadius(FetchMoreConstants.containerCornerRadius)
     }
 
     // MARK: - Subviews
@@ -182,7 +191,7 @@ struct FetchMoreView: View {
                 if isFetching {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(0.8)
+                        .scaleEffect(FetchMoreConstants.buttonProgressScale)
                 } else {
                     Image(systemName: "arrow.down.doc")
                 }
@@ -193,7 +202,7 @@ struct FetchMoreView: View {
             .padding()
             .background(isFetching ? Color.gray : Color.accentColor)
             .foregroundColor(.white)
-            .cornerRadius(10)
+            .cornerRadius(FetchMoreConstants.buttonCornerRadius)
         }
         .disabled(isFetching)
     }

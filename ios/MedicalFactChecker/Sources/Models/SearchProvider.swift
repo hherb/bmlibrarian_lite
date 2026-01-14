@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 // MARK: - Constants
 
@@ -43,15 +44,15 @@ enum SearchProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Short description for settings UI.
+    /// Detailed description for the provider.
     var description: String {
         switch self {
         case .pubmed:
-            return "NCBI's biomedical literature database"
+            return "Search the US National Library of Medicine's PubMed database. Best for comprehensive medical literature coverage."
         case .europePMC:
-            return "Europe PMC with preprints from 34 servers"
+            return "Search Europe PMC, which includes PubMed plus additional European sources and preprints."
         case .both:
-            return "Search both and merge results"
+            return "Search both PubMed and Europe PMC simultaneously. Results are deduplicated. Best for comprehensive coverage."
         }
     }
 
@@ -60,7 +61,16 @@ enum SearchProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .pubmed: return "building.columns"
         case .europePMC: return "globe.europe.africa"
-        case .both: return "rectangle.on.rectangle"
+        case .both: return "arrow.triangle.merge"
+        }
+    }
+
+    /// Theme color for the provider.
+    var themeColor: Color {
+        switch self {
+        case .pubmed: return .blue
+        case .europePMC: return .green
+        case .both: return .purple
         }
     }
 

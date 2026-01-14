@@ -7,6 +7,20 @@
 
 import SwiftUI
 
+// MARK: - Constants
+
+/// Constants for search progress view UI.
+private enum SearchProgressConstants {
+    /// Scale for overall progress spinner.
+    static let overallProgressScale: CGFloat = 0.8
+
+    /// Scale for inline provider progress spinner.
+    static let inlineProgressScale: CGFloat = 0.6
+
+    /// Width for provider icon frame.
+    static let providerIconWidth: CGFloat = 20
+}
+
 // MARK: - Search Progress State
 
 /// State of a search operation for progress tracking.
@@ -146,7 +160,7 @@ struct SearchProgressView: View {
             Image(systemName: providerProgress.provider.iconName)
                 .font(.caption)
                 .foregroundColor(providerColor(providerProgress))
-                .frame(width: 20)
+                .frame(width: SearchProgressConstants.providerIconWidth)
 
             // Provider name
             Text(providerProgress.provider.displayName)
@@ -190,7 +204,7 @@ struct SearchProgressView: View {
                 .foregroundColor(.secondary)
         case .searching:
             ProgressView()
-                .scaleEffect(0.8)
+                .scaleEffect(SearchProgressConstants.overallProgressScale)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
@@ -214,7 +228,7 @@ struct SearchProgressView: View {
         case .searching:
             HStack(spacing: 4) {
                 ProgressView()
-                    .scaleEffect(0.6)
+                    .scaleEffect(SearchProgressConstants.inlineProgressScale)
                 Text("Searching...")
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -260,7 +274,7 @@ struct SearchProgressView: View {
         case .idle:
             return .secondary
         case .searching:
-            return .accentColor
+            return providerProgress.provider.themeColor
         case .completed:
             return .green
         case .failed:
