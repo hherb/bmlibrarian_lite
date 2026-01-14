@@ -8,6 +8,14 @@
 import SwiftData
 import SwiftUI
 
+// MARK: - Constants
+
+/// Constants for scored documents view UI.
+private enum ScoredDocumentsConstants {
+    /// Scale factor for inline progress indicators.
+    static let inlineProgressScale: CGFloat = 0.8
+}
+
 /// Section displaying scored documents with both LLM and embedding scores.
 ///
 /// Shows a collapsible list of documents sorted by relevance score.
@@ -282,7 +290,7 @@ struct DocumentScoreRow: View {
             Button(action: fetchFullText) {
                 if isLoadingFullText {
                     ProgressView()
-                        .scaleEffect(0.8)
+                        .scaleEffect(ScoredDocumentsConstants.inlineProgressScale)
                 } else {
                     Label("Get Full Text", systemImage: "arrow.down.doc")
                 }

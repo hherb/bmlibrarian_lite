@@ -17,14 +17,8 @@ private enum FullTextViewerConstants {
     /// Padding for content areas.
     static let contentPadding: CGFloat = 16
 
-    /// Corner radius for error state icons.
-    static let iconCornerRadius: CGFloat = 8
-
     /// Spacing between elements in stack views.
     static let stackSpacing: CGFloat = 12
-
-    /// HTTP status code for successful response.
-    static let httpStatusOK = 200
 }
 
 // MARK: - Full Text Viewer
@@ -224,7 +218,7 @@ struct PDFContentView: View {
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == FullTextViewerConstants.httpStatusOK else {
+                  httpResponse.statusCode == FullTextConstants.httpStatusOK else {
                 throw URLError(.badServerResponse)
             }
             await MainActor.run {
