@@ -68,17 +68,21 @@ actor EuropePMCService {
 
     /// Search Europe PMC with a query string.
     ///
+    /// Europe PMC uses cursor-based pagination. For the first page, pass nil
+    /// for cursorMark. For subsequent pages, pass the nextCursorMark from the
+    /// previous response.
+    ///
     /// - Parameters:
     ///   - query: Europe PMC query string (or plain text).
     ///   - maxResults: Maximum results to return.
-    ///   - offset: Starting position for pagination.
+    ///   - cursorMark: Cursor for pagination (nil for first page, nextCursorMark for subsequent).
     ///   - includePreprints: Whether to include preprints.
     /// - Returns: Search result with article metadata.
     /// - Throws: `EuropePMCError` if the request fails.
     func search(
         query: String,
         maxResults: Int = SearchProviderConstants.defaultMaxResults,
-        offset: Int = SearchProviderConstants.defaultOffset,
+        cursorMark: String? = nil,
         includePreprints: Bool = false
     ) async throws -> EuropePMCSearchResult {
         let finalQuery = buildQuery(query, includePreprints: includePreprints)
@@ -89,14 +93,14 @@ actor EuropePMCService {
             throw EuropePMCError.invalidURL
         }
 
+        // Use "*" for initial cursor (first page), otherwise use provided cursor
+        let effectiveCursor = cursorMark ?? EuropePMCConstants.initialCursorMark
+
         components.queryItems = [
             URLQueryItem(name: "query", value: finalQuery),
             URLQueryItem(name: "resultType", value: "core"),
             URLQueryItem(name: "pageSize", value: String(maxResults)),
-            URLQueryItem(
-                name: "cursorMark",
-                value: offset == 0 ? EuropePMCConstants.initialCursorMark : String(offset)
-            ),
+            URLQueryItem(name: "cursorMark", value: effectiveCursor),
             URLQueryItem(name: "format", value: "json"),
             URLQueryItem(name: "sort", value: "RELEVANCE desc"),
         ]
@@ -113,7 +117,7 @@ actor EuropePMCService {
             throw EuropePMCError.searchFailed
         }
 
-        return try parseSearchResponse(data, offset: offset)
+        return try parseSearchResponse(data, cursorMark: effectiveCursor)
     }
 
     // MARK: - Query Building
@@ -146,10 +150,10 @@ actor EuropePMCService {
     ///
     /// - Parameters:
     ///   - data: The response data.
-    ///   - offset: The current offset.
+    ///   - cursorMark: The cursor mark used for this request.
     /// - Returns: Parsed search result.
     /// - Throws: `EuropePMCError.parseError` if parsing fails.
-    private func parseSearchResponse(_ data: Data, offset: Int) throws -> EuropePMCSearchResult {
+    private func parseSearchResponse(_ data: Data, cursorMark: String) throws -> EuropePMCSearchResult {
         let decoder = JSONDecoder()
         let response: EPMCSearchResponse
 
@@ -173,14 +177,14 @@ actor EuropePMCService {
                 meshTerms: [],  // Europe PMC doesn't return MeSH in search
                 source: result.source ?? "MED",
                 isPreprint: result.source == EuropePMCConstants.preprintSource,
-                resultPosition: offset + index
+                resultPosition: index  // Position within this page
             )
         }
 
         return EuropePMCSearchResult(
             articles: articles,
             totalCount: Int(response.hitCount) ?? 0,
-            offset: offset,
+            currentCursorMark: cursorMark,
             nextCursorMark: response.nextCursorMark
         )
     }
@@ -222,20 +226,19 @@ struct EuropePMCSearchResult: Sendable {
     /// Total count of matching documents.
     let totalCount: Int
 
-    /// Current offset in the result set.
-    let offset: Int
+    /// Cursor mark used for this request.
+    let currentCursorMark: String
 
     /// Cursor mark for next page (if any).
     let nextCursorMark: String?
 
     /// Check if more results are available.
+    ///
+    /// More results exist when nextCursorMark differs from currentCursorMark.
+    /// Europe PMC returns the same cursor when you've reached the end.
     var hasMore: Bool {
-        offset + articles.count < totalCount
-    }
-
-    /// Next offset for pagination.
-    var nextOffset: Int {
-        offset + articles.count
+        guard let next = nextCursorMark else { return false }
+        return next != currentCursorMark && !articles.isEmpty
     }
 }
 

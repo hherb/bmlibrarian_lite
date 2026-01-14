@@ -26,10 +26,13 @@ enum SearchResultMerger {
     ///
     /// Deduplication priority: PMID > DOI > Title similarity
     ///
+    /// Note: For subsequent pages, callers need to track pagination separately
+    /// since PubMed uses offset and Europe PMC uses cursor marks.
+    ///
     /// - Parameters:
     ///   - pubmedResult: Results from PubMed.
     ///   - europePMCResult: Results from Europe PMC.
-    /// - Returns: Merged, deduplicated result.
+    /// - Returns: Merged, deduplicated result with Europe PMC cursor preserved.
     static func merge(
         pubmedResult: UnifiedSearchResult,
         europePMCResult: UnifiedSearchResult
@@ -65,7 +68,8 @@ enum SearchResultMerger {
             articles: sorted,
             totalCount: estimatedTotal,
             offset: pubmedResult.offset,
-            provider: .both
+            provider: .both,
+            nextCursorMark: europePMCResult.nextCursorMark
         )
     }
 

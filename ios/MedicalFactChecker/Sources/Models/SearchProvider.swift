@@ -105,8 +105,15 @@ struct SearchOptions: Sendable {
     /// Maximum results per provider.
     var maxResults: Int = SearchProviderConstants.defaultMaxResults
 
-    /// Starting offset for pagination.
+    /// Starting offset for pagination (PubMed style).
     var offset: Int = SearchProviderConstants.defaultOffset
+
+    /// Cursor mark for Europe PMC pagination (nil for first page).
+    ///
+    /// Europe PMC uses cursor-based pagination. For the first page, pass nil
+    /// (which will use "*"). For subsequent pages, pass the nextCursorMark
+    /// from the previous response.
+    var cursorMark: String?
 
     /// Create default options for a provider.
     ///
@@ -117,7 +124,8 @@ struct SearchOptions: Sendable {
             provider: provider,
             includePreprints: false,
             maxResults: SearchProviderConstants.defaultMaxResults,
-            offset: SearchProviderConstants.defaultOffset
+            offset: SearchProviderConstants.defaultOffset,
+            cursorMark: nil
         )
     }
 }
