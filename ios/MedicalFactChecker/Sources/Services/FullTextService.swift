@@ -8,9 +8,9 @@
 import Foundation
 
 /// Errors that can occur during full-text retrieval.
-enum FullTextError: LocalizedError {
+enum FullTextError: LocalizedError, Sendable {
     case noIdentifiers
-    case networkError(Error)
+    case networkError(String)
     case noFullTextAvailable
     case pdfDownloadFailed
     case xmlParseError(String)
@@ -19,8 +19,8 @@ enum FullTextError: LocalizedError {
         switch self {
         case .noIdentifiers:
             return "Document has no DOI or PMC ID for full-text lookup"
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+        case .networkError(let message):
+            return "Network error: \(message)"
         case .noFullTextAvailable:
             return "No full text available from any source"
         case .pdfDownloadFailed:
@@ -40,8 +40,6 @@ enum FullTextError: LocalizedError {
 actor FullTextService {
     // MARK: - Configuration
 
-    private let europePMCBaseURL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
-    private let unpaywallBaseURL = "https://api.unpaywall.org/v2"
     private let email: String
     private let session: URLSession
 
@@ -54,8 +52,8 @@ actor FullTextService {
         self.email = email
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120  // Longer for PDF downloads
+        config.timeoutIntervalForRequest = FullTextConstants.requestTimeoutSeconds
+        config.timeoutIntervalForResource = FullTextConstants.downloadTimeoutSeconds
         self.session = URLSession(configuration: config)
     }
 
@@ -64,7 +62,9 @@ actor FullTextService {
     /// - Parameter settings: The app settings containing the NCBI email.
     /// - Returns: A configured FullTextService instance.
     static func create(from settings: AppSettings) -> FullTextService {
-        let email = settings.ncbiEmail.isEmpty ? "user@example.com" : settings.ncbiEmail
+        let email = settings.ncbiEmail.isEmpty
+            ? FullTextConstants.fallbackEmail
+            : settings.ncbiEmail
         return FullTextService(email: email)
     }
 
@@ -106,12 +106,13 @@ actor FullTextService {
         }
 
         // Fallback to DOI or PubMed URL
-        if let doi = doi, !doi.isEmpty, let url = URL(string: "https://doi.org/\(doi)") {
+        if let doi = doi, !doi.isEmpty,
+           let url = URL(string: "\(FullTextConstants.doiBaseURL)/\(doi)") {
             return FullTextResult(content: .webURL(url), source: .doi)
         }
 
         // Final fallback: PubMed page
-        if let url = URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(pmid)/") {
+        if let url = URL(string: "\(FullTextConstants.pubmedBaseURL)/\(pmid)/") {
             return FullTextResult(content: .webURL(url), source: .doi)
         }
 
@@ -139,10 +140,11 @@ actor FullTextService {
     /// - Returns: The article content as markdown.
     /// - Throws: FullTextError on failure.
     private func fetchEuropePMCXML(pmcId: String) async throws -> String {
-        // Normalize PMC ID
+        // Normalize PMC ID (ensure it has "PMC" prefix)
         let normalizedId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
 
-        guard let url = URL(string: "\(europePMCBaseURL)/\(normalizedId)/fullTextXML") else {
+        let urlString = "\(FullTextConstants.europePMCBaseURL)/\(normalizedId)/fullTextXML"
+        guard let url = URL(string: urlString) else {
             throw FullTextError.noIdentifiers
         }
 
@@ -152,15 +154,15 @@ actor FullTextService {
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw FullTextError.networkError(URLError(.badServerResponse))
+            throw FullTextError.networkError("Invalid server response")
         }
 
-        if httpResponse.statusCode == 404 {
+        if httpResponse.statusCode == FullTextConstants.httpStatusNotFound {
             throw FullTextError.noFullTextAvailable
         }
 
-        guard httpResponse.statusCode == 200 else {
-            throw FullTextError.networkError(URLError(.badServerResponse))
+        guard httpResponse.statusCode == FullTextConstants.httpStatusOK else {
+            throw FullTextError.networkError("HTTP \(httpResponse.statusCode)")
         }
 
         // Parse XML and convert to markdown
@@ -191,40 +193,65 @@ actor FullTextService {
     /// - Returns: URL to the PDF.
     /// - Throws: FullTextError if no open access version is available.
     private func fetchUnpaywallPDF(doi: String) async throws -> URL {
-        guard let encodedDOI = doi.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+        // DOIs must be percent-encoded for URL path, including the "/" character
+        guard let encodedDOI = encodeDOIForURLPath(doi) else {
             throw FullTextError.noIdentifiers
         }
 
-        guard let url = URL(string: "\(unpaywallBaseURL)/\(encodedDOI)?email=\(email)") else {
+        let urlString = "\(FullTextConstants.unpaywallBaseURL)/\(encodedDOI)?email=\(email)"
+        guard let url = URL(string: urlString) else {
             throw FullTextError.noIdentifiers
         }
 
         let (data, response) = try await session.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              httpResponse.statusCode == FullTextConstants.httpStatusOK else {
             throw FullTextError.noFullTextAvailable
         }
 
         // Parse Unpaywall response
         let result = try JSONDecoder().decode(UnpaywallResponse.self, from: data)
 
-        // Try best OA location first, then any OA location
-        if let bestOA = result.bestOaLocation,
-           let urlString = bestOA.urlForPdf ?? bestOA.url,
-           let pdfURL = URL(string: urlString) {
+        // Try best OA location first
+        if let pdfURL = extractPDFURL(from: result.bestOaLocation) {
             return pdfURL
         }
 
         // Try other OA locations
         for location in result.oaLocations ?? [] {
-            if let urlString = location.urlForPdf ?? location.url,
-               let pdfURL = URL(string: urlString) {
+            if let pdfURL = extractPDFURL(from: location) {
                 return pdfURL
             }
         }
 
         throw FullTextError.noFullTextAvailable
+    }
+
+    /// Encode a DOI for use in a URL path.
+    ///
+    /// DOIs contain "/" characters that must be percent-encoded for URL paths.
+    ///
+    /// - Parameter doi: The DOI to encode.
+    /// - Returns: The percent-encoded DOI, or nil if encoding fails.
+    private func encodeDOIForURLPath(_ doi: String) -> String? {
+        // Create a character set that excludes "/" for proper DOI encoding
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        return doi.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+
+    /// Extract PDF URL from an Unpaywall OA location.
+    ///
+    /// - Parameter location: The OA location to extract from.
+    /// - Returns: The PDF URL, or nil if not available.
+    private func extractPDFURL(from location: OALocation?) -> URL? {
+        guard let location = location,
+              let urlString = location.urlForPdf ?? location.url,
+              let pdfURL = URL(string: urlString) else {
+            return nil
+        }
+        return pdfURL
     }
 
     // MARK: - PDF Download
@@ -238,12 +265,14 @@ actor FullTextService {
         let (data, response) = try await session.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              httpResponse.statusCode == FullTextConstants.httpStatusOK else {
             throw FullTextError.pdfDownloadFailed
         }
 
         // Save to a temporary file
-        let fileName = url.lastPathComponent.isEmpty ? "article.pdf" : url.lastPathComponent
+        let fileName = url.lastPathComponent.isEmpty
+            ? FullTextConstants.defaultPDFFilename
+            : url.lastPathComponent
         let tempDir = FileManager.default.temporaryDirectory
         let localURL = tempDir.appendingPathComponent(fileName)
 
@@ -263,25 +292,34 @@ actor FullTextService {
         let (data, response) = try await session.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              httpResponse.statusCode == FullTextConstants.httpStatusOK else {
             throw FullTextError.pdfDownloadFailed
         }
 
         // Get the documents directory
-        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let pdfsDir = documentsDir.appendingPathComponent("PDFs", isDirectory: true)
+        guard let documentsDir = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw FullTextError.pdfDownloadFailed
+        }
+
+        let pdfsDir = documentsDir.appendingPathComponent(
+            FullTextConstants.pdfDirectoryName,
+            isDirectory: true
+        )
 
         // Create PDFs directory if needed
         try FileManager.default.createDirectory(at: pdfsDir, withIntermediateDirectories: true)
 
         // Save with PMID as filename
-        let fileName = "pmid-\(pmid).pdf"
+        let fileName = "\(FullTextConstants.pdfFilenamePrefix)\(pmid).\(FullTextConstants.pdfExtension)"
         let localURL = pdfsDir.appendingPathComponent(fileName)
 
         try data.write(to: localURL)
 
         // Return relative path
-        return "PDFs/\(fileName)"
+        return "\(FullTextConstants.pdfDirectoryName)/\(fileName)"
     }
 }
 

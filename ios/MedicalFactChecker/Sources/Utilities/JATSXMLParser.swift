@@ -8,7 +8,7 @@
 import Foundation
 
 /// Errors that can occur during JATS XML parsing.
-enum JATSXMLParserError: LocalizedError {
+enum JATSXMLParserError: LocalizedError, Sendable {
     case parsingFailed(String)
     case emptyContent
 
@@ -28,6 +28,16 @@ enum JATSXMLParserError: LocalizedError {
 /// and Europe PMC for full-text articles. This parser extracts the article
 /// structure and converts it to readable markdown.
 final class JATSXMLParser: NSObject, XMLParserDelegate {
+    // MARK: - Constants
+
+    /// Maximum number of authors to display before using "et al."
+    private static let maxAuthorsBeforeEtAl = 3
+
+    /// Maximum markdown heading level (h1-h6).
+    private static let maxHeadingLevel = 6
+
+    // MARK: - Properties
+
     private let parser: XMLParser
     private var sections: [String] = []
 
@@ -38,6 +48,7 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
     private var inSection = false
     private var inAbstract = false
     private var inParagraph = false
+    private var inBiblioRef = false
     private var sectionLevel = 0
 
     // Metadata
@@ -125,8 +136,9 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
         case "sub":
             currentText += "_"
         case "xref":
-            // Handle citations/references inline
+            // Handle citations/references inline (only for bibliography refs)
             if attributeDict["ref-type"] == "bibr" {
+                inBiblioRef = true
                 currentText += "["
             }
         default:
@@ -177,7 +189,8 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
         case "sec":
             // Flush current section
             if !currentSectionTitle.isEmpty || !currentSectionContent.isEmpty {
-                let prefix = String(repeating: "#", count: min(sectionLevel + 1, 6))
+                let headingLevel = min(sectionLevel + 1, Self.maxHeadingLevel)
+                let prefix = String(repeating: "#", count: headingLevel)
                 if !currentSectionTitle.isEmpty {
                     sections.append("\(prefix) \(currentSectionTitle)")
                 }
@@ -209,7 +222,11 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
         case "sub":
             currentText += ""  // End subscript
         case "xref":
-            currentText += "]"
+            // Only close bracket for bibliography references
+            if inBiblioRef {
+                currentText += "]"
+                inBiblioRef = false
+            }
         default:
             break
         }
@@ -232,8 +249,8 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
 
         // Metadata
         if !authors.isEmpty {
-            let authorList = authors.prefix(3).joined(separator: ", ")
-            let suffix = authors.count > 3 ? " et al." : ""
+            let authorList = authors.prefix(Self.maxAuthorsBeforeEtAl).joined(separator: ", ")
+            let suffix = authors.count > Self.maxAuthorsBeforeEtAl ? " et al." : ""
             lines.append("**Authors:** \(authorList)\(suffix)")
         }
         if !journal.isEmpty || !year.isEmpty {
