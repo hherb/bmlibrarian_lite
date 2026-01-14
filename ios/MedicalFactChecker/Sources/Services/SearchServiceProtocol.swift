@@ -159,12 +159,14 @@ enum SearchServiceFactory {
 
         let articles = result.articles.map { $0.toArticleMetadata(batchNumber: 1) }
 
+        // Only include nextCursorMark if there are actually more results
+        // (Europe PMC returns the same cursor at the end of results)
         return UnifiedSearchResult(
             articles: articles,
             totalCount: result.totalCount,
             offset: 0,  // Offset not used for cursor-based pagination
             provider: .europePMC,
-            nextCursorMark: result.nextCursorMark
+            nextCursorMark: result.hasMore ? result.nextCursorMark : nil
         )
     }
 
