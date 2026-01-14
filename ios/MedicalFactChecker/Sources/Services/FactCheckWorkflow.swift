@@ -31,6 +31,9 @@ final class FactCheckWorkflow {
     private(set) var isRunning = false
     private(set) var progressMessage = ""
 
+    /// Current search options being used.
+    private(set) var currentSearchOptions: SearchOptions?
+
     /// Set to true when waiting for user decision on fetching more docs.
     private(set) var awaitingUserDecision = false
 
@@ -60,7 +63,11 @@ final class FactCheckWorkflow {
     // MARK: - Main Entry Points
 
     /// Start a new fact-check for the given claim.
-    func startFactCheck(claim: String) async {
+    ///
+    /// - Parameters:
+    ///   - claim: The medical claim to fact-check.
+    ///   - searchOptions: Search configuration (provider, preprints, etc.).
+    func startFactCheck(claim: String, searchOptions: SearchOptions? = nil) async {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
@@ -69,6 +76,9 @@ final class FactCheckWorkflow {
             onError?(error)
             return
         }
+
+        // Store search options (use settings defaults if not provided)
+        self.currentSearchOptions = searchOptions ?? settings.buildSearchOptions()
 
         // Load monthly usage
         await loadMonthlyUsage()
@@ -83,6 +93,8 @@ final class FactCheckWorkflow {
         let newSession = FactCheckSession(claim: claim)
         newSession.modelName = settings.llmModel
         newSession.providerName = settings.selectedProvider.displayName
+        newSession.searchProvider = currentSearchOptions?.provider
+        newSession.includedPreprints = currentSearchOptions?.includePreprints ?? false
         modelContext.insert(newSession)
         try? modelContext.save()
 
@@ -523,47 +535,55 @@ final class FactCheckWorkflow {
 
     private func searchPubMed() async throws {
         guard let session = session,
-              let pubmedService = pubmedService,
               let query = session.pubmedQuery else { return }
 
         let batchNumber = session.batchesFetched + 1
-        updateProgress(.searchingPubMed, "Searching PubMed (batch \(batchNumber))...")
+        let provider = currentSearchOptions?.provider ?? .pubmed
+        let providerName = provider.displayName
 
-        let result = try await pubmedService.search(
+        updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
+
+        // Build search options with current pagination state
+        var options = currentSearchOptions ?? settings.buildSearchOptions()
+        options.maxResults = settings.batchSize
+        options.offset = session.currentSearchOffset
+        options.cursorMark = session.europePMCCursorMark
+
+        // Use unified search service
+        let result = try await SearchServiceFactory.search(
             query: query,
-            maxResults: settings.batchSize,
-            offset: session.currentSearchOffset
+            options: options,
+            settings: settings
         )
 
-        // Update session state
-        session.totalPubMedResults = result.totalCount
-        session.currentSearchOffset = result.nextOffset
+        // Update session state based on provider
+        if provider == .pubmed || provider == .both {
+            session.totalPubMedResults = result.totalCount
+            session.currentSearchOffset = result.nextOffset
+        }
+        if provider == .europePMC || provider == .both {
+            session.totalEuropePMCResults = result.totalCount
+            session.europePMCCursorMark = result.nextCursorMark
+        }
         session.batchesFetched = batchNumber
 
-        if result.pmids.isEmpty {
+        if result.articles.isEmpty {
             if session.documents.isEmpty {
                 throw PubMedError.noResults
             }
             return  // No more results, proceed with what we have
         }
 
-        updateProgress(.searchingPubMed, "Fetching \(result.pmids.count) article details...")
+        updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
 
-        // Fetch article metadata
-        let articles = try await pubmedService.fetchArticles(
-            pmids: result.pmids,
-            batchNumber: batchNumber,
-            basePosition: session.documentsFound
-        )
-
-        // Create Document objects
-        for article in articles {
+        // Create Document objects from unified results
+        for article in result.articles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
                 abstract: article.abstract,
                 authors: article.authors,
-                batchNumber: article.batchNumber,
+                batchNumber: batchNumber,
                 resultPosition: article.resultPosition
             )
             document.year = article.year
@@ -573,11 +593,12 @@ final class FactCheckWorkflow {
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
             document.session = session
+            document.sourceProvider = result.provider
 
             modelContext.insert(document)
         }
 
-        session.documentsFound += articles.count
+        session.documentsFound += result.articles.count
         try? modelContext.save()
     }
 

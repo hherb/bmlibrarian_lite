@@ -104,9 +104,19 @@ struct DocumentScoreRow: View {
                             .lineLimit(isExpanded ? nil : 2)
                             .multilineTextAlignment(.leading)
 
-                        Text(document.shortReference)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Text(document.shortReference)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            // Source provider badge
+                            if let provider = document.sourceProvider {
+                                DocumentSourceBadge(
+                                    provider: provider,
+                                    isPreprint: document.isPreprint
+                                )
+                            }
+                        }
                     }
 
                     Spacer(minLength: 0)

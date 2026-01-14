@@ -85,6 +85,15 @@ final class Document {
     /// Position within the PubMed results (0-indexed).
     var resultPosition: Int
 
+    // MARK: - Source Tracking
+
+    /// The search provider that returned this document (raw value string).
+    /// Values: "pubmed", "europepmc", or nil if unknown/legacy.
+    var sourceProviderRaw: String?
+
+    /// Whether this is a preprint (Europe PMC only).
+    var isPreprint: Bool = false
+
     // MARK: - Full Text
 
     /// The full text content (markdown format for XML sources, nil for PDF-only).
@@ -217,5 +226,16 @@ final class Document {
             parts.append("PMID: \(pmid)")
         }
         return parts.joined(separator: ". ")
+    }
+
+    /// The search provider that returned this document.
+    var sourceProvider: SearchProvider? {
+        get {
+            guard let raw = sourceProviderRaw else { return nil }
+            return SearchProvider(rawValue: raw)
+        }
+        set {
+            sourceProviderRaw = newValue?.rawValue
+        }
     }
 }

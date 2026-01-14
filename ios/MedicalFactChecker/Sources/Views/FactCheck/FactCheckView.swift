@@ -20,6 +20,9 @@ struct FactCheckView: View {
     @Binding var claimText: String
     @Binding var workflow: FactCheckWorkflow?
 
+    /// Search options for the current fact-check.
+    @State private var searchOptions = AppSettings.shared.buildSearchOptions()
+
     @State private var showingError = false
     @State private var errorMessage = ""
 
@@ -42,6 +45,12 @@ struct FactCheckView: View {
                             isTextEditorFocused = false
                             startFactCheck()
                         }
+                    )
+
+                    // Search Options (collapsible)
+                    SearchOptionsView(
+                        options: $searchOptions,
+                        isDisabled: workflow?.isRunning ?? false
                     )
 
                     // Budget Display
@@ -125,7 +134,7 @@ struct FactCheckView: View {
         self.workflow = newWorkflow
 
         Task {
-            await newWorkflow.startFactCheck(claim: claimText)
+            await newWorkflow.startFactCheck(claim: claimText, searchOptions: searchOptions)
         }
     }
 }

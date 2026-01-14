@@ -251,6 +251,39 @@ struct SettingsView: View {
                     }
                 }
 
+                // Search Provider Settings
+                Section {
+                    Picker("Default Provider", selection: $settings.selectedSearchProvider) {
+                        ForEach(SearchProvider.allCases) { provider in
+                            HStack {
+                                Image(systemName: provider.iconName)
+                                Text(provider.displayName)
+                            }
+                            .tag(provider)
+                        }
+                    }
+
+                    Text(settings.selectedSearchProvider.description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Toggle("Include Preprints", isOn: $settings.includePreprints)
+
+                    if settings.includePreprints {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("Preprints are not peer-reviewed")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Literature Search")
+                } footer: {
+                    Text("Choose which database(s) to search. Europe PMC includes additional European sources and preprints.")
+                }
+
                 // Search Settings
                 Section {
                     Stepper(
@@ -272,7 +305,7 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Search Settings")
+                    Text("Search Parameters")
                 } footer: {
                     Text("Control how many documents to fetch per batch and the minimum relevance threshold.")
                 }
