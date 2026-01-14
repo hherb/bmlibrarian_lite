@@ -581,8 +581,17 @@ struct AboutTab: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 350)
 
-            // Links
+            // Links and onboarding
             VStack(spacing: MacSpacing.medium) {
+                Button {
+                    NotificationCenter.default.post(name: .showMacOnboarding, object: nil)
+                } label: {
+                    HStack {
+                        Image(systemName: "hands.sparkles")
+                        Text("View Onboarding Guide")
+                    }
+                }
+
                 Link(destination: URL(string: "https://github.com/hherb/bmlibrarian_lite")!) {
                     HStack {
                         Image(systemName: "link")

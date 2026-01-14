@@ -367,6 +367,12 @@ struct SettingsView: View {
 
                 // Help & Documentation
                 Section {
+                    Button {
+                        NotificationCenter.default.post(name: .showOnboarding, object: nil)
+                    } label: {
+                        Label("View Onboarding Guide", systemImage: "hands.sparkles")
+                    }
+
                     NavigationLink {
                         HelpView()
                     } label: {

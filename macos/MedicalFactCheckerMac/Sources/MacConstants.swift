@@ -47,6 +47,11 @@ enum MacLayout {
     static let disclaimerMinHeight: CGFloat = 600
     static let disclaimerMaxContentWidth: CGFloat = 600
 
+    /// Onboarding dimensions.
+    static let onboardingMinWidth: CGFloat = 650
+    static let onboardingMinHeight: CGFloat = 550
+    static let onboardingMaxContentWidth: CGFloat = 500
+
     /// Minimum heights.
     static let viewMinHeight: CGFloat = 500
     static let textEditorMinHeight: CGFloat = 120
@@ -102,6 +107,7 @@ enum MacIconSize {
     static let emptyStateMedium: CGFloat = 48
     static let disclaimerIcon: CGFloat = 80
     static let aboutIcon: CGFloat = 64
+    static let onboardingIcon: CGFloat = 72
 
     /// Badge sizes.
     static let scoreBadgeSize: CGFloat = 36

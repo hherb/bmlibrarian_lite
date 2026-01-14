@@ -34,17 +34,31 @@ enum MacNavigationItem: String, CaseIterable, Identifiable {
 struct MacContentView: View {
     @State private var selectedNavItem: MacNavigationItem? = .factCheck
     @State private var hasAcceptedDisclaimer = UserDefaults.standard.bool(forKey: "hasAcceptedDisclaimer")
+    @State private var hasSeenOnboarding = UserDefaults.standard.bool(forKey: "hasSeenOnboarding")
     @State private var currentReport: EvidenceReport?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     /// The active fact-check workflow (persisted across tab switches).
     @State private var activeWorkflow: FactCheckWorkflow?
 
+    /// Controls showing onboarding from settings.
+    @State private var showingOnboardingFromSettings = false
+
     var body: some View {
-        if hasAcceptedDisclaimer {
-            mainNavigationView
-        } else {
+        if !hasAcceptedDisclaimer {
             MacDisclaimerView(onAccept: acceptDisclaimer)
+        } else if !hasSeenOnboarding {
+            MacOnboardingView(onComplete: completeOnboarding)
+        } else {
+            mainNavigationView
+                .sheet(isPresented: $showingOnboardingFromSettings) {
+                    MacOnboardingView(onComplete: {
+                        showingOnboardingFromSettings = false
+                    })
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showMacOnboarding)) { _ in
+                    showingOnboardingFromSettings = true
+                }
         }
     }
 
@@ -104,6 +118,20 @@ struct MacContentView: View {
             hasAcceptedDisclaimer = true
         }
     }
+
+    private func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: "hasSeenOnboarding")
+        withAnimation {
+            hasSeenOnboarding = true
+        }
+    }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    /// Posted when the user wants to view onboarding again from settings.
+    static let showMacOnboarding = Notification.Name("showMacOnboarding")
 }
 
 // MARK: - macOS Disclaimer View
