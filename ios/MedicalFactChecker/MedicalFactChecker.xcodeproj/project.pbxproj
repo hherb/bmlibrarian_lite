@@ -36,6 +36,7 @@
 		A1000029001 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000029000 /* NotificationNames.swift */; };
 		A1000030001 /* StringArrayTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000030000 /* StringArrayTransformer.swift */; };
 		A1000031001 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000031000 /* HelpView.swift */; };
+		A1000034001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000034000 /* OnboardingView.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
 		A1000032001 /* HELP.md in Resources */ = {isa = PBXBuildFile; fileRef = A1000032000 /* HELP.md */; };
@@ -77,6 +78,7 @@
 		A1000031000 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
 		A1000032000 /* HELP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = HELP.md; sourceTree = SOURCE_ROOT; };
 		A1000033000 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
+		A1000034000 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -179,6 +181,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000025000 /* DisclaimerView.swift */,
+				A1000034000 /* OnboardingView.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -335,6 +338,7 @@
 				A1000029001 /* NotificationNames.swift in Sources */,
 				A1000030001 /* StringArrayTransformer.swift in Sources */,
 				A1000031001 /* HelpView.swift in Sources */,
+				A1000034001 /* OnboardingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

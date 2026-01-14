@@ -39,6 +39,7 @@
 		A1000030 /* MacHelpViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000033 /* MacHelpViews.swift */; };
 		A1000031 /* HELP.md in Resources */ = {isa = PBXBuildFile; fileRef = A2000034 /* HELP.md */; };
 		A1000032 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = A2000035 /* PRIVACY.md */; };
+		A1000033 /* MacOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036 /* MacOnboardingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -97,6 +98,7 @@
 		A2000033 /* MacHelpViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacHelpViews.swift; sourceTree = "<group>"; };
 		A2000034 /* HELP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = HELP.md; sourceTree = SOURCE_ROOT; };
 		A2000035 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
+		A2000036 /* MacOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -180,10 +182,19 @@
 				A4000005 /* FactCheck */,
 				A400000D /* Help */,
 				A4000007 /* History */,
+				A400000E /* Onboarding */,
 				A4000006 /* Report */,
 				A4000008 /* Settings */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A400000E /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				A2000036 /* MacOnboardingView.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 		A400000D /* Help */ = {
@@ -507,6 +518,7 @@
 				A1000026 /* ResponseParser.swift in Sources */,
 				A1000029 /* StringArrayTransformer.swift in Sources */,
 				A1000030 /* MacHelpViews.swift in Sources */,
+				A1000033 /* MacOnboardingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
