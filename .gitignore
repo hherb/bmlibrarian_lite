@@ -86,7 +86,10 @@ temp/
 
 # Lock files (keep uv.lock if using uv)
 # uv.lock
+
+# Claude IDE settings
 .claude/settings.local.json
+.claude/settings.json
 
 # iOS/Xcode
 ios/**/.build/
@@ -102,6 +105,14 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Xcode workspace shared data
+**/project.xcworkspace/xcshareddata/
+
+# macOS Xcode test directories
+macos/**/Medical Fact Checker/
+macos/**/Medical Fact CheckerTests/
+macos/**/Medical Fact CheckerUITests/
 
 # Research outputs (generated)
 concordance_output/
