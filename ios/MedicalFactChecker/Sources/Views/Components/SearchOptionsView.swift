@@ -114,7 +114,7 @@ struct SearchOptionsView: View {
             Picker("Provider", selection: $options.provider) {
                 ForEach(SearchProvider.allCases) { provider in
                     HStack {
-                        providerIcon(for: provider)
+                        providerBadge(for: provider)
                         Text(provider.displayName)
                     }
                     .tag(provider)
