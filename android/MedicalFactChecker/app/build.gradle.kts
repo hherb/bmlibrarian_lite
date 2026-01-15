@@ -106,6 +106,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
 
+    // Retrofit Scalars converter for raw string responses (XML from PubMed)
+    implementation("com.squareup.retrofit2:converter-scalars:2.9.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
