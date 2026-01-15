@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    themes.xml
+    MedicalFactChecker Android App
+
+    XML theme for non-Compose components (splash screen, system UI).
+    Main theming is done in Compose via ui/theme/Theme.kt.
+-->
+<resources>
+    <!-- Base application theme -->
+    <style name="Theme.MedicalFactChecker" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Status bar color -->
+        <item name="android:statusBarColor">#1976D2</item>
+        <!-- Navigation bar color -->
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <!-- Light navigation bar icons -->
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

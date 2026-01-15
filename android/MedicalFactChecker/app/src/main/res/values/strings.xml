@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    strings.xml
+    MedicalFactChecker Android App
+
+    String resources for the application.
+    All user-visible strings should be defined here for localization support.
+-->
+<resources>
+    <!-- App name -->
+    <string name="app_name">Medical Fact Checker</string>
+
+    <!-- Navigation -->
+    <string name="nav_fact_check">Fact Check</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Fact Check Screen -->
+    <string name="fact_check_title">Check Medical Claim</string>
+    <string name="fact_check_placeholder">Enter a medical claim to verify...</string>
+    <string name="fact_check_button">Check Claim</string>
+    <string name="fact_check_searching">Searching medical literature...</string>
+    <string name="fact_check_scoring">Scoring relevance...</string>
+    <string name="fact_check_extracting">Extracting citations...</string>
+    <string name="fact_check_generating">Generating report...</string>
+
+    <!-- Verdicts -->
+    <string name="verdict_supported">Supported</string>
+    <string name="verdict_likely_supported">Likely Supported</string>
+    <string name="verdict_unclear">Unclear</string>
+    <string name="verdict_likely_refuted">Likely Refuted</string>
+    <string name="verdict_refuted">Refuted</string>
+
+    <!-- Documents -->
+    <string name="documents_found">%d documents found</string>
+    <string name="documents_scored">%d documents scored</string>
+    <string name="relevance_score">Relevance: %d/5</string>
+    <string name="view_full_text">View Full Text</string>
+    <string name="full_text_unavailable">Full text not available</string>
+
+    <!-- History Screen -->
+    <string name="history_title">Past Sessions</string>
+    <string name="history_empty">No fact-check sessions yet</string>
+    <string name="history_delete">Delete</string>
+    <string name="history_delete_confirm">Delete this session?</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_llm_section">LLM Provider</string>
+    <string name="settings_llm_provider">Provider</string>
+    <string name="settings_llm_model">Model</string>
+    <string name="settings_llm_api_key">API Key</string>
+    <string name="settings_llm_base_url">Base URL</string>
+    <string name="settings_budget_section">Budget</string>
+    <string name="settings_max_run_budget">Max per run</string>
+    <string name="settings_monthly_budget">Monthly limit</string>
+    <string name="settings_ncbi_section">PubMed</string>
+    <string name="settings_ncbi_email">NCBI Email</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome">Welcome to Medical Fact Checker</string>
+    <string name="onboarding_description">Verify medical claims using evidence from peer-reviewed literature.</string>
+    <string name="onboarding_disclaimer_title">Medical Disclaimer</string>
+    <string name="onboarding_disclaimer_text">This app is for informational purposes only. It is not a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider.</string>
+    <string name="onboarding_accept">I Understand</string>
+    <string name="onboarding_setup">Setup</string>
+    <string name="onboarding_get_started">Get Started</string>
+
+    <!-- Errors -->
+    <string name="error_network">Network error. Please check your connection.</string>
+    <string name="error_api_key">Invalid API key. Please check your settings.</string>
+    <string name="error_no_results">No results found for this query.</string>
+    <string name="error_budget_exceeded">Budget limit exceeded.</string>
+    <string name="error_generic">An error occurred. Please try again.</string>
+
+    <!-- Actions -->
+    <string name="action_retry">Retry</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_share">Share</string>
+    <string name="action_export_pdf">Export PDF</string>
+    <string name="action_copy">Copy</string>
+
+    <!-- Accessibility -->
+    <string name="content_desc_back">Go back</string>
+    <string name="content_desc_menu">Open menu</string>
+    <string name="content_desc_close">Close</string>
+</resources>
