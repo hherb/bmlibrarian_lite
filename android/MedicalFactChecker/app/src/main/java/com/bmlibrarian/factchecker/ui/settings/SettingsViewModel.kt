@@ -7,6 +7,7 @@ import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.ModelInfo
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.CostCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -254,7 +255,10 @@ class SettingsViewModel @Inject constructor(
      * @param threshold Minimum score for relevance (1-5)
      */
     fun setRelevanceThreshold(threshold: Int) {
-        val clampedThreshold = threshold.coerceIn(1, 5)
+        val clampedThreshold = threshold.coerceIn(
+            Constants.SCORING_MIN_SCORE,
+            Constants.SCORING_MAX_SCORE
+        )
         settingsRepository.setRelevanceThreshold(clampedThreshold)
     }
 
