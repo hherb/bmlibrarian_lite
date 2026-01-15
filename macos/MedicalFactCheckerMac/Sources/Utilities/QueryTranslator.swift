@@ -1,176 +1,112 @@
 //
 //  QueryTranslator.swift
-//  MedicalFactChecker
+//  MedicalFactCheckerMac
 //
-//  Stub implementation for query syntax translation between search providers.
-//  Full implementation will be completed in Phase 4.
+//  Translates queries between PubMed and Europe PMC syntax.
 //
 
 import Foundation
 
-// MARK: - TODO: Phase 4 Implementation
-//
-// This file contains a stub implementation of the QueryTranslator.
-// The full implementation should be completed as part of Phase 4.
-//
-// Phase 4 requirements (from 04-query-translator.md):
-// 1. Build PubMed → Europe PMC query translator
-// 2. Build Europe PMC → PubMed translator
-// 3. Handle all common query patterns
-// 4. Preserve search intent during translation
-// 5. Create comprehensive test suite
-//
-// Field tag mapping to implement:
-// | Concept          | PubMed Syntax       | Europe PMC Syntax      |
-// |------------------|---------------------|------------------------|
-// | MeSH term        | "Term"[MeSH]        | MeSH_TERM:"Term"       |
-// | Title/Abstract   | term[tiab]          | TITLE_ABS:term         |
-// | Title only       | term[ti]            | TITLE:term             |
-// | Abstract only    | term[ab]            | ABSTRACT:term          |
-// | Author           | "Name"[au]          | AUTH:"Name"            |
-// | Journal          | "Journal"[ta]       | JOURNAL:"Journal"      |
-// | Publication Year | 2020[dp]            | PUB_YEAR:2020          |
-// | Date range       | 2020:2024[dp]       | PUB_YEAR:[2020 TO 2024]|
-// | Has abstract     | hasabstract         | HAS_ABSTRACT:Y         |
-// | Free full text   | free full text[sb]  | OPEN_ACCESS:Y          |
-//
-// Known limitations to document:
-// - MeSH Explosion: PubMed auto-explodes; Europe PMC may not
-// - Subheadings: PubMed MeSH subheadings (/therapy) have no equivalent
-// - PMID Lookup: 12345[pmid] syntax differs between systems
-// - Complex Filters: Some PubMed search builder filters have no equivalent
-//
+// MARK: - Constants
 
-/// Utility for translating query syntax between search providers.
+/// Constants for query translation.
+private enum QueryTranslatorConstants {
+    /// Maximum iterations for whitespace cleanup to prevent infinite loops.
+    static let maxCleanupIterations = 10
+}
+
+// MARK: - Query Translator
+
+/// Translates queries between different literature database syntaxes.
 ///
-/// Different literature databases use different query syntax for searching.
-/// This translator converts queries to ensure consistent search behavior
-/// across providers.
+/// Handles common query patterns including MeSH terms, field tags, date filters,
+/// and special filters. Unrecognized patterns are passed through as-is.
 ///
-/// - Note: This is a stub implementation. Full implementation in Phase 4.
+/// ## Field Tag Mapping
+///
+/// | Concept          | PubMed Syntax       | Europe PMC Syntax      |
+/// |------------------|---------------------|------------------------|
+/// | MeSH term        | "Term"[MeSH]        | MeSH_TERM:"Term"       |
+/// | Title/Abstract   | term[tiab]          | TITLE_ABS:term         |
+/// | Title only       | term[ti]            | TITLE:term             |
+/// | Abstract only    | term[ab]            | ABSTRACT:term          |
+/// | Author           | "Name"[au]          | AUTH:"Name"            |
+/// | Journal          | "Journal"[ta]       | JOURNAL:"Journal"      |
+/// | Publication Year | 2020[dp]            | PUB_YEAR:2020          |
+/// | Date range       | 2020:2024[dp]       | PUB_YEAR:[2020 TO 2024]|
+/// | Has abstract     | hasabstract         | HAS_ABSTRACT:y         |
+/// | Free full text   | free full text[sb]  | OPEN_ACCESS:y          |
+///
+/// ## Known Limitations
+///
+/// - MeSH Explosion: PubMed auto-explodes MeSH terms; Europe PMC may not
+/// - Subheadings: PubMed MeSH subheadings (/therapy) have no equivalent
+/// - PMID Lookup: 12345[pmid] syntax differs between systems
+/// - Complex Filters: Some PubMed search builder filters have no equivalent
 enum QueryTranslator {
-    // MARK: - PubMed to Europe PMC
+    // MARK: - Public API
 
-    /// Translate a PubMed query to Europe PMC syntax.
+    /// Convert a PubMed query to Europe PMC syntax.
     ///
-    /// Currently returns the query with minimal transformation.
-    /// Full implementation will handle:
-    /// - MeSH term syntax conversion
-    /// - Field tag translation
-    /// - Date filter conversion
-    /// - Special filter translation
+    /// Handles common PubMed field tags and converts them to Europe PMC equivalents.
+    /// Unrecognized patterns are passed through as-is.
     ///
     /// - Parameter query: PubMed query string.
-    /// - Returns: Europe PMC-compatible query string.
-    ///
-    /// - TODO: Phase 4 - Implement full translation logic
+    /// - Returns: Europe PMC query string.
     static func pubmedToEuropePMC(_ query: String) -> String {
-        // TODO: Phase 4 - Implement comprehensive translation
-        //
-        // Implementation steps:
-        // 1. Parse query into tokens (terms, operators, field tags)
-        // 2. Translate field tags: [MeSH] -> MeSH_TERM:, [tiab] -> TITLE_ABS:, etc.
-        // 3. Convert date ranges: 2020:2024[dp] -> PUB_YEAR:[2020 TO 2024]
-        // 4. Handle special filters: hasabstract -> HAS_ABSTRACT:Y
-        // 5. Preserve Boolean operators (AND, OR, NOT)
-        // 6. Clean up whitespace and validate result
+        guard !query.isEmpty else { return query }
 
-        var translated = query
+        var result = query
 
-        // Minimal translation: handle common PubMed-specific syntax
-        // that would cause Europe PMC to fail
+        // Apply transformations in order
+        result = translateMeSHTerms(result, direction: .toEuropePMC)
+        result = translateFieldTags(result, direction: .toEuropePMC)
+        result = translateDateFilters(result, direction: .toEuropePMC)
+        result = translateSpecialFilters(result, direction: .toEuropePMC)
+        result = cleanupQuery(result)
 
-        // Remove PubMed-specific "hasabstract" (we add HAS_ABSTRACT:Y separately)
-        translated = translated.replacingOccurrences(
-            of: "\\s+AND\\s+hasabstract",
-            with: "",
-            options: .regularExpression
-        )
-        translated = translated.replacingOccurrences(
-            of: "hasabstract\\s+AND\\s+",
-            with: "",
-            options: .regularExpression
-        )
-        translated = translated.replacingOccurrences(of: "hasabstract", with: "")
-
-        // Remove PubMed publication type filters that don't translate
-        translated = translated.replacingOccurrences(
-            of: "NOT\\s*\\([^)]*\\[pt\\][^)]*\\)",
-            with: "",
-            options: .regularExpression
-        )
-
-        // Basic field tag translation (partial - expand in Phase 4)
-        translated = translated.replacingOccurrences(of: "[tiab]", with: "")
-        translated = translated.replacingOccurrences(of: "[ti]", with: "")
-        translated = translated.replacingOccurrences(of: "[ab]", with: "")
-        translated = translated.replacingOccurrences(of: "[MeSH]", with: "")
-        translated = translated.replacingOccurrences(of: "[Mesh]", with: "")
-        translated = translated.replacingOccurrences(of: "[mesh]", with: "")
-
-        // Clean up extra whitespace
-        translated = translated.replacingOccurrences(
-            of: "\\s+",
-            with: " ",
-            options: .regularExpression
-        )
-        translated = translated.trimmingCharacters(in: .whitespaces)
-
-        // Remove trailing AND/OR
-        translated = translated.replacingOccurrences(
-            of: "\\s+(AND|OR)\\s*$",
-            with: "",
-            options: .regularExpression
-        )
-
-        return translated.isEmpty ? query : translated
+        return result
     }
 
-    // MARK: - Europe PMC to PubMed
-
-    /// Translate a Europe PMC query to PubMed syntax.
-    ///
-    /// Currently returns the query unchanged.
-    /// Full implementation will handle reverse translation.
+    /// Convert a Europe PMC query to PubMed syntax.
     ///
     /// - Parameter query: Europe PMC query string.
-    /// - Returns: PubMed-compatible query string.
-    ///
-    /// - TODO: Phase 4 - Implement full translation logic
+    /// - Returns: PubMed query string.
     static func europePMCToPubMed(_ query: String) -> String {
-        // TODO: Phase 4 - Implement reverse translation
-        //
-        // Implementation steps:
-        // 1. Parse Europe PMC field prefixes (TITLE_ABS:, MeSH_TERM:, etc.)
-        // 2. Convert to PubMed syntax ([tiab], [MeSH], etc.)
-        // 3. Handle date ranges: PUB_YEAR:[2020 TO 2024] -> 2020:2024[dp]
-        // 4. Convert special filters: HAS_ABSTRACT:Y -> hasabstract
-        // 5. Preserve Boolean operators
-        // 6. Validate result
+        guard !query.isEmpty else { return query }
 
-        // Stub: return unchanged
-        return query
+        var result = query
+
+        // Apply transformations in order
+        result = translateMeSHTerms(result, direction: .toPubMed)
+        result = translateFieldTags(result, direction: .toPubMed)
+        result = translateDateFilters(result, direction: .toPubMed)
+        result = translateSpecialFilters(result, direction: .toPubMed)
+        result = cleanupQuery(result)
+
+        return result
     }
-
-    // MARK: - Query Detection
 
     /// Detect if a query appears to be in PubMed syntax.
     ///
-    /// Checks for common PubMed-specific patterns.
+    /// Checks for common PubMed-specific patterns like field tags.
     ///
     /// - Parameter query: Query string to analyze.
     /// - Returns: True if query appears to be PubMed syntax.
     static func isPubMedSyntax(_ query: String) -> Bool {
         let pubmedPatterns = [
-            "\\[MeSH\\]",
-            "\\[mesh\\]",
-            "\\[tiab\\]",
-            "\\[ti\\]",
-            "\\[ab\\]",
-            "\\[au\\]",
-            "\\[ta\\]",
-            "\\[dp\\]",
-            "\\[pt\\]",
+            #"\[MeSH\]"#,
+            #"\[mesh\]"#,
+            #"\[Mesh\]"#,
+            #"\[tiab\]"#,
+            #"\[ti\]"#,
+            #"\[ab\]"#,
+            #"\[au\]"#,
+            #"\[ta\]"#,
+            #"\[dp\]"#,
+            #"\[pt\]"#,
+            #"\[la\]"#,
+            #"\[sb\]"#,
             "hasabstract"
         ]
 
@@ -184,7 +120,7 @@ enum QueryTranslator {
 
     /// Detect if a query appears to be in Europe PMC syntax.
     ///
-    /// Checks for common Europe PMC-specific patterns.
+    /// Checks for common Europe PMC-specific patterns like field prefixes.
     ///
     /// - Parameter query: Query string to analyze.
     /// - Returns: True if query appears to be Europe PMC syntax.
@@ -199,99 +135,438 @@ enum QueryTranslator {
             "PUB_YEAR:",
             "HAS_ABSTRACT:",
             "OPEN_ACCESS:",
+            "LANG:",
+            "PUB_TYPE:",
             "SRC:"
         ]
 
         for pattern in europePMCPatterns {
-            if query.contains(pattern) {
+            if query.uppercased().contains(pattern) {
                 return true
             }
         }
         return false
     }
-}
 
-// MARK: - Query Validator Stub
+    // MARK: - Translation Direction
 
-/// Utility for validating translated queries.
-///
-/// - Note: This is a stub. Full implementation in Phase 4.
-///
-/// - TODO: Phase 4 - Implement QueryValidator as a separate file
-enum QueryValidator {
-    /// Validation result for a query.
-    struct ValidationResult {
-        /// Whether the query is valid.
-        let isValid: Bool
-
-        /// Warning messages for potential issues.
-        let warnings: [String]
-
-        /// Error messages for invalid syntax.
-        let errors: [String]
+    /// Direction of query translation.
+    private enum Direction {
+        case toEuropePMC
+        case toPubMed
     }
 
-    /// Validate a Europe PMC query.
+    // MARK: - MeSH Term Translation
+
+    /// Translate MeSH term syntax between systems.
     ///
-    /// - Parameter query: Query to validate.
-    /// - Returns: Validation result.
+    /// - Parameters:
+    ///   - query: The query to translate.
+    ///   - direction: Translation direction.
+    /// - Returns: Query with translated MeSH terms.
+    private static func translateMeSHTerms(_ query: String, direction: Direction) -> String {
+        var result = query
+
+        switch direction {
+        case .toEuropePMC:
+            // "Term"[MeSH] → MeSH_TERM:"Term"
+            result = applyRegex(
+                to: result,
+                pattern: #""([^"]+)"\s*\[(MeSH|mesh|Mesh)\]"#,
+                template: "MeSH_TERM:\"$1\""
+            )
+
+        case .toPubMed:
+            // MeSH_TERM:"Term" → "Term"[MeSH]
+            result = applyRegex(
+                to: result,
+                pattern: #"MeSH_TERM:\s*"([^"]+)""#,
+                template: "\"$1\"[MeSH]",
+                caseInsensitive: true
+            )
+        }
+
+        return result
+    }
+
+    // MARK: - Field Tag Translation
+
+    /// Field tag mappings between PubMed and Europe PMC.
+    private static let fieldTagMappings: [(pubmed: String, europePMC: String)] = [
+        // Title/Abstract
+        ("[tiab]", "TITLE_ABS:"),
+        ("[ti]", "TITLE:"),
+        ("[ab]", "ABSTRACT:"),
+        // Author
+        ("[au]", "AUTH:"),
+        ("[Author]", "AUTH:"),
+        // Journal
+        ("[ta]", "JOURNAL:"),
+        ("[Journal]", "JOURNAL:"),
+        // Publication type
+        ("[pt]", "PUB_TYPE:"),
+        ("[Publication Type]", "PUB_TYPE:"),
+    ]
+
+    /// Translate field tags between systems.
     ///
-    /// - TODO: Phase 4 - Implement comprehensive validation
-    static func validateEuropePMCQuery(_ query: String) -> ValidationResult {
-        var warnings: [String] = []
-        var errors: [String] = []
+    /// - Parameters:
+    ///   - query: The query to translate.
+    ///   - direction: Translation direction.
+    /// - Returns: Query with translated field tags.
+    private static func translateFieldTags(_ query: String, direction: Direction) -> String {
+        var result = query
 
-        // Check for balanced parentheses
-        let openCount = query.filter { $0 == "(" }.count
-        let closeCount = query.filter { $0 == ")" }.count
-        if openCount != closeCount {
-            errors.append("Unbalanced parentheses: \(openCount) open, \(closeCount) close")
+        switch direction {
+        case .toEuropePMC:
+            for mapping in fieldTagMappings {
+                result = translateFieldTagToEuropePMC(
+                    result,
+                    from: mapping.pubmed,
+                    to: mapping.europePMC
+                )
+            }
+
+        case .toPubMed:
+            for mapping in fieldTagMappings {
+                result = translateFieldTagToPubMed(
+                    result,
+                    from: mapping.europePMC,
+                    to: mapping.pubmed
+                )
+            }
         }
 
-        // Check for balanced quotes
-        let quoteCount = query.filter { $0 == "\"" }.count
-        if quoteCount % 2 != 0 {
-            errors.append("Unbalanced quotes")
+        return result
+    }
+
+    /// Translate a PubMed field tag to Europe PMC prefix.
+    ///
+    /// Handles both quoted terms ("something"[tag]) and unquoted terms (something[tag]).
+    ///
+    /// - Parameters:
+    ///   - query: The query to transform.
+    ///   - pubmedTag: The PubMed tag to find (e.g., "[tiab]").
+    ///   - europePMCPrefix: The Europe PMC prefix to use (e.g., "TITLE_ABS:").
+    /// - Returns: Query with the tag translated.
+    private static func translateFieldTagToEuropePMC(
+        _ query: String,
+        from pubmedTag: String,
+        to europePMCPrefix: String
+    ) -> String {
+        var result = query
+        let escapedTag = escapeForRegex(pubmedTag)
+
+        // Quoted term: "something"[tag]
+        result = applyRegex(
+            to: result,
+            pattern: "\"([^\"]+)\"\\s*\(escapedTag)",
+            template: "\(europePMCPrefix)\"$1\"",
+            caseInsensitive: true
+        )
+
+        // Unquoted term: something[tag]
+        result = applyRegex(
+            to: result,
+            pattern: "(\\w+)\\s*\(escapedTag)",
+            template: "\(europePMCPrefix)$1",
+            caseInsensitive: true
+        )
+
+        return result
+    }
+
+    /// Translate a Europe PMC prefix to PubMed field tag.
+    ///
+    /// Handles both quoted terms (PREFIX:"term") and unquoted terms (PREFIX:term).
+    ///
+    /// - Parameters:
+    ///   - query: The query to transform.
+    ///   - europePMCPrefix: The Europe PMC prefix to find (e.g., "TITLE_ABS:").
+    ///   - pubmedTag: The PubMed tag to use (e.g., "[tiab]").
+    /// - Returns: Query with the prefix translated.
+    private static func translateFieldTagToPubMed(
+        _ query: String,
+        from europePMCPrefix: String,
+        to pubmedTag: String
+    ) -> String {
+        var result = query
+        let escapedPrefix = NSRegularExpression.escapedPattern(for: europePMCPrefix)
+
+        // Quoted: PREFIX:"term"
+        result = applyRegex(
+            to: result,
+            pattern: "\(escapedPrefix)\\s*\"([^\"]+)\"",
+            template: "\"$1\"\(pubmedTag)",
+            caseInsensitive: true
+        )
+
+        // Unquoted: PREFIX:term
+        result = applyRegex(
+            to: result,
+            pattern: "\(escapedPrefix)\\s*(\\w+)",
+            template: "$1\(pubmedTag)",
+            caseInsensitive: true
+        )
+
+        return result
+    }
+
+    // MARK: - Date Filter Translation
+
+    /// Translate date filters between systems.
+    ///
+    /// Handles both single years (2020[dp]) and date ranges (2020:2024[dp]).
+    ///
+    /// - Parameters:
+    ///   - query: The query to translate.
+    ///   - direction: Translation direction.
+    /// - Returns: Query with translated date filters.
+    private static func translateDateFilters(_ query: String, direction: Direction) -> String {
+        var result = query
+
+        switch direction {
+        case .toEuropePMC:
+            // Date range first (more specific pattern): 2020:2024[dp] → PUB_YEAR:[2020 TO 2024]
+            result = applyRegex(
+                to: result,
+                pattern: #"(\d{4})\s*:\s*(\d{4})\s*\[dp\]"#,
+                template: "PUB_YEAR:[$1 TO $2]",
+                caseInsensitive: true
+            )
+
+            // Single year: 2020[dp] → PUB_YEAR:2020
+            result = applyRegex(
+                to: result,
+                pattern: #"(\d{4})\s*\[dp\]"#,
+                template: "PUB_YEAR:$1",
+                caseInsensitive: true
+            )
+
+        case .toPubMed:
+            // Date range first: PUB_YEAR:[2020 TO 2024] → 2020:2024[dp]
+            result = applyRegex(
+                to: result,
+                pattern: #"PUB_YEAR:\s*\[\s*(\d{4})\s+TO\s+(\d{4})\s*\]"#,
+                template: "$1:$2[dp]",
+                caseInsensitive: true
+            )
+
+            // Single year: PUB_YEAR:2020 → 2020[dp]
+            result = applyRegex(
+                to: result,
+                pattern: #"PUB_YEAR:\s*(\d{4})"#,
+                template: "$1[dp]",
+                caseInsensitive: true
+            )
         }
 
-        // Warn about untranslated PubMed syntax
-        if QueryTranslator.isPubMedSyntax(query) {
-            warnings.append("Query may contain untranslated PubMed syntax")
+        return result
+    }
+
+    // MARK: - Special Filter Translation
+
+    /// Publication type mappings from PubMed to Europe PMC.
+    private static let publicationTypeMappings: [(pubmed: String, europePMC: String)] = [
+        ("\"Randomized Controlled Trial\"[pt]", "PUB_TYPE:\"randomized-controlled-trial\""),
+        ("\"Systematic Review\"[pt]", "PUB_TYPE:\"systematic-review\""),
+        ("\"Meta-Analysis\"[pt]", "PUB_TYPE:\"meta-analysis\""),
+        ("\"Clinical Trial\"[pt]", "PUB_TYPE:\"clinical-trial\""),
+        ("\"Review\"[pt]", "PUB_TYPE:\"review\""),
+    ]
+
+    /// Translate special filters between systems.
+    ///
+    /// Handles filters like hasabstract, free full text, language, and publication types.
+    ///
+    /// - Parameters:
+    ///   - query: The query to translate.
+    ///   - direction: Translation direction.
+    /// - Returns: Query with translated special filters.
+    private static func translateSpecialFilters(_ query: String, direction: Direction) -> String {
+        var result = query
+
+        switch direction {
+        case .toEuropePMC:
+            // hasabstract → HAS_ABSTRACT:y
+            result = result.replacingOccurrences(
+                of: "hasabstract",
+                with: "HAS_ABSTRACT:y",
+                options: .caseInsensitive
+            )
+
+            // free full text[sb] → OPEN_ACCESS:y
+            result = result.replacingOccurrences(
+                of: "free full text[sb]",
+                with: "OPEN_ACCESS:y",
+                options: .caseInsensitive
+            )
+
+            // english[la] → LANG:"eng"
+            result = result.replacingOccurrences(
+                of: "english[la]",
+                with: "LANG:\"eng\"",
+                options: .caseInsensitive
+            )
+
+            // Publication types
+            for mapping in publicationTypeMappings {
+                result = result.replacingOccurrences(
+                    of: mapping.pubmed,
+                    with: mapping.europePMC,
+                    options: .caseInsensitive
+                )
+            }
+
+        case .toPubMed:
+            // HAS_ABSTRACT:y → hasabstract
+            result = result.replacingOccurrences(
+                of: "HAS_ABSTRACT:y",
+                with: "hasabstract",
+                options: .caseInsensitive
+            )
+
+            // OPEN_ACCESS:y → free full text[sb]
+            result = result.replacingOccurrences(
+                of: "OPEN_ACCESS:y",
+                with: "free full text[sb]",
+                options: .caseInsensitive
+            )
+
+            // LANG:"eng" → english[la]
+            result = result.replacingOccurrences(
+                of: "LANG:\"eng\"",
+                with: "english[la]",
+                options: .caseInsensitive
+            )
+
+            // Remove Europe PMC-specific filters (no PubMed equivalent)
+            result = result.replacingOccurrences(
+                of: "NOT SRC:PPR",
+                with: "",
+                options: .caseInsensitive
+            )
+            result = result.replacingOccurrences(
+                of: "SRC:PPR",
+                with: "",
+                options: .caseInsensitive
+            )
         }
 
-        return ValidationResult(
-            isValid: errors.isEmpty,
-            warnings: warnings,
-            errors: errors
+        return result
+    }
+
+    // MARK: - Cleanup
+
+    /// Clean up a translated query.
+    ///
+    /// Removes double spaces, fixes boolean operator issues,
+    /// and trims whitespace.
+    ///
+    /// - Parameter query: The query to clean up.
+    /// - Returns: Cleaned query string.
+    private static func cleanupQuery(_ query: String) -> String {
+        var result = query
+        var iterations = 0
+
+        // Remove double spaces (with iteration limit to prevent infinite loops)
+        while result.contains("  ") && iterations < QueryTranslatorConstants.maxCleanupIterations {
+            result = result.replacingOccurrences(of: "  ", with: " ")
+            iterations += 1
+        }
+
+        // Trim whitespace
+        result = result.trimmingCharacters(in: .whitespaces)
+
+        // Remove empty parentheses
+        result = result.replacingOccurrences(of: "()", with: "")
+        result = result.replacingOccurrences(of: "( )", with: "")
+
+        // Clean up duplicate boolean operators
+        result = result.replacingOccurrences(of: "AND AND", with: "AND")
+        result = result.replacingOccurrences(of: "OR OR", with: "OR")
+        result = result.replacingOccurrences(of: "AND OR", with: "OR")
+        result = result.replacingOccurrences(of: "OR AND", with: "AND")
+
+        // Remove trailing boolean operators
+        result = removeTrailingBooleanOperators(result)
+
+        // Remove leading boolean operators
+        result = removeLeadingBooleanOperators(result)
+
+        return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Remove trailing boolean operators from a query.
+    ///
+    /// - Parameter query: The query to clean.
+    /// - Returns: Query without trailing boolean operators.
+    private static func removeTrailingBooleanOperators(_ query: String) -> String {
+        var result = query.trimmingCharacters(in: .whitespaces)
+
+        let trailingOperators = [" AND", " OR", " NOT"]
+        for op in trailingOperators {
+            if result.hasSuffix(op) {
+                result = String(result.dropLast(op.count))
+                result = result.trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return result
+    }
+
+    /// Remove leading boolean operators from a query.
+    ///
+    /// - Parameter query: The query to clean.
+    /// - Returns: Query without leading boolean operators.
+    private static func removeLeadingBooleanOperators(_ query: String) -> String {
+        var result = query.trimmingCharacters(in: .whitespaces)
+
+        let leadingOperators = ["AND ", "OR "]
+        for op in leadingOperators {
+            if result.hasPrefix(op) {
+                result = String(result.dropFirst(op.count))
+                result = result.trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - Regex Helpers
+
+    /// Apply a regex replacement to a string.
+    ///
+    /// - Parameters:
+    ///   - string: The string to transform.
+    ///   - pattern: The regex pattern.
+    ///   - template: The replacement template.
+    ///   - caseInsensitive: Whether to match case-insensitively.
+    /// - Returns: The transformed string.
+    private static func applyRegex(
+        to string: String,
+        pattern: String,
+        template: String,
+        caseInsensitive: Bool = false
+    ) -> String {
+        let options: NSRegularExpression.Options = caseInsensitive ? [.caseInsensitive] : []
+
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return string
+        }
+
+        return regex.stringByReplacingMatches(
+            in: string,
+            range: NSRange(string.startIndex..., in: string),
+            withTemplate: template
         )
     }
 
-    /// Validate a PubMed query.
+    /// Escape a string for use in a regex pattern.
     ///
-    /// - Parameter query: Query to validate.
-    /// - Returns: Validation result.
-    ///
-    /// - TODO: Phase 4 - Implement comprehensive validation
-    static func validatePubMedQuery(_ query: String) -> ValidationResult {
-        var warnings: [String] = []
-        var errors: [String] = []
-
-        // Check for balanced parentheses
-        let openCount = query.filter { $0 == "(" }.count
-        let closeCount = query.filter { $0 == ")" }.count
-        if openCount != closeCount {
-            errors.append("Unbalanced parentheses")
-        }
-
-        // Warn about Europe PMC syntax
-        if QueryTranslator.isEuropePMCSyntax(query) {
-            warnings.append("Query may contain Europe PMC syntax")
-        }
-
-        return ValidationResult(
-            isValid: errors.isEmpty,
-            warnings: warnings,
-            errors: errors
-        )
+    /// - Parameter string: The string to escape.
+    /// - Returns: The escaped string.
+    private static func escapeForRegex(_ string: String) -> String {
+        NSRegularExpression.escapedPattern(for: string)
     }
 }
