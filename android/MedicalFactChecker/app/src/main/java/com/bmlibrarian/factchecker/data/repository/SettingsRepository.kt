@@ -3,6 +3,7 @@ package com.bmlibrarian.factchecker.data.repository
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.bmlibrarian.factchecker.util.Constants
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -109,7 +110,8 @@ class SettingsRepository(private val context: Context) {
      * @return The base URL
      */
     fun getLlmBaseUrl(): String {
-        return regularPrefs.getString(KEY_LLM_BASE_URL, DEFAULT_LLM_BASE_URL) ?: DEFAULT_LLM_BASE_URL
+        return regularPrefs.getString(KEY_LLM_BASE_URL, Constants.DEFAULT_OPENAI_BASE_URL)
+            ?: Constants.DEFAULT_OPENAI_BASE_URL
     }
 
     /**
@@ -151,7 +153,7 @@ class SettingsRepository(private val context: Context) {
      * @return The budget limit
      */
     fun getMaxRunBudgetUsd(): Float {
-        return regularPrefs.getFloat(KEY_MAX_RUN_BUDGET, DEFAULT_MAX_RUN_BUDGET)
+        return regularPrefs.getFloat(KEY_MAX_RUN_BUDGET, Constants.DEFAULT_MAX_RUN_BUDGET_USD)
     }
 
     /**
@@ -170,7 +172,7 @@ class SettingsRepository(private val context: Context) {
      * @return The monthly budget limit
      */
     fun getMonthlyBudgetUsd(): Float {
-        return regularPrefs.getFloat(KEY_MONTHLY_BUDGET, DEFAULT_MONTHLY_BUDGET)
+        return regularPrefs.getFloat(KEY_MONTHLY_BUDGET, Constants.DEFAULT_MONTHLY_BUDGET_USD)
     }
 
     /**
@@ -242,11 +244,8 @@ class SettingsRepository(private val context: Context) {
         private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         private const val KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted"
 
-        // Defaults
+        // Defaults - string defaults are kept here; numeric defaults use Constants directly
         private const val DEFAULT_LLM_PROVIDER = "openai"
         private const val DEFAULT_LLM_MODEL = "gpt-4o-mini"
-        private const val DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1"
-        private const val DEFAULT_MAX_RUN_BUDGET = 0.50f
-        private const val DEFAULT_MONTHLY_BUDGET = 10.00f
     }
 }

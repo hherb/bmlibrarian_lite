@@ -14,6 +14,19 @@ import kotlin.math.pow
 object NetworkRetry {
 
     /**
+     * HTTP status codes that indicate transient errors worth retrying.
+     * Using Set for O(1) lookup performance.
+     */
+    private val RETRYABLE_STATUS_CODES = setOf(
+        408, // Request Timeout
+        429, // Too Many Requests (rate limited)
+        500, // Internal Server Error
+        502, // Bad Gateway
+        503, // Service Unavailable
+        504  // Gateway Timeout
+    )
+
+    /**
      * Executes a suspending block with exponential backoff retry.
      *
      * Retries the operation up to [maxRetries] times with exponentially
@@ -88,7 +101,7 @@ object NetworkRetry {
      * @return True if the status code indicates a retryable error
      */
     fun isRetryableStatusCode(statusCode: Int): Boolean {
-        return statusCode in listOf(408, 429, 500, 502, 503, 504)
+        return statusCode in RETRYABLE_STATUS_CODES
     }
 
     /**
