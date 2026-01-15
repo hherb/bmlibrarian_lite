@@ -103,4 +103,54 @@ object Constants {
 
     /** Maximum tokens for query conversion responses. */
     const val LLM_QUERY_MAX_TOKENS = 200
+
+    // ==================== Document Source Constants ====================
+
+    /** Document source: PubMed. */
+    const val SOURCE_PUBMED = "pubmed"
+
+    /** Document source: Europe PMC. */
+    const val SOURCE_EUROPE_PMC = "europepmc"
+
+    /** Document source: Preprint server. */
+    const val SOURCE_PREPRINT = "preprint"
+
+    // ==================== Full-Text Source Constants ====================
+
+    /** Full-text source: Europe PMC XML. */
+    const val FULLTEXT_SOURCE_EUROPE_PMC = "europepmc"
+
+    /** Full-text source: Unpaywall PDF. */
+    const val FULLTEXT_SOURCE_UNPAYWALL = "unpaywall"
+
+    /** Full-text source: DOI/Publisher. */
+    const val FULLTEXT_SOURCE_DOI = "doi"
+
+    /** Full-text source: Cached from previous fetch. */
+    const val FULLTEXT_SOURCE_CACHED = "cached"
+
+    // ==================== External URL Prefixes ====================
+
+    /** DOI resolver URL prefix. */
+    const val DOI_URL_PREFIX = "https://doi.org/"
+
+    /** PubMed article URL prefix. */
+    const val PUBMED_URL_PREFIX = "https://pubmed.ncbi.nlm.nih.gov/"
+
+    /** PubMed Central article URL prefix. */
+    const val PMC_URL_PREFIX = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
+
+    // ==================== Preview Length Constants ====================
+
+    /** Default maximum length for abstract preview. */
+    const val DEFAULT_ABSTRACT_PREVIEW_LENGTH = 300
+
+    /** Default maximum length for passage preview. */
+    const val DEFAULT_PASSAGE_PREVIEW_LENGTH = 150
+
+    /** Default maximum length for summary preview. */
+    const val DEFAULT_SUMMARY_PREVIEW_LENGTH = 200
+
+    /** Default maximum length for claim preview. */
+    const val DEFAULT_CLAIM_PREVIEW_LENGTH = 100
 }
