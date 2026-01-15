@@ -1,0 +1,137 @@
+package com.bmlibrarian.factchecker.data.local.entity
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.model.WorkflowStep
+import java.util.Date
+import java.util.UUID
+
+/**
+ * Room entity for fact-check sessions.
+ *
+ * Represents a complete fact-checking workflow, from initial claim
+ * through to final report generation. Tracks workflow state,
+ * pagination cursors, and cost/token usage.
+ *
+ * Mirrors iOS FactCheckSession model for cross-platform consistency.
+ */
+@Entity(tableName = "sessions")
+data class SessionEntity(
+    /** Unique identifier for this session. */
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+
+    /** The user's original claim text to be fact-checked. */
+    @ColumnInfo(name = "claim_text")
+    val claimText: String,
+
+    /** Generated PubMed query from the claim. */
+    @ColumnInfo(name = "pubmed_query")
+    val pubmedQuery: String? = null,
+
+    /** Alternative query suggestion from LLM. */
+    @ColumnInfo(name = "alternative_query")
+    val alternativeQuery: String? = null,
+
+    /** Current step in the workflow. */
+    @ColumnInfo(name = "workflow_step")
+    val workflowStep: WorkflowStep = WorkflowStep.IDLE,
+
+    /** Selected search provider(s). */
+    @ColumnInfo(name = "search_provider")
+    val searchProvider: SearchProvider = SearchProvider.PUBMED,
+
+    /** Whether to include preprints in search results. */
+    @ColumnInfo(name = "include_preprints")
+    val includePreprints: Boolean = false,
+
+    // ==================== PubMed Pagination ====================
+
+    /** Current offset for PubMed pagination. */
+    @ColumnInfo(name = "pubmed_offset")
+    val pubmedOffset: Int = 0,
+
+    /** Total results available from PubMed. */
+    @ColumnInfo(name = "pubmed_total_results")
+    val pubmedTotalResults: Int = 0,
+
+    // ==================== Europe PMC Pagination ====================
+
+    /** Cursor for Europe PMC pagination. */
+    @ColumnInfo(name = "epmc_cursor")
+    val epmcCursor: String? = null,
+
+    /** Total results available from Europe PMC. */
+    @ColumnInfo(name = "epmc_total_results")
+    val epmcTotalResults: Int = 0,
+
+    // ==================== Batch Tracking ====================
+
+    /** Current batch number (for "fetch more" operations). */
+    @ColumnInfo(name = "current_batch")
+    val currentBatch: Int = 1,
+
+    /** Number of documents in current batch. */
+    @ColumnInfo(name = "documents_in_batch")
+    val documentsInBatch: Int = 0,
+
+    // ==================== Cost Tracking ====================
+
+    /** Total input tokens used across all LLM calls. */
+    @ColumnInfo(name = "total_input_tokens")
+    val totalInputTokens: Int = 0,
+
+    /** Total output tokens used across all LLM calls. */
+    @ColumnInfo(name = "total_output_tokens")
+    val totalOutputTokens: Int = 0,
+
+    /** Estimated total cost in USD. */
+    @ColumnInfo(name = "estimated_cost_usd")
+    val estimatedCostUsd: Double = 0.0,
+
+    // ==================== Error Tracking ====================
+
+    /** Error message if workflow failed. */
+    @ColumnInfo(name = "error_message")
+    val errorMessage: String? = null,
+
+    // ==================== Timestamps ====================
+
+    /** When this session was created. */
+    @ColumnInfo(name = "created_at")
+    val createdAt: Date = Date(),
+
+    /** When this session was last updated. */
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Date = Date()
+) {
+    /**
+     * Check if more documents are available from search providers.
+     *
+     * @return true if additional documents can be fetched
+     */
+    val hasMoreDocuments: Boolean
+        get() = when (searchProvider) {
+            SearchProvider.PUBMED -> pubmedOffset < pubmedTotalResults
+            SearchProvider.EUROPE_PMC -> epmcCursor != null
+            SearchProvider.BOTH -> pubmedOffset < pubmedTotalResults || epmcCursor != null
+        }
+
+    /**
+     * Check if the workflow is in a terminal state.
+     *
+     * @return true if workflow cannot continue (completed, failed, or budget exceeded)
+     */
+    val isTerminal: Boolean
+        get() = workflowStep.isTerminal()
+
+    /**
+     * Check if the workflow is actively processing.
+     *
+     * @return true if workflow is in a processing state
+     */
+    val isProcessing: Boolean
+        get() = workflowStep.isProcessing()
+}
