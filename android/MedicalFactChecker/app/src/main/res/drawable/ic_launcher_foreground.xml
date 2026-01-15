@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ic_launcher_foreground.xml
+    MedicalFactChecker Android App
+
+    Vector drawable for adaptive icon foreground.
+    Displays a medical checkmark symbol.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Background circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+
+    <!-- Checkmark -->
+    <path
+        android:fillColor="#1976D2"
+        android:strokeWidth="0"
+        android:pathData="M45,54L51,60L63,48"
+        android:strokeColor="#1976D2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+
+    <!-- Medical cross -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M52,32h4v12h-4z"/>
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M48,36h12v4h-12z"/>
+
+</vector>

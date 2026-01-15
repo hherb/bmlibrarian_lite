@@ -47,8 +47,9 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data directories
+# Data directories (exclude Android app data package)
 data/
+!android/**/data/
 *.db
 *.sqlite
 *.sqlite3
