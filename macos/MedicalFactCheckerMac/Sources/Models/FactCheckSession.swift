@@ -39,6 +39,31 @@ final class FactCheckSession {
     /// Number of batches fetched so far.
     var batchesFetched: Int
 
+    // MARK: - Search Provider State
+
+    /// The search provider used for this session (stored as raw value).
+    ///
+    /// Options: "pubmed", "europepmc", "both".
+    var searchProvider: String?
+
+    /// Whether preprints were included in the search.
+    var includePreprints: Bool = false
+
+    /// Pagination offset for PubMed when using "both" provider.
+    var pubmedOffset: Int = 0
+
+    /// Pagination offset for Europe PMC when using "both" provider.
+    var europePMCOffset: Int = 0
+
+    /// Cursor for Europe PMC pagination (cursor-based API).
+    var europePMCCursor: String?
+
+    /// Whether more results are available from PubMed.
+    var pubmedHasMore: Bool = true
+
+    /// Whether more results are available from Europe PMC.
+    var europePMCHasMore: Bool = true
+
     // MARK: - Smart Search State
 
     /// Whether smart search mode has been activated.
@@ -117,13 +142,33 @@ final class FactCheckSession {
         currentSearchOffset < totalPubMedResults
     }
 
+    /// Check if more documents can be fetched from any active provider.
+    ///
+    /// Takes into account the selected search provider and its pagination state.
+    var canFetchMoreFromAnyProvider: Bool {
+        guard let providerString = searchProvider,
+              let provider = SearchProvider(rawValue: providerString) else {
+            // Fall back to legacy PubMed-only check
+            return canFetchMoreDocuments
+        }
+
+        switch provider {
+        case .pubmed:
+            return pubmedHasMore
+        case .europePMC:
+            return europePMCHasMore
+        case .both:
+            return pubmedHasMore || europePMCHasMore
+        }
+    }
+
     /// Check if more evidence can be gathered (either more PubMed results or smart search available).
     ///
     /// Returns true if:
     /// - More documents available in current PubMed query, OR
     /// - Smart search hasn't been tried yet (can generate alternative queries)
     var canGetMoreEvidence: Bool {
-        canFetchMoreDocuments || !smartSearchEnabled
+        canFetchMoreFromAnyProvider || !smartSearchEnabled
     }
 
     /// Number of additional PubMed results available to fetch.

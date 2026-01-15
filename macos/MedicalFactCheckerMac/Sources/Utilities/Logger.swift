@@ -39,6 +39,9 @@ enum AppLogger {
     /// Logger for PubMed API operations.
     static let pubmed = Logger(subsystem: subsystem, category: "PubMed")
 
+    /// Logger for search operations across providers.
+    static let search = Logger(subsystem: subsystem, category: "Search")
+
     /// Logger for LLM service operations.
     static let llm = Logger(subsystem: subsystem, category: "LLM")
 

@@ -25,6 +25,12 @@ final class FactCheckWorkflow {
     private let modelContext: ModelContext
     private let settings: AppSettings
 
+    /// Search options for the current workflow run.
+    ///
+    /// Configures which provider(s) to use, whether to include preprints, etc.
+    /// Set during startFactCheck from current settings, can be overridden.
+    private var searchOptions: SearchOptions?
+
     // MARK: - State
 
     private(set) var session: FactCheckSession?
@@ -60,7 +66,11 @@ final class FactCheckWorkflow {
     // MARK: - Main Entry Points
 
     /// Start a new fact-check for the given claim.
-    func startFactCheck(claim: String) async {
+    ///
+    /// - Parameters:
+    ///   - claim: The medical claim to fact-check.
+    ///   - overrideSearchOptions: Optional search options to override settings.
+    func startFactCheck(claim: String, overrideSearchOptions: SearchOptions? = nil) async {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
@@ -69,6 +79,9 @@ final class FactCheckWorkflow {
             onError?(error)
             return
         }
+
+        // Initialize search options from settings or override
+        searchOptions = overrideSearchOptions ?? settings.buildSearchOptions()
 
         // Load monthly usage
         await loadMonthlyUsage()
@@ -83,6 +96,8 @@ final class FactCheckWorkflow {
         let newSession = FactCheckSession(claim: claim)
         newSession.modelName = settings.llmModel
         newSession.providerName = settings.selectedProvider.displayName
+        newSession.searchProvider = searchOptions?.provider.rawValue
+        newSession.includePreprints = searchOptions?.includePreprints ?? false
         modelContext.insert(newSession)
         try? modelContext.save()
 
@@ -99,6 +114,19 @@ final class FactCheckWorkflow {
         } catch {
             onError?(error)
             return
+        }
+
+        // Restore search options from session or use current settings
+        if let providerString = session.searchProvider,
+           let provider = SearchProvider(rawValue: providerString) {
+            searchOptions = SearchOptions(
+                provider: provider,
+                includePreprints: session.includePreprints,
+                maxResults: settings.batchSize,
+                offset: session.currentSearchOffset
+            )
+        } else {
+            searchOptions = settings.buildSearchOptions()
         }
 
         await loadMonthlyUsage()
@@ -523,16 +551,23 @@ final class FactCheckWorkflow {
 
     private func searchPubMed() async throws {
         guard let session = session,
-              let pubmedService = pubmedService,
               let query = session.pubmedQuery else { return }
 
         let batchNumber = session.batchesFetched + 1
-        updateProgress(.searchingPubMed, "Searching PubMed (batch \(batchNumber))...")
 
-        let result = try await pubmedService.search(
+        // Build search options from settings
+        var options = searchOptions ?? settings.buildSearchOptions()
+        options.offset = session.currentSearchOffset
+        options.maxResults = settings.batchSize
+
+        let providerName = options.provider.displayName
+        updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
+
+        // Use unified search factory
+        let result = try await SearchServiceFactory.search(
             query: query,
-            maxResults: settings.batchSize,
-            offset: session.currentSearchOffset
+            options: options,
+            settings: settings
         )
 
         // Update session state
@@ -540,24 +575,21 @@ final class FactCheckWorkflow {
         session.currentSearchOffset = result.nextOffset
         session.batchesFetched = batchNumber
 
-        if result.pmids.isEmpty {
+        // Track provider-specific state
+        session.searchProvider = options.provider.rawValue
+        session.includePreprints = options.includePreprints
+
+        if result.articles.isEmpty {
             if session.documents.isEmpty {
                 throw PubMedError.noResults
             }
             return  // No more results, proceed with what we have
         }
 
-        updateProgress(.searchingPubMed, "Fetching \(result.pmids.count) article details...")
+        updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
 
-        // Fetch article metadata
-        let articles = try await pubmedService.fetchArticles(
-            pmids: result.pmids,
-            batchNumber: batchNumber,
-            basePosition: session.documentsFound
-        )
-
-        // Create Document objects
-        for article in articles {
+        // Create Document objects from unified metadata
+        for article in result.articles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
@@ -577,7 +609,24 @@ final class FactCheckWorkflow {
             modelContext.insert(document)
         }
 
-        session.documentsFound += articles.count
+        session.documentsFound += result.articles.count
+
+        // Update provider-specific pagination state
+        switch options.provider {
+        case .pubmed:
+            session.pubmedHasMore = result.hasMore
+        case .europePMC:
+            session.europePMCHasMore = result.hasMore
+            // Store cursor if using Europe PMC
+            if let cursorState = result.pagination as? CursorPaginationState {
+                session.europePMCCursor = cursorState.nextCursor
+            }
+        case .both:
+            // For "both" mode, track independently (simplified for now)
+            session.pubmedHasMore = result.hasMore
+            session.europePMCHasMore = result.hasMore
+        }
+
         try? modelContext.save()
     }
 

@@ -48,6 +48,12 @@
 		A1000039 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* FullTextSourceBadge.swift */; };
 		A1000040 /* MacFullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* MacFullTextViewer.swift */; };
 		A1000041 /* MacFullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000044 /* MacFullTextTab.swift */; };
+		A1000042 /* SearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000045 /* SearchProvider.swift */; };
+		A1000043 /* SearchTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000046 /* SearchTypes.swift */; };
+		A1000044 /* EuropePMCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000047 /* EuropePMCService.swift */; };
+		A1000045 /* QueryTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000048 /* QueryTranslator.swift */; };
+		A1000046 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000049 /* SearchResultMerger.swift */; };
+		A1000047 /* SearchServiceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SearchServiceFactory.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -115,6 +121,12 @@
 		A2000042 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
 		A2000043 /* MacFullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextViewer.swift; sourceTree = "<group>"; };
 		A2000044 /* MacFullTextTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextTab.swift; sourceTree = "<group>"; };
+		A2000045 /* SearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProvider.swift; sourceTree = "<group>"; };
+		A2000046 /* SearchTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTypes.swift; sourceTree = "<group>"; };
+		A2000047 /* EuropePMCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EuropePMCService.swift; sourceTree = "<group>"; };
+		A2000048 /* QueryTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryTranslator.swift; sourceTree = "<group>"; };
+		A2000049 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
+		A2000050 /* SearchServiceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceFactory.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -252,6 +264,7 @@
 				A2000014 /* FactCheckSession.swift */,
 				A2000040 /* FullTextSource.swift */,
 				A2000015 /* LLMProvider.swift */,
+				A2000045 /* SearchProvider.swift */,
 				A2000016 /* UsageRecord.swift */,
 			);
 			path = Models;
@@ -261,11 +274,14 @@
 			isa = PBXGroup;
 			children = (
 				A2000017 /* EmbeddingService.swift */,
+				A2000047 /* EuropePMCService.swift */,
 				A2000018 /* FactCheckWorkflow.swift */,
 				A2000041 /* FullTextService.swift */,
 				A2000019 /* LLMService.swift */,
 				A2000020 /* ModelFetchService.swift */,
 				A2000021 /* PubMedService.swift */,
+				A2000050 /* SearchServiceFactory.swift */,
+				A2000046 /* SearchTypes.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -279,8 +295,10 @@
 				A2000037 /* Logger.swift */,
 				A2000024 /* NotificationNames.swift */,
 				A2000025 /* PDFExporter.swift */,
+				A2000048 /* QueryTranslator.swift */,
 				A2000026 /* ResponseParser.swift */,
 				A2000038 /* RetryHelper.swift */,
+				A2000049 /* SearchResultMerger.swift */,
 				A2000032 /* StringArrayTransformer.swift */,
 			);
 			path = Utilities;
@@ -559,6 +577,12 @@
 				A1000039 /* FullTextSourceBadge.swift in Sources */,
 				A1000040 /* MacFullTextViewer.swift in Sources */,
 				A1000041 /* MacFullTextTab.swift in Sources */,
+				A1000042 /* SearchProvider.swift in Sources */,
+				A1000043 /* SearchTypes.swift in Sources */,
+				A1000044 /* EuropePMCService.swift in Sources */,
+				A1000045 /* QueryTranslator.swift in Sources */,
+				A1000046 /* SearchResultMerger.swift in Sources */,
+				A1000047 /* SearchServiceFactory.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

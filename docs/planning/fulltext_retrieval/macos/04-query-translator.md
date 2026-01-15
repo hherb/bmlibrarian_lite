@@ -6,6 +6,24 @@ This document details the implementation of the query syntax translator that con
 
 ---
 
+## Prerequisites
+
+**A stub implementation already exists from Phase 3.**
+
+The file `Sources/Utilities/QueryTranslator.swift` contains a minimal stub implementation
+that was created during Phase 3 (Search Provider Abstraction). This stub:
+
+- Removes PubMed-specific syntax that would cause Europe PMC to fail
+- Provides basic field tag stripping (removes `[tiab]`, `[MeSH]`, etc.)
+- Includes comprehensive TODO comments documenting all requirements
+- Includes `isPubMedSyntax()` and `isEuropePMCSyntax()` detection methods
+- Includes a `QueryValidator` stub for basic validation
+
+**Your task in Phase 4 is to implement the full translation logic** by replacing the stub
+code with proper regex-based translation as documented below and in the TODO comments.
+
+---
+
 ## Goals
 
 1. Build PubMed → Europe PMC query translator (shared)
@@ -18,11 +36,11 @@ This document details the implementation of the query syntax translator that con
 
 ## Shared Code Files
 
-The following files are identical to the iOS implementation:
+The following files need to be **updated/completed** (stub already exists):
 
 ### 1. Query Translator
 
-**File:** `Sources/Utilities/QueryTranslator.swift` (new file)
+**File:** `Sources/Utilities/QueryTranslator.swift` (stub exists, needs full implementation)
 
 See `../04-query-translator.md` for complete implementation.
 
@@ -144,13 +162,25 @@ private static func searchEuropePMC(
 
 ---
 
-## Files to Create
+## Files to Update/Create
 
-### New Files
+### Existing Files to Update (stubs from Phase 3)
 
-- `Sources/Utilities/QueryTranslator.swift`
-- `Sources/Utilities/QueryValidator.swift`
-- `Tests/QueryTranslatorTests.swift`
+- `Sources/Utilities/QueryTranslator.swift` - **Stub exists**: Complete the full translation logic
+  - The stub currently strips field tags but doesn't translate them
+  - Implement proper `[MeSH]` → `MeSH_TERM:` translation
+  - Implement proper `[tiab]` → `TITLE_ABS:` translation
+  - Add date range translation
+  - Implement `europePMCToPubMed()` (currently returns query unchanged)
+
+### New Files to Create
+
+- `Tests/QueryTranslatorTests.swift` - Unit tests for translation logic
+
+### Note on QueryValidator
+
+The `QueryValidator` is currently embedded as an enum within `QueryTranslator.swift`.
+If it grows significantly, consider extracting it to a separate file.
 
 ---
 

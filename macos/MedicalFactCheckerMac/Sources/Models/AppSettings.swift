@@ -125,6 +125,23 @@ final class AppSettings {
 
     // MARK: - Search Settings
 
+    /// Selected search provider for literature searches.
+    ///
+    /// Options: PubMed only, Europe PMC only, or both (merged results).
+    var selectedSearchProvider: SearchProvider {
+        didSet {
+            UserDefaults.standard.set(selectedSearchProvider.rawValue, forKey: Keys.selectedSearchProvider)
+        }
+    }
+
+    /// Whether to include preprints when using Europe PMC.
+    ///
+    /// Preprints are non-peer-reviewed articles from servers like bioRxiv and medRxiv.
+    /// Only effective when selectedSearchProvider is .europePMC or .both.
+    var includePreprints: Bool {
+        didSet { UserDefaults.standard.set(includePreprints, forKey: Keys.includePreprints) }
+    }
+
     /// Number of documents to fetch per batch.
     var batchSize: Int {
         didSet { UserDefaults.standard.set(batchSize, forKey: Keys.batchSize) }
@@ -187,6 +204,15 @@ final class AppSettings {
         self.llmModel = defaults.string(forKey: Keys.llmModel) ?? defaultModel
         self.ncbiEmail = defaults.string(forKey: Keys.ncbiEmail) ?? ""
 
+        // Search provider settings
+        if let searchProviderString = defaults.string(forKey: Keys.selectedSearchProvider),
+           let searchProvider = SearchProvider(rawValue: searchProviderString) {
+            self.selectedSearchProvider = searchProvider
+        } else {
+            self.selectedSearchProvider = .pubmed  // Default to PubMed for backward compatibility
+        }
+        self.includePreprints = defaults.bool(forKey: Keys.includePreprints)
+
         self.batchSize = defaults.object(forKey: Keys.batchSize) as? Int ?? 20
         self.minRelevantDocuments = defaults.object(forKey: Keys.minRelevantDocuments) as? Int ?? 5
         self.minScoreThreshold = defaults.object(forKey: Keys.minScoreThreshold) as? Int ?? 3
@@ -232,6 +258,8 @@ final class AppSettings {
         static let apiKeyMigrated = "api_key_migrated_v1"
         static let ncbiEmail = "ncbi_email"
         static let ncbiAPIKey = "ncbi_api_key"
+        static let selectedSearchProvider = "selected_search_provider"
+        static let includePreprints = "include_preprints"
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
@@ -268,12 +296,32 @@ final class AppSettings {
         clearAllAPIKeys()
         ncbiEmail = ""
         ncbiAPIKey = ""
+        selectedSearchProvider = .pubmed
+        includePreprints = false
         batchSize = 20
         minRelevantDocuments = 5
         minScoreThreshold = 3
         embeddingScoringEnabled = false
         maxRunBudgetUSD = 1.0
         monthlyBudgetUSD = 10.0
+    }
+
+    // MARK: - Search Options Builder
+
+    /// Build SearchOptions from current settings.
+    ///
+    /// Creates a SearchOptions struct configured with the current user preferences.
+    /// Use this when initiating a search to ensure consistent configuration.
+    ///
+    /// - Parameter overrideProvider: Optional provider to use instead of settings.
+    /// - Returns: Configured SearchOptions.
+    func buildSearchOptions(overrideProvider: SearchProvider? = nil) -> SearchOptions {
+        SearchOptions(
+            provider: overrideProvider ?? selectedSearchProvider,
+            includePreprints: includePreprints,
+            maxResults: batchSize,
+            offset: 0
+        )
     }
 
     // MARK: - Provider Detection
