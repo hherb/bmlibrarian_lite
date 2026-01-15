@@ -40,6 +40,11 @@
 		A1000031 /* HELP.md in Resources */ = {isa = PBXBuildFile; fileRef = A2000034 /* HELP.md */; };
 		A1000032 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = A2000035 /* PRIVACY.md */; };
 		A1000033 /* MacOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036 /* MacOnboardingView.swift */; };
+		A1000034 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037 /* Logger.swift */; };
+		A1000035 /* RetryHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038 /* RetryHelper.swift */; };
+		A1000036 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039 /* JATSXMLParser.swift */; };
+		A1000037 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* FullTextSource.swift */; };
+		A1000038 /* FullTextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* FullTextService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -99,6 +104,11 @@
 		A2000034 /* HELP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = HELP.md; sourceTree = SOURCE_ROOT; };
 		A2000035 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
 		A2000036 /* MacOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOnboardingView.swift; sourceTree = "<group>"; };
+		A2000037 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
+		A2000038 /* RetryHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryHelper.swift; sourceTree = "<group>"; };
+		A2000039 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
+		A2000040 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
+		A2000041 /* FullTextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -231,6 +241,7 @@
 				A2000012 /* Enums.swift */,
 				A2000013 /* EvidenceReport.swift */,
 				A2000014 /* FactCheckSession.swift */,
+				A2000040 /* FullTextSource.swift */,
 				A2000015 /* LLMProvider.swift */,
 				A2000016 /* UsageRecord.swift */,
 			);
@@ -242,6 +253,7 @@
 			children = (
 				A2000017 /* EmbeddingService.swift */,
 				A2000018 /* FactCheckWorkflow.swift */,
+				A2000041 /* FullTextService.swift */,
 				A2000019 /* LLMService.swift */,
 				A2000020 /* ModelFetchService.swift */,
 				A2000021 /* PubMedService.swift */,
@@ -253,10 +265,13 @@
 			isa = PBXGroup;
 			children = (
 				A2000022 /* CostCalculator.swift */,
+				A2000039 /* JATSXMLParser.swift */,
 				A2000023 /* KeychainHelper.swift */,
+				A2000037 /* Logger.swift */,
 				A2000024 /* NotificationNames.swift */,
 				A2000025 /* PDFExporter.swift */,
 				A2000026 /* ResponseParser.swift */,
+				A2000038 /* RetryHelper.swift */,
 				A2000032 /* StringArrayTransformer.swift */,
 			);
 			path = Utilities;
@@ -519,6 +534,11 @@
 				A1000029 /* StringArrayTransformer.swift in Sources */,
 				A1000030 /* MacHelpViews.swift in Sources */,
 				A1000033 /* MacOnboardingView.swift in Sources */,
+				A1000034 /* Logger.swift in Sources */,
+				A1000035 /* RetryHelper.swift in Sources */,
+				A1000036 /* JATSXMLParser.swift in Sources */,
+				A1000037 /* FullTextSource.swift in Sources */,
+				A1000038 /* FullTextService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -564,6 +584,8 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Medic al Fact Checker Mac";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -609,6 +631,8 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Medic al Fact Checker Mac";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

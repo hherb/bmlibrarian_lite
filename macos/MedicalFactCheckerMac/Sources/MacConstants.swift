@@ -225,3 +225,62 @@ enum MacUserDefaultsKeys {
     static let hasAcceptedDisclaimer = "hasAcceptedDisclaimer"
     static let pdfPaperSize = "pdf_paper_size"
 }
+
+// MARK: - Full Text Layout Constants
+
+/// Constants for full-text viewer layout.
+enum MacFullTextLayout {
+    /// Viewer window dimensions.
+    static let viewerMinWidth: CGFloat = 500
+    static let viewerIdealWidth: CGFloat = 700
+    static let viewerMaxWidth: CGFloat = 900
+    static let viewerMinHeight: CGFloat = 600
+
+    /// Split view proportions.
+    static let documentListProportion: CGFloat = 0.4
+    static let fullTextProportion: CGFloat = 0.6
+
+    /// PDF viewer constraints.
+    static let pdfMinWidth: CGFloat = 400
+    static let pdfMinHeight: CGFloat = 500
+
+    /// Markdown viewer padding.
+    static let markdownPadding: CGFloat = 20
+    static let markdownLineSpacing: CGFloat = 4
+
+    /// Loading indicator size.
+    static let loadingIndicatorSize: CGFloat = 24
+}
+
+// MARK: - Full Text Colors
+
+/// Colors for full-text source badges and viewer.
+enum MacFullTextColors {
+    /// Background color for markdown viewer.
+    static let markdownBackground = Color(NSColor.textBackgroundColor)
+
+    /// Tint color for Europe PMC badge.
+    static let europePMCTint = Color.blue
+
+    /// Tint color for Unpaywall badge.
+    static let unpaywallTint = Color.green
+
+    /// Tint color for DOI/website badge.
+    static let doiTint = Color.orange
+
+    /// Tint color for cached content badge.
+    static let cachedTint = Color.gray
+
+    /// Returns the appropriate color for a full-text source.
+    ///
+    /// - Parameter source: The full-text source.
+    /// - Returns: Color appropriate for the source badge.
+    static func color(for source: FullTextSource) -> Color {
+        switch source {
+        case .europePMC: return europePMCTint
+        case .unpaywall: return unpaywallTint
+        case .doi: return doiTint
+        case .cached: return cachedTint
+        }
+    }
+}

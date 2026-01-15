@@ -1,0 +1,156 @@
+//
+//  FullTextSource.swift
+//  MedicalFactChecker
+//
+//  Models for full-text retrieval results and sources.
+//
+
+import Foundation
+
+/// Source from which full text was retrieved.
+///
+/// Represents the origin of a full-text article, used for display,
+/// attribution, and debugging purposes.
+enum FullTextSource: String, Codable, CaseIterable {
+    /// Europe PMC XML full text (highest quality, machine-readable).
+    case europePMC = "europepmc"
+
+    /// Unpaywall open access PDF.
+    case unpaywall = "unpaywall"
+
+    /// DOI resolution to publisher website.
+    case doi = "doi"
+
+    /// Previously cached content.
+    case cached = "cached"
+
+    /// Human-readable display name for the source.
+    var displayName: String {
+        switch self {
+        case .europePMC: return "Europe PMC"
+        case .unpaywall: return "Unpaywall"
+        case .doi: return "Publisher"
+        case .cached: return "Cached"
+        }
+    }
+
+    /// SF Symbol icon name for the source.
+    var iconName: String {
+        switch self {
+        case .europePMC: return "building.columns"
+        case .unpaywall: return "lock.open"
+        case .doi: return "link"
+        case .cached: return "arrow.down.circle"
+        }
+    }
+
+    /// Whether this source provides in-app viewable content.
+    ///
+    /// Europe PMC and Unpaywall provide content that can be displayed
+    /// within the app. DOI sources require opening in an external browser.
+    var canDisplayInApp: Bool {
+        switch self {
+        case .europePMC, .unpaywall, .cached:
+            return true
+        case .doi:
+            return false
+        }
+    }
+}
+
+/// The type of content retrieved from a full-text source.
+enum FullTextContentType: Equatable {
+    /// Markdown-formatted text (from Europe PMC XML conversion).
+    case markdown(String)
+
+    /// URL to a downloadable PDF file.
+    case pdfURL(URL)
+
+    /// URL to open in an external web browser.
+    case webURL(URL)
+
+    /// Whether this content can be displayed in-app.
+    var canDisplayInApp: Bool {
+        switch self {
+        case .markdown, .pdfURL:
+            return true
+        case .webURL:
+            return false
+        }
+    }
+
+    /// Extract the markdown content if this is a markdown type.
+    var markdownContent: String? {
+        if case .markdown(let content) = self {
+            return content
+        }
+        return nil
+    }
+
+    /// Extract the PDF URL if this is a PDF type.
+    var pdfURL: URL? {
+        if case .pdfURL(let url) = self {
+            return url
+        }
+        return nil
+    }
+
+    /// Extract the web URL if this is a web URL type.
+    var webURL: URL? {
+        if case .webURL(let url) = self {
+            return url
+        }
+        return nil
+    }
+}
+
+/// Result of a full-text retrieval attempt.
+///
+/// Contains the retrieved content and metadata about its source.
+struct FullTextResult: Equatable {
+    /// The type of content retrieved.
+    let content: FullTextContentType
+
+    /// The source from which the content was retrieved.
+    let source: FullTextSource
+
+    /// Whether this result can be displayed within the app.
+    ///
+    /// Markdown and PDF content can be displayed in-app, while
+    /// web URLs require opening in an external browser.
+    var canDisplayInApp: Bool {
+        content.canDisplayInApp
+    }
+
+    /// Create a markdown result from Europe PMC.
+    ///
+    /// - Parameter markdown: The markdown content.
+    /// - Returns: A full-text result with Europe PMC source.
+    static func europePMC(markdown: String) -> FullTextResult {
+        FullTextResult(content: .markdown(markdown), source: .europePMC)
+    }
+
+    /// Create a PDF URL result from Unpaywall.
+    ///
+    /// - Parameter url: The PDF download URL.
+    /// - Returns: A full-text result with Unpaywall source.
+    static func unpaywall(pdfURL url: URL) -> FullTextResult {
+        FullTextResult(content: .pdfURL(url), source: .unpaywall)
+    }
+
+    /// Create a web URL result for DOI resolution.
+    ///
+    /// - Parameter url: The web URL to open.
+    /// - Returns: A full-text result with DOI source.
+    static func doi(webURL url: URL) -> FullTextResult {
+        FullTextResult(content: .webURL(url), source: .doi)
+    }
+
+    /// Create a cached result.
+    ///
+    /// - Parameter content: The cached content type.
+    /// - Returns: A full-text result with cached source.
+    static func cached(content: FullTextContentType) -> FullTextResult {
+        FullTextResult(content: content, source: .cached)
+    }
+}

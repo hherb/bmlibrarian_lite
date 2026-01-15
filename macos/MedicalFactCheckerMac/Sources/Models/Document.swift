@@ -82,6 +82,34 @@ final class Document {
     /// Position within the PubMed results (0-indexed).
     var resultPosition: Int
 
+    // MARK: - Full Text
+
+    /// The full text content in markdown format (from Europe PMC XML conversion).
+    ///
+    /// Nil if full text was not retrieved or only PDF is available.
+    var fullTextContent: String?
+
+    /// Local file path to the cached PDF, if available.
+    ///
+    /// Stored as a relative path within Application Support for portability.
+    var fullTextPDFPath: String?
+
+    /// Source from which the full text was retrieved.
+    ///
+    /// Stored as raw string value of `FullTextSource` enum:
+    /// - "europepmc": Europe PMC XML (converted to markdown)
+    /// - "unpaywall": Unpaywall open access PDF
+    /// - "doi": Publisher website (opened in browser)
+    var fullTextSource: String?
+
+    /// When the full text was successfully fetched.
+    var fullTextFetchedAt: Date?
+
+    /// True if full text fetch was attempted but no source was available.
+    ///
+    /// Used to avoid repeated failed lookups for the same document.
+    var fullTextUnavailable: Bool = false
+
     // MARK: - Relationships
 
     var session: FactCheckSession?
@@ -173,5 +201,88 @@ final class Document {
             parts.append("PMID: \(pmid)")
         }
         return parts.joined(separator: ". ")
+    }
+
+    // MARK: - Full Text Computed Properties
+
+    /// Whether full text is available for this document.
+    ///
+    /// True if either markdown content or a cached PDF is available.
+    var hasFullText: Bool {
+        fullTextContent != nil || fullTextPDFPath != nil
+    }
+
+    /// Whether a full text fetch has been attempted (success or failure).
+    ///
+    /// Used to avoid redundant fetch attempts.
+    var fullTextAttempted: Bool {
+        fullTextFetchedAt != nil || fullTextUnavailable
+    }
+
+    /// Human-readable display name for the full text source.
+    ///
+    /// Returns nil if no full text source is set.
+    var fullTextSourceDisplay: String? {
+        guard let source = fullTextSource else { return nil }
+        switch source {
+        case "europepmc": return "Europe PMC"
+        case "unpaywall": return "Unpaywall"
+        case "doi": return "Publisher"
+        case "cached": return "Cached"
+        default: return source.capitalized
+        }
+    }
+
+    /// The `FullTextSource` enum value for the stored source string.
+    ///
+    /// Returns nil if no source is set or if the string doesn't match a known source.
+    var fullTextSourceEnum: FullTextSource? {
+        guard let source = fullTextSource else { return nil }
+        return FullTextSource(rawValue: source)
+    }
+
+    /// SF Symbol icon name for the full text source.
+    var fullTextSourceIcon: String? {
+        fullTextSourceEnum?.iconName
+    }
+
+    /// Update the document with a successful full text result.
+    ///
+    /// - Parameter result: The full text retrieval result.
+    func applyFullTextResult(_ result: FullTextResult) {
+        fullTextSource = result.source.rawValue
+        fullTextFetchedAt = Date()
+        fullTextUnavailable = false
+
+        switch result.content {
+        case .markdown(let content):
+            fullTextContent = content
+            fullTextPDFPath = nil
+        case .pdfURL:
+            // PDF path will be set after download
+            fullTextContent = nil
+        case .webURL:
+            // Web URLs don't store content locally
+            fullTextContent = nil
+            fullTextPDFPath = nil
+        }
+    }
+
+    /// Mark the document as having no full text available.
+    func markFullTextUnavailable() {
+        fullTextUnavailable = true
+        fullTextFetchedAt = nil
+        fullTextContent = nil
+        fullTextPDFPath = nil
+        fullTextSource = nil
+    }
+
+    /// Clear cached full text data to allow re-fetching.
+    func clearFullTextCache() {
+        fullTextContent = nil
+        fullTextPDFPath = nil
+        fullTextSource = nil
+        fullTextFetchedAt = nil
+        fullTextUnavailable = false
     }
 }
