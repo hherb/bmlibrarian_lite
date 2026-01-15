@@ -37,7 +37,7 @@ enum FullTextSource: String, Codable, Sendable {
 
 /// Result of a full-text retrieval attempt.
 struct FullTextResult: Sendable {
-    /// The content type retrieved.
+    /// Type of content retrieved from full-text sources.
     enum ContentType: Sendable {
         case markdown(String)    // Europe PMC XML converted to markdown
         case pdfURL(URL)         // URL to downloadable PDF
