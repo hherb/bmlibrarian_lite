@@ -104,6 +104,15 @@ object Constants {
     /** Maximum tokens for query conversion responses. */
     const val LLM_QUERY_MAX_TOKENS = 200
 
+    /** Estimated characters per token for token count estimation. */
+    const val TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4
+
+    /** Divisor for estimating output tokens (output typically half of max). */
+    const val OUTPUT_TOKEN_ESTIMATE_DIVISOR = 2
+
+    /** Estimated available documents from Europe PMC when cursor exists. */
+    const val EUROPE_PMC_AVAILABLE_ESTIMATE = 100
+
     // ==================== Document Source Constants ====================
 
     /** Document source: PubMed. */

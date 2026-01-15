@@ -3,9 +3,7 @@ package com.bmlibrarian.factchecker.domain.workflow
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
-import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
-import com.bmlibrarian.factchecker.data.remote.llm.LLMResult
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
@@ -21,7 +19,6 @@ import com.bmlibrarian.factchecker.util.Constants
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -234,10 +231,14 @@ class FactCheckWorkflow @Inject constructor(
                     updateProgress("Scoring new documents...", 0.65f)
                     scoreDocuments(newDocs, session.claimText, config)
 
-                    // Extract citations from new relevant documents
+                    // Extract citations from newly scored relevant documents
                     updateProgress("Extracting citations...", 0.75f)
-                    val relevantDocs = documentRepository.getUnscoredDocuments(session.id)
+                    // Re-fetch the documents to get updated scores, then filter for relevant ones
+                    val scoredDocIds = newDocs.map { it.id }.toSet()
+                    val relevantDocs = documentRepository.getDocumentsBySessionSync(session.id)
+                        .filter { it.id in scoredDocIds }
                         .filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
+                        .filter { documentRepository.getCitationCountForDocument(it.id) == 0 }
                     extractCitations(relevantDocs, session.claimText, session.id, config)
                 }
             }
@@ -435,7 +436,7 @@ class FactCheckWorkflow @Inject constructor(
         recordUsage(
             operation = "query_conversion",
             inputTokens = estimateTokens(claim),
-            outputTokens = Constants.LLM_QUERY_MAX_TOKENS / 2
+            outputTokens = Constants.LLM_QUERY_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
         )
 
         return result.getOrThrow()
@@ -608,7 +609,7 @@ class FactCheckWorkflow @Inject constructor(
                 recordUsage(
                     operation = "scoring",
                     inputTokens = estimateTokens(claim + doc.title + (doc.abstractText ?: "")),
-                    outputTokens = Constants.LLM_SCORING_MAX_TOKENS / 2
+                    outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
                 )
             }
             // If scoring fails for a document, continue with others
@@ -662,7 +663,7 @@ class FactCheckWorkflow @Inject constructor(
                 recordUsage(
                     operation = "citation",
                     inputTokens = estimateTokens(claim + doc.title + (doc.abstractText ?: "")),
-                    outputTokens = Constants.LLM_CITATION_MAX_TOKENS / 2
+                    outputTokens = Constants.LLM_CITATION_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
                 )
             }
         }
@@ -833,14 +834,19 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Calculate available documents that can still be fetched.
+     *
+     * @param session The current session with pagination state
+     * @return Estimated number of documents available for fetching
      */
     private fun calculateAvailableDocuments(session: SessionEntity): Int {
         return when (currentConfig?.searchProvider) {
             SearchProvider.PUBMED -> maxOf(0, session.pubmedTotalResults - session.pubmedOffset)
-            SearchProvider.EUROPE_PMC -> if (session.epmcCursor != null) 100 else 0 // Estimate
+            SearchProvider.EUROPE_PMC -> {
+                if (session.epmcCursor != null) Constants.EUROPE_PMC_AVAILABLE_ESTIMATE else 0
+            }
             SearchProvider.BOTH -> {
                 maxOf(0, session.pubmedTotalResults - session.pubmedOffset) +
-                        (if (session.epmcCursor != null) 100 else 0)
+                        (if (session.epmcCursor != null) Constants.EUROPE_PMC_AVAILABLE_ESTIMATE else 0)
             }
             null -> 0
         }
@@ -848,10 +854,15 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Estimate token count for text.
+     *
+     * Uses a rough approximation based on average characters per token.
+     * This is sufficient for cost estimation purposes.
+     *
+     * @param text The text to estimate tokens for
+     * @return Estimated token count (minimum 1)
      */
     private fun estimateTokens(text: String): Int {
-        // Rough estimate: ~4 characters per token
-        return (text.length / 4).coerceAtLeast(1)
+        return (text.length / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN).coerceAtLeast(1)
     }
 
     /**
