@@ -3,6 +3,7 @@
 //  MedicalFactChecker
 //
 //  macOS-optimized view for displaying scored documents in a table format.
+//  Includes full-text retrieval functionality with fallback chain support.
 //
 
 import SwiftUI
@@ -11,10 +12,13 @@ import SwiftData
 /// macOS view for displaying scored documents as expandable cards.
 ///
 /// Takes advantage of the larger screen with more information visible at once
-/// and support for keyboard navigation.
+/// and support for keyboard navigation. Includes full-text retrieval capabilities.
 struct MacScoredDocumentsView: View {
     @Bindable var session: FactCheckSession
     let showEmbeddingScores: Bool
+
+    /// Callback when user wants to view full text in the dedicated tab.
+    var onShowFullText: ((Document) -> Void)?
 
     @State private var expandedDocumentId: String?
     @State private var sortOrder: DocumentSortOrder = .score
@@ -54,14 +58,15 @@ struct MacScoredDocumentsView: View {
                             isExpanded: expandedDocumentId == document.id,
                             showEmbeddingScore: showEmbeddingScores,
                             onToggleExpand: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
+                                withAnimation(.easeInOut(duration: MacAnimation.expandDuration)) {
                                     if expandedDocumentId == document.id {
                                         expandedDocumentId = nil
                                     } else {
                                         expandedDocumentId = document.id
                                     }
                                 }
-                            }
+                            },
+                            onShowFullText: onShowFullText
                         )
                     }
                 }
@@ -111,12 +116,27 @@ enum DocumentSortOrder: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Expandable document card for macOS.
+/// Expandable document card for macOS with full-text retrieval support.
+///
+/// Displays document metadata, relevance score, and provides full-text
+/// retrieval functionality with fallback chain (Europe PMC → Unpaywall → DOI).
 struct MacDocumentCard: View {
+    // MARK: - Properties
+
     let document: Document
     let isExpanded: Bool
     let showEmbeddingScore: Bool
     let onToggleExpand: () -> Void
+
+    /// Callback when user wants to view full text in the dedicated tab.
+    var onShowFullText: ((Document) -> Void)?
+
+    // MARK: - State
+
+    @State private var isLoadingFullText = false
+    @State private var fullTextError: String?
+
+    // MARK: - Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -124,6 +144,7 @@ struct MacDocumentCard: View {
             cardHeader
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onToggleExpand)
+                .contextMenu { documentContextMenu }
 
             // Expanded content
             if isExpanded {
@@ -141,6 +162,8 @@ struct MacDocumentCard: View {
         )
     }
 
+    // MARK: - Card Header
+
     private var cardHeader: some View {
         HStack(alignment: .top, spacing: MacSpacing.large) {
             // Score badge (shows "?" for failed scores)
@@ -148,9 +171,19 @@ struct MacDocumentCard: View {
 
             // Title and metadata
             VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
-                Text(document.title)
-                    .font(.headline)
-                    .lineLimit(isExpanded ? nil : 2)
+                HStack(spacing: MacSpacing.small) {
+                    Text(document.title)
+                        .font(.headline)
+                        .lineLimit(isExpanded ? nil : 2)
+
+                    // Full text indicator
+                    if document.hasFullText {
+                        Image(systemName: "doc.text.fill")
+                            .font(.caption)
+                            .foregroundColor(.accentColor)
+                            .help("Full text available")
+                    }
+                }
 
                 HStack(spacing: MacSpacing.medium) {
                     Text(document.formattedAuthors)
@@ -165,6 +198,11 @@ struct MacDocumentCard: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                    }
+
+                    // Full text source badge (compact)
+                    if let sourceString = document.fullTextSource {
+                        FullTextSourceBadge(sourceString: sourceString)
                     }
                 }
             }
@@ -191,6 +229,8 @@ struct MacDocumentCard: View {
         }
         .padding(MacSpacing.large)
     }
+
+    // MARK: - Expanded Content
 
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: MacSpacing.large) {
@@ -259,6 +299,11 @@ struct MacDocumentCard: View {
                     .textSelection(.enabled)
             }
 
+            Divider()
+
+            // Full Text Section
+            fullTextSection
+
             // Links
             HStack(spacing: MacSpacing.large) {
                 Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
@@ -290,10 +335,244 @@ struct MacDocumentCard: View {
         .padding(MacSpacing.large)
     }
 
+    // MARK: - Full Text Section
+
+    /// Section for full-text retrieval button and status.
+    @ViewBuilder
+    private var fullTextSection: some View {
+        HStack(spacing: MacSpacing.medium) {
+            if document.hasFullText {
+                // Already have full text - show view button
+                Button(action: { onShowFullText?(document) }) {
+                    Label("View Full Text", systemImage: "doc.text")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("View full text")
+                .accessibilityHint("Opens the full text in a new tab")
+
+                if let sourceString = document.fullTextSource {
+                    FullTextSourceBadge(sourceString: sourceString)
+                }
+
+                Spacer()
+
+                // Open in Preview (for PDFs)
+                if document.fullTextPDFPath != nil {
+                    Button(action: openInPreview) {
+                        Label("Open in Preview", systemImage: "eye")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open PDF in Preview.app")
+                }
+            } else if document.fullTextUnavailable {
+                // Already tried, not available
+                HStack(spacing: MacSpacing.small) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                    Text("Full text not available")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Full text not available")
+
+                Spacer()
+
+                // Still offer to open in browser
+                if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                    Link(destination: url) {
+                        Label("Open Publisher", systemImage: "safari")
+                            .font(.caption)
+                    }
+                }
+            } else {
+                // Not yet attempted
+                Button(action: fetchFullText) {
+                    if isLoadingFullText {
+                        ProgressView()
+                            .scaleEffect(MacScale.progressViewSmall)
+                            .frame(width: MacFullTextLayout.loadingIndicatorSize,
+                                   height: MacFullTextLayout.loadingIndicatorSize)
+                    } else {
+                        Label("Get Full Text", systemImage: "arrow.down.doc")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingFullText)
+                .accessibilityLabel(isLoadingFullText ? "Loading full text" : "Get full text")
+                .accessibilityHint("Downloads the full text of this article if available")
+
+                if let error = fullTextError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Context Menu
+
+    /// Context menu for document card with full-text options.
+    @ViewBuilder
+    private var documentContextMenu: some View {
+        if document.hasFullText {
+            Button(action: { onShowFullText?(document) }) {
+                Label("View Full Text", systemImage: "doc.text")
+            }
+
+            if document.fullTextPDFPath != nil {
+                Button(action: openInPreview) {
+                    Label("Open in Preview", systemImage: "eye")
+                }
+
+                Button(action: revealInFinder) {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+            }
+
+            Divider()
+        } else if !document.fullTextUnavailable {
+            Button(action: fetchFullText) {
+                Label("Get Full Text", systemImage: "arrow.down.doc")
+            }
+            .disabled(isLoadingFullText)
+
+            Divider()
+        }
+
+        // Standard links
+        Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
+            Label("Open in PubMed", systemImage: "link")
+        }
+
+        if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+            Link(destination: url) {
+                Label("Open DOI", systemImage: "link")
+            }
+        }
+
+        Divider()
+
+        Button(action: copyPMID) {
+            Label("Copy PMID", systemImage: "doc.on.doc")
+        }
+
+        Button(action: copyCitation) {
+            Label("Copy Citation", systemImage: "quote.opening")
+        }
+    }
+
+    // MARK: - Computed Properties
+
     private var embeddingColor: Color {
         MacColors.scoreColor(for: document.embeddingScoreNormalized ?? 0)
     }
+
+    // MARK: - Full Text Actions
+
+    /// Fetch full text for this document using the FullTextService fallback chain.
+    private func fetchFullText() {
+        isLoadingFullText = true
+        fullTextError = nil
+
+        Task {
+            do {
+                let service = FullTextService.create(from: .shared)
+                let result = try await service.fetchFullText(
+                    pmcId: document.pmcId,
+                    doi: document.doi,
+                    pmid: document.pmid
+                )
+
+                await MainActor.run {
+                    // Update document model based on result type
+                    document.applyFullTextResult(result)
+
+                    switch result.content {
+                    case .markdown:
+                        // Content already stored, show in tab
+                        onShowFullText?(document)
+
+                    case .pdfURL(let url):
+                        // Download and cache PDF
+                        Task {
+                            await downloadAndCachePDF(from: url)
+                        }
+
+                    case .webURL(let url):
+                        // Open in browser
+                        NSWorkspace.shared.open(url)
+                    }
+
+                    isLoadingFullText = false
+                }
+            } catch {
+                await MainActor.run {
+                    if case FullTextError.noFullTextAvailable = error {
+                        document.markFullTextUnavailable()
+                    }
+                    fullTextError = error.localizedDescription
+                    isLoadingFullText = false
+                    AppLogger.fullText.error("Failed to fetch full text: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Download and cache a PDF file.
+    ///
+    /// - Parameter url: The URL to download the PDF from.
+    private func downloadAndCachePDF(from url: URL) async {
+        do {
+            let service = FullTextService.create(from: .shared)
+            let path = try await service.downloadAndCachePDF(from: url, for: document.pmid)
+
+            await MainActor.run {
+                document.fullTextPDFPath = path
+                isLoadingFullText = false
+                // Show in full text tab
+                onShowFullText?(document)
+            }
+        } catch {
+            await MainActor.run {
+                fullTextError = "Failed to download PDF"
+                isLoadingFullText = false
+                AppLogger.fullText.error("Failed to cache PDF: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Open the cached PDF in Preview.app.
+    private func openInPreview() {
+        guard let path = document.fullTextPDFPath else { return }
+        let url = URL(fileURLWithPath: path)
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reveal the cached PDF in Finder.
+    private func revealInFinder() {
+        guard let path = document.fullTextPDFPath else { return }
+        NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+    }
+
+    /// Copy the PMID to the clipboard.
+    private func copyPMID() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(document.pmid, forType: .string)
+    }
+
+    /// Copy the full citation to the clipboard.
+    private func copyCitation() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(document.fullCitation, forType: .string)
+    }
 }
+
+// MARK: - Score Badge
 
 /// Score badge displaying a relevance score (1-5) with color coding.
 ///
@@ -366,8 +645,16 @@ struct MacAbstractView: View {
     }
 }
 
+// MARK: - Preview
+
 #Preview {
     let session = FactCheckSession(claim: "Test claim")
-    return MacScoredDocumentsView(session: session, showEmbeddingScores: true)
-        .frame(width: 600, height: 500)
+    return MacScoredDocumentsView(
+        session: session,
+        showEmbeddingScores: true,
+        onShowFullText: { doc in
+            print("Show full text for: \(doc.title)")
+        }
+    )
+    .frame(width: 600, height: 500)
 }

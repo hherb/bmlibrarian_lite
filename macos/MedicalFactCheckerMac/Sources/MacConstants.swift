@@ -61,6 +61,7 @@ enum MacLayout {
     static let submitButtonMinWidth: CGFloat = 140
     static let sortPickerWidth: CGFloat = 140
     static let filterPickerWidth: CGFloat = 100
+    static let filterPickerWideWidth: CGFloat = 140
 }
 
 // MARK: - Spacing Constants

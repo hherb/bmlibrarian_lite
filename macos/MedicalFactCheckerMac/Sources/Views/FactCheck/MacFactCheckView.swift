@@ -23,6 +23,9 @@ struct MacFactCheckView: View {
     /// Callback when a report is generated (navigates to Report view).
     var onReportGenerated: ((EvidenceReport) -> Void)?
 
+    /// Callback when user wants to view full text (navigates to Full Text tab).
+    var onShowFullText: ((Document) -> Void)?
+
     @State private var claimText = ""
     @State private var showingError = false
     @State private var errorMessage = ""
@@ -123,7 +126,8 @@ struct MacFactCheckView: View {
                !session.documents.filter({ $0.isScored }).isEmpty {
                 MacScoredDocumentsView(
                     session: session,
-                    showEmbeddingScores: settings.embeddingScoringEnabled
+                    showEmbeddingScores: settings.embeddingScoringEnabled,
+                    onShowFullText: onShowFullText
                 )
             } else {
                 emptyDocumentsState
@@ -541,14 +545,18 @@ struct MacUserDecisionSection: View {
 
 #Preview {
     @Previewable @State var previewWorkflow: FactCheckWorkflow? = nil
-    MacFactCheckView(workflow: $previewWorkflow, onReportGenerated: nil)
-        .modelContainer(for: [
-            FactCheckSession.self,
-            Document.self,
-            Citation.self,
-            EvidenceReport.self,
-            UsageRecord.self,
-        ], inMemory: true)
-        .environment(AppSettings.shared)
-        .frame(width: 1000, height: 700)
+    MacFactCheckView(
+        workflow: $previewWorkflow,
+        onReportGenerated: nil,
+        onShowFullText: nil
+    )
+    .modelContainer(for: [
+        FactCheckSession.self,
+        Document.self,
+        Citation.self,
+        EvidenceReport.self,
+        UsageRecord.self,
+    ], inMemory: true)
+    .environment(AppSettings.shared)
+    .frame(width: 1000, height: 700)
 }

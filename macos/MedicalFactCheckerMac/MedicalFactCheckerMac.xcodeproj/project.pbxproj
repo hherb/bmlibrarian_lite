@@ -45,6 +45,9 @@
 		A1000036 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039 /* JATSXMLParser.swift */; };
 		A1000037 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* FullTextSource.swift */; };
 		A1000038 /* FullTextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* FullTextService.swift */; };
+		A1000039 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* FullTextSourceBadge.swift */; };
+		A1000040 /* MacFullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* MacFullTextViewer.swift */; };
+		A1000041 /* MacFullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000044 /* MacFullTextTab.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -109,6 +112,9 @@
 		A2000039 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
 		A2000040 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
 		A2000041 /* FullTextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextService.swift; sourceTree = "<group>"; };
+		A2000042 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
+		A2000043 /* MacFullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextViewer.swift; sourceTree = "<group>"; };
+		A2000044 /* MacFullTextTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextTab.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -189,6 +195,7 @@
 		A4000004 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A400000F /* Components */,
 				A4000005 /* FactCheck */,
 				A400000D /* Help */,
 				A4000007 /* History */,
@@ -203,6 +210,8 @@
 			isa = PBXGroup;
 			children = (
 				A2000003 /* MacFactCheckView.swift */,
+				A2000044 /* MacFullTextTab.swift */,
+				A2000043 /* MacFullTextViewer.swift */,
 				A2000004 /* MacScoredDocumentsView.swift */,
 			);
 			path = FactCheck;
@@ -299,6 +308,14 @@
 				A2000036 /* MacOnboardingView.swift */,
 			);
 			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		A400000F /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A2000042 /* FullTextSourceBadge.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		A4000010 /* Products */ = {
@@ -539,6 +556,9 @@
 				A1000036 /* JATSXMLParser.swift in Sources */,
 				A1000037 /* FullTextSource.swift in Sources */,
 				A1000038 /* FullTextService.swift in Sources */,
+				A1000039 /* FullTextSourceBadge.swift in Sources */,
+				A1000040 /* MacFullTextViewer.swift in Sources */,
+				A1000041 /* MacFullTextTab.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

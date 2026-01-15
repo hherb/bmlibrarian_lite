@@ -11,6 +11,7 @@ import SwiftData
 /// Sidebar navigation items.
 enum MacNavigationItem: String, CaseIterable, Identifiable {
     case factCheck = "Fact Check"
+    case fullText = "Full Text"
     case report = "Report"
     case history = "History"
 
@@ -19,6 +20,7 @@ enum MacNavigationItem: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .factCheck: return "checkmark.shield"
+        case .fullText: return "doc.richtext"
         case .report: return "doc.text"
         case .history: return "clock"
         }
@@ -40,6 +42,9 @@ struct MacContentView: View {
 
     /// The active fact-check workflow (persisted across tab switches).
     @State private var activeWorkflow: FactCheckWorkflow?
+
+    /// The currently selected document for full-text viewing.
+    @State private var selectedFullTextDocument: Document?
 
     /// Controls showing onboarding from settings.
     @State private var showingOnboardingFromSettings = false
@@ -94,7 +99,16 @@ struct MacContentView: View {
                 onReportGenerated: { report in
                     currentReport = report
                     selectedNavItem = .report
+                },
+                onShowFullText: { document in
+                    selectedFullTextDocument = document
+                    selectedNavItem = .fullText
                 }
+            )
+        case .fullText:
+            MacFullTextTab(
+                workflow: activeWorkflow,
+                selectedDocument: $selectedFullTextDocument
             )
         case .report:
             MacReportView(report: currentReport, workflow: activeWorkflow)

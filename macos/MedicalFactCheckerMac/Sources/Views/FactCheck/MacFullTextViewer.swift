@@ -1,0 +1,447 @@
+//
+//  MacFullTextViewer.swift
+//  MedicalFactChecker
+//
+//  macOS view for displaying full-text content with markdown and PDF support.
+//  Provides toolbar actions for sharing, exporting, and opening in external apps.
+//
+
+import SwiftUI
+import PDFKit
+
+/// Full-text viewer optimized for macOS.
+///
+/// Supports:
+/// - Markdown content (converted from Europe PMC XML)
+/// - PDF viewing with PDFKit
+/// - Toolbar actions for share/export
+/// - Text search within markdown content
+/// - Keyboard shortcuts (Cmd+F for search, Cmd+C for copy)
+struct MacFullTextViewer: View {
+    // MARK: - Properties
+
+    /// The document to display full text for.
+    let document: Document
+
+    /// Callback when user wants to close the viewer.
+    var onClose: (() -> Void)?
+
+    // MARK: - State
+
+    @State private var searchText = ""
+    @State private var isSearchFieldVisible = false
+    @State private var pdfDocument: PDFKit.PDFDocument?
+    @State private var isLoadingPDF = false
+    @State private var loadError: String?
+
+    // MARK: - Body
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            content
+        }
+        .frame(
+            minWidth: MacFullTextLayout.viewerMinWidth,
+            idealWidth: MacFullTextLayout.viewerIdealWidth,
+            maxWidth: .infinity,
+            minHeight: MacFullTextLayout.viewerMinHeight
+        )
+        .background(MacFullTextColors.markdownBackground)
+        .focusable()
+        .onKeyPress(keys: [.init("f")], phases: .down) { _ in
+            if NSEvent.modifierFlags.contains(.command) {
+                isSearchFieldVisible = true
+                return .handled
+            }
+            return .ignored
+        }
+        .onKeyPress(.escape) {
+            if isSearchFieldVisible {
+                isSearchFieldVisible = false
+                searchText = ""
+                return .handled
+            }
+            onClose?()
+            return .handled
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: MacSpacing.medium) {
+            // Title and metadata
+            VStack(alignment: .leading, spacing: MacSpacing.xxSmall) {
+                Text(document.title)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                HStack(spacing: MacSpacing.small) {
+                    Text(document.formattedAuthors)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if let sourceString = document.fullTextSource {
+                        FullTextSourceBadge(sourceString: sourceString)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Actions
+            HStack(spacing: MacSpacing.small) {
+                // Search field (for markdown)
+                if document.fullTextContent != nil {
+                    if isSearchFieldVisible {
+                        HStack(spacing: MacSpacing.xSmall) {
+                            TextField("Search", text: $searchText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: MacLayout.searchFieldWidth)
+
+                            Button {
+                                isSearchFieldVisible = false
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else {
+                        Button {
+                            isSearchFieldVisible = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Search (⌘F)")
+                    }
+                }
+
+                // Share menu
+                shareMenu
+
+                // Open in browser
+                if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                    Link(destination: url) {
+                        Image(systemName: "safari")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open in browser")
+                }
+            }
+        }
+        .padding(MacSpacing.standard)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var content: some View {
+        if let markdownContent = document.fullTextContent {
+            MacMarkdownView(content: markdownContent, searchText: searchText)
+        } else if let pdfPath = document.fullTextPDFPath {
+            MacPDFView(filePath: pdfPath)
+        } else if isLoadingPDF {
+            loadingView
+        } else if let error = loadError {
+            errorView(error)
+        } else {
+            emptyView
+        }
+    }
+
+    private var loadingView: some View {
+        VStack(spacing: MacSpacing.large) {
+            ProgressView()
+                .scaleEffect(MacScale.progressViewMedium)
+            Text("Loading full text...")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Loading full text")
+    }
+
+    private func errorView(_ error: String) -> some View {
+        VStack(spacing: MacSpacing.large) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: MacIconSize.emptyStateMedium))
+                .foregroundColor(.orange)
+            Text(error)
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                Link("Open Publisher Website", destination: url)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Error: \(error)")
+    }
+
+    private var emptyView: some View {
+        VStack(spacing: MacSpacing.large) {
+            Image(systemName: "doc.text")
+                .font(.system(size: MacIconSize.emptyStateMedium))
+                .foregroundColor(.secondary)
+            Text("No full text available")
+                .font(.body)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("No full text available")
+    }
+
+    // MARK: - Share Menu
+
+    private var shareMenu: some View {
+        Menu {
+            if let content = document.fullTextContent {
+                Button(action: { copyToClipboard(content) }) {
+                    Label("Copy Text", systemImage: "doc.on.doc")
+                }
+            }
+
+            if let pdfPath = document.fullTextPDFPath {
+                Button(action: { openInPreview(pdfPath) }) {
+                    Label("Open in Preview", systemImage: "eye")
+                }
+
+                Button(action: { revealInFinder(pdfPath) }) {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+            }
+
+            Divider()
+
+            if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                ShareLink(item: url) {
+                    Label("Share Link", systemImage: "square.and.arrow.up")
+                }
+            }
+
+            // PubMed link
+            if let pubmedURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/") {
+                ShareLink(item: pubmedURL) {
+                    Label("Share PubMed Link", systemImage: "link")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .help("Share options")
+    }
+
+    // MARK: - Actions
+
+    /// Copy text to the system clipboard.
+    ///
+    /// - Parameter text: The text to copy.
+    private func copyToClipboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Open a file in Preview.app.
+    ///
+    /// - Parameter path: The file path to open.
+    private func openInPreview(_ path: String) {
+        let url = URL(fileURLWithPath: path)
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reveal a file in Finder.
+    ///
+    /// - Parameter path: The file path to reveal.
+    private func revealInFinder(_ path: String) {
+        NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+    }
+}
+
+// MARK: - Markdown View
+
+/// Scrollable markdown view with search highlighting.
+///
+/// Renders markdown content using SwiftUI's AttributedString parser.
+/// Supports text selection and search highlighting.
+struct MacMarkdownView: View {
+    /// The markdown content to display.
+    let content: String
+
+    /// Text to highlight in the content (empty string for no highlighting).
+    let searchText: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MacSpacing.standard) {
+                if let attributed = parseMarkdown(content) {
+                    Text(attributed)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .lineSpacing(MacFullTextLayout.markdownLineSpacing)
+                } else {
+                    Text(content)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .lineSpacing(MacFullTextLayout.markdownLineSpacing)
+                }
+            }
+            .padding(MacFullTextLayout.markdownPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Parse markdown text to AttributedString.
+    ///
+    /// - Parameter text: The markdown text to parse.
+    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
+    private func parseMarkdown(_ text: String) -> AttributedString? {
+        try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )
+    }
+}
+
+// MARK: - PDF View
+
+/// macOS PDF viewer using PDFKit.
+///
+/// Loads a PDF from a file path and displays it with zoom and scroll support.
+struct MacPDFView: View {
+    /// The file path to the PDF.
+    let filePath: String
+
+    @State private var pdfDocument: PDFKit.PDFDocument?
+    @State private var loadError: String?
+
+    var body: some View {
+        Group {
+            if let document = pdfDocument {
+                PDFKitRepresentableMac(document: document)
+            } else if let error = loadError {
+                VStack(spacing: MacSpacing.large) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundColor(.orange)
+                    Text(error)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView("Loading PDF...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            loadPDF()
+        }
+    }
+
+    /// Load the PDF document from the file path.
+    private func loadPDF() {
+        let url = URL(fileURLWithPath: filePath)
+
+        guard FileManager.default.fileExists(atPath: filePath) else {
+            loadError = "PDF file not found"
+            AppLogger.fullText.error("PDF file not found at path: \(filePath)")
+            return
+        }
+
+        if let document = PDFKit.PDFDocument(url: url) {
+            self.pdfDocument = document
+            AppLogger.fullText.debug("Successfully loaded PDF from: \(filePath)")
+        } else {
+            loadError = "Failed to load PDF"
+            AppLogger.fullText.error("Failed to load PDF from: \(filePath)")
+        }
+    }
+}
+
+// MARK: - PDFKit NSViewRepresentable
+
+/// NSViewRepresentable wrapper for PDFView on macOS.
+///
+/// Provides native PDF viewing with zoom, scroll, and text selection support.
+struct PDFKitRepresentableMac: NSViewRepresentable {
+    /// The PDF document to display.
+    let document: PDFKit.PDFDocument
+
+    func makeNSView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.document = document
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.backgroundColor = NSColor.textBackgroundColor
+        return pdfView
+    }
+
+    func updateNSView(_ nsView: PDFView, context: Context) {
+        if nsView.document != document {
+            nsView.document = document
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview("Markdown Content") {
+    let doc = Document(
+        pmid: "12345678",
+        title: "Effect of Vitamin D Supplementation on COVID-19 Outcomes: A Systematic Review",
+        abstract: "Background: Vitamin D has been proposed..."
+    )
+    doc.fullTextContent = """
+    # Effect of Vitamin D Supplementation on COVID-19 Outcomes
+
+    **Authors:** Smith J, Jones A, Brown B et al.
+
+    *Journal of Medical Virology* (2024)
+
+    ## Abstract
+
+    Vitamin D has been proposed to have immunomodulatory effects that may be beneficial in COVID-19.
+    This systematic review examines the evidence from randomized controlled trials.
+
+    ## Methods
+
+    We conducted a systematic review and meta-analysis of randomized controlled trials examining
+    vitamin D supplementation in COVID-19 patients.
+
+    ## Results
+
+    Ten studies with 5,234 participants were included. Vitamin D supplementation was associated
+    with reduced ICU admission rates (OR 0.72, 95% CI 0.54-0.96) but not mortality.
+
+    ## Conclusions
+
+    Current evidence suggests a modest benefit of vitamin D supplementation in COVID-19,
+    particularly for reducing ICU admissions.
+    """
+    doc.fullTextSource = "europepmc"
+
+    return MacFullTextViewer(document: doc)
+        .frame(width: 700, height: 600)
+}
+
+#Preview("Empty State") {
+    let doc = Document(
+        pmid: "12345678",
+        title: "Article Without Full Text",
+        abstract: "This article has no full text available."
+    )
+
+    return MacFullTextViewer(document: doc)
+        .frame(width: 700, height: 600)
+}
