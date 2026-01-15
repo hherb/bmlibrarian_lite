@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    network_security_config.xml
+    MedicalFactChecker Android App
+
+    Network security configuration for API endpoints.
+    Allows cleartext traffic for localhost (Ollama local inference).
+-->
+<network-security-config>
+    <!-- Default: only HTTPS traffic -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Allow cleartext for localhost (Ollama local LLM) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- localhost for emulator -->
+        <domain includeSubdomains="true">localhost</domain>
+        <!-- Android emulator's alias for host machine -->
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <!-- Local network for physical device testing -->
+        <domain includeSubdomains="true">192.168.0.0/16</domain>
+        <domain includeSubdomains="true">10.0.0.0/8</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,43 @@
+# Android Studio / Gradle
+.gradle/
+build/
+*.iml
+.idea/
+local.properties
+
+# Generated files
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Kotlin
+*.kotlin_module
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test output
+/app/build/
+/app/release/
+
+# Signing files (should not be in repo)
+*.jks
+*.keystore
+keystore.properties
+
+# ProGuard
+proguard/
+
+# NDK
+obj/
+
+# Dependency directories
+node_modules/
+
+# Local configuration
+secrets.properties

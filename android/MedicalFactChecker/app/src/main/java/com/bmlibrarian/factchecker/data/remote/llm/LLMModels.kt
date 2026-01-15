@@ -1,0 +1,261 @@
+package com.bmlibrarian.factchecker.data.remote.llm
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+// ==================== OpenAI-Compatible API Models ====================
+
+/**
+ * Chat completion request for OpenAI-compatible APIs.
+ *
+ * Compatible with OpenAI, DeepSeek, Groq, Mistral, and Ollama.
+ */
+@Serializable
+data class OpenAIChatRequest(
+    /** Model ID to use for completion. */
+    val model: String,
+    /** List of messages in the conversation. */
+    val messages: List<OpenAIChatMessage>,
+    /** Maximum tokens to generate. */
+    @SerialName("max_tokens")
+    val maxTokens: Int,
+    /** Sampling temperature (0.0-2.0). */
+    val temperature: Double = 0.0
+)
+
+/**
+ * Chat message for OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAIChatMessage(
+    /** Role: "system", "user", or "assistant". */
+    val role: String,
+    /** Message content. */
+    val content: String
+)
+
+/**
+ * Chat completion response from OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAIChatResponse(
+    /** Unique ID for this completion. */
+    val id: String? = null,
+    /** Object type (always "chat.completion"). */
+    val `object`: String? = null,
+    /** Timestamp of creation. */
+    val created: Long? = null,
+    /** Model used for completion. */
+    val model: String? = null,
+    /** List of completion choices. */
+    val choices: List<OpenAIChatChoice> = emptyList(),
+    /** Token usage statistics. */
+    val usage: OpenAITokenUsage? = null
+)
+
+/**
+ * A completion choice from OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAIChatChoice(
+    /** Index of this choice. */
+    val index: Int = 0,
+    /** The generated message. */
+    val message: OpenAIChatMessage? = null,
+    /** Reason for completion (e.g., "stop", "length"). */
+    @SerialName("finish_reason")
+    val finishReason: String? = null
+)
+
+/**
+ * Token usage statistics from OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAITokenUsage(
+    /** Tokens in the prompt. */
+    @SerialName("prompt_tokens")
+    val promptTokens: Int = 0,
+    /** Tokens in the completion. */
+    @SerialName("completion_tokens")
+    val completionTokens: Int = 0,
+    /** Total tokens used. */
+    @SerialName("total_tokens")
+    val totalTokens: Int = 0
+)
+
+/**
+ * Error response from OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAIErrorResponse(
+    val error: OpenAIError? = null
+)
+
+/**
+ * Error details from OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAIError(
+    val message: String? = null,
+    val type: String? = null,
+    val param: String? = null,
+    val code: String? = null
+)
+
+// ==================== Anthropic API Models ====================
+
+/**
+ * Messages request for Anthropic Claude API.
+ *
+ * Anthropic uses a different format than OpenAI.
+ */
+@Serializable
+data class AnthropicMessagesRequest(
+    /** Model ID to use. */
+    val model: String,
+    /** Maximum tokens to generate. */
+    @SerialName("max_tokens")
+    val maxTokens: Int,
+    /** System prompt (separate from messages). */
+    val system: String? = null,
+    /** List of messages in the conversation. */
+    val messages: List<AnthropicMessage>,
+    /** Sampling temperature (0.0-1.0). */
+    val temperature: Double = 0.0
+)
+
+/**
+ * Message for Anthropic Claude API.
+ */
+@Serializable
+data class AnthropicMessage(
+    /** Role: "user" or "assistant". */
+    val role: String,
+    /** Message content. */
+    val content: String
+)
+
+/**
+ * Messages response from Anthropic Claude API.
+ */
+@Serializable
+data class AnthropicMessagesResponse(
+    /** Unique ID for this message. */
+    val id: String? = null,
+    /** Object type (always "message"). */
+    val type: String? = null,
+    /** Role of the response (always "assistant"). */
+    val role: String? = null,
+    /** Content blocks in the response. */
+    val content: List<AnthropicContentBlock> = emptyList(),
+    /** Model used for completion. */
+    val model: String? = null,
+    /** Reason for stopping. */
+    @SerialName("stop_reason")
+    val stopReason: String? = null,
+    /** Stop sequence if applicable. */
+    @SerialName("stop_sequence")
+    val stopSequence: String? = null,
+    /** Token usage statistics. */
+    val usage: AnthropicUsage? = null
+)
+
+/**
+ * Content block in Anthropic response.
+ */
+@Serializable
+data class AnthropicContentBlock(
+    /** Type of content block (e.g., "text"). */
+    val type: String,
+    /** Text content (for type="text"). */
+    val text: String? = null
+)
+
+/**
+ * Token usage statistics from Anthropic API.
+ */
+@Serializable
+data class AnthropicUsage(
+    /** Tokens in the input. */
+    @SerialName("input_tokens")
+    val inputTokens: Int = 0,
+    /** Tokens in the output. */
+    @SerialName("output_tokens")
+    val outputTokens: Int = 0
+)
+
+/**
+ * Error response from Anthropic API.
+ */
+@Serializable
+data class AnthropicErrorResponse(
+    val type: String? = null,
+    val error: AnthropicError? = null
+)
+
+/**
+ * Error details from Anthropic API.
+ */
+@Serializable
+data class AnthropicError(
+    val type: String? = null,
+    val message: String? = null
+)
+
+// ==================== Unified Result ====================
+
+/**
+ * Unified result from any LLM API call.
+ *
+ * Normalizes responses from OpenAI and Anthropic APIs.
+ */
+data class LLMResult(
+    /** The generated text content. */
+    val content: String,
+    /** Number of input/prompt tokens used. */
+    val inputTokens: Int,
+    /** Number of output/completion tokens used. */
+    val outputTokens: Int,
+    /** Reason for completion (e.g., "stop", "length"). */
+    val finishReason: String?,
+    /** Model that generated this response. */
+    val model: String?
+) {
+    companion object {
+        /**
+         * Create LLMResult from OpenAI response.
+         */
+        fun fromOpenAI(response: OpenAIChatResponse): LLMResult? {
+            val choice = response.choices.firstOrNull() ?: return null
+            val content = choice.message?.content ?: return null
+
+            return LLMResult(
+                content = content,
+                inputTokens = response.usage?.promptTokens ?: 0,
+                outputTokens = response.usage?.completionTokens ?: 0,
+                finishReason = choice.finishReason,
+                model = response.model
+            )
+        }
+
+        /**
+         * Create LLMResult from Anthropic response.
+         */
+        fun fromAnthropic(response: AnthropicMessagesResponse): LLMResult? {
+            val textContent = response.content
+                .filter { it.type == "text" }
+                .mapNotNull { it.text }
+                .joinToString("")
+
+            if (textContent.isEmpty()) return null
+
+            return LLMResult(
+                content = textContent,
+                inputTokens = response.usage?.inputTokens ?: 0,
+                outputTokens = response.usage?.outputTokens ?: 0,
+                finishReason = response.stopReason,
+                model = response.model
+            )
+        }
+    }
+}
