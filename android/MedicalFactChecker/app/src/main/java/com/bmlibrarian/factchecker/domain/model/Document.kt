@@ -1,6 +1,7 @@
 package com.bmlibrarian.factchecker.domain.model
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
 
 /**
@@ -109,7 +110,7 @@ data class Document(
      * @param maxLength Maximum length for the preview
      * @return Truncated abstract with ellipsis if needed
      */
-    fun abstractPreview(maxLength: Int = 300): String? {
+    fun abstractPreview(maxLength: Int = Constants.DEFAULT_ABSTRACT_PREVIEW_LENGTH): String? {
         return abstractText?.let {
             if (it.length <= maxLength) it
             else "${it.take(maxLength - 3)}..."
@@ -122,7 +123,7 @@ data class Document(
      * @return Full DOI URL or null if no DOI
      */
     val doiUrl: String?
-        get() = doi?.let { "https://doi.org/$it" }
+        get() = doi?.let { "${Constants.DOI_URL_PREFIX}$it" }
 
     /**
      * Get PubMed URL.
@@ -130,7 +131,7 @@ data class Document(
      * @return Full PubMed URL or null if no PMID
      */
     val pubmedUrl: String?
-        get() = pmid?.let { "https://pubmed.ncbi.nlm.nih.gov/$it/" }
+        get() = pmid?.let { "${Constants.PUBMED_URL_PREFIX}$it/" }
 
     /**
      * Get PMC URL.
@@ -138,7 +139,7 @@ data class Document(
      * @return Full PMC URL or null if no PMC ID
      */
     val pmcUrl: String?
-        get() = pmcId?.let { "https://www.ncbi.nlm.nih.gov/pmc/articles/$it/" }
+        get() = pmcId?.let { "${Constants.PMC_URL_PREFIX}$it/" }
 
     companion object {
         /**

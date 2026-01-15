@@ -1,6 +1,7 @@
 package com.bmlibrarian.factchecker.domain.model
 
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
+import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
 
 /**
@@ -48,7 +49,7 @@ data class EvidenceReport(
      * @param maxLength Maximum length for the preview
      * @return Truncated summary with ellipsis if needed
      */
-    fun summaryPreview(maxLength: Int = 200): String {
+    fun summaryPreview(maxLength: Int = Constants.DEFAULT_SUMMARY_PREVIEW_LENGTH): String {
         return if (summary.length <= maxLength) {
             summary
         } else {

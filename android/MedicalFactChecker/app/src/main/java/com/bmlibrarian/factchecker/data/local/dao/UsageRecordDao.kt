@@ -75,10 +75,12 @@ interface UsageRecordDao {
      * Get total tokens used for a session.
      *
      * @param sessionId Session ID
-     * @return Pair of (inputTokens, outputTokens) as combined sum
+     * @return TokenSums containing input and output token totals
      */
     @Query("""
-        SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+        SELECT
+            COALESCE(SUM(input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(output_tokens), 0) AS outputTokens
         FROM usage_records
         WHERE session_id = :sessionId
     """)

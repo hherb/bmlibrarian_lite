@@ -88,9 +88,9 @@ data class DocumentEntity(
 
     // ==================== Source Tracking ====================
 
-    /** Source database: "pubmed", "europepmc", or "preprint". */
+    /** Source database: SOURCE_PUBMED, SOURCE_EUROPE_PMC, or SOURCE_PREPRINT. */
     @ColumnInfo(name = "source")
-    val source: String = "pubmed",
+    val source: String = Constants.SOURCE_PUBMED,
 
     /** Whether this is a preprint (not peer-reviewed). */
     @ColumnInfo(name = "is_preprint")
@@ -116,7 +116,7 @@ data class DocumentEntity(
     @ColumnInfo(name = "full_text_markdown")
     val fullTextMarkdown: String? = null,
 
-    /** Source of full text: "europepmc", "unpaywall", "doi". */
+    /** Source of full text: FULLTEXT_SOURCE_EUROPE_PMC, FULLTEXT_SOURCE_UNPAYWALL, etc. */
     @ColumnInfo(name = "full_text_source")
     val fullTextSource: String? = null,
 
@@ -195,9 +195,10 @@ data class DocumentEntity(
      */
     val fullTextSourceDisplay: String?
         get() = when (fullTextSource) {
-            "europepmc" -> "Europe PMC"
-            "unpaywall" -> "Unpaywall"
-            "doi" -> "Publisher"
+            Constants.FULLTEXT_SOURCE_EUROPE_PMC -> "Europe PMC"
+            Constants.FULLTEXT_SOURCE_UNPAYWALL -> "Unpaywall"
+            Constants.FULLTEXT_SOURCE_DOI -> "Publisher"
+            Constants.FULLTEXT_SOURCE_CACHED -> "Cached"
             else -> fullTextSource
         }
 

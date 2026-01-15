@@ -1,6 +1,7 @@
 package com.bmlibrarian.factchecker.domain.model
 
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
+import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
 
 /**
@@ -79,7 +80,7 @@ data class FactCheckSession(
     /**
      * Get a preview of the claim (truncated if too long).
      */
-    fun claimPreview(maxLength: Int = 100): String {
+    fun claimPreview(maxLength: Int = Constants.DEFAULT_CLAIM_PREVIEW_LENGTH): String {
         return if (claimText.length <= maxLength) {
             claimText
         } else {

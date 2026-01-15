@@ -1,6 +1,7 @@
 package com.bmlibrarian.factchecker.domain.model
 
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
+import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
 
 /**
@@ -36,7 +37,7 @@ data class Citation(
      * @param maxLength Maximum length for the preview
      * @return Truncated passage with ellipsis if needed
      */
-    fun passagePreview(maxLength: Int = 150): String {
+    fun passagePreview(maxLength: Int = Constants.DEFAULT_PASSAGE_PREVIEW_LENGTH): String {
         return if (passage.length <= maxLength) {
             passage
         } else {
