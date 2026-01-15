@@ -262,7 +262,7 @@ struct PDFKitRepresentable: UIViewRepresentable {
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
-        if let document = PDFDocument(data: data) {
+        if let document = PDFKit.PDFDocument(data: data) {
             pdfView.document = document
         }
         return pdfView
@@ -282,7 +282,7 @@ struct PDFKitRepresentableMac: NSViewRepresentable {
         let pdfView = PDFView()
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
-        if let document = PDFDocument(data: data) {
+        if let document = PDFKit.PDFDocument(data: data) {
             pdfView.document = document
         }
         return pdfView
