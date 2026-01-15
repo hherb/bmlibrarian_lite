@@ -100,5 +100,35 @@ data class WorkflowProgress(
          * @return Base percentage for that step
          */
         fun basePercentageFor(step: WorkflowStep): Float = STEP_PERCENTAGES[step] ?: 0f
+
+        // ==================== Intermediate Progress Constants ====================
+        // These constants represent progress within workflow steps for fine-grained UI updates.
+
+        /** Progress percentage when starting document search. */
+        const val PROGRESS_SEARCHING_START = 0.15f
+
+        /** Progress percentage when starting document scoring. */
+        const val PROGRESS_SCORING_START = 0.25f
+
+        /** Progress range for document scoring (scoring goes from SCORING_START to this + SCORING_START). */
+        const val PROGRESS_SCORING_RANGE = 0.25f
+
+        /** Progress percentage when awaiting user decision. */
+        const val PROGRESS_AWAITING_USER = 0.50f
+
+        /** Progress percentage when starting citation extraction. */
+        const val PROGRESS_EXTRACTION_START = 0.60f
+
+        /** Progress range for citation extraction (from EXTRACTION_START to this + EXTRACTION_START). */
+        const val PROGRESS_EXTRACTION_RANGE = 0.15f
+
+        /** Progress percentage when scoring new documents during fetch more evidence. */
+        const val PROGRESS_SCORING_MORE_EVIDENCE = 0.65f
+
+        /** Progress percentage when starting report generation. */
+        const val PROGRESS_REPORT_GENERATION = 0.85f
+
+        /** Progress percentage when workflow is complete. */
+        const val PROGRESS_COMPLETE = 1.0f
     }
 }
