@@ -24,7 +24,6 @@ class EuropePMCService @Inject constructor(
      * Search Europe PMC for articles.
      *
      * @param query Search query (supports Europe PMC syntax)
-     * @param sessionId Session ID for the documents
      * @param cursor Cursor for pagination (null or "*" for first page)
      * @param batchSize Number of results per page
      * @param includePreprints Whether to include preprints in results
@@ -32,7 +31,6 @@ class EuropePMCService @Inject constructor(
      */
     suspend fun search(
         query: String,
-        sessionId: String,
         cursor: String? = null,
         batchSize: Int = EuropePMCApi.DEFAULT_PAGE_SIZE,
         includePreprints: Boolean = false

@@ -5,7 +5,6 @@ import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import com.bmlibrarian.factchecker.util.ResponseParser
-import kotlinx.coroutines.delay
 import retrofit2.Response
 import javax.inject.Inject
 import javax.inject.Singleton

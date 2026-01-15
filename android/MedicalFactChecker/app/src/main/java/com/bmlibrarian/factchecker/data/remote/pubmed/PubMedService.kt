@@ -32,7 +32,6 @@ class PubMedService @Inject constructor(
      * 2. EFetch to get article details for those PMIDs
      *
      * @param query PubMed search query
-     * @param sessionId Session ID for the documents
      * @param offset Starting position for pagination
      * @param batchSize Number of results to fetch
      * @param apiKey Optional NCBI API key (increases rate limit)
@@ -41,7 +40,6 @@ class PubMedService @Inject constructor(
      */
     suspend fun search(
         query: String,
-        sessionId: String,
         offset: Int = 0,
         batchSize: Int = PubMedApi.DEFAULT_BATCH_SIZE,
         apiKey: String? = null,
@@ -62,7 +60,7 @@ class PubMedService @Inject constructor(
                 maxRetries = Constants.NETWORK_MAX_RETRIES,
                 shouldRetry = { e -> shouldRetryError(e) }
             ) {
-                performSearch(query, sessionId, offset, batchSize, apiKey, email)
+                performSearch(query, offset, batchSize, apiKey, email)
             }
         } catch (e: PubMedError) {
             Result.failure(e)
@@ -119,7 +117,6 @@ class PubMedService @Inject constructor(
      */
     private suspend fun performSearch(
         query: String,
-        sessionId: String,
         offset: Int,
         batchSize: Int,
         apiKey: String?,
