@@ -223,36 +223,42 @@ class FactCheckWorkflow @Inject constructor(
         try {
             // Fetch more documents
             if (session.hasMoreDocuments) {
-                updateProgress("Fetching more documents...", 0.60f)
+                updateProgress("Fetching more documents...", WorkflowProgress.PROGRESS_EXTRACTION_START)
                 val newDocs = searchForDocuments(session, config, isNextBatch = true)
 
                 if (newDocs.isNotEmpty()) {
                     // Score new documents
-                    updateProgress("Scoring new documents...", 0.65f)
+                    updateProgress("Scoring new documents...", WorkflowProgress.PROGRESS_SCORING_MORE_EVIDENCE)
                     scoreDocuments(newDocs, session.claimText, config)
 
                     // Extract citations from newly scored relevant documents
-                    updateProgress("Extracting citations...", 0.75f)
+                    updateProgress("Extracting citations...", WorkflowProgress.basePercentageFor(WorkflowStep.EXTRACTING_CITATIONS))
                     // Re-fetch the documents to get updated scores, then filter for relevant ones
                     val scoredDocIds = newDocs.map { it.id }.toSet()
                     val relevantDocs = documentRepository.getDocumentsBySessionSync(session.id)
                         .filter { it.id in scoredDocIds }
                         .filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
-                        .filter { documentRepository.getCitationCountForDocument(it.id) == 0 }
-                    extractCitations(relevantDocs, session.claimText, session.id, config)
+
+                    // Fetch citation counts before filtering (suspend function can't be called in filter lambda)
+                    val citationCounts = relevantDocs.associateWith { doc ->
+                        documentRepository.getCitationCountForDocument(doc.id)
+                    }
+                    val docsNeedingCitations = relevantDocs.filter { citationCounts[it] == 0 }
+
+                    extractCitations(docsNeedingCitations, session.claimText, session.id, config)
                 }
             }
 
             // Regenerate report with all evidence
             sessionRepository.updateWorkflowStep(session.id, WorkflowStep.GENERATING_REPORT)
             _state.value = WorkflowState.GeneratingReport
-            updateProgress("Regenerating report...", 0.85f)
+            updateProgress("Regenerating report...", WorkflowProgress.PROGRESS_REPORT_GENERATION)
             val report = generateReport(session.id, session.claimText, config)
 
             // Complete
             sessionRepository.updateWorkflowStep(session.id, WorkflowStep.COMPLETED)
             _state.value = WorkflowState.Completed(reportId = report.id)
-            updateProgress("Complete", 1.0f)
+            updateProgress("Complete", WorkflowProgress.PROGRESS_COMPLETE)
 
         } catch (e: BudgetError) {
             handleBudgetError(e, session)
@@ -294,7 +300,7 @@ class FactCheckWorkflow @Inject constructor(
         // Step 1: Convert claim to query
         if (currentStep == WorkflowStep.IDLE || currentStep == WorkflowStep.CONVERTING_QUERY) {
             _state.value = WorkflowState.ConvertingQuery(session.claimText)
-            updateProgress("Converting claim to search query...", 0.05f)
+            updateProgress("Converting claim to search query...", WorkflowProgress.basePercentageFor(WorkflowStep.CONVERTING_QUERY))
             checkBudget(session, config)
 
             val query = convertClaimToQuery(session.claimText, config)
@@ -314,7 +320,7 @@ class FactCheckWorkflow @Inject constructor(
                 provider = config.searchProvider.name,
                 batchNumber = updatedSession.currentBatch
             )
-            updateProgress("Searching for documents...", 0.15f)
+            updateProgress("Searching for documents...", WorkflowProgress.PROGRESS_SEARCHING_START)
 
             val documents = searchForDocuments(updatedSession, config)
 
@@ -338,7 +344,7 @@ class FactCheckWorkflow @Inject constructor(
 
             if (unscoredDocs.isNotEmpty()) {
                 _state.value = WorkflowState.Scoring(0, unscoredDocs.size)
-                updateProgress("Scoring documents...", 0.25f)
+                updateProgress("Scoring documents...", WorkflowProgress.PROGRESS_SCORING_START)
                 scoreDocuments(unscoredDocs, session.claimText, config)
             }
 
@@ -366,7 +372,7 @@ class FactCheckWorkflow @Inject constructor(
                     )
                     updateProgress(
                         "Found $relevantCount relevant documents. Fetch more?",
-                        0.50f
+                        WorkflowProgress.PROGRESS_AWAITING_USER
                     )
                     return // Wait for user decision
                 }
@@ -382,13 +388,18 @@ class FactCheckWorkflow @Inject constructor(
             sessionRepository.updateWorkflowStep(session.id, WorkflowStep.EXTRACTING_CITATIONS)
 
             // Get relevant documents without citations yet
-            val relevantDocs = documentRepository.getDocumentsBySessionSync(session.id)
+            val allRelevantDocs = documentRepository.getDocumentsBySessionSync(session.id)
                 .filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
-                .filter { documentRepository.getCitationCountForDocument(it.id) == 0 }
+
+            // Fetch citation counts before filtering (suspend function can't be called in filter lambda)
+            val citationCounts = allRelevantDocs.associateWith { doc ->
+                documentRepository.getCitationCountForDocument(doc.id)
+            }
+            val relevantDocs = allRelevantDocs.filter { citationCounts[it] == 0 }
 
             if (relevantDocs.isNotEmpty()) {
                 _state.value = WorkflowState.ExtractingCitations(0, relevantDocs.size)
-                updateProgress("Extracting citations...", 0.60f)
+                updateProgress("Extracting citations...", WorkflowProgress.PROGRESS_EXTRACTION_START)
                 extractCitations(relevantDocs, session.claimText, session.id, config)
             }
 
@@ -399,14 +410,14 @@ class FactCheckWorkflow @Inject constructor(
         // Step 5: Generate report
         if (currentStep == WorkflowStep.GENERATING_REPORT) {
             _state.value = WorkflowState.GeneratingReport
-            updateProgress("Generating evidence report...", 0.85f)
+            updateProgress("Generating evidence report...", WorkflowProgress.PROGRESS_REPORT_GENERATION)
 
             val report = generateReport(session.id, session.claimText, config)
 
             currentStep = WorkflowStep.COMPLETED
             sessionRepository.updateWorkflowStep(session.id, currentStep)
             _state.value = WorkflowState.Completed(reportId = report.id)
-            updateProgress("Complete", 1.0f)
+            updateProgress("Complete", WorkflowProgress.PROGRESS_COMPLETE)
         }
     }
 
@@ -589,7 +600,7 @@ class FactCheckWorkflow @Inject constructor(
             _state.value = WorkflowState.Scoring(index + 1, documents.size)
             updateProgress(
                 "Scoring document ${index + 1} of ${documents.size}",
-                0.25f + (0.25f * (index + 1) / documents.size)
+                WorkflowProgress.PROGRESS_SCORING_START + (WorkflowProgress.PROGRESS_SCORING_RANGE * (index + 1) / documents.size)
             )
 
             val result = llmService.scoreDocument(
@@ -636,7 +647,7 @@ class FactCheckWorkflow @Inject constructor(
             _state.value = WorkflowState.ExtractingCitations(index + 1, documents.size)
             updateProgress(
                 "Extracting citations from document ${index + 1}",
-                0.60f + (0.15f * (index + 1) / documents.size)
+                WorkflowProgress.PROGRESS_EXTRACTION_START + (WorkflowProgress.PROGRESS_EXTRACTION_RANGE * (index + 1) / documents.size)
             )
 
             val result = llmService.extractCitations(
