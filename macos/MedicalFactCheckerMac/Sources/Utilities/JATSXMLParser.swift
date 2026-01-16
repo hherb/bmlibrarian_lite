@@ -951,9 +951,24 @@ extension JATSXMLParser: XMLParserDelegate {
             if inTableWrap {
                 currentTable?.startRow()
             }
-        case "th", "td":
+        case "th":
             if inTableWrap {
-                currentTable?.startCell()
+                currentTable?.startCell(isHeader: true)
+            }
+        case "td":
+            if inTableWrap {
+                currentTable?.startCell(isHeader: false)
+            }
+        case "list":
+            if inTableWrap {
+                // Check if ordered list (list-type="order" or "ordered")
+                let listTypeAttr = attributeDict["list-type"] ?? ""
+                let isOrdered = listTypeAttr.hasPrefix("order")
+                currentTable?.startList(ordered: isOrdered)
+            }
+        case "list-item":
+            if inTableWrap {
+                currentTable?.startListItem()
             }
         case "ref-list":
             inRefList = true
@@ -1168,6 +1183,14 @@ extension JATSXMLParser: XMLParserDelegate {
         case "th", "td":
             if inTableWrap {
                 currentTable?.endCell()
+            }
+        case "list":
+            if inTableWrap {
+                currentTable?.endList()
+            }
+        case "list-item":
+            if inTableWrap {
+                currentTable?.endListItem()
             }
         case "table-wrap":
             if let table = currentTable?.build() {
@@ -1472,6 +1495,20 @@ private struct TableBuilder {
     var inRow = false
     var inCell = false
 
+    // Track if current row has <th> cells (for tables without <thead>)
+    var currentRowHasHeaderCells = false
+
+    // List tracking for proper formatting
+    var inList = false
+    var listType: ListType = .unordered
+    var listItemNumber = 0
+    var pendingListItem = false
+
+    enum ListType {
+        case ordered
+        case unordered
+    }
+
     mutating func startHeader() {
         inHeader = true
         inBody = false
@@ -1493,11 +1530,13 @@ private struct TableBuilder {
     mutating func startRow() {
         inRow = true
         currentRow = []
+        currentRowHasHeaderCells = false
     }
 
     mutating func endRow() {
         if inRow && !currentRow.isEmpty {
-            if inHeader {
+            // If in explicit header OR row has <th> cells and we haven't started body yet
+            if inHeader || (currentRowHasHeaderCells && !inBody && headerRows.isEmpty) {
                 headerRows.append(currentRow)
             } else {
                 bodyRows.append(currentRow)
@@ -1505,11 +1544,18 @@ private struct TableBuilder {
         }
         inRow = false
         currentRow = []
+        currentRowHasHeaderCells = false
     }
 
-    mutating func startCell() {
+    mutating func startCell(isHeader: Bool = false) {
         inCell = true
         currentCellText = ""
+        inList = false
+        listItemNumber = 0
+        pendingListItem = false
+        if isHeader {
+            currentRowHasHeaderCells = true
+        }
     }
 
     mutating func endCell() {
@@ -1525,6 +1571,36 @@ private struct TableBuilder {
         }
         inCell = false
         currentCellText = ""
+        inList = false
+        listItemNumber = 0
+        pendingListItem = false
+    }
+
+    mutating func startList(ordered: Bool) {
+        if inCell {
+            inList = true
+            listType = ordered ? .ordered : .unordered
+            listItemNumber = 0
+        }
+    }
+
+    mutating func endList() {
+        if inCell {
+            inList = false
+        }
+    }
+
+    mutating func startListItem() {
+        if inCell && inList {
+            listItemNumber += 1
+            pendingListItem = true
+        }
+    }
+
+    mutating func endListItem() {
+        if inCell {
+            pendingListItem = false
+        }
     }
 
     mutating func appendCellText(_ text: String) {
@@ -1533,6 +1609,23 @@ private struct TableBuilder {
             // that would corrupt the markdown table format
             let normalized = text.replacingOccurrences(of: "\n", with: " ")
                 .replacingOccurrences(of: "\r", with: " ")
+
+            // If we have a pending list item and there's actual content, add the marker
+            if pendingListItem && !normalized.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Add separator if there's existing content
+                if !currentCellText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    currentCellText += "; "
+                }
+                // Add list marker
+                switch listType {
+                case .ordered:
+                    currentCellText += "\(listItemNumber). "
+                case .unordered:
+                    currentCellText += "• "
+                }
+                pendingListItem = false
+            }
+
             currentCellText += normalized
         }
     }
