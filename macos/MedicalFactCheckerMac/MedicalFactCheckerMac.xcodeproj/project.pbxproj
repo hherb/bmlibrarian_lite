@@ -56,6 +56,7 @@
 		A1000046 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000049 /* SearchResultMerger.swift */; };
 		A1000047 /* SearchServiceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SearchServiceFactory.swift */; };
 		A1000048 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051 /* QueryValidator.swift */; };
+		A1000049 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052 /* CloudKitConfiguration.swift */; };
 		D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */; };
 		DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */; };
 /* End PBXBuildFile section */
@@ -134,6 +135,7 @@
 		A2000049 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
 		A2000050 /* SearchServiceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceFactory.swift; sourceTree = "<group>"; };
 		A2000051 /* QueryValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValidator.swift; sourceTree = "<group>"; };
+		A2000052 /* CloudKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitConfiguration.swift; sourceTree = "<group>"; };
 		B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -320,6 +322,7 @@
 		A400000B /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				A2000052 /* CloudKitConfiguration.swift */,
 				A2000022 /* CostCalculator.swift */,
 				A2000039 /* JATSXMLParser.swift */,
 				A2000023 /* KeychainHelper.swift */,
@@ -610,6 +613,7 @@
 				A1000048 /* QueryValidator.swift in Sources */,
 				A1000046 /* SearchResultMerger.swift in Sources */,
 				A1000047 /* SearchServiceFactory.swift in Sources */,
+				A1000049 /* CloudKitConfiguration.swift in Sources */,
 				D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */,
 				2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */,
 				DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */,
@@ -945,6 +949,7 @@
 				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
+				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;

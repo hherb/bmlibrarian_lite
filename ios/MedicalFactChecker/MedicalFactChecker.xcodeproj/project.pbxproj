@@ -54,6 +54,7 @@
 		A1000049001 /* SearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049000 /* SearchProgressView.swift */; };
 		A1000050001 /* SearchOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000050000 /* SearchOptionsView.swift */; };
 		A1000051001 /* FullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051000 /* FullTextViewer.swift */; };
+		A1000052001 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000052000 /* CloudKitConfiguration.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
 		A1000032001 /* HELP.md in Resources */ = {isa = PBXBuildFile; fileRef = A1000032000 /* HELP.md */; };
@@ -113,6 +114,8 @@
 		A1000049000 /* SearchProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProgressView.swift; sourceTree = "<group>"; };
 		A1000050000 /* SearchOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOptionsView.swift; sourceTree = "<group>"; };
 		A1000051000 /* FullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextViewer.swift; sourceTree = "<group>"; };
+		A1000052000 /* CloudKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitConfiguration.swift; sourceTree = "<group>"; };
+		A1000053000 /* MedicalFactChecker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MedicalFactChecker.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -146,6 +149,7 @@
 				A1000000026 /* Preview Content */,
 				A1000032000 /* HELP.md */,
 				A1000033000 /* PRIVACY.md */,
+				A1000053000 /* MedicalFactChecker.entitlements */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -194,6 +198,7 @@
 		A1000000024 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				A1000052000 /* CloudKitConfiguration.swift */,
 				A1000013000 /* CostCalculator.swift */,
 				A1000040000 /* FullTextConstants.swift */,
 				A1000041000 /* JATSXMLParser.swift */,
@@ -415,6 +420,7 @@
 				A1000049001 /* SearchProgressView.swift in Sources */,
 				A1000050001 /* SearchOptionsView.swift in Sources */,
 				A1000051001 /* FullTextViewer.swift in Sources */,
+				A1000052001 /* CloudKitConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -551,9 +557,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sources/MedicalFactChecker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
+				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -582,9 +590,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sources/MedicalFactChecker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
+				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
