@@ -7,6 +7,16 @@
 
 import Foundation
 
+/// Protocol for errors that can declare themselves retryable.
+///
+/// Implement this protocol on custom error types to allow the
+/// RetryHelper to automatically determine if an error should
+/// trigger a retry.
+protocol RetryableError: Error {
+    /// Whether this error is transient and the operation should be retried.
+    var isRetryable: Bool { get }
+}
+
 /// Configuration for retry behavior.
 struct RetryConfiguration {
     /// Maximum number of retry attempts.
@@ -49,6 +59,18 @@ struct RetryConfiguration {
         maxDelay: 5.0,
         backoffMultiplier: 2.0,
         jitterFactor: 0.1
+    )
+
+    /// Configuration for server error recovery (5xx errors, service unavailable).
+    ///
+    /// Uses longer delays and more attempts since server issues often
+    /// resolve within a few minutes.
+    static let serverError = RetryConfiguration(
+        maxAttempts: 5,
+        initialDelay: 5.0,
+        maxDelay: 60.0,
+        backoffMultiplier: 2.0,
+        jitterFactor: 0.2
     )
 
     /// Initialize with custom configuration.
@@ -179,9 +201,20 @@ enum RetryHelper {
     /// This is a convenience predicate for common network errors that are
     /// typically transient and may succeed on retry.
     ///
+    /// Retryable errors include:
+    /// - URLError transient codes (timeout, connection lost, etc.)
+    /// - HTTP 5xx server errors (500, 502, 503, 504)
+    /// - HTTP 429 rate limiting
+    /// - Errors conforming to `RetryableError` protocol
+    ///
     /// - Parameter error: The error to check.
     /// - Returns: True if the error is likely transient.
     static func isTransientError(_ error: Error) -> Bool {
+        // Check if error explicitly declares itself retryable
+        if let retryable = error as? RetryableError {
+            return retryable.isRetryable
+        }
+
         // URLError codes that are typically transient
         if let urlError = error as? URLError {
             switch urlError.code {

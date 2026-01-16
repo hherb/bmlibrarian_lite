@@ -532,38 +532,73 @@ struct AsyncFigureView: View {
         }
     }
 
-    /// Load image from URL asynchronously.
+    /// Alternative extensions to try if the original URL fails.
+    ///
+    /// Europe PMC figures often don't include extensions in the XML,
+    /// so we try common image formats.
+    private let alternativeExtensions = [".gif", ".jpg", ".png"]
+
+    /// Load image from URL asynchronously, trying alternative extensions if needed.
     private func loadImage() async {
-        guard let imageURL = URL(string: url) else {
-            loadError = "Invalid URL"
-            isLoading = false
-            return
+        // Build list of URLs to try
+        var urlsToTry: [URL] = []
+
+        if let baseURL = URL(string: url) {
+            urlsToTry.append(baseURL)
         }
 
-        do {
-            let (data, response) = try await URLSession.shared.data(from: imageURL)
+        // If the URL ends with an extension, also try stripping it and adding alternatives
+        let urlString = url
+        let hasExtension = [".gif", ".jpg", ".jpeg", ".png", ".svg"]
+            .contains { urlString.lowercased().hasSuffix($0) }
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                loadError = "Failed to load image"
-                isLoading = false
-                return
-            }
-
-            if let nsImage = NSImage(data: data) {
-                await MainActor.run {
-                    self.image = nsImage
-                    self.isLoading = false
+        if hasExtension {
+            // Try the original first, then alternatives by replacing the extension
+            let baseWithoutExt = String(urlString.dropLast(4)) // Remove .xxx
+            for ext in alternativeExtensions {
+                if !urlString.lowercased().hasSuffix(ext),
+                   let altURL = URL(string: baseWithoutExt + ext) {
+                    urlsToTry.append(altURL)
                 }
-            } else {
-                loadError = "Invalid image data"
-                isLoading = false
             }
-        } catch {
-            loadError = error.localizedDescription
-            isLoading = false
-            AppLogger.fullText.warning("Failed to load figure from \(url): \(error.localizedDescription)")
+        } else {
+            // URL doesn't have extension, try adding them
+            for ext in alternativeExtensions {
+                if let altURL = URL(string: urlString + ext) {
+                    urlsToTry.append(altURL)
+                }
+            }
         }
+
+        // Try each URL in order
+        for imageURL in urlsToTry {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: imageURL)
+
+                guard let httpResponse = response as? HTTPURLResponse,
+                      httpResponse.statusCode == 200 else {
+                    continue // Try next URL
+                }
+
+                if let nsImage = NSImage(data: data) {
+                    await MainActor.run {
+                        self.image = nsImage
+                        self.isLoading = false
+                    }
+                    return // Success!
+                }
+            } catch {
+                // Try next URL
+                continue
+            }
+        }
+
+        // All URLs failed
+        await MainActor.run {
+            self.loadError = "Failed to load image"
+            self.isLoading = false
+        }
+        AppLogger.fullText.warning("Failed to load figure from \(url) (tried \(urlsToTry.count) URLs)")
     }
 }
 

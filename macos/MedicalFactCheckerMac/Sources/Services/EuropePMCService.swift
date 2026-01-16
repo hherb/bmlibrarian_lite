@@ -108,8 +108,9 @@ actor EuropePMCService {
         AppLogger.network.info("Europe PMC query: \(url.absoluteString)")
 
         // Execute request with retry
+        // Uses serverError config for more aggressive retry on 5xx errors
         let data = try await RetryHelper.retry(
-            config: .networkDefault,
+            config: .serverError,
             shouldRetry: RetryHelper.retryOnlyTransient
         ) {
             let request = URLRequest(url: url)
@@ -119,14 +120,23 @@ actor EuropePMCService {
                 throw EuropePMCError.invalidResponse
             }
 
+            let statusCode = httpResponse.statusCode
+
             // Handle rate limiting
-            if httpResponse.statusCode == EuropePMCError.rateLimitStatusCode {
+            if statusCode == EuropePMCError.rateLimitStatusCode {
+                AppLogger.network.warning("Europe PMC rate limited (429), will retry with backoff")
                 throw EuropePMCError.rateLimited
             }
 
-            guard httpResponse.statusCode == EuropePMCError.successStatusCode else {
-                AppLogger.network.error("Europe PMC search failed with status \(httpResponse.statusCode)")
-                throw EuropePMCError.searchFailed(statusCode: httpResponse.statusCode)
+            // Handle server errors (5xx) - these are retryable
+            if EuropePMCError.retryableStatusCodes.contains(statusCode) && statusCode != 429 {
+                AppLogger.network.warning("Europe PMC server error (\(statusCode)), will retry with backoff")
+                throw EuropePMCError.searchFailed(statusCode: statusCode)
+            }
+
+            guard statusCode == EuropePMCError.successStatusCode else {
+                AppLogger.network.error("Europe PMC search failed with status \(statusCode)")
+                throw EuropePMCError.searchFailed(statusCode: statusCode)
             }
 
             return data
@@ -552,12 +562,15 @@ private struct EPMCAuthor: Codable {
 // MARK: - Errors
 
 /// Errors that can occur during Europe PMC operations.
-enum EuropePMCError: LocalizedError {
+enum EuropePMCError: LocalizedError, RetryableError {
     /// HTTP status code for success.
     static let successStatusCode = 200
 
     /// HTTP status code for rate limiting.
     static let rateLimitStatusCode = 429
+
+    /// HTTP status codes that indicate server errors (retryable).
+    static let retryableStatusCodes: Set<Int> = [429, 500, 502, 503, 504]
 
     /// Search request failed.
     case searchFailed(statusCode: Int)
@@ -580,6 +593,9 @@ enum EuropePMCError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .searchFailed(let statusCode):
+            if Self.retryableStatusCodes.contains(statusCode) {
+                return "Europe PMC temporarily unavailable (HTTP \(statusCode)). Retrying..."
+            }
             return "Europe PMC search failed with status code \(statusCode)"
         case .noResults:
             return "No results found in Europe PMC"
@@ -590,7 +606,22 @@ enum EuropePMCError: LocalizedError {
         case .invalidResponse:
             return "Invalid response from Europe PMC"
         case .rateLimited:
-            return "Europe PMC rate limit exceeded. Please try again later."
+            return "Europe PMC rate limit exceeded. Retrying with backoff..."
+        }
+    }
+
+    /// Whether this error is transient and should be retried.
+    ///
+    /// Server errors (5xx) and rate limiting (429) are considered retryable
+    /// as they often resolve after a short delay.
+    var isRetryable: Bool {
+        switch self {
+        case .searchFailed(let statusCode):
+            return Self.retryableStatusCodes.contains(statusCode)
+        case .rateLimited:
+            return true
+        case .noResults, .parseError, .invalidURL, .invalidResponse:
+            return false
         }
     }
 }

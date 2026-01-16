@@ -298,6 +298,11 @@ final class JATSXMLParser: NSObject {
                     lines.append(table.caption)
                 }
                 lines.append("")
+                // Include markdown table content if available
+                if !table.markdownContent.isEmpty {
+                    lines.append(table.markdownContent)
+                    lines.append("")
+                }
             }
         }
 
@@ -381,23 +386,36 @@ final class JATSXMLParser: NSObject {
 
     /// Build a complete URL for a figure graphic.
     ///
-    /// Europe PMC graphics use relative paths like "EMS12345/gr1.jpg"
-    /// which need to be prefixed with the base URL.
+    /// Europe PMC graphics use relative paths like "13023_2014_170_Fig1_HTML"
+    /// which need to be prefixed with the base URL. The XML often doesn't include
+    /// the file extension, so we build a URL pattern that the viewer can try
+    /// with different extensions (.gif, .jpg).
     ///
     /// - Parameter path: The graphic path or href from the XML.
-    /// - Returns: Complete URL string for the figure.
+    /// - Returns: Complete URL string for the figure (without extension if unknown).
     private func buildFigureURL(_ path: String) -> String {
         // If already a full URL, return as-is
         if path.hasPrefix("http://") || path.hasPrefix("https://") {
             return path
         }
 
+        // If path already has an image extension, keep it
+        let hasExtension = [".gif", ".jpg", ".jpeg", ".png", ".svg"]
+            .contains { path.lowercased().hasSuffix($0) }
+
         // Europe PMC figure URL pattern
-        // https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{id}/bin/{filename}
-        // or https://europepmc.org/articles/{pmcid}/bin/{filename}
+        // Use europepmc.org which properly serves images (NCBI returns 403)
+        // Pattern: https://europepmc.org/articles/PMC{id}/bin/{filename}
         if !pmcId.isEmpty {
             let normalizedPMCId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
-            return "https://www.ncbi.nlm.nih.gov/pmc/articles/\(normalizedPMCId)/bin/\(path)"
+            let baseURL = "https://europepmc.org/articles/\(normalizedPMCId)/bin/\(path)"
+
+            // If no extension, add .jpg as default (most common)
+            // AsyncFigureView will try other extensions if this fails
+            if !hasExtension {
+                return baseURL + ".jpg"
+            }
+            return baseURL
         }
 
         // Return path as-is if we can't build a full URL
@@ -492,6 +510,22 @@ extension JATSXMLParser: XMLParserDelegate {
             inTableWrap = true
             currentTable = TableBuilder()
             currentTable?.id = attributeDict["id"] ?? ""
+        case "thead":
+            if inTableWrap {
+                currentTable?.startHeader()
+            }
+        case "tbody":
+            if inTableWrap {
+                currentTable?.startBody()
+            }
+        case "tr":
+            if inTableWrap {
+                currentTable?.startRow()
+            }
+        case "th", "td":
+            if inTableWrap {
+                currentTable?.startCell()
+            }
         case "ref-list":
             inRefList = true
         case "ref":
@@ -535,6 +569,10 @@ extension JATSXMLParser: XMLParserDelegate {
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         appendText(string)
+        // Also append to table cell if we're in a table cell
+        if inTableWrap {
+            currentTable?.appendCellText(string)
+        }
     }
 
     func parser(
@@ -677,6 +715,22 @@ extension JATSXMLParser: XMLParserDelegate {
             break
 
         // Tables
+        case "thead":
+            if inTableWrap {
+                currentTable?.endHeader()
+            }
+        case "tbody":
+            if inTableWrap {
+                currentTable?.endBody()
+            }
+        case "tr":
+            if inTableWrap {
+                currentTable?.endRow()
+            }
+        case "th", "td":
+            if inTableWrap {
+                currentTable?.endCell()
+            }
         case "table-wrap":
             if let table = currentTable?.build() {
                 tables.append(table)
@@ -939,6 +993,8 @@ struct TableInfo {
     let id: String
     let label: String
     let caption: String
+    /// Table content as markdown table format.
+    let markdownContent: String
 }
 
 /// Builder for table information.
@@ -946,9 +1002,125 @@ private struct TableBuilder {
     var id = ""
     var label = ""
     var caption = ""
+    var headerRows: [[String]] = []
+    var bodyRows: [[String]] = []
+    var currentRow: [String] = []
+    var currentCellText = ""
+    var inHeader = false
+    var inBody = false
+    var inRow = false
+    var inCell = false
+
+    mutating func startHeader() {
+        inHeader = true
+        inBody = false
+    }
+
+    mutating func endHeader() {
+        inHeader = false
+    }
+
+    mutating func startBody() {
+        inBody = true
+        inHeader = false
+    }
+
+    mutating func endBody() {
+        inBody = false
+    }
+
+    mutating func startRow() {
+        inRow = true
+        currentRow = []
+    }
+
+    mutating func endRow() {
+        if inRow && !currentRow.isEmpty {
+            if inHeader {
+                headerRows.append(currentRow)
+            } else {
+                bodyRows.append(currentRow)
+            }
+        }
+        inRow = false
+        currentRow = []
+    }
+
+    mutating func startCell() {
+        inCell = true
+        currentCellText = ""
+    }
+
+    mutating func endCell() {
+        if inCell {
+            currentRow.append(currentCellText.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        inCell = false
+        currentCellText = ""
+    }
+
+    mutating func appendCellText(_ text: String) {
+        if inCell {
+            currentCellText += text
+        }
+    }
 
     func build() -> TableInfo {
-        TableInfo(id: id, label: label, caption: caption)
+        TableInfo(
+            id: id,
+            label: label,
+            caption: caption,
+            markdownContent: buildMarkdownTable()
+        )
+    }
+
+    /// Convert table rows to markdown table format.
+    private func buildMarkdownTable() -> String {
+        guard !headerRows.isEmpty || !bodyRows.isEmpty else {
+            return ""
+        }
+
+        var lines: [String] = []
+
+        // Determine column count from header or body
+        let columnCount = max(
+            headerRows.first?.count ?? 0,
+            bodyRows.first?.count ?? 0
+        )
+        guard columnCount > 0 else { return "" }
+
+        // Add header rows
+        if !headerRows.isEmpty {
+            for row in headerRows {
+                let paddedRow = padRow(row, to: columnCount)
+                lines.append("| " + paddedRow.joined(separator: " | ") + " |")
+            }
+            // Add separator line after header
+            let separator = Array(repeating: "---", count: columnCount)
+            lines.append("| " + separator.joined(separator: " | ") + " |")
+        } else {
+            // No header - create empty header for valid markdown
+            let emptyHeader = Array(repeating: "", count: columnCount)
+            lines.append("| " + emptyHeader.joined(separator: " | ") + " |")
+            let separator = Array(repeating: "---", count: columnCount)
+            lines.append("| " + separator.joined(separator: " | ") + " |")
+        }
+
+        // Add body rows
+        for row in bodyRows {
+            let paddedRow = padRow(row, to: columnCount)
+            lines.append("| " + paddedRow.joined(separator: " | ") + " |")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Pad or truncate a row to the specified column count.
+    private func padRow(_ row: [String], to count: Int) -> [String] {
+        if row.count >= count {
+            return Array(row.prefix(count))
+        }
+        return row + Array(repeating: "", count: count - row.count)
     }
 }
 

@@ -9,7 +9,7 @@
 import Foundation
 
 /// Errors that can occur during full-text retrieval.
-enum FullTextError: LocalizedError {
+enum FullTextError: LocalizedError, RetryableError {
     /// Document has no identifiers suitable for full-text lookup.
     case noIdentifiers
 
@@ -31,6 +31,9 @@ enum FullTextError: LocalizedError {
     /// Invalid response from API.
     case invalidResponse(String)
 
+    /// Server error (5xx) - retryable.
+    case serverError(statusCode: Int)
+
     var errorDescription: String? {
         switch self {
         case .noIdentifiers:
@@ -47,6 +50,21 @@ enum FullTextError: LocalizedError {
             return "Failed to cache PDF: \(reason)"
         case .invalidResponse(let reason):
             return "Invalid API response: \(reason)"
+        case .serverError(let statusCode):
+            return "Server temporarily unavailable (HTTP \(statusCode)). Retrying..."
+        }
+    }
+
+    /// Whether this error is transient and should be retried.
+    var isRetryable: Bool {
+        switch self {
+        case .networkError:
+            return true
+        case .serverError:
+            return true
+        case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
+             .xmlParseError, .cachingFailed, .invalidResponse:
+            return false
         }
     }
 }
@@ -172,9 +190,11 @@ actor FullTextService {
     // MARK: - Europe PMC
 
     /// Fetch full-text XML from Europe PMC with retry logic.
+    ///
+    /// Uses server error configuration for more aggressive retry on 5xx errors.
     private func fetchEuropePMCWithRetry(pmcId: String) async throws -> String {
         try await RetryHelper.retry(
-            config: .networkDefault,
+            config: .serverError,
             shouldRetry: RetryHelper.retryOnlyTransient
         ) {
             try await self.fetchEuropePMCXML(pmcId: pmcId)
@@ -208,15 +228,18 @@ actor FullTextService {
 
         AppLogger.fullText.debug("Europe PMC response status: \(httpResponse.statusCode)")
 
-        switch httpResponse.statusCode {
+        let statusCode = httpResponse.statusCode
+        switch statusCode {
         case 200:
             break  // Success, continue to parse
         case 404:
             throw FullTextError.noFullTextAvailable
-        case 429:
-            throw FullTextError.networkError(URLError(.timedOut))  // Rate limited, retry
+        case 429, 500, 502, 503, 504:
+            // Server errors and rate limiting - retryable
+            AppLogger.fullText.warning("Europe PMC server error (\(statusCode)), will retry with backoff")
+            throw FullTextError.serverError(statusCode: statusCode)
         default:
-            throw FullTextError.invalidResponse("HTTP \(httpResponse.statusCode)")
+            throw FullTextError.invalidResponse("HTTP \(statusCode)")
         }
 
         // Parse JATS XML to markdown, passing the known PMC ID for figure URLs
