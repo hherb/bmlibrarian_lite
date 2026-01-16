@@ -109,6 +109,9 @@ actor EuropePMCService {
             throw EuropePMCError.invalidURL
         }
 
+        // Log the query URL for debugging
+        print("[EuropePMCService] Query URL: \(url.absoluteString)")
+
         let request = URLRequest(url: url)
         let (data, response) = try await session.data(for: request)
 
@@ -287,11 +290,28 @@ private struct EPMCSearchResponse: Codable {
     let hitCount: String
     let nextCursorMark: String?
     let resultList: EPMCResultList
+
+    /// Custom decoder to handle missing or null resultList gracefully.
+    ///
+    /// The Europe PMC API may return null or omit resultList entirely
+    /// when no results are found.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hitCount = try container.decodeIfPresent(String.self, forKey: .hitCount) ?? "0"
+        nextCursorMark = try container.decodeIfPresent(String.self, forKey: .nextCursorMark)
+        resultList = try container.decodeIfPresent(EPMCResultList.self, forKey: .resultList)
+            ?? EPMCResultList(result: [])
+    }
 }
 
 /// Result list container.
 private struct EPMCResultList: Codable {
     let result: [EPMCResult]
+
+    /// Direct initializer for creating an empty result list.
+    init(result: [EPMCResult]) {
+        self.result = result
+    }
 
     /// Custom decoder to handle missing or null result arrays gracefully.
     ///

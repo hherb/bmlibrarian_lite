@@ -104,6 +104,9 @@ actor EuropePMCService {
             throw EuropePMCError.invalidURL
         }
 
+        // Log the query URL for debugging
+        AppLogger.network.info("Europe PMC query: \(url.absoluteString)")
+
         // Execute request with retry
         let data = try await RetryHelper.retry(
             config: .networkDefault,
@@ -369,12 +372,29 @@ private struct EPMCSearchResponse: Codable {
 
     /// Container for result list.
     let resultList: EPMCResultList
+
+    /// Custom decoder to handle missing or null resultList gracefully.
+    ///
+    /// The Europe PMC API may return null or omit resultList entirely
+    /// when no results are found.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hitCount = try container.decodeIfPresent(String.self, forKey: .hitCount) ?? "0"
+        nextCursorMark = try container.decodeIfPresent(String.self, forKey: .nextCursorMark)
+        resultList = try container.decodeIfPresent(EPMCResultList.self, forKey: .resultList)
+            ?? EPMCResultList(result: [])
+    }
 }
 
 /// Container for result array.
 private struct EPMCResultList: Codable {
     /// Array of article results.
     let result: [EPMCResult]
+
+    /// Direct initializer for creating an empty result list.
+    init(result: [EPMCResult]) {
+        self.result = result
+    }
 
     /// Custom decoder to handle missing or null result arrays gracefully.
     ///
