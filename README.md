@@ -8,10 +8,23 @@ A lightweight biomedical literature research tool - no PostgreSQL required.
 
 BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database nor a powerful GPU and fast memory for local AI. It uses only the PubMed E-utilities API for searching and fetching article metadata instead of a local database. It uses SQLite with sqlite-vec for vector storage and metadata, making it easy to install and use on any machine. Also, in order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows to use cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference. Using local models with ollama is optional.
 
+## Platform Support
+
+BMLibrarian Lite is available on multiple platforms:
+
+| Platform | Technology | Status |
+|----------|------------|--------|
+| **Desktop** | Python/PySide6 | Production |
+| **iOS** | Swift/SwiftUI | Production |
+| **macOS** | Swift/SwiftUI | Production |
+| **Android** | Kotlin/Jetpack Compose | Production |
 
 ## Features
 
 ### Desktop Application (Python/PySide6)
+
+Cross-platform desktop application for comprehensive systematic literature review.
+
 - **Systematic Literature Review**: Search PubMed, score documents, extract citations, and generate reports
 - **Document Interrogation**: Interactive Q&A with loaded documents
 - **PDF Discovery & Download**: Automatic PDF retrieval from PubMed Central, Unpaywall, and DOI resolution
@@ -23,19 +36,42 @@ BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered
 - **Unified SQLite Storage**: Single database for metadata and vector embeddings - no external database needed
 
 ### iOS App (Swift/SwiftUI)
-- **Medical Fact Checker**: Native iOS app for fact-checking medical claims on-the-go
+
+Native iOS app for medical fact-checking on-the-go.
+
+- **Medical Fact Checker**: Verify medical claims against peer-reviewed literature
 - **Dual Scoring System**: LLM-based relevance scoring plus on-device NLEmbedding semantic similarity
 - **HyDE Enhancement**: Hypothetical Document Embedding for improved semantic matching
 - **Budget Controls**: Per-run and monthly spending limits with real-time cost tracking
 - **SwiftData Persistence**: Local storage of sessions, documents, citations, and reports
 - **Clickable Citations**: Tap references in reports to view source document details
 - **Smart Search**: Automatic alternative query generation when initial results are insufficient
+- **iCloud Sync**: CloudKit integration for syncing data across devices
 
 ### macOS App (Swift/SwiftUI)
-- **Standalone Project**: Separate Xcode project designed for platform-specific evolution
+
+Native macOS app optimized for desktop workflows.
+
 - **Native macOS UI**: Optimized layouts for larger screens with keyboard navigation
 - **PDF Export**: Native AppKit-based PDF generation with A4/Letter paper sizes
+- **Full-Text Viewer**: View retrieved full-text articles with JATS XML rendering
+- **Hybrid Search**: Search both PubMed and Europe PMC simultaneously
+- **iCloud Sync**: CloudKit integration for syncing with iOS devices
 - **Future-Ready**: Architecture prepared for local LLM processing and PostgreSQL backend
+
+### Android App (Kotlin/Jetpack Compose)
+
+Native Android app with Material 3 design.
+
+- **Material 3 Design**: Modern UI following Google's Material You guidelines
+- **Medical Fact Checker**: Same fact-checking workflow as iOS/macOS
+- **Jetpack Compose UI**: Declarative, modern Android UI toolkit
+- **Room Database**: Local persistence with SQLite via Room
+- **Hilt Dependency Injection**: Clean architecture with Dagger Hilt
+- **Budget Controls**: Per-run and monthly spending limits
+- **Multiple Search Providers**: Support for PubMed and Europe PMC
+- **PDF Export**: Generate evidence reports as PDF documents
+- **Session History**: Browse and revisit past fact-check sessions
 
 ## Quick Start
 
@@ -150,6 +186,32 @@ xcodebuild -project MedicalFactCheckerMac.xcodeproj \
 
 The macOS app shares the same core functionality as iOS but is designed to evolve independently with features like local LLM support and PostgreSQL backend.
 
+### Android App
+
+The Android app is located in `android/MedicalFactChecker/`. To build:
+
+1. **Open in Android Studio**: Open the `android/MedicalFactChecker` directory
+2. **Sync Gradle**: Android Studio will automatically sync dependencies
+3. **Build and run**: Select your target device/emulator and click Run
+
+**Or build from command line:**
+```bash
+cd android/MedicalFactChecker
+./gradlew assembleDebug
+```
+
+**Configuration in Android:**
+- Open Settings screen to configure:
+  - LLM provider and API endpoint (OpenAI, Anthropic, or custom)
+  - API key (stored securely in EncryptedSharedPreferences)
+  - NCBI email for PubMed API
+  - Per-run and monthly budget limits
+  - Search provider preferences (PubMed, Europe PMC, or both)
+
+**Requirements:**
+- Android 8.0 (API 26) or higher
+- Internet connection for API access
+
 ## Usage
 
 ### Systematic Review Workflow
@@ -211,6 +273,21 @@ Right-click any document card to send it to the Document Interrogator for deeper
 - LLM scores use AI reasoning about document relevance
 - Embedding scores use on-device NLEmbedding with HyDE (Hypothetical Document Embedding)
 - Agreement indicators show when scores align or differ
+
+### Android Medical Fact Checker
+
+1. **Enter a medical claim** on the Fact Check screen
+2. **Tap "Check"** to start the fact-checking workflow
+3. **Review scored documents** as they are processed
+4. **Optionally fetch more documents** if initial results are insufficient
+5. **View the evidence report** with verdict badge and supporting citations
+6. **Tap references** to view source document details
+7. **Export as PDF** to share or save the report
+
+**Features:**
+- Progress indicators show each workflow step
+- Budget tracking displays estimated costs before and during runs
+- History tab shows all past sessions for easy reference
 
 ### Document Interrogation
 
@@ -289,20 +366,21 @@ You can also use the model string format: `anthropic:claude-sonnet-4-20250514` o
 
 BMLibrarian Lite is designed for ease of use and portability:
 
-| Feature | BMLibrarian | Desktop (Python) | iOS App | macOS App |
-|---------|-------------|------------------|---------|-----------|
-| Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData | SwiftData* |
-| Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding | Apple NLEmbedding |
-| PDF Discovery | Full | Included | N/A | N/A |
-| PDF Export | N/A | N/A | Included | Included |
-| Multi-Agent Workflow | Full orchestration | Simplified | Streamlined | Streamlined |
-| Plugin System | Lab plugins | N/A | N/A | N/A |
-| Multi-Model Benchmarking | N/A | Included | N/A | N/A |
-| Research Questions | N/A | Save & re-run | History view | History view |
-| Budget Controls | N/A | N/A | Per-run & monthly | Per-run & monthly |
-| HyDE Embedding | N/A | N/A | Included | Included |
-| Local LLM Support | N/A | Ollama | N/A | Planned |
-| Installation | Complex | `pip install` | Xcode build | Xcode build |
+| Feature | BMLibrarian | Desktop (Python) | iOS App | macOS App | Android App |
+|---------|-------------|------------------|---------|-----------|-------------|
+| Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData | SwiftData* | Room (SQLite) |
+| Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding | Apple NLEmbedding | N/A |
+| PDF Discovery | Full | Included | N/A | N/A | N/A |
+| PDF Export | N/A | N/A | Included | Included | Included |
+| Multi-Agent Workflow | Full orchestration | Simplified | Streamlined | Streamlined | Streamlined |
+| Plugin System | Lab plugins | N/A | N/A | N/A | N/A |
+| Multi-Model Benchmarking | N/A | Included | N/A | N/A | N/A |
+| Research Questions | N/A | Save & re-run | History view | History view | History view |
+| Budget Controls | N/A | N/A | Per-run & monthly | Per-run & monthly | Per-run & monthly |
+| HyDE Embedding | N/A | N/A | Included | Included | N/A |
+| Local LLM Support | N/A | Ollama | N/A | Planned | N/A |
+| Search Providers | N/A | PubMed | PubMed + Europe PMC | PubMed + Europe PMC | PubMed + Europe PMC |
+| Installation | Complex | `pip install` | Xcode build | Xcode build | Android Studio |
 
 *macOS app is designed to support PostgreSQL backend in future versions.
 
