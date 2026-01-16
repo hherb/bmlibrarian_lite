@@ -116,4 +116,18 @@ public enum BioMedLitConstants {
 
     /// PDF filename prefix.
     public static let pdfFilenamePrefix = "article_"
+
+    // MARK: - Formatting Constants
+
+    /// Maximum authors to display before using "et al."
+    public static let maxAuthorsBeforeEtAl = 3
+
+    /// Maximum heading level for markdown/HTML (h1-h6).
+    public static let maxHeadingLevel = 6
+
+    /// Minimum PMID length for pattern matching.
+    public static let minPMIDLength = 7
+
+    /// PDF magic bytes ("%PDF").
+    public static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
 }

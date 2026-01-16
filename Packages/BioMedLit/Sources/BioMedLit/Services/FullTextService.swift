@@ -174,11 +174,11 @@ public actor FullTextService {
 
         let statusCode = httpResponse.statusCode
         switch statusCode {
-        case 200:
+        case BioMedLitConstants.httpStatusOK:
             break  // Success, continue to parse
-        case 404:
+        case BioMedLitConstants.httpStatusNotFound:
             throw FullTextError.noFullTextAvailable
-        case 429, 500, 502, 503, 504:
+        case _ where BioMedLitConstants.retryableStatusCodes.contains(statusCode):
             // Server errors and rate limiting - retryable
             BioMedLit.logger?.warning(
                 "Europe PMC server error (\(statusCode)), will retry with backoff",
@@ -244,8 +244,8 @@ public actor FullTextService {
 
         BioMedLit.logger?.debug("Unpaywall response status: \(httpResponse.statusCode)", category: .fullText)
 
-        guard httpResponse.statusCode == 200 else {
-            if httpResponse.statusCode == 404 {
+        guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
+            if httpResponse.statusCode == BioMedLitConstants.httpStatusNotFound {
                 throw FullTextError.noFullTextAvailable
             }
             throw FullTextError.invalidResponse("HTTP \(httpResponse.statusCode)")
@@ -306,13 +306,14 @@ public actor FullTextService {
         }
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
             throw FullTextError.pdfDownloadFailed("Invalid response")
         }
 
-        // Verify it looks like a PDF
-        guard data.count > 4,
-              data.prefix(4) == Data([0x25, 0x50, 0x44, 0x46]) else {  // %PDF
+        // Verify it looks like a PDF by checking magic bytes (%PDF)
+        let pdfMagic = Data(BioMedLitConstants.pdfMagicBytes)
+        guard data.count > pdfMagic.count,
+              data.prefix(pdfMagic.count) == pdfMagic else {
             throw FullTextError.pdfDownloadFailed("Response is not a valid PDF")
         }
 

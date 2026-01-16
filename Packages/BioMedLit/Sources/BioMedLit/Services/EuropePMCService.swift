@@ -82,7 +82,9 @@ public actor EuropePMCService {
         }
 
         // Build URL
-        var components = URLComponents(string: BioMedLitConstants.europePMCSearchURL)!
+        guard var components = URLComponents(string: BioMedLitConstants.europePMCSearchURL) else {
+            throw EuropePMCError.invalidQuery("Invalid search URL configuration")
+        }
         components.queryItems = [
             URLQueryItem(name: "query", value: fullQuery),
             URLQueryItem(name: "format", value: "json"),

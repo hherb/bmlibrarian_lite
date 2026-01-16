@@ -100,7 +100,6 @@ public final class JATSXMLParser: NSObject {
 
     // Figure/Table state
     private var inFigure = false
-    private var inTable = false
     private var inTableWrap = false
     private var currentFigure: FigureBuilder?
     private var currentTable: TableBuilder?
@@ -384,10 +383,12 @@ public final class JATSXMLParser: NSObject {
             return name
         }
 
-        if authorNames.count <= 3 {
+        let maxAuthors = BioMedLitConstants.maxAuthorsBeforeEtAl
+        if authorNames.count <= maxAuthors {
             return authorNames.joined(separator: ", ")
         } else {
-            return "\(authorNames[0]), \(authorNames[1]), \(authorNames[2]) et al."
+            let firstAuthors = authorNames.prefix(maxAuthors).joined(separator: ", ")
+            return "\(firstAuthors) et al."
         }
     }
 
@@ -478,7 +479,7 @@ public final class JATSXMLParser: NSObject {
     /// Format a body section recursively.
     private func formatBodySection(_ section: JATSBodySection, level: Int) -> [String] {
         var lines: [String] = []
-        let headingPrefix = String(repeating: "#", count: min(level, 6))
+        let headingPrefix = String(repeating: "#", count: min(level, BioMedLitConstants.maxHeadingLevel))
 
         if !section.title.isEmpty {
             lines.append("\(headingPrefix) \(section.title)")
@@ -653,7 +654,7 @@ public final class JATSXMLParser: NSObject {
     /// Format a body section recursively as HTML.
     private func formatBodySectionHTML(_ section: JATSBodySection, level: Int) -> [String] {
         var html: [String] = []
-        let headingLevel = min(level, 6)
+        let headingLevel = min(level, BioMedLitConstants.maxHeadingLevel)
 
         if !section.title.isEmpty {
             html.append("<h\(headingLevel)>\(escapeHTML(section.title))</h\(headingLevel)>")
@@ -760,11 +761,13 @@ public final class JATSXMLParser: NSObject {
         var parts: [String] = []
 
         // Authors
+        let maxAuthors = BioMedLitConstants.maxAuthorsBeforeEtAl
         if !ref.authors.isEmpty {
-            if ref.authors.count <= 3 {
+            if ref.authors.count <= maxAuthors {
                 parts.append(escapeHTML(ref.authors.joined(separator: ", ")))
             } else {
-                parts.append(escapeHTML("\(ref.authors[0]), \(ref.authors[1]), et al."))
+                let firstAuthors = ref.authors.prefix(maxAuthors - 1).joined(separator: ", ")
+                parts.append(escapeHTML("\(firstAuthors), et al."))
             }
         }
 
@@ -1386,7 +1389,7 @@ extension JATSXMLParser: XMLParserDelegate {
             doi = text
         } else if text.hasPrefix("PMC") {
             pmcId = text
-        } else if text.allSatisfy({ $0.isNumber }) && text.count >= 7 {
+        } else if text.allSatisfy({ $0.isNumber }) && text.count >= BioMedLitConstants.minPMIDLength {
             // Pure numeric ID - could be PMID or PMC ID
             // Store in both if empty (PMC ID detection takes priority for figures)
             if pmid.isEmpty {
