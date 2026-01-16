@@ -1,21 +1,48 @@
 # Medical Fact Checker - iOS App
 
-A lightweight iOS app (iPhone/iPad) that fact-checks medical claims using PubMed literature and an OpenAI-compatible LLM API.
+A native iOS app (iPhone/iPad) for medical fact-checking using biomedical literature and AI-powered evidence synthesis.
 
 ## Features
 
-- **Medical claim fact-checking**: Enter a medical statement or question and get an evidence-based report
-- **PubMed integration**: Searches medical literature via NCBI E-utilities API
-- **Multiple LLM providers**: Pre-configured support for Anthropic (Claude), OpenAI, DeepSeek, Groq, Mistral, and Ollama
+### Literature Search
+- **Multi-provider search**: Search PubMed, Europe PMC, or both simultaneously with intelligent deduplication
+- **Europe PMC integration**: Access to full-text articles, preprints from 34+ servers (bioRxiv, medRxiv, etc.)
+- **PubMed integration**: NCBI E-utilities API for comprehensive biomedical literature
+- **Query translation**: Automatic syntax translation between search providers
+- **Preprint filtering**: Optional exclusion of preprints when using Europe PMC
+
+### Full-Text Access
+- **Multi-source retrieval**: Automatic fallback chain for full-text content:
+  1. Europe PMC XML (converted to readable markdown)
+  2. Unpaywall PDF (open access)
+  3. DOI resolution (publisher website)
+- **JATS XML parsing**: Converts PubMed Central/Europe PMC XML to formatted markdown
+- **PDF viewer**: Built-in PDF display with download and caching
+- **Source badges**: Visual indicators showing content source
+
+### AI-Powered Analysis
+- **Multiple LLM providers**: Anthropic (Claude), OpenAI, DeepSeek, Groq, Mistral, Ollama, and custom endpoints
 - **Dynamic model fetching**: Automatically fetches available models from provider APIs
 - **Dual scoring system**: LLM relevance scoring plus optional on-device NLEmbedding semantic similarity
 - **HyDE scoring**: Hypothetical Document Embedding for improved semantic matching
-- **Citation extraction**: Extracts key passages from relevant documents with clickable references
-- **Evidence synthesis**: Generates verdicts with supporting citations and model info footnote
-- **PDF export**: Export reports to PDF with configurable paper size (A4/Letter)
-- **Cost tracking**: Per-run and monthly budget limits with real-time cost display
-- **History**: Browse, share, and export past fact-check reports
-- **Disclaimer**: First-launch disclaimer explaining AI limitations
+- **Citation extraction**: Extracts key passages with clickable references
+- **Evidence synthesis**: Generates verdicts with supporting citations
+
+### Cloud Sync
+- **iCloud integration**: Optional CloudKit sync across devices (opt-in, disabled by default)
+- **Privacy-first**: Data stays local unless you explicitly enable sync
+- **SwiftData persistence**: All sessions, documents, and reports stored locally
+
+### Export & Sharing
+- **PDF export**: Generate PDF reports with configurable paper size (A4/Letter)
+- **Share sheet**: Native sharing of reports and evidence
+- **History browser**: Browse, search, and revisit past fact-check sessions
+
+### Cost Management
+- **Per-run budget**: Set maximum cost per fact-check
+- **Monthly budget**: Cap monthly spending across all sessions
+- **Real-time tracking**: View token usage and costs during workflow
+- **Model pricing**: Built-in pricing data for all supported models
 
 ## Requirements
 
@@ -54,14 +81,15 @@ Models are fetched dynamically from provider APIs when an API key is configured.
 1. Enter a medical claim or question in the main view
 2. Tap "Check Evidence"
 3. The app will:
-   - Convert your claim to a PubMed search query
-   - Fetch documents from PubMed
+   - Convert your claim to an optimized search query
+   - Fetch documents from PubMed and/or Europe PMC (based on settings)
    - Score each document for relevance (LLM + optional embedding)
    - Ask to fetch more if not enough relevant docs found
    - Extract citations from relevant documents
    - Generate an evidence report with verdict
 4. View the report with clickable document references
-5. Export to PDF or share
+5. Tap any document to view full text (when available)
+6. Export to PDF or share
 
 ## Configuration Options
 
@@ -69,45 +97,56 @@ Models are fetched dynamically from provider APIs when an API key is configured.
 |---------|---------|-------------|
 | Provider | Anthropic | LLM API provider |
 | Model | Claude Sonnet 4.5 | Model for inference |
+| Search Provider | PubMed | PubMed, Europe PMC, or Both |
+| Include Preprints | Off | Include preprints (Europe PMC only) |
 | Embedding Scoring | Off | Enable on-device NLEmbedding scoring |
-| Batch Size | 20 | Documents to fetch per PubMed batch |
+| Batch Size | 20 | Documents to fetch per batch |
 | Min Relevant Docs | 5 | Minimum relevant docs before prompting for more |
 | Min Score Threshold | 3 | Score threshold for "relevant" (1-5) |
 | Per-Run Budget | $1.00 | Maximum cost per fact-check |
 | Monthly Budget | $10.00 | Maximum monthly spending |
+| iCloud Sync | Off | Sync data across devices via CloudKit |
 
 ## Architecture
 
 ```
 Sources/
-├── App/                    # App entry point and main views
-│   ├── MedicalFactCheckerApp  # URL handling, disclaimer
+├── App/                       # App entry point and main views
+│   ├── MedicalFactCheckerApp  # URL handling, CloudKit init, disclaimer
 │   └── ContentView            # Tab-based navigation
-├── Models/                 # SwiftData models and enums
-│   ├── FactCheckSession   # Main workflow session
-│   ├── Document           # PubMed article with dual scoring
-│   ├── Citation           # Extracted passage
-│   ├── EvidenceReport     # Final report
-│   ├── UsageRecord        # Token/cost tracking
-│   ├── AppSettings        # User configuration
-│   └── LLMProvider        # Provider presets with models
-├── Services/              # Business logic
-│   ├── LLMService         # OpenAI-compatible API client with retry
-│   ├── PubMedService      # PubMed E-utilities client
-│   ├── EmbeddingService   # NLEmbedding scoring with HyDE
-│   ├── ModelFetchService  # Dynamic model fetching from APIs
-│   └── FactCheckWorkflow  # Workflow orchestrator
-├── Views/                 # SwiftUI views
-│   ├── FactCheck/         # Main input view, scored documents
-│   ├── Report/            # Report display with markdown rendering
-│   ├── History/           # Past sessions
-│   ├── Settings/          # Configuration with model pricing
-│   └── Onboarding/        # Disclaimer view
-└── Utilities/             # Helpers
-    ├── KeychainHelper     # Secure storage
-    ├── CostCalculator     # Token cost estimation
-    ├── ResponseParser     # LLM response parsing
-    └── PDFExporter        # PDF generation
+├── Models/                    # SwiftData models and enums
+│   ├── FactCheckSession       # Main workflow session (CloudKit-ready)
+│   ├── Document               # Article with dual scoring, full-text state
+│   ├── Citation               # Extracted passage
+│   ├── EvidenceReport         # Final report
+│   ├── UsageRecord            # Token/cost tracking
+│   ├── AppSettings            # User configuration
+│   ├── LLMProvider            # Provider presets with models
+│   ├── SearchProvider         # PubMed, Europe PMC, or Both
+│   └── FullTextSource         # Source tracking for full-text content
+├── Services/                  # Business logic
+│   ├── LLMService             # OpenAI-compatible API client with retry
+│   ├── PubMedService          # PubMed E-utilities client
+│   ├── EuropePMCService       # Europe PMC REST API client
+│   ├── FullTextService        # Multi-source full-text retrieval
+│   ├── EmbeddingService       # NLEmbedding scoring with HyDE
+│   ├── ModelFetchService      # Dynamic model fetching from APIs
+│   ├── CloudKitConfiguration  # iCloud sync management
+│   └── FactCheckWorkflow      # Workflow orchestrator
+├── Views/                     # SwiftUI views
+│   ├── FactCheck/             # Main input view, scored documents
+│   ├── FullText/              # Full-text viewer with source badges
+│   ├── Report/                # Report display with markdown rendering
+│   ├── History/               # Past sessions
+│   ├── Settings/              # Configuration with model pricing
+│   └── Onboarding/            # Disclaimer view
+└── Utilities/                 # Helpers
+    ├── KeychainHelper         # Secure credential storage
+    ├── CostCalculator         # Token cost estimation
+    ├── ResponseParser         # LLM response parsing
+    ├── JATSXMLParser          # Europe PMC XML to markdown
+    ├── SearchResultMerger     # Multi-provider deduplication
+    └── PDFExporter            # PDF generation
 ```
 
 ## Scoring Methods
