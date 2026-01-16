@@ -87,6 +87,44 @@ object Constants {
     /** Animation duration for card expansion in milliseconds. */
     const val CARD_ANIMATION_DURATION_MS = 300
 
+    // ==================== UI Spacing (in dp) ====================
+
+    /** Standard screen padding. */
+    const val UI_SCREEN_PADDING = 16
+
+    /** Standard spacing between major UI sections. */
+    const val UI_SECTION_SPACING = 16
+
+    /** Standard padding inside cards. */
+    const val UI_CARD_PADDING = 16
+
+    /** Smaller padding inside compact components. */
+    const val UI_CARD_PADDING_SMALL = 12
+
+    /** Standard spacing between related elements. */
+    const val UI_ELEMENT_SPACING = 8
+
+    /** Small spacing between tightly grouped elements. */
+    const val UI_ELEMENT_SPACING_SMALL = 4
+
+    /** Horizontal padding for badges and chips. */
+    const val UI_BADGE_PADDING_HORIZONTAL = 8
+
+    /** Vertical padding for badges and chips. */
+    const val UI_BADGE_PADDING_VERTICAL = 2
+
+    /** Large padding for placeholder/empty state sections. */
+    const val UI_PLACEHOLDER_PADDING = 32
+
+    /** Spacing between icon and text. */
+    const val UI_ICON_TEXT_SPACING = 12
+
+    /** Standard icon size. */
+    const val UI_ICON_SIZE = 18
+
+    /** Large icon size for placeholder screens. */
+    const val UI_ICON_SIZE_LARGE = 64
+
     // ==================== LLM Configuration ====================
 
     /** Default temperature for LLM requests (0.0 = deterministic). */
