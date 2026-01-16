@@ -15,16 +15,18 @@ import SwiftData
 final class Document {
     // MARK: - Identification
 
-    @Attribute(.unique) var id: String  // "pmid-12345678"
-    var pmid: String
-    var title: String
-    var abstract: String
+    /// Unique identifier for this document (format: "pmid-12345678").
+    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    var id: String = ""
+    var pmid: String = ""
+    var title: String = ""
+    var abstract: String = ""
 
     // MARK: - Metadata
 
     /// Document authors (stored as transformable for CoreData compatibility).
     @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
-    var authors: [String]
+    var authors: [String] = []
 
     var year: Int?
     var journal: String?
@@ -33,7 +35,7 @@ final class Document {
 
     /// MeSH terms for the document (stored as transformable for CoreData compatibility).
     @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
-    var meshTerms: [String]
+    var meshTerms: [String] = []
 
     var publicationDate: String?
 
@@ -77,10 +79,10 @@ final class Document {
     // MARK: - Batch Tracking
 
     /// Which batch this document was fetched in (1-indexed).
-    var batchNumber: Int
+    var batchNumber: Int = 1
 
     /// Position within the PubMed results (0-indexed).
-    var resultPosition: Int
+    var resultPosition: Int = 0
 
     // MARK: - Full Text
 
@@ -115,10 +117,19 @@ final class Document {
     var session: FactCheckSession?
 
     @Relationship(deleteRule: .cascade, inverse: \Citation.document)
-    var citations: [Citation]
+    var citations: [Citation] = []
 
     // MARK: - Initialization
 
+    /// Creates a new document from PubMed metadata.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed identifier.
+    ///   - title: Article title.
+    ///   - abstract: Article abstract text.
+    ///   - authors: Author names (defaults to empty).
+    ///   - batchNumber: Which batch this document was fetched in (1-indexed).
+    ///   - resultPosition: Position within search results (0-indexed).
     init(
         pmid: String,
         title: String,
@@ -134,8 +145,6 @@ final class Document {
         self.authors = authors
         self.batchNumber = batchNumber
         self.resultPosition = resultPosition
-        self.meshTerms = []
-        self.citations = []
     }
 
     // MARK: - Computed Properties

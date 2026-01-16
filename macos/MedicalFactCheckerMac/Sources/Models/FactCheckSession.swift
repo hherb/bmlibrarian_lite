@@ -16,28 +16,30 @@ import SwiftData
 final class FactCheckSession {
     // MARK: - Identification
 
-    @Attribute(.unique) var id: UUID
-    var claim: String
+    /// Unique identifier for this session.
+    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    var id: UUID = UUID()
+    var claim: String = ""
     var pubmedQuery: String?
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
 
     // MARK: - Workflow State
 
-    var currentStep: WorkflowStep
+    var currentStep: WorkflowStep = .idle
     var errorMessage: String?
     var stopReason: StopReason?
 
     // MARK: - Search State (for batch pagination)
 
     /// Total results available in PubMed for this query.
-    var totalPubMedResults: Int
+    var totalPubMedResults: Int = 0
 
     /// Current offset for next batch fetch.
-    var currentSearchOffset: Int
+    var currentSearchOffset: Int = 0
 
     /// Number of batches fetched so far.
-    var batchesFetched: Int
+    var batchesFetched: Int = 0
 
     // MARK: - Search Provider State
 
@@ -80,21 +82,21 @@ final class FactCheckSession {
 
     // MARK: - Progress Tracking
 
-    var documentsFound: Int
-    var documentsScored: Int
-    var relevantDocumentsFound: Int
-    var citationsExtracted: Int
+    var documentsFound: Int = 0
+    var documentsScored: Int = 0
+    var relevantDocumentsFound: Int = 0
+    var citationsExtracted: Int = 0
 
     // MARK: - Cost Tracking
 
     /// Total input tokens used in this session.
-    var totalInputTokens: Int
+    var totalInputTokens: Int = 0
 
     /// Total output tokens used in this session.
-    var totalOutputTokens: Int
+    var totalOutputTokens: Int = 0
 
     /// Estimated cost in USD for this session.
-    var estimatedCostUSD: Double
+    var estimatedCostUSD: Double = 0.0
 
     // MARK: - Model Information
 
@@ -107,32 +109,18 @@ final class FactCheckSession {
     // MARK: - Relationships
 
     @Relationship(deleteRule: .cascade, inverse: \Document.session)
-    var documents: [Document]
+    var documents: [Document] = []
 
     @Relationship(deleteRule: .cascade, inverse: \EvidenceReport.session)
     var report: EvidenceReport?
 
     // MARK: - Initialization
 
+    /// Creates a new fact-check session for the given claim.
+    ///
+    /// - Parameter claim: The medical claim to fact-check.
     init(claim: String) {
-        self.id = UUID()
         self.claim = claim
-        self.createdAt = Date()
-        self.updatedAt = Date()
-        self.currentStep = .idle
-        self.documents = []
-        self.totalPubMedResults = 0
-        self.currentSearchOffset = 0
-        self.batchesFetched = 0
-        self.smartSearchEnabled = false
-        self.currentAlternativeQueryIndex = 0
-        self.documentsFound = 0
-        self.documentsScored = 0
-        self.relevantDocumentsFound = 0
-        self.citationsExtracted = 0
-        self.totalInputTokens = 0
-        self.totalOutputTokens = 0
-        self.estimatedCostUSD = 0.0
     }
 
     // MARK: - Computed Properties

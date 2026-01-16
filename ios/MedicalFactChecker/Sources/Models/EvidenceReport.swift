@@ -16,32 +16,34 @@ import SwiftData
 final class EvidenceReport {
     // MARK: - Identification
 
-    @Attribute(.unique) var id: UUID
+    /// Unique identifier for this report.
+    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    var id: UUID = UUID()
 
     // MARK: - Content
 
     /// The evidence verdict (supported, refuted, etc.).
-    var verdict: Verdict
+    var verdict: Verdict = .insufficientEvidence
 
     /// Brief 2-3 sentence summary of findings.
-    var summary: String
+    var summary: String = ""
 
     /// Full markdown report with citations.
-    var fullReport: String
+    var fullReport: String = ""
 
     /// When the report was generated.
-    var generatedAt: Date
+    var generatedAt: Date = Date()
 
     // MARK: - Statistics
 
     /// Number of citations included in the report.
-    var citationCount: Int
+    var citationCount: Int = 0
 
     /// Number of unique sources (documents) cited.
-    var uniqueSourceCount: Int
+    var uniqueSourceCount: Int = 0
 
     /// Number of documents reviewed total.
-    var documentsReviewed: Int
+    var documentsReviewed: Int = 0
 
     // MARK: - Relationships
 
@@ -49,6 +51,15 @@ final class EvidenceReport {
 
     // MARK: - Initialization
 
+    /// Creates a new evidence report.
+    ///
+    /// - Parameters:
+    ///   - verdict: The evidence verdict (supported, refuted, etc.).
+    ///   - summary: Brief 2-3 sentence summary of findings.
+    ///   - fullReport: Full markdown report with citations.
+    ///   - citationCount: Number of citations included.
+    ///   - uniqueSourceCount: Number of unique sources cited.
+    ///   - documentsReviewed: Total documents reviewed.
     init(
         verdict: Verdict,
         summary: String,
@@ -57,11 +68,9 @@ final class EvidenceReport {
         uniqueSourceCount: Int,
         documentsReviewed: Int
     ) {
-        self.id = UUID()
         self.verdict = verdict
         self.summary = summary
         self.fullReport = fullReport
-        self.generatedAt = Date()
         self.citationCount = citationCount
         self.uniqueSourceCount = uniqueSourceCount
         self.documentsReviewed = documentsReviewed

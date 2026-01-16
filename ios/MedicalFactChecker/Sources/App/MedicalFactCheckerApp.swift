@@ -11,8 +11,12 @@ import SwiftData
 @main
 struct MedicalFactCheckerApp: App {
     var sharedModelContainer: ModelContainer = {
+        // Clear any pending config change flag from previous launch
+        CloudKitConfiguration.clearPendingChange()
+
         // Register custom transformer before creating the container
         StringArrayTransformer.register()
+
         let schema = Schema([
             FactCheckSession.self,
             Document.self,
@@ -20,11 +24,9 @@ struct MedicalFactCheckerApp: App {
             EvidenceReport.self,
             UsageRecord.self,
         ])
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
-        )
+
+        // Use CloudKitConfiguration to determine sync settings
+        let modelConfiguration = CloudKitConfiguration.makeModelConfiguration(schema: schema)
 
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])

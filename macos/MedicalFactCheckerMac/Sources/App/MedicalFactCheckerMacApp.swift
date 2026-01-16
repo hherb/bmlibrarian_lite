@@ -17,6 +17,9 @@ struct MedicalFactCheckerMacApp: App {
     static let mainWindowID = "main-window"
 
     var sharedModelContainer: ModelContainer = {
+        // Clear any pending config change flag from previous launch
+        CloudKitConfiguration.clearPendingChange()
+
         // Register custom transformer before creating the container
         StringArrayTransformer.register()
 
@@ -27,11 +30,9 @@ struct MedicalFactCheckerMacApp: App {
             EvidenceReport.self,
             UsageRecord.self,
         ])
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
-        )
+
+        // Use CloudKitConfiguration to determine sync settings
+        let modelConfiguration = CloudKitConfiguration.makeModelConfiguration(schema: schema)
 
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])

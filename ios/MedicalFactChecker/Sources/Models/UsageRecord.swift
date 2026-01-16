@@ -16,36 +16,47 @@ import SwiftData
 final class UsageRecord {
     // MARK: - Identification
 
-    @Attribute(.unique) var id: UUID
+    /// Unique identifier for this usage record.
+    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    var id: UUID = UUID()
 
     /// Which session this usage belongs to.
-    var sessionId: UUID
+    var sessionId: UUID = UUID()
 
     /// When the usage occurred.
-    var timestamp: Date
+    var timestamp: Date = Date()
 
     /// Year-month string for monthly aggregation (e.g., "2024-01").
-    var monthKey: String
+    var monthKey: String = ""
 
     // MARK: - Usage Details
 
     /// Model used for this call.
-    var model: String
+    var model: String = ""
 
     /// Number of input tokens.
-    var inputTokens: Int
+    var inputTokens: Int = 0
 
     /// Number of output tokens.
-    var outputTokens: Int
+    var outputTokens: Int = 0
 
     /// Estimated cost in USD.
-    var costUSD: Double
+    var costUSD: Double = 0.0
 
     /// Type of operation (scoring, citation, report, query).
-    var operationType: String
+    var operationType: String = ""
 
     // MARK: - Initialization
 
+    /// Creates a new usage record.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session this usage belongs to.
+    ///   - model: Model used for this call.
+    ///   - inputTokens: Number of input tokens.
+    ///   - outputTokens: Number of output tokens.
+    ///   - costUSD: Estimated cost in USD.
+    ///   - operationType: Type of operation (scoring, citation, report, query).
     init(
         sessionId: UUID,
         model: String,
@@ -54,9 +65,7 @@ final class UsageRecord {
         costUSD: Double,
         operationType: String
     ) {
-        self.id = UUID()
         self.sessionId = sessionId
-        self.timestamp = Date()
         self.model = model
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens

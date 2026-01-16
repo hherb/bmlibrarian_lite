@@ -16,18 +16,20 @@ import SwiftData
 final class Citation {
     // MARK: - Identification
 
-    @Attribute(.unique) var id: UUID
+    /// Unique identifier for this citation.
+    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    var id: UUID = UUID()
 
     // MARK: - Content
 
     /// The extracted passage/quote from the document.
-    var passage: String
+    var passage: String = ""
 
     /// Why this passage is relevant to the claim.
     var context: String?
 
     /// When the citation was extracted.
-    var extractedAt: Date
+    var extractedAt: Date = Date()
 
     // MARK: - Relationships
 
@@ -35,11 +37,14 @@ final class Citation {
 
     // MARK: - Initialization
 
+    /// Creates a new citation with the extracted passage.
+    ///
+    /// - Parameters:
+    ///   - passage: The extracted passage/quote from the document.
+    ///   - context: Why this passage is relevant to the claim.
     init(passage: String, context: String? = nil) {
-        self.id = UUID()
         self.passage = passage
         self.context = context
-        self.extractedAt = Date()
     }
 
     // MARK: - Computed Properties
