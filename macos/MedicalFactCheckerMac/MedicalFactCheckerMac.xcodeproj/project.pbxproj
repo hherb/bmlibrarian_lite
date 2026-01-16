@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */; };
 		A1000001 /* MedicalFactCheckerMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* MedicalFactCheckerMacApp.swift */; };
 		A1000002 /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* MacContentView.swift */; };
 		A1000003 /* MacFactCheckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* MacFactCheckView.swift */; };
@@ -55,6 +56,8 @@
 		A1000046 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000049 /* SearchResultMerger.swift */; };
 		A1000047 /* SearchServiceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SearchServiceFactory.swift */; };
 		A1000048 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051 /* QueryValidator.swift */; };
+		D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */; };
+		DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -75,9 +78,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFetchMoreView.swift; sourceTree = "<group>"; };
 		6FCBC9C52F16568000D6BF11 /* Medical Fact Checker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Medical Fact Checker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6FCBC9D32F16568100D6BF11 /* Medical Fact CheckerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Medical Fact CheckerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6FCBC9DD2F16568100D6BF11 /* Medical Fact CheckerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Medical Fact CheckerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchOptionsToolbar.swift; sourceTree = "<group>"; };
 		A2000001 /* MedicalFactCheckerMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerMacApp.swift; sourceTree = "<group>"; };
 		A2000002 /* MacContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* MacFactCheckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFactCheckView.swift; sourceTree = "<group>"; };
@@ -129,11 +134,32 @@
 		A2000049 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
 		A2000050 /* SearchServiceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceFactory.swift; sourceTree = "<group>"; };
 		A2000051 /* QueryValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValidator.swift; sourceTree = "<group>"; };
+		B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		6FCBC9D62F16568100D6BF11 /* Medical Fact CheckerTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "Medical Fact CheckerTests"; sourceTree = "<group>"; };
-		6FCBC9E02F16568100D6BF11 /* Medical Fact CheckerUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "Medical Fact CheckerUITests"; sourceTree = "<group>"; };
+		6FCBC9D62F16568100D6BF11 /* Medical Fact CheckerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = "Medical Fact CheckerTests";
+			sourceTree = "<group>";
+		};
+		6FCBC9E02F16568100D6BF11 /* Medical Fact CheckerUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = "Medical Fact CheckerUITests";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -227,6 +253,9 @@
 				A2000044 /* MacFullTextTab.swift */,
 				A2000043 /* MacFullTextViewer.swift */,
 				A2000004 /* MacScoredDocumentsView.swift */,
+				7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */,
+				2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */,
+				B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */,
 			);
 			path = FactCheck;
 			sourceTree = "<group>";
@@ -366,8 +395,6 @@
 			dependencies = (
 			);
 			name = "Medical Fact Checker";
-			packageProductDependencies = (
-			);
 			productName = "Medical Fact Checker";
 			productReference = 6FCBC9C52F16568000D6BF11 /* Medical Fact Checker.app */;
 			productType = "com.apple.product-type.application";
@@ -389,8 +416,6 @@
 				6FCBC9D62F16568100D6BF11 /* Medical Fact CheckerTests */,
 			);
 			name = "Medical Fact CheckerTests";
-			packageProductDependencies = (
-			);
 			productName = "Medical Fact CheckerTests";
 			productReference = 6FCBC9D32F16568100D6BF11 /* Medical Fact CheckerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -412,8 +437,6 @@
 				6FCBC9E02F16568100D6BF11 /* Medical Fact CheckerUITests */,
 			);
 			name = "Medical Fact CheckerUITests";
-			packageProductDependencies = (
-			);
 			productName = "Medical Fact CheckerUITests";
 			productReference = 6FCBC9DD2F16568100D6BF11 /* Medical Fact CheckerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -587,6 +610,9 @@
 				A1000048 /* QueryValidator.swift in Sources */,
 				A1000046 /* SearchResultMerger.swift in Sources */,
 				A1000047 /* SearchServiceFactory.swift in Sources */,
+				D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */,
+				2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */,
+				DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

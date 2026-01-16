@@ -110,9 +110,10 @@ DerivedData/
 # Xcode workspace shared data
 **/project.xcworkspace/xcshareddata/
 
-# macOS Xcode test directories
+# macOS Xcode app bundle (generated)
 macos/**/Medical Fact Checker/
-macos/**/Medical Fact CheckerTests/
+
+# macOS Xcode UI tests (not needed for automated testing)
 macos/**/Medical Fact CheckerUITests/
 
 # Research outputs (generated)
