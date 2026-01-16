@@ -139,9 +139,16 @@ final class JATSXMLParser: NSObject {
 
     /// Initialize the parser with XML data.
     ///
-    /// - Parameter data: Raw JATS XML data.
-    init(data: Data) {
+    /// - Parameters:
+    ///   - data: Raw JATS XML data.
+    ///   - knownPMCId: Optional PMC ID if known from external source (e.g., search results).
+    ///                 Used for building figure URLs when the XML doesn't contain the PMC ID.
+    init(data: Data, knownPMCId: String? = nil) {
         self.parser = XMLParser(data: data)
+        // Pre-populate PMC ID if provided
+        if let knownId = knownPMCId, !knownId.isEmpty {
+            self.pmcId = knownId.hasPrefix("PMC") ? knownId : "PMC\(knownId)"
+        }
         super.init()
         parser.delegate = self
     }

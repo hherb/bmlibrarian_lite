@@ -219,8 +219,8 @@ actor FullTextService {
             throw FullTextError.invalidResponse("HTTP \(httpResponse.statusCode)")
         }
 
-        // Parse JATS XML to markdown
-        let parser = JATSXMLParser(data: data)
+        // Parse JATS XML to markdown, passing the known PMC ID for figure URLs
+        let parser = JATSXMLParser(data: data, knownPMCId: normalizedId)
         do {
             return try parser.parseToMarkdown()
         } catch let parseError as JATSParseError {
