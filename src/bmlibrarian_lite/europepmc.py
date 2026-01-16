@@ -1,5 +1,4 @@
-"""
-Europe PMC API client for full-text article retrieval.
+"""Europe PMC API client for full-text article retrieval.
 
 Provides access to full-text articles via the Europe PMC REST API,
 preferring XML full text over PDF downloads for better text extraction.
@@ -25,8 +24,6 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional, List, Tuple
 from html import unescape
 
 import requests
@@ -34,36 +31,60 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .constants import (
-    EUROPEPMC_REST_BASE_URL,
-    EUROPEPMC_SEARCH_URL,
-    EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
-    EUROPEPMC_USER_AGENT,
+    EUROPEPMC_DEFAULT_FILTERS,
+    EUROPEPMC_INITIAL_CURSOR,
     EUROPEPMC_MAX_RETRIES,
+    EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+    EUROPEPMC_REST_BASE_URL,
+    EUROPEPMC_RESULT_TYPE,
+    EUROPEPMC_SEARCH_PAGE_SIZE,
+    EUROPEPMC_SEARCH_URL,
+    EUROPEPMC_SORT_ORDER,
+    EUROPEPMC_SOURCE_PREPRINT,
+    EUROPEPMC_USER_AGENT,
 )
+from .data_models import CursorPaginationState
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ArticleInfo:
-    """Information about an article from Europe PMC."""
+    """Information about an article from Europe PMC.
 
-    pmid: Optional[str] = None
-    pmcid: Optional[str] = None
-    doi: Optional[str] = None
+    Attributes:
+        pmid: PubMed ID
+        pmcid: PubMed Central ID
+        doi: Digital Object Identifier
+        title: Article title
+        authors: List of author names
+        journal: Journal title
+        year: Publication year
+        abstract: Article abstract
+        is_open_access: Whether the article is open access
+        has_fulltext_xml: Whether JATS XML full text is available
+        has_pdf: Whether PDF is available
+        is_preprint: Whether this is a preprint (from PPR source)
+        source: Europe PMC source code (MED, PMC, PPR, etc.)
+    """
+
+    pmid: str | None = None
+    pmcid: str | None = None
+    doi: str | None = None
     title: str = ""
-    authors: List[str] = field(default_factory=list)
+    authors: list[str] = field(default_factory=list)
     journal: str = ""
-    year: Optional[int] = None
+    year: int | None = None
     abstract: str = ""
     is_open_access: bool = False
     has_fulltext_xml: bool = False
     has_pdf: bool = False
+    is_preprint: bool = False
+    source: str = ""
 
 
 class EuropePMCClient:
-    """
-    Client for the Europe PMC REST API.
+    """Client for the Europe PMC REST API.
 
     Provides methods for:
     - Searching for articles by PMID, DOI, or PMC ID
@@ -98,12 +119,11 @@ class EuropePMCClient:
 
     def get_article_info(
         self,
-        pmid: Optional[str] = None,
-        pmcid: Optional[str] = None,
-        doi: Optional[str] = None,
-    ) -> Optional[ArticleInfo]:
-        """
-        Get article information from Europe PMC.
+        pmid: str | None = None,
+        pmcid: str | None = None,
+        doi: str | None = None,
+    ) -> ArticleInfo | None:
+        """Get article information from Europe PMC.
 
         Searches by PMID, PMC ID, or DOI and returns availability information.
 
@@ -183,13 +203,259 @@ class EuropePMCClient:
             logger.warning(f"Europe PMC API error: {e}")
             return None
 
+    def search(
+        self,
+        query: str,
+        max_results: int = 100,
+        cursor: str | None = None,
+        include_preprints: bool = False,
+        page_size: int | None = None,
+    ) -> tuple[list[ArticleInfo], CursorPaginationState]:
+        """Search Europe PMC for articles.
+
+        Performs a search using the Europe PMC REST API with cursor-based
+        pagination for efficient retrieval of large result sets.
+
+        Args:
+            query: Search query in Europe PMC syntax
+            max_results: Maximum number of results to return
+            cursor: Pagination cursor (None for first page)
+            include_preprints: Whether to include preprints in results
+            page_size: Results per page (default from constants)
+
+        Returns:
+            Tuple of (list of ArticleInfo, pagination state)
+
+        Example:
+            client = EuropePMCClient()
+            articles, pagination = client.search(
+                "TITLE_ABS:covid-19 AND TITLE_ABS:vaccine",
+                max_results=50,
+            )
+        """
+        page_size = page_size or EUROPEPMC_SEARCH_PAGE_SIZE
+        cursor = cursor or EUROPEPMC_INITIAL_CURSOR
+
+        # Build query with filters
+        full_query = self._build_search_query(query, include_preprints)
+
+        all_articles: list[ArticleInfo] = []
+        current_cursor = cursor
+        total_count = 0
+
+        while len(all_articles) < max_results:
+            # Calculate how many results we still need
+            remaining = max_results - len(all_articles)
+            request_size = min(page_size, remaining)
+
+            try:
+                response = self._session.get(
+                    EUROPEPMC_SEARCH_URL,
+                    params={
+                        "query": full_query,
+                        "format": "json",
+                        "resultType": EUROPEPMC_RESULT_TYPE,
+                        "pageSize": request_size,
+                        "cursorMark": current_cursor,
+                        "sort": EUROPEPMC_SORT_ORDER,
+                    },
+                    timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                # Get total count from first response
+                if total_count == 0:
+                    total_count = data.get("hitCount", 0)
+                    logger.info(f"Europe PMC search found {total_count} total results")
+
+                # Parse results
+                results = data.get("resultList", {}).get("result", [])
+                if not results:
+                    break
+
+                for result in results:
+                    article = self._parse_search_result(result)
+                    if article:
+                        all_articles.append(article)
+
+                # Get next cursor
+                next_cursor = data.get("nextCursorMark")
+
+                # Check if we've reached the end
+                if not next_cursor or next_cursor == current_cursor:
+                    break
+
+                current_cursor = next_cursor
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Europe PMC search error: {e}")
+                break
+
+        # Build pagination state
+        # Note: next_cursor might not be set if the loop didn't execute
+        # or if an error occurred before the last response was parsed
+        next_cursor_value = None
+        try:
+            next_cursor_value = data.get("nextCursorMark")  # noqa: F821
+        except NameError:
+            # 'data' was never assigned (loop didn't execute or failed early)
+            pass
+
+        pagination = CursorPaginationState(
+            total_count=total_count,
+            fetched_count=len(all_articles),
+            current_cursor=current_cursor,
+            next_cursor=next_cursor_value,
+        )
+
+        logger.info(f"Europe PMC search returned {len(all_articles)} articles")
+        return all_articles, pagination
+
+    def search_simple(
+        self,
+        query: str,
+        max_results: int = 100,
+        include_preprints: bool = False,
+    ) -> list[ArticleInfo]:
+        """Simplified search that returns just the articles.
+
+        Convenience method when pagination state is not needed.
+
+        Args:
+            query: Search query in Europe PMC syntax
+            max_results: Maximum number of results to return
+            include_preprints: Whether to include preprints
+
+        Returns:
+            List of ArticleInfo objects
+        """
+        articles, _ = self.search(
+            query=query,
+            max_results=max_results,
+            include_preprints=include_preprints,
+        )
+        return articles
+
+    def get_total_count(
+        self,
+        query: str,
+        include_preprints: bool = False,
+    ) -> int:
+        """Get total count of results for a query without fetching articles.
+
+        Useful for displaying result counts before actually fetching results.
+
+        Args:
+            query: Search query in Europe PMC syntax
+            include_preprints: Whether to include preprints
+
+        Returns:
+            Total number of matching articles
+        """
+        full_query = self._build_search_query(query, include_preprints)
+
+        try:
+            response = self._session.get(
+                EUROPEPMC_SEARCH_URL,
+                params={
+                    "query": full_query,
+                    "format": "json",
+                    "resultType": "lite",  # Faster, less data
+                    "pageSize": 1,
+                },
+                timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("hitCount", 0)
+
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Europe PMC count error: {e}")
+            return 0
+
+    def _build_search_query(
+        self,
+        query: str,
+        include_preprints: bool = False,
+    ) -> str:
+        """Build full search query with standard filters.
+
+        Args:
+            query: Base search query
+            include_preprints: Whether to include preprints
+
+        Returns:
+            Full query string with filters applied
+        """
+        filters = [query]
+
+        # Require abstract
+        filters.append(EUROPEPMC_DEFAULT_FILTERS["has_abstract"])
+
+        # Exclude preprints unless explicitly requested
+        if not include_preprints:
+            filters.append(EUROPEPMC_DEFAULT_FILTERS["exclude_preprints"])
+
+        return " AND ".join(filters)
+
+    def _parse_search_result(self, result: dict) -> ArticleInfo | None:
+        """Parse a single search result into ArticleInfo.
+
+        Args:
+            result: Raw result dict from Europe PMC API
+
+        Returns:
+            ArticleInfo object or None if parsing fails
+        """
+        try:
+            # Extract authors
+            authors = []
+            author_list = result.get("authorList", {}).get("author", [])
+            for author in author_list:
+                full_name = author.get("fullName", "")
+                if full_name:
+                    authors.append(full_name)
+
+            # Extract year
+            year = None
+            pub_year = result.get("pubYear")
+            if pub_year:
+                try:
+                    year = int(pub_year)
+                except ValueError:
+                    pass
+
+            # Check if this is a preprint
+            source = result.get("source", "")
+            is_preprint = source == EUROPEPMC_SOURCE_PREPRINT
+
+            return ArticleInfo(
+                pmid=result.get("pmid"),
+                pmcid=result.get("pmcid"),
+                doi=result.get("doi"),
+                title=result.get("title", ""),
+                authors=authors,
+                journal=result.get("journalTitle", ""),
+                year=year,
+                abstract=result.get("abstractText", ""),
+                is_open_access=result.get("isOpenAccess") == "Y",
+                has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
+                has_pdf=result.get("hasPDF") == "Y",
+                is_preprint=is_preprint,
+                source=source,
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to parse Europe PMC result: {e}")
+            return None
+
     def get_fulltext_xml(
         self,
-        pmcid: Optional[str] = None,
-        pmid: Optional[str] = None,
-    ) -> Optional[str]:
-        """
-        Retrieve full-text XML for an article.
+        pmcid: str | None = None,
+        pmid: str | None = None,
+    ) -> str | None:
+        """Retrieve full-text XML for an article.
 
         Args:
             pmcid: PubMed Central ID (preferred)
@@ -235,8 +501,7 @@ class EuropePMCClient:
             return None
 
     def xml_to_markdown(self, xml_content: str) -> str:
-        """
-        Convert JATS XML to readable markdown.
+        """Convert JATS XML to readable markdown.
 
         Extracts and formats the key sections:
         - Title and metadata
@@ -423,7 +688,6 @@ class EuropePMCClient:
         parts = ["## References"]
 
         for ref in ref_list.findall("ref"):
-            ref_id = ref.get("id", "")
             citation = ref.find(".//mixed-citation")
             if citation is None:
                 citation = ref.find(".//element-citation")
@@ -441,8 +705,7 @@ class EuropePMCClient:
         return "\n".join(parts)
 
     def _get_text(self, element: ET.Element) -> str:
-        """
-        Extract all text content from an element, handling nested elements.
+        """Extract all text content from an element, handling nested elements.
 
         Preserves inline formatting like italic/bold where appropriate.
         """
@@ -510,12 +773,11 @@ class EuropePMCClient:
 
 
 def get_fulltext_markdown(
-    pmid: Optional[str] = None,
-    pmcid: Optional[str] = None,
-    doi: Optional[str] = None,
-) -> Tuple[Optional[str], Optional[ArticleInfo]]:
-    """
-    Convenience function to get full-text markdown for an article.
+    pmid: str | None = None,
+    pmcid: str | None = None,
+    doi: str | None = None,
+) -> tuple[str | None, ArticleInfo | None]:
+    """Convenience function to get full-text markdown for an article.
 
     Args:
         pmid: PubMed ID
@@ -533,7 +795,7 @@ def get_fulltext_markdown(
         return None, None
 
     if not info.has_fulltext_xml:
-        logger.debug(f"No full-text XML available for article")
+        logger.debug("No full-text XML available for article")
         return None, info
 
     # Get XML and convert

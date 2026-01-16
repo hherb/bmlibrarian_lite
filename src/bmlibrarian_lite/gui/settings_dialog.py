@@ -48,7 +48,9 @@ from ..constants import (
     LLM_PROVIDERS,
     LLM_TASK_TYPES,
     LLM_TASK_CATEGORIES,
+    PROVIDER_DISPLAY_NAMES,
 )
+from ..data_models import SearchProvider
 from ..quality.data_models import QualityTier
 
 logger = logging.getLogger(__name__)
@@ -231,6 +233,7 @@ class SettingsDialog(QDialog):
         # Create tabs - new order with Providers and Tasks first
         self._setup_providers_tab()
         self._setup_tasks_tab()
+        self._setup_search_tab()
         self._setup_embeddings_tab()
         self._setup_pubmed_tab()
         self._setup_api_keys_tab()
@@ -431,6 +434,94 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(task_group)
         self.tab_widget.addTab(tab, "Tasks")
+
+    def _setup_search_tab(self) -> None:
+        """Set up the Search settings tab for provider selection."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+
+        # Search provider group
+        provider_group = QGroupBox("Search Provider")
+        provider_layout = QFormLayout(provider_group)
+        provider_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # Provider selector
+        self.search_provider_combo = QComboBox()
+        for provider in SearchProvider:
+            self.search_provider_combo.addItem(provider.display_name, provider.value)
+        self.search_provider_combo.setToolTip(
+            "Select which database(s) to search for literature"
+        )
+        self.search_provider_combo.currentIndexChanged.connect(
+            self._on_search_provider_changed
+        )
+        provider_layout.addRow("Provider:", self.search_provider_combo)
+
+        # Provider descriptions
+        provider_descriptions = QLabel(
+            "<small><b>PubMed:</b> NCBI's biomedical literature database (default)<br>"
+            "<b>Europe PMC:</b> European alternative with preprint support<br>"
+            "<b>Both:</b> Search both and merge results (removes duplicates)</small>"
+        )
+        provider_descriptions.setWordWrap(True)
+        provider_layout.addRow(provider_descriptions)
+
+        layout.addWidget(provider_group)
+
+        # Europe PMC options group
+        self.europepmc_options_group = QGroupBox("Europe PMC Options")
+        europepmc_layout = QFormLayout(self.europepmc_options_group)
+        europepmc_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # Include preprints checkbox
+        self.include_preprints_check = QCheckBox("Include preprints in search results")
+        self.include_preprints_check.setToolTip(
+            "Include preprint articles from bioRxiv, medRxiv, etc.\n"
+            "Preprints have not undergone peer review."
+        )
+        europepmc_layout.addRow(self.include_preprints_check)
+
+        # Preprint warning
+        preprint_note = QLabel(
+            "<small><i>Preprints are not peer-reviewed and should be interpreted "
+            "with caution in systematic reviews.</i></small>"
+        )
+        preprint_note.setWordWrap(True)
+        europepmc_layout.addRow(preprint_note)
+
+        layout.addWidget(self.europepmc_options_group)
+
+        # Search results group
+        results_group = QGroupBox("Search Results")
+        results_layout = QFormLayout(results_group)
+        results_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        # Max results
+        self.max_results_spin = QSpinBox()
+        self.max_results_spin.setRange(10, 1000)
+        self.max_results_spin.setValue(self.config.search.max_results)
+        self.max_results_spin.setSingleStep(10)
+        self.max_results_spin.setToolTip("Maximum number of results to retrieve per search")
+        results_layout.addRow("Max Results:", self.max_results_spin)
+
+        layout.addWidget(results_group)
+
+        layout.addStretch()
+        self.tab_widget.addTab(tab, "Search")
+
+        # Apply initial state
+        self._on_search_provider_changed()
+
+    def _on_search_provider_changed(self) -> None:
+        """Handle search provider selection change."""
+        provider_value = self.search_provider_combo.currentData()
+        # Show Europe PMC options only when Europe PMC is involved
+        show_epmc_options = provider_value in (
+            SearchProvider.EUROPEPMC.value,
+            SearchProvider.BOTH.value,
+        )
+        self.europepmc_options_group.setVisible(show_epmc_options)
 
     def _add_task_config_widget(self, parent_layout: QVBoxLayout, task_id: str) -> None:
         """Add a task configuration widget."""
@@ -887,6 +978,16 @@ class SettingsDialog(QDialog):
         if self.config.pubmed.api_key:
             self.api_key_input.setText(self.config.pubmed.api_key)
 
+        # Search Provider
+        provider_value = self.config.search.search_provider.value
+        for i in range(self.search_provider_combo.count()):
+            if self.search_provider_combo.itemData(i) == provider_value:
+                self.search_provider_combo.setCurrentIndex(i)
+                break
+        self.include_preprints_check.setChecked(self.config.europepmc.include_preprints)
+        self.max_results_spin.setValue(self.config.search.max_results)
+        self._on_search_provider_changed()
+
         # OpenAthens
         self.openathens_enabled.setChecked(self.config.openathens.enabled)
         self.openathens_url_input.setText(self.config.openathens.institution_url)
@@ -968,6 +1069,12 @@ class SettingsDialog(QDialog):
         self.config.pubmed.email = self.email_input.text().strip()
         api_key = self.api_key_input.text().strip()
         self.config.pubmed.api_key = api_key if api_key else None
+
+        # Save Search Provider settings
+        provider_value = self.search_provider_combo.currentData()
+        self.config.search.search_provider = SearchProvider(provider_value)
+        self.config.search.max_results = self.max_results_spin.value()
+        self.config.europepmc.include_preprints = self.include_preprints_check.isChecked()
 
         # OpenAthens - validate URL or domain before saving
         openathens_url = self.openathens_url_input.text().strip()

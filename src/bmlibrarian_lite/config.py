@@ -36,7 +36,11 @@ from .constants import (
     EMBEDDING_MODEL_SPECS,
     LLM_TASK_TYPES,
     LLM_PROVIDERS,
+    EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+    EUROPEPMC_MAX_RETRIES,
+    EUROPEPMC_SEARCH_PAGE_SIZE,
 )
+from .data_models import SearchProvider
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +320,29 @@ class DiscoveryConfig:
 
 
 @dataclass
+class EuropePMCConfig:
+    """
+    Europe PMC API configuration.
+
+    Europe PMC provides an alternative to PubMed with additional features:
+    - Access to preprints
+    - JATS XML full-text retrieval
+    - Cursor-based pagination for large result sets
+
+    Attributes:
+        request_timeout: Timeout for API requests in seconds
+        max_retries: Maximum retry attempts for failed requests
+        page_size: Number of results per page (max 1000)
+        include_preprints: Whether to include preprints in search results
+    """
+
+    request_timeout: int = EUROPEPMC_REQUEST_TIMEOUT_SECONDS
+    max_retries: int = EUROPEPMC_MAX_RETRIES
+    page_size: int = EUROPEPMC_SEARCH_PAGE_SIZE
+    include_preprints: bool = False
+
+
+@dataclass
 class StorageConfig:
     """Storage configuration with derived paths."""
 
@@ -349,12 +376,22 @@ class StorageConfig:
 
 @dataclass
 class SearchConfig:
-    """Search configuration."""
+    """
+    Search configuration.
+
+    Attributes:
+        chunk_size: Size of text chunks for embedding
+        chunk_overlap: Overlap between chunks
+        similarity_threshold: Minimum similarity for vector search
+        max_results: Maximum results to return from search
+        search_provider: Which provider to use for searches
+    """
 
     chunk_size: int = DEFAULT_CHUNK_SIZE
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
     similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD
     max_results: int = DEFAULT_MAX_RESULTS
+    search_provider: SearchProvider = SearchProvider.PUBMED
 
 
 @dataclass
@@ -528,6 +565,7 @@ class LiteConfig:
     models: ModelsConfig = field(default_factory=ModelsConfig)
     embeddings: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     pubmed: PubMedConfig = field(default_factory=PubMedConfig)
+    europepmc: EuropePMCConfig = field(default_factory=EuropePMCConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     openathens: OpenAthensConfig = field(default_factory=OpenAthensConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
@@ -604,6 +642,17 @@ class LiteConfig:
                 unpaywall_email=discovery_data.get("unpaywall_email", ""),
             )
 
+        if "europepmc" in data:
+            europepmc_data = data["europepmc"]
+            config.europepmc = EuropePMCConfig(
+                request_timeout=int(europepmc_data.get(
+                    "request_timeout", EUROPEPMC_REQUEST_TIMEOUT_SECONDS
+                )),
+                max_retries=int(europepmc_data.get("max_retries", EUROPEPMC_MAX_RETRIES)),
+                page_size=int(europepmc_data.get("page_size", EUROPEPMC_SEARCH_PAGE_SIZE)),
+                include_preprints=bool(europepmc_data.get("include_preprints", False)),
+            )
+
         if "openathens" in data:
             openathens_data = data["openathens"]
             config.openathens = OpenAthensConfig(
@@ -621,6 +670,13 @@ class LiteConfig:
 
         if "search" in data:
             search_data = data["search"]
+            # Parse search provider from string
+            provider_str = search_data.get("search_provider", "pubmed")
+            try:
+                search_provider = SearchProvider(provider_str)
+            except ValueError:
+                search_provider = SearchProvider.PUBMED
+
             config.search = SearchConfig(
                 chunk_size=int(search_data.get("chunk_size", DEFAULT_CHUNK_SIZE)),
                 chunk_overlap=int(search_data.get("chunk_overlap", DEFAULT_CHUNK_OVERLAP)),
@@ -628,6 +684,7 @@ class LiteConfig:
                     search_data.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD)
                 ),
                 max_results=int(search_data.get("max_results", DEFAULT_MAX_RESULTS)),
+                search_provider=search_provider,
             )
 
         if "benchmark" in data:
@@ -652,6 +709,12 @@ class LiteConfig:
                 "email": self.pubmed.email,
                 "api_key": self.pubmed.api_key,
             },
+            "europepmc": {
+                "request_timeout": self.europepmc.request_timeout,
+                "max_retries": self.europepmc.max_retries,
+                "page_size": self.europepmc.page_size,
+                "include_preprints": self.europepmc.include_preprints,
+            },
             "discovery": {
                 "unpaywall_email": self.discovery.unpaywall_email,
             },
@@ -668,6 +731,7 @@ class LiteConfig:
                 "chunk_overlap": self.search.chunk_overlap,
                 "similarity_threshold": self.search.similarity_threshold,
                 "max_results": self.search.max_results,
+                "search_provider": self.search.search_provider.value,
             },
             "benchmark": self.benchmark.to_dict(),
         }

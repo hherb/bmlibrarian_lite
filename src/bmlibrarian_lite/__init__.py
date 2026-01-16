@@ -10,6 +10,7 @@ Features:
 - FastEmbed for local embeddings (CPU-optimized, no PyTorch)
 - Anthropic Claude or Ollama for LLM inference
 - NCBI E-utilities for PubMed search (online)
+- Europe PMC REST API for alternative search and full-text retrieval
 
 No PostgreSQL or external databases required.
 """
@@ -25,6 +26,9 @@ from .data_models import (
     ScoredDocument,
     Citation,
     InterrogationSession,
+    SearchProvider,
+    CursorPaginationState,
+    OffsetPaginationState,
 )
 from .exceptions import (
     LiteError,
@@ -34,6 +38,9 @@ from .exceptions import (
     LLMError,
 )
 from .pdf_discovery import PDFDiscoverer, PDFSource, DiscoveryResult, close_browser_session
+from .search_service import SearchService, UnifiedSearchResult
+from .query_translator import QueryTranslator
+from .search_merger import SearchResultMerger, MergedArticle
 
 __version__ = "0.2.0"
 
@@ -66,6 +73,15 @@ __all__ = [
     "ScoredDocument",
     "Citation",
     "InterrogationSession",
+    "SearchProvider",
+    "CursorPaginationState",
+    "OffsetPaginationState",
+    # Search
+    "SearchService",
+    "UnifiedSearchResult",
+    "QueryTranslator",
+    "SearchResultMerger",
+    "MergedArticle",
     # PDF Discovery
     "PDFDiscoverer",
     "PDFSource",
