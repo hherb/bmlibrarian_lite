@@ -26,7 +26,7 @@ final class FactCheckSession {
 
     // MARK: - Workflow State
 
-    var currentStep: WorkflowStep = .idle
+    var currentStep: WorkflowStep = WorkflowStep.idle
     var errorMessage: String?
     var stopReason: StopReason?
 

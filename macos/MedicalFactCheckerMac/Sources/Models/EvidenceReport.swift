@@ -23,7 +23,14 @@ final class EvidenceReport {
     // MARK: - Content
 
     /// The evidence verdict (supported, refuted, etc.).
-    var verdict: Verdict = .insufficientEvidence
+    /// Stored as raw string for SwiftData compatibility.
+    private var verdictRaw: String = "Insufficient Evidence"
+
+    /// The evidence verdict (supported, refuted, etc.).
+    var verdict: Verdict {
+        get { Verdict(rawValue: verdictRaw) ?? .insufficientEvidence }
+        set { verdictRaw = newValue.rawValue }
+    }
 
     /// Brief 2-3 sentence summary of findings.
     var summary: String = ""

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import CloudKit
 
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
@@ -27,6 +28,11 @@ struct SettingsView: View {
     // API testing state
     @State private var isTestingAPI = false
     @State private var apiTestResult: APITestResult?
+
+    // iCloud sync state
+    @State private var isSyncEnabled = CloudKitConfiguration.isSyncEnabled
+    @State private var cloudStatus: CKAccountStatus = .couldNotDetermine
+    @State private var showingRestartAlert = false
 
     /// Result of an API connection test.
     private enum APITestResult {
@@ -421,6 +427,15 @@ struct SettingsView: View {
                     Text("Information")
                 }
 
+                // iCloud Sync
+                Section {
+                    iCloudSyncSection
+                } header: {
+                    Text("iCloud Sync")
+                } footer: {
+                    Text("Sync your fact-check sessions across all your devices signed into the same iCloud account.")
+                }
+
                 // About
                 Section {
                     HStack {
@@ -583,6 +598,108 @@ struct SettingsView: View {
         case 4: return "High"
         case 5: return "Very High"
         default: return ""
+        }
+    }
+
+    // MARK: - iCloud Sync Section
+
+    private var iCloudSyncSection: some View {
+        Group {
+            Toggle("Enable iCloud Sync", isOn: $isSyncEnabled)
+                .onChange(of: isSyncEnabled) { _, newValue in
+                    CloudKitConfiguration.requestSyncChange(enabled: newValue)
+                    showingRestartAlert = true
+                }
+
+            HStack {
+                Image(systemName: cloudStatusIcon)
+                    .foregroundColor(cloudStatusColor)
+                Text(cloudStatusText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if CloudKitConfiguration.pendingConfigChange {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Restart app to apply changes")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Data stays local by default", systemImage: "lock.shield")
+                Label("API keys are never synced", systemImage: "key")
+            }
+            .font(.caption2)
+            .foregroundColor(.secondary)
+        }
+        .onAppear {
+            isSyncEnabled = CloudKitConfiguration.isSyncEnabled
+            Task { await checkCloudStatus() }
+        }
+        .alert("Restart Required", isPresented: $showingRestartAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Please restart the app to apply the sync setting change.")
+        }
+    }
+
+    private var cloudStatusIcon: String {
+        switch cloudStatus {
+        case .available:
+            return "checkmark.icloud.fill"
+        case .noAccount:
+            return "xmark.icloud"
+        case .restricted:
+            return "lock.icloud"
+        case .temporarilyUnavailable:
+            return "exclamationmark.icloud"
+        case .couldNotDetermine:
+            return "questionmark.circle"
+        @unknown default:
+            return "questionmark.circle"
+        }
+    }
+
+    private var cloudStatusColor: Color {
+        switch cloudStatus {
+        case .available:
+            return .green
+        case .noAccount, .restricted:
+            return .red
+        case .temporarilyUnavailable:
+            return .orange
+        case .couldNotDetermine:
+            return .secondary
+        @unknown default:
+            return .secondary
+        }
+    }
+
+    private var cloudStatusText: String {
+        switch cloudStatus {
+        case .available:
+            return "iCloud is available"
+        case .noAccount:
+            return "Not signed in to iCloud"
+        case .restricted:
+            return "iCloud access is restricted"
+        case .temporarilyUnavailable:
+            return "iCloud temporarily unavailable"
+        case .couldNotDetermine:
+            return "Checking iCloud status..."
+        @unknown default:
+            return "Unknown iCloud status"
+        }
+    }
+
+    private func checkCloudStatus() async {
+        let status = await CloudKitConfiguration.checkAccountStatus()
+        await MainActor.run {
+            cloudStatus = status
         }
     }
 }

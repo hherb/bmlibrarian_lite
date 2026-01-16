@@ -26,9 +26,28 @@ final class FactCheckSession {
 
     // MARK: - Workflow State
 
-    var currentStep: WorkflowStep = .idle
+    /// Current workflow step (stored as raw string for SwiftData compatibility).
+    private var currentStepRaw: String = "idle"
+
+    /// Current step in the fact-checking workflow.
+    var currentStep: WorkflowStep {
+        get { WorkflowStep(rawValue: currentStepRaw) ?? .idle }
+        set { currentStepRaw = newValue.rawValue }
+    }
+
     var errorMessage: String?
-    var stopReason: StopReason?
+
+    /// Stop reason (stored as raw string for SwiftData compatibility).
+    private var stopReasonRaw: String?
+
+    /// Reason why the workflow stopped.
+    var stopReason: StopReason? {
+        get {
+            guard let raw = stopReasonRaw else { return nil }
+            return StopReason(rawValue: raw)
+        }
+        set { stopReasonRaw = newValue?.rawValue }
+    }
 
     // MARK: - Search State (for batch pagination)
 
