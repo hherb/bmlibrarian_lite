@@ -11,10 +11,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.bmlibrarian.factchecker.ui.factcheck.FactCheckScreen
 import com.bmlibrarian.factchecker.ui.history.HistoryScreen
 import com.bmlibrarian.factchecker.ui.report.ReportScreen
@@ -42,7 +44,8 @@ fun AppNavigation() {
             NavigationBar {
                 NavRoute.bottomNavItems.forEach { navItem ->
                     val selected = currentDestination?.hierarchy?.any {
-                        it.route == navItem.route
+                        // Match on base route for Report to handle parameterized routes
+                        it.route?.startsWith(navItem.route) == true
                     } == true
 
                     NavigationBarItem(
@@ -91,15 +94,26 @@ fun AppNavigation() {
                 )
             }
 
-            composable(NavRoute.Report.route) {
-                ReportScreen()
+            // Report screen with optional sessionId argument
+            composable(
+                route = NavRoute.Report.routeWithArgs,
+                arguments = listOf(
+                    navArgument(NavRoute.Report.ARG_SESSION_ID) {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val sessionId = backStackEntry.arguments?.getString(NavRoute.Report.ARG_SESSION_ID)
+                ReportScreen(sessionId = sessionId)
             }
 
             composable(NavRoute.History.route) {
                 HistoryScreen(
                     onSessionClick = { sessionId ->
-                        // Navigate to report for this session
-                        navController.navigate(NavRoute.Report.route) {
+                        // Navigate to report for this session with sessionId
+                        navController.navigate(NavRoute.Report.createRoute(sessionId)) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
                             }
