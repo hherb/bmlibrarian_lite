@@ -17,12 +17,123 @@ if TYPE_CHECKING:
     from .quality.data_models import QualityAssessment
 
 
+class SearchProvider(Enum):
+    """Search provider for literature retrieval."""
+
+    PUBMED = "pubmed"
+    EUROPEPMC = "europepmc"
+    BOTH = "both"
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable name for display."""
+        names = {
+            SearchProvider.PUBMED: "PubMed",
+            SearchProvider.EUROPEPMC: "Europe PMC",
+            SearchProvider.BOTH: "PubMed + Europe PMC",
+        }
+        return names.get(self, self.value)
+
+    @property
+    def description(self) -> str:
+        """Description of the provider."""
+        descriptions = {
+            SearchProvider.PUBMED: "NCBI PubMed via E-utilities API",
+            SearchProvider.EUROPEPMC: "Europe PMC REST API with preprint support",
+            SearchProvider.BOTH: "Search both providers and merge results",
+        }
+        return descriptions.get(self, "")
+
+    @property
+    def supports_preprints(self) -> bool:
+        """Whether this provider can search preprints."""
+        return self in (SearchProvider.EUROPEPMC, SearchProvider.BOTH)
+
+
 class DocumentSource(Enum):
     """Source of a document."""
 
     PUBMED = "pubmed"
+    EUROPEPMC = "europepmc"
     LOCAL_PDF = "local_pdf"
     LOCAL_TEXT = "local_text"
+
+
+@dataclass
+class CursorPaginationState:
+    """
+    Pagination state for cursor-based APIs (Europe PMC).
+
+    Europe PMC uses cursor-based pagination which is more efficient
+    for large result sets and provides stable iteration.
+
+    Attributes:
+        total_count: Total number of results available
+        fetched_count: Number of results fetched so far
+        current_cursor: Current cursor position
+        next_cursor: Cursor for fetching next page (None if no more pages)
+    """
+
+    total_count: int
+    fetched_count: int
+    current_cursor: str
+    next_cursor: Optional[str]
+
+    @property
+    def has_more(self) -> bool:
+        """Check if there are more results to fetch."""
+        return (
+            self.next_cursor is not None
+            and self.next_cursor != self.current_cursor
+            and self.fetched_count < self.total_count
+        )
+
+    @property
+    def progress_percent(self) -> float:
+        """Get fetch progress as percentage."""
+        if self.total_count == 0:
+            return 100.0
+        return (self.fetched_count / self.total_count) * 100.0
+
+
+@dataclass
+class OffsetPaginationState:
+    """
+    Pagination state for offset-based APIs (PubMed).
+
+    PubMed uses offset-based pagination with a maximum offset limit.
+
+    Attributes:
+        total_count: Total number of results available
+        offset: Current offset position
+        batch_size: Number of results per batch
+        max_offset: Maximum allowed offset (API limit)
+    """
+
+    total_count: int
+    offset: int
+    batch_size: int
+    max_offset: int = 9999
+
+    @property
+    def has_more(self) -> bool:
+        """Check if there are more results to fetch."""
+        return (
+            self.offset + self.batch_size < self.total_count
+            and self.offset < self.max_offset
+        )
+
+    @property
+    def fetched_count(self) -> int:
+        """Number of results fetched so far."""
+        return min(self.offset + self.batch_size, self.total_count)
+
+    @property
+    def progress_percent(self) -> float:
+        """Get fetch progress as percentage."""
+        if self.total_count == 0:
+            return 100.0
+        return (self.fetched_count / self.total_count) * 100.0
 
 
 class EvaluationErrorCode(Enum):
@@ -321,7 +432,8 @@ class LiteDocument:
         pmc_id: PubMed Central ID (for open access articles)
         url: URL to the article
         mesh_terms: MeSH terms associated with the article
-        source: Source of the document (PubMed, local PDF, etc.)
+        source: Source of the document (PubMed, Europe PMC, local PDF, etc.)
+        is_preprint: Whether this document is a preprint (Europe PMC only)
         metadata: Additional custom metadata
     """
 
@@ -337,6 +449,7 @@ class LiteDocument:
     url: Optional[str] = None
     mesh_terms: list[str] = field(default_factory=list)
     source: DocumentSource = DocumentSource.PUBMED
+    is_preprint: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -389,6 +502,7 @@ class LiteDocument:
             "url": self.url,
             "mesh_terms": self.mesh_terms,
             "source": self.source.value,
+            "is_preprint": self.is_preprint,
             "metadata": self.metadata,
         }
 
@@ -416,6 +530,7 @@ class LiteDocument:
             url=data.get("url"),
             mesh_terms=data.get("mesh_terms", []),
             source=DocumentSource(data.get("source", "pubmed")),
+            is_preprint=data.get("is_preprint", False),
             metadata=data.get("metadata", {}),
         )
 

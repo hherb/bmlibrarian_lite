@@ -1,8 +1,14 @@
 """
-Lite search agent for PubMed queries.
+Lite search agent for literature queries.
 
-This agent handles converting natural language questions to PubMed queries,
-executing searches, and caching results in SQLite with vector embeddings.
+This agent handles converting natural language questions to search queries,
+executing searches across PubMed and/or Europe PMC, and caching results
+in SQLite with vector embeddings.
+
+Supports multiple search providers:
+- PubMed: NCBI E-utilities API (default)
+- Europe PMC: REST API with preprint support
+- Both: Combined search with automatic deduplication
 """
 
 import logging
@@ -15,9 +21,11 @@ from bmlibrarian_lite.pubmed import (
 )
 from ..storage import LiteStorage
 from ..config import LiteConfig
-from ..data_models import LiteDocument, DocumentSource, SearchSession
+from ..data_models import LiteDocument, DocumentSource, SearchSession, SearchProvider
 from ..embeddings import LiteEmbedder
 from ..query_converter import LiteQueryConverter
+from ..search_service import SearchService, UnifiedSearchResult
+from ..query_translator import QueryTranslator
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -25,19 +33,22 @@ logger = logging.getLogger(__name__)
 
 class LiteSearchAgent(LiteBaseAgent):
     """
-    Search agent for PubMed queries with SQLite caching.
+    Search agent for literature queries with SQLite caching.
 
-    Converts natural language queries to PubMed searches and caches
-    results in SQLite with vector embeddings.
+    Converts natural language queries to search queries and executes
+    searches across PubMed and/or Europe PMC, caching results in
+    SQLite with vector embeddings.
 
     This agent:
-    1. Uses LLM to convert research questions to optimized PubMed queries
-    2. Executes searches via the PubMed E-utilities API
-    3. Caches results in SQLite with embeddings for later retrieval
-    4. Provides semantic search over cached documents
+    1. Uses LLM to convert research questions to optimized search queries
+    2. Executes searches via PubMed, Europe PMC, or both (configurable)
+    3. Merges and deduplicates results when using both providers
+    4. Caches results in SQLite with embeddings for later retrieval
+    5. Provides semantic search over cached documents
 
     Attributes:
         storage: LiteStorage instance for persistence
+        search_service: Unified search service for multi-provider searches
     """
 
     TASK_ID = "query_conversion"
@@ -59,11 +70,11 @@ class LiteSearchAgent(LiteBaseAgent):
         super().__init__(config=config, **kwargs)
         self.storage = storage or LiteStorage(self.config)
 
-        # Initialize PubMed client
-        self._search_client = PubMedSearchClient(
-            email=self.config.pubmed.email or "",
-            api_key=self.config.pubmed.api_key,
-        )
+        # Initialize unified search service (handles both PubMed and Europe PMC)
+        self.search_service = SearchService(self.config)
+
+        # Keep PubMed client for backward compatibility
+        self._search_client = self.search_service.pubmed_client
 
         # Initialize lite query converter (simplified, focused queries)
         # Uses query_conversion task configuration
@@ -108,62 +119,74 @@ class LiteSearchAgent(LiteBaseAgent):
         self,
         question: str,
         max_results: Optional[int] = None,
+        provider: Optional[SearchProvider] = None,
+        include_preprints: Optional[bool] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> tuple[SearchSession, list[LiteDocument]]:
         """
-        Search PubMed and cache results.
+        Search for literature and cache results.
 
         This is the main entry point for searching. It:
-        1. Converts the question to a PubMed query
-        2. Executes the search
-        3. Fetches article metadata
+        1. Converts the question to a search query
+        2. Executes the search via the configured provider(s)
+        3. Merges and deduplicates results (if searching both providers)
         4. Caches results in SQLite
 
         Args:
             question: Natural language research question
             max_results: Maximum results to fetch (uses config default if None)
+            provider: Search provider (uses config default if None)
+            include_preprints: Whether to include preprints (Europe PMC only)
             progress_callback: Optional callback for progress updates
 
         Returns:
             Tuple of (search session, list of documents)
         """
         max_results = max_results or self.config.search.max_results
+        provider = provider or self.config.search.search_provider
 
         if progress_callback:
-            progress_callback("Converting question to PubMed query...")
+            progress_callback(f"Converting question to search query...")
 
-        # Convert to PubMed query
+        # Convert to search query (generates PubMed syntax)
         pubmed_query = self.convert_query(question)
-        logger.info(f"PubMed query: {pubmed_query.query_string}")
+        logger.info(f"Generated query: {pubmed_query.query_string}")
 
         if progress_callback:
-            progress_callback("Searching PubMed...")
+            provider_name = provider.display_name
+            progress_callback(f"Searching {provider_name}...")
 
-        # Execute search
-        search_result = self._search_client.search(pubmed_query, max_results=max_results)
-        logger.info(
-            f"Found {search_result.total_count} results, "
-            f"retrieved {search_result.retrieved_count} PMIDs"
+        # Execute search via unified search service
+        search_result = self.search_service.search(
+            query=pubmed_query.query_string,
+            max_results=max_results,
+            provider=provider,
+            include_preprints=include_preprints,
+            progress_callback=progress_callback,
         )
 
-        if not search_result.pmids:
+        logger.info(
+            f"Found {search_result.total_count} total results, "
+            f"retrieved {search_result.fetched_count} documents"
+        )
+        if search_result.duplicates_removed > 0:
+            logger.info(f"Removed {search_result.duplicates_removed} duplicates")
+
+        if not search_result.documents:
             # No results found
             session = self.storage.create_search_session(
                 query=pubmed_query.query_string,
                 natural_language_query=question,
                 document_count=0,
+                metadata={
+                    "provider": provider.value,
+                    "total_available": search_result.total_count,
+                },
             )
             return session, []
 
-        if progress_callback:
-            progress_callback(f"Fetching details for {len(search_result.pmids)} articles...")
-
-        # Fetch article details
-        articles = self._search_client.fetch_articles(search_result.pmids)
-        logger.info(f"Fetched {len(articles)} article details")
-
-        # Convert to LiteDocuments
-        documents = self._articles_to_documents(articles)
+        # Use documents directly from search result
+        documents = search_result.documents
 
         if progress_callback:
             progress_callback(f"Caching {len(documents)} documents...")
@@ -172,11 +195,18 @@ class LiteSearchAgent(LiteBaseAgent):
         if documents:
             self.storage.add_documents(documents, embedding_function=self.embedder)
 
-        # Create search session
+        # Create search session with provider metadata
         session = self.storage.create_search_session(
             query=pubmed_query.query_string,
             natural_language_query=question,
             document_count=len(documents),
+            metadata={
+                "provider": provider.value,
+                "total_available": search_result.total_count,
+                "pubmed_count": search_result.pubmed_count,
+                "europepmc_count": search_result.europepmc_count,
+                "duplicates_removed": search_result.duplicates_removed,
+            },
         )
 
         # Record document-question associations for later retrieval
@@ -193,57 +223,59 @@ class LiteSearchAgent(LiteBaseAgent):
 
     def search_with_query(
         self,
-        pubmed_query: str,
+        query_string: str,
         natural_language_query: Optional[str] = None,
         max_results: Optional[int] = None,
+        provider: Optional[SearchProvider] = None,
+        include_preprints: Optional[bool] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> tuple[SearchSession, list[LiteDocument]]:
         """
-        Search PubMed with a pre-formatted query string.
+        Search with a pre-formatted query string.
 
         Use this when you want to bypass the LLM query conversion
-        and use a specific PubMed query directly.
+        and use a specific query directly. The query can be in either
+        PubMed or Europe PMC syntax and will be translated as needed.
 
         Args:
-            pubmed_query: Pre-formatted PubMed query string
+            query_string: Pre-formatted query string (PubMed or Europe PMC syntax)
             natural_language_query: Original question (for session tracking)
             max_results: Maximum results to fetch
+            provider: Search provider (uses config default if None)
+            include_preprints: Whether to include preprints (Europe PMC only)
             progress_callback: Optional callback for progress updates
 
         Returns:
             Tuple of (search session, list of documents)
         """
         max_results = max_results or self.config.search.max_results
-
-        # Create query object
-        query = PubMedQuery(
-            original_question=natural_language_query or pubmed_query,
-            query_string=pubmed_query,
-        )
+        provider = provider or self.config.search.search_provider
 
         if progress_callback:
-            progress_callback("Searching PubMed...")
+            provider_name = provider.display_name
+            progress_callback(f"Searching {provider_name}...")
 
-        # Execute search
-        search_result = self._search_client.search(query, max_results=max_results)
+        # Execute search via unified search service
+        search_result = self.search_service.search(
+            query=query_string,
+            max_results=max_results,
+            provider=provider,
+            include_preprints=include_preprints,
+            progress_callback=progress_callback,
+        )
+
         logger.info(f"Found {search_result.total_count} results")
 
-        if not search_result.pmids:
+        if not search_result.documents:
             session = self.storage.create_search_session(
-                query=pubmed_query,
-                natural_language_query=natural_language_query or pubmed_query,
+                query=query_string,
+                natural_language_query=natural_language_query or query_string,
                 document_count=0,
+                metadata={"provider": provider.value},
             )
             return session, []
 
-        if progress_callback:
-            progress_callback(f"Fetching details for {len(search_result.pmids)} articles...")
-
-        # Fetch article details
-        articles = self._search_client.fetch_articles(search_result.pmids)
-
-        # Convert and store
-        documents = self._articles_to_documents(articles)
+        documents = search_result.documents
 
         if documents:
             if progress_callback:
@@ -251,13 +283,20 @@ class LiteSearchAgent(LiteBaseAgent):
             self.storage.add_documents(documents, embedding_function=self.embedder)
 
         session = self.storage.create_search_session(
-            query=pubmed_query,
-            natural_language_query=natural_language_query or pubmed_query,
+            query=query_string,
+            natural_language_query=natural_language_query or query_string,
             document_count=len(documents),
+            metadata={
+                "provider": provider.value,
+                "total_available": search_result.total_count,
+                "pubmed_count": search_result.pubmed_count,
+                "europepmc_count": search_result.europepmc_count,
+                "duplicates_removed": search_result.duplicates_removed,
+            },
         )
 
         # Record document-question associations for later retrieval
-        question = natural_language_query or pubmed_query
+        question = natural_language_query or query_string
         if documents:
             doc_ids = [doc.id for doc in documents]
             self.storage.add_question_documents(

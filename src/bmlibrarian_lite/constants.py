@@ -502,10 +502,53 @@ EUROPEPMC_REST_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 EUROPEPMC_SEARCH_URL = f"{EUROPEPMC_REST_BASE_URL}/search"
 
 # Request timeout for Europe PMC API calls (seconds)
-EUROPEPMC_REQUEST_TIMEOUT_SECONDS = 30
+EUROPEPMC_REQUEST_TIMEOUT_SECONDS = 45
 
 # User agent for Europe PMC requests
 EUROPEPMC_USER_AGENT = "BMLibrarian/1.0 (https://github.com/hherb/bmlibrarian-lite)"
+
+# =============================================================================
+# Europe PMC Search Settings
+# =============================================================================
+
+# Page size for Europe PMC search results (max 1000)
+EUROPEPMC_SEARCH_PAGE_SIZE = 100
+
+# Initial cursor for Europe PMC pagination
+EUROPEPMC_INITIAL_CURSOR = "*"
+
+# Sort order for Europe PMC results
+EUROPEPMC_SORT_ORDER = "RELEVANCE desc"
+
+# Result type for Europe PMC search (core = full metadata)
+EUROPEPMC_RESULT_TYPE = "core"
+
+# Europe PMC source codes
+EUROPEPMC_SOURCE_MEDLINE = "MED"      # PubMed/MEDLINE
+EUROPEPMC_SOURCE_PMC = "PMC"          # PubMed Central
+EUROPEPMC_SOURCE_PREPRINT = "PPR"     # Preprints
+
+# Default filters for Europe PMC search
+EUROPEPMC_DEFAULT_FILTERS = {
+    "has_abstract": "HAS_ABSTRACT:Y",
+    "exclude_preprints": "(NOT SRC:PPR)",
+}
+
+# =============================================================================
+# Search Provider UI Colors
+# =============================================================================
+
+# Provider badge colors for document cards
+PROVIDER_COLOR_PUBMED = "#2196F3"      # Blue for PubMed
+PROVIDER_COLOR_EUROPEPMC = "#FF9800"   # Orange for Europe PMC
+PROVIDER_COLOR_PREPRINT = "#9C27B0"    # Purple for preprints
+
+# Provider display names
+PROVIDER_DISPLAY_NAMES = {
+    "pubmed": "PubMed",
+    "europepmc": "Europe PMC",
+    "both": "PubMed + Europe PMC",
+}
 
 # =============================================================================
 # Full-text Storage Settings

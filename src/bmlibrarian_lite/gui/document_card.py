@@ -34,8 +34,11 @@ from ..constants import (
     AUDIT_ABSTRACT_MAX_LINES,
     AUDIT_CARD_HEADER_COLOR,
     AUDIT_RATIONALE_COLOR,
+    PROVIDER_COLOR_PUBMED,
+    PROVIDER_COLOR_EUROPEPMC,
+    PROVIDER_COLOR_PREPRINT,
 )
-from ..data_models import LiteDocument
+from ..data_models import LiteDocument, DocumentSource
 from ..quality.data_models import QualityAssessment
 from .card_utils import format_authors, format_metadata, get_score_color
 from .quality_badge import QualityBadge
@@ -136,6 +139,99 @@ class ScoreBadge(QFrame):
         """)
 
 
+class SourceBadge(QFrame):
+    """
+    Badge displaying the document source (PubMed, Europe PMC, Preprint).
+
+    Shows the source name with a color-coded background to quickly
+    identify where the document came from.
+
+    Attributes:
+        source: Document source type
+        is_preprint: Whether document is a preprint
+    """
+
+    def __init__(
+        self,
+        source: DocumentSource,
+        is_preprint: bool = False,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize the source badge.
+
+        Args:
+            source: Document source (PubMed, Europe PMC, etc.)
+            is_preprint: Whether this is a preprint article
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self._source = source
+        self._is_preprint = is_preprint
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        """Set up the badge UI."""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(
+            scaled(6), scaled(2), scaled(6), scaled(2)
+        )
+        layout.setSpacing(0)
+
+        # Determine label text and color
+        if self._is_preprint:
+            label_text = "Preprint"
+            bg_color = PROVIDER_COLOR_PREPRINT
+        elif self._source == DocumentSource.EUROPEPMC:
+            label_text = "Europe PMC"
+            bg_color = PROVIDER_COLOR_EUROPEPMC
+        elif self._source == DocumentSource.PUBMED:
+            label_text = "PubMed"
+            bg_color = PROVIDER_COLOR_PUBMED
+        else:
+            # Other sources (local, etc.)
+            label_text = self._source.value.replace("_", " ").title()
+            bg_color = "#757575"  # Gray for other sources
+
+        # Source label
+        self.source_label = QLabel(label_text)
+        self.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Style font
+        font = QFont()
+        font.setPointSize(scaled(8))
+        font.setBold(False)
+        self.source_label.setFont(font)
+
+        # Apply colors
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_color};
+                border-radius: {scaled(3)}px;
+                border: none;
+            }}
+        """)
+        self.source_label.setStyleSheet("""
+            QLabel {
+                color: white;
+                padding: 0px;
+                background: transparent;
+            }
+        """)
+
+        layout.addWidget(self.source_label)
+
+    @property
+    def source(self) -> DocumentSource:
+        """Get current source."""
+        return self._source
+
+    @property
+    def is_preprint(self) -> bool:
+        """Check if this is a preprint."""
+        return self._is_preprint
+
+
 class DocumentCard(QFrame):
     """
     Collapsible card displaying document information.
@@ -190,6 +286,7 @@ class DocumentCard(QFrame):
         # Track child widgets for updates
         self._score_badge: Optional[ScoreBadge] = None
         self._quality_badge: Optional[QualityBadge] = None
+        self._source_badge: Optional[SourceBadge] = None
         self._abstract_widget: Optional[QTextEdit] = None
         self._rationale_widget: Optional[QLabel] = None
         self._header_widget: Optional[QWidget] = None
@@ -244,6 +341,17 @@ class DocumentCard(QFrame):
         if self._score is not None:
             self._score_badge = ScoreBadge(self._score)
             title_row.addWidget(self._score_badge)
+
+        # Source badge - show for Europe PMC or preprints
+        if (
+            self.document.source == DocumentSource.EUROPEPMC
+            or self.document.is_preprint
+        ):
+            self._source_badge = SourceBadge(
+                source=self.document.source,
+                is_preprint=self.document.is_preprint,
+            )
+            title_row.addWidget(self._source_badge)
 
         # Title
         self.title_label = QLabel(self.document.title)
