@@ -35,13 +35,16 @@ let package = Package(
         ),
     ],
     dependencies: [
-        // No external dependencies - using only Apple frameworks
+        // BioMedLit shared library for JATS parsing and literature services
+        .package(path: "../../Packages/BioMedLit"),
     ],
     targets: [
         // Full library target (for Xcode project compatibility)
         .target(
             name: "MedicalFactChecker",
-            dependencies: [],
+            dependencies: [
+                .product(name: "BioMedLit", package: "BioMedLit"),
+            ],
             path: "Sources",
             exclude: [
                 "macOS",
@@ -49,9 +52,12 @@ let package = Package(
         ),
         // Shared code target for cross-platform use
         // Contains models, services, and utilities that work on both iOS and macOS
+        // Note: This target now depends on BioMedLit for JATS parsing and search services
         .target(
             name: "MedicalFactCheckerShared",
-            dependencies: [],
+            dependencies: [
+                .product(name: "BioMedLit", package: "BioMedLit"),
+            ],
             path: "Sources",
             exclude: [
                 "App",
