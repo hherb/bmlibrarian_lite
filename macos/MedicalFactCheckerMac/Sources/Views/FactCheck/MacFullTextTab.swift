@@ -43,13 +43,14 @@ struct MacFullTextTab: View {
         guard let session = workflow?.session else { return [] }
 
         let filtered: [Document]
+        let docs = session.documents ?? []
         switch filterOption {
         case .all:
-            filtered = session.documents.filter { $0.isScored }
+            filtered = docs.filter { $0.isScored }
         case .withFullText:
-            filtered = session.documents.filter { $0.hasFullText }
+            filtered = docs.filter { $0.hasFullText }
         case .withoutFullText:
-            filtered = session.documents.filter { !$0.hasFullText && !$0.fullTextUnavailable }
+            filtered = docs.filter { !$0.hasFullText && !$0.fullTextUnavailable }
         }
 
         return filtered.sorted { ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0) }

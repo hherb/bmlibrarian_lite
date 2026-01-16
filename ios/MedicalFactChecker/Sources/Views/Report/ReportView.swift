@@ -152,8 +152,8 @@ struct ReportContentView: View {
             }
 
             // Reviewed Documents Section
-            if let session = report.session, !session.documents.isEmpty {
-                ReviewedDocumentsSection(documents: session.documents.sorted {
+            if let session = report.session, !(session.documents ?? []).isEmpty {
+                ReviewedDocumentsSection(documents: (session.documents ?? []).sorted {
                     ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
                 })
             }
@@ -308,8 +308,8 @@ struct ReportView: View {
                     }
 
                     // Reviewed Documents Section
-                    if let session = report.session, !session.documents.isEmpty {
-                        ReviewedDocumentsSection(documents: session.documents.sorted {
+                    if let session = report.session, !(session.documents ?? []).isEmpty {
+                        ReviewedDocumentsSection(documents: (session.documents ?? []).sorted {
                             ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
                         })
                     }
@@ -744,13 +744,13 @@ struct DocumentCard: View {
             }
 
             // Citations from this document
-            if !document.citations.isEmpty {
+            if !(document.citations ?? []).isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Key Passages:")
                         .font(.caption)
                         .fontWeight(.medium)
 
-                    ForEach(document.citations, id: \.id) { citation in
+                    ForEach(document.citations ?? [], id: \.id) { citation in
                         Text("\"\(citation.passage)\"")
                             .font(.caption)
                             .italic()
@@ -1250,7 +1250,7 @@ struct DocumentDetailSheet: View {
                     }
 
                     // Citations from this document
-                    if !document.citations.isEmpty {
+                    if !(document.citations ?? []).isEmpty {
                         Divider()
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -1258,7 +1258,7 @@ struct DocumentDetailSheet: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
 
-                            ForEach(document.citations, id: \.id) { citation in
+                            ForEach(document.citations ?? [], id: \.id) { citation in
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("\"\(citation.passage)\"")
                                         .font(.body)

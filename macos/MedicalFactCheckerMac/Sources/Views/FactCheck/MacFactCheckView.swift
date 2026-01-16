@@ -125,8 +125,9 @@ struct MacFactCheckView: View {
                 Spacer()
 
                 if let session = workflow?.session {
-                    let scored = session.documents.filter { $0.isScored }.count
-                    let total = session.documents.count
+                    let docs = session.documents ?? []
+                    let scored = docs.filter { $0.isScored }.count
+                    let total = docs.count
                     Text("\(scored) of \(total) scored")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -140,7 +141,7 @@ struct MacFactCheckView: View {
 
             // Documents list
             if let session = workflow?.session,
-               !session.documents.filter({ $0.isScored }).isEmpty {
+               !(session.documents ?? []).filter({ $0.isScored }).isEmpty {
                 MacScoredDocumentsView(
                     session: session,
                     showEmbeddingScores: settings.embeddingScoringEnabled,

@@ -28,7 +28,7 @@ struct ScoredDocumentsView: View {
 
     /// Scored documents from the session, computed to trigger observation.
     private var scoredDocuments: [Document] {
-        session.documents.filter { $0.isScored }
+        (session.documents ?? []).filter { $0.isScored }
     }
 
     var body: some View {

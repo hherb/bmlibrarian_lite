@@ -381,7 +381,7 @@ struct PDFExporter {
 
             // Reviewed Documents
             if let session = report.session {
-                let relevantDocs = session.documents.filter { ($0.relevanceScore ?? 0) >= 3 }
+                let relevantDocs = (session.documents ?? []).filter { ($0.relevanceScore ?? 0) >= 3 }
                     .sorted { ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0) }
 
                 if !relevantDocs.isEmpty {

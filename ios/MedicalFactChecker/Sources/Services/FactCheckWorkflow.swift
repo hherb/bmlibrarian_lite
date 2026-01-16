@@ -310,7 +310,7 @@ final class FactCheckWorkflow {
 
             // Check if we need more documents
             if session.currentStep == .scoringDocuments {
-                let relevant = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+                let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
                 let needed = settings.minRelevantDocuments
                 let available = session.totalPubMedResults - session.currentSearchOffset
 
@@ -321,7 +321,7 @@ final class FactCheckWorkflow {
                         try await executeSmartSearch()
 
                         // Re-check after smart search
-                        let relevantAfterSmart = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+                        let relevantAfterSmart = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
                         if relevantAfterSmart >= needed {
                             // Smart search found enough, proceed to citations
                             session.currentStep = .extractingCitations
@@ -568,7 +568,7 @@ final class FactCheckWorkflow {
         session.batchesFetched = batchNumber
 
         if result.articles.isEmpty {
-            if session.documents.isEmpty {
+            if (session.documents ?? []).isEmpty {
                 throw PubMedError.noResults
             }
             return  // No more results, proceed with what we have
@@ -721,7 +721,7 @@ final class FactCheckWorkflow {
             return
         }
 
-        let unscoredDocs = session.documents.filter { $0.embeddingScore == nil }
+        let unscoredDocs = (session.documents ?? []).filter { $0.embeddingScore == nil }
         guard !unscoredDocs.isEmpty else {
             print("[Embedding] No unscored documents found")
             return
@@ -813,8 +813,8 @@ final class FactCheckWorkflow {
     private func extractCitations() async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let relevantDocs = session.documents.filter {
-            $0.meetsThreshold(settings.minScoreThreshold) && $0.citations.isEmpty
+        let relevantDocs = (session.documents ?? []).filter {
+            $0.meetsThreshold(settings.minScoreThreshold) && ($0.citations ?? []).isEmpty
         }
         let total = relevantDocs.count
 
@@ -883,8 +883,8 @@ final class FactCheckWorkflow {
 
         try checkBudget()
 
-        let allCitations = session.documents.flatMap { $0.citations }
-        let relevantDocCount = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+        let allCitations = (session.documents ?? []).flatMap { $0.citations ?? [] }
+        let relevantDocCount = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
 
         // Handle no evidence case - distinguish between no relevant docs vs extraction failure
         guard !allCitations.isEmpty else {
@@ -916,7 +916,7 @@ final class FactCheckWorkflow {
 
         Claim: \(session.claim)
 
-        Evidence from \(allCitations.count) citation(s) across \(session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count) document(s):
+        Evidence from \(allCitations.count) citation(s) across \((session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count) document(s):
 
         \(citationsText)
 
@@ -977,7 +977,7 @@ final class FactCheckWorkflow {
         let uniqueSources = Set(allCitations.compactMap { $0.document?.pmid }).count
 
         // Add references section
-        let relevantDocsForRefs = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }
+        let relevantDocsForRefs = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }
         let references = formatReferences(relevantDocsForRefs)
         let completeReport = parsedReport.fullReport + "\n\n## References\n\n" + references
 
@@ -1231,7 +1231,7 @@ final class FactCheckWorkflow {
         session.currentAlternativeQueryIndex = 0
 
         // Track already-fetched PMIDs
-        let existingPmids = Set(session.documents.map { $0.pmid })
+        let existingPmids = Set((session.documents ?? []).map { $0.pmid })
         session.fetchedPmids = existingPmids.joined(separator: ",")
 
         onSmartSearchActivated?("Trying \(alternatives.count) alternative search strategies...")
@@ -1246,7 +1246,7 @@ final class FactCheckWorkflow {
             try await executeAlternativeQuery(query)
 
             // Check if we now have enough relevant documents
-            let relevant = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+            let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
             if relevant >= settings.minRelevantDocuments {
                 updateProgress(.searchingPubMed, "Found enough relevant documents with smart search")
                 break
@@ -1323,7 +1323,7 @@ final class FactCheckWorkflow {
     private func scoreNewDocuments(_ pmids: [String]) async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed }
+        let docsToScore = (session.documents ?? []).filter { pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed }
 
         for document in docsToScore {
             try checkBudget()

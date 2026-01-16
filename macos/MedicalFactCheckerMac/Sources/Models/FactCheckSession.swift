@@ -128,7 +128,7 @@ final class FactCheckSession {
     // MARK: - Relationships
 
     @Relationship(deleteRule: .cascade, inverse: \Document.session)
-    var documents: [Document] = []
+    var documents: [Document]? = []
 
     @Relationship(deleteRule: .cascade, inverse: \EvidenceReport.session)
     var report: EvidenceReport?
@@ -185,12 +185,12 @@ final class FactCheckSession {
 
     /// Documents that have been scored with relevance >= threshold.
     var relevantDocuments: [Document] {
-        documents.filter { $0.isRelevant }
+        (documents ?? []).filter { $0.isRelevant }
     }
 
     /// Documents that haven't been scored yet.
     var unscoredDocuments: [Document] {
-        documents.filter { $0.relevanceScore == nil }
+        (documents ?? []).filter { $0.relevanceScore == nil }
     }
 
     /// Progress percentage (0-100) for the current workflow.

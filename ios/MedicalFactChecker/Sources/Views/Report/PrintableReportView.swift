@@ -54,8 +54,8 @@ struct PrintableReportView: View {
             statisticsSection
 
             // Reviewed Documents (if any)
-            if let session = report.session, !session.documents.isEmpty {
-                documentsSection(session.documents)
+            if let session = report.session, !(session.documents ?? []).isEmpty {
+                documentsSection(session.documents ?? [])
             }
 
             Spacer(minLength: 20)

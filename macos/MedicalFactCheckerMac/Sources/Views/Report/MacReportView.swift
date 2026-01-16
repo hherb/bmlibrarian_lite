@@ -98,8 +98,8 @@ struct MacReportView: View {
                     detailedReportSection(report)
 
                     // Reviewed documents
-                    if let session = report.session, !session.documents.isEmpty {
-                        reviewedDocumentsSection(session.documents)
+                    if let session = report.session, !(session.documents ?? []).isEmpty {
+                        reviewedDocumentsSection(session.documents ?? [])
                     }
 
                     // Statistics
@@ -963,14 +963,14 @@ struct MacDocumentDetailSheet: View {
                     }
 
                     // Citations
-                    if !document.citations.isEmpty {
+                    if !(document.citations ?? []).isEmpty {
                         Divider()
 
                         VStack(alignment: .leading, spacing: MacSpacing.standard) {
                             Text("Key Passages")
                                 .font(.headline)
 
-                            ForEach(document.citations, id: \.id) { citation in
+                            ForEach(document.citations ?? [], id: \.id) { citation in
                                 VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                                     Text("\"\(citation.passage)\"")
                                         .font(.body)

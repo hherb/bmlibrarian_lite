@@ -25,7 +25,7 @@ struct MacScoredDocumentsView: View {
     @State private var filterThreshold: Int = 1
 
     private var scoredDocuments: [Document] {
-        session.documents
+        (session.documents ?? [])
             .filter { $0.isScored && ($0.relevanceScore ?? 0) >= filterThreshold }
             .sorted { doc1, doc2 in
                 switch sortOrder {
@@ -267,14 +267,14 @@ struct MacDocumentCard: View {
             }
 
             // Citations (Key Passages) - shown before abstract
-            if !document.citations.isEmpty {
+            if !(document.citations ?? []).isEmpty {
                 VStack(alignment: .leading, spacing: MacSpacing.medium) {
-                    Text("Key Passages (\(document.citations.count))")
+                    Text("Key Passages (\((document.citations ?? []).count))")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
 
-                    ForEach(document.citations, id: \.id) { citation in
+                    ForEach(document.citations ?? [], id: \.id) { citation in
                         HStack(alignment: .top, spacing: MacSpacing.medium) {
                             Image(systemName: "quote.opening")
                                 .font(.caption)

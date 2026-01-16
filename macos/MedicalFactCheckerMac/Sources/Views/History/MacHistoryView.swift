@@ -354,7 +354,7 @@ struct MacSessionDetailView: View {
                 }
 
                 // Statistics
-                if session.documents.count > 0 {
+                if (session.documents ?? []).count > 0 {
                     Divider()
 
                     VStack(alignment: .leading, spacing: MacSpacing.standard) {
@@ -365,11 +365,11 @@ struct MacSessionDetailView: View {
 
                         HStack(spacing: MacSpacing.sectionSpacing) {
                             MacDetailStatItem(
-                                value: "\(session.documents.count)",
+                                value: "\((session.documents ?? []).count)",
                                 label: "Documents"
                             )
                             MacDetailStatItem(
-                                value: "\(session.documents.filter { $0.isScored }.count)",
+                                value: "\((session.documents ?? []).filter { $0.isScored }.count)",
                                 label: "Scored"
                             )
                             MacDetailStatItem(

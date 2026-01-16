@@ -119,7 +119,7 @@ final class Document {
     var session: FactCheckSession?
 
     @Relationship(deleteRule: .cascade, inverse: \Citation.document)
-    var citations: [Citation] = []
+    var citations: [Citation]? = []
 
     // MARK: - Initialization
 
