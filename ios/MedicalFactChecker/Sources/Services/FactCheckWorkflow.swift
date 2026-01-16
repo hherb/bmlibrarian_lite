@@ -648,7 +648,7 @@ final class FactCheckWorkflow {
             let messages = [LLMService.userMessage(prompt)]
 
             // Retry loop for parse failures with exponential backoff
-            var parseResult: ResponseParser.ScoreParseResult?
+            var parseResult: ResponseParser.ScoreResult?
             var lastParseError: String = ""
 
             for attempt in 0..<Self.maxParseRetries {
@@ -664,7 +664,7 @@ final class FactCheckWorkflow {
                 // Parse response using ResponseParser
                 let parsed = ResponseParser.parseScoreResponse(response)
 
-                if parsed.success {
+                if !parsed.parseFailed {
                     parseResult = parsed
                     break
                 }
@@ -1357,7 +1357,7 @@ final class FactCheckWorkflow {
             let messages = [LLMService.userMessage(prompt)]
 
             // Retry loop for parse failures with exponential backoff
-            var parseResult: ResponseParser.ScoreParseResult?
+            var parseResult: ResponseParser.ScoreResult?
             var lastParseError: String = ""
 
             for attempt in 0..<Self.maxParseRetries {
@@ -1372,7 +1372,7 @@ final class FactCheckWorkflow {
 
                 let parsed = ResponseParser.parseScoreResponse(response)
 
-                if parsed.success {
+                if !parsed.parseFailed {
                     parseResult = parsed
                     break
                 }
