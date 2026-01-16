@@ -302,8 +302,11 @@ private func buildFigureURL(_ path: String) -> String {
 
 ## Table Extraction
 
-### XML Structure
+### XML Structure Variations
 
+JATS tables can have several different structures. Here are the main patterns encountered:
+
+**Standard structure with `<th>` in `<thead>`:**
 ```xml
 <table-wrap id="Tab1">
   <label>Table 1</label>
@@ -325,9 +328,185 @@ private func buildFigureURL(_ path: String) -> String {
 </table-wrap>
 ```
 
-### Parsing Strategy
+**Non-standard: `<td>` inside `<thead>` (seen in PMC7542412):**
+```xml
+<thead>
+  <tr valign="top">
+    <td colspan="2" rowspan="1">Characteristic</td>
+    <td rowspan="1" colspan="1">Description</td>
+  </tr>
+</thead>
+```
 
-Track state for header vs body rows:
+**Complex cells with nested lists (seen in PMC11817335):**
+```xml
+<th>Outcomes<list list-type="order">
+  <list-item><p>Sleep</p></list-item>
+  <list-item><p>Others</p></list-item>
+</list></th>
+```
+
+**Tables without `<thead>`/`<tbody>` wrappers:**
+```xml
+<table>
+  <tr><th>Header 1</th><th>Header 2</th></tr>
+  <tr><td>Data 1</td><td>Data 2</td></tr>
+</table>
+```
+
+### Common Problems and Solutions
+
+#### Problem 1: Tables using `<td>` inside `<thead>`
+
+Some JATS documents use `<td>` elements instead of `<th>` within the `<thead>` section. If you only check for `<th>` to identify header rows, these headers will be placed in the body section.
+
+**Solution:** Mark rows as headers if they're inside `<thead>` regardless of whether they contain `<th>` or `<td>`:
+
+```swift
+mutating func startCell(isHeader: Bool = false, colspan: Int = 1) {
+    inCell = true
+    // Mark as header row if explicitly a <th> cell OR if we're inside <thead>
+    if isHeader || inHeader {
+        currentRowHasHeaderCells = true
+    }
+}
+```
+
+#### Problem 2: Colspan attributes not handled
+
+Tables with merged cells (`colspan` attributes) will have misaligned columns if colspan isn't handled.
+
+**Solution:** Track colspan and add empty cells to fill the span:
+
+```swift
+// Track colspan for current cell
+var currentColspan = 1
+
+mutating func startCell(isHeader: Bool = false, colspan: Int = 1) {
+    inCell = true
+    currentColspan = max(1, colspan)
+    // ...
+}
+
+mutating func endCell() {
+    if inCell {
+        currentRow.append(normalizedContent)
+
+        // Add empty cells for colspan > 1
+        for _ in 1..<currentColspan {
+            currentRow.append("")
+        }
+    }
+    currentColspan = 1
+    // ...
+}
+```
+
+Parse the colspan attribute when starting a cell:
+```swift
+case "th":
+    let colspan = Int(attributeDict["colspan"] ?? "1") ?? 1
+    currentTable?.startCell(isHeader: true, colspan: colspan)
+case "td":
+    let colspan = Int(attributeDict["colspan"] ?? "1") ?? 1
+    currentTable?.startCell(isHeader: false, colspan: colspan)
+```
+
+#### Problem 3: Nested lists inside table cells
+
+Cell content can include `<list>` elements with `<list-item>` children. Without special handling, text from all nested elements concatenates without separation (e.g., "OutcomesSleepOthers" instead of "Outcomes; 1. Sleep; 2. Others").
+
+**Solution:** Track list state within cells and add markers:
+
+```swift
+// List tracking for proper formatting
+var inList = false
+var listType: ListType = .unordered
+var listItemNumber = 0
+var pendingListItem = false
+
+enum ListType { case ordered, unordered }
+
+mutating func startList(ordered: Bool) {
+    if inCell {
+        inList = true
+        listType = ordered ? .ordered : .unordered
+        listItemNumber = 0
+    }
+}
+
+mutating func startListItem() {
+    if inCell && inList {
+        listItemNumber += 1
+        pendingListItem = true
+    }
+}
+
+mutating func appendCellText(_ text: String) {
+    if inCell {
+        let normalized = text.replacingOccurrences(of: "\n", with: " ")
+
+        // Add list marker when we hit content after starting a list item
+        if pendingListItem && !normalized.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !currentCellText.trimmingCharacters(in: .whitespaces).isEmpty {
+                currentCellText += "; "  // Separator between items
+            }
+            switch listType {
+            case .ordered:
+                currentCellText += "\(listItemNumber). "
+            case .unordered:
+                currentCellText += "• "
+            }
+            pendingListItem = false
+        }
+
+        currentCellText += normalized
+    }
+}
+```
+
+Handle list elements in the parser:
+```swift
+case "list":
+    if inTableWrap {
+        let listTypeAttr = attributeDict["list-type"] ?? ""
+        let isOrdered = listTypeAttr.hasPrefix("order")  // "order" or "ordered"
+        currentTable?.startList(ordered: isOrdered)
+    }
+case "list-item":
+    if inTableWrap {
+        currentTable?.startListItem()
+    }
+```
+
+#### Problem 4: Tables without `<thead>` wrapper
+
+Some tables have `<th>` cells but no `<thead>` element wrapping them. The first row with `<th>` cells should be treated as a header.
+
+**Solution:** Track if the current row contains any `<th>` cells:
+
+```swift
+var currentRowHasHeaderCells = false
+
+mutating func startRow() {
+    currentRow = []
+    currentRowHasHeaderCells = false
+}
+
+mutating func endRow() {
+    if inRow && !currentRow.isEmpty {
+        // If in explicit <thead> OR row has <th> cells and we haven't started <tbody> yet
+        if inHeader || (currentRowHasHeaderCells && !inBody && headerRows.isEmpty) {
+            headerRows.append(currentRow)
+        } else {
+            bodyRows.append(currentRow)
+        }
+    }
+    currentRowHasHeaderCells = false
+}
+```
+
+### Complete TableBuilder Example
 
 ```swift
 struct TableBuilder {
@@ -337,52 +516,147 @@ struct TableBuilder {
     var currentCellText = ""
     var inHeader = false
     var inBody = false
+    var inRow = false
     var inCell = false
+
+    // Track header cells without <thead> wrapper
+    var currentRowHasHeaderCells = false
+
+    // Track colspan
+    var currentColspan = 1
+
+    // List tracking for nested lists in cells
+    var inList = false
+    var listType: ListType = .unordered
+    var listItemNumber = 0
+    var pendingListItem = false
+
+    enum ListType { case ordered, unordered }
 
     mutating func startHeader() { inHeader = true; inBody = false }
     mutating func endHeader() { inHeader = false }
     mutating func startBody() { inBody = true; inHeader = false }
     mutating func endBody() { inBody = false }
 
-    mutating func startRow() { currentRow = [] }
+    mutating func startRow() {
+        inRow = true
+        currentRow = []
+        currentRowHasHeaderCells = false
+    }
+
     mutating func endRow() {
-        if inHeader {
-            headerRows.append(currentRow)
-        } else {
-            bodyRows.append(currentRow)
+        if inRow && !currentRow.isEmpty {
+            if inHeader || (currentRowHasHeaderCells && !inBody && headerRows.isEmpty) {
+                headerRows.append(currentRow)
+            } else {
+                bodyRows.append(currentRow)
+            }
+        }
+        inRow = false
+        currentRow = []
+        currentRowHasHeaderCells = false
+    }
+
+    mutating func startCell(isHeader: Bool = false, colspan: Int = 1) {
+        inCell = true
+        currentCellText = ""
+        currentColspan = max(1, colspan)
+        inList = false
+        listItemNumber = 0
+        pendingListItem = false
+        if isHeader || inHeader {
+            currentRowHasHeaderCells = true
         }
     }
 
-    mutating func startCell() { currentCellText = "" }
-    mutating func endCell() { currentRow.append(currentCellText.trimmed()) }
-    mutating func appendCellText(_ text: String) { currentCellText += text }
+    mutating func endCell() {
+        if inCell {
+            let normalized = currentCellText
+                .components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+                .replacingOccurrences(of: "|", with: "\\|")
+            currentRow.append(normalized)
+
+            for _ in 1..<currentColspan {
+                currentRow.append("")
+            }
+        }
+        inCell = false
+        currentCellText = ""
+        currentColspan = 1
+        inList = false
+        listItemNumber = 0
+        pendingListItem = false
+    }
+
+    mutating func startList(ordered: Bool) {
+        if inCell {
+            inList = true
+            listType = ordered ? .ordered : .unordered
+            listItemNumber = 0
+        }
+    }
+
+    mutating func endList() {
+        if inCell { inList = false }
+    }
+
+    mutating func startListItem() {
+        if inCell && inList {
+            listItemNumber += 1
+            pendingListItem = true
+        }
+    }
+
+    mutating func endListItem() {
+        if inCell { pendingListItem = false }
+    }
+
+    mutating func appendCellText(_ text: String) {
+        if inCell {
+            let normalized = text.replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+
+            if pendingListItem && !normalized.trimmingCharacters(in: .whitespaces).isEmpty {
+                if !currentCellText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    currentCellText += "; "
+                }
+                switch listType {
+                case .ordered:
+                    currentCellText += "\(listItemNumber). "
+                case .unordered:
+                    currentCellText += "• "
+                }
+                pendingListItem = false
+            }
+
+            currentCellText += normalized
+        }
+    }
 }
 ```
 
-### Markdown Output
+### HTML vs Markdown Output
+
+For complex tables with colspan/rowspan or nested content, **HTML rendering is recommended** over markdown. Markdown tables don't support:
+- Cell spanning (colspan/rowspan)
+- Nested lists or complex formatting within cells
+- Multiple header rows
+
+Consider generating both formats and preferring HTML in the viewer:
 
 ```swift
-func buildMarkdownTable() -> String {
-    var lines: [String] = []
-    let columnCount = max(headerRows.first?.count ?? 0, bodyRows.first?.count ?? 0)
+func parseToHTML() throws -> String {
+    // Parse to HTML for better table rendering
+}
 
-    // Header rows
-    for row in headerRows {
-        lines.append("| " + row.joined(separator: " | ") + " |")
-    }
-
-    // Separator line
-    let separator = Array(repeating: "---", count: columnCount)
-    lines.append("| " + separator.joined(separator: " | ") + " |")
-
-    // Body rows
-    for row in bodyRows {
-        lines.append("| " + row.joined(separator: " | ") + " |")
-    }
-
-    return lines.joined(separator: "\n")
+func parseToMarkdown() throws -> String {
+    // Fallback for simpler display contexts
 }
 ```
+
+Use WKWebView or similar HTML renderer for displaying the content with proper table support.
 
 ---
 
@@ -651,3 +925,8 @@ struct EPMCResultList: Codable {
 6. **Track table header vs body state** - Otherwise all rows become body rows
 7. **Finish authors on `</name>` close** - Not on `</person-group>` close
 8. **Implement retry for 5xx errors** - Europe PMC can return 503 during maintenance
+9. **Handle `<td>` inside `<thead>`** - Some documents use `<td>` instead of `<th>` for headers
+10. **Handle colspan attributes** - Merged cells need empty placeholders to maintain column alignment
+11. **Handle nested `<list>` elements in cells** - Lists inside table cells need proper formatting with separators
+12. **Prefer HTML for complex tables** - Markdown tables can't represent colspan/rowspan or nested content
+13. **Handle tables without `<thead>` wrapper** - First row with `<th>` cells should be detected as header
