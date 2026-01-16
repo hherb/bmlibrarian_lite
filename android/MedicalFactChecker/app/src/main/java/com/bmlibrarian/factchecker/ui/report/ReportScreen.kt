@@ -61,11 +61,13 @@ import com.bmlibrarian.factchecker.util.Constants
  * including verdict, summary, full markdown report with clickable
  * references, statistics, and export/share functionality.
  *
+ * @param sessionId Optional session ID to load. If null, loads the latest report.
  * @param viewModel The ViewModel for managing report state
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportScreen(
+    sessionId: String? = null,
     viewModel: ReportViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -78,6 +80,15 @@ fun ReportScreen(
 
     // Document detail bottom sheet state
     val sheetState = rememberModalBottomSheetState()
+
+    // Load the appropriate report based on sessionId
+    LaunchedEffect(sessionId) {
+        if (sessionId != null) {
+            viewModel.loadReport(sessionId)
+        } else {
+            viewModel.loadLatestReport()
+        }
+    }
 
     // Handle one-shot events
     LaunchedEffect(Unit) {

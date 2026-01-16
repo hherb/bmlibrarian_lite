@@ -265,6 +265,23 @@ object Constants {
     /** Alpha for divider lines. */
     const val DIVIDER_ALPHA = 0.5f
 
+    // ==================== History Screen Configuration ====================
+
+    /** Date format pattern for session list display. */
+    const val SESSION_DATE_DISPLAY_PATTERN = "MMM d, yyyy"
+
+    /** Maximum lines for claim text in session card. */
+    const val MAX_CLAIM_LINES = 2
+
+    /** Maximum lines for summary preview in session card. */
+    const val MAX_SUMMARY_PREVIEW_LINES = 2
+
+    /** Spacing between session cards in the history list (dp). */
+    const val HISTORY_CARD_SPACING = 12
+
+    /** Cost display decimal places. */
+    const val COST_DISPLAY_DECIMAL_PLACES = 4
+
     // ==================== Luminance Calculation (ITU-R BT.601) ====================
 
     /** Red coefficient for relative luminance (ITU-R BT.601 Y'). */

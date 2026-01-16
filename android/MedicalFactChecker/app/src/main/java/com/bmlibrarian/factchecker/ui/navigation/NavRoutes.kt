@@ -35,13 +35,36 @@ sealed class NavRoute(
 
     /**
      * Evidence report display screen.
+     *
+     * Supports an optional sessionId argument for viewing specific session reports.
+     * When sessionId is null, displays the most recent report.
      */
     data object Report : NavRoute(
         route = "report",
         title = "Report",
         selectedIcon = Icons.Filled.Description,
         unselectedIcon = Icons.Outlined.Description
-    )
+    ) {
+        /** Route pattern with optional sessionId argument. */
+        const val routeWithArgs = "report?sessionId={sessionId}"
+
+        /** Argument key for session ID. */
+        const val ARG_SESSION_ID = "sessionId"
+
+        /**
+         * Creates a route with the specified session ID.
+         *
+         * @param sessionId The session ID to view, or null for latest report
+         * @return The navigation route string
+         */
+        fun createRoute(sessionId: String? = null): String {
+            return if (sessionId != null) {
+                "report?sessionId=$sessionId"
+            } else {
+                route
+            }
+        }
+    }
 
     /**
      * Session history screen.
