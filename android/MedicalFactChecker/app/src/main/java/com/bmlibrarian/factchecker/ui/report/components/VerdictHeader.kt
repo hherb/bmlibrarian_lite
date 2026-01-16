@@ -38,7 +38,7 @@ fun VerdictHeader(
 ) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = verdict.color.copy(alpha = BACKGROUND_ALPHA)
+            containerColor = verdict.color.copy(alpha = Constants.VERDICT_BACKGROUND_ALPHA)
         ),
         modifier = modifier.fillMaxWidth()
     ) {
@@ -69,9 +69,6 @@ fun VerdictHeader(
         }
     }
 }
-
-/** Alpha value for the verdict background color. */
-private const val BACKGROUND_ALPHA = 0.1f
 
 @Preview(showBackground = true)
 @Composable

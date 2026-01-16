@@ -88,7 +88,7 @@ fun ReportStatistics(
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
             HorizontalDivider(
-                color = MaterialTheme.colorScheme.outline.copy(alpha = DIVIDER_ALPHA)
+                color = MaterialTheme.colorScheme.outline.copy(alpha = Constants.DIVIDER_ALPHA)
             )
 
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
@@ -134,9 +134,6 @@ private fun StatItem(
         )
     }
 }
-
-/** Alpha for the divider line. */
-private const val DIVIDER_ALPHA = 0.5f
 
 @Preview(showBackground = true)
 @Composable

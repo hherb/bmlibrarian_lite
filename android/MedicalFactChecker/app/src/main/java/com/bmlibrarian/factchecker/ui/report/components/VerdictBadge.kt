@@ -47,19 +47,19 @@ fun VerdictBadge(
 /**
  * Determines appropriate text color for a given background color.
  *
- * Uses luminance calculation to determine if white or black text
- * provides better contrast.
+ * Uses luminance calculation (ITU-R BT.601 Y' coefficients) to determine
+ * if white or black text provides better contrast.
  *
  * @param backgroundColor The background color to check
  * @return White or black color for optimal text contrast
  */
 private fun getTextColorForBackground(backgroundColor: Color): Color {
-    // Calculate relative luminance
-    val luminance = (0.299f * backgroundColor.red +
-            0.587f * backgroundColor.green +
-            0.114f * backgroundColor.blue)
+    // Calculate relative luminance using ITU-R BT.601 Y' coefficients
+    val luminance = (Constants.LUMINANCE_RED_COEFFICIENT * backgroundColor.red +
+            Constants.LUMINANCE_GREEN_COEFFICIENT * backgroundColor.green +
+            Constants.LUMINANCE_BLUE_COEFFICIENT * backgroundColor.blue)
 
-    return if (luminance > 0.5f) Color.Black else Color.White
+    return if (luminance > Constants.LUMINANCE_THRESHOLD) Color.Black else Color.White
 }
 
 @Preview(showBackground = true)

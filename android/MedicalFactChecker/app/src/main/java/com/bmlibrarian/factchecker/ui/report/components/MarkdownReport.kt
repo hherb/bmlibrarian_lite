@@ -55,7 +55,7 @@ fun MarkdownReport(
             TextView(ctx).apply {
                 setTextColor(textColor)
                 setLinkTextColor(linkColor)
-                textSize = TEXT_SIZE_SP
+                textSize = Constants.MARKDOWN_TEXT_SIZE_SP
                 movementMethod = LinkMovementMethod.getInstance()
                 // Enable selectable text for copy/paste
                 setTextIsSelectable(true)
@@ -164,6 +164,3 @@ private data class ReferenceMatch(
     val end: Int,
     val referenceNumber: Int
 )
-
-/** Text size in SP for the markdown content. */
-private const val TEXT_SIZE_SP = 16f

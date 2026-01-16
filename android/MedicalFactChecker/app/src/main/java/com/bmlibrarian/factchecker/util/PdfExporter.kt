@@ -353,16 +353,46 @@ class PdfExporter @Inject constructor(
     }
 
     /**
-     * Get color for verdict display.
+     * Get color for verdict display in PDF.
+     *
+     * Maps verdict display names to RGB colors for consistent
+     * visual representation matching the app's UI colors.
+     *
+     * @param verdict The verdict display name
+     * @return DeviceRgb color for the verdict
      */
     private fun getVerdictColor(verdict: String): DeviceRgb {
         return when (verdict.lowercase()) {
-            "supported" -> DeviceRgb(76, 175, 80) // Green
-            "likely supported" -> DeviceRgb(139, 195, 74) // Light green
-            "unclear" -> DeviceRgb(255, 152, 0) // Orange
-            "likely refuted" -> DeviceRgb(255, 152, 0) // Orange
-            "refuted" -> DeviceRgb(244, 67, 54) // Red
-            else -> DeviceRgb(158, 158, 158) // Gray
+            "supported" -> DeviceRgb(
+                Constants.PDF_VERDICT_GREEN_R,
+                Constants.PDF_VERDICT_GREEN_G,
+                Constants.PDF_VERDICT_GREEN_B
+            )
+            "likely supported" -> DeviceRgb(
+                Constants.PDF_VERDICT_LIGHT_GREEN_R,
+                Constants.PDF_VERDICT_LIGHT_GREEN_G,
+                Constants.PDF_VERDICT_LIGHT_GREEN_B
+            )
+            "unclear" -> DeviceRgb(
+                Constants.PDF_VERDICT_ORANGE_R,
+                Constants.PDF_VERDICT_ORANGE_G,
+                Constants.PDF_VERDICT_ORANGE_B
+            )
+            "likely refuted" -> DeviceRgb(
+                Constants.PDF_VERDICT_ORANGE_R,
+                Constants.PDF_VERDICT_ORANGE_G,
+                Constants.PDF_VERDICT_ORANGE_B
+            )
+            "refuted" -> DeviceRgb(
+                Constants.PDF_VERDICT_RED_R,
+                Constants.PDF_VERDICT_RED_G,
+                Constants.PDF_VERDICT_RED_B
+            )
+            else -> DeviceRgb(
+                Constants.PDF_VERDICT_GRAY_R,
+                Constants.PDF_VERDICT_GRAY_G,
+                Constants.PDF_VERDICT_GRAY_B
+            )
         }
     }
 

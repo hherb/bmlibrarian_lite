@@ -1,6 +1,5 @@
 package com.bmlibrarian.factchecker.ui.report
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity

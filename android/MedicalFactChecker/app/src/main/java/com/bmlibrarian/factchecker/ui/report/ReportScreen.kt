@@ -165,7 +165,7 @@ fun ReportScreen(
                     if (uiState.isExporting) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(Constants.UI_ICON_SIZE.dp),
-                            strokeWidth = 2.dp
+                            strokeWidth = Constants.PROGRESS_STROKE_WIDTH_SMALL.dp
                         )
                     } else {
                         Icon(
