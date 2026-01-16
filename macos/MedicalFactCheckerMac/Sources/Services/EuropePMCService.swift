@@ -207,7 +207,7 @@ actor EuropePMCService {
             throw EuropePMCError.parseError(error.localizedDescription)
         }
 
-        let totalCount = Int(response.hitCount) ?? 0
+        let totalCount = response.hitCount
         let articles = parseArticles(response.resultList.result)
 
         // Build pagination state
@@ -365,8 +365,8 @@ struct EuropePMCArticle: Sendable {
 
 /// Root response from Europe PMC search API.
 private struct EPMCSearchResponse: Codable {
-    /// Total hit count as string.
-    let hitCount: String
+    /// Total hit count.
+    let hitCount: Int
 
     /// Cursor for next page (nil if no more results).
     let nextCursorMark: String?
@@ -380,7 +380,7 @@ private struct EPMCSearchResponse: Codable {
     /// when no results are found.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        hitCount = try container.decodeIfPresent(String.self, forKey: .hitCount) ?? "0"
+        hitCount = try container.decodeIfPresent(Int.self, forKey: .hitCount) ?? 0
         nextCursorMark = try container.decodeIfPresent(String.self, forKey: .nextCursorMark)
         resultList = try container.decodeIfPresent(EPMCResultList.self, forKey: .resultList)
             ?? EPMCResultList(result: [])

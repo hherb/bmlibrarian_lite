@@ -187,7 +187,7 @@ actor EuropePMCService {
 
         return EuropePMCSearchResult(
             articles: articles,
-            totalCount: Int(response.hitCount) ?? 0,
+            totalCount: response.hitCount,
             currentCursorMark: cursorMark,
             nextCursorMark: response.nextCursorMark
         )
@@ -288,7 +288,7 @@ struct EuropePMCArticle: Sendable {
 
 /// Root response from Europe PMC search API.
 private struct EPMCSearchResponse: Codable {
-    let hitCount: String
+    let hitCount: Int
     let nextCursorMark: String?
     let resultList: EPMCResultList
 
@@ -298,7 +298,7 @@ private struct EPMCSearchResponse: Codable {
     /// when no results are found.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        hitCount = try container.decodeIfPresent(String.self, forKey: .hitCount) ?? "0"
+        hitCount = try container.decodeIfPresent(Int.self, forKey: .hitCount) ?? 0
         nextCursorMark = try container.decodeIfPresent(String.self, forKey: .nextCursorMark)
         resultList = try container.decodeIfPresent(EPMCResultList.self, forKey: .resultList)
             ?? EPMCResultList(result: [])
