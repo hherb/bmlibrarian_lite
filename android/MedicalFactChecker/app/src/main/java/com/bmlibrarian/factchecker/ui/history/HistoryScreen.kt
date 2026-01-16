@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.util.Constants
 
 /**
  * Session history screen.
@@ -40,7 +41,7 @@ fun HistoryScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(Constants.UI_PLACEHOLDER_PADDING.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -50,10 +51,10 @@ fun HistoryScreen(
                 imageVector = Icons.Default.History,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.height(64.dp)
+                modifier = Modifier.height(Constants.UI_ICON_SIZE_LARGE.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
             Text(
                 text = "History",
@@ -61,7 +62,7 @@ fun HistoryScreen(
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
             Text(
                 text = "No Sessions Yet",
@@ -69,7 +70,7 @@ fun HistoryScreen(
                 color = MaterialTheme.colorScheme.primary
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height((Constants.UI_SECTION_SPACING + Constants.UI_ELEMENT_SPACING).dp))
 
             Text(
                 text = "Your fact-checking sessions will appear here.\n\nStart a fact-check to see your history.",

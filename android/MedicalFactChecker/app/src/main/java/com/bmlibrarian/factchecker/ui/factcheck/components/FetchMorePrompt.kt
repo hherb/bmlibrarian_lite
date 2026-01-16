@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.util.Constants
 
 /**
  * Prompt asking user if they want to fetch more documents.
@@ -49,7 +50,7 @@ fun FetchMorePrompt(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
             Text(
                 text = "Fetch More Documents?",
@@ -57,7 +58,7 @@ fun FetchMorePrompt(
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
             Text(
                 text = buildPromptMessage(relevantCount, targetCount, availableCount),
@@ -65,10 +66,10 @@ fun FetchMorePrompt(
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ICON_TEXT_SPACING.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 OutlinedButton(

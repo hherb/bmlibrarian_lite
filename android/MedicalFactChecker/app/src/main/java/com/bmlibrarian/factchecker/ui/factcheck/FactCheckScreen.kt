@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
@@ -54,12 +55,12 @@ fun FactCheckScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(Constants.UI_SCREEN_PADDING.dp)
     ) {
         // Configuration warning banner
         if (uiState.showConfigWarning) {
             ConfigWarningBanner()
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
         }
 
         // Budget display
@@ -69,7 +70,7 @@ fun FactCheckScreen(
             runBudget = uiState.runBudgetUsd
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
         // Claim input section
         ClaimInput(
@@ -80,7 +81,7 @@ fun FactCheckScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
         // Progress/State section
         when (val state = uiState.workflowState) {
@@ -131,18 +132,18 @@ fun FactCheckScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
         // Scored documents list
         if (uiState.documents.isNotEmpty()) {
             Text(
                 text = "Scored Documents (${uiState.documents.size})",
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = 8.dp)
+                modifier = Modifier.padding(bottom = Constants.UI_ELEMENT_SPACING.dp)
             )
 
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp),
                 modifier = Modifier.weight(1f)
             ) {
                 items(
@@ -169,14 +170,14 @@ private fun ConfigWarningBanner() {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Warning,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error
             )
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(Constants.UI_ICON_TEXT_SPACING.dp))
             Text(
                 text = "Please configure your LLM provider and API key in Settings before starting.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -205,7 +206,7 @@ private fun BudgetDisplay(
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(Constants.UI_CARD_PADDING.dp)
         ) {
             Column {
                 Text(
@@ -243,7 +244,7 @@ private fun IdlePlaceholder() {
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(32.dp)
+            .padding(Constants.UI_PLACEHOLDER_PADDING.dp)
     ) {
         Text(
             text = "Enter a medical claim above to start fact-checking.\n\nExample: \"Vitamin D supplementation prevents COVID-19 infection\"",
@@ -269,20 +270,20 @@ private fun CompletedMessage(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
             Text(
                 text = "Fact-check complete!",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             Text(
                 text = "View the evidence report in the Report tab.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             TextButton(onClick = onViewReport) {
                 Text("View Report")
             }
@@ -305,20 +306,20 @@ private fun ErrorMessage(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
             Text(
                 text = "Error",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.error
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             Text(
                 text = error,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ICON_TEXT_SPACING.dp))
             TextButton(onClick = onDismiss) {
                 Text("Dismiss")
             }
@@ -342,14 +343,14 @@ private fun BudgetExceededMessage(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
             Text(
                 text = "Budget Exceeded",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,

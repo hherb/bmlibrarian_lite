@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
+import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.CostCalculator
 
 /**
@@ -42,7 +43,7 @@ fun SearchProgress(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
             // Status row with spinner and message
             Row(
@@ -53,7 +54,7 @@ fun SearchProgress(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(Constants.UI_ICON_TEXT_SPACING.dp))
                 Text(
                     text = progress.message,
                     style = MaterialTheme.typography.bodyLarge,
@@ -61,7 +62,7 @@ fun SearchProgress(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ICON_TEXT_SPACING.dp))
 
             // Linear progress bar
             LinearProgressIndicator(
@@ -69,7 +70,7 @@ fun SearchProgress(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ICON_TEXT_SPACING.dp))
 
             // Statistics row
             Row(
@@ -114,7 +115,7 @@ fun SearchProgress(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
             // Cancel button
             TextButton(

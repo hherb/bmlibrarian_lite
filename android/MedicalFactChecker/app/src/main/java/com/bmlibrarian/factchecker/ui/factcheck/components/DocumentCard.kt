@@ -54,7 +54,7 @@ fun DocumentCard(
             .clickable { expanded = !expanded }
     ) {
         Column(
-            modifier = Modifier.padding(12.dp)
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING_SMALL.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.Top,
@@ -64,7 +64,7 @@ fun DocumentCard(
                 document.relevanceScore?.let { score ->
                     ScoreBadge(
                         score = score,
-                        modifier = Modifier.padding(end = 12.dp)
+                        modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
                     )
                 }
 
@@ -77,7 +77,7 @@ fun DocumentCard(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
 
                     Text(
                         text = document.formattedAuthors,
@@ -88,7 +88,7 @@ fun DocumentCard(
                     )
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
                     ) {
                         document.journal?.let {
                             Text(
@@ -120,13 +120,13 @@ fun DocumentCard(
 
             // Expanded content
             if (expanded) {
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 HorizontalDivider()
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
 
                 // Source badges
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
                 ) {
                     SourceBadge(source = document.source)
                     if (document.isPreprint) {
@@ -143,12 +143,12 @@ fun DocumentCard(
 
                 // Abstract
                 document.abstractText?.let { abstract ->
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                     Text(
                         text = "Abstract",
                         style = MaterialTheme.typography.labelMedium
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                     Text(
                         text = abstract,
                         style = MaterialTheme.typography.bodySmall,
@@ -158,12 +158,12 @@ fun DocumentCard(
 
                 // Score rationale
                 document.scoreRationale?.let { rationale ->
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                     Text(
                         text = "Relevance Assessment",
                         style = MaterialTheme.typography.labelMedium
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                     Text(
                         text = rationale,
                         style = MaterialTheme.typography.bodySmall,
@@ -197,7 +197,10 @@ fun ScoreBadge(
             text = score.toString(),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            modifier = Modifier.padding(
+                horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
+                vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
+            )
         )
     }
 }
@@ -224,7 +227,10 @@ private fun SourceBadge(source: String) {
             text = displayText,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            modifier = Modifier.padding(
+                horizontal = Constants.UI_BADGE_PADDING_HORIZONTAL.dp,
+                vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
+            )
         )
     }
 }
@@ -242,7 +248,10 @@ private fun PreprintBadge() {
             text = "Preprint",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onTertiaryContainer,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            modifier = Modifier.padding(
+                horizontal = Constants.UI_BADGE_PADDING_HORIZONTAL.dp,
+                vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
+            )
         )
     }
 }

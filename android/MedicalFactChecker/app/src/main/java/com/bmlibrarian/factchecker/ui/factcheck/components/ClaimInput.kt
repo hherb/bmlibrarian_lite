@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.util.Constants
 
 /**
  * Input component for the medical claim.
@@ -49,7 +50,7 @@ fun ClaimInput(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(Constants.UI_ICON_TEXT_SPACING.dp))
 
         Button(
             onClick = onSubmit,
@@ -59,9 +60,9 @@ fun ClaimInput(
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = null,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(Constants.UI_ICON_SIZE.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING.dp))
             Text("Check Claim")
         }
     }

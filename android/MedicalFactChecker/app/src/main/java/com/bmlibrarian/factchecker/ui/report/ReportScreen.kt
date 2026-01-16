@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.util.Constants
 
 /**
  * Evidence report display screen.
@@ -36,7 +37,7 @@ fun ReportScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(Constants.UI_PLACEHOLDER_PADDING.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -46,10 +47,10 @@ fun ReportScreen() {
                 imageVector = Icons.Default.Description,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.height(64.dp)
+                modifier = Modifier.height(Constants.UI_ICON_SIZE_LARGE.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
             Text(
                 text = "Evidence Report",
@@ -57,7 +58,7 @@ fun ReportScreen() {
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
             Text(
                 text = "No Report Available",
@@ -65,7 +66,7 @@ fun ReportScreen() {
                 color = MaterialTheme.colorScheme.primary
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height((Constants.UI_SECTION_SPACING + Constants.UI_ELEMENT_SPACING).dp))
 
             Text(
                 text = "Complete a fact-check to generate an evidence report.\n\nThe report will include a verdict, summary, and supporting citations.",
