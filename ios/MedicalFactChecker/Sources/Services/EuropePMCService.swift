@@ -292,6 +292,15 @@ private struct EPMCSearchResponse: Codable {
 /// Result list container.
 private struct EPMCResultList: Codable {
     let result: [EPMCResult]
+
+    /// Custom decoder to handle missing or null result arrays gracefully.
+    ///
+    /// The Europe PMC API may return null or omit the result array entirely
+    /// when no results are found, instead of returning an empty array.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = try container.decodeIfPresent([EPMCResult].self, forKey: .result) ?? []
+    }
 }
 
 /// Individual result from Europe PMC.
