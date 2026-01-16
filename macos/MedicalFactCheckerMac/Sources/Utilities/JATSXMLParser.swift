@@ -282,9 +282,10 @@ final class JATSXMLParser: NSObject {
             lines.append("")
             for (index, figure) in figures.enumerated() {
                 let figNum = figure.label.isEmpty ? "Figure \(index + 1)" : figure.label
-                // Add anchor for linking from xrefs
+                // Add anchor for linking from xrefs - blank line needed for parser to detect
                 let anchorId = figure.id.isEmpty ? "fig\(index + 1)" : figure.id
                 lines.append("<!-- anchor:\(anchorId) -->")
+                lines.append("")
                 lines.append("### \(figNum)")
                 lines.append("")
                 // Include figure image if URL is available
@@ -307,9 +308,10 @@ final class JATSXMLParser: NSObject {
             lines.append("")
             for (index, table) in tables.enumerated() {
                 let tableNum = table.label.isEmpty ? "Table \(index + 1)" : table.label
-                // Add anchor for linking from xrefs
+                // Add anchor for linking from xrefs - blank line needed for parser to detect
                 let anchorId = table.id.isEmpty ? "table\(index + 1)" : table.id
                 lines.append("<!-- anchor:\(anchorId) -->")
+                lines.append("")
                 lines.append("### \(tableNum)")
                 if !table.caption.isEmpty {
                     lines.append("")
@@ -1099,7 +1101,14 @@ private struct TableBuilder {
 
     mutating func endCell() {
         if inCell {
-            currentRow.append(currentCellText.trimmingCharacters(in: .whitespacesAndNewlines))
+            // Normalize cell content: collapse all whitespace to single spaces
+            // and escape pipe characters that would break table formatting
+            let normalized = currentCellText
+                .components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+                .replacingOccurrences(of: "|", with: "\\|")
+            currentRow.append(normalized)
         }
         inCell = false
         currentCellText = ""
@@ -1107,7 +1116,11 @@ private struct TableBuilder {
 
     mutating func appendCellText(_ text: String) {
         if inCell {
-            currentCellText += text
+            // Normalize whitespace within cell text to prevent line breaks
+            // that would corrupt the markdown table format
+            let normalized = text.replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+            currentCellText += normalized
         }
     }
 

@@ -554,13 +554,22 @@ struct MacMarkdownView: View {
         let rawBlocks = text.components(separatedBy: "\n\n")
 
         for rawBlock in rawBlocks {
-            let trimmed = rawBlock.trimmingCharacters(in: .whitespacesAndNewlines)
+            var trimmed = rawBlock.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
             // Check for anchor comment: <!-- anchor:id -->
+            // First check if the entire block is just an anchor (preferred format)
             if let anchorId = extractAnchorId(from: trimmed) {
                 pendingAnchorId = anchorId
                 continue
+            }
+
+            // Also handle anchors at the start of a block with content following
+            // (legacy format or single-newline separation)
+            if let (extractedAnchorId, remaining) = extractAnchorWithContent(from: trimmed) {
+                pendingAnchorId = extractedAnchorId
+                trimmed = remaining
+                guard !trimmed.isEmpty else { continue }
             }
 
             // Use pending anchor ID for next content block
@@ -628,8 +637,13 @@ struct MacMarkdownView: View {
     }
 
     /// Extract anchor ID from an anchor comment.
+    ///
+    /// Handles both standalone anchor comments and anchors at the start of a block.
+    /// - Parameter text: The text to search for an anchor comment.
+    /// - Returns: A tuple of (anchorId, remainingText) if found, nil otherwise.
     private func extractAnchorId(from text: String) -> String? {
         // Pattern: <!-- anchor:id -->
+        // Handle case where entire text is the anchor
         if text.hasPrefix("<!-- anchor:") && text.hasSuffix("-->") {
             let start = text.index(text.startIndex, offsetBy: 12)
             let end = text.index(text.endIndex, offsetBy: -3)
@@ -638,6 +652,28 @@ struct MacMarkdownView: View {
             }
         }
         return nil
+    }
+
+    /// Extract anchor ID and remaining content from text that may contain an anchor at the start.
+    ///
+    /// - Parameter text: The text to search.
+    /// - Returns: A tuple of (anchorId, remainingText) if an anchor was found, nil otherwise.
+    private func extractAnchorWithContent(from text: String) -> (anchorId: String, remaining: String)? {
+        // Pattern: <!-- anchor:id --> followed by content
+        guard text.hasPrefix("<!-- anchor:") else { return nil }
+
+        // Find the closing -->
+        guard let closeRange = text.range(of: "-->") else { return nil }
+
+        let anchorStart = text.index(text.startIndex, offsetBy: 12)
+        let anchorEnd = closeRange.lowerBound
+
+        guard anchorStart < anchorEnd else { return nil }
+
+        let anchorId = String(text[anchorStart..<anchorEnd]).trimmingCharacters(in: .whitespaces)
+        let remaining = String(text[closeRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return (anchorId, remaining)
     }
 
     /// Parse a numbered list item without using regex literals.
