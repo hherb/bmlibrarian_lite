@@ -369,6 +369,9 @@ struct MacMarkdownView: View {
                     .font(.body)
                     .textSelection(.enabled)
             }
+
+        case .image(let url, let altText):
+            AsyncFigureView(url: url, altText: altText)
         }
     }
 
@@ -430,6 +433,11 @@ struct MacMarkdownView: View {
                 } else {
                     blocks.append(MarkdownBlock(type: .paragraph, content: trimmed))
                 }
+            } else if let imageMatch = trimmed.firstMatch(of: /^!\[([^\]]*)\]\(([^)]+)\)/) {
+                // Markdown image: ![alt text](url)
+                let altText = String(imageMatch.1)
+                let url = String(imageMatch.2)
+                blocks.append(MarkdownBlock(type: .image(url: url, altText: altText), content: ""))
             } else {
                 // Regular paragraph
                 blocks.append(MarkdownBlock(type: .paragraph, content: trimmed))
@@ -455,6 +463,107 @@ private struct MarkdownBlock {
         case paragraph
         case listItem
         case numberedItem(Int)
+        case image(url: String, altText: String)
+    }
+}
+
+// MARK: - Async Figure View
+
+/// View for loading and displaying figure images asynchronously.
+///
+/// Handles loading state, errors, and displays images with appropriate sizing.
+struct AsyncFigureView: View {
+    let url: String
+    let altText: String
+
+    @State private var image: NSImage?
+    @State private var isLoading = true
+    @State private var loadError: String?
+
+    /// Maximum width for displayed figures.
+    private let maxFigureWidth: CGFloat = 600
+
+    /// Maximum height for displayed figures.
+    private let maxFigureHeight: CGFloat = 500
+
+    var body: some View {
+        VStack(alignment: .center, spacing: MacSpacing.small) {
+            if let image = image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: maxFigureWidth, maxHeight: maxFigureHeight)
+                    .cornerRadius(MacCornerRadius.standard)
+                    .shadow(radius: 2)
+            } else if isLoading {
+                HStack(spacing: MacSpacing.small) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading figure...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(height: 100)
+            } else if let error = loadError {
+                VStack(spacing: MacSpacing.xSmall) {
+                    Image(systemName: "photo")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                    Text("Could not load image")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if !altText.isEmpty {
+                        Text(altText)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                }
+                .frame(height: 100)
+                .frame(maxWidth: .infinity)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(MacCornerRadius.standard)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, MacSpacing.small)
+        .task {
+            await loadImage()
+        }
+    }
+
+    /// Load image from URL asynchronously.
+    private func loadImage() async {
+        guard let imageURL = URL(string: url) else {
+            loadError = "Invalid URL"
+            isLoading = false
+            return
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: imageURL)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                loadError = "Failed to load image"
+                isLoading = false
+                return
+            }
+
+            if let nsImage = NSImage(data: data) {
+                await MainActor.run {
+                    self.image = nsImage
+                    self.isLoading = false
+                }
+            } else {
+                loadError = "Invalid image data"
+                isLoading = false
+            }
+        } catch {
+            loadError = error.localizedDescription
+            isLoading = false
+            AppLogger.fullText.warning("Failed to load figure from \(url): \(error.localizedDescription)")
+        }
     }
 }
 

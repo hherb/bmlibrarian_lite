@@ -89,7 +89,9 @@ final class JATSXMLParser: NSObject {
         "bold", "b", "italic", "i", "sub", "sup", "monospace", "code",
         "xref", "ext-link", "uri", "email", "named-content",
         "list-item", "def", "term", "kwd", "alt-title",
-        "inline-formula", "disp-formula", "tex-math"
+        "inline-formula", "disp-formula", "tex-math",
+        // Reference elements
+        "source", "article-title", "person-group", "pub-id", "collab"
     ]
 
     // Article metadata state
@@ -119,6 +121,8 @@ final class JATSXMLParser: NSObject {
     // Reference state
     private var inRefList = false
     private var inRef = false
+    private var inRefCitation = false
+    private var inRefPersonGroup = false
     private var currentReference: ReferenceBuilder?
 
     // Author state
@@ -257,11 +261,18 @@ final class JATSXMLParser: NSObject {
             for (index, figure) in figures.enumerated() {
                 let figNum = figure.label.isEmpty ? "Figure \(index + 1)" : figure.label
                 lines.append("### \(figNum)")
-                if !figure.caption.isEmpty {
-                    lines.append("")
-                    lines.append(figure.caption)
-                }
                 lines.append("")
+                // Include figure image if URL is available
+                if let graphicURL = figure.graphicURL {
+                    // Build full URL for Europe PMC graphics
+                    let fullURL = buildFigureURL(graphicURL)
+                    lines.append("![Figure](\(fullURL))")
+                    lines.append("")
+                }
+                if !figure.caption.isEmpty {
+                    lines.append(figure.caption)
+                    lines.append("")
+                }
             }
         }
 
@@ -286,7 +297,8 @@ final class JATSXMLParser: NSObject {
             lines.append("")
             for (index, ref) in references.enumerated() {
                 let refNum = ref.label.isEmpty ? String(index + 1) : ref.label
-                lines.append("\(refNum). \(ref.citation)")
+                // Use formatted citation with full structured data
+                lines.append("\(refNum). \(ref.formattedCitation)")
             }
             lines.append("")
         }
@@ -355,6 +367,31 @@ final class JATSXMLParser: NSObject {
         }
 
         return ids.joined(separator: " | ")
+    }
+
+    /// Build a complete URL for a figure graphic.
+    ///
+    /// Europe PMC graphics use relative paths like "EMS12345/gr1.jpg"
+    /// which need to be prefixed with the base URL.
+    ///
+    /// - Parameter path: The graphic path or href from the XML.
+    /// - Returns: Complete URL string for the figure.
+    private func buildFigureURL(_ path: String) -> String {
+        // If already a full URL, return as-is
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            return path
+        }
+
+        // Europe PMC figure URL pattern
+        // https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{id}/bin/{filename}
+        // or https://europepmc.org/articles/{pmcid}/bin/{filename}
+        if !pmcId.isEmpty {
+            let normalizedPMCId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
+            return "https://www.ncbi.nlm.nih.gov/pmc/articles/\(normalizedPMCId)/bin/\(path)"
+        }
+
+        // Return path as-is if we can't build a full URL
+        return path
     }
 
     /// Format a body section recursively.
@@ -431,6 +468,16 @@ extension JATSXMLParser: XMLParserDelegate {
             inFigure = true
             currentFigure = FigureBuilder()
             currentFigure?.id = attributeDict["id"] ?? ""
+        case "graphic":
+            // Extract graphic URL from xlink:href attribute
+            if inFigure {
+                let href = attributeDict["xlink:href"]
+                    ?? attributeDict["href"]
+                    ?? attributeDict["xlink-href"]
+                if let href = href {
+                    currentFigure?.graphicHref = href
+                }
+            }
         case "table-wrap":
             inTableWrap = true
             currentTable = TableBuilder()
@@ -441,6 +488,20 @@ extension JATSXMLParser: XMLParserDelegate {
             inRef = true
             currentReference = ReferenceBuilder()
             currentReference?.id = attributeDict["id"] ?? ""
+        case "mixed-citation", "element-citation":
+            if inRef {
+                inRefCitation = true
+            }
+        case "person-group":
+            if inRefCitation {
+                inRefPersonGroup = true
+            }
+        case "name":
+            // Start of an author name within reference - handled in didEndElement
+            break
+        case "pub-id":
+            // Handled in didEndElement with pub-id-type attribute
+            break
 
         // Inline formatting
         case "bold", "b":
@@ -504,41 +565,9 @@ extension JATSXMLParser: XMLParserDelegate {
             inAff = false
 
         // Metadata fields
-        case "article-title":
-            if inFront && inArticleMeta {
-                title = normalizedText
-            }
-        case "surname":
-            if inContrib {
-                currentAuthor?.surname = text
-            }
-        case "given-names":
-            if inContrib {
-                currentAuthor?.givenNames = text
-            }
         case "journal-title":
             if inFront {
                 journal = text
-            }
-        case "volume":
-            if inFront && inArticleMeta {
-                volume = text
-            }
-        case "issue":
-            if inFront && inArticleMeta {
-                issue = text
-            }
-        case "fpage":
-            if inFront && inArticleMeta && pages.isEmpty {
-                pages = text
-            }
-        case "lpage":
-            if inFront && inArticleMeta && !pages.isEmpty && !text.isEmpty {
-                pages += "-\(text)"
-            }
-        case "year":
-            if inFront && inArticleMeta && year.isEmpty {
-                year = text
             }
         case "article-id":
             if let parent = elementStack.dropLast().last {
@@ -637,14 +666,96 @@ extension JATSXMLParser: XMLParserDelegate {
         case "ref-list":
             inRefList = false
         case "ref":
+            // Finish any pending author
+            currentReference?.finishCurrentAuthor()
             if let reference = currentReference?.build() {
                 references.append(reference)
             }
             inRef = false
+            inRefCitation = false
+            inRefPersonGroup = false
             currentReference = nil
         case "mixed-citation", "element-citation":
             if inRef {
                 currentReference?.citation = normalizedText
+                inRefCitation = false
+            }
+        case "person-group":
+            if inRefCitation {
+                // Finish any pending author when exiting person-group
+                currentReference?.finishCurrentAuthor()
+                inRefPersonGroup = false
+            }
+        case "surname":
+            if inRefPersonGroup {
+                currentReference?.currentAuthorSurname = text
+            } else if inContrib {
+                currentAuthor?.surname = text
+            }
+        case "given-names":
+            if inRefPersonGroup {
+                currentReference?.currentAuthorGivenNames = text
+            } else if inContrib {
+                currentAuthor?.givenNames = text
+            }
+        case "name":
+            // Complete one author when closing <name> element
+            if inRefPersonGroup {
+                currentReference?.finishCurrentAuthor()
+            }
+        case "collab":
+            // Collaborative author (organization name)
+            if inRefCitation && !text.isEmpty {
+                currentReference?.authors.append(text)
+            }
+        case "article-title":
+            if inRefCitation {
+                currentReference?.articleTitle = normalizedText
+            } else if inFront && inArticleMeta {
+                title = normalizedText
+            }
+        case "source":
+            if inRefCitation {
+                currentReference?.source = text
+            }
+        case "year":
+            if inRefCitation {
+                currentReference?.year = text
+            } else if inFront && inArticleMeta && year.isEmpty {
+                year = text
+            }
+        case "volume":
+            if inRefCitation {
+                currentReference?.volume = text
+            } else if inFront && inArticleMeta {
+                volume = text
+            }
+        case "issue":
+            if inRefCitation {
+                currentReference?.issue = text
+            } else if inFront && inArticleMeta {
+                issue = text
+            }
+        case "fpage":
+            if inRefCitation {
+                currentReference?.firstPage = text
+            } else if inFront && inArticleMeta && pages.isEmpty {
+                pages = text
+            }
+        case "lpage":
+            if inRefCitation {
+                currentReference?.lastPage = text
+            } else if inFront && inArticleMeta && !pages.isEmpty && !text.isEmpty {
+                pages += "-\(text)"
+            }
+        case "pub-id":
+            if inRefCitation {
+                // Determine type from content pattern since we don't have attribute access here
+                if text.hasPrefix("10.") {
+                    currentReference?.doi = text
+                } else if text.allSatisfy({ $0.isNumber }) && text.count >= 7 {
+                    currentReference?.pmid = text
+                }
             }
 
         // Inline formatting - these merge with parent, nothing else to do
@@ -765,6 +876,8 @@ struct FigureInfo {
     let id: String
     let label: String
     let caption: String
+    /// URL or path to the figure graphic.
+    let graphicURL: String?
 }
 
 /// Builder for figure information.
@@ -772,9 +885,15 @@ private struct FigureBuilder {
     var id = ""
     var label = ""
     var caption = ""
+    var graphicHref = ""
 
     func build() -> FigureInfo {
-        FigureInfo(id: id, label: label, caption: caption)
+        FigureInfo(
+            id: id,
+            label: label,
+            caption: caption,
+            graphicURL: graphicHref.isEmpty ? nil : graphicHref
+        )
     }
 }
 
@@ -801,6 +920,79 @@ struct ReferenceInfo {
     let id: String
     let label: String
     let citation: String
+    /// Structured reference fields for complete display.
+    let authors: [String]
+    let articleTitle: String
+    let source: String  // Journal name
+    let year: String
+    let volume: String
+    let issue: String
+    let firstPage: String
+    let lastPage: String
+    let doi: String
+    let pmid: String
+
+    /// Format the reference as a complete citation string.
+    var formattedCitation: String {
+        var parts: [String] = []
+
+        // Authors
+        if !authors.isEmpty {
+            if authors.count <= 3 {
+                parts.append(authors.joined(separator: ", "))
+            } else {
+                parts.append("\(authors[0]), \(authors[1]), et al.")
+            }
+        }
+
+        // Article title
+        if !articleTitle.isEmpty {
+            parts.append(articleTitle)
+        }
+
+        // Journal name (italicized in markdown)
+        if !source.isEmpty {
+            parts.append("*\(source)*")
+        }
+
+        // Year
+        if !year.isEmpty {
+            parts.append("(\(year))")
+        }
+
+        // Volume and pages
+        var volumeInfo = ""
+        if !volume.isEmpty {
+            volumeInfo = volume
+            if !issue.isEmpty {
+                volumeInfo += "(\(issue))"
+            }
+        }
+        if !firstPage.isEmpty {
+            if !volumeInfo.isEmpty {
+                volumeInfo += ":"
+            }
+            volumeInfo += firstPage
+            if !lastPage.isEmpty {
+                volumeInfo += "-\(lastPage)"
+            }
+        }
+        if !volumeInfo.isEmpty {
+            parts.append(volumeInfo)
+        }
+
+        // DOI
+        if !doi.isEmpty {
+            parts.append("doi:\(doi)")
+        }
+
+        // If we have structured data, use it; otherwise fall back to raw citation
+        if parts.isEmpty {
+            return citation
+        }
+
+        return parts.joined(separator: ". ")
+    }
 }
 
 /// Builder for reference information.
@@ -808,8 +1000,47 @@ private struct ReferenceBuilder {
     var id = ""
     var label = ""
     var citation = ""
+    var authors: [String] = []
+    var currentAuthorSurname = ""
+    var currentAuthorGivenNames = ""
+    var articleTitle = ""
+    var source = ""
+    var year = ""
+    var volume = ""
+    var issue = ""
+    var firstPage = ""
+    var lastPage = ""
+    var doi = ""
+    var pmid = ""
+    var inPersonGroup = false
+
+    mutating func finishCurrentAuthor() {
+        if !currentAuthorSurname.isEmpty {
+            var name = currentAuthorSurname
+            if !currentAuthorGivenNames.isEmpty {
+                name = "\(currentAuthorGivenNames) \(name)"
+            }
+            authors.append(name)
+            currentAuthorSurname = ""
+            currentAuthorGivenNames = ""
+        }
+    }
 
     func build() -> ReferenceInfo {
-        ReferenceInfo(id: id, label: label, citation: citation)
+        ReferenceInfo(
+            id: id,
+            label: label,
+            citation: citation,
+            authors: authors,
+            articleTitle: articleTitle,
+            source: source,
+            year: year,
+            volume: volume,
+            issue: issue,
+            firstPage: firstPage,
+            lastPage: lastPage,
+            doi: doi,
+            pmid: pmid
+        )
     }
 }
