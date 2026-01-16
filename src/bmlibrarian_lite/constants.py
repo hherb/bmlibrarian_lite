@@ -542,6 +542,7 @@ EUROPEPMC_DEFAULT_FILTERS = {
 PROVIDER_COLOR_PUBMED = "#2196F3"      # Blue for PubMed
 PROVIDER_COLOR_EUROPEPMC = "#FF9800"   # Orange for Europe PMC
 PROVIDER_COLOR_PREPRINT = "#9C27B0"    # Purple for preprints
+PROVIDER_COLOR_OTHER = "#757575"       # Gray for other/unknown sources
 
 # Provider display names
 PROVIDER_DISPLAY_NAMES = {

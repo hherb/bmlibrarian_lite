@@ -293,11 +293,20 @@ class EuropePMCClient:
                 break
 
         # Build pagination state
+        # Note: next_cursor might not be set if the loop didn't execute
+        # or if an error occurred before the last response was parsed
+        next_cursor_value = None
+        try:
+            next_cursor_value = data.get("nextCursorMark")  # noqa: F821
+        except NameError:
+            # 'data' was never assigned (loop didn't execute or failed early)
+            pass
+
         pagination = CursorPaginationState(
             total_count=total_count,
             fetched_count=len(all_articles),
             current_cursor=current_cursor,
-            next_cursor=data.get("nextCursorMark") if 'data' in dir() else None,
+            next_cursor=next_cursor_value,
         )
 
         logger.info(f"Europe PMC search returned {len(all_articles)} articles")

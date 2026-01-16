@@ -37,6 +37,7 @@ from ..constants import (
     PROVIDER_COLOR_PUBMED,
     PROVIDER_COLOR_EUROPEPMC,
     PROVIDER_COLOR_PREPRINT,
+    PROVIDER_COLOR_OTHER,
 )
 from ..data_models import LiteDocument, DocumentSource
 from ..quality.data_models import QualityAssessment
@@ -191,7 +192,7 @@ class SourceBadge(QFrame):
         else:
             # Other sources (local, etc.)
             label_text = self._source.value.replace("_", " ").title()
-            bg_color = "#757575"  # Gray for other sources
+            bg_color = PROVIDER_COLOR_OTHER
 
         # Source label
         self.source_label = QLabel(label_text)
