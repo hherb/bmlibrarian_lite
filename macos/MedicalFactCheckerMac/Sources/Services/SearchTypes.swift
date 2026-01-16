@@ -64,6 +64,12 @@ struct UnifiedArticleMetadata: Sendable, Identifiable {
     /// Whether this is a preprint (Europe PMC only).
     let isPreprint: Bool
 
+    /// Whether full text is available in PubMed Central.
+    ///
+    /// True if the article has a PMC ID or the `inPMC` flag is set.
+    /// Used to show availability badge before user attempts to fetch full text.
+    let hasFullTextInPMC: Bool
+
     /// Batch number for pagination tracking.
     let batchNumber: Int
 
@@ -87,6 +93,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable {
     ///   - meshTerms: MeSH indexing terms.
     ///   - source: Provider that returned this article.
     ///   - isPreprint: Whether this is a preprint.
+    ///   - hasFullTextInPMC: Whether full text is available in PMC.
     ///   - batchNumber: Batch number for tracking.
     ///   - resultPosition: Position in search results.
     init(
@@ -102,6 +109,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable {
         meshTerms: [String] = [],
         source: SearchProvider,
         isPreprint: Bool = false,
+        hasFullTextInPMC: Bool = false,
         batchNumber: Int = 1,
         resultPosition: Int = 0
     ) {
@@ -117,6 +125,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable {
         self.meshTerms = meshTerms
         self.source = source
         self.isPreprint = isPreprint
+        self.hasFullTextInPMC = hasFullTextInPMC
         self.batchNumber = batchNumber
         self.resultPosition = resultPosition
     }

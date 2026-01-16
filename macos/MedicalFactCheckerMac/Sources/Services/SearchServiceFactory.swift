@@ -93,6 +93,7 @@ enum SearchServiceFactory {
                 meshTerms: article.meshTerms,
                 source: .pubmed,
                 isPreprint: false,
+                hasFullTextInPMC: article.pmcId != nil,
                 batchNumber: article.batchNumber,
                 resultPosition: article.resultPosition
             )

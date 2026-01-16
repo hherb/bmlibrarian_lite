@@ -562,6 +562,7 @@ final class FactCheckWorkflow {
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
             document.searchSource = article.source.rawValue
+            document.hasFullTextInPMC = article.hasFullTextInPMC
             document.session = session
 
             modelContext.insert(document)

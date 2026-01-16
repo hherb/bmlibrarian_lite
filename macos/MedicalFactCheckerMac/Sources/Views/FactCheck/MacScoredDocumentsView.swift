@@ -203,6 +203,11 @@ struct MacDocumentCard: View {
                     // Search provider badge
                     MacProviderBadge(provider: documentProvider)
 
+                    // PMC full text availability indicator (only if not already fetched)
+                    if document.hasFullTextInPMC && !document.hasFullText && !document.fullTextUnavailable {
+                        PMCAvailableBadge()
+                    }
+
                     // Full text source badge (compact)
                     if let sourceString = document.fullTextSource {
                         FullTextSourceBadge(sourceString: sourceString)
@@ -676,6 +681,29 @@ struct MacAbstractView: View {
             return attributed
         }
         return nil
+    }
+}
+
+// MARK: - PMC Availability Badge
+
+/// Compact badge indicating full text is available in PubMed Central.
+///
+/// Shows "PMC" in a green-tinted badge to indicate the article has
+/// free full text available that can be fetched.
+struct PMCAvailableBadge: View {
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 9))
+            Text("PMC")
+                .font(.system(size: 10, weight: .medium))
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(Color.green.opacity(0.15))
+        .foregroundColor(.green)
+        .cornerRadius(4)
+        .help("Full text available in PubMed Central")
     }
 }
 

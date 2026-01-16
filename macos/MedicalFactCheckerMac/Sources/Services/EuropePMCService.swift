@@ -245,6 +245,7 @@ actor EuropePMCService {
                 year: parseYear(result.pubYear),
                 source: result.source ?? "MED",
                 isPreprint: result.source == "PPR",
+                hasFullTextInPMC: result.hasFullTextInPMC,
                 resultPosition: index
             )
         }
@@ -417,6 +418,9 @@ struct EuropePMCArticle: Sendable {
     /// Whether this is a preprint.
     let isPreprint: Bool
 
+    /// Whether full text is available in PubMed Central.
+    let hasFullTextInPMC: Bool
+
     /// Position in search results.
     let resultPosition: Int
 
@@ -438,6 +442,7 @@ struct EuropePMCArticle: Sendable {
             meshTerms: [],  // Europe PMC doesn't return MeSH in search results
             source: .europePMC,
             isPreprint: isPreprint,
+            hasFullTextInPMC: hasFullTextInPMC,
             batchNumber: batchNumber,
             resultPosition: resultPosition
         )
@@ -498,10 +503,38 @@ private struct EPMCResult: Codable {
     let title: String?
     let abstractText: String?
     let authorList: EPMCAuthorList?
-    let journalTitle: String?
+    let journalInfo: EPMCJournalInfo?
     let pubYear: String?
     let firstPublicationDate: String?
     let source: String?
+
+    // Full text availability indicators
+    let isOpenAccess: String?
+    let inPMC: String?
+    let hasPDF: String?
+
+    /// Get the journal title from nested journalInfo structure.
+    var journalTitle: String? {
+        journalInfo?.journal?.title ?? journalInfo?.journal?.medlineAbbreviation
+    }
+
+    /// Whether full text is likely available in PMC.
+    var hasFullTextInPMC: Bool {
+        // inPMC is "Y" or "N" string
+        inPMC?.uppercased() == "Y" || pmcid != nil
+    }
+}
+
+/// Journal information container.
+private struct EPMCJournalInfo: Codable {
+    let journal: EPMCJournal?
+}
+
+/// Journal details.
+private struct EPMCJournal: Codable {
+    let title: String?
+    let medlineAbbreviation: String?
+    let isoabbreviation: String?
 }
 
 /// Author list container.

@@ -130,6 +130,12 @@ final class Document {
     /// Used to avoid repeated failed lookups for the same document.
     var fullTextUnavailable: Bool = false
 
+    /// Whether full text is known to be available in PubMed Central.
+    ///
+    /// Set from search results metadata (Europe PMC `inPMC` flag or presence of PMC ID).
+    /// Used to display availability indicator before user attempts to fetch full text.
+    var hasFullTextInPMC: Bool = false
+
     // MARK: - Relationships
 
     var session: FactCheckSession?
