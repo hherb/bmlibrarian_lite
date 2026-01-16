@@ -75,7 +75,22 @@ final class JATSXMLParser: NSObject {
     // MARK: - Parsing State
 
     private var elementStack: [String] = []
-    private var currentText = ""
+
+    /// Stack of text buffers for nested elements.
+    /// Each text-accumulating element pushes its own buffer.
+    private var textStack: [String] = [""]
+
+    /// Elements that accumulate their own text content.
+    private let textAccumulatingElements: Set<String> = [
+        "p", "title", "article-title", "abstract", "sec",
+        "surname", "given-names", "journal-title", "volume", "issue",
+        "fpage", "lpage", "year", "article-id", "label",
+        "mixed-citation", "element-citation", "caption",
+        "bold", "b", "italic", "i", "sub", "sup", "monospace", "code",
+        "xref", "ext-link", "uri", "email", "named-content",
+        "list-item", "def", "term", "kwd", "alt-title",
+        "inline-formula", "disp-formula", "tex-math"
+    ]
 
     // Article metadata state
     private var inFront = false
@@ -122,6 +137,43 @@ final class JATSXMLParser: NSObject {
         self.parser = XMLParser(data: data)
         super.init()
         parser.delegate = self
+    }
+
+    // MARK: - Text Stack Helpers
+
+    /// Get the current accumulated text.
+    private var currentText: String {
+        textStack.last ?? ""
+    }
+
+    /// Append text to the current buffer.
+    private func appendText(_ text: String) {
+        guard !textStack.isEmpty else { return }
+        textStack[textStack.count - 1] += text
+    }
+
+    /// Push a new text buffer for a nested element.
+    private func pushTextBuffer() {
+        textStack.append("")
+    }
+
+    /// Pop and return the text buffer, merging it with parent if needed.
+    private func popTextBuffer(mergeWithParent: Bool = false) -> String {
+        guard textStack.count > 1 else {
+            let text = textStack.first ?? ""
+            if !textStack.isEmpty {
+                textStack[0] = ""
+            }
+            return text
+        }
+
+        let text = textStack.removeLast()
+
+        if mergeWithParent && !text.isEmpty && !textStack.isEmpty {
+            textStack[textStack.count - 1] += text
+        }
+
+        return text
     }
 
     // MARK: - Public API
@@ -341,7 +393,11 @@ extension JATSXMLParser: XMLParserDelegate {
         attributes attributeDict: [String: String] = [:]
     ) {
         elementStack.append(elementName)
-        currentText = ""
+
+        // Push a new text buffer for text-accumulating elements
+        if textAccumulatingElements.contains(elementName) {
+            pushTextBuffer()
+        }
 
         switch elementName {
         // Document structure
@@ -404,7 +460,7 @@ extension JATSXMLParser: XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        currentText += string
+        appendText(string)
     }
 
     func parser(
@@ -413,12 +469,21 @@ extension JATSXMLParser: XMLParserDelegate {
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
-        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedText = normalizeWhitespace(currentText)
+        // Pop text buffer if this was a text-accumulating element
+        let elementText: String
+        if textAccumulatingElements.contains(elementName) {
+            // Inline elements merge their text with parent
+            let isInlineElement = isInlineTextElement(elementName)
+            elementText = popTextBuffer(mergeWithParent: isInlineElement)
+        } else {
+            elementText = currentText
+        }
+
+        let text = elementText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedText = normalizeWhitespace(elementText)
 
         defer {
             _ = elementStack.popLast()
-            currentText = ""
         }
 
         switch elementName {
@@ -582,7 +647,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 currentReference?.citation = normalizedText
             }
 
-        // Inline formatting
+        // Inline formatting - these merge with parent, nothing else to do
         case "bold", "b":
             _ = inlineFormattingStack.popLast()
         case "italic", "i":
@@ -593,6 +658,10 @@ extension JATSXMLParser: XMLParserDelegate {
             _ = inlineFormattingStack.popLast()
         case "monospace", "code":
             _ = inlineFormattingStack.popLast()
+
+        // xref and ext-link - already merged with parent via popTextBuffer
+        case "xref", "ext-link", "uri", "email", "named-content":
+            break
 
         default:
             break
@@ -605,6 +674,21 @@ extension JATSXMLParser: XMLParserDelegate {
     }
 
     // MARK: - Helper Methods
+
+    /// Check if an element is an inline text element that should merge with parent.
+    ///
+    /// - Parameter elementName: The element name to check.
+    /// - Returns: True if the element's text should be merged with its parent.
+    private func isInlineTextElement(_ elementName: String) -> Bool {
+        switch elementName {
+        case "bold", "b", "italic", "i", "sub", "sup", "monospace", "code",
+             "xref", "ext-link", "uri", "email", "named-content",
+             "inline-formula":
+            return true
+        default:
+            return false
+        }
+    }
 
     /// Normalize whitespace in text (collapse multiple spaces/newlines).
     private func normalizeWhitespace(_ text: String) -> String {
