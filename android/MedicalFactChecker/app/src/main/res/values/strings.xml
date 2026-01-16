@@ -5,59 +5,191 @@
 
     String resources for the application.
     All user-visible strings should be defined here for localization support.
+
+    Note: Strings are organized by screen/feature for easier maintenance.
+    Format specifiers: %d = integer, %s = string, %.2f = decimal with 2 places
 -->
 <resources>
-    <!-- App name -->
+    <!-- App name and branding -->
     <string name="app_name">Medical Fact Checker</string>
+    <string name="app_tagline">Evidence-based medical claim verification</string>
 
-    <!-- Navigation -->
-    <string name="nav_fact_check">Fact Check</string>
+    <!-- Navigation tabs -->
+    <string name="nav_fact_check">Check</string>
+    <string name="nav_report">Report</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
 
-    <!-- Fact Check Screen -->
+    <!-- ==================== Fact Check Screen ==================== -->
     <string name="fact_check_title">Check Medical Claim</string>
-    <string name="fact_check_placeholder">Enter a medical claim to verify...</string>
+    <string name="fact_check_label">Medical Claim</string>
+    <string name="fact_check_placeholder">Enter a medical claim to verify…</string>
     <string name="fact_check_button">Check Claim</string>
-    <string name="fact_check_searching">Searching medical literature...</string>
-    <string name="fact_check_scoring">Scoring relevance...</string>
-    <string name="fact_check_extracting">Extracting citations...</string>
-    <string name="fact_check_generating">Generating report...</string>
+    <string name="fact_check_checking">Checking claim…</string>
 
-    <!-- Verdicts -->
+    <!-- Workflow steps -->
+    <string name="workflow_converting_query">Converting to search query…</string>
+    <string name="workflow_searching">Searching medical literature…</string>
+    <string name="workflow_scoring">Scoring document relevance…</string>
+    <string name="workflow_extracting">Extracting citations…</string>
+    <string name="workflow_generating">Generating evidence report…</string>
+    <string name="workflow_complete">Analysis complete</string>
+
+    <!-- Progress indicators -->
+    <string name="progress_documents_found">%d documents found</string>
+    <string name="progress_documents_scored">%d of %d scored</string>
+    <string name="progress_relevant_found">%d relevant documents</string>
+    <string name="progress_citations_extracted">%d citations extracted</string>
+    <string name="progress_percent">%d%%</string>
+
+    <!-- Fetch more prompt -->
+    <string name="fetch_more_title">More documents available</string>
+    <string name="fetch_more_message">Found %d relevant documents so far. Search for more?</string>
+    <string name="fetch_more_yes">Search More</string>
+    <string name="fetch_more_no">Continue with Current</string>
+
+    <!-- Completion states -->
+    <string name="result_view_report">View Report</string>
+    <string name="result_new_check">New Check</string>
+    <string name="result_dismiss">Dismiss</string>
+
+    <!-- ==================== Verdicts ==================== -->
     <string name="verdict_supported">Supported</string>
     <string name="verdict_likely_supported">Likely Supported</string>
     <string name="verdict_unclear">Unclear</string>
     <string name="verdict_likely_refuted">Likely Refuted</string>
     <string name="verdict_refuted">Refuted</string>
+    <string name="verdict_unknown">Unknown</string>
 
-    <!-- Documents -->
+    <!-- Verdict descriptions -->
+    <string name="verdict_desc_supported">Strong evidence supports this claim</string>
+    <string name="verdict_desc_likely_supported">Evidence tends to support this claim</string>
+    <string name="verdict_desc_unclear">Evidence is mixed or insufficient</string>
+    <string name="verdict_desc_likely_refuted">Evidence tends to refute this claim</string>
+    <string name="verdict_desc_refuted">Strong evidence refutes this claim</string>
+
+    <!-- ==================== Documents ==================== -->
     <string name="documents_found">%d documents found</string>
     <string name="documents_scored">%d documents scored</string>
+    <string name="documents_relevant">%d relevant</string>
     <string name="relevance_score">Relevance: %d/5</string>
+    <string name="embedding_score">Similarity: %d/5</string>
+    <string name="combined_score">Combined: %d/5</string>
+
+    <!-- Document metadata -->
+    <string name="document_authors">%s et al.</string>
+    <string name="document_journal">%s</string>
+    <string name="document_year">%d</string>
+    <string name="document_pmid">PMID: %s</string>
+    <string name="document_doi">DOI: %s</string>
+    <string name="document_pmc">PMC: %s</string>
+
+    <!-- Document actions -->
+    <string name="view_abstract">View Abstract</string>
     <string name="view_full_text">View Full Text</string>
     <string name="full_text_unavailable">Full text not available</string>
+    <string name="open_in_pubmed">Open in PubMed</string>
 
-    <!-- History Screen -->
+    <!-- Rationale display -->
+    <string name="rationale_label">AI Rationale:</string>
+    <string name="no_rationale">No rationale provided</string>
+
+    <!-- ==================== Report Screen ==================== -->
+    <string name="report_title">Evidence Report</string>
+    <string name="report_empty">No report available</string>
+    <string name="report_empty_hint">Complete a fact check to generate a report</string>
+    <string name="report_claim_label">Claim:</string>
+    <string name="report_summary_label">Summary</string>
+    <string name="report_evidence_label">Evidence</string>
+    <string name="report_references_label">References</string>
+
+    <!-- Report statistics -->
+    <string name="report_stats_documents">%d documents analyzed</string>
+    <string name="report_stats_citations">%d citations extracted</string>
+    <string name="report_stats_cost">Est. cost: %s</string>
+
+    <!-- PDF export -->
+    <string name="pdf_select_size">Select Paper Size</string>
+    <string name="pdf_size_a4">A4</string>
+    <string name="pdf_size_letter">Letter</string>
+    <string name="pdf_exporting">Exporting PDF…</string>
+    <string name="pdf_export_success">PDF exported successfully</string>
+    <string name="pdf_export_error">Failed to export PDF</string>
+
+    <!-- ==================== History Screen ==================== -->
     <string name="history_title">Past Sessions</string>
-    <string name="history_empty">No fact-check sessions yet</string>
-    <string name="history_delete">Delete</string>
-    <string name="history_delete_confirm">Delete this session?</string>
+    <string name="history_empty">No History Yet</string>
+    <string name="history_empty_hint">Your fact-check sessions will appear here</string>
+    <string name="history_session_date">%s</string>
+    <string name="history_session_docs">%d documents</string>
 
-    <!-- Settings Screen -->
+    <!-- History actions -->
+    <string name="history_view">View</string>
+    <string name="history_delete">Delete</string>
+    <string name="history_clear_all">Clear All</string>
+
+    <!-- Delete confirmation dialogs -->
+    <string name="history_delete_title">Delete Session?</string>
+    <string name="history_delete_message">This will permanently delete this session and all its data.</string>
+    <string name="history_clear_all_title">Clear All History?</string>
+    <string name="history_clear_all_message">This will permanently delete all sessions. This cannot be undone.</string>
+
+    <!-- ==================== Settings Screen ==================== -->
     <string name="settings_title">Settings</string>
+
+    <!-- LLM Provider section -->
     <string name="settings_llm_section">LLM Provider</string>
     <string name="settings_llm_provider">Provider</string>
     <string name="settings_llm_model">Model</string>
     <string name="settings_llm_api_key">API Key</string>
-    <string name="settings_llm_base_url">Base URL</string>
-    <string name="settings_budget_section">Budget</string>
+    <string name="settings_llm_api_key_placeholder">Enter your API key</string>
+    <string name="settings_llm_api_key_saved">API key saved</string>
+    <string name="settings_llm_base_url">Custom Base URL</string>
+    <string name="settings_llm_base_url_placeholder">https://api.example.com/v1</string>
+    <string name="settings_save_api_key">Save API Key</string>
+    <string name="settings_clear_api_key">Clear</string>
+
+    <!-- Model pricing -->
+    <string name="settings_model_pricing">Pricing</string>
+    <string name="settings_price_per_million">$%.2f/1M tokens</string>
+    <string name="settings_price_input">Input: $%.2f/1M</string>
+    <string name="settings_price_output">Output: $%.2f/1M</string>
+    <string name="settings_model_free">Free (local)</string>
+
+    <!-- Search provider section -->
+    <string name="settings_search_section">Search Provider</string>
+    <string name="settings_search_provider">Search Provider</string>
+    <string name="settings_search_pubmed">PubMed</string>
+    <string name="settings_search_europepmc">Europe PMC</string>
+    <string name="settings_search_both">Both</string>
+
+    <!-- Budget section -->
+    <string name="settings_budget_section">Budget Limits</string>
     <string name="settings_max_run_budget">Max per run</string>
     <string name="settings_monthly_budget">Monthly limit</string>
-    <string name="settings_ncbi_section">PubMed</string>
-    <string name="settings_ncbi_email">NCBI Email</string>
+    <string name="settings_budget_value">$%.2f</string>
+    <string name="settings_budget_used">Used: %s of %s</string>
+    <string name="settings_budget_remaining">Remaining: %s</string>
 
-    <!-- Onboarding -->
+    <!-- Batch settings -->
+    <string name="settings_batch_section">Search Settings</string>
+    <string name="settings_batch_size">Batch size</string>
+    <string name="settings_batch_size_value">%d documents</string>
+    <string name="settings_include_preprints">Include preprints</string>
+
+    <!-- PubMed settings -->
+    <string name="settings_ncbi_section">PubMed Settings</string>
+    <string name="settings_ncbi_email">NCBI Email (optional)</string>
+    <string name="settings_ncbi_email_placeholder">your@email.com</string>
+    <string name="settings_ncbi_email_hint">Increases PubMed rate limit</string>
+
+    <!-- Reset settings -->
+    <string name="settings_reset">Reset to Defaults</string>
+    <string name="settings_reset_title">Reset Settings?</string>
+    <string name="settings_reset_message">This will restore all settings to their default values. Your API key will be cleared.</string>
+    <string name="settings_reset_confirm">Reset</string>
+
+    <!-- ==================== Onboarding ==================== -->
     <string name="onboarding_welcome">Welcome to Medical Fact Checker</string>
     <string name="onboarding_description">Verify medical claims using evidence from peer-reviewed literature.</string>
     <string name="onboarding_disclaimer_title">Medical Disclaimer</string>
@@ -66,23 +198,63 @@
     <string name="onboarding_setup">Setup</string>
     <string name="onboarding_get_started">Get Started</string>
 
-    <!-- Errors -->
+    <!-- ==================== Errors ==================== -->
+    <string name="error_title">Error</string>
     <string name="error_network">Network error. Please check your connection.</string>
     <string name="error_api_key">Invalid API key. Please check your settings.</string>
+    <string name="error_api_key_missing">API key required. Please configure in Settings.</string>
+    <string name="error_rate_limit">Rate limit exceeded. Please wait and try again.</string>
     <string name="error_no_results">No results found for this query.</string>
     <string name="error_budget_exceeded">Budget limit exceeded.</string>
+    <string name="error_budget_run">This operation would exceed your per-run budget.</string>
+    <string name="error_budget_monthly">Monthly budget limit reached.</string>
+    <string name="error_server">Server error. Please try again later.</string>
+    <string name="error_parse">Failed to parse response.</string>
     <string name="error_generic">An error occurred. Please try again.</string>
 
-    <!-- Actions -->
+    <!-- ==================== Actions ==================== -->
+    <string name="action_ok">OK</string>
     <string name="action_retry">Retry</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_save">Save</string>
+    <string name="action_delete">Delete</string>
     <string name="action_share">Share</string>
     <string name="action_export_pdf">Export PDF</string>
     <string name="action_copy">Copy</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_settings">Settings</string>
 
-    <!-- Accessibility -->
+    <!-- ==================== Accessibility ==================== -->
     <string name="content_desc_back">Go back</string>
     <string name="content_desc_menu">Open menu</string>
     <string name="content_desc_close">Close</string>
+    <string name="content_desc_expand">Expand</string>
+    <string name="content_desc_collapse">Collapse</string>
+    <string name="content_desc_search">Search</string>
+    <string name="content_desc_clear_text">Clear text</string>
+    <string name="content_desc_show_password">Show password</string>
+    <string name="content_desc_hide_password">Hide password</string>
+    <string name="content_desc_verdict_badge">Verdict: %s</string>
+    <string name="content_desc_score_badge">Relevance score: %d out of 5</string>
+    <string name="content_desc_loading">Loading</string>
+    <string name="content_desc_error">Error indicator</string>
+    <string name="content_desc_success">Success indicator</string>
+
+    <!-- ==================== Units and formatting ==================== -->
+    <string name="format_cost">$%s</string>
+    <string name="format_cost_cents">%dc</string>
+    <string name="format_cost_less_than_cent">&lt;1c</string>
+    <string name="format_date">%s</string>
+    <string name="format_time_ago_minutes">%d min ago</string>
+    <string name="format_time_ago_hours">%d hours ago</string>
+    <string name="format_time_ago_days">%d days ago</string>
+    <string name="format_today">Today</string>
+    <string name="format_yesterday">Yesterday</string>
+
+    <!-- ==================== Tooltips and hints ==================== -->
+    <string name="hint_claim_example">Example: \"Aspirin reduces heart attack risk\"</string>
+    <string name="hint_api_key_where">Get your API key from the provider\'s dashboard</string>
+    <string name="hint_budget_explanation">Spending limits help control API costs</string>
 </resources>
