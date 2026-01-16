@@ -20,12 +20,14 @@ interface EuropePMCApi {
     /**
      * Search Europe PMC for articles.
      *
+     * Note: No sort parameter is used - Europe PMC defaults to relevance sorting.
+     * The "RELEVANCE desc" parameter was deprecated by Europe PMC API in late 2025.
+     *
      * @param query Search query (supports Europe PMC query syntax)
      * @param resultType Result detail level ("lite", "core", or "idlist")
      * @param pageSize Number of results per page
      * @param cursorMark Cursor for pagination (use "*" for first page)
      * @param format Response format (always "json")
-     * @param sort Sort order (e.g., "RELEVANCE desc", "DATE desc")
      * @return Search response with articles and pagination cursor
      */
     @GET("search")
@@ -34,8 +36,7 @@ interface EuropePMCApi {
         @Query("resultType") resultType: String = DEFAULT_RESULT_TYPE,
         @Query("pageSize") pageSize: Int = DEFAULT_PAGE_SIZE,
         @Query("cursorMark") cursorMark: String = INITIAL_CURSOR,
-        @Query("format") format: String = "json",
-        @Query("sort") sort: String = DEFAULT_SORT
+        @Query("format") format: String = "json"
     ): Response<EuropePMCSearchResponse>
 
     /**
@@ -74,11 +75,11 @@ interface EuropePMCApi {
         /** Initial cursor value for first page. */
         const val INITIAL_CURSOR = "*"
 
-        /** Default sort order - by relevance. */
-        const val DEFAULT_SORT = "RELEVANCE desc"
+        // Note: No sort constant needed - Europe PMC defaults to relevance sorting.
+        // The "RELEVANCE desc" parameter was deprecated by Europe PMC API in late 2025.
 
-        /** Sort by date (newest first). */
-        const val SORT_DATE_DESC = "DATE desc"
+        /** Sort by date (newest first) - still supported via P_PDATE_D. */
+        const val SORT_DATE_DESC = "P_PDATE_D desc"
 
         /** Source: PubMed/MEDLINE. */
         const val SOURCE_MED = "MED"

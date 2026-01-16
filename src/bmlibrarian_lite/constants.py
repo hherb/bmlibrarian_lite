@@ -518,7 +518,9 @@ EUROPEPMC_SEARCH_PAGE_SIZE = 100
 EUROPEPMC_INITIAL_CURSOR = "*"
 
 # Sort order for Europe PMC results
-EUROPEPMC_SORT_ORDER = "RELEVANCE desc"
+# Note: Empty string uses default relevance sorting. The "RELEVANCE desc"
+# parameter was deprecated by Europe PMC API in late 2025.
+EUROPEPMC_SORT_ORDER = ""
 
 # Result type for Europe PMC search (core = full metadata)
 EUROPEPMC_RESULT_TYPE = "core"

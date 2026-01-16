@@ -35,8 +35,8 @@ actor EuropePMCService {
         /// Maximum concurrent connections to the host.
         static let maxConnectionsPerHost = 4
 
-        /// Sort order for search results.
-        static let defaultSortOrder = "RELEVANCE desc"
+        // Note: No sort parameter needed - Europe PMC defaults to relevance sorting.
+        // The "RELEVANCE desc" parameter was deprecated by Europe PMC API in late 2025.
 
         /// Result type for comprehensive metadata.
         static let resultType = "core"
@@ -172,13 +172,14 @@ actor EuropePMCService {
         cursor: String?
     ) -> URL? {
         var components = URLComponents(string: "\(Config.baseURL)/search")
+        // Note: No sort parameter needed - Europe PMC defaults to relevance sorting.
+        // The "RELEVANCE desc" parameter was deprecated by Europe PMC API in late 2025.
         components?.queryItems = [
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "resultType", value: Config.resultType),
             URLQueryItem(name: "pageSize", value: String(maxResults)),
             URLQueryItem(name: "cursorMark", value: cursor ?? CursorPaginationState.initialCursor),
             URLQueryItem(name: "format", value: Config.responseFormat),
-            URLQueryItem(name: "sort", value: Config.defaultSortOrder),
         ]
         return components?.url
     }

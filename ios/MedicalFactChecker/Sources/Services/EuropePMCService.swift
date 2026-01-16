@@ -96,13 +96,14 @@ actor EuropePMCService {
         // Use "*" for initial cursor (first page), otherwise use provided cursor
         let effectiveCursor = cursorMark ?? EuropePMCConstants.initialCursorMark
 
+        // Note: No sort parameter needed - Europe PMC defaults to relevance sorting.
+        // The "RELEVANCE desc" parameter was deprecated by Europe PMC API in late 2025.
         components.queryItems = [
             URLQueryItem(name: "query", value: finalQuery),
             URLQueryItem(name: "resultType", value: "core"),
             URLQueryItem(name: "pageSize", value: String(maxResults)),
             URLQueryItem(name: "cursorMark", value: effectiveCursor),
             URLQueryItem(name: "format", value: "json"),
-            URLQueryItem(name: "sort", value: "RELEVANCE desc"),
         ]
 
         guard let url = components.url else {
