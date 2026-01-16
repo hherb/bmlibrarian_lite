@@ -255,14 +255,16 @@ actor EuropePMCService {
     /// Europe PMC returns structured abstracts with HTML tags like:
     /// `<h4>Background</h4>Text...<h4>Methods</h4>Text...`
     ///
-    /// This function converts them to readable plain text with section headers.
+    /// This function converts them to markdown format for nice display:
+    /// - Section headers become **Bold:** format
+    /// - Paragraphs are separated by newlines
     ///
     /// - Parameter abstract: Raw abstract text from API (may contain HTML).
-    /// - Returns: Cleaned abstract text with formatted section headers.
+    /// - Returns: Markdown-formatted abstract text.
     private func cleanAbstract(_ abstract: String) -> String {
         var result = abstract
 
-        // Convert <h4>Section</h4> to "SECTION: " format
+        // Convert <h4>Section</h4> to markdown bold "**Section:** " format
         // Common sections: Background, Objective, Methods, Results, Conclusion
         let sectionPattern = "<h4>([^<]+)</h4>"
         if let regex = try? NSRegularExpression(pattern: sectionPattern, options: .caseInsensitive) {
@@ -270,9 +272,34 @@ actor EuropePMCService {
                 in: result,
                 options: [],
                 range: NSRange(result.startIndex..., in: result),
-                withTemplate: "\n\n$1: "
+                withTemplate: "\n\n**$1:** "
             )
         }
+
+        // Convert <p> tags to paragraph breaks
+        result = result
+            .replacingOccurrences(of: "<p>", with: "\n\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "</p>", with: "", options: .caseInsensitive)
+
+        // Convert <br> to newlines
+        result = result
+            .replacingOccurrences(of: "<br>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "<br/>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "<br />", with: "\n", options: .caseInsensitive)
+
+        // Convert <strong> and <b> to markdown bold
+        result = result
+            .replacingOccurrences(of: "<strong>", with: "**", options: .caseInsensitive)
+            .replacingOccurrences(of: "</strong>", with: "**", options: .caseInsensitive)
+            .replacingOccurrences(of: "<b>", with: "**", options: .caseInsensitive)
+            .replacingOccurrences(of: "</b>", with: "**", options: .caseInsensitive)
+
+        // Convert <em> and <i> to markdown italic
+        result = result
+            .replacingOccurrences(of: "<em>", with: "*", options: .caseInsensitive)
+            .replacingOccurrences(of: "</em>", with: "*", options: .caseInsensitive)
+            .replacingOccurrences(of: "<i>", with: "*", options: .caseInsensitive)
+            .replacingOccurrences(of: "</i>", with: "*", options: .caseInsensitive)
 
         // Remove any remaining HTML tags
         let tagPattern = "<[^>]+>"
@@ -285,19 +312,23 @@ actor EuropePMCService {
             )
         }
 
-        // Clean up whitespace
+        // Decode HTML entities
         result = result
             .replacingOccurrences(of: "&nbsp;", with: " ")
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
 
-        // Remove leading newlines from section conversion
-        while result.hasPrefix("\n") {
-            result = String(result.dropFirst())
-        }
+        // Clean up excessive whitespace while preserving paragraph breaks
+        result = result
+            .replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\n +", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: " +\n", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return result
     }
