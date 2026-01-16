@@ -39,6 +39,24 @@ final class Document {
 
     var publicationDate: String?
 
+    // MARK: - Source Tracking
+
+    /// The search provider that returned this document.
+    ///
+    /// Stored as raw string value of `SearchProvider` enum:
+    /// - "pubmed": PubMed/NCBI
+    /// - "europePMC": Europe PMC
+    /// - "both": Found by both providers (merged result)
+    var searchSource: String?
+
+    /// The `SearchProvider` enum value for the stored source string.
+    ///
+    /// Returns `.pubmed` as default if no source is set (for backwards compatibility).
+    var searchSourceEnum: SearchProvider {
+        guard let source = searchSource else { return .pubmed }
+        return SearchProvider(rawValue: source) ?? .pubmed
+    }
+
     // MARK: - Scoring
 
     /// LLM relevance score (1-5 scale), nil if not yet scored.

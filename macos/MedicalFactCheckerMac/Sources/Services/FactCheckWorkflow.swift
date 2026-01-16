@@ -561,6 +561,7 @@ final class FactCheckWorkflow {
             document.pmcId = article.pmcId
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
+            document.searchSource = article.source.rawValue
             document.session = session
 
             modelContext.insert(document)
@@ -818,10 +819,20 @@ final class FactCheckWorkflow {
     private func extractCitations() async throws {
         guard let session = session, let llmService = llmService else { return }
 
+        // Debug: Log document scoring state
+        let allDocs = session.documents ?? []
+        let scoredDocs = allDocs.filter { $0.relevanceScore != nil }
+        let thresholdDocs = allDocs.filter { $0.meetsThreshold(settings.minScoreThreshold) }
+        print("[Citation] Total documents: \(allDocs.count), Scored: \(scoredDocs.count), Meeting threshold (\(settings.minScoreThreshold)): \(thresholdDocs.count)")
+        for doc in scoredDocs {
+            print("[Citation]   Doc \(doc.pmid): score=\(doc.relevanceScore ?? -1), source=\(doc.searchSource ?? "unknown")")
+        }
+
         let relevantDocs = (session.documents ?? []).filter {
             $0.meetsThreshold(settings.minScoreThreshold) && ($0.citations ?? []).isEmpty
         }
         let total = relevantDocs.count
+        print("[Citation] Documents for citation extraction: \(total)")
 
         for (index, document) in relevantDocs.enumerated() {
             try checkBudget()
