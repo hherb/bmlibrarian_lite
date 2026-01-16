@@ -125,6 +125,9 @@ final class JATSXMLParser: NSObject {
     private var inRefPersonGroup = false
     private var currentReference: ReferenceBuilder?
 
+    // Article ID tracking
+    private var currentArticleIdType: String?
+
     // Author state
     private var currentAuthor: AuthorBuilder?
     private var currentAffiliations: [String: String] = [:]  // id -> text
@@ -502,6 +505,9 @@ extension JATSXMLParser: XMLParserDelegate {
         case "pub-id":
             // Handled in didEndElement with pub-id-type attribute
             break
+        case "article-id":
+            // Capture the pub-id-type attribute for proper ID classification
+            currentArticleIdType = attributeDict["pub-id-type"]
 
         // Inline formatting
         case "bold", "b":
@@ -572,15 +578,24 @@ extension JATSXMLParser: XMLParserDelegate {
         case "article-id":
             if let parent = elementStack.dropLast().last {
                 if parent == "article-meta" || inFront {
-                    // Check the previous element's attributes for pub-id-type
-                    // Since we don't have direct access, we check content patterns
-                    if text.hasPrefix("10.") {
-                        doi = text
-                    } else if text.hasPrefix("PMC") {
-                        pmcId = text
-                    } else if text.allSatisfy({ $0.isNumber }) && text.count >= 7 {
-                        pmid = text
+                    // Use the pub-id-type attribute if available
+                    if let idType = currentArticleIdType {
+                        switch idType.lowercased() {
+                        case "doi":
+                            doi = text
+                        case "pmc", "pmcid":
+                            pmcId = text
+                        case "pmid", "pubmed":
+                            pmid = text
+                        default:
+                            // Fall back to pattern matching
+                            classifyArticleIdByPattern(text)
+                        }
+                    } else {
+                        // No type attribute, use pattern matching
+                        classifyArticleIdByPattern(text)
                     }
+                    currentArticleIdType = nil
                 }
             }
 
@@ -806,6 +821,21 @@ extension JATSXMLParser: XMLParserDelegate {
         text.components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    /// Classify an article ID by its content pattern when type attribute is unavailable.
+    private func classifyArticleIdByPattern(_ text: String) {
+        if text.hasPrefix("10.") {
+            doi = text
+        } else if text.hasPrefix("PMC") {
+            pmcId = text
+        } else if text.allSatisfy({ $0.isNumber }) && text.count >= 7 {
+            // Pure numeric ID - could be PMID or PMC ID
+            // Store in both if empty (PMC ID detection takes priority for figures)
+            if pmid.isEmpty {
+                pmid = text
+            }
+        }
     }
 }
 
