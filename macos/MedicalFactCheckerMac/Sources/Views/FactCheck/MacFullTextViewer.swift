@@ -993,6 +993,7 @@ struct AsyncFigureView: View {
 /// - Alternating row backgrounds for readability
 /// - Horizontal scrolling for wide tables
 /// - Text selection support
+/// - Consistent column widths across all rows
 struct MarkdownTableView: View {
     /// The table rows (first row is header if hasHeader is true).
     let rows: [[String]]
@@ -1006,26 +1007,61 @@ struct MarkdownTableView: View {
     /// Background color for alternating rows.
     private let alternateBackground = Color.gray.opacity(0.05)
 
+    /// Minimum column width.
+    private let minColumnWidth: CGFloat = 80
+
+    /// Maximum column width before truncation.
+    private let maxColumnWidth: CGFloat = 300
+
+    /// Approximate character width for estimating column sizes.
+    private let charWidth: CGFloat = 8
+
+    /// Padding per cell (horizontal).
+    private let cellPadding: CGFloat = 8
+
+    /// Calculate the number of columns in the table.
+    private var columnCount: Int {
+        rows.map { $0.count }.max() ?? 0
+    }
+
+    /// Calculate ideal width for each column based on content.
+    private var columnWidths: [CGFloat] {
+        guard columnCount > 0 else { return [] }
+
+        var widths = Array(repeating: minColumnWidth, count: columnCount)
+
+        for row in rows {
+            for (colIndex, cell) in row.enumerated() where colIndex < columnCount {
+                // Estimate width based on character count
+                let estimatedWidth = CGFloat(cell.count) * charWidth + cellPadding * 2
+                let clampedWidth = min(max(estimatedWidth, minColumnWidth), maxColumnWidth)
+                widths[colIndex] = max(widths[colIndex], clampedWidth)
+            }
+        }
+
+        return widths
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     HStack(spacing: 0) {
-                        ForEach(Array(row.enumerated()), id: \.offset) { cellIndex, cell in
+                        ForEach(0..<columnCount, id: \.self) { colIndex in
+                            let cell = colIndex < row.count ? row[colIndex] : ""
                             Text(cell)
                                 .font(isHeaderRow(index) ? .body.bold() : .body)
                                 .textSelection(.enabled)
-                                .padding(.horizontal, MacSpacing.small)
+                                .padding(.horizontal, cellPadding)
                                 .padding(.vertical, MacSpacing.xSmall)
-                                .frame(minWidth: 80, alignment: .leading)
+                                .frame(width: columnWidths[colIndex], alignment: .leading)
 
-                            if cellIndex < row.count - 1 {
+                            if colIndex < columnCount - 1 {
                                 Divider()
-                                    .frame(height: 20)
+                                    .frame(height: 24)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(rowBackground(for: index))
 
                     if index < rows.count - 1 {

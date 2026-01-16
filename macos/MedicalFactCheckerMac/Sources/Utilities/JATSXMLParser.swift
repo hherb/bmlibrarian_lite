@@ -609,9 +609,13 @@ extension JATSXMLParser: XMLParserDelegate {
         // Pop text buffer if this was a text-accumulating element
         let elementText: String
         if textAccumulatingElements.contains(elementName) {
-            // Inline elements merge their text with parent
+            // Inline elements merge their text with parent, EXCEPT for xrefs
+            // to figures/tables which we handle specially (replacing text with link)
             let isInlineElement = isInlineTextElement(elementName)
-            elementText = popTextBuffer(mergeWithParent: isInlineElement)
+            let isFigureOrTableXref = elementName == "xref" &&
+                (currentXrefType == "fig" || currentXrefType == "figure" ||
+                 currentXrefType == "table" || currentXrefType == "table-wrap")
+            elementText = popTextBuffer(mergeWithParent: isInlineElement && !isFigureOrTableXref)
         } else {
             elementText = currentText
         }
