@@ -23,7 +23,7 @@ final class Document {
     // MARK: - Metadata
 
     /// Document authors (stored as transformable for CoreData compatibility).
-    @Attribute(.transformable(by: NSValueTransformerName.secureUnarchiveFromDataTransformerName.rawValue))
+    @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
     var authors: [String]
 
     var year: Int?
@@ -32,14 +32,14 @@ final class Document {
     var pmcId: String?
 
     /// MeSH terms for the document (stored as transformable for CoreData compatibility).
-    @Attribute(.transformable(by: NSValueTransformerName.secureUnarchiveFromDataTransformerName.rawValue))
+    @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
     var meshTerms: [String]
 
     var publicationDate: String?
 
     // MARK: - Scoring
 
-    /// LLM relevance score (1-5 scale), nil if not yet scored.
+    /// LLM relevance score (1-5 scale), nil if not yet scored or if scoring failed.
     var relevanceScore: Int?
 
     /// LLM explanation for the relevance score.
@@ -47,6 +47,9 @@ final class Document {
 
     /// When the document was scored by LLM.
     var scoredAt: Date?
+
+    /// True if LLM scoring was attempted but failed to parse after all retries.
+    var scoreParseFailed: Bool = false
 
     // MARK: - Embedding Scoring
 
@@ -81,6 +84,33 @@ final class Document {
 
     /// Position within the PubMed results (0-indexed).
     var resultPosition: Int
+
+    // MARK: - Source Tracking
+
+    /// The search provider that returned this document (raw value string).
+    /// Values: "pubmed", "europepmc", or nil if unknown/legacy.
+    var sourceProviderRaw: String?
+
+    /// Whether this is a preprint (Europe PMC only).
+    var isPreprint: Bool = false
+
+    // MARK: - Full Text
+
+    /// The full text content (markdown format for XML sources, nil for PDF-only).
+    var fullTextContent: String?
+
+    /// URL to the locally cached PDF file, if available.
+    var fullTextPDFPath: String?
+
+    /// Source of the full text (for display and debugging).
+    /// Values: "europepmc", "unpaywall", "doi"
+    var fullTextSource: String?
+
+    /// When the full text was fetched.
+    var fullTextFetchedAt: Date?
+
+    /// True if full text fetch was attempted but no source was available.
+    var fullTextUnavailable: Bool = false
 
     // MARK: - Relationships
 
@@ -153,9 +183,32 @@ final class Document {
         return score >= threshold
     }
 
-    /// Check if document has been scored.
+    /// Check if document has been scored (or scoring was attempted but failed).
     var isScored: Bool {
-        relevanceScore != nil
+        relevanceScore != nil || scoreParseFailed
+    }
+
+    // MARK: - Full Text Computed Properties
+
+    /// Whether full text is available for this document.
+    var hasFullText: Bool {
+        fullTextContent != nil || fullTextPDFPath != nil
+    }
+
+    /// Whether we've already tried to fetch full text (success or failure).
+    var fullTextAttempted: Bool {
+        fullTextFetchedAt != nil || fullTextUnavailable
+    }
+
+    /// Display name for the full text source.
+    var fullTextSourceDisplay: String? {
+        guard let source = fullTextSource else { return nil }
+        switch source {
+        case "europepmc": return "Europe PMC"
+        case "unpaywall": return "Unpaywall"
+        case "doi": return "Publisher"
+        default: return source.capitalized
+        }
     }
 
     /// Full citation string for references section.
@@ -173,5 +226,16 @@ final class Document {
             parts.append("PMID: \(pmid)")
         }
         return parts.joined(separator: ". ")
+    }
+
+    /// The search provider that returned this document.
+    var sourceProvider: SearchProvider? {
+        get {
+            guard let raw = sourceProviderRaw else { return nil }
+            return SearchProvider(rawValue: raw)
+        }
+        set {
+            sourceProviderRaw = newValue?.rawValue
+        }
     }
 }

@@ -1,0 +1,815 @@
+//
+//  JATSXMLParser.swift
+//  MedicalFactChecker
+//
+//  Comprehensive parser for JATS XML format used by Europe PMC.
+//  Converts JATS XML to markdown format for display.
+//
+
+import Foundation
+
+/// Errors that can occur during JATS XML parsing.
+enum JATSParseError: LocalizedError {
+    /// XML parsing failed with an underlying error.
+    case parsingFailed(String)
+
+    /// No content was found in the XML.
+    case noContent
+
+    /// Invalid or unsupported XML structure.
+    case invalidStructure(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .parsingFailed(let reason):
+            return "Failed to parse JATS XML: \(reason)"
+        case .noContent:
+            return "No content found in JATS XML"
+        case .invalidStructure(let reason):
+            return "Invalid JATS XML structure: \(reason)"
+        }
+    }
+}
+
+/// Parser for converting JATS (Journal Article Tag Suite) XML to markdown.
+///
+/// JATS is the standard XML format used by Europe PMC and many other
+/// biomedical literature databases. This parser handles:
+/// - Article metadata (title, authors, journal, dates)
+/// - Abstract with labeled sections
+/// - Full article body with nested sections
+/// - Figures and tables (with captions)
+/// - References and citations
+/// - Inline formatting (bold, italic, subscript, superscript)
+/// - Lists (ordered and unordered)
+///
+/// Usage:
+/// ```swift
+/// let parser = JATSXMLParser(data: xmlData)
+/// let markdown = try parser.parseToMarkdown()
+/// ```
+final class JATSXMLParser: NSObject {
+    // MARK: - Properties
+
+    private let parser: XMLParser
+    private var parseError: Error?
+
+    // MARK: - Parsed Content
+
+    private var title = ""
+    private var authors: [AuthorInfo] = []
+    private var journal = ""
+    private var volume = ""
+    private var issue = ""
+    private var pages = ""
+    private var year = ""
+    private var doi = ""
+    private var pmcId = ""
+    private var pmid = ""
+    private var abstractSections: [AbstractSection] = []
+    private var bodySections: [BodySection] = []
+    private var figures: [FigureInfo] = []
+    private var tables: [TableInfo] = []
+    private var references: [ReferenceInfo] = []
+
+    // MARK: - Parsing State
+
+    private var elementStack: [String] = []
+
+    /// Stack of text buffers for nested elements.
+    /// Each text-accumulating element pushes its own buffer.
+    private var textStack: [String] = [""]
+
+    /// Elements that accumulate their own text content.
+    private let textAccumulatingElements: Set<String> = [
+        "p", "title", "article-title", "abstract", "sec",
+        "surname", "given-names", "journal-title", "volume", "issue",
+        "fpage", "lpage", "year", "article-id", "label",
+        "mixed-citation", "element-citation", "caption",
+        "bold", "b", "italic", "i", "sub", "sup", "monospace", "code",
+        "xref", "ext-link", "uri", "email", "named-content",
+        "list-item", "def", "term", "kwd", "alt-title",
+        "inline-formula", "disp-formula", "tex-math"
+    ]
+
+    // Article metadata state
+    private var inFront = false
+    private var inArticleMeta = false
+    private var inContribGroup = false
+    private var inContrib = false
+    private var inAff = false
+
+    // Abstract state
+    private var inAbstract = false
+    private var currentAbstractLabel = ""
+    private var currentAbstractTitle = ""
+    private var currentAbstractText: [String] = []
+
+    // Body state
+    private var inBody = false
+    private var sectionStack: [SectionBuilder] = []
+
+    // Figure/Table state
+    private var inFigure = false
+    private var inTable = false
+    private var inTableWrap = false
+    private var currentFigure: FigureBuilder?
+    private var currentTable: TableBuilder?
+
+    // Reference state
+    private var inRefList = false
+    private var inRef = false
+    private var currentReference: ReferenceBuilder?
+
+    // Author state
+    private var currentAuthor: AuthorBuilder?
+    private var currentAffiliations: [String: String] = [:]  // id -> text
+
+    // Inline formatting state
+    private var inlineFormattingStack: [InlineFormat] = []
+
+    // MARK: - Initialization
+
+    /// Initialize the parser with XML data.
+    ///
+    /// - Parameter data: Raw JATS XML data.
+    init(data: Data) {
+        self.parser = XMLParser(data: data)
+        super.init()
+        parser.delegate = self
+    }
+
+    // MARK: - Text Stack Helpers
+
+    /// Get the current accumulated text.
+    private var currentText: String {
+        textStack.last ?? ""
+    }
+
+    /// Append text to the current buffer.
+    private func appendText(_ text: String) {
+        guard !textStack.isEmpty else { return }
+        textStack[textStack.count - 1] += text
+    }
+
+    /// Push a new text buffer for a nested element.
+    private func pushTextBuffer() {
+        textStack.append("")
+    }
+
+    /// Pop and return the text buffer, merging it with parent if needed.
+    private func popTextBuffer(mergeWithParent: Bool = false) -> String {
+        guard textStack.count > 1 else {
+            let text = textStack.first ?? ""
+            if !textStack.isEmpty {
+                textStack[0] = ""
+            }
+            return text
+        }
+
+        let text = textStack.removeLast()
+
+        if mergeWithParent && !text.isEmpty && !textStack.isEmpty {
+            textStack[textStack.count - 1] += text
+        }
+
+        return text
+    }
+
+    // MARK: - Public API
+
+    /// Parse the XML and return markdown-formatted content.
+    ///
+    /// - Returns: Markdown string representation of the article.
+    /// - Throws: `JATSParseError` if parsing fails.
+    func parseToMarkdown() throws -> String {
+        guard parser.parse() else {
+            let errorMessage = parseError?.localizedDescription
+                ?? parser.parserError?.localizedDescription
+                ?? "Unknown parsing error"
+            throw JATSParseError.parsingFailed(errorMessage)
+        }
+
+        let markdown = buildMarkdown()
+        if markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw JATSParseError.noContent
+        }
+
+        return markdown
+    }
+
+    // MARK: - Markdown Builder
+
+    /// Build the final markdown string from parsed content.
+    private func buildMarkdown() -> String {
+        var lines: [String] = []
+
+        // Title
+        if !title.isEmpty {
+            lines.append("# \(title)")
+            lines.append("")
+        }
+
+        // Authors
+        if !authors.isEmpty {
+            let authorString = formatAuthors()
+            lines.append("**Authors:** \(authorString)")
+            lines.append("")
+        }
+
+        // Journal info
+        let journalInfo = formatJournalInfo()
+        if !journalInfo.isEmpty {
+            lines.append(journalInfo)
+            lines.append("")
+        }
+
+        // Identifiers
+        let identifiers = formatIdentifiers()
+        if !identifiers.isEmpty {
+            lines.append(identifiers)
+            lines.append("")
+        }
+
+        // Abstract
+        if !abstractSections.isEmpty {
+            lines.append("## Abstract")
+            lines.append("")
+            for section in abstractSections {
+                if !section.title.isEmpty {
+                    lines.append("**\(section.title):** \(section.content)")
+                } else {
+                    lines.append(section.content)
+                }
+                lines.append("")
+            }
+        }
+
+        // Body sections
+        for section in bodySections {
+            lines.append(contentsOf: formatBodySection(section, level: 2))
+        }
+
+        // Figures
+        if !figures.isEmpty {
+            lines.append("## Figures")
+            lines.append("")
+            for (index, figure) in figures.enumerated() {
+                let figNum = figure.label.isEmpty ? "Figure \(index + 1)" : figure.label
+                lines.append("### \(figNum)")
+                if !figure.caption.isEmpty {
+                    lines.append("")
+                    lines.append(figure.caption)
+                }
+                lines.append("")
+            }
+        }
+
+        // Tables
+        if !tables.isEmpty {
+            lines.append("## Tables")
+            lines.append("")
+            for (index, table) in tables.enumerated() {
+                let tableNum = table.label.isEmpty ? "Table \(index + 1)" : table.label
+                lines.append("### \(tableNum)")
+                if !table.caption.isEmpty {
+                    lines.append("")
+                    lines.append(table.caption)
+                }
+                lines.append("")
+            }
+        }
+
+        // References
+        if !references.isEmpty {
+            lines.append("## References")
+            lines.append("")
+            for (index, ref) in references.enumerated() {
+                let refNum = ref.label.isEmpty ? String(index + 1) : ref.label
+                lines.append("\(refNum). \(ref.citation)")
+            }
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Format authors for display.
+    private func formatAuthors() -> String {
+        let authorNames = authors.map { author -> String in
+            var name = author.surname
+            if !author.givenNames.isEmpty {
+                name = "\(author.givenNames) \(name)"
+            }
+            return name
+        }
+
+        if authorNames.count <= 3 {
+            return authorNames.joined(separator: ", ")
+        } else {
+            return "\(authorNames[0]), \(authorNames[1]), \(authorNames[2]) et al."
+        }
+    }
+
+    /// Format journal information.
+    private func formatJournalInfo() -> String {
+        var parts: [String] = []
+
+        if !journal.isEmpty {
+            parts.append("*\(journal)*")
+        }
+
+        var volumeInfo: [String] = []
+        if !volume.isEmpty {
+            volumeInfo.append(volume)
+        }
+        if !issue.isEmpty {
+            volumeInfo.append("(\(issue))")
+        }
+        if !pages.isEmpty {
+            volumeInfo.append(": \(pages)")
+        }
+        if !volumeInfo.isEmpty {
+            parts.append(volumeInfo.joined())
+        }
+
+        if !year.isEmpty {
+            parts.append("(\(year))")
+        }
+
+        return parts.joined(separator: " ")
+    }
+
+    /// Format document identifiers.
+    private func formatIdentifiers() -> String {
+        var ids: [String] = []
+
+        if !doi.isEmpty {
+            ids.append("DOI: \(doi)")
+        }
+        if !pmcId.isEmpty {
+            ids.append("PMC: \(pmcId)")
+        }
+        if !pmid.isEmpty {
+            ids.append("PMID: \(pmid)")
+        }
+
+        return ids.joined(separator: " | ")
+    }
+
+    /// Format a body section recursively.
+    private func formatBodySection(_ section: BodySection, level: Int) -> [String] {
+        var lines: [String] = []
+        let headingPrefix = String(repeating: "#", count: min(level, 6))
+
+        if !section.title.isEmpty {
+            lines.append("\(headingPrefix) \(section.title)")
+            lines.append("")
+        }
+
+        for paragraph in section.paragraphs {
+            if !paragraph.isEmpty {
+                lines.append(paragraph)
+                lines.append("")
+            }
+        }
+
+        for subsection in section.subsections {
+            lines.append(contentsOf: formatBodySection(subsection, level: level + 1))
+        }
+
+        return lines
+    }
+}
+
+// MARK: - XMLParserDelegate
+
+extension JATSXMLParser: XMLParserDelegate {
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        elementStack.append(elementName)
+
+        // Push a new text buffer for text-accumulating elements
+        if textAccumulatingElements.contains(elementName) {
+            pushTextBuffer()
+        }
+
+        switch elementName {
+        // Document structure
+        case "front":
+            inFront = true
+        case "article-meta":
+            inArticleMeta = true
+        case "contrib-group":
+            inContribGroup = true
+        case "contrib":
+            if attributeDict["contrib-type"] == "author" {
+                inContrib = true
+                currentAuthor = AuthorBuilder()
+            }
+        case "aff":
+            inAff = true
+            if let id = attributeDict["id"] {
+                currentAffiliations[id] = ""
+            }
+        case "abstract":
+            inAbstract = true
+            currentAbstractLabel = attributeDict["abstract-type"] ?? ""
+            currentAbstractTitle = ""
+            currentAbstractText = []
+        case "body":
+            inBody = true
+        case "sec":
+            let builder = SectionBuilder()
+            sectionStack.append(builder)
+        case "fig":
+            inFigure = true
+            currentFigure = FigureBuilder()
+            currentFigure?.id = attributeDict["id"] ?? ""
+        case "table-wrap":
+            inTableWrap = true
+            currentTable = TableBuilder()
+            currentTable?.id = attributeDict["id"] ?? ""
+        case "ref-list":
+            inRefList = true
+        case "ref":
+            inRef = true
+            currentReference = ReferenceBuilder()
+            currentReference?.id = attributeDict["id"] ?? ""
+
+        // Inline formatting
+        case "bold", "b":
+            inlineFormattingStack.append(.bold)
+        case "italic", "i":
+            inlineFormattingStack.append(.italic)
+        case "sub":
+            inlineFormattingStack.append(.subscript)
+        case "sup":
+            inlineFormattingStack.append(.superscript)
+        case "monospace", "code":
+            inlineFormattingStack.append(.monospace)
+
+        default:
+            break
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        appendText(string)
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        // Pop text buffer if this was a text-accumulating element
+        let elementText: String
+        if textAccumulatingElements.contains(elementName) {
+            // Inline elements merge their text with parent
+            let isInlineElement = isInlineTextElement(elementName)
+            elementText = popTextBuffer(mergeWithParent: isInlineElement)
+        } else {
+            elementText = currentText
+        }
+
+        let text = elementText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedText = normalizeWhitespace(elementText)
+
+        defer {
+            _ = elementStack.popLast()
+        }
+
+        switch elementName {
+        // Document structure
+        case "front":
+            inFront = false
+        case "article-meta":
+            inArticleMeta = false
+        case "contrib-group":
+            inContribGroup = false
+        case "contrib":
+            if inContrib, let author = currentAuthor?.build() {
+                authors.append(author)
+            }
+            inContrib = false
+            currentAuthor = nil
+        case "aff":
+            inAff = false
+
+        // Metadata fields
+        case "article-title":
+            if inFront && inArticleMeta {
+                title = normalizedText
+            }
+        case "surname":
+            if inContrib {
+                currentAuthor?.surname = text
+            }
+        case "given-names":
+            if inContrib {
+                currentAuthor?.givenNames = text
+            }
+        case "journal-title":
+            if inFront {
+                journal = text
+            }
+        case "volume":
+            if inFront && inArticleMeta {
+                volume = text
+            }
+        case "issue":
+            if inFront && inArticleMeta {
+                issue = text
+            }
+        case "fpage":
+            if inFront && inArticleMeta && pages.isEmpty {
+                pages = text
+            }
+        case "lpage":
+            if inFront && inArticleMeta && !pages.isEmpty && !text.isEmpty {
+                pages += "-\(text)"
+            }
+        case "year":
+            if inFront && inArticleMeta && year.isEmpty {
+                year = text
+            }
+        case "article-id":
+            if let parent = elementStack.dropLast().last {
+                if parent == "article-meta" || inFront {
+                    // Check the previous element's attributes for pub-id-type
+                    // Since we don't have direct access, we check content patterns
+                    if text.hasPrefix("10.") {
+                        doi = text
+                    } else if text.hasPrefix("PMC") {
+                        pmcId = text
+                    } else if text.allSatisfy({ $0.isNumber }) && text.count >= 7 {
+                        pmid = text
+                    }
+                }
+            }
+
+        // Abstract
+        case "abstract":
+            if !currentAbstractText.isEmpty {
+                let content = currentAbstractText.joined(separator: " ")
+                abstractSections.append(AbstractSection(
+                    title: currentAbstractTitle,
+                    content: content
+                ))
+            }
+            inAbstract = false
+        case "title":
+            if inAbstract {
+                // If we had previous content, save it before starting new section
+                if !currentAbstractText.isEmpty {
+                    let content = currentAbstractText.joined(separator: " ")
+                    abstractSections.append(AbstractSection(
+                        title: currentAbstractTitle,
+                        content: content
+                    ))
+                    currentAbstractText = []
+                }
+                currentAbstractTitle = text
+            } else if !sectionStack.isEmpty {
+                sectionStack[sectionStack.count - 1].title = normalizedText
+            }
+        case "p":
+            if inAbstract {
+                if !normalizedText.isEmpty {
+                    currentAbstractText.append(normalizedText)
+                }
+            } else if inBody, !sectionStack.isEmpty {
+                sectionStack[sectionStack.count - 1].paragraphs.append(normalizedText)
+            } else if inFigure {
+                currentFigure?.caption += normalizedText
+            } else if inTableWrap {
+                currentTable?.caption += normalizedText
+            }
+
+        // Body sections
+        case "body":
+            inBody = false
+        case "sec":
+            if let builder = sectionStack.popLast() {
+                let section = builder.build()
+                if sectionStack.isEmpty {
+                    bodySections.append(section)
+                } else {
+                    sectionStack[sectionStack.count - 1].subsections.append(section)
+                }
+            }
+
+        // Figures
+        case "fig":
+            if let figure = currentFigure?.build() {
+                figures.append(figure)
+            }
+            inFigure = false
+            currentFigure = nil
+        case "label":
+            if inFigure {
+                currentFigure?.label = text
+            } else if inTableWrap {
+                currentTable?.label = text
+            } else if inRef {
+                currentReference?.label = text
+            }
+        case "caption":
+            // Caption content is handled in nested p elements
+            break
+
+        // Tables
+        case "table-wrap":
+            if let table = currentTable?.build() {
+                tables.append(table)
+            }
+            inTableWrap = false
+            currentTable = nil
+
+        // References
+        case "ref-list":
+            inRefList = false
+        case "ref":
+            if let reference = currentReference?.build() {
+                references.append(reference)
+            }
+            inRef = false
+            currentReference = nil
+        case "mixed-citation", "element-citation":
+            if inRef {
+                currentReference?.citation = normalizedText
+            }
+
+        // Inline formatting - these merge with parent, nothing else to do
+        case "bold", "b":
+            _ = inlineFormattingStack.popLast()
+        case "italic", "i":
+            _ = inlineFormattingStack.popLast()
+        case "sub":
+            _ = inlineFormattingStack.popLast()
+        case "sup":
+            _ = inlineFormattingStack.popLast()
+        case "monospace", "code":
+            _ = inlineFormattingStack.popLast()
+
+        // xref and ext-link - already merged with parent via popTextBuffer
+        case "xref", "ext-link", "uri", "email", "named-content":
+            break
+
+        default:
+            break
+        }
+    }
+
+    func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
+        self.parseError = parseError
+        AppLogger.parsing.error("JATS XML parse error: \(parseError.localizedDescription)")
+    }
+
+    // MARK: - Helper Methods
+
+    /// Check if an element is an inline text element that should merge with parent.
+    ///
+    /// - Parameter elementName: The element name to check.
+    /// - Returns: True if the element's text should be merged with its parent.
+    private func isInlineTextElement(_ elementName: String) -> Bool {
+        switch elementName {
+        case "bold", "b", "italic", "i", "sub", "sup", "monospace", "code",
+             "xref", "ext-link", "uri", "email", "named-content",
+             "inline-formula":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Normalize whitespace in text (collapse multiple spaces/newlines).
+    private func normalizeWhitespace(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
+// MARK: - Supporting Types
+
+/// Inline formatting types.
+private enum InlineFormat {
+    case bold
+    case italic
+    case `subscript`
+    case superscript
+    case monospace
+}
+
+/// Parsed author information.
+struct AuthorInfo {
+    let surname: String
+    let givenNames: String
+    let affiliations: [String]
+}
+
+/// Builder for author information.
+private struct AuthorBuilder {
+    var surname = ""
+    var givenNames = ""
+    var affiliations: [String] = []
+
+    func build() -> AuthorInfo? {
+        guard !surname.isEmpty else { return nil }
+        return AuthorInfo(
+            surname: surname,
+            givenNames: givenNames,
+            affiliations: affiliations
+        )
+    }
+}
+
+/// Parsed abstract section.
+private struct AbstractSection {
+    let title: String
+    let content: String
+}
+
+/// Parsed body section.
+struct BodySection {
+    let title: String
+    let paragraphs: [String]
+    let subsections: [BodySection]
+}
+
+/// Builder for body sections.
+private struct SectionBuilder {
+    var title = ""
+    var paragraphs: [String] = []
+    var subsections: [BodySection] = []
+
+    func build() -> BodySection {
+        BodySection(
+            title: title,
+            paragraphs: paragraphs,
+            subsections: subsections
+        )
+    }
+}
+
+/// Parsed figure information.
+struct FigureInfo {
+    let id: String
+    let label: String
+    let caption: String
+}
+
+/// Builder for figure information.
+private struct FigureBuilder {
+    var id = ""
+    var label = ""
+    var caption = ""
+
+    func build() -> FigureInfo {
+        FigureInfo(id: id, label: label, caption: caption)
+    }
+}
+
+/// Parsed table information.
+struct TableInfo {
+    let id: String
+    let label: String
+    let caption: String
+}
+
+/// Builder for table information.
+private struct TableBuilder {
+    var id = ""
+    var label = ""
+    var caption = ""
+
+    func build() -> TableInfo {
+        TableInfo(id: id, label: label, caption: caption)
+    }
+}
+
+/// Parsed reference information.
+struct ReferenceInfo {
+    let id: String
+    let label: String
+    let citation: String
+}
+
+/// Builder for reference information.
+private struct ReferenceBuilder {
+    var id = ""
+    var label = ""
+    var citation = ""
+
+    func build() -> ReferenceInfo {
+        ReferenceInfo(id: id, label: label, citation: citation)
+    }
+}

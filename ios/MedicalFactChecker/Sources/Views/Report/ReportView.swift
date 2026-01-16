@@ -16,8 +16,10 @@ import UIKit
 /// - Uses full screen width on iPad
 /// - Has no "Done" dismiss button
 /// - Integrates with tab-based navigation
+/// - Supports fetching more evidence via the workflow
 struct ReportContentView: View {
     let report: EvidenceReport
+    var workflow: FactCheckWorkflow?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingPDFExportSheet = false
     @State private var selectedPaperSize: PaperSize = PDFExporter.preferredPaperSize
@@ -29,10 +31,27 @@ struct ReportContentView: View {
         horizontalSizeClass == .regular ? 800 : .infinity
     }
 
+    /// Whether more evidence can be fetched for this session.
+    private var canGetMoreEvidence: Bool {
+        report.session?.canGetMoreEvidence ?? false
+    }
+
+    /// Whether the workflow is currently running (fetching more evidence).
+    private var isFetchingEvidence: Bool {
+        workflow?.isRunning ?? false
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                reportContent
+            ZStack {
+                ScrollView {
+                    reportContent
+                }
+
+                // Progress overlay when fetching more evidence
+                if isFetchingEvidence {
+                    fetchingProgressOverlay
+                }
             }
             .navigationTitle("Evidence Report")
             .navigationBarTitleDisplayMode(.inline)
@@ -50,6 +69,24 @@ struct ReportContentView: View {
                 )
             }
         }
+    }
+
+    /// Overlay shown when fetching more evidence.
+    private var fetchingProgressOverlay: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text(workflow?.progressMessage ?? "Fetching more evidence...")
+                .font(.headline)
+            if let session = report.session {
+                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(32)
+        .background(.regularMaterial)
+        .cornerRadius(16)
     }
 
     private var reportContent: some View {
@@ -129,6 +166,19 @@ struct ReportContentView: View {
                 CostSection(session: session)
             }
 
+            // Get More Evidence button
+            if workflow != nil && canGetMoreEvidence {
+                GetMoreEvidenceSection(
+                    session: report.session,
+                    isFetching: isFetchingEvidence,
+                    onFetchMore: {
+                        Task {
+                            await workflow?.fetchMoreEvidence()
+                        }
+                    }
+                )
+            }
+
             // Generation footnote and disclaimer
             FootnoteSection(report: report)
         }
@@ -166,8 +216,10 @@ struct ReportContentView: View {
 ///
 /// Includes a "Done" button for dismissing the sheet.
 /// For tab-based display, use `ReportContentView` instead.
+/// Supports fetching more evidence via the optional workflow parameter.
 struct ReportView: View {
     let report: EvidenceReport
+    var workflow: FactCheckWorkflow?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingPDFExportSheet = false
@@ -180,9 +232,20 @@ struct ReportView: View {
         horizontalSizeClass == .regular ? 800 : .infinity
     }
 
+    /// Whether more evidence can be fetched for this session.
+    private var canGetMoreEvidence: Bool {
+        report.session?.canGetMoreEvidence ?? false
+    }
+
+    /// Whether the workflow is currently running (fetching more evidence).
+    private var isFetchingEvidence: Bool {
+        workflow?.isRunning ?? false
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ZStack {
+                ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // Verdict Badge
                     HStack {
@@ -259,12 +322,44 @@ struct ReportView: View {
                         CostSection(session: session)
                     }
 
+                    // Get More Evidence button
+                    if workflow != nil && canGetMoreEvidence {
+                        GetMoreEvidenceSection(
+                            session: report.session,
+                            isFetching: isFetchingEvidence,
+                            onFetchMore: {
+                                Task {
+                                    await workflow?.fetchMoreEvidence()
+                                }
+                            }
+                        )
+                    }
+
                     // Generation footnote and disclaimer
                     FootnoteSection(report: report)
                 }
                 .frame(maxWidth: maxContentWidth)
                 .padding()
                 .frame(maxWidth: .infinity)
+                }
+
+                // Progress overlay when fetching more evidence
+                if isFetchingEvidence {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text(workflow?.progressMessage ?? "Fetching more evidence...")
+                            .font(.headline)
+                        if let session = report.session {
+                            Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(32)
+                    .background(.regularMaterial)
+                    .cornerRadius(16)
+                }
             }
             .navigationTitle("Evidence Report")
             .navigationBarTitleDisplayMode(.inline)
@@ -1116,7 +1211,7 @@ struct DocumentDetailSheet: View {
                             Text(journal)
                                 .italic()
                             if let year = document.year {
-                                Text("(\(year))")
+                                Text(verbatim: "(\(year))")
                             }
                         }
                         .font(.subheadline)
@@ -1226,6 +1321,74 @@ struct MarkdownText: View {
 
     var body: some View {
         MarkdownReportView(content, documents: [])
+    }
+}
+
+// MARK: - Get More Evidence Section
+
+/// Section with button to fetch additional evidence for the report.
+///
+/// Shows:
+/// - Remaining PubMed results count (if available)
+/// - Whether smart search is available
+/// - Button to trigger fetching more evidence
+struct GetMoreEvidenceSection: View {
+    let session: FactCheckSession?
+    let isFetching: Bool
+    let onFetchMore: () -> Void
+
+    /// Description of what evidence sources are available.
+    private var availableSourcesText: String {
+        guard let session = session else { return "" }
+
+        if session.canFetchMoreDocuments {
+            let remaining = session.remainingPubMedResults
+            if !session.smartSearchEnabled {
+                return "\(remaining) more results available, plus smart search"
+            } else {
+                return "\(remaining) more results available"
+            }
+        } else if !session.smartSearchEnabled {
+            return "Smart search available (alternative queries)"
+        } else {
+            return "All sources exhausted"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "plus.magnifyingglass")
+                    .foregroundColor(.accentColor)
+                Text("Need More Evidence?")
+                    .font(.headline)
+            }
+
+            Text(availableSourcesText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Button(action: onFetchMore) {
+                HStack {
+                    if isFetching {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    Text(isFetching ? "Fetching..." : "Get More Evidence")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(isFetching ? Color.gray : Color.accentColor)
+                .foregroundColor(.white)
+                .cornerRadius(10)
+            }
+            .disabled(isFetching)
+        }
+        .padding()
+        .background(Color.accentColor.opacity(0.1))
+        .cornerRadius(10)
     }
 }
 

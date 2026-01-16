@@ -1,0 +1,110 @@
+//
+//  DocumentSourceBadge.swift
+//  MedicalFactChecker
+//
+//  Badge indicating the source of a document (PubMed, Europe PMC).
+//
+
+import SwiftUI
+
+// MARK: - Constants
+
+/// Constants for document source badge UI.
+private enum DocumentSourceBadgeConstants {
+    /// Font size for provider icon.
+    static let iconFontSize: CGFloat = 8
+
+    /// Font size for provider abbreviation.
+    static let abbreviationFontSize: CGFloat = 9
+
+    /// Font size for preprint label.
+    static let preprintFontSize: CGFloat = 7
+
+    /// Horizontal padding for badge.
+    static let badgeHorizontalPadding: CGFloat = 6
+
+    /// Vertical padding for badge.
+    static let badgeVerticalPadding: CGFloat = 3
+
+    /// Corner radius for badge.
+    static let badgeCornerRadius: CGFloat = 4
+
+    /// Background opacity for badge.
+    static let badgeBackgroundOpacity: CGFloat = 0.12
+}
+
+/// Badge showing the search provider source of a document.
+///
+/// Displays a small colored badge with the provider name, helping users
+/// identify which search provider returned each document.
+struct DocumentSourceBadge: View {
+    /// The source provider for the document.
+    let provider: SearchProvider
+
+    /// Whether the document is a preprint.
+    let isPreprint: Bool
+
+    /// Initialize with provider and preprint status.
+    ///
+    /// - Parameters:
+    ///   - provider: The search provider.
+    ///   - isPreprint: Whether the document is a preprint.
+    init(provider: SearchProvider, isPreprint: Bool = false) {
+        self.provider = provider
+        self.isPreprint = isPreprint
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Provider icon
+            Image(systemName: provider.iconName)
+                .font(.system(size: DocumentSourceBadgeConstants.iconFontSize))
+
+            // Provider abbreviation
+            Text(abbreviation)
+                .font(.system(size: DocumentSourceBadgeConstants.abbreviationFontSize, weight: .medium))
+
+            // Preprint indicator
+            if isPreprint {
+                Text("PPR")
+                    .font(.system(size: DocumentSourceBadgeConstants.preprintFontSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, DocumentSourceBadgeConstants.badgeVerticalPadding)
+                    .padding(.vertical, 1)
+                    .background(Color.orange)
+                    .cornerRadius(DocumentSourceBadgeConstants.badgeVerticalPadding)
+            }
+        }
+        .foregroundColor(provider.themeColor)
+        .padding(.horizontal, DocumentSourceBadgeConstants.badgeHorizontalPadding)
+        .padding(.vertical, DocumentSourceBadgeConstants.badgeVerticalPadding)
+        .background(provider.themeColor.opacity(DocumentSourceBadgeConstants.badgeBackgroundOpacity))
+        .cornerRadius(DocumentSourceBadgeConstants.badgeCornerRadius)
+    }
+
+    // MARK: - Private Properties
+
+    /// Abbreviated provider name for the badge.
+    private var abbreviation: String {
+        switch provider {
+        case .pubmed:
+            return "PM"
+        case .europePMC:
+            return "EPMC"
+        case .both:
+            return "Both"
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    VStack(spacing: 12) {
+        DocumentSourceBadge(provider: .pubmed)
+        DocumentSourceBadge(provider: .europePMC)
+        DocumentSourceBadge(provider: .europePMC, isPreprint: true)
+        DocumentSourceBadge(provider: .both)
+    }
+    .padding()
+}

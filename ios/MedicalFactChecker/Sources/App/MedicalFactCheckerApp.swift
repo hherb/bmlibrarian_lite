@@ -11,6 +11,8 @@ import SwiftData
 @main
 struct MedicalFactCheckerApp: App {
     var sharedModelContainer: ModelContainer = {
+        // Register custom transformer before creating the container
+        StringArrayTransformer.register()
         let schema = Schema([
             FactCheckSession.self,
             Document.self,
@@ -65,8 +67,3 @@ struct MedicalFactCheckerApp: App {
     }
 }
 
-// MARK: - Notification for Reference Clicks
-
-extension Notification.Name {
-    static let documentReferenceClicked = Notification.Name("documentReferenceClicked")
-}

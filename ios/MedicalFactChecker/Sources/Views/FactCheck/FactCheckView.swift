@@ -16,8 +16,13 @@ struct FactCheckView: View {
     /// Callback when a report is generated (navigates to Report tab).
     var onReportGenerated: ((EvidenceReport) -> Void)?
 
-    @State private var claimText = ""
-    @State private var workflow: FactCheckWorkflow?
+    /// Bindings to preserve state across tab switches (passed from parent).
+    @Binding var claimText: String
+    @Binding var workflow: FactCheckWorkflow?
+
+    /// Search options for the current fact-check.
+    @State private var searchOptions = AppSettings.shared.buildSearchOptions()
+
     @State private var showingError = false
     @State private var errorMessage = ""
 
@@ -40,6 +45,12 @@ struct FactCheckView: View {
                             isTextEditorFocused = false
                             startFactCheck()
                         }
+                    )
+
+                    // Search Options (collapsible)
+                    SearchOptionsView(
+                        options: $searchOptions,
+                        isDisabled: workflow?.isRunning ?? false
                     )
 
                     // Budget Display
@@ -123,7 +134,7 @@ struct FactCheckView: View {
         self.workflow = newWorkflow
 
         Task {
-            await newWorkflow.startFactCheck(claim: claimText)
+            await newWorkflow.startFactCheck(claim: claimText, searchOptions: searchOptions)
         }
     }
 }
@@ -260,7 +271,25 @@ struct ProgressSection: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Cost so far
+            // Generated PubMed query (show once generated)
+            if let query = workflow.session?.pubmedQuery, !query.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PubMed Query:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    Text(query)
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+
+            // Cost so far (only show if non-zero)
             if let session = workflow.session, session.estimatedCostUSD > 0 {
                 Text("Cost so far: \(CostCalculator.formatCost(session.estimatedCostUSD))")
                     .font(.caption)
@@ -354,13 +383,20 @@ struct UserDecisionSection: View {
 }
 
 #Preview {
-    FactCheckView(onReportGenerated: nil)
-        .modelContainer(for: [
-            FactCheckSession.self,
-            Document.self,
-            Citation.self,
-            EvidenceReport.self,
-            UsageRecord.self,
-        ], inMemory: true)
-        .environment(AppSettings.shared)
+    @Previewable @State var claimText = ""
+    @Previewable @State var workflow: FactCheckWorkflow? = nil
+
+    FactCheckView(
+        onReportGenerated: nil,
+        claimText: $claimText,
+        workflow: $workflow
+    )
+    .modelContainer(for: [
+        FactCheckSession.self,
+        Document.self,
+        Citation.self,
+        EvidenceReport.self,
+        UsageRecord.self,
+    ], inMemory: true)
+    .environment(AppSettings.shared)
 }

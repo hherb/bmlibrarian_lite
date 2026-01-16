@@ -31,6 +31,9 @@ final class FactCheckWorkflow {
     private(set) var isRunning = false
     private(set) var progressMessage = ""
 
+    /// Current search options being used.
+    private(set) var currentSearchOptions: SearchOptions?
+
     /// Set to true when waiting for user decision on fetching more docs.
     private(set) var awaitingUserDecision = false
 
@@ -60,7 +63,11 @@ final class FactCheckWorkflow {
     // MARK: - Main Entry Points
 
     /// Start a new fact-check for the given claim.
-    func startFactCheck(claim: String) async {
+    ///
+    /// - Parameters:
+    ///   - claim: The medical claim to fact-check.
+    ///   - searchOptions: Search configuration (provider, preprints, etc.).
+    func startFactCheck(claim: String, searchOptions: SearchOptions? = nil) async {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
@@ -69,6 +76,9 @@ final class FactCheckWorkflow {
             onError?(error)
             return
         }
+
+        // Store search options (use settings defaults if not provided)
+        self.currentSearchOptions = searchOptions ?? settings.buildSearchOptions()
 
         // Load monthly usage
         await loadMonthlyUsage()
@@ -83,6 +93,8 @@ final class FactCheckWorkflow {
         let newSession = FactCheckSession(claim: claim)
         newSession.modelName = settings.llmModel
         newSession.providerName = settings.selectedProvider.displayName
+        newSession.searchProvider = currentSearchOptions?.provider
+        newSession.includedPreprints = currentSearchOptions?.includePreprints ?? false
         modelContext.insert(newSession)
         try? modelContext.save()
 
@@ -143,6 +155,120 @@ final class FactCheckWorkflow {
 
         isRunning = false
         awaitingUserDecision = false
+    }
+
+    // MARK: - Fetch More Evidence
+
+    /// Fetch additional evidence after initial report generation.
+    ///
+    /// This method allows users to gather more evidence when the initial report
+    /// seems incomplete. It will:
+    /// 1. Fetch more documents from PubMed (if available) or try smart search
+    /// 2. Score only the newly fetched documents
+    /// 3. Extract citations from new relevant documents
+    /// 4. Regenerate the report with all accumulated evidence
+    ///
+    /// Can be called multiple times until PubMed is exhausted and smart search has been tried.
+    func fetchMoreEvidence() async {
+        guard let session = session else { return }
+
+        // Initialize services if needed
+        if llmService == nil || pubmedService == nil {
+            do {
+                llmService = try LLMService.create(from: settings)
+                pubmedService = PubMedService.create(from: settings)
+            } catch {
+                onError?(error)
+                return
+            }
+        }
+
+        // Load monthly usage
+        await loadMonthlyUsage()
+
+        // Check monthly budget
+        if monthlyUsedUSD >= settings.monthlyBudgetUSD {
+            onBudgetExceeded?("Monthly budget of \(CostCalculator.formatCost(settings.monthlyBudgetUSD)) exceeded")
+            return
+        }
+
+        isRunning = true
+        session.currentStep = .fetchingMoreEvidence
+        try? modelContext.save()
+
+        do {
+            // Step 1: Fetch more documents
+            if session.canFetchMoreDocuments {
+                // More results available from original query
+                updateProgress(.fetchingMoreEvidence, "Fetching more documents from PubMed...")
+                try await searchPubMed()
+
+                // Score new documents
+                updateProgress(.fetchingMoreEvidence, "Scoring new documents...")
+                try await scoreDocuments()
+
+                // Compute embedding scores if enabled
+                if settings.embeddingScoringEnabled {
+                    await computeEmbeddingScores()
+                }
+            } else if !session.smartSearchEnabled {
+                // PubMed exhausted but smart search not tried - try alternative queries
+                updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
+                try await executeSmartSearch()
+            } else {
+                // Both exhausted - nothing more we can do
+                print("[FetchMoreEvidence] No more evidence sources available")
+                session.currentStep = .completed
+                try? modelContext.save()
+                isRunning = false
+                return
+            }
+
+            // Step 2: Extract citations from new relevant documents only
+            updateProgress(.fetchingMoreEvidence, "Extracting citations from new documents...")
+            try await extractCitations()
+
+            // Step 3: Preserve existing report reference for recovery on error
+            let previousReport = session.report
+
+            // Step 4: Regenerate report with all evidence
+            session.currentStep = .generatingReport
+            try? modelContext.save()
+
+            updateProgress(.generatingReport, "Regenerating report with additional evidence...")
+            try await generateReport()
+
+            // Step 5: Delete old report only after new one succeeds
+            if let oldReport = previousReport {
+                modelContext.delete(oldReport)
+            }
+
+            // Complete
+            session.currentStep = .completed
+            session.stopReason = .completed
+            session.updatedAt = Date()
+            try? modelContext.save()
+
+            if let report = session.report {
+                onComplete?(report)
+            }
+
+        } catch let error as BudgetError {
+            session.currentStep = .budgetExceeded
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .budgetExceeded
+            try? modelContext.save()
+            onBudgetExceeded?(error.localizedDescription)
+        } catch {
+            // Restore to completed state on error - original report is preserved
+            // since we only delete it after successful regeneration
+            session.currentStep = .completed
+            session.errorMessage = error.localizedDescription
+            try? modelContext.save()
+            onError?(error)
+        }
+
+        isRunning = false
     }
 
     // MARK: - Workflow Execution
@@ -278,86 +404,186 @@ final class FactCheckWorkflow {
 
         try checkBudget()
 
+        // Use structured JSON prompt for better local model compatibility
         let prompt = """
-        Convert this medical claim/question into a PubMed search query.
+        Convert this research question into a concise PubMed search query.
 
-        Claim: \(session.claim)
+        Research Question: \(session.claim)
 
         Instructions:
-        1. Extract 2-3 key medical concepts (drug names, conditions, treatments)
-        2. Use simple keyword combinations with AND/OR operators
-        3. Be inclusive rather than restrictive - use synonyms and alternative spellings
-        4. Do NOT use overly specific MeSH qualifiers that limit results
-        5. Example format: (term1 OR synonym1) AND (term2 OR synonym2)
+        1. Identify 2-3 key concepts from the question
+        2. For each concept, provide 1-2 MeSH terms and 1-2 keywords
+        3. Keep it CONCISE - fewer specific terms work better than many broad terms
+        4. DO NOT add filters like hasabstract or publication type filters - those will be added automatically
 
-        IMPORTANT: Generate a query that will find relevant articles. Avoid being too restrictive.
+        Output ONLY valid JSON in this exact format:
+        {
+          "concepts": [
+            {"name": "concept1", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]},
+            {"name": "concept2", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]}
+          ]
+        }
 
-        Output ONLY the PubMed query string, nothing else. No explanation.
+        Example for "amlodipine improves arterial stiffness":
+        {
+          "concepts": [
+            {"name": "amlodipine", "mesh_terms": ["Amlodipine"], "keywords": ["amlodipine"]},
+            {"name": "arterial stiffness", "mesh_terms": ["Vascular Stiffness"], "keywords": ["arterial stiffness", "pulse wave velocity"]}
+          ]
+        }
+
+        Generate JSON for the research question:
         """
 
         let messages = [LLMService.userMessage(prompt)]
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.1,
-            maxTokens: 256
+            maxTokens: 512,
+            jsonMode: true
         )
 
         // Record usage
         recordUsage(usage, operationType: "query_conversion")
 
-        // Clean up response
-        var query = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !query.lowercased().contains("hasabstract") {
-            query += " AND hasabstract"
-        }
+        // Parse JSON response and build query
+        let query = buildQueryFromJSON(response, claim: session.claim)
 
         session.pubmedQuery = query
         try? modelContext.save()
     }
 
+    /// Build a PubMed query string from JSON response.
+    private func buildQueryFromJSON(_ response: String, claim: String) -> String {
+        // Try to parse JSON
+        guard let data = response.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let concepts = json["concepts"] as? [[String: Any]],
+              !concepts.isEmpty else {
+            // Fallback: try to extract JSON from markdown blocks
+            if let extracted = extractJSONFromResponse(response),
+               let data = extracted.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let concepts = json["concepts"] as? [[String: Any]],
+               !concepts.isEmpty {
+                return buildQueryFromConcepts(concepts)
+            }
+            // Final fallback: use claim as simple search
+            return "\(claim) AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
+        }
+
+        return buildQueryFromConcepts(concepts)
+    }
+
+    /// Extract JSON from a response that may have markdown wrapping.
+    private func extractJSONFromResponse(_ response: String) -> String? {
+        // Try markdown code block
+        if let range = response.range(of: "```json"),
+           let endRange = response.range(of: "```", range: range.upperBound..<response.endIndex) {
+            let jsonStr = String(response[range.upperBound..<endRange.lowerBound])
+            return jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Try plain code block
+        if let range = response.range(of: "```"),
+           let endRange = response.range(of: "```", range: range.upperBound..<response.endIndex) {
+            let jsonStr = String(response[range.upperBound..<endRange.lowerBound])
+            return jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Try to find JSON object
+        if let start = response.firstIndex(of: "{"),
+           let end = response.lastIndex(of: "}") {
+            return String(response[start...end])
+        }
+        return nil
+    }
+
+    /// Build query string from parsed concepts.
+    private func buildQueryFromConcepts(_ concepts: [[String: Any]]) -> String {
+        var conceptClauses: [String] = []
+
+        for concept in concepts {
+            var terms: [String] = []
+
+            // Add MeSH terms
+            if let meshTerms = concept["mesh_terms"] as? [String] {
+                for term in meshTerms.prefix(2) {
+                    terms.append("\"\(term)\"[MeSH]")
+                }
+            }
+
+            // Add keywords
+            if let keywords = concept["keywords"] as? [String] {
+                for keyword in keywords.prefix(3) {
+                    terms.append("\(keyword)[tiab]")
+                }
+            }
+
+            if !terms.isEmpty {
+                let clause = "(" + terms.joined(separator: " OR ") + ")"
+                conceptClauses.append(clause)
+            }
+        }
+
+        guard !conceptClauses.isEmpty else {
+            return "AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
+        }
+
+        // Join concepts with AND, add filters
+        let baseQuery = conceptClauses.joined(separator: " AND ")
+        return "\(baseQuery) AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
+    }
+
     private func searchPubMed() async throws {
         guard let session = session,
-              let pubmedService = pubmedService,
               let query = session.pubmedQuery else { return }
 
         let batchNumber = session.batchesFetched + 1
-        updateProgress(.searchingPubMed, "Searching PubMed (batch \(batchNumber))...")
+        let provider = currentSearchOptions?.provider ?? .pubmed
+        let providerName = provider.displayName
 
-        let result = try await pubmedService.search(
+        updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
+
+        // Build search options with current pagination state
+        var options = currentSearchOptions ?? settings.buildSearchOptions()
+        options.maxResults = settings.batchSize
+        options.offset = session.currentSearchOffset
+        options.cursorMark = session.europePMCCursorMark
+
+        // Use unified search service
+        let result = try await SearchServiceFactory.search(
             query: query,
-            maxResults: settings.batchSize,
-            offset: session.currentSearchOffset
+            options: options,
+            settings: settings
         )
 
-        // Update session state
-        session.totalPubMedResults = result.totalCount
-        session.currentSearchOffset = result.nextOffset
+        // Update session state based on provider
+        if provider == .pubmed || provider == .both {
+            session.totalPubMedResults = result.totalCount
+            session.currentSearchOffset = result.nextOffset
+        }
+        if provider == .europePMC || provider == .both {
+            session.totalEuropePMCResults = result.totalCount
+            session.europePMCCursorMark = result.nextCursorMark
+        }
         session.batchesFetched = batchNumber
 
-        if result.pmids.isEmpty {
+        if result.articles.isEmpty {
             if session.documents.isEmpty {
                 throw PubMedError.noResults
             }
             return  // No more results, proceed with what we have
         }
 
-        updateProgress(.searchingPubMed, "Fetching \(result.pmids.count) article details...")
+        updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
 
-        // Fetch article metadata
-        let articles = try await pubmedService.fetchArticles(
-            pmids: result.pmids,
-            batchNumber: batchNumber,
-            basePosition: session.documentsFound
-        )
-
-        // Create Document objects
-        for article in articles {
+        // Create Document objects from unified results
+        for article in result.articles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
                 abstract: article.abstract,
                 authors: article.authors,
-                batchNumber: article.batchNumber,
+                batchNumber: batchNumber,
                 resultPosition: article.resultPosition
             )
             document.year = article.year
@@ -367,13 +593,20 @@ final class FactCheckWorkflow {
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
             document.session = session
+            document.sourceProvider = result.provider
 
             modelContext.insert(document)
         }
 
-        session.documentsFound += articles.count
+        session.documentsFound += result.articles.count
         try? modelContext.save()
     }
+
+    /// Maximum retries for JSON parse failures when scoring documents.
+    private static let maxParseRetries = 3
+
+    /// Base delay in seconds for exponential backoff on parse failures.
+    private static let parseRetryBaseDelay: Double = 1.0
 
     private func scoreDocuments() async throws {
         guard let session = session, let llmService = llmService else { return }
@@ -399,9 +632,11 @@ final class FactCheckWorkflow {
             Abstract:
             \(document.abstract)
 
+            IMPORTANT: Relevance means how useful the document is for ANSWERING the research question or EVALUATING the claim. Evidence that REFUTES or contradicts the claim is EQUALLY valuable as evidence that supports it. A study showing negative results is highly relevant if it directly addresses the claim.
+
             Score on a scale of 1-5:
-            - 5: Directly addresses the claim with strong evidence
-            - 4: Highly relevant, provides substantial supporting information
+            - 5: Directly addresses the claim with strong evidence (supporting OR refuting)
+            - 4: Highly relevant, provides substantial information about the claim (positive or negative findings)
             - 3: Moderately relevant, contains useful related information
             - 2: Marginally relevant, tangentially related
             - 1: Not relevant to the claim
@@ -411,26 +646,61 @@ final class FactCheckWorkflow {
             """
 
             let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 256,
-                jsonMode: true
-            )
 
-            recordUsage(usage, operationType: "scoring")
+            // Retry loop for parse failures with exponential backoff
+            var parseResult: ResponseParser.ScoreParseResult?
+            var lastParseError: String = ""
 
-            // Parse response using ResponseParser
-            let parsed = ResponseParser.parseScoreResponse(response)
-            let score = parsed.score
-            let explanation = parsed.explanation
-            document.relevanceScore = score
-            document.scoreExplanation = explanation
-            document.scoredAt = Date()
+            for attempt in 0..<Self.maxParseRetries {
+                let (response, usage) = try await llmService.chat(
+                    messages: messages,
+                    temperature: 0.1,
+                    maxTokens: 512,
+                    jsonMode: true
+                )
 
-            session.documentsScored += 1
-            if score >= settings.minScoreThreshold {
-                session.relevantDocumentsFound += 1
+                recordUsage(usage, operationType: "scoring")
+
+                // Parse response using ResponseParser
+                let parsed = ResponseParser.parseScoreResponse(response)
+
+                if parsed.success {
+                    parseResult = parsed
+                    break
+                }
+
+                // Parse failed, log and retry
+                lastParseError = parsed.explanation
+                print("[Scoring] Parse attempt \(attempt + 1)/\(Self.maxParseRetries) failed: \(lastParseError)")
+
+                if attempt < Self.maxParseRetries - 1 {
+                    // Exponential backoff with jitter
+                    let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
+                    let jitter = delay * Double.random(in: -0.25...0.25)
+                    let totalDelay = delay + jitter
+                    print("[Scoring] Retrying in \(String(format: "%.1f", totalDelay))s...")
+                    try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
+                }
+            }
+
+            // Process result
+            if let result = parseResult, let score = result.score {
+                document.relevanceScore = score
+                document.scoreExplanation = result.explanation
+                document.scoredAt = Date()
+
+                session.documentsScored += 1
+                if score >= settings.minScoreThreshold {
+                    session.relevantDocumentsFound += 1
+                }
+            } else {
+                // All retries failed - mark as parse failed
+                print("[Scoring] All \(Self.maxParseRetries) parse attempts failed for document \(document.pmid)")
+                document.scoreParseFailed = true
+                document.scoreExplanation = lastParseError
+                document.scoredAt = Date()
+
+                session.documentsScored += 1  // Count as scored (attempted)
             }
 
             try? modelContext.save()
@@ -564,19 +834,24 @@ final class FactCheckWorkflow {
             \(document.abstract)
 
             Extract exact or close quotes that:
-            1. Directly address the claim
+            1. Directly address the claim (whether supporting OR refuting it)
             2. Contain specific findings, data, or conclusions
             3. Could be quoted in an evidence summary
 
+            For each passage, also identify:
+            - Whether the finding SUPPORTS or REFUTES the claim (or is NEUTRAL/UNCLEAR)
+            - The study type if identifiable (e.g., systematic review, meta-analysis, RCT, cohort study, case-control, case report, narrative review)
+            - Sample size if mentioned (e.g., "n=500", "1,234 participants")
+
             Respond in JSON format only:
-            {"passages": [{"text": "<quote>", "relevance": "<why relevant>"}]}
+            {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
             """
 
             let messages = [LLMService.userMessage(prompt)]
             let (response, usage) = try await llmService.chat(
                 messages: messages,
                 temperature: 0.1,
-                maxTokens: 512,
+                maxTokens: 4096,
                 jsonMode: true
             )
 
@@ -584,6 +859,14 @@ final class FactCheckWorkflow {
 
             // Parse passages using ResponseParser
             let passages = ResponseParser.parsePassagesResponse(response)
+
+            if passages.isEmpty {
+                print("[Citation] Warning: No passages extracted from document \(document.pmid)")
+                print("[Citation] Response (first 500 chars): \(String(response.prefix(500)))")
+            } else {
+                print("[Citation] Extracted \(passages.count) passage(s) from document \(document.pmid)")
+            }
+
             for passage in passages {
                 let citation = Citation(passage: passage.text, context: passage.relevance)
                 citation.document = document
@@ -601,13 +884,19 @@ final class FactCheckWorkflow {
         try checkBudget()
 
         let allCitations = session.documents.flatMap { $0.citations }
+        let relevantDocCount = session.documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
 
-        // Handle no evidence case
+        // Handle no evidence case - distinguish between no relevant docs vs extraction failure
         guard !allCitations.isEmpty else {
+            let (summary, fullReport) = generateNoEvidenceContent(
+                claim: session.claim,
+                hadRelevantDocuments: relevantDocCount > 0,
+                relevantDocCount: relevantDocCount
+            )
             let report = EvidenceReport(
                 verdict: .insufficientEvidence,
-                summary: "No relevant evidence was found in the medical literature for this claim.",
-                fullReport: generateNoEvidenceReport(claim: session.claim),
+                summary: summary,
+                fullReport: fullReport,
                 citationCount: 0,
                 uniqueSourceCount: 0,
                 documentsReviewed: session.documentsScored
@@ -631,11 +920,27 @@ final class FactCheckWorkflow {
 
         \(citationsText)
 
+        EVIDENCE WEIGHING PRINCIPLES:
+        When synthesizing evidence, consider both supporting AND refuting findings. Evidence quality hierarchy (highest to lowest):
+        1. Systematic reviews and meta-analyses (strongest - synthesize multiple studies)
+        2. Randomized controlled trials (RCTs) - especially large, well-designed ones
+        3. Cohort studies (prospective stronger than retrospective)
+        4. Case-control studies
+        5. Case series and case reports (weakest)
+        6. Narrative reviews and expert opinion
+
+        Also consider:
+        - Sample size: Larger studies (thousands) carry more weight than small ones (dozens)
+        - A single high-quality RCT can outweigh multiple observational studies
+        - If high-quality evidence conflicts with lower-quality evidence, prioritize the higher-quality
+        - Report the balance of evidence fairly - if most evidence refutes the claim, the verdict should reflect that
+
         Write an evidence report that:
         1. States a verdict: Supported, Partially Supported, Not Supported, Insufficient Evidence, or Conflicting Evidence
         2. Provides a 2-3 sentence summary of the key findings
-        3. Discusses the evidence briefly with inline citations
+        3. Discusses the evidence briefly with inline citations, noting study quality where relevant
         4. Notes any important limitations
+        5. If evidence conflicts, explain which findings carry more weight and why
 
         CRITICAL - Citation format:
         Use this EXACT format for all inline citations: [Author, Year](doc:ID)
@@ -661,7 +966,7 @@ final class FactCheckWorkflow {
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.3,
-            maxTokens: 2048,
+            maxTokens: 8192,
             jsonMode: true
         )
 
@@ -720,7 +1025,8 @@ final class FactCheckWorkflow {
         session.recordUsage(
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
-            model: settings.llmModel
+            model: settings.llmModel,
+            provider: usage.provider
         )
 
         // Create usage record for monthly tracking
@@ -781,31 +1087,75 @@ final class FactCheckWorkflow {
         }.joined(separator: "\n\n")
     }
 
-    private func generateNoEvidenceReport(claim: String) -> String {
-        """
-        ## Evidence Report
+    /// Generate content for the no-evidence report, distinguishing between
+    /// no relevant documents found vs citation extraction failure.
+    ///
+    /// - Parameters:
+    ///   - claim: The medical claim being evaluated.
+    ///   - hadRelevantDocuments: True if relevant documents were found but citation extraction failed.
+    ///   - relevantDocCount: Number of documents that met the relevance threshold.
+    /// - Returns: Tuple of (summary, fullReport) strings.
+    private func generateNoEvidenceContent(
+        claim: String,
+        hadRelevantDocuments: Bool,
+        relevantDocCount: Int
+    ) -> (summary: String, fullReport: String) {
+        if hadRelevantDocuments {
+            // Relevant documents were found but citation extraction failed
+            let summary = "Citation extraction failed for \(relevantDocCount) relevant document(s). Please review the scored documents manually or try again."
+            let fullReport = """
+            ## Evidence Report
 
-        **Claim:** \(claim)
+            **Claim:** \(claim)
 
-        **Verdict:** Insufficient Evidence
+            **Verdict:** Insufficient Evidence
 
-        No relevant evidence was found in the searched medical literature for this claim.
+            \(relevantDocCount) relevant document(s) were found during the search, but citation extraction was unable to identify specific passages from them. This may be due to:
 
-        ### Possible Reasons
+            1. API or network errors during citation extraction
+            2. Documents having abstracts that are difficult to parse
+            3. Temporary service issues
+            4. The LLM returning responses in an unexpected format
 
-        1. The topic may have limited published research
-        2. The search terms may need refinement
-        3. The claim may be too specific or novel
+            ### Recommendations
 
-        ### Recommendations
+            - Review the scored documents shown above - they contain relevant information
+            - Try running the search again
+            - If the problem persists, check for network connectivity issues
 
-        - Try rephrasing the claim with different medical terms
-        - Consider searching for related topics
-        - Consult specialized medical databases
+            ---
+            *No citations extracted*
+            """
+            return (summary, fullReport)
+        } else {
+            // No relevant documents were found
+            let summary = "No relevant evidence was found in the medical literature for this claim."
+            let fullReport = """
+            ## Evidence Report
 
-        ---
-        *No citations available*
-        """
+            **Claim:** \(claim)
+
+            **Verdict:** Insufficient Evidence
+
+            No relevant evidence was found in the searched medical literature for this claim.
+
+            ### Possible Reasons
+
+            1. The topic may have limited published research
+            2. The search terms may need refinement
+            3. The claim may be too specific or novel
+
+            ### Recommendations
+
+            - Try rephrasing the claim with different medical terms
+            - Consider searching for related topics
+            - Consult specialized medical databases
+
+            ---
+            *No citations available*
+            """
+            return (summary, fullReport)
+        }
     }
 
     // MARK: - Smart Search
@@ -973,7 +1323,7 @@ final class FactCheckWorkflow {
     private func scoreNewDocuments(_ pmids: [String]) async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil }
+        let docsToScore = session.documents.filter { pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed }
 
         for document in docsToScore {
             try checkBudget()
@@ -991,9 +1341,11 @@ final class FactCheckWorkflow {
             Abstract:
             \(document.abstract)
 
+            IMPORTANT: Relevance means how useful the document is for ANSWERING the research question or EVALUATING the claim. Evidence that REFUTES or contradicts the claim is EQUALLY valuable as evidence that supports it. A study showing negative results is highly relevant if it directly addresses the claim.
+
             Score on a scale of 1-5:
-            - 5: Directly addresses the claim with strong evidence
-            - 4: Highly relevant, provides substantial supporting information
+            - 5: Directly addresses the claim with strong evidence (supporting OR refuting)
+            - 4: Highly relevant, provides substantial information about the claim (positive or negative findings)
             - 3: Moderately relevant, contains useful related information
             - 2: Marginally relevant, tangentially related
             - 1: Not relevant to the claim
@@ -1003,23 +1355,58 @@ final class FactCheckWorkflow {
             """
 
             let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 256,
-                jsonMode: true
-            )
 
-            recordUsage(usage, operationType: "scoring")
+            // Retry loop for parse failures with exponential backoff
+            var parseResult: ResponseParser.ScoreParseResult?
+            var lastParseError: String = ""
 
-            let parsed = ResponseParser.parseScoreResponse(response)
-            document.relevanceScore = parsed.score
-            document.scoreExplanation = parsed.explanation
-            document.scoredAt = Date()
+            for attempt in 0..<Self.maxParseRetries {
+                let (response, usage) = try await llmService.chat(
+                    messages: messages,
+                    temperature: 0.1,
+                    maxTokens: 512,
+                    jsonMode: true
+                )
 
-            session.documentsScored += 1
-            if parsed.score >= settings.minScoreThreshold {
-                session.relevantDocumentsFound += 1
+                recordUsage(usage, operationType: "scoring")
+
+                let parsed = ResponseParser.parseScoreResponse(response)
+
+                if parsed.success {
+                    parseResult = parsed
+                    break
+                }
+
+                // Parse failed, log and retry
+                lastParseError = parsed.explanation
+                print("[Scoring] Parse attempt \(attempt + 1)/\(Self.maxParseRetries) failed: \(lastParseError)")
+
+                if attempt < Self.maxParseRetries - 1 {
+                    let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
+                    let jitter = delay * Double.random(in: -0.25...0.25)
+                    let totalDelay = delay + jitter
+                    try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
+                }
+            }
+
+            // Process result
+            if let result = parseResult, let score = result.score {
+                document.relevanceScore = score
+                document.scoreExplanation = result.explanation
+                document.scoredAt = Date()
+
+                session.documentsScored += 1
+                if score >= settings.minScoreThreshold {
+                    session.relevantDocumentsFound += 1
+                }
+            } else {
+                // All retries failed - mark as parse failed
+                print("[Scoring] All \(Self.maxParseRetries) parse attempts failed for document \(document.pmid)")
+                document.scoreParseFailed = true
+                document.scoreExplanation = lastParseError
+                document.scoredAt = Date()
+
+                session.documentsScored += 1
             }
 
             try? modelContext.save()

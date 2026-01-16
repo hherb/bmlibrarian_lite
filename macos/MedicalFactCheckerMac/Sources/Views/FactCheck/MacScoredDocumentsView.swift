@@ -1,0 +1,688 @@
+//
+//  MacScoredDocumentsView.swift
+//  MedicalFactChecker
+//
+//  macOS-optimized view for displaying scored documents in a table format.
+//  Includes full-text retrieval functionality with fallback chain support.
+//
+
+import SwiftUI
+import SwiftData
+
+/// macOS view for displaying scored documents as expandable cards.
+///
+/// Takes advantage of the larger screen with more information visible at once
+/// and support for keyboard navigation. Includes full-text retrieval capabilities.
+struct MacScoredDocumentsView: View {
+    @Bindable var session: FactCheckSession
+    let showEmbeddingScores: Bool
+
+    /// Callback when user wants to view full text in the dedicated tab.
+    var onShowFullText: ((Document) -> Void)?
+
+    @State private var expandedDocumentId: String?
+    @State private var sortOrder: DocumentSortOrder = .score
+    @State private var filterThreshold: Int = 1
+
+    private var scoredDocuments: [Document] {
+        session.documents
+            .filter { $0.isScored && ($0.relevanceScore ?? 0) >= filterThreshold }
+            .sorted { doc1, doc2 in
+                switch sortOrder {
+                case .score:
+                    return (doc1.relevanceScore ?? 0) > (doc2.relevanceScore ?? 0)
+                case .year:
+                    return (doc1.year ?? 0) > (doc2.year ?? 0)
+                case .title:
+                    return doc1.title < doc2.title
+                }
+            }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Toolbar
+            toolbar
+                .padding(.horizontal, MacSpacing.large)
+                .padding(.vertical, MacSpacing.medium)
+                .background(Color(NSColor.controlBackgroundColor))
+
+            Divider()
+
+            // Documents list
+            ScrollView {
+                LazyVStack(spacing: MacSpacing.cardSpacing) {
+                    ForEach(scoredDocuments, id: \.id) { document in
+                        MacDocumentCard(
+                            document: document,
+                            isExpanded: expandedDocumentId == document.id,
+                            showEmbeddingScore: showEmbeddingScores,
+                            onToggleExpand: {
+                                withAnimation(.easeInOut(duration: MacAnimation.expandDuration)) {
+                                    if expandedDocumentId == document.id {
+                                        expandedDocumentId = nil
+                                    } else {
+                                        expandedDocumentId = document.id
+                                    }
+                                }
+                            },
+                            onShowFullText: onShowFullText
+                        )
+                    }
+                }
+                .padding(MacSpacing.large)
+            }
+        }
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: MacSpacing.large) {
+            // Sort picker
+            Picker("Sort by", selection: $sortOrder) {
+                ForEach(DocumentSortOrder.allCases) { order in
+                    Text(order.rawValue).tag(order)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: MacLayout.sortPickerWidth)
+
+            // Filter picker
+            Picker("Min score", selection: $filterThreshold) {
+                Text("All").tag(1)
+                Text("2+").tag(2)
+                Text("3+").tag(3)
+                Text("4+").tag(4)
+                Text("5 only").tag(5)
+            }
+            .pickerStyle(.menu)
+            .frame(width: MacLayout.filterPickerWidth)
+
+            Spacer()
+
+            // Count
+            Text("\(scoredDocuments.count) documents")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+/// Sort order options for document list.
+enum DocumentSortOrder: String, CaseIterable, Identifiable {
+    case score = "Score"
+    case year = "Year"
+    case title = "Title"
+
+    var id: String { rawValue }
+}
+
+/// Expandable document card for macOS with full-text retrieval support.
+///
+/// Displays document metadata, relevance score, and provides full-text
+/// retrieval functionality with fallback chain (Europe PMC → Unpaywall → DOI).
+struct MacDocumentCard: View {
+    // MARK: - Properties
+
+    let document: Document
+    let isExpanded: Bool
+    let showEmbeddingScore: Bool
+    let onToggleExpand: () -> Void
+
+    /// Callback when user wants to view full text in the dedicated tab.
+    var onShowFullText: ((Document) -> Void)?
+
+    // MARK: - State
+
+    @State private var isLoadingFullText = false
+    @State private var fullTextError: String?
+
+    // MARK: - Body
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header (always visible)
+            cardHeader
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onToggleExpand)
+                .contextMenu { documentContextMenu }
+
+            // Expanded content
+            if isExpanded {
+                Divider()
+                    .padding(.horizontal, MacSpacing.large)
+
+                expandedContent
+            }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(MacCornerRadius.standard)
+        .overlay(
+            RoundedRectangle(cornerRadius: MacCornerRadius.standard)
+                .stroke(Color.secondary.opacity(MacOpacity.border))
+        )
+    }
+
+    // MARK: - Card Header
+
+    private var cardHeader: some View {
+        HStack(alignment: .top, spacing: MacSpacing.large) {
+            // Score badge (shows "?" for failed scores)
+            MacScoreBadge(score: document.relevanceScore)
+
+            // Title and metadata
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                HStack(spacing: MacSpacing.small) {
+                    Text(document.title)
+                        .font(.headline)
+                        .lineLimit(isExpanded ? nil : 2)
+
+                    // Full text indicator
+                    if document.hasFullText {
+                        Image(systemName: "doc.text.fill")
+                            .font(.caption)
+                            .foregroundColor(.accentColor)
+                            .help("Full text available")
+                    }
+                }
+
+                HStack(spacing: MacSpacing.medium) {
+                    Text(document.formattedAuthors)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+
+                    if let journal = document.journal, let year = document.year {
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        Text(verbatim: "\(journal), \(year)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    // Search provider badge
+                    MacProviderBadge(provider: documentProvider)
+
+                    // Full text source badge (compact)
+                    if let sourceString = document.fullTextSource {
+                        FullTextSourceBadge(sourceString: sourceString)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Embedding score (if enabled)
+            if showEmbeddingScore {
+                VStack(alignment: .trailing, spacing: MacSpacing.xxSmall) {
+                    Text("Embed")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text("\(document.embeddingScoreNormalized ?? 0)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(embeddingColor)
+                }
+            }
+
+            // Expand indicator
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .foregroundColor(.secondary)
+                .font(.caption)
+        }
+        .padding(MacSpacing.large)
+    }
+
+    // MARK: - Expanded Content
+
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: MacSpacing.large) {
+            // Score explanation - visually distinct with background and quote styling
+            if let explanation = document.scoreExplanation, !explanation.isEmpty {
+                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                    Text("Relevance Explanation")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+
+                    HStack(alignment: .top, spacing: MacSpacing.medium) {
+                        Image(systemName: "brain.head.profile")
+                            .font(.body)
+                            .foregroundColor(MacColors.reasoningAccent)
+
+                        Text(explanation)
+                            .font(.body)
+                            .italic()
+                            .foregroundColor(MacColors.reasoningText)
+                    }
+                    .padding(MacSpacing.standard)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(MacColors.reasoningBackground)
+                    .cornerRadius(MacCornerRadius.standard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MacCornerRadius.standard)
+                            .stroke(MacColors.reasoningBorder, lineWidth: 1)
+                    )
+                }
+            }
+
+            // Citations (Key Passages) - shown before abstract
+            if !document.citations.isEmpty {
+                VStack(alignment: .leading, spacing: MacSpacing.medium) {
+                    Text("Key Passages (\(document.citations.count))")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+
+                    ForEach(document.citations, id: \.id) { citation in
+                        HStack(alignment: .top, spacing: MacSpacing.medium) {
+                            Image(systemName: "quote.opening")
+                                .font(.caption)
+                                .foregroundColor(.accentColor)
+
+                            Text(citation.passage)
+                                .font(.body)
+                                .italic()
+                                .textSelection(.enabled)
+                        }
+                        .padding(MacSpacing.standard)
+                        .background(Color.accentColor.opacity(MacOpacity.veryLight))
+                        .cornerRadius(MacCornerRadius.medium)
+                    }
+                }
+            }
+
+            // Abstract - rendered as markdown
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                Text("Abstract")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                MacAbstractView(text: document.abstract)
+                    .textSelection(.enabled)
+            }
+
+            Divider()
+
+            // Full Text Section
+            fullTextSection
+
+            // Links
+            HStack(spacing: MacSpacing.large) {
+                Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
+                    HStack(spacing: MacSpacing.xSmall) {
+                        Image(systemName: "link")
+                        Text("PubMed")
+                    }
+                    .font(.caption)
+                }
+
+                if let doi = document.doi {
+                    Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                        HStack(spacing: MacSpacing.xSmall) {
+                            Image(systemName: "doc.text")
+                            Text("DOI")
+                        }
+                        .font(.caption)
+                    }
+                }
+
+                Spacer()
+
+                Text("PMID: \(document.pmid)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(MacSpacing.large)
+    }
+
+    // MARK: - Full Text Section
+
+    /// Section for full-text retrieval button and status.
+    @ViewBuilder
+    private var fullTextSection: some View {
+        HStack(spacing: MacSpacing.medium) {
+            if document.hasFullText {
+                // Already have full text - show view button
+                Button(action: { onShowFullText?(document) }) {
+                    Label("View Full Text", systemImage: "doc.text")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("View full text")
+                .accessibilityHint("Opens the full text in a new tab")
+
+                if let sourceString = document.fullTextSource {
+                    FullTextSourceBadge(sourceString: sourceString)
+                }
+
+                Spacer()
+
+                // Open in Preview (for PDFs)
+                if document.fullTextPDFPath != nil {
+                    Button(action: openInPreview) {
+                        Label("Open in Preview", systemImage: "eye")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open PDF in Preview.app")
+                }
+            } else if document.fullTextUnavailable {
+                // Already tried, not available
+                HStack(spacing: MacSpacing.small) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                    Text("Full text not available")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Full text not available")
+
+                Spacer()
+
+                // Still offer to open in browser
+                if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                    Link(destination: url) {
+                        Label("Open Publisher", systemImage: "safari")
+                            .font(.caption)
+                    }
+                }
+            } else {
+                // Not yet attempted
+                Button(action: fetchFullText) {
+                    if isLoadingFullText {
+                        ProgressView()
+                            .scaleEffect(MacScale.progressViewSmall)
+                            .frame(width: MacFullTextLayout.loadingIndicatorSize,
+                                   height: MacFullTextLayout.loadingIndicatorSize)
+                    } else {
+                        Label("Get Full Text", systemImage: "arrow.down.doc")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingFullText)
+                .accessibilityLabel(isLoadingFullText ? "Loading full text" : "Get full text")
+                .accessibilityHint("Downloads the full text of this article if available")
+
+                if let error = fullTextError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Context Menu
+
+    /// Context menu for document card with full-text options.
+    @ViewBuilder
+    private var documentContextMenu: some View {
+        if document.hasFullText {
+            Button(action: { onShowFullText?(document) }) {
+                Label("View Full Text", systemImage: "doc.text")
+            }
+
+            if document.fullTextPDFPath != nil {
+                Button(action: openInPreview) {
+                    Label("Open in Preview", systemImage: "eye")
+                }
+
+                Button(action: revealInFinder) {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+            }
+
+            Divider()
+        } else if !document.fullTextUnavailable {
+            Button(action: fetchFullText) {
+                Label("Get Full Text", systemImage: "arrow.down.doc")
+            }
+            .disabled(isLoadingFullText)
+
+            Divider()
+        }
+
+        // Standard links
+        Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
+            Label("Open in PubMed", systemImage: "link")
+        }
+
+        if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+            Link(destination: url) {
+                Label("Open DOI", systemImage: "link")
+            }
+        }
+
+        Divider()
+
+        Button(action: copyPMID) {
+            Label("Copy PMID", systemImage: "doc.on.doc")
+        }
+
+        Button(action: copyCitation) {
+            Label("Copy Citation", systemImage: "quote.opening")
+        }
+    }
+
+    // MARK: - Computed Properties
+
+    private var embeddingColor: Color {
+        MacColors.scoreColor(for: document.embeddingScoreNormalized ?? 0)
+    }
+
+    /// Determine the search provider based on document properties.
+    ///
+    /// Uses heuristics to infer which provider a document came from:
+    /// - Documents with PMC ID but empty PMID likely came from Europe PMC
+    /// - Preprints (bioRxiv, medRxiv) came from Europe PMC
+    /// - Documents with PMID likely came from PubMed
+    private var documentProvider: SearchProvider? {
+        // Documents from Europe PMC often have pmcId but empty pmid
+        if document.pmid.isEmpty && document.pmcId != nil {
+            return .europePMC
+        }
+        // Check if it's a preprint (would come from Europe PMC)
+        if let journal = document.journal?.lowercased() {
+            if journal.contains("biorxiv") || journal.contains("medrxiv") ||
+               journal.contains("preprint") || journal.contains("arxiv") {
+                return .europePMC
+            }
+        }
+        // Default to PubMed for articles with PMID
+        if !document.pmid.isEmpty {
+            return .pubmed
+        }
+        return nil
+    }
+
+    // MARK: - Full Text Actions
+
+    /// Fetch full text for this document using the FullTextService fallback chain.
+    private func fetchFullText() {
+        isLoadingFullText = true
+        fullTextError = nil
+
+        Task {
+            do {
+                let service = FullTextService.create(from: .shared)
+                let result = try await service.fetchFullText(
+                    pmcId: document.pmcId,
+                    doi: document.doi,
+                    pmid: document.pmid
+                )
+
+                await MainActor.run {
+                    // Update document model based on result type
+                    document.applyFullTextResult(result)
+
+                    switch result.content {
+                    case .markdown:
+                        // Content already stored, show in tab
+                        onShowFullText?(document)
+
+                    case .pdfURL(let url):
+                        // Download and cache PDF
+                        Task {
+                            await downloadAndCachePDF(from: url)
+                        }
+
+                    case .webURL(let url):
+                        // Open in browser
+                        NSWorkspace.shared.open(url)
+                    }
+
+                    isLoadingFullText = false
+                }
+            } catch {
+                await MainActor.run {
+                    if case FullTextError.noFullTextAvailable = error {
+                        document.markFullTextUnavailable()
+                    }
+                    fullTextError = error.localizedDescription
+                    isLoadingFullText = false
+                    AppLogger.fullText.error("Failed to fetch full text: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Download and cache a PDF file.
+    ///
+    /// - Parameter url: The URL to download the PDF from.
+    private func downloadAndCachePDF(from url: URL) async {
+        do {
+            let service = FullTextService.create(from: .shared)
+            let path = try await service.downloadAndCachePDF(from: url, for: document.pmid)
+
+            await MainActor.run {
+                document.fullTextPDFPath = path
+                isLoadingFullText = false
+                // Show in full text tab
+                onShowFullText?(document)
+            }
+        } catch {
+            await MainActor.run {
+                fullTextError = "Failed to download PDF"
+                isLoadingFullText = false
+                AppLogger.fullText.error("Failed to cache PDF: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Open the cached PDF in Preview.app.
+    private func openInPreview() {
+        guard let path = document.fullTextPDFPath else { return }
+        let url = URL(fileURLWithPath: path)
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reveal the cached PDF in Finder.
+    private func revealInFinder() {
+        guard let path = document.fullTextPDFPath else { return }
+        NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+    }
+
+    /// Copy the PMID to the clipboard.
+    private func copyPMID() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(document.pmid, forType: .string)
+    }
+
+    /// Copy the full citation to the clipboard.
+    private func copyCitation() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(document.fullCitation, forType: .string)
+    }
+}
+
+// MARK: - Score Badge
+
+/// Score badge displaying a relevance score (1-5) with color coding.
+///
+/// Colors range from red (1) through orange (2-3) to green (4-5).
+/// Displays "?" for nil scores (parsing failures).
+struct MacScoreBadge: View {
+    /// The relevance score to display (nil for failed scores).
+    let score: Int?
+
+    var body: some View {
+        Group {
+            if let score = score {
+                Text("\(score)")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: MacIconSize.scoreBadgeSize, height: MacIconSize.scoreBadgeSize)
+                    .background(MacColors.scoreColor(for: score))
+                    .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
+            } else {
+                Text("?")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: MacIconSize.scoreBadgeSize, height: MacIconSize.scoreBadgeSize)
+                    .background(Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: MacCornerRadius.standard))
+            }
+        }
+    }
+}
+
+// MARK: - Abstract View with Markdown Support
+
+/// View that renders abstract text with markdown formatting support.
+///
+/// Handles common markdown patterns found in PubMed abstracts like
+/// bold section headers (e.g., **OBJECTIVE:**) and emphasis.
+struct MacAbstractView: View {
+    /// The abstract text to render.
+    let text: String
+
+    var body: some View {
+        if let attributed = parseAbstractMarkdown(text) {
+            Text(attributed)
+                .font(.body)
+        } else {
+            Text(text)
+                .font(.body)
+        }
+    }
+
+    /// Parses markdown in abstract text and returns an AttributedString.
+    ///
+    /// Handles common patterns in PubMed abstracts:
+    /// - **SECTION:** headers (bold)
+    /// - *emphasis* text (italic)
+    ///
+    /// - Parameter text: The abstract text to parse.
+    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
+    private func parseAbstractMarkdown(_ text: String) -> AttributedString? {
+        // Try native markdown parsing first
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return nil
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    let session = FactCheckSession(claim: "Test claim")
+    return MacScoredDocumentsView(
+        session: session,
+        showEmbeddingScores: true,
+        onShowFullText: { doc in
+            print("Show full text for: \(doc.title)")
+        }
+    )
+    .frame(width: 600, height: 500)
+}

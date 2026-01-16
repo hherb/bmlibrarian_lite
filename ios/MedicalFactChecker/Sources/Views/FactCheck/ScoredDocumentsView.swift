@@ -8,6 +8,14 @@
 import SwiftData
 import SwiftUI
 
+// MARK: - Constants
+
+/// Constants for scored documents view UI.
+private enum ScoredDocumentsConstants {
+    /// Scale factor for inline progress indicators.
+    static let inlineProgressScale: CGFloat = 0.8
+}
+
 /// Section displaying scored documents with both LLM and embedding scores.
 ///
 /// Shows a collapsible list of documents sorted by relevance score.
@@ -66,12 +74,20 @@ struct ScoredDocumentsView: View {
 /// Expandable row displaying a single document with its LLM and embedding scores.
 ///
 /// Shows title, reference, and score badges in collapsed state.
-/// Expands to show abstract, LLM reasoning, score comparison, and metadata.
+/// Expands to show abstract, LLM reasoning, score comparison, metadata, and full-text options.
 struct DocumentScoreRow: View {
     @Bindable var document: Document
     let showEmbeddingScore: Bool
 
     @State private var isExpanded = false
+
+    // Full-text retrieval state
+    @State private var isLoadingFullText = false
+    @State private var fullTextError: String?
+    @State private var showFullTextViewer = false
+    @State private var fullTextResult: FullTextResult?
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -88,9 +104,19 @@ struct DocumentScoreRow: View {
                             .lineLimit(isExpanded ? nil : 2)
                             .multilineTextAlignment(.leading)
 
-                        Text(document.shortReference)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Text(document.shortReference)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            // Source provider badge
+                            if let provider = document.sourceProvider {
+                                DocumentSourceBadge(
+                                    provider: provider,
+                                    isPreprint: document.isPreprint
+                                )
+                            }
+                        }
                     }
 
                     Spacer(minLength: 0)
@@ -110,6 +136,27 @@ struct DocumentScoreRow: View {
         .padding(12)
         .background(Color(.systemBackground))
         .cornerRadius(8)
+        .sheet(isPresented: $showFullTextViewer) {
+            fullTextViewerSheet
+        }
+    }
+
+    // MARK: - Full Text Viewer Sheet
+
+    /// Sheet content for displaying full text.
+    @ViewBuilder
+    private var fullTextViewerSheet: some View {
+        if let result = fullTextResult {
+            FullTextViewer(document: document, result: result)
+        } else if let content = document.fullTextContent {
+            FullTextViewer(
+                document: document,
+                result: FullTextResult(
+                    content: .markdown(content),
+                    source: FullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
+                )
+            )
+        }
     }
 
     // MARK: - Subviews
@@ -117,11 +164,12 @@ struct DocumentScoreRow: View {
     /// Column displaying LLM and embedding score badges vertically.
     private var scoresColumn: some View {
         VStack(spacing: 4) {
-            // LLM Score
+            // LLM Score (shows "?" if parse failed)
             LabeledScoreBadge(
                 score: document.relevanceScore,
                 label: "LLM",
-                color: scoreColor(for: document.relevanceScore)
+                color: scoreColor(for: document.relevanceScore),
+                parseFailed: document.scoreParseFailed
             )
 
             // Embedding Score (if enabled and available)
@@ -140,29 +188,42 @@ struct DocumentScoreRow: View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
 
-            // Abstract
-            if !document.abstract.isEmpty {
-                Text("Abstract")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
-
-                Text(document.abstract)
-                    .font(.caption)
-                    .lineLimit(10)
-            }
-
-            // Score explanation
+            // Score explanation - visually distinct with background and icon
             if let explanation = document.scoreExplanation {
                 Text("LLM Reasoning")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
 
-                Text(explanation)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.caption)
+                        .foregroundColor(ReasoningColors.accent)
+
+                    Text(explanation)
+                        .font(.caption)
+                        .italic()
+                        .foregroundColor(ReasoningColors.text)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ReasoningColors.background)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(ReasoningColors.border, lineWidth: 1)
+                )
+            }
+
+            // Abstract - rendered with markdown
+            if !document.abstract.isEmpty {
+                Text("Abstract")
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundColor(.secondary)
-                    .italic()
+
+                AbstractTextView(text: document.abstract)
+                    .lineLimit(10)
             }
 
             // Score comparison (if both available)
@@ -174,6 +235,134 @@ struct DocumentScoreRow: View {
 
             // Metadata
             metadataView
+
+            Divider()
+
+            // Full Text
+            fullTextSection
+        }
+    }
+
+    // MARK: - Full Text Section
+
+    /// Section for full-text retrieval button and status.
+    @ViewBuilder
+    private var fullTextSection: some View {
+        if document.hasFullText {
+            // Already have full text - show view button
+            HStack {
+                Button(action: { showFullTextViewer = true }) {
+                    Label("View Full Text", systemImage: "doc.text")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+
+                if let source = document.fullTextSource,
+                   let fullTextSource = FullTextSource(rawValue: source) {
+                    FullTextSourceBadge(source: fullTextSource)
+                }
+            }
+        } else if document.fullTextUnavailable {
+            // Already tried, not available
+            fullTextUnavailableView
+        } else {
+            // Not yet attempted
+            fullTextFetchView
+        }
+    }
+
+    /// View shown when full text was attempted but not available.
+    private var fullTextUnavailableView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundColor(.orange)
+            Text("Full text not available")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Spacer()
+
+            // Still offer to open in browser
+            if let doi = document.doi,
+               let url = PlatformHelper.doiURL(for: doi) {
+                Link(destination: url) {
+                    Label("Open Publisher", systemImage: "safari")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    /// View for fetching full text when not yet attempted.
+    private var fullTextFetchView: some View {
+        HStack(spacing: 12) {
+            Button(action: fetchFullText) {
+                if isLoadingFullText {
+                    ProgressView()
+                        .scaleEffect(ScoredDocumentsConstants.inlineProgressScale)
+                } else {
+                    Label("Get Full Text", systemImage: "arrow.down.doc")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isLoadingFullText)
+            .accessibilityHint("Downloads the full text of this article if available")
+
+            if let error = fullTextError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    // MARK: - Full Text Fetching
+
+    /// Fetch full text for the document.
+    private func fetchFullText() {
+        isLoadingFullText = true
+        fullTextError = nil
+
+        Task {
+            do {
+                let service = FullTextService.create(from: .shared)
+                let result = try await service.fetchFullText(for: document)
+
+                await MainActor.run {
+                    // Update document model
+                    switch result.content {
+                    case .markdown(let content):
+                        document.fullTextContent = content
+                    case .pdfURL(let url):
+                        document.fullTextPDFPath = url.absoluteString
+                    case .webURL:
+                        // Don't store - just open
+                        break
+                    }
+                    document.fullTextSource = result.source.rawValue
+                    document.fullTextFetchedAt = Date()
+
+                    fullTextResult = result
+                    isLoadingFullText = false
+
+                    // For web URLs, open directly instead of showing viewer
+                    if case .webURL(let url) = result.content {
+                        openURL(url)
+                    } else {
+                        showFullTextViewer = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    if case FullTextError.noFullTextAvailable = error {
+                        document.fullTextUnavailable = true
+                    }
+                    fullTextError = error.localizedDescription
+                    isLoadingFullText = false
+                }
+            }
         }
     }
 
@@ -243,7 +432,7 @@ struct DocumentScoreRow: View {
 /// Compact badge displaying a numeric score with a label.
 ///
 /// Used to show LLM and embedding scores side-by-side for comparison.
-/// Displays a dash when score is nil, indicating not yet scored.
+/// Displays a dash when score is nil (not yet scored) or "?" if parsing failed.
 struct LabeledScoreBadge: View {
     /// The score to display (1-5), or nil if not scored.
     let score: Int?
@@ -254,10 +443,18 @@ struct LabeledScoreBadge: View {
     /// Background color for the badge.
     let color: Color
 
+    /// If true and score is nil, shows "?" instead of "-" to indicate parse failure.
+    var parseFailed: Bool = false
+
     var body: some View {
         VStack(spacing: 2) {
             if let score = score {
                 Text("\(score)")
+                    .font(.system(.headline, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+            } else if parseFailed {
+                Text("?")
                     .font(.system(.headline, design: .rounded))
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -272,8 +469,18 @@ struct LabeledScoreBadge: View {
                 .foregroundColor(.white.opacity(0.8))
         }
         .frame(width: 36, height: 40)
-        .background(score != nil ? color : Color.gray)
+        .background(backgroundColor)
         .cornerRadius(6)
+    }
+
+    private var backgroundColor: Color {
+        if score != nil {
+            return color
+        } else if parseFailed {
+            return .orange  // Amber/orange to indicate uncertain status
+        } else {
+            return .gray
+        }
     }
 }
 
@@ -311,13 +518,68 @@ enum ScoreAgreement {
     }
 }
 
+// MARK: - Reasoning Colors
+
+/// Colors for LLM reasoning/explanation display.
+///
+/// Provides a visually distinct style for AI-generated explanations
+/// to help users distinguish them from source text like abstracts.
+enum ReasoningColors {
+    /// Background color for reasoning blocks (warm off-white).
+    static let background = Color(red: 0.98, green: 0.97, blue: 0.93)
+
+    /// Border color for reasoning blocks.
+    static let border = Color(red: 0.85, green: 0.82, blue: 0.72)
+
+    /// Text color for reasoning content.
+    static let text = Color(red: 0.35, green: 0.35, blue: 0.35)
+
+    /// Accent color for reasoning icon.
+    static let accent = Color(red: 0.6, green: 0.55, blue: 0.4)
+}
+
+// MARK: - Abstract Text View
+
+/// View that renders abstract text with markdown formatting support.
+///
+/// Handles common markdown patterns found in PubMed abstracts like
+/// bold section headers (e.g., **OBJECTIVE:**) and emphasis.
+struct AbstractTextView: View {
+    /// The abstract text to render.
+    let text: String
+
+    var body: some View {
+        if let attributed = parseAbstractMarkdown(text) {
+            Text(attributed)
+                .font(.caption)
+        } else {
+            Text(text)
+                .font(.caption)
+        }
+    }
+
+    /// Parses markdown in abstract text and returns an AttributedString.
+    ///
+    /// - Parameter text: The abstract text to parse.
+    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
+    private func parseAbstractMarkdown(_ text: String) -> AttributedString? {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return nil
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
     let doc = Document(
         pmid: "12345678",
         title: "Effect of Vitamin D Supplementation on COVID-19 Outcomes: A Meta-Analysis",
-        abstract: "Background: Vitamin D has been proposed to have immunomodulatory effects..."
+        abstract: "**Background:** Vitamin D has been proposed to have immunomodulatory effects..."
     )
     doc.relevanceScore = 4
     doc.scoreExplanation = "This meta-analysis directly addresses vitamin D supplementation and COVID-19 outcomes."

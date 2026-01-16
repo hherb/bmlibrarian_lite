@@ -18,16 +18,34 @@ enum AppTab: Int {
 struct ContentView: View {
     @State private var selectedTab: AppTab = .check
     @State private var hasAcceptedDisclaimer = UserDefaults.standard.bool(forKey: "hasAcceptedDisclaimer")
+    @State private var hasSeenOnboarding = UserDefaults.standard.bool(forKey: "hasSeenOnboarding")
     @State private var currentReport: EvidenceReport?
 
     /// Tracks which tabs have been visited for lazy loading.
     @State private var visitedTabs: Set<AppTab> = [.check]
 
+    /// Preserved state for FactCheckView to survive tab switches.
+    @State private var factCheckClaimText: String = ""
+    @State private var factCheckWorkflow: FactCheckWorkflow?
+
+    /// Controls showing onboarding from settings.
+    @State private var showingOnboardingFromSettings = false
+
     var body: some View {
-        if hasAcceptedDisclaimer {
-            mainTabView
-        } else {
+        if !hasAcceptedDisclaimer {
             DisclaimerView(onAccept: acceptDisclaimer)
+        } else if !hasSeenOnboarding {
+            OnboardingView(onComplete: completeOnboarding)
+        } else {
+            mainTabView
+                .sheet(isPresented: $showingOnboardingFromSettings) {
+                    OnboardingView(onComplete: {
+                        showingOnboardingFromSettings = false
+                    })
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
+                    showingOnboardingFromSettings = true
+                }
         }
     }
 
@@ -38,7 +56,9 @@ struct ContentView: View {
                     currentReport = report
                     visitedTabs.insert(.report)
                     selectedTab = .report
-                }
+                },
+                claimText: $factCheckClaimText,
+                workflow: $factCheckWorkflow
             )
             .tabItem {
                 Label("Check", systemImage: "checkmark.shield")
@@ -46,7 +66,7 @@ struct ContentView: View {
             .tag(AppTab.check)
 
             LazyTabContent(tab: .report, visitedTabs: $visitedTabs) {
-                ReportTabView(report: currentReport)
+                ReportTabView(report: currentReport, workflow: factCheckWorkflow)
             }
             .tabItem {
                 Label("Report", systemImage: "doc.text")
@@ -80,6 +100,20 @@ struct ContentView: View {
             hasAcceptedDisclaimer = true
         }
     }
+
+    private func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: "hasSeenOnboarding")
+        withAnimation {
+            hasSeenOnboarding = true
+        }
+    }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    /// Posted when the user wants to view onboarding again from settings.
+    static let showOnboarding = Notification.Name("showOnboarding")
 }
 
 // MARK: - Lazy Tab Content
@@ -108,12 +142,14 @@ struct LazyTabContent<Content: View>: View {
 /// A wrapper view for displaying reports in a dedicated tab.
 ///
 /// Shows the full report when available, or an empty state when no report exists.
+/// Passes the workflow to enable "Get More Evidence" functionality.
 struct ReportTabView: View {
     let report: EvidenceReport?
+    var workflow: FactCheckWorkflow?
 
     var body: some View {
         if let report = report {
-            ReportContentView(report: report)
+            ReportContentView(report: report, workflow: workflow)
         } else {
             emptyState
         }

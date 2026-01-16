@@ -39,6 +39,20 @@ final class FactCheckSession {
     /// Number of batches fetched so far.
     var batchesFetched: Int
 
+    // MARK: - Search Provider State
+
+    /// The search provider used for this session (raw value string).
+    var searchProviderRaw: String?
+
+    /// Total results from Europe PMC (when using europePMC or both).
+    var totalEuropePMCResults: Int = 0
+
+    /// Cursor mark for Europe PMC pagination (nil for first page).
+    var europePMCCursorMark: String?
+
+    /// Whether preprints were included in Europe PMC search.
+    var includedPreprints: Bool = false
+
     // MARK: - Smart Search State
 
     /// Whether smart search mode has been activated.
@@ -99,6 +113,8 @@ final class FactCheckSession {
         self.totalPubMedResults = 0
         self.currentSearchOffset = 0
         self.batchesFetched = 0
+        self.totalEuropePMCResults = 0
+        self.includedPreprints = false
         self.smartSearchEnabled = false
         self.currentAlternativeQueryIndex = 0
         self.documentsFound = 0
@@ -112,9 +128,44 @@ final class FactCheckSession {
 
     // MARK: - Computed Properties
 
+    /// The search provider used for this session.
+    var searchProvider: SearchProvider? {
+        get {
+            guard let raw = searchProviderRaw else { return nil }
+            return SearchProvider(rawValue: raw)
+        }
+        set {
+            searchProviderRaw = newValue?.rawValue
+        }
+    }
+
     /// Check if more documents can be fetched from PubMed.
     var canFetchMoreDocuments: Bool {
         currentSearchOffset < totalPubMedResults
+    }
+
+    /// Check if more documents can be fetched from Europe PMC.
+    var canFetchMoreFromEuropePMC: Bool {
+        europePMCCursorMark != nil
+    }
+
+    /// Check if more documents can be fetched from any provider.
+    var canFetchMoreFromAnyProvider: Bool {
+        canFetchMoreDocuments || canFetchMoreFromEuropePMC
+    }
+
+    /// Check if more evidence can be gathered (either more PubMed results or smart search available).
+    ///
+    /// Returns true if:
+    /// - More documents available in current PubMed query, OR
+    /// - Smart search hasn't been tried yet (can generate alternative queries)
+    var canGetMoreEvidence: Bool {
+        canFetchMoreDocuments || !smartSearchEnabled
+    }
+
+    /// Number of additional PubMed results available to fetch.
+    var remainingPubMedResults: Int {
+        max(0, totalPubMedResults - currentSearchOffset)
     }
 
     /// Documents that have been scored with relevance >= threshold.
@@ -150,6 +201,8 @@ final class FactCheckSession {
             return 60 + (citationProgress * 25)
         case .generatingReport:
             return 90
+        case .fetchingMoreEvidence:
+            return 50  // Mid-progress for additional evidence fetch
         case .completed:
             return 100
         case .failed, .budgetExceeded:
@@ -160,13 +213,14 @@ final class FactCheckSession {
     // MARK: - Methods
 
     /// Record token usage and update cost estimate.
-    func recordUsage(inputTokens: Int, outputTokens: Int, model: String) {
+    func recordUsage(inputTokens: Int, outputTokens: Int, model: String, provider: LLMProvider? = nil) {
         totalInputTokens += inputTokens
         totalOutputTokens += outputTokens
         estimatedCostUSD += CostCalculator.calculateCost(
             model: model,
             inputTokens: inputTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            provider: provider
         )
         updatedAt = Date()
     }

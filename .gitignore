@@ -47,8 +47,9 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data directories
+# Data directories (exclude Android app data package)
 data/
+!android/**/data/
 *.db
 *.sqlite
 *.sqlite3
@@ -86,7 +87,10 @@ temp/
 
 # Lock files (keep uv.lock if using uv)
 # uv.lock
+
+# Claude IDE settings
 .claude/settings.local.json
+.claude/settings.json
 
 # iOS/Xcode
 ios/**/.build/
@@ -102,6 +106,15 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Xcode workspace shared data
+**/project.xcworkspace/xcshareddata/
+
+# macOS Xcode app bundle (generated)
+macos/**/Medical Fact Checker/
+
+# macOS Xcode UI tests (not needed for automated testing)
+macos/**/Medical Fact CheckerUITests/
 
 # Research outputs (generated)
 concordance_output/

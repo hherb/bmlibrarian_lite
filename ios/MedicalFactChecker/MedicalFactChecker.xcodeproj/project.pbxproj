@@ -33,8 +33,31 @@
 		A1000026001 /* PrintableReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000026000 /* PrintableReportView.swift */; };
 		A1000027001 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000027000 /* PDFExporter.swift */; };
 		A1000028001 /* ModelFetchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000028000 /* ModelFetchService.swift */; };
+		A1000029001 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000029000 /* NotificationNames.swift */; };
+		A1000030001 /* StringArrayTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000030000 /* StringArrayTransformer.swift */; };
+		A1000031001 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000031000 /* HelpView.swift */; };
+		A1000034001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000034000 /* OnboardingView.swift */; };
+		A1000035001 /* SearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000035000 /* SearchProvider.swift */; };
+		A1000036001 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000036000 /* FullTextSource.swift */; };
+		A1000037001 /* EuropePMCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000037000 /* EuropePMCService.swift */; };
+		A1000038001 /* FullTextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000038000 /* FullTextService.swift */; };
+		A1000039001 /* SearchServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000039000 /* SearchServiceProtocol.swift */; };
+		A1000040001 /* FullTextConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000040000 /* FullTextConstants.swift */; };
+		A1000041001 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041000 /* JATSXMLParser.swift */; };
+		A1000042001 /* PlatformHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000042000 /* PlatformHelper.swift */; };
+		A1000043001 /* QueryTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000043000 /* QueryTranslator.swift */; };
+		A1000044001 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000044000 /* QueryValidator.swift */; };
+		A1000045001 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045000 /* SearchResultMerger.swift */; };
+		A1000046001 /* DocumentSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000046000 /* DocumentSourceBadge.swift */; };
+		A1000047001 /* FetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000047000 /* FetchMoreView.swift */; };
+		A1000048001 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000048000 /* FullTextSourceBadge.swift */; };
+		A1000049001 /* SearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049000 /* SearchProgressView.swift */; };
+		A1000050001 /* SearchOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000050000 /* SearchOptionsView.swift */; };
+		A1000051001 /* FullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051000 /* FullTextViewer.swift */; };
 		A1000020001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000020000 /* Assets.xcassets */; };
 		A1000021001 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000021000 /* Preview Assets.xcassets */; };
+		A1000032001 /* HELP.md in Resources */ = {isa = PBXBuildFile; fileRef = A1000032000 /* HELP.md */; };
+		A1000033001 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = A1000033000 /* PRIVACY.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -65,8 +88,31 @@
 		A1000026000 /* PrintableReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintableReportView.swift; sourceTree = "<group>"; };
 		A1000027000 /* PDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExporter.swift; sourceTree = "<group>"; };
 		A1000028000 /* ModelFetchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelFetchService.swift; sourceTree = "<group>"; };
+		A1000029000 /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
+		A1000030000 /* StringArrayTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringArrayTransformer.swift; sourceTree = "<group>"; };
 		A1000020000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000021000 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		A1000031000 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
+		A1000032000 /* HELP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = HELP.md; sourceTree = SOURCE_ROOT; };
+		A1000033000 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
+		A1000034000 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		A1000035000 /* SearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProvider.swift; sourceTree = "<group>"; };
+		A1000036000 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
+		A1000037000 /* EuropePMCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EuropePMCService.swift; sourceTree = "<group>"; };
+		A1000038000 /* FullTextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextService.swift; sourceTree = "<group>"; };
+		A1000039000 /* SearchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceProtocol.swift; sourceTree = "<group>"; };
+		A1000040000 /* FullTextConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextConstants.swift; sourceTree = "<group>"; };
+		A1000041000 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
+		A1000042000 /* PlatformHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformHelper.swift; sourceTree = "<group>"; };
+		A1000043000 /* QueryTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryTranslator.swift; sourceTree = "<group>"; };
+		A1000044000 /* QueryValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValidator.swift; sourceTree = "<group>"; };
+		A1000045000 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
+		A1000046000 /* DocumentSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSourceBadge.swift; sourceTree = "<group>"; };
+		A1000047000 /* FetchMoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FetchMoreView.swift; sourceTree = "<group>"; };
+		A1000048000 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
+		A1000049000 /* SearchProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProgressView.swift; sourceTree = "<group>"; };
+		A1000050000 /* SearchOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOptionsView.swift; sourceTree = "<group>"; };
+		A1000051000 /* FullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextViewer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -98,6 +144,8 @@
 				A1000000025 /* Views */,
 				A1000020000 /* Assets.xcassets */,
 				A1000000026 /* Preview Content */,
+				A1000032000 /* HELP.md */,
+				A1000033000 /* PRIVACY.md */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -120,7 +168,9 @@
 				A1000006000 /* Enums.swift */,
 				A1000007000 /* EvidenceReport.swift */,
 				A1000008000 /* FactCheckSession.swift */,
+				A1000036000 /* FullTextSource.swift */,
 				A1000024000 /* LLMProvider.swift */,
+				A1000035000 /* SearchProvider.swift */,
 				A1000009000 /* UsageRecord.swift */,
 			);
 			path = Models;
@@ -130,10 +180,13 @@
 			isa = PBXGroup;
 			children = (
 				A1000022000 /* EmbeddingService.swift */,
+				A1000037000 /* EuropePMCService.swift */,
 				A1000010000 /* FactCheckWorkflow.swift */,
+				A1000038000 /* FullTextService.swift */,
 				A1000011000 /* LLMService.swift */,
 				A1000028000 /* ModelFetchService.swift */,
 				A1000012000 /* PubMedService.swift */,
+				A1000039000 /* SearchServiceProtocol.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -142,9 +195,17 @@
 			isa = PBXGroup;
 			children = (
 				A1000013000 /* CostCalculator.swift */,
+				A1000040000 /* FullTextConstants.swift */,
+				A1000041000 /* JATSXMLParser.swift */,
 				A1000014000 /* KeychainHelper.swift */,
+				A1000029000 /* NotificationNames.swift */,
 				A1000027000 /* PDFExporter.swift */,
+				A1000042000 /* PlatformHelper.swift */,
+				A1000043000 /* QueryTranslator.swift */,
+				A1000044000 /* QueryValidator.swift */,
 				A1000015000 /* ResponseParser.swift */,
+				A1000045000 /* SearchResultMerger.swift */,
+				A1000030000 /* StringArrayTransformer.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -152,6 +213,7 @@
 		A1000000025 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A100000002C /* Components */,
 				A1000000027 /* FactCheck */,
 				A1000000028 /* History */,
 				A100000002B /* Onboarding */,
@@ -165,8 +227,21 @@
 			isa = PBXGroup;
 			children = (
 				A1000025000 /* DisclaimerView.swift */,
+				A1000034000 /* OnboardingView.swift */,
 			);
 			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		A100000002C /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A1000046000 /* DocumentSourceBadge.swift */,
+				A1000047000 /* FetchMoreView.swift */,
+				A1000048000 /* FullTextSourceBadge.swift */,
+				A1000049000 /* SearchProgressView.swift */,
+				A1000050000 /* SearchOptionsView.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		A1000000026 /* Preview Content */ = {
@@ -181,6 +256,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000016000 /* FactCheckView.swift */,
+				A1000051000 /* FullTextViewer.swift */,
 				A1000023000 /* ScoredDocumentsView.swift */,
 			);
 			path = FactCheck;
@@ -206,6 +282,7 @@
 		A100000002A /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				A1000031000 /* HelpView.swift */,
 				A1000019000 /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -279,6 +356,8 @@
 			files = (
 				A1000020001 /* Assets.xcassets in Resources */,
 				A1000021001 /* Preview Assets.xcassets in Resources */,
+				A1000032001 /* HELP.md in Resources */,
+				A1000033001 /* PRIVACY.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -315,6 +394,27 @@
 				A1000026001 /* PrintableReportView.swift in Sources */,
 				A1000027001 /* PDFExporter.swift in Sources */,
 				A1000028001 /* ModelFetchService.swift in Sources */,
+				A1000029001 /* NotificationNames.swift in Sources */,
+				A1000030001 /* StringArrayTransformer.swift in Sources */,
+				A1000031001 /* HelpView.swift in Sources */,
+				A1000034001 /* OnboardingView.swift in Sources */,
+				A1000035001 /* SearchProvider.swift in Sources */,
+				A1000036001 /* FullTextSource.swift in Sources */,
+				A1000037001 /* EuropePMCService.swift in Sources */,
+				A1000038001 /* FullTextService.swift in Sources */,
+				A1000039001 /* SearchServiceProtocol.swift in Sources */,
+				A1000040001 /* FullTextConstants.swift in Sources */,
+				A1000041001 /* JATSXMLParser.swift in Sources */,
+				A1000042001 /* PlatformHelper.swift in Sources */,
+				A1000043001 /* QueryTranslator.swift in Sources */,
+				A1000044001 /* QueryValidator.swift in Sources */,
+				A1000045001 /* SearchResultMerger.swift in Sources */,
+				A1000046001 /* DocumentSourceBadge.swift in Sources */,
+				A1000047001 /* FetchMoreView.swift in Sources */,
+				A1000048001 /* FullTextSourceBadge.swift in Sources */,
+				A1000049001 /* SearchProgressView.swift in Sources */,
+				A1000050001 /* SearchOptionsView.swift in Sources */,
+				A1000051001 /* FullTextViewer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -452,7 +552,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -468,7 +568,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -483,7 +583,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -499,7 +599,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

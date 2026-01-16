@@ -6,7 +6,6 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
-import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
@@ -125,11 +124,14 @@ class FactCheckViewModel @Inject constructor(
 
     /**
      * Check if the app is properly configured.
+     *
+     * Shows a warning if API key is missing for providers that require one,
+     * or if other required settings are not configured.
      */
     private fun checkConfiguration() {
-        val hasApiKey = settingsRepository.getLlmApiKey().isNotEmpty()
+        val isConfigured = settingsRepository.isConfigured()
         _uiState.update {
-            it.copy(showConfigWarning = !hasApiKey)
+            it.copy(showConfigWarning = !isConfigured)
         }
     }
 
@@ -256,20 +258,18 @@ class FactCheckViewModel @Inject constructor(
     /**
      * Build the workflow configuration from current settings.
      *
-     * Uses default search provider (PubMed) since search provider settings
-     * are not yet implemented in SettingsRepository.
+     * Uses all available settings from SettingsRepository for search provider,
+     * batch size, thresholds, and budget limits.
      *
      * @return WorkflowConfig with current settings
      */
     private fun buildWorkflowConfig(): WorkflowConfig {
-        // TODO: Add search provider to SettingsRepository and use it here
-        // For now, default to PubMed as the primary search provider
         return WorkflowConfig(
-            searchProvider = SearchProvider.PUBMED,
-            includePreprints = false,
-            batchSize = WorkflowConfig.DEFAULT_BATCH_SIZE,
-            relevanceThreshold = Constants.SCORING_MIN_RELEVANT_SCORE,
-            targetRelevantDocuments = WorkflowConfig.DEFAULT_TARGET_RELEVANT_DOCUMENTS,
+            searchProvider = settingsRepository.getSearchProvider(),
+            includePreprints = settingsRepository.getIncludePreprints(),
+            batchSize = settingsRepository.getBatchSize(),
+            relevanceThreshold = settingsRepository.getRelevanceThreshold(),
+            targetRelevantDocuments = settingsRepository.getTargetRelevantDocuments(),
             maxRunBudgetUsd = settingsRepository.getMaxRunBudgetUsd().toDouble(),
             monthlyBudgetUsd = settingsRepository.getMonthlyBudgetUsd().toDouble()
         )

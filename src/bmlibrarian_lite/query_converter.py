@@ -155,31 +155,106 @@ class LiteQueryConverter:
             logger.error(f"Query conversion failed: {e}")
             return self._create_fallback_query(question)
 
-    def _parse_json(self, response: str) -> Optional[dict]:
-        """Parse JSON from LLM response."""
+    def _fix_json_string(self, s: str) -> str:
+        """Fix common JSON issues from LLM output.
+
+        Args:
+            s: JSON string with potential issues
+
+        Returns:
+            Fixed JSON string
+        """
+        # Remove trailing commas before ] or }
+        s = re.sub(r',\s*]', ']', s)
+        s = re.sub(r',\s*}', '}', s)
+        # Fix unescaped newlines in strings (common with local models)
+        s = re.sub(r'(?<!\\)\n', ' ', s)
+        return s
+
+    def _try_parse_json(self, s: str) -> Optional[dict]:
+        """Try parsing JSON with and without fixes.
+
+        Args:
+            s: JSON string to parse
+
+        Returns:
+            Parsed dict or None
+        """
         # Try direct parse
         try:
-            return json.loads(response)
+            return json.loads(s)
         except json.JSONDecodeError:
             pass
+        # Try with fixes
+        try:
+            return json.loads(self._fix_json_string(s))
+        except json.JSONDecodeError:
+            pass
+        return None
+
+    def _parse_json(self, response: str) -> Optional[dict]:
+        """Parse JSON from LLM response.
+
+        Attempts multiple parsing strategies to extract JSON from
+        potentially messy LLM output. Handles common issues from
+        local models like trailing commas and markdown wrapping.
+
+        Args:
+            response: Raw LLM response text
+
+        Returns:
+            Parsed dict if successful, None otherwise
+        """
+        if not response or not response.strip():
+            logger.warning("Empty response from LLM")
+            return None
+
+        logger.debug(f"Parsing LLM response ({len(response)} chars): {response[:200]}...")
+
+        # Try direct parse
+        data = self._try_parse_json(response)
+        if data is not None and self._validate_query_json(data):
+            return data
+        if data is not None:
+            logger.warning("JSON parsed but missing required structure")
 
         # Try to extract from markdown code block
         match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", response, re.DOTALL)
         if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
+            data = self._try_parse_json(match.group(1))
+            if data is not None and self._validate_query_json(data):
+                return data
 
-        # Try to find JSON object
+        # Try to find JSON object in response
         match = re.search(r"\{.*\}", response, re.DOTALL)
         if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
+            data = self._try_parse_json(match.group(0))
+            if data is not None and self._validate_query_json(data):
+                return data
 
+        logger.warning(f"Could not parse JSON from response: {response[:500]}...")
         return None
+
+    def _validate_query_json(self, data: dict) -> bool:
+        """Validate that parsed JSON has required structure.
+
+        Args:
+            data: Parsed JSON dict
+
+        Returns:
+            True if structure is valid for query building
+        """
+        if not isinstance(data, dict):
+            return False
+        concepts = data.get("concepts", [])
+        if not isinstance(concepts, list) or len(concepts) == 0:
+            return False
+        # Check at least one concept has terms
+        for concept in concepts:
+            if isinstance(concept, dict):
+                if concept.get("mesh_terms") or concept.get("keywords"):
+                    return True
+        return False
 
     def _build_query(self, data: dict) -> str:
         """
