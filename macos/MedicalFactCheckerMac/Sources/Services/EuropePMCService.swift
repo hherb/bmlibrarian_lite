@@ -238,7 +238,7 @@ actor EuropePMCService {
                 pmcId: result.pmcid,
                 doi: result.doi,
                 title: result.title ?? "",
-                abstract: result.abstractText ?? "",
+                abstract: cleanAbstract(result.abstractText ?? ""),
                 authors: parseAuthors(result.authorList),
                 journal: result.journalTitle ?? "",
                 publicationDate: result.firstPublicationDate,
@@ -248,6 +248,58 @@ actor EuropePMCService {
                 resultPosition: index
             )
         }
+    }
+
+    /// Clean and format an abstract from Europe PMC.
+    ///
+    /// Europe PMC returns structured abstracts with HTML tags like:
+    /// `<h4>Background</h4>Text...<h4>Methods</h4>Text...`
+    ///
+    /// This function converts them to readable plain text with section headers.
+    ///
+    /// - Parameter abstract: Raw abstract text from API (may contain HTML).
+    /// - Returns: Cleaned abstract text with formatted section headers.
+    private func cleanAbstract(_ abstract: String) -> String {
+        var result = abstract
+
+        // Convert <h4>Section</h4> to "SECTION: " format
+        // Common sections: Background, Objective, Methods, Results, Conclusion
+        let sectionPattern = "<h4>([^<]+)</h4>"
+        if let regex = try? NSRegularExpression(pattern: sectionPattern, options: .caseInsensitive) {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                options: [],
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: "\n\n$1: "
+            )
+        }
+
+        // Remove any remaining HTML tags
+        let tagPattern = "<[^>]+>"
+        if let regex = try? NSRegularExpression(pattern: tagPattern, options: []) {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                options: [],
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
+        }
+
+        // Clean up whitespace
+        result = result
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Remove leading newlines from section conversion
+        while result.hasPrefix("\n") {
+            result = String(result.dropFirst())
+        }
+
+        return result
     }
 
     /// Parse author list from the response.

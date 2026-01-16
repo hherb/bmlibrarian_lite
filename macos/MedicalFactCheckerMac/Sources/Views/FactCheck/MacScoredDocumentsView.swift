@@ -477,11 +477,17 @@ struct MacDocumentCard: View {
 
     /// Determine the search provider based on document properties.
     ///
-    /// Uses heuristics to infer which provider a document came from:
-    /// - Documents with PMC ID but empty PMID likely came from Europe PMC
-    /// - Preprints (bioRxiv, medRxiv) came from Europe PMC
-    /// - Documents with PMID likely came from PubMed
+    /// Returns the search provider that returned this document.
+    ///
+    /// Uses the stored `searchSource` property if available, otherwise
+    /// falls back to heuristics for backwards compatibility with older data.
     private var documentProvider: SearchProvider? {
+        // Use stored search source if available
+        if let source = document.searchSource {
+            return SearchProvider(rawValue: source)
+        }
+
+        // Fallback heuristics for older documents without searchSource
         // Documents from Europe PMC often have pmcId but empty pmid
         if document.pmid.isEmpty && document.pmcId != nil {
             return .europePMC
