@@ -27,6 +27,9 @@ enum JATSXMLParserError: LocalizedError, Sendable {
 /// JATS (Journal Article Tag Suite) is the XML format used by PubMed Central
 /// and Europe PMC for full-text articles. This parser extracts the article
 /// structure and converts it to readable markdown.
+///
+/// Uses a stack-based text accumulation approach to properly handle inline
+/// elements like `<xref>`, `<italic>`, `<bold>`, etc. without losing surrounding text.
 final class JATSXMLParser: NSObject, XMLParserDelegate {
     // MARK: - Constants
 
@@ -41,9 +44,23 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
     private let parser: XMLParser
     private var sections: [String] = []
 
+    // Text stack for proper inline element handling
+    private var textStack: [String] = [""]
+
+    /// Elements that accumulate their own text content.
+    private let textAccumulatingElements: Set<String> = [
+        "article-title", "surname", "given-names", "journal-title", "year",
+        "abstract", "title", "p",
+        "italic", "i", "bold", "b", "sup", "sub", "xref", "ext-link"
+    ]
+
+    /// Inline elements that should merge text back to parent.
+    private let inlineElements: Set<String> = [
+        "italic", "i", "bold", "b", "sup", "sub", "xref", "ext-link"
+    ]
+
     // State tracking
     private var currentElement = ""
-    private var currentText = ""
     private var inBody = false
     private var inSection = false
     private var inAbstract = false
@@ -62,6 +79,48 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
     // Current section content
     private var currentSectionTitle = ""
     private var currentSectionContent: [String] = []
+
+    // MARK: - Text Stack Helpers
+
+    /// Get the current accumulated text.
+    private var currentText: String {
+        get { textStack.last ?? "" }
+        set {
+            if !textStack.isEmpty {
+                textStack[textStack.count - 1] = newValue
+            }
+        }
+    }
+
+    /// Append text to the current buffer.
+    private func appendText(_ text: String) {
+        guard !textStack.isEmpty else { return }
+        textStack[textStack.count - 1] += text
+    }
+
+    /// Push a new text buffer for a nested element.
+    private func pushTextBuffer() {
+        textStack.append("")
+    }
+
+    /// Pop and return the text buffer, optionally merging with parent.
+    private func popTextBuffer(mergeWithParent: Bool = false) -> String {
+        guard textStack.count > 1 else {
+            let text = textStack.first ?? ""
+            if !textStack.isEmpty {
+                textStack[0] = ""
+            }
+            return text
+        }
+
+        let text = textStack.removeLast()
+
+        if mergeWithParent && !textStack.isEmpty {
+            textStack[textStack.count - 1] += text
+        }
+
+        return text
+    }
 
     /// Initialize with XML data.
     ///
@@ -101,45 +160,34 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
     ) {
         currentElement = elementName
 
+        // Push text buffer for text-accumulating elements
+        if textAccumulatingElements.contains(elementName) {
+            pushTextBuffer()
+        }
+
         switch elementName {
-        case "article-title":
-            currentText = ""
-        case "surname":
-            currentText = ""
-        case "given-names":
-            currentText = ""
-        case "journal-title":
-            currentText = ""
-        case "year":
-            currentText = ""
         case "abstract":
             inAbstract = true
-            currentText = ""
         case "body":
             inBody = true
         case "sec":
             inSection = true
             sectionLevel += 1
-        case "title":
-            if inSection {
-                currentText = ""
-            }
         case "p":
             inParagraph = true
-            currentText = ""
         case "italic", "i":
-            currentText += "*"
+            appendText("*")
         case "bold", "b":
-            currentText += "**"
+            appendText("**")
         case "sup":
-            currentText += "^"
+            appendText("^")
         case "sub":
-            currentText += "_"
+            appendText("_")
         case "xref":
             // Handle citations/references inline (only for bibliography refs)
             if attributeDict["ref-type"] == "bibr" {
                 inBiblioRef = true
-                currentText += "["
+                appendText("[")
             }
         default:
             break
@@ -147,7 +195,7 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        currentText += string
+        appendText(string)
     }
 
     func parser(
@@ -156,7 +204,31 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
-        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Handle inline formatting closers before popping
+        switch elementName {
+        case "italic", "i":
+            appendText("*")
+        case "bold", "b":
+            appendText("**")
+        case "xref":
+            if inBiblioRef {
+                appendText("]")
+                inBiblioRef = false
+            }
+        default:
+            break
+        }
+
+        // Pop text buffer if this was a text-accumulating element
+        let elementText: String
+        if textAccumulatingElements.contains(elementName) {
+            let isInline = inlineElements.contains(elementName)
+            elementText = popTextBuffer(mergeWithParent: isInline)
+        } else {
+            elementText = currentText
+        }
+
+        let text = elementText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch elementName {
         case "article-title":
@@ -210,23 +282,13 @@ final class JATSXMLParser: NSObject, XMLParserDelegate {
                 currentSectionContent.append(text)
                 currentSectionContent.append("")
             } else if inAbstract && !text.isEmpty {
-                currentText = text + " "
+                // For abstract, accumulate paragraphs
+                if !abstract.isEmpty {
+                    abstract += " "
+                }
+                abstract += text
             }
             inParagraph = false
-        case "italic", "i":
-            currentText += "*"
-        case "bold", "b":
-            currentText += "**"
-        case "sup":
-            currentText += ""  // End superscript
-        case "sub":
-            currentText += ""  // End subscript
-        case "xref":
-            // Only close bracket for bibliography references
-            if inBiblioRef {
-                currentText += "]"
-                inBiblioRef = false
-            }
         default:
             break
         }
