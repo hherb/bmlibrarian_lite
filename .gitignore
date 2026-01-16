@@ -119,3 +119,4 @@ macos/**/Medical Fact CheckerUITests/
 # Research outputs (generated)
 concordance_output/
 research_report_*.md
+.claude/settings.local.json
