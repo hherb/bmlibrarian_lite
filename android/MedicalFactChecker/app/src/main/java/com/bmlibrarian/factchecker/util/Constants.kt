@@ -322,4 +322,51 @@ object Constants {
     const val PDF_VERDICT_GRAY_R = 158
     const val PDF_VERDICT_GRAY_G = 158
     const val PDF_VERDICT_GRAY_B = 158
+
+    // ==================== Settings Screen Configuration ====================
+
+    /** Minimum value for per-run budget slider in USD. */
+    const val SETTINGS_MIN_RUN_BUDGET_USD = 0.10f
+
+    /** Maximum value for per-run budget slider in USD. */
+    const val SETTINGS_MAX_RUN_BUDGET_USD = 5.0f
+
+    /** Number of steps for per-run budget slider. */
+    const val SETTINGS_RUN_BUDGET_STEPS = 49
+
+    /** Minimum value for monthly budget slider in USD. */
+    const val SETTINGS_MIN_MONTHLY_BUDGET_USD = 1.0f
+
+    /** Maximum value for monthly budget slider in USD. */
+    const val SETTINGS_MAX_MONTHLY_BUDGET_USD = 100.0f
+
+    /** Number of steps for monthly budget slider. */
+    const val SETTINGS_MONTHLY_BUDGET_STEPS = 99
+
+    /** Minimum value for batch size slider. */
+    const val SETTINGS_MIN_BATCH_SIZE = 5f
+
+    /** Maximum value for batch size slider. */
+    const val SETTINGS_MAX_BATCH_SIZE = 100f
+
+    /** Number of steps for batch size slider. */
+    const val SETTINGS_BATCH_SIZE_STEPS = 18
+
+    /** Minimum value for target documents slider. */
+    const val SETTINGS_MIN_TARGET_DOCS = 3f
+
+    /** Maximum value for target documents slider. */
+    const val SETTINGS_MAX_TARGET_DOCS = 50f
+
+    /** Number of steps for target documents slider. */
+    const val SETTINGS_TARGET_DOCS_STEPS = 46
+
+    /** Column weight for model name in pricing table. */
+    const val SETTINGS_PRICING_MODEL_WEIGHT = 2f
+
+    /** Column weight for price columns in pricing table. */
+    const val SETTINGS_PRICING_VALUE_WEIGHT = 1f
+
+    /** Number of decimal places for budget display. */
+    const val SETTINGS_BUDGET_DECIMAL_PLACES = 2
 }

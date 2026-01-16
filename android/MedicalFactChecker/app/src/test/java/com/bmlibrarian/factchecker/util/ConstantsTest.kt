@@ -162,4 +162,90 @@ class ConstantsTest {
             Constants.NETWORK_MAX_BACKOFF_MS >= Constants.NETWORK_INITIAL_BACKOFF_MS
         )
     }
+
+    // ==================== Settings Screen Constants ====================
+
+    @Test
+    fun `settings budget slider range is valid`() {
+        assertTrue(
+            "Min run budget must be positive",
+            Constants.SETTINGS_MIN_RUN_BUDGET_USD > 0
+        )
+        assertTrue(
+            "Max run budget must exceed min",
+            Constants.SETTINGS_MAX_RUN_BUDGET_USD > Constants.SETTINGS_MIN_RUN_BUDGET_USD
+        )
+        assertTrue(
+            "Min monthly budget must be positive",
+            Constants.SETTINGS_MIN_MONTHLY_BUDGET_USD > 0
+        )
+        assertTrue(
+            "Max monthly budget must exceed min",
+            Constants.SETTINGS_MAX_MONTHLY_BUDGET_USD > Constants.SETTINGS_MIN_MONTHLY_BUDGET_USD
+        )
+    }
+
+    @Test
+    fun `settings budget slider steps are positive`() {
+        assertTrue(
+            "Run budget steps must be positive",
+            Constants.SETTINGS_RUN_BUDGET_STEPS > 0
+        )
+        assertTrue(
+            "Monthly budget steps must be positive",
+            Constants.SETTINGS_MONTHLY_BUDGET_STEPS > 0
+        )
+    }
+
+    @Test
+    fun `settings batch size slider range is valid`() {
+        assertTrue(
+            "Min batch size must be positive",
+            Constants.SETTINGS_MIN_BATCH_SIZE > 0
+        )
+        assertTrue(
+            "Max batch size must exceed min",
+            Constants.SETTINGS_MAX_BATCH_SIZE > Constants.SETTINGS_MIN_BATCH_SIZE
+        )
+        assertTrue(
+            "Batch size steps must be positive",
+            Constants.SETTINGS_BATCH_SIZE_STEPS > 0
+        )
+    }
+
+    @Test
+    fun `settings target documents slider range is valid`() {
+        assertTrue(
+            "Min target docs must be positive",
+            Constants.SETTINGS_MIN_TARGET_DOCS > 0
+        )
+        assertTrue(
+            "Max target docs must exceed min",
+            Constants.SETTINGS_MAX_TARGET_DOCS > Constants.SETTINGS_MIN_TARGET_DOCS
+        )
+        assertTrue(
+            "Target docs steps must be positive",
+            Constants.SETTINGS_TARGET_DOCS_STEPS > 0
+        )
+    }
+
+    @Test
+    fun `settings pricing table weights are positive`() {
+        assertTrue(
+            "Model weight must be positive",
+            Constants.SETTINGS_PRICING_MODEL_WEIGHT > 0
+        )
+        assertTrue(
+            "Value weight must be positive",
+            Constants.SETTINGS_PRICING_VALUE_WEIGHT > 0
+        )
+    }
+
+    @Test
+    fun `settings budget decimal places is reasonable`() {
+        assertTrue(
+            "Budget decimal places should be between 0 and 4",
+            Constants.SETTINGS_BUDGET_DECIMAL_PLACES in 0..4
+        )
+    }
 }
