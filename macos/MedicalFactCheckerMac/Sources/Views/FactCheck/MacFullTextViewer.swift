@@ -83,6 +83,22 @@ struct MacFullTextViewer: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
 
+                    if let journal = document.journal, let year = document.year {
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        Text(verbatim: "\(journal), \(year)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    } else if let journal = document.journal {
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        Text(journal)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+
                     if let sourceString = document.fullTextSource {
                         FullTextSourceBadge(sourceString: sourceString)
                     }
@@ -306,9 +322,10 @@ struct MacMarkdownView: View {
     /// - Parameter text: The markdown text to parse.
     /// - Returns: An AttributedString with formatting, or nil if parsing fails.
     private func parseMarkdown(_ text: String) -> AttributedString? {
+        // Use full markdown parsing to support headers, lists, and other block elements
         try? AttributedString(
             markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            options: .init(interpretedSyntax: .full)
         )
     }
 }
