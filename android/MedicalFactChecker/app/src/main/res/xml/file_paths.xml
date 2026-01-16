@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    file_paths.xml
+    FileProvider configuration for sharing files.
+
+    Defines the directories that FileProvider can share with external apps.
+    Used for exporting and sharing PDF reports.
+-->
+<paths>
+    <!-- Cache directory for exported PDFs -->
+    <cache-path
+        name="exports"
+        path="exports/" />
+</paths>

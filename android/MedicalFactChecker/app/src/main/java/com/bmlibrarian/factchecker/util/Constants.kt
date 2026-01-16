@@ -200,4 +200,50 @@ object Constants {
 
     /** Default maximum length for claim preview. */
     const val DEFAULT_CLAIM_PREVIEW_LENGTH = 100
+
+    // ==================== Report Screen Configuration ====================
+
+    /** Regex pattern to match citation references like [1], [2], etc. */
+    const val REFERENCE_PATTERN = "\\[(\\d+)\\]"
+
+    /** Bottom sheet peek height in dp. */
+    const val BOTTOM_SHEET_PEEK_HEIGHT = 56
+
+    /** Bottom padding for content above navigation bar. */
+    const val UI_NAVIGATION_BAR_PADDING = 32
+
+    // ==================== PDF Export Configuration ====================
+
+    /** PDF export cache subdirectory name. */
+    const val PDF_EXPORT_DIRECTORY = "exports"
+
+    /** PDF filename prefix. */
+    const val PDF_FILENAME_PREFIX = "factcheck_report_"
+
+    /** Date format pattern for PDF filenames. */
+    const val PDF_FILENAME_DATE_PATTERN = "yyyy-MM-dd_HHmmss"
+
+    /** Date format pattern for display in reports. */
+    const val REPORT_DATE_DISPLAY_PATTERN = "MMMM d, yyyy"
+
+    /** Date format pattern for display with time. */
+    const val REPORT_DATETIME_DISPLAY_PATTERN = "MMM d, yyyy 'at' h:mm a"
+
+    /** PDF page margin in points (72 points = 1 inch). */
+    const val PDF_PAGE_MARGIN_POINTS = 72f
+
+    /** PDF title font size in points. */
+    const val PDF_TITLE_FONT_SIZE = 18f
+
+    /** PDF heading font size in points. */
+    const val PDF_HEADING_FONT_SIZE = 14f
+
+    /** PDF body font size in points. */
+    const val PDF_BODY_FONT_SIZE = 11f
+
+    /** PDF small font size in points. */
+    const val PDF_SMALL_FONT_SIZE = 9f
+
+    /** PDF line spacing multiplier. */
+    const val PDF_LINE_SPACING = 1.2f
 }
