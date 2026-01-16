@@ -412,7 +412,9 @@ mypy src/
 
 ## License
 
-GPL-3.0 License - see LICENSE file for details.
+Copyright (C) 2024-2025 Dr Horst Herb
+
+AGPL-3.0 License - see LICENSE file for details.
 
 ## Acknowledgments
 

@@ -225,7 +225,9 @@ The app synthesizes information from peer-reviewed literature but:
 
 ## License
 
-This project is part of BMLibrarian Lite. See the root LICENSE file for details.
+Copyright (C) 2024-2025 Dr Horst Herb
+
+AGPL-3.0 License - see the root LICENSE file for details.
 
 ## Contributing
 

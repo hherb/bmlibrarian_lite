@@ -170,6 +170,12 @@ macos/MedicalFactCheckerMac/
 | Monthly Budget | $10.00 | Maximum monthly spending |
 | iCloud Sync | Off | Sync data across devices via CloudKit |
 
+## License
+
+Copyright (C) 2024-2025 Dr Horst Herb
+
+AGPL-3.0 License - see main project LICENSE file for details.
+
 ## Related
 
 - [iOS App](../ios/MedicalFactChecker/) - Mobile version for iPhone/iPad

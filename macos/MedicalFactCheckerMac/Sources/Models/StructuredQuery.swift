@@ -1,12 +1,18 @@
+// BMLibrarian Lite - Biomedical Literature Research Tool
+// Copyright (C) 2024-2025 Dr Horst Herb
 //
-//  StructuredQuery.swift
-//  MedicalFactCheckerMac
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 //
-//  Intermediate query representation that can be translated to any search provider.
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
 //
-//  This decouples LLM output from specific query syntax, allowing clean translation
-//  to PubMed, Europe PMC, or any future search provider.
-//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
 

@@ -186,4 +186,6 @@ View current pricing for all models in Settings > View Model Pricing.
 
 ## License
 
-See main project LICENSE file.
+Copyright (C) 2024-2025 Dr Horst Herb
+
+AGPL-3.0 License - see main project LICENSE file for details.
