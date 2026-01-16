@@ -415,14 +415,21 @@ final class FactCheckWorkflow {
 
     // MARK: - Step Implementations
 
+    /// The structured query parsed from LLM response.
+    ///
+    /// This is stored in memory during the workflow and used to generate
+    /// provider-specific queries. The PubMed version is also stored in
+    /// `session.pubmedQuery` for display and persistence.
+    private var structuredQuery: StructuredQuery?
+
     private func convertClaimToQuery() async throws {
         guard let session = session, let llmService = llmService else { return }
 
         try checkBudget()
 
-        // Use structured JSON prompt similar to Python version for better local model compatibility
+        // Use structured JSON prompt - LLM outputs provider-agnostic format
         let prompt = """
-        Convert this research question into a concise PubMed search query.
+        Convert this research question into search concepts.
 
         Research Question: \(session.claim)
 
@@ -462,96 +469,46 @@ final class FactCheckWorkflow {
         // Record usage
         recordUsage(usage, operationType: "query_conversion")
 
-        // Parse JSON response and build query
-        let query = buildQueryFromJSON(response, claim: session.claim)
+        // Parse JSON response into StructuredQuery
+        if let parsed = StructuredQuery.parse(from: response) {
+            structuredQuery = parsed
+            // Store PubMed version for display/persistence (backwards compatibility)
+            session.pubmedQuery = PubMedQueryBuilder.build(from: parsed)
+        } else {
+            // Fallback: create a simple query from the claim
+            print("[QueryConversion] Failed to parse structured query, using fallback")
+            let fallbackQuery = StructuredQuery(
+                concepts: [SearchConcept(name: "claim", keywords: session.claim.components(separatedBy: " "))]
+            )
+            structuredQuery = fallbackQuery
+            session.pubmedQuery = PubMedQueryBuilder.build(from: fallbackQuery)
+        }
 
-        session.pubmedQuery = query
         try? modelContext.save()
     }
 
-    /// Build a PubMed query string from JSON response.
-    private func buildQueryFromJSON(_ response: String, claim: String) -> String {
-        // Try to parse JSON
-        guard let data = response.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let concepts = json["concepts"] as? [[String: Any]],
-              !concepts.isEmpty else {
-            // Fallback: try to extract JSON from markdown blocks
-            if let extracted = extractJSONFromResponse(response),
-               let data = extracted.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let concepts = json["concepts"] as? [[String: Any]],
-               !concepts.isEmpty {
-                return buildQueryFromConcepts(concepts)
-            }
-            // Final fallback: use claim as simple search
-            return "\(claim) AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
-        }
-
-        return buildQueryFromConcepts(concepts)
-    }
-
-    /// Extract JSON from a response that may have markdown wrapping.
-    private func extractJSONFromResponse(_ response: String) -> String? {
-        // Try markdown code block
-        if let range = response.range(of: "```json"),
-           let endRange = response.range(of: "```", range: range.upperBound..<response.endIndex) {
-            let jsonStr = String(response[range.upperBound..<endRange.lowerBound])
-            return jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        // Try plain code block
-        if let range = response.range(of: "```"),
-           let endRange = response.range(of: "```", range: range.upperBound..<response.endIndex) {
-            let jsonStr = String(response[range.upperBound..<endRange.lowerBound])
-            return jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        // Try to find JSON object
-        if let start = response.firstIndex(of: "{"),
-           let end = response.lastIndex(of: "}") {
-            return String(response[start...end])
-        }
-        return nil
-    }
-
-    /// Build query string from parsed concepts.
-    private func buildQueryFromConcepts(_ concepts: [[String: Any]]) -> String {
-        var conceptClauses: [String] = []
-
-        for concept in concepts {
-            var terms: [String] = []
-
-            // Add MeSH terms
-            if let meshTerms = concept["mesh_terms"] as? [String] {
-                for term in meshTerms.prefix(2) {
-                    terms.append("\"\(term)\"[MeSH]")
-                }
-            }
-
-            // Add keywords
-            if let keywords = concept["keywords"] as? [String] {
-                for keyword in keywords.prefix(3) {
-                    terms.append("\(keyword)[tiab]")
-                }
-            }
-
-            if !terms.isEmpty {
-                let clause = "(" + terms.joined(separator: " OR ") + ")"
-                conceptClauses.append(clause)
-            }
-        }
-
-        guard !conceptClauses.isEmpty else {
-            return "AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
-        }
-
-        // Join concepts with AND, add filters
-        let baseQuery = conceptClauses.joined(separator: " AND ")
-        return "\(baseQuery) AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
-    }
-
     private func searchPubMed() async throws {
-        guard let session = session,
-              let query = session.pubmedQuery else { return }
+        guard let session = session else { return }
+
+        // Get the appropriate query for the provider
+        let query: String
+        let provider = searchOptions?.provider ?? .pubmed
+
+        if let structured = structuredQuery {
+            // Use the new structured query system
+            query = QueryBuilderFactory.build(from: structured, for: provider)
+            print("[Search] Using structured query for \(provider.displayName): \(query)")
+        } else if let pubmedQuery = session.pubmedQuery {
+            // Fall back to stored PubMed query (for resumed sessions)
+            if provider == .europePMC {
+                // Need to translate for Europe PMC
+                query = QueryTranslator.pubmedToEuropePMC(pubmedQuery)
+            } else {
+                query = pubmedQuery
+            }
+        } else {
+            return
+        }
 
         let batchNumber = session.batchesFetched + 1
 

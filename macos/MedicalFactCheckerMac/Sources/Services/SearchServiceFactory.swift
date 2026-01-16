@@ -116,10 +116,12 @@ enum SearchServiceFactory {
 
     /// Search Europe PMC with the given query and options.
     ///
-    /// Translates PubMed syntax to Europe PMC syntax if detected.
+    /// The query should ideally be in native Europe PMC syntax (built by
+    /// `EuropePMCQueryBuilder`). For backwards compatibility with resumed
+    /// sessions, PubMed syntax queries will be auto-translated.
     ///
     /// - Parameters:
-    ///   - query: Query string (may be PubMed or Europe PMC syntax).
+    ///   - query: Query string (ideally Europe PMC syntax, PubMed syntax auto-translated).
     ///   - options: Search options.
     /// - Returns: Unified search result.
     private static func searchEuropePMC(
@@ -128,12 +130,18 @@ enum SearchServiceFactory {
     ) async throws -> UnifiedSearchResult {
         let service = EuropePMCService.create()
 
-        // Translate query if it appears to be PubMed syntax
+        // Check if query is already in Europe PMC syntax
         let translatedQuery: String
-        if QueryTranslator.isPubMedSyntax(query) {
+        if QueryTranslator.isEuropePMCSyntax(query) {
+            // Already in Europe PMC format (from EuropePMCQueryBuilder)
+            translatedQuery = query
+            AppLogger.search.debug("Using native Europe PMC query")
+        } else if QueryTranslator.isPubMedSyntax(query) {
+            // Legacy: translate from PubMed syntax (for resumed sessions)
             translatedQuery = QueryTranslator.pubmedToEuropePMC(query)
+            AppLogger.search.debug("Translated PubMed query to Europe PMC syntax")
 
-            // Log translation for debugging
+            // Log translation warnings
             let validation = QueryValidator.validateEuropePMCQuery(translatedQuery)
             if !validation.warnings.isEmpty {
                 AppLogger.search.debug(
@@ -141,6 +149,7 @@ enum SearchServiceFactory {
                 )
             }
         } else {
+            // Plain text query - use as-is
             translatedQuery = query
         }
 
