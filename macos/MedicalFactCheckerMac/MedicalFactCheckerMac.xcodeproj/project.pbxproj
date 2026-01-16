@@ -744,7 +744,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MedicalFactCheckerMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MedicalFactCheckerMac";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Medical Fact Checker.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Medical Fact Checker";
 			};
 			name = Debug;
 		};
@@ -766,7 +766,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MedicalFactCheckerMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MedicalFactCheckerMac";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Medical Fact Checker.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Medical Fact Checker";
 			};
 			name = Release;
 		};
@@ -959,8 +959,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactCheckerMac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
+				PRODUCT_NAME = "Medical Fact Checker";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -1001,8 +1001,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactCheckerMac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
+				PRODUCT_NAME = "Medical Fact Checker";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

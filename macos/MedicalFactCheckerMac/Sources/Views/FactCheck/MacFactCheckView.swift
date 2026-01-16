@@ -233,10 +233,8 @@ struct MacConfigurationWarningView: View {
 
             Spacer()
 
-            Button("Open Settings") {
-                #if os(macOS)
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                #endif
+            SettingsLink {
+                Text("Open Settings")
             }
             .buttonStyle(.bordered)
         }

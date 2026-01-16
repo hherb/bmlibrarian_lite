@@ -13,6 +13,9 @@ import SwiftData
 /// Configures SwiftData persistence, window management, Help menu, and the Settings scene.
 @main
 struct MedicalFactCheckerMacApp: App {
+    /// Window ID for the main fact-checking window.
+    static let mainWindowID = "main-window"
+
     var sharedModelContainer: ModelContainer = {
         // Register custom transformer before creating the container
         StringArrayTransformer.register()
@@ -46,7 +49,7 @@ struct MedicalFactCheckerMacApp: App {
     }()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: Self.mainWindowID) {
             MacContentView()
                 .environment(AppSettings.shared)
                 .environment(\.openURL, OpenURLAction { url in
@@ -68,10 +71,9 @@ struct MedicalFactCheckerMacApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
 
-            CommandGroup(after: .appInfo) {
-                Button("Check for Updates...") {
-                    // Placeholder for update checking
-                }
+            // Window menu command to show/reopen main window
+            CommandGroup(after: .windowList) {
+                ShowMainWindowCommand()
             }
 
             // Help menu commands
@@ -108,6 +110,22 @@ struct MedicalFactCheckerMacApp: App {
         .windowResizability(.contentSize)
         .defaultPosition(.center)
         #endif
+    }
+}
+
+// MARK: - Window Menu Commands
+
+/// Command to show/reopen the main window.
+///
+/// Uses @Environment(\.openWindow) to open the main window when it has been closed.
+struct ShowMainWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Medical Fact Checker") {
+            openWindow(id: MedicalFactCheckerMacApp.mainWindowID)
+        }
+        .keyboardShortcut("0", modifiers: .command)
     }
 }
 

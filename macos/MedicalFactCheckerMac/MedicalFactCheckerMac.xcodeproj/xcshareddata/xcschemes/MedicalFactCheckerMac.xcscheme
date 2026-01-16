@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A5000001"
-               BuildableName = "MedicalFactCheckerMac.app"
+               BuildableName = "Medical Fact Checker.app"
                BlueprintName = "MedicalFactCheckerMac"
                ReferencedContainer = "container:MedicalFactCheckerMac.xcodeproj">
             </BuildableReference>
@@ -58,7 +58,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A5000001"
-            BuildableName = "MedicalFactCheckerMac.app"
+            BuildableName = "Medical Fact Checker.app"
             BlueprintName = "MedicalFactCheckerMac"
             ReferencedContainer = "container:MedicalFactCheckerMac.xcodeproj">
          </BuildableReference>
@@ -75,7 +75,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A5000001"
-            BuildableName = "MedicalFactCheckerMac.app"
+            BuildableName = "Medical Fact Checker.app"
             BlueprintName = "MedicalFactCheckerMac"
             ReferencedContainer = "container:MedicalFactCheckerMac.xcodeproj">
          </BuildableReference>
