@@ -6,12 +6,14 @@ citations, and review checkpoints. These models are used throughout
 the lite module for consistent data handling.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Any, TYPE_CHECKING
-import hashlib
-import json
+from typing import TYPE_CHECKING, Any, Optional
+
+from .constants import MAX_PUBMED_SEARCH_OFFSET
 
 if TYPE_CHECKING:
     from .quality.data_models import QualityAssessment
@@ -113,7 +115,7 @@ class OffsetPaginationState:
     total_count: int
     offset: int
     batch_size: int
-    max_offset: int = 9999
+    max_offset: int = MAX_PUBMED_SEARCH_OFFSET
 
     @property
     def has_more(self) -> bool:
