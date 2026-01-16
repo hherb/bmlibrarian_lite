@@ -174,11 +174,13 @@ enum QueryTranslator {
             caseInsensitive: true
         )
 
-        // Unquoted term: something[tag]
+        // Unquoted multi-word term: something something[tag]
+        // Match word characters and spaces, but not operators or special chars
+        // The pattern captures words (possibly with spaces) before the tag
         result = applyRegex(
             to: result,
-            pattern: "(\\w+)\\s*\(escapedTag)",
-            template: "\(europePMCPrefix)$1",
+            pattern: "([a-zA-Z][a-zA-Z0-9]*(?:\\s+[a-zA-Z][a-zA-Z0-9]*)*)\\s*\(escapedTag)",
+            template: "\(europePMCPrefix)\"$1\"",
             caseInsensitive: true
         )
 
