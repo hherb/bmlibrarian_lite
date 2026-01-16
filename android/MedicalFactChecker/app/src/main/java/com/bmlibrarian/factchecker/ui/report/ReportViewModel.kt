@@ -1,0 +1,310 @@
+package com.bmlibrarian.factchecker.ui.report
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
+import com.bmlibrarian.factchecker.data.repository.DocumentRepository
+import com.bmlibrarian.factchecker.data.repository.ReportRepository
+import com.bmlibrarian.factchecker.data.repository.SessionRepository
+import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.PdfExporter
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import java.io.File
+import javax.inject.Inject
+
+/**
+ * UI state for the Report screen.
+ *
+ * Contains all state needed to render the report view including the report
+ * data, referenced documents, and UI interaction state.
+ *
+ * @property report The current report to display, or null if none available
+ * @property documents List of documents referenced in the report
+ * @property selectedDocument Document selected for detail view
+ * @property showDocumentSheet Whether to show the document detail bottom sheet
+ * @property isExporting Whether a PDF export is in progress
+ * @property exportError Error message if export failed, or null
+ */
+data class ReportUiState(
+    val report: ReportEntity? = null,
+    val documents: List<DocumentEntity> = emptyList(),
+    val selectedDocument: DocumentEntity? = null,
+    val showDocumentSheet: Boolean = false,
+    val isExporting: Boolean = false,
+    val exportError: String? = null,
+    val isLoading: Boolean = true
+)
+
+/**
+ * One-shot UI events emitted by the ViewModel.
+ *
+ * These events are consumed once by the UI layer to trigger side effects
+ * like navigation, sharing, or opening external apps.
+ */
+sealed class ReportUiEvent {
+    /**
+     * Open a URL in the device browser.
+     *
+     * @property url The URL to open (e.g., PubMed article link)
+     */
+    data class OpenUrl(val url: String) : ReportUiEvent()
+
+    /**
+     * Share text content via Android share sheet.
+     *
+     * @property subject Subject line for the share
+     * @property text Text content to share
+     */
+    data class ShareText(val subject: String, val text: String) : ReportUiEvent()
+
+    /**
+     * Share a file via Android share sheet.
+     *
+     * @property file The file to share
+     * @property mimeType MIME type of the file
+     */
+    data class ShareFile(val file: File, val mimeType: String) : ReportUiEvent()
+
+    /**
+     * Show a snackbar message.
+     *
+     * @property message The message to display
+     */
+    data class ShowSnackbar(val message: String) : ReportUiEvent()
+}
+
+/**
+ * Paper size options for PDF export.
+ */
+enum class PaperSize {
+    /** A4 paper (210 x 297 mm). */
+    A4,
+
+    /** US Letter paper (8.5 x 11 inches). */
+    LETTER
+}
+
+/**
+ * ViewModel for the Report screen.
+ *
+ * Manages the state for displaying evidence reports, handling reference clicks,
+ * exporting to PDF, and sharing reports. Uses event-based architecture for
+ * side effects to maintain clean separation from Android framework.
+ *
+ * @property sessionRepository Repository for session operations
+ * @property reportRepository Repository for report operations
+ * @property documentRepository Repository for document operations
+ * @property pdfExporter Utility for PDF generation
+ */
+@HiltViewModel
+class ReportViewModel @Inject constructor(
+    private val sessionRepository: SessionRepository,
+    private val reportRepository: ReportRepository,
+    private val documentRepository: DocumentRepository,
+    private val pdfExporter: PdfExporter
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(ReportUiState())
+    /** Observable UI state for the report screen. */
+    val uiState: StateFlow<ReportUiState> = _uiState.asStateFlow()
+
+    private val _events = Channel<ReportUiEvent>(Channel.BUFFERED)
+    /** One-shot events for the UI to consume. */
+    val events = _events.receiveAsFlow()
+
+    /** Current session ID being displayed. */
+    private var currentSessionId: String? = null
+
+    init {
+        loadLatestReport()
+    }
+
+    /**
+     * Load report for a specific session.
+     *
+     * Fetches the report and associated documents from the database.
+     *
+     * @param sessionId The session ID to load the report for
+     */
+    fun loadReport(sessionId: String) {
+        currentSessionId = sessionId
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            try {
+                // Load report
+                val report = reportRepository.getReportBySession(sessionId)
+                _uiState.update { it.copy(report = report) }
+
+                // Load documents for reference lookup
+                documentRepository.getScoredDocumentsBySession(sessionId)
+                    .collect { docs ->
+                        _uiState.update { it.copy(documents = docs, isLoading = false) }
+                    }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false) }
+                _events.send(ReportUiEvent.ShowSnackbar("Failed to load report: ${e.message}"))
+            }
+        }
+    }
+
+    /**
+     * Load the most recent report.
+     *
+     * Finds the latest completed session and loads its report.
+     */
+    fun loadLatestReport() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            try {
+                val sessions = sessionRepository.getCompletedSessions().first()
+                val latestSession = sessions.firstOrNull()
+
+                if (latestSession != null) {
+                    loadReport(latestSession.id)
+                } else {
+                    _uiState.update { it.copy(report = null, isLoading = false) }
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false) }
+                _events.send(ReportUiEvent.ShowSnackbar("Failed to load report: ${e.message}"))
+            }
+        }
+    }
+
+    /**
+     * Handle click on a document reference in the report.
+     *
+     * References are formatted as [1], [2], etc. and map to documents
+     * by their position in the scored documents list.
+     *
+     * @param referenceNumber The 1-based reference number clicked
+     */
+    fun onReferenceClick(referenceNumber: Int) {
+        val docs = _uiState.value.documents
+        if (referenceNumber in 1..docs.size) {
+            val document = docs[referenceNumber - 1]
+            _uiState.update {
+                it.copy(
+                    selectedDocument = document,
+                    showDocumentSheet = true
+                )
+            }
+        }
+    }
+
+    /**
+     * Dismiss the document detail bottom sheet.
+     */
+    fun dismissDocumentSheet() {
+        _uiState.update {
+            it.copy(
+                selectedDocument = null,
+                showDocumentSheet = false
+            )
+        }
+    }
+
+    /**
+     * Open document in PubMed in the device browser.
+     *
+     * @param pmid The PubMed ID to open
+     */
+    fun openInPubMed(pmid: String) {
+        viewModelScope.launch {
+            val url = "${Constants.PUBMED_URL_PREFIX}$pmid/"
+            _events.send(ReportUiEvent.OpenUrl(url))
+        }
+    }
+
+    /**
+     * Export report as PDF.
+     *
+     * Generates a PDF file and triggers sharing via the Android share sheet.
+     *
+     * @param paperSize The paper size for the PDF (default: A4)
+     */
+    fun exportPdf(paperSize: PaperSize = PaperSize.A4) {
+        val report = _uiState.value.report ?: return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExporting = true, exportError = null) }
+
+            try {
+                val file = pdfExporter.exportReport(
+                    report = report,
+                    documents = _uiState.value.documents,
+                    paperSize = paperSize
+                )
+
+                _uiState.update { it.copy(isExporting = false) }
+                _events.send(ReportUiEvent.ShareFile(file, "application/pdf"))
+            } catch (e: Exception) {
+                val errorMessage = e.message ?: "Failed to export PDF"
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        exportError = errorMessage
+                    )
+                }
+                _events.send(ReportUiEvent.ShowSnackbar(errorMessage))
+            }
+        }
+    }
+
+    /**
+     * Share the report as plain text.
+     *
+     * Creates a text representation of the report and triggers sharing
+     * via the Android share sheet.
+     */
+    fun shareReport() {
+        val report = _uiState.value.report ?: return
+
+        viewModelScope.launch {
+            val shareText = buildString {
+                appendLine("Medical Fact Check Report")
+                appendLine("========================")
+                appendLine()
+                appendLine("Verdict: ${report.verdict.displayName}")
+                appendLine()
+                appendLine(report.summary)
+                appendLine()
+                appendLine("---")
+                appendLine()
+                appendLine(report.fullReportMarkdown)
+                report.footnotes?.let {
+                    appendLine()
+                    appendLine("---")
+                    appendLine()
+                    appendLine("References:")
+                    appendLine(it)
+                }
+            }
+
+            _events.send(
+                ReportUiEvent.ShareText(
+                    subject = "Medical Fact Check Report",
+                    text = shareText
+                )
+            )
+        }
+    }
+
+    /**
+     * Clear export error state.
+     */
+    fun clearExportError() {
+        _uiState.update { it.copy(exportError = null) }
+    }
+}

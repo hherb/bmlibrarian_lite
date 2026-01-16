@@ -200,4 +200,109 @@ object Constants {
 
     /** Default maximum length for claim preview. */
     const val DEFAULT_CLAIM_PREVIEW_LENGTH = 100
+
+    // ==================== Report Screen Configuration ====================
+
+    /** Regex pattern to match citation references like [1], [2], etc. */
+    const val REFERENCE_PATTERN = "\\[(\\d+)\\]"
+
+    /** Bottom sheet peek height in dp. */
+    const val BOTTOM_SHEET_PEEK_HEIGHT = 56
+
+    /** Bottom padding for content above navigation bar. */
+    const val UI_NAVIGATION_BAR_PADDING = 32
+
+    // ==================== PDF Export Configuration ====================
+
+    /** PDF export cache subdirectory name. */
+    const val PDF_EXPORT_DIRECTORY = "exports"
+
+    /** PDF filename prefix. */
+    const val PDF_FILENAME_PREFIX = "factcheck_report_"
+
+    /** Date format pattern for PDF filenames. */
+    const val PDF_FILENAME_DATE_PATTERN = "yyyy-MM-dd_HHmmss"
+
+    /** Date format pattern for display in reports. */
+    const val REPORT_DATE_DISPLAY_PATTERN = "MMMM d, yyyy"
+
+    /** Date format pattern for display with time. */
+    const val REPORT_DATETIME_DISPLAY_PATTERN = "MMM d, yyyy 'at' h:mm a"
+
+    /** PDF page margin in points (72 points = 1 inch). */
+    const val PDF_PAGE_MARGIN_POINTS = 72f
+
+    /** PDF title font size in points. */
+    const val PDF_TITLE_FONT_SIZE = 18f
+
+    /** PDF heading font size in points. */
+    const val PDF_HEADING_FONT_SIZE = 14f
+
+    /** PDF body font size in points. */
+    const val PDF_BODY_FONT_SIZE = 11f
+
+    /** PDF small font size in points. */
+    const val PDF_SMALL_FONT_SIZE = 9f
+
+    /** PDF line spacing multiplier. */
+    const val PDF_LINE_SPACING = 1.2f
+
+    // ==================== Markdown Rendering ====================
+
+    /** Text size in SP for markdown content. */
+    const val MARKDOWN_TEXT_SIZE_SP = 16f
+
+    // ==================== Progress Indicator ====================
+
+    /** Stroke width for small circular progress indicators in dp. */
+    const val PROGRESS_STROKE_WIDTH_SMALL = 2
+
+    // ==================== Color/Alpha Constants ====================
+
+    /** Alpha for verdict header background tint. */
+    const val VERDICT_BACKGROUND_ALPHA = 0.1f
+
+    /** Alpha for divider lines. */
+    const val DIVIDER_ALPHA = 0.5f
+
+    // ==================== Luminance Calculation (ITU-R BT.601) ====================
+
+    /** Red coefficient for relative luminance (ITU-R BT.601 Y'). */
+    const val LUMINANCE_RED_COEFFICIENT = 0.299f
+
+    /** Green coefficient for relative luminance (ITU-R BT.601 Y'). */
+    const val LUMINANCE_GREEN_COEFFICIENT = 0.587f
+
+    /** Blue coefficient for relative luminance (ITU-R BT.601 Y'). */
+    const val LUMINANCE_BLUE_COEFFICIENT = 0.114f
+
+    /** Threshold for determining light vs dark background (0.5 = midpoint). */
+    const val LUMINANCE_THRESHOLD = 0.5f
+
+    // ==================== PDF Verdict Colors (RGB) ====================
+
+    /** Green RGB for SUPPORTED verdict in PDF (matches VerdictSupported). */
+    const val PDF_VERDICT_GREEN_R = 76
+    const val PDF_VERDICT_GREEN_G = 175
+    const val PDF_VERDICT_GREEN_B = 80
+
+    /** Light green RGB for LIKELY_SUPPORTED verdict in PDF. */
+    const val PDF_VERDICT_LIGHT_GREEN_R = 139
+    const val PDF_VERDICT_LIGHT_GREEN_G = 195
+    const val PDF_VERDICT_LIGHT_GREEN_B = 74
+
+    /** Orange RGB for UNCLEAR/LIKELY_REFUTED verdict in PDF. */
+    const val PDF_VERDICT_ORANGE_R = 255
+    const val PDF_VERDICT_ORANGE_G = 152
+    const val PDF_VERDICT_ORANGE_B = 0
+
+    /** Red RGB for REFUTED verdict in PDF. */
+    const val PDF_VERDICT_RED_R = 244
+    const val PDF_VERDICT_RED_G = 67
+    const val PDF_VERDICT_RED_B = 54
+
+    /** Gray RGB for unknown verdict in PDF. */
+    const val PDF_VERDICT_GRAY_R = 158
+    const val PDF_VERDICT_GRAY_G = 158
+    const val PDF_VERDICT_GRAY_B = 158
 }

@@ -124,6 +124,9 @@ dependencies {
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
 
+    // PDF generation (AGPL license - compatible with open source projects)
+    implementation("com.itextpdf:itext7-core:7.2.5")
+
     // Note: XML parsing uses built-in Android XmlPullParser - no external dependency needed
     // This is more efficient for large PubMed XML documents
 
