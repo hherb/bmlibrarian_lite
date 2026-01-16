@@ -8,7 +8,7 @@
 
 import Testing
 import Foundation
-@testable import Medical_Fact_Checker
+@testable import MedicalFactCheckerMac
 
 // MARK: - SearchProvider Tests
 
@@ -460,19 +460,19 @@ struct QueryValidatorTests {
     @Test func validQueryPasses() {
         let result = QueryValidator.validateEuropePMCQuery("aspirin AND cardiovascular")
         #expect(result.isValid == true)
-        #expect(result.errors.isEmpty)
+        #expect(result.warnings.isEmpty)
     }
 
     @Test func unbalancedParenthesesFails() {
         let result = QueryValidator.validateEuropePMCQuery("(aspirin AND (cardiovascular)")
         #expect(result.isValid == false)
-        #expect(result.errors.contains { $0.contains("parentheses") })
+        #expect(result.warnings.contains { $0.contains("parentheses") })
     }
 
     @Test func unbalancedQuotesFails() {
         let result = QueryValidator.validateEuropePMCQuery("\"aspirin AND cardiovascular")
         #expect(result.isValid == false)
-        #expect(result.errors.contains { $0.contains("quotes") })
+        #expect(result.warnings.contains { $0.contains("quotes") })
     }
 
     @Test func untranslatedPubMedSyntaxWarns() {

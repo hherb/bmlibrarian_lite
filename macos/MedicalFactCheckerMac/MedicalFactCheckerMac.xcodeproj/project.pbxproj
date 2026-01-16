@@ -65,8 +65,8 @@
 			isa = PBXContainerItemProxy;
 			containerPortal = A5000010 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 6FCBC9C42F16568000D6BF11;
-			remoteInfo = "Medical Fact Checker";
+			remoteGlobalIDString = A5000001;
+			remoteInfo = MedicalFactCheckerMac;
 		};
 		6FCBC9DE2F16568100D6BF11 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -621,7 +621,7 @@
 /* Begin PBXTargetDependency section */
 		6FCBC9D52F16568100D6BF11 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 6FCBC9C42F16568000D6BF11 /* Medical Fact Checker */;
+			target = A5000001 /* MedicalFactCheckerMac */;
 			targetProxy = 6FCBC9D42F16568100D6BF11 /* PBXContainerItemProxy */;
 		};
 		6FCBC9DF2F16568100D6BF11 /* PBXTargetDependency */ = {
@@ -744,7 +744,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Medical Fact Checker.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Medical Fact Checker";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MedicalFactCheckerMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MedicalFactCheckerMac";
 			};
 			name = Debug;
 		};
@@ -766,7 +766,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Medical Fact Checker.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Medical Fact Checker";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MedicalFactCheckerMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MedicalFactCheckerMac";
 			};
 			name = Release;
 		};

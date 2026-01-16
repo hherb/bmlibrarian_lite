@@ -6,7 +6,7 @@
 //
 
 import Testing
-@testable import Medical_Fact_Checker
+@testable import MedicalFactCheckerMac
 
 struct Medical_Fact_CheckerTests {
 
