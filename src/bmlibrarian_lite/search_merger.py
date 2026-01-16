@@ -24,15 +24,16 @@ Usage:
 import logging
 from dataclasses import dataclass, field
 
+from .constants import (
+    MIN_WORD_LENGTH_FOR_SIMILARITY,
+    TITLE_HASH_LENGTH,
+    TITLE_SIMILARITY_THRESHOLD,
+)
 from .data_models import DocumentSource, LiteDocument
 from .europepmc import ArticleInfo
 from .pubmed import ArticleMetadata
 
 logger = logging.getLogger(__name__)
-
-
-# Title similarity threshold for deduplication
-TITLE_SIMILARITY_THRESHOLD = 0.8
 
 
 @dataclass
@@ -93,7 +94,7 @@ class MergedArticle:
         else:
             # Fallback to title hash
             import hashlib
-            title_hash = hashlib.md5(self.title.encode()).hexdigest()[:12]
+            title_hash = hashlib.md5(self.title.encode()).hexdigest()[:TITLE_HASH_LENGTH]
             return f"title-{title_hash}"
 
     def to_lite_document(self) -> LiteDocument:
@@ -358,8 +359,8 @@ class SearchResultMerger:
 
         # Remove common words and short words
         stop_words = {"a", "an", "the", "of", "in", "on", "for", "to", "and", "or", "is", "are", "with"}
-        words1 = {w for w in words1 if w not in stop_words and len(w) > 2}
-        words2 = {w for w in words2 if w not in stop_words and len(w) > 2}
+        words1 = {w for w in words1 if w not in stop_words and len(w) > MIN_WORD_LENGTH_FOR_SIMILARITY}
+        words2 = {w for w in words2 if w not in stop_words and len(w) > MIN_WORD_LENGTH_FOR_SIMILARITY}
 
         if not words1 or not words2:
             return 0.0

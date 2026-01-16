@@ -534,6 +534,31 @@ EUROPEPMC_DEFAULT_FILTERS = {
     "exclude_preprints": "(NOT SRC:PPR)",
 }
 
+# Page size for Europe PMC count queries (minimal data needed)
+EUROPEPMC_COUNT_PAGE_SIZE = 1
+
+# =============================================================================
+# Search Result Merger Settings
+# =============================================================================
+
+# Title similarity threshold for deduplication (Jaccard index)
+TITLE_SIMILARITY_THRESHOLD = 0.8
+
+# Hash length for title-based document IDs
+TITLE_HASH_LENGTH = 12
+
+# Minimum word length for similarity comparison (filters out short words)
+MIN_WORD_LENGTH_FOR_SIMILARITY = 2
+
+# =============================================================================
+# Settings UI Constants
+# =============================================================================
+
+# Max results spinner range and step
+MIN_MAX_RESULTS = 10
+MAX_MAX_RESULTS = 1000
+MAX_RESULTS_STEP = 10
+
 # =============================================================================
 # Search Provider UI Colors
 # =============================================================================

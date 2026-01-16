@@ -48,6 +48,9 @@ from ..constants import (
     LLM_PROVIDERS,
     LLM_TASK_TYPES,
     LLM_TASK_CATEGORIES,
+    MAX_MAX_RESULTS,
+    MAX_RESULTS_STEP,
+    MIN_MAX_RESULTS,
     PROVIDER_DISPLAY_NAMES,
 )
 from ..data_models import SearchProvider
@@ -499,9 +502,9 @@ class SettingsDialog(QDialog):
 
         # Max results
         self.max_results_spin = QSpinBox()
-        self.max_results_spin.setRange(10, 1000)
+        self.max_results_spin.setRange(MIN_MAX_RESULTS, MAX_MAX_RESULTS)
         self.max_results_spin.setValue(self.config.search.max_results)
-        self.max_results_spin.setSingleStep(10)
+        self.max_results_spin.setSingleStep(MAX_RESULTS_STEP)
         self.max_results_spin.setToolTip("Maximum number of results to retrieve per search")
         results_layout.addRow("Max Results:", self.max_results_spin)
 

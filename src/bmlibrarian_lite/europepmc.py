@@ -31,6 +31,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .constants import (
+    EUROPEPMC_COUNT_PAGE_SIZE,
     EUROPEPMC_DEFAULT_FILTERS,
     EUROPEPMC_INITIAL_CURSOR,
     EUROPEPMC_MAX_RETRIES,
@@ -362,7 +363,7 @@ class EuropePMCClient:
                     "query": full_query,
                     "format": "json",
                     "resultType": "lite",  # Faster, less data
-                    "pageSize": 1,
+                    "pageSize": EUROPEPMC_COUNT_PAGE_SIZE,
                 },
                 timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
             )

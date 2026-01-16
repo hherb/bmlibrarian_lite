@@ -369,7 +369,8 @@ class SearchService:
         if provider == SearchProvider.PUBMED:
             if QueryTranslator.is_europepmc_syntax(query):
                 query = QueryTranslator.europepmc_to_pubmed(query)
-            return self.pubmed_client.get_count(query)
+            query_obj = PubMedQuery(original_question=query, query_string=query)
+            return self.pubmed_client.get_count(query_obj)
 
         elif provider == SearchProvider.EUROPEPMC:
             if QueryTranslator.is_pubmed_syntax(query):
@@ -385,7 +386,10 @@ class SearchService:
             elif QueryTranslator.is_europepmc_syntax(query):
                 pubmed_query = QueryTranslator.europepmc_to_pubmed(query)
 
-            pubmed_count = self.pubmed_client.get_count(pubmed_query)
+            pubmed_query_obj = PubMedQuery(
+                original_question=pubmed_query, query_string=pubmed_query
+            )
+            pubmed_count = self.pubmed_client.get_count(pubmed_query_obj)
             epmc_count = self.europepmc_client.get_total_count(epmc_query, include_preprints)
 
             # This is an upper bound; actual unique count will be lower due to duplicates
