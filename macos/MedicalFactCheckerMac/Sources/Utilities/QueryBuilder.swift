@@ -122,24 +122,25 @@ enum PubMedQueryBuilder: QueryBuilder {
 /// Builds Europe PMC query strings from StructuredQuery.
 ///
 /// ## Europe PMC Syntax Reference
-/// - MeSH terms: `MeSH_TERM:"Term"`
 /// - Title/Abstract: `TITLE_ABS:"keyword"`
 /// - Has abstract filter: `HAS_ABSTRACT:y`
-/// - Publication type: `PUB_TYPE:"type"`
 /// - Exclude preprints: `NOT SRC:PPR`
 /// - Boolean: `AND`, `OR`, `NOT`
 /// - Publication year: `PUB_YEAR:2024` or `PUB_YEAR:[2020 TO 2024]`
+///
+/// ## Note on MeSH Terms
+/// Europe PMC's MeSH indexing has much lower coverage than PubMed's.
+/// Using MeSH_TERM in queries drastically reduces results because most
+/// articles aren't indexed with MeSH in Europe PMC. We use keywords only.
+///
+/// ## Note on Publication Type Exclusions
+/// Europe PMC doesn't have the same volume of non-article content as PubMed,
+/// so we skip publication type exclusions to avoid filtering out valid results.
 enum EuropePMCQueryBuilder: QueryBuilder {
-    /// Standard publication types to exclude for clinical queries.
-    ///
-    /// Note: Europe PMC uses lowercase hyphenated format for some types.
-    static let defaultExcludeTypes = [
-        "News", "Newspaper Article", "Editorial", "Letter", "Comment",
-        "Published Erratum", "Biography", "Historical Article",
-        "Personal Narrative", "Directory", "Retracted Publication"
-    ]
-
     /// Build a Europe PMC query string.
+    ///
+    /// Uses keywords only (not MeSH terms) because Europe PMC's MeSH coverage
+    /// is much lower than PubMed's, which would drastically reduce results.
     static func build(from query: StructuredQuery) -> String {
         guard !query.isEmpty else {
             return "HAS_ABSTRACT:y"
@@ -172,15 +173,10 @@ enum EuropePMCQueryBuilder: QueryBuilder {
             result += " NOT SRC:PPR"
         }
 
-        // Add publication type exclusions
-        let excludeTypes = query.excludePublicationTypes.isEmpty
-            ? defaultExcludeTypes
-            : query.excludePublicationTypes
-
-        if !excludeTypes.isEmpty {
-            let exclusions = excludeTypes.map { formatPublicationType($0) }
-            result += " NOT (\(exclusions.joined(separator: " OR ")))"
-        }
+        // Note: We skip publication type exclusions for Europe PMC because:
+        // 1. Europe PMC doesn't have the same volume of non-article content
+        // 2. The PUB_TYPE field values differ from PubMed
+        // 3. Over-filtering reduces valid results
 
         // Add date range
         if let dateRange = query.dateRange {
@@ -191,12 +187,20 @@ enum EuropePMCQueryBuilder: QueryBuilder {
     }
 
     /// Build clause for a single concept (terms combined with OR).
+    ///
+    /// Uses only keywords (not MeSH terms) because Europe PMC's MeSH coverage
+    /// is significantly lower than PubMed's.
     private static func buildConceptClause(_ concept: SearchConcept) -> String {
         var terms: [String] = []
 
-        // Add MeSH terms
+        // Note: We skip MeSH terms for Europe PMC because their MeSH indexing
+        // has much lower coverage than PubMed. Including MeSH_TERM would
+        // drastically reduce results. Instead, we include MeSH term text as
+        // keywords to search in title/abstract.
+
+        // Add MeSH term text as keywords (search as free text)
         for mesh in concept.meshTerms {
-            terms.append("MeSH_TERM:\"\(mesh)\"")
+            terms.append("TITLE_ABS:\"\(mesh)\"")
         }
 
         // Add keywords (search in title/abstract)
@@ -206,11 +210,6 @@ enum EuropePMCQueryBuilder: QueryBuilder {
         }
 
         return terms.joined(separator: " OR ")
-    }
-
-    /// Format a publication type for exclusion.
-    private static func formatPublicationType(_ type: String) -> String {
-        return "PUB_TYPE:\"\(type)\""
     }
 }
 
