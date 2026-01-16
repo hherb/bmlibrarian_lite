@@ -135,6 +135,10 @@ final class JATSXMLParser: NSObject {
     // Inline formatting state
     private var inlineFormattingStack: [InlineFormat] = []
 
+    // Cross-reference state (for figure/table links)
+    private var currentXrefType: String?
+    private var currentXrefRid: String?
+
     // MARK: - Initialization
 
     /// Initialize the parser with XML data.
@@ -270,6 +274,9 @@ final class JATSXMLParser: NSObject {
             lines.append("")
             for (index, figure) in figures.enumerated() {
                 let figNum = figure.label.isEmpty ? "Figure \(index + 1)" : figure.label
+                // Add anchor for linking from xrefs
+                let anchorId = figure.id.isEmpty ? "fig\(index + 1)" : figure.id
+                lines.append("<!-- anchor:\(anchorId) -->")
                 lines.append("### \(figNum)")
                 lines.append("")
                 // Include figure image if URL is available
@@ -292,6 +299,9 @@ final class JATSXMLParser: NSObject {
             lines.append("")
             for (index, table) in tables.enumerated() {
                 let tableNum = table.label.isEmpty ? "Table \(index + 1)" : table.label
+                // Add anchor for linking from xrefs
+                let anchorId = table.id.isEmpty ? "table\(index + 1)" : table.id
+                lines.append("<!-- anchor:\(anchorId) -->")
                 lines.append("### \(tableNum)")
                 if !table.caption.isEmpty {
                     lines.append("")
@@ -561,6 +571,11 @@ extension JATSXMLParser: XMLParserDelegate {
             inlineFormattingStack.append(.superscript)
         case "monospace", "code":
             inlineFormattingStack.append(.monospace)
+
+        // Cross-references (figure/table links)
+        case "xref":
+            currentXrefType = attributeDict["ref-type"]
+            currentXrefRid = attributeDict["rid"]
 
         default:
             break
@@ -846,8 +861,31 @@ extension JATSXMLParser: XMLParserDelegate {
         case "monospace", "code":
             _ = inlineFormattingStack.popLast()
 
-        // xref and ext-link - already merged with parent via popTextBuffer
-        case "xref", "ext-link", "uri", "email", "named-content":
+        // Cross-references - convert figure/table refs to anchor links
+        case "xref":
+            if let refType = currentXrefType, let rid = currentXrefRid {
+                // Convert to markdown anchor link for figures and tables
+                switch refType {
+                case "fig", "figure":
+                    // Format: [Figure 1](#fig-id)
+                    let linkText = text.isEmpty ? "Figure" : text
+                    let anchorLink = "[\(linkText)](#\(rid))"
+                    appendText(anchorLink)
+                case "table", "table-wrap":
+                    // Format: [Table 1](#table-id)
+                    let linkText = text.isEmpty ? "Table" : text
+                    let anchorLink = "[\(linkText)](#\(rid))"
+                    appendText(anchorLink)
+                default:
+                    // Other ref types (bibr, aff, etc.) - just use the text
+                    break
+                }
+            }
+            currentXrefType = nil
+            currentXrefRid = nil
+
+        // ext-link and other inline elements - already merged with parent
+        case "ext-link", "uri", "email", "named-content":
             break
 
         default:
