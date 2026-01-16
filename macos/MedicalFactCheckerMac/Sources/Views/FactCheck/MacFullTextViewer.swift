@@ -286,10 +286,10 @@ struct MacFullTextViewer: View {
 
 // MARK: - Markdown View
 
-/// Scrollable markdown view with search highlighting.
+/// Scrollable markdown view with proper block element rendering.
 ///
-/// Renders markdown content using SwiftUI's AttributedString parser.
-/// Supports text selection and search highlighting.
+/// Splits markdown content into blocks (paragraphs, headers) and renders
+/// each with appropriate styling. Supports text selection.
 struct MacMarkdownView: View {
     /// The markdown content to display.
     let content: String
@@ -297,19 +297,16 @@ struct MacMarkdownView: View {
     /// Text to highlight in the content (empty string for no highlighting).
     let searchText: String
 
+    /// Parsed blocks from the markdown content.
+    private var blocks: [MarkdownBlock] {
+        parseMarkdownBlocks(content)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MacSpacing.standard) {
-                if let attributed = parseMarkdown(content) {
-                    Text(attributed)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .lineSpacing(MacFullTextLayout.markdownLineSpacing)
-                } else {
-                    Text(content)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .lineSpacing(MacFullTextLayout.markdownLineSpacing)
+            VStack(alignment: .leading, spacing: MacSpacing.large) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    renderBlock(block)
                 }
             }
             .padding(MacFullTextLayout.markdownPadding)
@@ -317,16 +314,147 @@ struct MacMarkdownView: View {
         }
     }
 
-    /// Parse markdown text to AttributedString.
-    ///
-    /// - Parameter text: The markdown text to parse.
-    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
-    private func parseMarkdown(_ text: String) -> AttributedString? {
-        // Use full markdown parsing to support headers, lists, and other block elements
-        try? AttributedString(
+    /// Render a single markdown block with appropriate styling.
+    @ViewBuilder
+    private func renderBlock(_ block: MarkdownBlock) -> some View {
+        switch block.type {
+        case .heading1:
+            Text(parseInlineMarkdown(block.content))
+                .font(.title)
+                .fontWeight(.bold)
+                .textSelection(.enabled)
+                .padding(.top, MacSpacing.large)
+
+        case .heading2:
+            Text(parseInlineMarkdown(block.content))
+                .font(.title2)
+                .fontWeight(.semibold)
+                .textSelection(.enabled)
+                .padding(.top, MacSpacing.medium)
+
+        case .heading3:
+            Text(parseInlineMarkdown(block.content))
+                .font(.title3)
+                .fontWeight(.medium)
+                .textSelection(.enabled)
+                .padding(.top, MacSpacing.small)
+
+        case .heading4, .heading5, .heading6:
+            Text(parseInlineMarkdown(block.content))
+                .font(.headline)
+                .textSelection(.enabled)
+                .padding(.top, MacSpacing.small)
+
+        case .paragraph:
+            Text(parseInlineMarkdown(block.content))
+                .font(.body)
+                .textSelection(.enabled)
+                .lineSpacing(MacFullTextLayout.markdownLineSpacing)
+
+        case .listItem:
+            HStack(alignment: .top, spacing: MacSpacing.small) {
+                Text("•")
+                    .foregroundColor(.secondary)
+                Text(parseInlineMarkdown(block.content))
+                    .font(.body)
+                    .textSelection(.enabled)
+            }
+
+        case .numberedItem(let number):
+            HStack(alignment: .top, spacing: MacSpacing.small) {
+                Text("\(number).")
+                    .foregroundColor(.secondary)
+                    .frame(minWidth: 20, alignment: .trailing)
+                Text(parseInlineMarkdown(block.content))
+                    .font(.body)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    /// Parse inline markdown (bold, italic) to AttributedString.
+    private func parseInlineMarkdown(_ text: String) -> AttributedString {
+        (try? AttributedString(
             markdown: text,
-            options: .init(interpretedSyntax: .full)
-        )
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
+
+    /// Parse markdown content into blocks.
+    private func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
+        var blocks: [MarkdownBlock] = []
+
+        // Split by double newlines to get blocks
+        let rawBlocks = text.components(separatedBy: "\n\n")
+
+        for rawBlock in rawBlocks {
+            let trimmed = rawBlock.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            // Check for headers
+            if trimmed.hasPrefix("######") {
+                let content = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                blocks.append(MarkdownBlock(type: .heading6, content: content))
+            } else if trimmed.hasPrefix("#####") {
+                let content = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                blocks.append(MarkdownBlock(type: .heading5, content: content))
+            } else if trimmed.hasPrefix("####") {
+                let content = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+                blocks.append(MarkdownBlock(type: .heading4, content: content))
+            } else if trimmed.hasPrefix("###") {
+                let content = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                blocks.append(MarkdownBlock(type: .heading3, content: content))
+            } else if trimmed.hasPrefix("##") {
+                let content = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                blocks.append(MarkdownBlock(type: .heading2, content: content))
+            } else if trimmed.hasPrefix("#") {
+                let content = String(trimmed.dropFirst(1)).trimmingCharacters(in: .whitespaces)
+                blocks.append(MarkdownBlock(type: .heading1, content: content))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                // Handle list items (may be multiple lines)
+                let lines = trimmed.components(separatedBy: "\n")
+                for line in lines {
+                    let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                    if trimmedLine.hasPrefix("- ") {
+                        blocks.append(MarkdownBlock(type: .listItem, content: String(trimmedLine.dropFirst(2))))
+                    } else if trimmedLine.hasPrefix("* ") {
+                        blocks.append(MarkdownBlock(type: .listItem, content: String(trimmedLine.dropFirst(2))))
+                    } else if !trimmedLine.isEmpty {
+                        blocks.append(MarkdownBlock(type: .paragraph, content: trimmedLine))
+                    }
+                }
+            } else if let match = trimmed.firstMatch(of: /^(\d+)\.\s+(.+)/) {
+                // Numbered list item
+                if let number = Int(match.1) {
+                    blocks.append(MarkdownBlock(type: .numberedItem(number), content: String(match.2)))
+                } else {
+                    blocks.append(MarkdownBlock(type: .paragraph, content: trimmed))
+                }
+            } else {
+                // Regular paragraph
+                blocks.append(MarkdownBlock(type: .paragraph, content: trimmed))
+            }
+        }
+
+        return blocks
+    }
+}
+
+/// A parsed markdown block.
+private struct MarkdownBlock {
+    let type: BlockType
+    let content: String
+
+    enum BlockType {
+        case heading1
+        case heading2
+        case heading3
+        case heading4
+        case heading5
+        case heading6
+        case paragraph
+        case listItem
+        case numberedItem(Int)
     }
 }
 
