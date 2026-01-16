@@ -253,6 +253,38 @@ enum MacFullTextLayout {
     static let loadingIndicatorSize: CGFloat = 24
 }
 
+// MARK: - Search Provider Colors
+
+/// Colors for search provider badges and UI elements.
+///
+/// Uses distinct blue shades to differentiate providers while reserving
+/// green for other purposes (scores, success states, etc.):
+/// - PubMed: Very pale blue (traditional, established database)
+/// - Europe PMC: Darker blue (European alternative)
+/// - Both: Cyan (merged/combined results)
+enum MacProviderColors {
+    /// Color for PubMed provider (very pale blue).
+    static let pubmed = Color(red: 0.6, green: 0.75, blue: 0.9)
+
+    /// Color for Europe PMC provider (darker blue).
+    static let europePMC = Color(red: 0.2, green: 0.4, blue: 0.7)
+
+    /// Color for merged/both providers (cyan).
+    static let both = Color(red: 0.0, green: 0.7, blue: 0.8)
+
+    /// Returns the appropriate color for a search provider.
+    ///
+    /// - Parameter provider: The search provider.
+    /// - Returns: Color appropriate for the provider badge.
+    static func color(for provider: SearchProvider) -> Color {
+        switch provider {
+        case .pubmed: return pubmed
+        case .europePMC: return europePMC
+        case .both: return both
+        }
+    }
+}
+
 // MARK: - Full Text Colors
 
 /// Colors for full-text source badges and viewer.

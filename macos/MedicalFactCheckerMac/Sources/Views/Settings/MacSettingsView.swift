@@ -343,6 +343,41 @@ struct SearchSettingsTab: View {
         @Bindable var settings = settings
 
         Form {
+            // Search Provider Section
+            Section("Default Search Provider") {
+                Picker("Provider", selection: $settings.selectedSearchProvider) {
+                    ForEach(SearchProvider.allCases) { provider in
+                        HStack {
+                            Image(systemName: provider.iconName)
+                                .foregroundColor(MacProviderColors.color(for: provider))
+                                .frame(width: MacIconSize.iconFrame)
+                            VStack(alignment: .leading) {
+                                Text(provider.displayName)
+                                Text(provider.description)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .tag(provider)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+
+                Toggle("Include Preprints by Default", isOn: $settings.includePreprints)
+                    .disabled(!settings.selectedSearchProvider.supportsPreprints)
+
+                if !settings.selectedSearchProvider.supportsPreprints {
+                    Text("Preprints are only available when using Europe PMC or Both providers.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // Provider Information Section
+            Section("Provider Information") {
+                providerInfoView
+            }
+
             Section("Document Retrieval") {
                 Stepper(value: $settings.batchSize, in: 5...50, step: 5) {
                     HStack {
@@ -382,6 +417,65 @@ struct SearchSettingsTab: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    /// View displaying information about each search provider.
+    private var providerInfoView: some View {
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
+            providerInfoRow(
+                icon: SearchProvider.pubmed.iconName,
+                color: MacProviderColors.pubmed,
+                name: "PubMed",
+                description: "NCBI's primary biomedical literature database. Uses MeSH indexing and provides the most reliable PMID identifiers."
+            )
+
+            Divider()
+
+            providerInfoRow(
+                icon: SearchProvider.europePMC.iconName,
+                color: MacProviderColors.europePMC,
+                name: "Europe PMC",
+                description: "European mirror with access to preprints from 34 servers including bioRxiv and medRxiv. Also provides full-text XML for many articles."
+            )
+
+            Divider()
+
+            providerInfoRow(
+                icon: SearchProvider.both.iconName,
+                color: MacProviderColors.both,
+                name: "Both (Merged)",
+                description: "Search both providers simultaneously. Results are merged with duplicates removed based on PMID, DOI, and title similarity."
+            )
+        }
+        .padding(.vertical, MacSpacing.small)
+    }
+
+    /// Row displaying information about a single provider.
+    ///
+    /// - Parameters:
+    ///   - icon: SF Symbol name for the provider.
+    ///   - color: Color for the icon.
+    ///   - name: Provider display name.
+    ///   - description: Provider description.
+    /// - Returns: A view displaying the provider information.
+    private func providerInfoRow(
+        icon: String,
+        color: Color,
+        name: String,
+        description: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: MacSpacing.medium) {
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .frame(width: MacIconSize.listNumberWidth)
+            VStack(alignment: .leading, spacing: MacSpacing.xxSmall) {
+                Text(name)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
     }
 
     private func scoreLabel(_ score: Int) -> String {

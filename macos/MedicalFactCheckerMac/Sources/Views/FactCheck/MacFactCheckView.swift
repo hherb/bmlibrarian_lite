@@ -30,6 +30,10 @@ struct MacFactCheckView: View {
     @State private var showingError = false
     @State private var errorMessage = ""
 
+    // Search options state (initialized from settings)
+    @State private var selectedSearchProvider: SearchProvider = .pubmed
+    @State private var includePreprints: Bool = false
+
     var body: some View {
         HSplitView {
             // Left column: Input and controls
@@ -45,6 +49,17 @@ struct MacFactCheckView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .onAppear {
+            // Initialize search options from settings
+            selectedSearchProvider = settings.selectedSearchProvider
+            includePreprints = settings.includePreprints
+        }
+        .onChange(of: selectedSearchProvider) { _, newValue in
+            // Reset preprints if provider doesn't support it
+            if !newValue.supportsPreprints {
+                includePreprints = false
+            }
         }
     }
 
@@ -63,11 +78,13 @@ struct MacFactCheckView: View {
                     MacConfigurationWarningView()
                 }
 
-                // Claim input
+                // Claim input with search options
                 MacClaimInputSection(
                     claimText: $claimText,
                     isRunning: workflow?.isRunning ?? false,
                     canSubmit: canSubmit,
+                    selectedSearchProvider: $selectedSearchProvider,
+                    includePreprints: $includePreprints,
                     onSubmit: startFactCheck
                 )
 
@@ -182,8 +199,16 @@ struct MacFactCheckView: View {
 
         self.workflow = newWorkflow
 
+        // Build search options from current UI state
+        let searchOptions = SearchOptions(
+            provider: selectedSearchProvider,
+            includePreprints: includePreprints,
+            maxResults: settings.batchSize,
+            offset: 0
+        )
+
         Task {
-            await newWorkflow.startFactCheck(claim: claimText)
+            await newWorkflow.startFactCheck(claim: claimText, overrideSearchOptions: searchOptions)
         }
     }
 }
@@ -223,7 +248,8 @@ struct MacConfigurationWarningView: View {
 
 /// Text input section for entering medical claims.
 ///
-/// Includes a multiline text editor with example hints and a submit button.
+/// Includes a multiline text editor with example hints, search provider options,
+/// and a submit button.
 struct MacClaimInputSection: View {
     /// The claim text binding.
     @Binding var claimText: String
@@ -231,6 +257,10 @@ struct MacClaimInputSection: View {
     let isRunning: Bool
     /// Whether the submit button should be enabled.
     let canSubmit: Bool
+    /// The selected search provider binding.
+    @Binding var selectedSearchProvider: SearchProvider
+    /// Whether to include preprints binding.
+    @Binding var includePreprints: Bool
     /// Callback when the user submits the claim.
     let onSubmit: () -> Void
 
@@ -255,30 +285,43 @@ struct MacClaimInputSection: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            HStack {
-                Button(action: onSubmit) {
-                    HStack(spacing: MacSpacing.medium) {
-                        if isRunning {
-                            ProgressView()
-                                .scaleEffect(MacScale.progressViewMedium)
-                                .progressViewStyle(CircularProgressViewStyle())
-                        } else {
-                            Image(systemName: "magnifyingglass")
-                        }
-                        Text(isRunning ? "Checking..." : "Check Evidence")
-                    }
-                    .frame(minWidth: MacLayout.submitButtonMinWidth)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!canSubmit)
+            // Search options and submit button row
+            HStack(spacing: MacSpacing.large) {
+                // Search options
+                MacSearchOptionsInline(
+                    selectedProvider: $selectedSearchProvider,
+                    includePreprints: $includePreprints
+                )
+                .disabled(isRunning)
 
-                if isRunning {
-                    Button("Cancel") {
-                        // TODO: Implement cancellation
+                Spacer()
+
+                // Submit and cancel buttons
+                HStack {
+                    Button(action: onSubmit) {
+                        HStack(spacing: MacSpacing.medium) {
+                            if isRunning {
+                                ProgressView()
+                                    .scaleEffect(MacScale.progressViewMedium)
+                                    .progressViewStyle(CircularProgressViewStyle())
+                            } else {
+                                Image(systemName: "magnifyingglass")
+                            }
+                            Text(isRunning ? "Checking..." : "Check Evidence")
+                        }
+                        .frame(minWidth: MacLayout.submitButtonMinWidth)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(!canSubmit)
+
+                    if isRunning {
+                        Button("Cancel") {
+                            // TODO: Implement cancellation
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    }
                 }
             }
         }

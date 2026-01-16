@@ -200,6 +200,9 @@ struct MacDocumentCard: View {
                             .lineLimit(1)
                     }
 
+                    // Search provider badge
+                    MacProviderBadge(provider: documentProvider)
+
                     // Full text source badge (compact)
                     if let sourceString = document.fullTextSource {
                         FullTextSourceBadge(sourceString: sourceString)
@@ -470,6 +473,31 @@ struct MacDocumentCard: View {
 
     private var embeddingColor: Color {
         MacColors.scoreColor(for: document.embeddingScoreNormalized ?? 0)
+    }
+
+    /// Determine the search provider based on document properties.
+    ///
+    /// Uses heuristics to infer which provider a document came from:
+    /// - Documents with PMC ID but empty PMID likely came from Europe PMC
+    /// - Preprints (bioRxiv, medRxiv) came from Europe PMC
+    /// - Documents with PMID likely came from PubMed
+    private var documentProvider: SearchProvider? {
+        // Documents from Europe PMC often have pmcId but empty pmid
+        if document.pmid.isEmpty && document.pmcId != nil {
+            return .europePMC
+        }
+        // Check if it's a preprint (would come from Europe PMC)
+        if let journal = document.journal?.lowercased() {
+            if journal.contains("biorxiv") || journal.contains("medrxiv") ||
+               journal.contains("preprint") || journal.contains("arxiv") {
+                return .europePMC
+            }
+        }
+        // Default to PubMed for articles with PMID
+        if !document.pmid.isEmpty {
+            return .pubmed
+        }
+        return nil
     }
 
     // MARK: - Full Text Actions
