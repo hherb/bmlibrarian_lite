@@ -1,76 +1,118 @@
 package com.bmlibrarian.factchecker.ui.navigation
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.bmlibrarian.factchecker.ui.factcheck.FactCheckScreen
+import com.bmlibrarian.factchecker.ui.history.HistoryScreen
+import com.bmlibrarian.factchecker.ui.report.ReportScreen
+import com.bmlibrarian.factchecker.ui.settings.SettingsScreen
 
 /**
  * Main navigation component for MedicalFactChecker.
  *
- * This is a placeholder implementation that displays a setup confirmation.
- * Full navigation with bottom bar will be implemented in Phase 6.
+ * Provides bottom navigation with four tabs:
+ * - Check: Main fact-checking flow
+ * - Report: View generated evidence reports
+ * - History: Browse past sessions
+ * - Settings: App configuration
  *
- * Navigation structure (Phase 6):
- * - FactCheck tab: Main fact-checking flow
- * - History tab: Past sessions
- * - Settings tab: App configuration
+ * Uses Jetpack Compose Navigation for screen management.
  */
 @Composable
 fun AppNavigation() {
-    // Placeholder - will be replaced with NavHost and bottom navigation in Phase 6
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavRoute.bottomNavItems.forEach { navItem ->
+                    val selected = currentDestination?.hierarchy?.any {
+                        it.route == navItem.route
+                    } == true
+
+                    NavigationBarItem(
+                        selected = selected,
+                        onClick = {
+                            navController.navigate(navItem.route) {
+                                // Pop up to the start destination to avoid building
+                                // up a large back stack
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                // Avoid multiple copies of the same destination
+                                launchSingleTop = true
+                                // Restore state when reselecting a previously selected item
+                                restoreState = true
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = if (selected) navItem.selectedIcon else navItem.unselectedIcon,
+                                contentDescription = navItem.title
+                            )
+                        },
+                        label = { Text(navItem.title) }
+                    )
+                }
+            }
+        }
+    ) { paddingValues ->
+        NavHost(
+            navController = navController,
+            startDestination = NavRoute.FactCheck.route,
+            modifier = Modifier.padding(paddingValues)
         ) {
-            Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.height(64.dp)
-            )
+            composable(NavRoute.FactCheck.route) {
+                FactCheckScreen(
+                    onNavigateToReport = {
+                        navController.navigate(NavRoute.Report.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            composable(NavRoute.Report.route) {
+                ReportScreen()
+            }
 
-            Text(
-                text = "MedicalFactChecker",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            composable(NavRoute.History.route) {
+                HistoryScreen(
+                    onSessionClick = { sessionId ->
+                        // Navigate to report for this session
+                        navController.navigate(NavRoute.Report.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Phase 1 Setup Complete",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "Project structure, dependency injection, and theming are configured.\n\nProceed to Phase 2 to implement data models.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
+            composable(NavRoute.Settings.route) {
+                SettingsScreen()
+            }
         }
     }
 }
