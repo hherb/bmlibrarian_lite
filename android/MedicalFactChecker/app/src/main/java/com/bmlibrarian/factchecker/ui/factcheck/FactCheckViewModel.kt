@@ -256,22 +256,20 @@ class FactCheckViewModel @Inject constructor(
     /**
      * Build the workflow configuration from current settings.
      *
+     * Uses default search provider (PubMed) since search provider settings
+     * are not yet implemented in SettingsRepository.
+     *
      * @return WorkflowConfig with current settings
      */
     private fun buildWorkflowConfig(): WorkflowConfig {
-        val provider = settingsRepository.getLlmProvider()
-        val searchProvider = when (provider) {
-            "europepmc" -> SearchProvider.EUROPE_PMC
-            "both" -> SearchProvider.BOTH
-            else -> SearchProvider.PUBMED
-        }
-
+        // TODO: Add search provider to SettingsRepository and use it here
+        // For now, default to PubMed as the primary search provider
         return WorkflowConfig(
-            searchProvider = searchProvider,
+            searchProvider = SearchProvider.PUBMED,
             includePreprints = false,
-            batchSize = Constants.DEFAULT_BATCH_SIZE,
+            batchSize = WorkflowConfig.DEFAULT_BATCH_SIZE,
             relevanceThreshold = Constants.SCORING_MIN_RELEVANT_SCORE,
-            targetRelevantDocuments = Constants.DEFAULT_TARGET_RELEVANT_DOCS,
+            targetRelevantDocuments = WorkflowConfig.DEFAULT_TARGET_RELEVANT_DOCUMENTS,
             maxRunBudgetUsd = settingsRepository.getMaxRunBudgetUsd().toDouble(),
             monthlyBudgetUsd = settingsRepository.getMonthlyBudgetUsd().toDouble()
         )
