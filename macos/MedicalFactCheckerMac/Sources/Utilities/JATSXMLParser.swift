@@ -224,6 +224,29 @@ final class JATSXMLParser: NSObject {
         return markdown
     }
 
+    /// Parse the XML and return HTML-formatted content.
+    ///
+    /// HTML output provides better table rendering and semantic structure
+    /// compared to markdown.
+    ///
+    /// - Returns: HTML string representation of the article (body content only, no wrapper).
+    /// - Throws: `JATSParseError` if parsing fails.
+    func parseToHTML() throws -> String {
+        guard parser.parse() else {
+            let errorMessage = parseError?.localizedDescription
+                ?? parser.parserError?.localizedDescription
+                ?? "Unknown parsing error"
+            throw JATSParseError.parsingFailed(errorMessage)
+        }
+
+        let html = buildHTML()
+        if html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw JATSParseError.noContent
+        }
+
+        return html
+    }
+
     // MARK: - Markdown Builder
 
     /// Build the final markdown string from parsed content.
@@ -464,6 +487,392 @@ final class JATSXMLParser: NSObject {
         }
 
         return lines
+    }
+
+    // MARK: - HTML Builder
+
+    /// Build the final HTML string from parsed content.
+    ///
+    /// Generates semantic HTML with proper table structure, figure elements,
+    /// and anchor IDs for navigation.
+    private func buildHTML() -> String {
+        var html: [String] = []
+
+        // Title
+        if !title.isEmpty {
+            html.append("<h1>\(escapeHTML(title))</h1>")
+        }
+
+        // Authors
+        if !authors.isEmpty {
+            let authorString = formatAuthors()
+            html.append("<p class=\"authors\"><strong>Authors:</strong> \(escapeHTML(authorString))</p>")
+        }
+
+        // Journal info
+        let journalInfo = formatJournalInfoHTML()
+        if !journalInfo.isEmpty {
+            html.append("<p class=\"journal-info\">\(journalInfo)</p>")
+        }
+
+        // Identifiers
+        let identifiers = formatIdentifiersHTML()
+        if !identifiers.isEmpty {
+            html.append("<p class=\"identifiers\">\(identifiers)</p>")
+        }
+
+        // Abstract
+        if !abstractSections.isEmpty {
+            html.append("<h2>Abstract</h2>")
+            for section in abstractSections {
+                if !section.title.isEmpty {
+                    html.append("<p><strong>\(escapeHTML(section.title)):</strong> \(escapeHTML(section.content))</p>")
+                } else {
+                    html.append("<p>\(escapeHTML(section.content))</p>")
+                }
+            }
+        }
+
+        // Body sections
+        for section in bodySections {
+            html.append(contentsOf: formatBodySectionHTML(section, level: 2))
+        }
+
+        // Figures
+        if !figures.isEmpty {
+            html.append("<h2>Figures</h2>")
+            for (index, figure) in figures.enumerated() {
+                let figNum = figure.label.isEmpty ? "Figure \(index + 1)" : figure.label
+                let anchorId = figure.id.isEmpty ? "fig\(index + 1)" : figure.id
+
+                html.append("<figure id=\"\(escapeHTML(anchorId))\">")
+                if let graphicURL = figure.graphicURL {
+                    let fullURL = buildFigureURL(graphicURL)
+                    // Use onerror to try alternative extensions
+                    html.append("  <img src=\"\(escapeHTML(fullURL))\" alt=\"\(escapeHTML(figNum))\" " +
+                        "onerror=\"this.onerror=null; tryAlternativeExtensions(this);\" loading=\"lazy\">")
+                }
+                html.append("  <figcaption>")
+                html.append("    <strong>\(escapeHTML(figNum))</strong>")
+                if !figure.caption.isEmpty {
+                    html.append("    <p>\(escapeHTML(figure.caption))</p>")
+                }
+                html.append("  </figcaption>")
+                html.append("</figure>")
+            }
+        }
+
+        // Tables
+        if !tables.isEmpty {
+            html.append("<h2>Tables</h2>")
+            for (index, table) in tables.enumerated() {
+                let tableNum = table.label.isEmpty ? "Table \(index + 1)" : table.label
+                let anchorId = table.id.isEmpty ? "table\(index + 1)" : table.id
+
+                html.append("<div class=\"table-container\" id=\"\(escapeHTML(anchorId))\">")
+                html.append("  <h3>\(escapeHTML(tableNum))</h3>")
+                if !table.caption.isEmpty {
+                    html.append("  <p class=\"table-caption\">\(escapeHTML(table.caption))</p>")
+                }
+                // Build HTML table from rows
+                html.append(buildHTMLTable(table))
+                html.append("</div>")
+            }
+        }
+
+        // References
+        if !references.isEmpty {
+            html.append("<h2>References</h2>")
+            html.append("<ol class=\"references\">")
+            for ref in references {
+                html.append("  <li id=\"ref-\(escapeHTML(ref.id))\">\(formatReferenceHTML(ref))</li>")
+            }
+            html.append("</ol>")
+        }
+
+        return html.joined(separator: "\n")
+    }
+
+    /// Format journal information as HTML.
+    private func formatJournalInfoHTML() -> String {
+        var parts: [String] = []
+
+        if !journal.isEmpty {
+            parts.append("<em>\(escapeHTML(journal))</em>")
+        }
+
+        var volumeInfo: [String] = []
+        if !volume.isEmpty {
+            volumeInfo.append(volume)
+        }
+        if !issue.isEmpty {
+            volumeInfo.append("(\(issue))")
+        }
+        if !pages.isEmpty {
+            volumeInfo.append(": \(pages)")
+        }
+        if !volumeInfo.isEmpty {
+            parts.append(escapeHTML(volumeInfo.joined()))
+        }
+
+        if !year.isEmpty {
+            parts.append("(\(escapeHTML(year)))")
+        }
+
+        return parts.joined(separator: " ")
+    }
+
+    /// Format document identifiers as HTML.
+    private func formatIdentifiersHTML() -> String {
+        var ids: [String] = []
+
+        if !doi.isEmpty {
+            ids.append("DOI: <a href=\"https://doi.org/\(escapeHTML(doi))\">\(escapeHTML(doi))</a>")
+        }
+        if !pmcId.isEmpty {
+            let pmcNum = pmcId.hasPrefix("PMC") ? String(pmcId.dropFirst(3)) : pmcId
+            ids.append("PMC: <a href=\"https://europepmc.org/article/PMC/\(escapeHTML(pmcNum))\">\(escapeHTML(pmcId))</a>")
+        }
+        if !pmid.isEmpty {
+            ids.append("PMID: <a href=\"https://pubmed.ncbi.nlm.nih.gov/\(escapeHTML(pmid))/\">\(escapeHTML(pmid))</a>")
+        }
+
+        return ids.joined(separator: " | ")
+    }
+
+    /// Format a body section recursively as HTML.
+    private func formatBodySectionHTML(_ section: BodySection, level: Int) -> [String] {
+        var html: [String] = []
+        let headingLevel = min(level, 6)
+
+        if !section.title.isEmpty {
+            html.append("<h\(headingLevel)>\(escapeHTML(section.title))</h\(headingLevel)>")
+        }
+
+        for paragraph in section.paragraphs {
+            if !paragraph.isEmpty {
+                // Convert markdown-style links to HTML links
+                let htmlParagraph = convertInlineLinksToHTML(paragraph)
+                html.append("<p>\(htmlParagraph)</p>")
+            }
+        }
+
+        for subsection in section.subsections {
+            html.append(contentsOf: formatBodySectionHTML(subsection, level: level + 1))
+        }
+
+        return html
+    }
+
+    /// Build an HTML table from TableInfo.
+    private func buildHTMLTable(_ table: TableInfo) -> String {
+        var html: [String] = []
+
+        // Parse the markdown table back into rows for HTML generation
+        // This is a workaround since we currently store markdown format
+        let tableRows = parseMarkdownTableRows(table.markdownContent)
+
+        guard !tableRows.isEmpty else {
+            return "<p><em>Table content unavailable</em></p>"
+        }
+
+        html.append("  <table>")
+
+        // First row is header if we have more than one row
+        let hasHeader = tableRows.count > 1
+        if hasHeader {
+            html.append("    <thead>")
+            html.append("      <tr>")
+            for cell in tableRows[0] {
+                html.append("        <th>\(escapeHTML(cell))</th>")
+            }
+            html.append("      </tr>")
+            html.append("    </thead>")
+        }
+
+        // Body rows
+        let bodyRows = hasHeader ? Array(tableRows.dropFirst()) : tableRows
+        if !bodyRows.isEmpty {
+            html.append("    <tbody>")
+            for row in bodyRows {
+                html.append("      <tr>")
+                for cell in row {
+                    html.append("        <td>\(escapeHTML(cell))</td>")
+                }
+                html.append("      </tr>")
+            }
+            html.append("    </tbody>")
+        }
+
+        html.append("  </table>")
+        return html.joined(separator: "\n")
+    }
+
+    /// Parse markdown table content back into rows.
+    private func parseMarkdownTableRows(_ markdown: String) -> [[String]] {
+        var rows: [[String]] = []
+
+        let lines = markdown.components(separatedBy: "\n")
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Skip empty lines and separator lines (| --- | --- |)
+            if trimmed.isEmpty { continue }
+            if trimmed.allSatisfy({ $0 == "|" || $0 == "-" || $0 == ":" || $0 == " " }) { continue }
+
+            // Parse cells from pipe-separated line
+            var cells: [String] = []
+            var content = trimmed
+
+            // Remove leading/trailing pipes
+            if content.hasPrefix("|") { content = String(content.dropFirst()) }
+            if content.hasSuffix("|") { content = String(content.dropLast()) }
+
+            // Split by pipe and trim
+            let parts = content.components(separatedBy: "|")
+            for part in parts {
+                // Unescape any escaped pipes
+                let cell = part.trimmingCharacters(in: .whitespaces)
+                    .replacingOccurrences(of: "\\|", with: "|")
+                cells.append(cell)
+            }
+
+            if !cells.isEmpty {
+                rows.append(cells)
+            }
+        }
+
+        return rows
+    }
+
+    /// Format a reference as HTML.
+    private func formatReferenceHTML(_ ref: ReferenceInfo) -> String {
+        var parts: [String] = []
+
+        // Authors
+        if !ref.authors.isEmpty {
+            if ref.authors.count <= 3 {
+                parts.append(escapeHTML(ref.authors.joined(separator: ", ")))
+            } else {
+                parts.append(escapeHTML("\(ref.authors[0]), \(ref.authors[1]), et al."))
+            }
+        }
+
+        // Article title
+        if !ref.articleTitle.isEmpty {
+            parts.append(escapeHTML(ref.articleTitle))
+        }
+
+        // Journal name (italicized)
+        if !ref.source.isEmpty {
+            parts.append("<em>\(escapeHTML(ref.source))</em>")
+        }
+
+        // Year
+        if !ref.year.isEmpty {
+            parts.append("(\(escapeHTML(ref.year)))")
+        }
+
+        // Volume and pages
+        var volumeInfo = ""
+        if !ref.volume.isEmpty {
+            volumeInfo = ref.volume
+            if !ref.issue.isEmpty {
+                volumeInfo += "(\(ref.issue))"
+            }
+        }
+        if !ref.firstPage.isEmpty {
+            if !volumeInfo.isEmpty {
+                volumeInfo += ":"
+            }
+            volumeInfo += ref.firstPage
+            if !ref.lastPage.isEmpty {
+                volumeInfo += "-\(ref.lastPage)"
+            }
+        }
+        if !volumeInfo.isEmpty {
+            parts.append(escapeHTML(volumeInfo))
+        }
+
+        // DOI link
+        if !ref.doi.isEmpty {
+            parts.append("<a href=\"https://doi.org/\(escapeHTML(ref.doi))\">doi:\(escapeHTML(ref.doi))</a>")
+        }
+
+        if parts.isEmpty {
+            return escapeHTML(ref.citation)
+        }
+
+        return parts.joined(separator: ". ")
+    }
+
+    /// Convert markdown-style anchor links to HTML links.
+    ///
+    /// Converts `[text](#anchor)` to `<a href="#anchor">text</a>`.
+    private func convertInlineLinksToHTML(_ text: String) -> String {
+        var result = ""
+        var remaining = text
+
+        // Pattern: [link text](#anchor-id)
+        while let bracketStart = remaining.firstIndex(of: "[") {
+            // Add text before the bracket
+            result += escapeHTML(String(remaining[..<bracketStart]))
+
+            // Find closing bracket
+            var depth = 0
+            var bracketEnd: String.Index?
+            var index = bracketStart
+
+            while index < remaining.endIndex {
+                if remaining[index] == "[" {
+                    depth += 1
+                } else if remaining[index] == "]" {
+                    depth -= 1
+                    if depth == 0 {
+                        bracketEnd = index
+                        break
+                    }
+                }
+                index = remaining.index(after: index)
+            }
+
+            guard let bracketEnd = bracketEnd,
+                  remaining.index(after: bracketEnd) < remaining.endIndex,
+                  remaining[remaining.index(after: bracketEnd)] == "(" else {
+                // Not a valid link, add the bracket and continue
+                result += "["
+                remaining = String(remaining[remaining.index(after: bracketStart)...])
+                continue
+            }
+
+            let linkText = String(remaining[remaining.index(after: bracketStart)..<bracketEnd])
+
+            // Find the href
+            let parenStart = remaining.index(after: bracketEnd)
+            guard let parenEnd = remaining[parenStart...].firstIndex(of: ")") else {
+                result += "[\(escapeHTML(linkText))]"
+                remaining = String(remaining[remaining.index(after: bracketEnd)...])
+                continue
+            }
+
+            let href = String(remaining[remaining.index(after: parenStart)..<parenEnd])
+            result += "<a href=\"\(escapeHTML(href))\">\(escapeHTML(linkText))</a>"
+            remaining = String(remaining[remaining.index(after: parenEnd)...])
+        }
+
+        // Add any remaining text
+        result += escapeHTML(remaining)
+
+        return result
+    }
+
+    /// Escape HTML special characters.
+    private func escapeHTML(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
     }
 }
 

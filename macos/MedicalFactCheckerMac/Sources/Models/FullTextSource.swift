@@ -70,7 +70,12 @@ enum FullTextSource: String, Codable, CaseIterable {
 /// The type of content retrieved from a full-text source.
 enum FullTextContentType: Equatable {
     /// Markdown-formatted text (from Europe PMC XML conversion).
+    /// Deprecated: prefer `.html` for better table and figure rendering.
     case markdown(String)
+
+    /// HTML-formatted text (from Europe PMC XML conversion).
+    /// Preferred over markdown for proper table and figure rendering.
+    case html(content: String, markdown: String)
 
     /// URL to a downloadable PDF file.
     case pdfURL(URL)
@@ -81,19 +86,31 @@ enum FullTextContentType: Equatable {
     /// Whether this content can be displayed in-app.
     var canDisplayInApp: Bool {
         switch self {
-        case .markdown, .pdfURL:
+        case .markdown, .html, .pdfURL:
             return true
         case .webURL:
             return false
         }
     }
 
-    /// Extract the markdown content if this is a markdown type.
-    var markdownContent: String? {
-        if case .markdown(let content) = self {
+    /// Extract the HTML content if this is an HTML type.
+    var htmlContent: String? {
+        if case .html(let content, _) = self {
             return content
         }
         return nil
+    }
+
+    /// Extract the markdown content if this is a markdown or HTML type.
+    var markdownContent: String? {
+        switch self {
+        case .markdown(let content):
+            return content
+        case .html(_, let markdown):
+            return markdown
+        default:
+            return nil
+        }
     }
 
     /// Extract the PDF URL if this is a PDF type.
@@ -135,8 +152,21 @@ struct FullTextResult: Equatable {
     ///
     /// - Parameter markdown: The markdown content.
     /// - Returns: A full-text result with Europe PMC source.
+    /// - Note: Prefer `europePMC(html:markdown:)` for better table rendering.
     static func europePMC(markdown: String) -> FullTextResult {
         FullTextResult(content: .markdown(markdown), source: .europePMC)
+    }
+
+    /// Create an HTML result from Europe PMC.
+    ///
+    /// HTML provides better table and figure rendering than markdown.
+    ///
+    /// - Parameters:
+    ///   - html: The HTML content (body only, no wrapper).
+    ///   - markdown: The markdown content (fallback and for text search/export).
+    /// - Returns: A full-text result with Europe PMC source.
+    static func europePMC(html: String, markdown: String) -> FullTextResult {
+        FullTextResult(content: .html(content: html, markdown: markdown), source: .europePMC)
     }
 
     /// Create a PDF URL result from Unpaywall.

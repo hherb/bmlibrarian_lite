@@ -16,6 +16,7 @@
 
 import SwiftUI
 import PDFKit
+import WebKit
 
 /// Full-text viewer optimized for macOS.
 ///
@@ -166,7 +167,10 @@ struct MacFullTextViewer: View {
 
     @ViewBuilder
     private var content: some View {
-        if let markdownContent = document.fullTextContent {
+        // Prefer HTML for better table rendering, fall back to markdown
+        if let htmlContent = document.fullTextHTML {
+            HTMLContentView(htmlContent: htmlContent, searchText: searchText)
+        } else if let markdownContent = document.fullTextContent {
             MacMarkdownView(content: markdownContent, searchText: searchText)
         } else if let pdfPath = document.fullTextPDFPath {
             MacPDFView(filePath: pdfPath)
@@ -1092,6 +1096,425 @@ struct MarkdownTableView: View {
         // Adjust index for alternating colors (skip header)
         let adjustedIndex = hasHeader ? index - 1 : index
         return adjustedIndex.isMultiple(of: 2) ? Color.clear : alternateBackground
+    }
+}
+
+// MARK: - HTML Content View
+
+/// SwiftUI view that renders HTML content using WKWebView.
+///
+/// Provides proper table rendering, semantic HTML structure, and
+/// clickable anchor links for navigation within the document.
+struct HTMLContentView: NSViewRepresentable {
+    /// The HTML body content to render (without HTML/head wrapper).
+    let htmlContent: String
+
+    /// Current search text to highlight.
+    let searchText: String
+
+    /// Coordinator to handle WKWebView navigation and callbacks.
+    class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: HTMLContentView
+
+        init(_ parent: HTMLContentView) {
+            self.parent = parent
+        }
+
+        /// Handle navigation actions (e.g., anchor clicks, external links).
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Handle anchor links within the document
+            if url.scheme == nil || url.absoluteString.hasPrefix("#") {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Handle internal fragment navigation
+            if url.fragment != nil && url.host == nil {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Open external links in default browser
+            if url.scheme == "http" || url.scheme == "https" {
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+
+        // Enable JavaScript for anchor navigation
+        let preferences = WKPreferences()
+        configuration.preferences = preferences
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+
+        // Set appearance to match system
+        webView.setValue(false, forKey: "drawsBackground")
+
+        // Load the HTML content
+        let fullHTML = wrapHTMLContent(htmlContent)
+        webView.loadHTMLString(fullHTML, baseURL: nil)
+
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        // Re-load content if it changed
+        let fullHTML = wrapHTMLContent(htmlContent)
+        webView.loadHTMLString(fullHTML, baseURL: nil)
+
+        // Apply search highlighting if search text is present
+        if !searchText.isEmpty {
+            highlightSearchText(in: webView, searchText: searchText)
+        } else {
+            clearHighlights(in: webView)
+        }
+    }
+
+    /// Wrap HTML content in a full HTML document with CSS styling.
+    private func wrapHTMLContent(_ content: String) -> String {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                \(htmlCSS)
+            </style>
+            <script>
+                \(htmlJavaScript)
+            </script>
+        </head>
+        <body>
+            \(content)
+        </body>
+        </html>
+        """
+    }
+
+    /// CSS styles for the HTML content.
+    private var htmlCSS: String {
+        """
+        :root {
+            color-scheme: light dark;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 100%;
+            margin: 0 auto;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-color: #e0e0e0;
+                --bg-color: #1e1e1e;
+                --heading-color: #ffffff;
+                --link-color: #6db3f2;
+                --border-color: #444;
+                --table-header-bg: #2d3748;
+                --table-alt-bg: #252525;
+                --highlight-bg: #665500;
+            }
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --text-color: #333;
+                --bg-color: #ffffff;
+                --heading-color: #1a1a1a;
+                --link-color: #0066cc;
+                --border-color: #ddd;
+                --table-header-bg: #f0f4f8;
+                --table-alt-bg: #fafafa;
+                --highlight-bg: #ffff00;
+            }
+        }
+
+        h1 {
+            font-size: 1.8em;
+            color: var(--heading-color);
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 8px;
+            margin-top: 0;
+        }
+
+        h2 {
+            font-size: 1.4em;
+            color: var(--heading-color);
+            margin-top: 1.5em;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 4px;
+        }
+
+        h3 {
+            font-size: 1.2em;
+            color: var(--heading-color);
+            margin-top: 1.2em;
+        }
+
+        h4, h5, h6 {
+            font-size: 1.1em;
+            color: var(--heading-color);
+            margin-top: 1em;
+        }
+
+        p {
+            margin: 0.8em 0;
+        }
+
+        a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Metadata styling */
+        .authors, .journal-info, .identifiers {
+            font-size: 0.95em;
+            margin: 0.5em 0;
+        }
+
+        /* Table styling */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+            font-size: 0.9em;
+        }
+
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background-color: var(--table-header-bg);
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) {
+            background-color: var(--table-alt-bg);
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin: 1.5em 0;
+        }
+
+        .table-caption {
+            font-style: italic;
+            margin-bottom: 0.5em;
+            color: var(--text-color);
+            opacity: 0.8;
+        }
+
+        /* Figure styling */
+        figure {
+            margin: 1.5em 0;
+            padding: 1em;
+            background-color: var(--table-alt-bg);
+            border-radius: 8px;
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
+        figcaption {
+            margin-top: 0.5em;
+            font-size: 0.9em;
+            text-align: center;
+        }
+
+        figcaption strong {
+            display: block;
+            margin-bottom: 0.3em;
+        }
+
+        /* References styling */
+        .references {
+            font-size: 0.9em;
+        }
+
+        .references li {
+            margin-bottom: 0.8em;
+            padding-left: 0.5em;
+        }
+
+        /* Search highlight */
+        .search-highlight {
+            background-color: var(--highlight-bg);
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
+
+        /* Scrollbar styling for WebKit */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: var(--border-color);
+            border-radius: 4px;
+        }
+        """
+    }
+
+    /// JavaScript for figure fallback and search highlighting.
+    private var htmlJavaScript: String {
+        """
+        // Try alternative image extensions when loading fails
+        function tryAlternativeExtensions(img) {
+            var src = img.src;
+            var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+            var currentExt = src.match(/\\.[^.]+$/);
+
+            if (!currentExt) return;
+
+            var base = src.slice(0, -currentExt[0].length);
+            var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
+
+            for (var i = 0; i < extensions.length; i++) {
+                if (i !== currentIndex) {
+                    img.src = base + extensions[i];
+                    return;
+                }
+            }
+        }
+
+        // Smooth scroll to anchor
+        document.addEventListener('click', function(e) {
+            var target = e.target.closest('a[href^="#"]');
+            if (target) {
+                e.preventDefault();
+                var id = target.getAttribute('href').substring(1);
+                var element = document.getElementById(id);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
+        });
+        """
+    }
+
+    /// Highlight search text in the web view.
+    private func highlightSearchText(in webView: WKWebView, searchText: String) {
+        let escapedText = searchText
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+
+        let js = """
+        (function() {
+            // Clear existing highlights
+            var highlights = document.querySelectorAll('.search-highlight');
+            highlights.forEach(function(el) {
+                var parent = el.parentNode;
+                parent.replaceChild(document.createTextNode(el.textContent), el);
+                parent.normalize();
+            });
+
+            if ('\(escapedText)' === '') return;
+
+            // Find and highlight text
+            var walker = document.createTreeWalker(
+                document.body,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+
+            var nodes = [];
+            while (walker.nextNode()) {
+                if (walker.currentNode.textContent.toLowerCase().includes('\(escapedText.lowercased())')) {
+                    nodes.push(walker.currentNode);
+                }
+            }
+
+            nodes.forEach(function(node) {
+                var text = node.textContent;
+                var regex = new RegExp('(\(escapedText))', 'gi');
+                var parts = text.split(regex);
+
+                if (parts.length > 1) {
+                    var fragment = document.createDocumentFragment();
+                    parts.forEach(function(part) {
+                        if (part.toLowerCase() === '\(escapedText.lowercased())') {
+                            var span = document.createElement('span');
+                            span.className = 'search-highlight';
+                            span.textContent = part;
+                            fragment.appendChild(span);
+                        } else {
+                            fragment.appendChild(document.createTextNode(part));
+                        }
+                    });
+                    node.parentNode.replaceChild(fragment, node);
+                }
+            });
+
+            // Scroll to first highlight
+            var first = document.querySelector('.search-highlight');
+            if (first) {
+                first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        })();
+        """
+
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// Clear search highlights in the web view.
+    private func clearHighlights(in webView: WKWebView) {
+        let js = """
+        (function() {
+            var highlights = document.querySelectorAll('.search-highlight');
+            highlights.forEach(function(el) {
+                var parent = el.parentNode;
+                parent.replaceChild(document.createTextNode(el.textContent), el);
+                parent.normalize();
+            });
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 }
 

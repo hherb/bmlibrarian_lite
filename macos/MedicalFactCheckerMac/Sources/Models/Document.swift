@@ -116,7 +116,14 @@ final class Document {
     /// The full text content in markdown format (from Europe PMC XML conversion).
     ///
     /// Nil if full text was not retrieved or only PDF is available.
+    /// Deprecated: prefer `fullTextHTML` for better table and figure rendering.
     var fullTextContent: String?
+
+    /// The full text content in HTML format (from Europe PMC XML conversion).
+    ///
+    /// Nil if full text was not retrieved or only PDF is available.
+    /// Preferred over markdown for proper table and figure rendering.
+    var fullTextHTML: String?
 
     /// Local file path to the cached PDF, if available.
     ///
@@ -249,9 +256,9 @@ final class Document {
 
     /// Whether full text is available for this document.
     ///
-    /// True if either markdown content or a cached PDF is available.
+    /// True if either HTML/markdown content or a cached PDF is available.
     var hasFullText: Bool {
-        fullTextContent != nil || fullTextPDFPath != nil
+        fullTextHTML != nil || fullTextContent != nil || fullTextPDFPath != nil
     }
 
     /// Whether a full text fetch has been attempted (success or failure).
@@ -299,13 +306,20 @@ final class Document {
         switch result.content {
         case .markdown(let content):
             fullTextContent = content
+            fullTextHTML = nil
+            fullTextPDFPath = nil
+        case .html(let htmlContent, let markdownContent):
+            fullTextHTML = htmlContent
+            fullTextContent = markdownContent
             fullTextPDFPath = nil
         case .pdfURL:
             // PDF path will be set after download
             fullTextContent = nil
+            fullTextHTML = nil
         case .webURL:
             // Web URLs don't store content locally
             fullTextContent = nil
+            fullTextHTML = nil
             fullTextPDFPath = nil
         }
     }
@@ -315,6 +329,7 @@ final class Document {
         fullTextUnavailable = true
         fullTextFetchedAt = nil
         fullTextContent = nil
+        fullTextHTML = nil
         fullTextPDFPath = nil
         fullTextSource = nil
     }
@@ -322,6 +337,7 @@ final class Document {
     /// Clear cached full text data to allow re-fetching.
     func clearFullTextCache() {
         fullTextContent = nil
+        fullTextHTML = nil
         fullTextPDFPath = nil
         fullTextSource = nil
         fullTextFetchedAt = nil

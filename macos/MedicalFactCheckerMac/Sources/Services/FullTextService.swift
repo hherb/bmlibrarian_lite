@@ -160,9 +160,9 @@ actor FullTextService {
         // Try Europe PMC first (best quality - machine readable XML)
         if let pmcId = pmcId, !pmcId.isEmpty {
             do {
-                let markdown = try await fetchEuropePMCWithRetry(pmcId: pmcId)
+                let content = try await fetchEuropePMCWithRetry(pmcId: pmcId)
                 AppLogger.fullText.info("Successfully retrieved Europe PMC full text for \(pmcId)")
-                return .europePMC(markdown: markdown)
+                return .europePMC(html: content.html, markdown: content.markdown)
             } catch {
                 AppLogger.fullText.warning("Europe PMC failed for \(pmcId): \(error.localizedDescription)")
             }
@@ -200,7 +200,7 @@ actor FullTextService {
     /// Fetch full-text XML from Europe PMC with retry logic.
     ///
     /// Uses server error configuration for more aggressive retry on 5xx errors.
-    private func fetchEuropePMCWithRetry(pmcId: String) async throws -> String {
+    private func fetchEuropePMCWithRetry(pmcId: String) async throws -> (html: String, markdown: String) {
         try await RetryHelper.retry(
             config: .serverError,
             shouldRetry: RetryHelper.retryOnlyTransient
@@ -209,12 +209,12 @@ actor FullTextService {
         }
     }
 
-    /// Fetch full-text XML from Europe PMC and convert to markdown.
+    /// Fetch full-text XML from Europe PMC and convert to HTML and markdown.
     ///
     /// - Parameter pmcId: PubMed Central ID (with or without "PMC" prefix).
-    /// - Returns: Markdown-formatted article text.
+    /// - Returns: Tuple of HTML and markdown formatted article text.
     /// - Throws: `FullTextError` on failure.
-    private func fetchEuropePMCXML(pmcId: String) async throws -> String {
+    private func fetchEuropePMCXML(pmcId: String) async throws -> (html: String, markdown: String) {
         // Normalize PMC ID (ensure it has the PMC prefix)
         let normalizedId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
 
@@ -250,10 +250,15 @@ actor FullTextService {
             throw FullTextError.invalidResponse("HTTP \(statusCode)")
         }
 
-        // Parse JATS XML to markdown, passing the known PMC ID for figure URLs
+        // Parse JATS XML to both HTML and markdown, passing the known PMC ID for figure URLs
+        // HTML provides better table rendering, markdown is kept for text search/export
         let parser = JATSXMLParser(data: data, knownPMCId: normalizedId)
         do {
-            return try parser.parseToMarkdown()
+            let html = try parser.parseToHTML()
+            // Create a second parser for markdown (XML parser is consumed after first parse)
+            let markdownParser = JATSXMLParser(data: data, knownPMCId: normalizedId)
+            let markdown = try markdownParser.parseToMarkdown()
+            return (html: html, markdown: markdown)
         } catch let parseError as JATSParseError {
             throw FullTextError.xmlParseError(parseError.localizedDescription)
         } catch {

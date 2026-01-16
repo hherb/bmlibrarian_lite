@@ -540,7 +540,7 @@ struct MacDocumentCard: View {
                     document.applyFullTextResult(result)
 
                     switch result.content {
-                    case .markdown:
+                    case .markdown, .html:
                         // Content already stored, show in tab
                         onShowFullText?(document)
 
