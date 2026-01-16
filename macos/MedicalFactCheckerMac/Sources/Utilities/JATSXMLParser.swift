@@ -953,11 +953,13 @@ extension JATSXMLParser: XMLParserDelegate {
             }
         case "th":
             if inTableWrap {
-                currentTable?.startCell(isHeader: true)
+                let colspan = Int(attributeDict["colspan"] ?? "1") ?? 1
+                currentTable?.startCell(isHeader: true, colspan: colspan)
             }
         case "td":
             if inTableWrap {
-                currentTable?.startCell(isHeader: false)
+                let colspan = Int(attributeDict["colspan"] ?? "1") ?? 1
+                currentTable?.startCell(isHeader: false, colspan: colspan)
             }
         case "list":
             if inTableWrap {
@@ -1547,13 +1549,18 @@ private struct TableBuilder {
         currentRowHasHeaderCells = false
     }
 
-    mutating func startCell(isHeader: Bool = false) {
+    // Track colspan for current cell
+    var currentColspan = 1
+
+    mutating func startCell(isHeader: Bool = false, colspan: Int = 1) {
         inCell = true
         currentCellText = ""
+        currentColspan = max(1, colspan)
         inList = false
         listItemNumber = 0
         pendingListItem = false
-        if isHeader {
+        // Mark as header row if explicitly a <th> cell OR if we're inside <thead>
+        if isHeader || inHeader {
             currentRowHasHeaderCells = true
         }
     }
@@ -1568,9 +1575,15 @@ private struct TableBuilder {
                 .joined(separator: " ")
                 .replacingOccurrences(of: "|", with: "\\|")
             currentRow.append(normalized)
+
+            // Add empty cells for colspan > 1
+            for _ in 1..<currentColspan {
+                currentRow.append("")
+            }
         }
         inCell = false
         currentCellText = ""
+        currentColspan = 1
         inList = false
         listItemNumber = 0
         pendingListItem = false
