@@ -21,7 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Snackbar
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -83,85 +83,86 @@ fun SettingsScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(Constants.UI_SCREEN_PADDING.dp)
-    ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height((Constants.UI_SECTION_SPACING + Constants.UI_ELEMENT_SPACING).dp))
-
-        // LLM Provider Section
-        LLMProviderSection(
-            settings = settings,
-            apiKeyInput = apiKeyInput,
-            hasApiKey = hasApiKey,
-            requiresApiKey = requiresApiKey,
-            showApiKey = showApiKey,
-            currentModels = currentModels,
-            providers = viewModel.providers,
-            onProviderSelected = viewModel::setProvider,
-            onModelSelected = viewModel::setModel,
-            onApiKeyInputChange = viewModel::updateApiKeyInput,
-            onToggleApiKeyVisibility = { showApiKey = !showApiKey },
-            onSaveApiKey = viewModel::saveApiKey,
-            onClearApiKey = viewModel::clearApiKey,
-            onCustomBaseUrlChange = viewModel::setCustomBaseUrl
-        )
-
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Search Settings Section
-        SearchSettingsSection(
-            settings = settings,
-            onSearchProviderSelected = viewModel::setSearchProvider,
-            onIncludePreprintsChange = viewModel::setIncludePreprints,
-            onBatchSizeChange = viewModel::setBatchSize,
-            onRelevanceThresholdChange = viewModel::setRelevanceThreshold,
-            onTargetRelevantDocsChange = viewModel::setTargetRelevantDocuments
-        )
-
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Budget Settings Section
-        BudgetSettingsSection(
-            settings = settings,
-            estimatedCostPerRun = estimatedCostPerRun,
-            onMaxRunBudgetChange = viewModel::setMaxRunBudget,
-            onMonthlyBudgetChange = viewModel::setMonthlyBudget
-        )
-
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Advanced Section
-        AdvancedSection(
-            ncbiEmail = settings.ncbiEmail,
-            onNcbiEmailChange = viewModel::setNcbiEmail,
-            onResetClick = { showResetDialog = true }
-        )
-
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Model Pricing Info
-        if (currentModels.isNotEmpty()) {
-            SettingsSection(title = "Model Pricing") {
-                ModelPricingTable(models = currentModels)
-            }
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
         }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(paddingValues)
+                .padding(Constants.UI_SCREEN_PADDING.dp)
+        ) {
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.headlineMedium
+            )
 
-        Spacer(modifier = Modifier.height(Constants.UI_PLACEHOLDER_PADDING.dp))
+            Spacer(modifier = Modifier.height((Constants.UI_SECTION_SPACING + Constants.UI_ELEMENT_SPACING).dp))
+
+            // LLM Provider Section
+            LLMProviderSection(
+                settings = settings,
+                apiKeyInput = apiKeyInput,
+                hasApiKey = hasApiKey,
+                requiresApiKey = requiresApiKey,
+                showApiKey = showApiKey,
+                currentModels = currentModels,
+                providers = viewModel.providers,
+                onProviderSelected = viewModel::setProvider,
+                onModelSelected = viewModel::setModel,
+                onApiKeyInputChange = viewModel::updateApiKeyInput,
+                onToggleApiKeyVisibility = { showApiKey = !showApiKey },
+                onSaveApiKey = viewModel::saveApiKey,
+                onClearApiKey = viewModel::clearApiKey,
+                onCustomBaseUrlChange = viewModel::setCustomBaseUrl
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Search Settings Section
+            SearchSettingsSection(
+                settings = settings,
+                onSearchProviderSelected = viewModel::setSearchProvider,
+                onIncludePreprintsChange = viewModel::setIncludePreprints,
+                onBatchSizeChange = viewModel::setBatchSize,
+                onRelevanceThresholdChange = viewModel::setRelevanceThreshold,
+                onTargetRelevantDocsChange = viewModel::setTargetRelevantDocuments
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Budget Settings Section
+            BudgetSettingsSection(
+                settings = settings,
+                estimatedCostPerRun = estimatedCostPerRun,
+                onMaxRunBudgetChange = viewModel::setMaxRunBudget,
+                onMonthlyBudgetChange = viewModel::setMonthlyBudget
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Advanced Section
+            AdvancedSection(
+                ncbiEmail = settings.ncbiEmail,
+                onNcbiEmailChange = viewModel::setNcbiEmail,
+                onResetClick = { showResetDialog = true }
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Model Pricing Info
+            if (currentModels.isNotEmpty()) {
+                SettingsSection(title = "Model Pricing") {
+                    ModelPricingTable(models = currentModels)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Constants.UI_PLACEHOLDER_PADDING.dp))
+        }
     }
-
-    // Snackbar host for status messages
-    SnackbarHost(
-        hostState = snackbarHostState,
-        modifier = Modifier.padding(Constants.UI_SCREEN_PADDING.dp)
-    )
 
     // Reset confirmation dialog
     if (showResetDialog) {
@@ -366,7 +367,7 @@ private fun SearchSettingsSection(
             onValueChange = { onRelevanceThresholdChange(it.toInt()) },
             valueRange = Constants.SCORING_MIN_SCORE.toFloat()..Constants.SCORING_MAX_SCORE.toFloat(),
             steps = Constants.SCORING_MAX_SCORE - Constants.SCORING_MIN_SCORE - 1,
-            valueDisplay = "${settings.relevanceThreshold}/5 minimum"
+            valueDisplay = "${settings.relevanceThreshold}/${Constants.SCORING_MAX_SCORE} minimum"
         )
 
         Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
