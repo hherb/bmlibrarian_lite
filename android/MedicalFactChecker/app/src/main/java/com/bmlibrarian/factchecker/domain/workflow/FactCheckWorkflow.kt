@@ -191,18 +191,23 @@ class FactCheckWorkflow @Inject constructor(
         val config = currentConfig ?: WorkflowConfig.default()
 
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.SEARCHING_PUBMED)
+
+        // Refresh session to get updated workflow step
+        val updatedSession = sessionRepository.getSession(session.id) ?: session
+        currentSession = updatedSession
+
         _state.value = WorkflowState.Searching(
-            query = session.pubmedQuery ?: "",
+            query = updatedSession.pubmedQuery ?: "",
             provider = config.searchProvider.name,
-            batchNumber = session.currentBatch + 1
+            batchNumber = updatedSession.currentBatch + 1
         )
 
         try {
-            runWorkflow(session, config)
+            runWorkflow(updatedSession, config)
         } catch (e: BudgetError) {
-            handleBudgetError(e, session)
+            handleBudgetError(e, updatedSession)
         } catch (e: Exception) {
-            handleWorkflowError(e, session)
+            handleWorkflowError(e, updatedSession)
         }
     }
 
@@ -216,12 +221,16 @@ class FactCheckWorkflow @Inject constructor(
 
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.EXTRACTING_CITATIONS)
 
+        // Refresh session to get updated workflow step
+        val updatedSession = sessionRepository.getSession(session.id) ?: session
+        currentSession = updatedSession
+
         try {
-            runWorkflow(session, config)
+            runWorkflow(updatedSession, config)
         } catch (e: BudgetError) {
-            handleBudgetError(e, session)
+            handleBudgetError(e, updatedSession)
         } catch (e: Exception) {
-            handleWorkflowError(e, session)
+            handleWorkflowError(e, updatedSession)
         }
     }
 
