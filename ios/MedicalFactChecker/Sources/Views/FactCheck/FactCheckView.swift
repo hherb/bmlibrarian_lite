@@ -53,7 +53,7 @@ struct FactCheckView: View {
                         buttonText: buttonText,
                         onSubmit: {
                             isTextEditorFocused = false
-                            startFactCheck()
+                            handleSubmit()
                         }
                     )
 
@@ -181,6 +181,23 @@ struct FactCheckView: View {
     }
 
     // MARK: - Actions
+
+    /// Handles the submit button action.
+    ///
+    /// For resumed sessions with existing documents, this fetches more evidence
+    /// to append to the existing results. For new fact-checks, this starts
+    /// a fresh workflow.
+    private func handleSubmit() {
+        if isResumedSession, let workflow = workflow {
+            // Resumed session: fetch more evidence to append to existing documents
+            Task {
+                await workflow.fetchMoreEvidence()
+            }
+        } else {
+            // New fact-check: start fresh
+            startFactCheck()
+        }
+    }
 
     private func startFactCheck() {
         let newWorkflow = FactCheckWorkflow(modelContext: modelContext, settings: settings)
