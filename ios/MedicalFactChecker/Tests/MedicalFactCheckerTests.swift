@@ -1144,6 +1144,91 @@ final class UnifiedSearchResultTests: XCTestCase {
 
         XCTAssertNil(result.nextCursorMark)
     }
+
+    // MARK: - Bug Fix Tests: nextOffset should return next position, not current
+
+    func testNextOffsetWithOffsetPaginationReturnsNextPosition() {
+        // Bug fix test: nextOffset should return offset + batchSize, not just offset
+        let pagination = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let result = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: pagination,
+            provider: .pubmed
+        )
+
+        // nextOffset should be 30 (20 + 10), not 20
+        XCTAssertEqual(result.nextOffset, 30)
+        XCTAssertNotEqual(result.nextOffset, pagination.logicalOffset)
+    }
+
+    func testNextOffsetWithCursorPaginationReturnsFetchedCount() {
+        // For cursor pagination, nextOffset should return fetchedCount
+        let pagination = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 40,
+            currentCursor: "*",
+            nextCursor: "abc123"
+        )
+        let result = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: pagination,
+            provider: .europePMC
+        )
+
+        XCTAssertEqual(result.nextOffset, 40)
+    }
+
+    func testNextOffsetWithCombinedPaginationReturnsNextPubMedOffset() {
+        // For combined pagination, nextOffset should return PubMed's next offset
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 15,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+        let result = UnifiedSearchResult(
+            articles: [],
+            totalCount: 150,
+            pagination: combined,
+            provider: .both
+        )
+
+        // Should return PubMed's next offset (30), not logical offset (20)
+        XCTAssertEqual(result.nextOffset, 30)
+    }
+
+    func testNextOffsetIsConsistentWithPagination() {
+        // Verify nextOffset advances correctly for subsequent pages
+        let firstPage = OffsetPaginationState(totalCount: 100, offset: 0, batchSize: 20)
+        let firstResult = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: firstPage,
+            provider: .pubmed
+        )
+
+        // First page nextOffset should be 20
+        XCTAssertEqual(firstResult.nextOffset, 20)
+
+        // Simulate using nextOffset for second page
+        let secondPage = OffsetPaginationState(totalCount: 100, offset: firstResult.nextOffset, batchSize: 20)
+        let secondResult = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: secondPage,
+            provider: .pubmed
+        )
+
+        // Second page nextOffset should be 40
+        XCTAssertEqual(secondResult.nextOffset, 40)
+    }
 }
 
 // MARK: - SearchError Tests (Phase 4)

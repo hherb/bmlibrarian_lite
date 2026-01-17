@@ -227,7 +227,19 @@ struct UnifiedSearchResult: Sendable {
     var hasMore: Bool { pagination.hasMore }
 
     /// Logical offset for the next fetch.
-    var nextOffset: Int { pagination.logicalOffset }
+    ///
+    /// For offset-based pagination (PubMed), returns `offset + batchSize`.
+    /// For cursor-based pagination (Europe PMC), returns `fetchedCount`.
+    /// For combined pagination, returns the PubMed offset.
+    var nextOffset: Int {
+        if let offsetPagination = pagination as? OffsetPaginationState {
+            return offsetPagination.nextOffset
+        }
+        if let combinedPagination = pagination as? CombinedPaginationState {
+            return combinedPagination.nextPubMedOffset
+        }
+        return pagination.logicalOffset
+    }
 
     /// Next cursor mark for Europe PMC pagination (convenience accessor).
     ///
@@ -457,12 +469,16 @@ enum SearchServiceFactory {
     /// Uses TaskGroup for efficient concurrent execution. Results are merged
     /// and deduplicated, with PubMed given priority for metadata quality.
     ///
+    /// If one provider fails, returns results from the successful provider only.
+    /// If both fail, throws the first error encountered.
+    ///
     /// - Parameters:
     ///   - query: Query string.
     ///   - options: Search options.
     ///   - settings: App settings.
     ///   - cursor: Optional cursor for Europe PMC pagination.
     /// - Returns: Merged, deduplicated search result.
+    /// - Throws: SearchError if both providers fail.
     private static func searchBoth(
         query: String,
         options: SearchOptions,
@@ -484,46 +500,71 @@ enum SearchServiceFactory {
             offset: options.offset
         )
 
-        // Search both providers concurrently
-        return try await withThrowingTaskGroup(of: UnifiedSearchResult.self) { group in
+        // Use non-throwing TaskGroup with Result to handle partial failures gracefully
+        return try await withTaskGroup(of: Result<UnifiedSearchResult, Error>.self) { group in
             group.addTask {
-                try await searchPubMed(query: query, options: pubmedOptions, settings: settings)
+                do {
+                    let result = try await searchPubMed(query: query, options: pubmedOptions, settings: settings)
+                    return .success(result)
+                } catch {
+                    print("[Search] PubMed search failed: \(error.localizedDescription)")
+                    return .failure(error)
+                }
             }
             group.addTask {
-                try await searchEuropePMC(query: query, options: europePMCOptions, cursor: cursor)
+                do {
+                    let result = try await searchEuropePMC(query: query, options: europePMCOptions, cursor: cursor)
+                    return .success(result)
+                } catch {
+                    print("[Search] Europe PMC search failed: \(error.localizedDescription)")
+                    return .failure(error)
+                }
             }
 
             var pubmedResult: UnifiedSearchResult?
             var europePMCResult: UnifiedSearchResult?
+            var firstError: Error?
 
-            // Collect results
-            for try await result in group {
-                switch result.provider {
-                case .pubmed:
-                    pubmedResult = result
-                case .europePMC:
-                    europePMCResult = result
-                case .both:
-                    // Shouldn't happen, but handle gracefully
-                    break
+            // Collect results from both providers
+            for await result in group {
+                switch result {
+                case .success(let searchResult):
+                    switch searchResult.provider {
+                    case .pubmed:
+                        pubmedResult = searchResult
+                    case .europePMC:
+                        europePMCResult = searchResult
+                    case .both:
+                        // Shouldn't happen, but handle gracefully
+                        break
+                    }
+                case .failure(let error):
+                    // Store first error in case both fail
+                    if firstError == nil {
+                        firstError = error
+                    }
                 }
             }
 
             // Handle partial failures gracefully
-            guard let pubmed = pubmedResult else {
-                // PubMed failed, return Europe PMC results only
-                return europePMCResult ?? .empty(provider: .both)
-            }
-            guard let europePMC = europePMCResult else {
-                // Europe PMC failed, return PubMed results only
+            if let pubmed = pubmedResult, let europePMC = europePMCResult {
+                // Both succeeded - merge and deduplicate
+                return SearchResultMerger.merge(
+                    pubmedResult: pubmed,
+                    europePMCResult: europePMC
+                )
+            } else if let pubmed = pubmedResult {
+                // Only PubMed succeeded
+                print("[Search] Returning PubMed results only (Europe PMC failed)")
                 return pubmed
+            } else if let europePMC = europePMCResult {
+                // Only Europe PMC succeeded
+                print("[Search] Returning Europe PMC results only (PubMed failed)")
+                return europePMC
+            } else {
+                // Both failed - throw the first error
+                throw firstError ?? SearchError.noResults
             }
-
-            // Merge and deduplicate
-            return SearchResultMerger.merge(
-                pubmedResult: pubmed,
-                europePMCResult: europePMC
-            )
         }
     }
 

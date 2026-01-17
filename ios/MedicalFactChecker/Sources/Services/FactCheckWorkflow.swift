@@ -50,6 +50,16 @@ final class FactCheckWorkflow {
     /// Message to display when awaiting user decision.
     private(set) var userDecisionPrompt = ""
 
+    /// Set to true when specifically waiting for smart search decision.
+    private(set) var awaitingSmartSearchDecision = false
+
+    /// The structured query parsed from LLM response.
+    ///
+    /// Stored in memory (not persisted) so we can rebuild provider-specific
+    /// queries during the workflow. This enables proper query translation
+    /// between PubMed and Europe PMC syntax.
+    private var structuredQuery: StructuredQuery?
+
     // MARK: - Callbacks
 
     var onProgress: ((WorkflowStep, String) -> Void)?
@@ -131,6 +141,7 @@ final class FactCheckWorkflow {
     /// User approved fetching more documents.
     func continueWithMoreDocuments() async {
         awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
         userDecisionPrompt = ""
 
         guard let session = session else { return }
@@ -143,6 +154,7 @@ final class FactCheckWorkflow {
     /// User declined fetching more documents - proceed with current results.
     func proceedWithCurrentDocuments() async {
         awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
         userDecisionPrompt = ""
 
         guard let session = session else { return }
@@ -152,6 +164,57 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         await runWorkflow()
+    }
+
+    /// User chose to continue with smart search (alternative queries).
+    ///
+    /// This method triggers smart search to generate alternative queries
+    /// when the initial search didn't find enough relevant documents.
+    func continueWithSmartSearch() async {
+        awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
+        userDecisionPrompt = ""
+
+        guard let session = session else { return }
+
+        isRunning = true
+
+        do {
+            session.currentStep = .fetchingMoreEvidence
+            try? modelContext.save()
+
+            updateProgress(.fetchingMoreEvidence, "Generating alternative search queries...")
+
+            // Execute smart search with alternative queries
+            try await executeSmartSearch()
+
+            // Check if we found enough documents after smart search
+            let relevantCount = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+            if relevantCount >= settings.minRelevantDocuments {
+                // Proceed to citation extraction
+                session.currentStep = .extractingCitations
+                try? modelContext.save()
+                await runWorkflow()
+            } else if session.canFetchMoreFromAnyProvider {
+                // Still not enough, but more documents available
+                awaitingUserDecision = true
+                userDecisionPrompt = "Found \(relevantCount) relevant document(s) after smart search. Fetch more documents or proceed with current results?"
+                isRunning = false
+            } else {
+                // No more options, proceed with what we have
+                session.currentStep = .extractingCitations
+                try? modelContext.save()
+                await runWorkflow()
+            }
+
+        } catch {
+            session.currentStep = .failed
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .apiError
+            try? modelContext.save()
+            onError?(error)
+            isRunning = false
+        }
     }
 
     /// Cancel the current workflow.
@@ -165,6 +228,7 @@ final class FactCheckWorkflow {
 
         isRunning = false
         awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
     }
 
     // MARK: - Fetch More Evidence
@@ -456,10 +520,23 @@ final class FactCheckWorkflow {
         // Record usage
         recordUsage(usage, operationType: "query_conversion")
 
-        // Parse JSON response and build query
-        let query = buildQueryFromJSON(response, claim: session.claim)
+        // Parse the structured query from LLM response
+        if let parsed = StructuredQuery.parse(from: response) {
+            // Store structured query for provider-specific translation
+            self.structuredQuery = parsed
+            print("[QueryConversion] Parsed structured query with \(parsed.concepts.count) concept(s)")
 
-        session.pubmedQuery = query
+            // Build provider-specific query string
+            let provider = currentSearchOptions?.provider ?? .pubmed
+            let query = QueryBuilderFactory.build(from: parsed, for: provider)
+            session.pubmedQuery = query
+        } else {
+            // Fallback to legacy parsing for backwards compatibility
+            print("[QueryConversion] Structured query parsing failed, using legacy fallback")
+            let query = buildQueryFromJSON(response, claim: session.claim)
+            session.pubmedQuery = query
+        }
+
         try? modelContext.save()
     }
 
@@ -544,8 +621,7 @@ final class FactCheckWorkflow {
     }
 
     private func searchPubMed() async throws {
-        guard let session = session,
-              let query = session.pubmedQuery else { return }
+        guard let session = session else { return }
 
         let batchNumber = session.batchesFetched + 1
         let provider = currentSearchOptions?.provider ?? .pubmed
@@ -559,9 +635,23 @@ final class FactCheckWorkflow {
         options.offset = session.pubmedOffset
         options.cursorMark = session.europePMCCursor
 
+        // Build query string from stored structured query or fallback to session query
+        let queryString: String
+        if let structuredQuery = self.structuredQuery {
+            // Build provider-specific query from structured query
+            queryString = QueryBuilderFactory.build(from: structuredQuery, for: options.provider)
+            print("[Search] Using structured query for \(options.provider.displayName)")
+        } else if let storedQuery = session.pubmedQuery {
+            // Fallback for resumed sessions without structured query
+            queryString = storedQuery
+            print("[Search] Using stored query string (legacy mode)")
+        } else {
+            throw SearchError.invalidConfiguration("No query available for search")
+        }
+
         // Use unified search service
         let result = try await SearchServiceFactory.search(
-            query: query,
+            query: queryString,
             options: options,
             settings: settings
         )
@@ -1205,51 +1295,63 @@ final class FactCheckWorkflow {
     private let smartSearchThreshold = 3
 
     /// Generate alternative search queries when initial search yields insufficient results.
-    private func generateAlternativeQueries() async throws -> [String] {
+    ///
+    /// Returns structured queries that can be translated to any provider's syntax.
+    private func generateAlternativeQueries() async throws -> [StructuredQuery] {
         guard let session = session, let llmService = llmService else { return [] }
 
         try checkBudget()
 
         let prompt = """
-        The following medical question did not return enough relevant results with the initial PubMed search.
+        The following medical question did not return enough relevant results with the initial search.
 
         Question: \(session.claim)
         Initial query: \(session.pubmedQuery ?? "N/A")
         Results found: \(session.pubmedTotalResults)
         Relevant documents: \(session.relevantDocumentsFound)
 
-        Analyze the question and suggest 2-4 alternative search strategies. Consider:
+        Generate 2-3 alternative search strategies as structured queries. Consider:
         1. If comparing two treatments/medications, search for each one separately
         2. Use different synonyms or related terms
         3. Break compound questions into simpler components
         4. Try broader or narrower search terms
         5. Focus on key outcomes or mechanisms
 
-        For comparison questions (e.g., "A vs B for condition C"), generate separate queries like:
-        - "A AND condition C AND outcome"
-        - "B AND condition C AND outcome"
+        Return a JSON array of structured query objects. Each object should have:
+        - "concepts": an array of concepts, each with "name", "mesh_terms", and "keywords"
 
-        Output a JSON array of alternative PubMed query strings. Each query should:
-        - Be a valid PubMed search syntax
-        - Include "AND hasabstract" at the end
-        - Be different from the original query
+        Example response:
+        [
+          {
+            "concepts": [
+              {"name": "treatment A", "mesh_terms": ["MeSH Term A"], "keywords": ["keyword A"]},
+              {"name": "condition", "mesh_terms": ["Condition MeSH"], "keywords": ["condition"]}
+            ]
+          },
+          {
+            "concepts": [
+              {"name": "treatment B", "mesh_terms": ["MeSH Term B"], "keywords": ["keyword B"]},
+              {"name": "condition", "mesh_terms": ["Condition MeSH"], "keywords": ["condition"]}
+            ]
+          }
+        ]
 
-        Respond with ONLY a JSON array of strings, nothing else:
-        ["query1 AND hasabstract", "query2 AND hasabstract"]
+        Generate alternative structured queries for the medical question:
         """
 
         let messages = [LLMService.userMessage(prompt)]
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.3,
-            maxTokens: 512,
+            maxTokens: 1024,
             jsonMode: true
         )
 
         recordUsage(usage, operationType: "smart_search")
 
-        // Parse the JSON array
-        let queries = ResponseParser.parseStringArray(response)
+        // Parse the structured query array
+        let queries = ResponseParser.parseStructuredQueryArray(response)
+        print("[SmartSearch] Generated \(queries.count) alternative structured queries")
         return queries
     }
 
@@ -1257,7 +1359,7 @@ final class FactCheckWorkflow {
     private func executeSmartSearch() async throws {
         guard let session = session else { return }
 
-        // Generate alternative queries
+        // Generate alternative structured queries
         updateProgress(.searchingPubMed, "Generating alternative search strategies...")
         let alternatives = try await generateAlternativeQueries()
 
@@ -1266,8 +1368,11 @@ final class FactCheckWorkflow {
             return
         }
 
-        // Store alternatives in session
-        session.alternativeQueries = try? JSONEncoder().encode(alternatives).base64EncodedString()
+        // Store alternatives in session (encode as JSON)
+        if let data = try? JSONEncoder().encode(alternatives.map { $0.concepts }),
+           let jsonString = String(data: data, encoding: .utf8) {
+            session.alternativeQueries = jsonString
+        }
         session.smartSearchEnabled = true
         session.currentAlternativeQueryIndex = 0
 
@@ -1278,13 +1383,16 @@ final class FactCheckWorkflow {
         onSmartSearchActivated?("Trying \(alternatives.count) alternative search strategies...")
 
         // Execute each alternative query
-        for (index, query) in alternatives.enumerated() {
+        for (index, structuredQuery) in alternatives.enumerated() {
             try checkBudget()
 
             session.currentAlternativeQueryIndex = index
-            updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(query.prefix(50))...")
 
-            try await executeAlternativeQuery(query)
+            // Build a description from the first concept's name
+            let queryDescription = structuredQuery.concepts.first?.name ?? "alternative \(index + 1)"
+            updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(queryDescription)...")
+
+            try await executeAlternativeQuery(structuredQuery)
 
             // Check if we now have enough relevant documents
             let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
@@ -1297,46 +1405,57 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
-    /// Execute a single alternative query, avoiding duplicates.
-    private func executeAlternativeQuery(_ query: String) async throws {
-        guard let session = session, let pubmedService = pubmedService else { return }
+    /// Execute a single alternative structured query, avoiding duplicates.
+    ///
+    /// Searches using the current provider (from search options) with the given
+    /// structured query, then scores any new documents found.
+    ///
+    /// - Parameter query: The structured query to execute.
+    private func executeAlternativeQuery(_ query: StructuredQuery) async throws {
+        guard let session = session else { return }
 
         // Get already-fetched PMIDs
         let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
 
-        let result = try await pubmedService.search(
-            query: query,
+        // Build provider-specific query string
+        let provider = currentSearchOptions?.provider ?? .pubmed
+        let queryString = QueryBuilderFactory.build(from: query, for: provider)
+        print("[SmartSearch] Executing query for \(provider.displayName): \(queryString.prefix(80))...")
+
+        // Build search options
+        let options = SearchOptions(
+            provider: provider,
+            includePreprints: currentSearchOptions?.includePreprints ?? false,
             maxResults: settings.batchSize,
             offset: 0
         )
 
-        // Filter out already-fetched PMIDs from BioMedLit result
+        // Use unified search service
+        let result = try await SearchServiceFactory.search(
+            query: queryString,
+            options: options,
+            settings: settings
+        )
+
+        // Filter out already-fetched PMIDs from result
         let newArticles = result.articles.filter { !fetchedPmidSet.contains($0.pmid) }
 
         guard !newArticles.isEmpty else {
             return  // No new results from this query
         }
 
+        print("[SmartSearch] Found \(newArticles.count) new article(s)")
         let batchNumber = session.batchesFetched + 1
 
-        // Convert BioMedLit articles to app ArticleMetadata
-        let articles = newArticles.enumerated().map { index, article in
-            BioMedLitAdapters.toArticleMetadata(
-                article,
-                batchNumber: batchNumber,
-                resultPosition: session.documentsFound + index
-            )
-        }
-
-        // Create Document objects
-        for article in articles {
+        // Create Document objects from ArticleMetadata
+        for (index, article) in newArticles.enumerated() {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
                 abstract: article.abstract,
                 authors: article.authors,
-                batchNumber: article.batchNumber,
-                resultPosition: article.resultPosition
+                batchNumber: batchNumber,
+                resultPosition: session.documentsFound + index
             )
             document.year = article.year
             document.journal = article.journal
@@ -1344,13 +1463,14 @@ final class FactCheckWorkflow {
             document.pmcId = article.pmcId
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
+            document.sourceProvider = result.provider
             document.session = session
 
             modelContext.insert(document)
         }
 
         // Update tracking
-        session.documentsFound += articles.count
+        session.documentsFound += newArticles.count
         session.batchesFetched += 1
 
         // Update fetched PMIDs
@@ -1361,7 +1481,7 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         // Score the new documents
-        try await scoreNewDocuments(articles.map { $0.pmid })
+        try await scoreNewDocuments(newArticles.map { $0.pmid })
     }
 
     /// Score only specific documents (by PMID).
