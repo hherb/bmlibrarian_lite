@@ -652,14 +652,13 @@
 /* Begin XCLocalSwiftPackageReference section */
 		A1000056000 /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../Packages/BioMedLit";
+			relativePath = ../../Packages/BioMedLit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A1000055000 /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A1000056000 /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */;
 			productName = BioMedLit;
 		};
 /* End XCSwiftPackageProductDependency section */
