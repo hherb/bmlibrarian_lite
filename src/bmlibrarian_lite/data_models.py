@@ -703,15 +703,25 @@ class Citation:
         """
         Return a short reference string.
 
+        Handles author names in either "LastName, FirstName" or "LastName FirstName" formats.
+
         Returns:
             Short reference (e.g., "Smith et al., 2023")
         """
         if self.document.authors:
-            first_author = self.document.authors[0].split(",")[0].split()[-1]
-            if len(self.document.authors) > 1:
-                author_str = f"{first_author} et al."
+            first_author_full = self.document.authors[0]
+            # Handle both "LastName, FirstName" and "LastName FirstName" formats
+            if "," in first_author_full:
+                # "LastName, FirstName" format - take part before comma
+                last_name = first_author_full.split(",")[0].strip()
             else:
-                author_str = first_author
+                # "LastName FirstName" format - take first word
+                last_name = first_author_full.split()[0].strip()
+
+            if len(self.document.authors) > 1:
+                author_str = f"{last_name} et al."
+            else:
+                author_str = last_name
         else:
             author_str = "Unknown"
         year = self.document.year or "n.d."

@@ -35,15 +35,17 @@ REPORTING_SYSTEM_PROMPT = """You are a medical research report writer. Your task
 
 Guidelines:
 1. Write in clear, professional medical prose
-2. Cite sources using EXACTLY this markdown link format: [Author et al., Year](docid:DOCUMENT_ID)
-   - The DOCUMENT_ID is provided in each source (e.g., "pmid-12345")
+2. Cite sources using EXACTLY this markdown link format: [Author, Year](docid:DOCUMENT_ID)
+   - Copy the "Source:" line exactly as the citation text (e.g., "Smith et al., 2023")
+   - Copy the "Document ID:" exactly as the docid value (e.g., "pmid-12345")
    - Example: [Smith et al., 2023](docid:pmid-12345)
-   - You MUST use the exact document ID provided - never make up IDs
-3. Organize findings by themes or topics, not by source
-4. Include specific data and findings when available
-5. Note any conflicting or contrasting evidence
-6. Conclude with a summary of the key findings
-7. Use specific years (e.g., "In a 2023 study") - NEVER use vague phrases like "recent studies" or "recently"
+   - NEVER invent or modify IDs - use ONLY the exact values provided
+3. If multiple passages come from the same source, cite it ONCE per statement, not once per passage
+4. Organize findings by themes or topics, not by source
+5. Include specific data and findings when available
+6. Note any conflicting or contrasting evidence
+7. Conclude with a summary of the key findings
+8. Use specific years (e.g., "In a 2023 study") - NEVER use vague phrases like "recent studies" or "recently"
 
 Structure your report with:
 - An introduction addressing the research question
@@ -51,7 +53,7 @@ Structure your report with:
 - A conclusion summarizing key findings
 
 Do NOT simply list sources - synthesize the information into a flowing narrative.
-IMPORTANT: Every citation MUST use the markdown link format [Author, Year](docid:ID) with the exact document ID provided."""
+IMPORTANT: Every citation MUST use the markdown link format [Author, Year](docid:ID) with the exact values provided."""
 
 
 class LiteReportingAgent(LiteBaseAgent):
@@ -103,20 +105,23 @@ class LiteReportingAgent(LiteBaseAgent):
         # Format citations for the prompt
         formatted_citations = self._format_citations_for_prompt(citations)
 
+        # Count unique documents
+        unique_doc_ids = set(c.document.id for c in citations)
         user_prompt = f"""Research Question: {question}
 
-Evidence from {len(citations)} source passages:
+Evidence from {len(unique_doc_ids)} source(s) ({len(citations)} passages total):
 
 {formatted_citations}
 
 Write a comprehensive research summary that synthesizes this evidence to answer the research question.
 
-CITATION FORMAT REQUIREMENT: Use markdown links with the Document ID for EVERY citation:
-[Author et al., Year](docid:DOCUMENT_ID)
+CITATION FORMAT - MANDATORY:
+- Use this exact format: [Source](docid:Document ID)
+- Copy the "Source:" value as the link text
+- Copy the "Document ID:" value as the docid
+- Example: [Smith et al., 2023](docid:pmid-12345678)
 
-Example: If citing source [1] with Document ID "pmid-12345", write: [Smith et al., 2023](docid:pmid-12345)
-
-This format is MANDATORY - do not use plain [Author, Year] citations."""
+IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do not invent IDs."""
 
         messages = [
             self._create_system_message(REPORTING_SYSTEM_PROMPT),
@@ -168,12 +173,15 @@ Evidence from selected sources:
 
 {formatted_citations}
 
-Write a brief summary (approximately {max_length} characters) of the key findings. Include citations."""
+Write a brief summary (approximately {max_length} characters) of the key findings.
+
+CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above."""
 
         messages = [
             self._create_system_message(
                 "You are a concise medical summarizer. "
-                "Provide brief, accurate summaries with citations."
+                "Provide brief, accurate summaries with citations in "
+                "[Author, Year](docid:ID) format."
             ),
             self._create_user_message(user_prompt),
         ]
@@ -247,22 +255,44 @@ No relevant evidence was found in the searched literature. This may indicate:
         """
         Format citations for the LLM prompt.
 
-        Includes document IDs so the LLM can create proper citation links.
+        Groups passages by document so that multiple passages from the same
+        source are presented together. Uses the document's short reference
+        (Author, Year) as the citation key, which the LLM should use verbatim.
 
         Args:
             citations: List of citations
 
         Returns:
-            Formatted string with numbered citations including document IDs
+            Formatted string with citations grouped by document
         """
+        # Group passages by document ID to present each source once
+        doc_order: list[str] = []  # Preserve first-seen order
+        doc_passages: dict[str, list[Citation]] = {}
+        for citation in citations:
+            doc_id = citation.document.id
+            if doc_id not in doc_passages:
+                doc_order.append(doc_id)
+                doc_passages[doc_id] = []
+            doc_passages[doc_id].append(citation)
+
         formatted = []
-        for i, citation in enumerate(citations, 1):
-            doc = citation.document
-            formatted.append(f"""[{i}] {doc.formatted_authors} ({doc.year or 'n.d.'})
+        for doc_id in doc_order:
+            citation_list = doc_passages[doc_id]
+            doc = citation_list[0].document
+            short_ref = citation_list[0].formatted_reference
+
+            # Format all passages from this document together
+            passages_text = "\n".join(
+                f'  - "{c.passage}"' for c in citation_list
+            )
+            formatted.append(f"""Source: {short_ref}
 Document ID: {doc.id}
 Title: {doc.title}
+Authors: {doc.formatted_authors}
+Year: {doc.year or 'n.d.'}
 Journal: {doc.journal or 'Unknown'}
-Passage: "{citation.passage}"
+Key passages:
+{passages_text}
 """)
         return "\n".join(formatted)
 
