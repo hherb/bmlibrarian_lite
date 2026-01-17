@@ -346,7 +346,7 @@ enum PubMedQueryBuilder {
 
         // Add keywords (title/abstract search)
         for keyword in concept.keywords.prefix(QueryConstants.maxKeywordsPerConcept) {
-            terms.append("\(keyword)\(QueryConstants.pubmedTitleAbstractFieldTag)")
+            terms.append("\"\(keyword)\"\(QueryConstants.pubmedTitleAbstractFieldTag)")
         }
 
         guard !terms.isEmpty else {
@@ -433,7 +433,7 @@ enum EuropePMCQueryBuilder {
         }
 
         for keyword in concept.keywords.prefix(QueryConstants.maxKeywordsPerConcept) {
-            terms.append("\(QueryConstants.europePMCTitleAbstractField)\(keyword)")
+            terms.append("\(QueryConstants.europePMCTitleAbstractField)\"\(keyword)\"")
         }
 
         guard !terms.isEmpty else {
