@@ -646,7 +646,7 @@ final class FactCheckWorkflow {
             queryString = storedQuery
             print("[Search] Using stored query string (legacy mode)")
         } else {
-            throw PubMedError.invalidQuery
+            throw SearchError.invalidConfiguration("No query available for search")
         }
 
         // Use unified search service
