@@ -467,3 +467,368 @@ final class FactCheckSessionPaginationTests: XCTestCase {
         XCTAssertEqual(session.totalFetchedDocuments, 0)
     }
 }
+
+// MARK: - StructuredQuery Tests
+
+final class StructuredQueryTests: XCTestCase {
+
+    // MARK: - SearchConcept Tests
+
+    func testSearchConceptIsEmpty() {
+        let emptyConcept = SearchConcept(name: "empty")
+        XCTAssertTrue(emptyConcept.isEmpty)
+
+        let withMesh = SearchConcept(name: "test", meshTerms: ["Term1"])
+        XCTAssertFalse(withMesh.isEmpty)
+
+        let withKeywords = SearchConcept(name: "test", keywords: ["keyword1"])
+        XCTAssertFalse(withKeywords.isEmpty)
+    }
+
+    func testSearchConceptAllTerms() {
+        let concept = SearchConcept(
+            name: "test",
+            meshTerms: ["MeSH1", "MeSH2"],
+            keywords: ["kw1", "kw2"]
+        )
+        XCTAssertEqual(concept.allTerms, ["MeSH1", "MeSH2", "kw1", "kw2"])
+    }
+
+    // MARK: - StructuredQuery Tests
+
+    func testStructuredQueryIsEmpty() {
+        let emptyQuery = StructuredQuery(concepts: [])
+        XCTAssertTrue(emptyQuery.isEmpty)
+
+        let queryWithEmptyConcepts = StructuredQuery(concepts: [
+            SearchConcept(name: "empty1"),
+            SearchConcept(name: "empty2")
+        ])
+        XCTAssertTrue(queryWithEmptyConcepts.isEmpty)
+
+        let validQuery = StructuredQuery(concepts: [
+            SearchConcept(name: "valid", meshTerms: ["Term"])
+        ])
+        XCTAssertFalse(validQuery.isEmpty)
+    }
+
+    func testStructuredQueryParseValidJSON() {
+        let json = """
+        {
+          "concepts": [
+            {"name": "amlodipine", "mesh_terms": ["Amlodipine"], "keywords": ["amlodipine"]},
+            {"name": "arterial stiffness", "mesh_terms": ["Vascular Stiffness"], "keywords": ["arterial stiffness"]}
+          ]
+        }
+        """
+
+        let query = StructuredQuery.parse(from: json)
+        XCTAssertNotNil(query)
+        XCTAssertEqual(query?.concepts.count, 2)
+        XCTAssertEqual(query?.concepts[0].name, "amlodipine")
+        XCTAssertEqual(query?.concepts[0].meshTerms, ["Amlodipine"])
+        XCTAssertEqual(query?.concepts[1].name, "arterial stiffness")
+    }
+
+    func testStructuredQueryParseMarkdownWrappedJSON() {
+        let json = """
+        Here's the query:
+        ```json
+        {
+          "concepts": [
+            {"name": "test", "mesh_terms": ["TestMeSH"], "keywords": ["testkw"]}
+          ]
+        }
+        ```
+        That's it!
+        """
+
+        let query = StructuredQuery.parse(from: json)
+        XCTAssertNotNil(query)
+        XCTAssertEqual(query?.concepts.count, 1)
+        XCTAssertEqual(query?.concepts[0].name, "test")
+    }
+
+    func testStructuredQueryParseInvalidJSON() {
+        let invalid = "This is not JSON at all"
+        XCTAssertNil(StructuredQuery.parse(from: invalid))
+
+        let malformed = "{\"concepts\": [}"
+        XCTAssertNil(StructuredQuery.parse(from: malformed))
+    }
+
+    // MARK: - DateRange Tests
+
+    func testDateRangeLastYears() {
+        let range = DateRange.lastYears(5)
+        let currentYear = Calendar.current.component(.year, from: Date())
+
+        XCTAssertEqual(range.endYear, currentYear)
+        XCTAssertEqual(range.startYear, currentYear - 5)
+    }
+}
+
+// MARK: - Query Builder Tests
+
+final class QueryBuilderTests: XCTestCase {
+
+    // MARK: - PubMed Query Builder Tests
+
+    func testPubMedQueryBuilderEmptyQuery() {
+        let emptyQuery = StructuredQuery(concepts: [])
+        let result = PubMedQueryBuilder.build(from: emptyQuery)
+        XCTAssertEqual(result, QueryConstants.pubmedHasAbstractFilter)
+    }
+
+    func testPubMedQueryBuilderSingleConcept() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(name: "amlodipine", meshTerms: ["Amlodipine"], keywords: ["amlodipine"])
+        ])
+
+        let result = PubMedQueryBuilder.build(from: query)
+
+        // Should contain MeSH term with tag
+        XCTAssertTrue(result.contains("\"Amlodipine\"[MeSH]"))
+        // Should contain keyword with tiab tag
+        XCTAssertTrue(result.contains("amlodipine[tiab]"))
+        // Should contain abstract filter
+        XCTAssertTrue(result.contains("hasabstract"))
+        // Should contain publication type filter
+        XCTAssertTrue(result.contains("Clinical Trial[pt]"))
+    }
+
+    func testPubMedQueryBuilderMultipleConcepts() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(name: "drug", meshTerms: ["Amlodipine"]),
+            SearchConcept(name: "condition", meshTerms: ["Hypertension"])
+        ])
+
+        let result = PubMedQueryBuilder.build(from: query)
+
+        // Should have AND between concepts
+        XCTAssertTrue(result.contains(") AND ("))
+        // Should contain both MeSH terms
+        XCTAssertTrue(result.contains("\"Amlodipine\"[MeSH]"))
+        XCTAssertTrue(result.contains("\"Hypertension\"[MeSH]"))
+    }
+
+    func testPubMedQueryBuilderRespectsTermLimits() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(
+                name: "many terms",
+                meshTerms: ["Term1", "Term2", "Term3", "Term4", "Term5"],
+                keywords: ["kw1", "kw2", "kw3", "kw4", "kw5"]
+            )
+        ])
+
+        let result = PubMedQueryBuilder.build(from: query)
+
+        // Should only include first 3 MeSH terms (per QueryConstants.maxMeSHTermsPerConcept)
+        XCTAssertTrue(result.contains("\"Term1\"[MeSH]"))
+        XCTAssertTrue(result.contains("\"Term2\"[MeSH]"))
+        XCTAssertTrue(result.contains("\"Term3\"[MeSH]"))
+        XCTAssertFalse(result.contains("\"Term4\"[MeSH]"))
+        XCTAssertFalse(result.contains("\"Term5\"[MeSH]"))
+
+        // Should only include first 3 keywords (per QueryConstants.maxKeywordsPerConcept)
+        XCTAssertTrue(result.contains("kw1[tiab]"))
+        XCTAssertTrue(result.contains("kw2[tiab]"))
+        XCTAssertTrue(result.contains("kw3[tiab]"))
+        XCTAssertFalse(result.contains("kw4[tiab]"))
+        XCTAssertFalse(result.contains("kw5[tiab]"))
+    }
+
+    // MARK: - Europe PMC Query Builder Tests
+
+    func testEuropePMCQueryBuilderEmptyQuery() {
+        let emptyQuery = StructuredQuery(concepts: [])
+        let result = EuropePMCQueryBuilder.build(from: emptyQuery)
+        XCTAssertEqual(result, QueryConstants.europePMCHasAbstractFilter)
+    }
+
+    func testEuropePMCQueryBuilderSingleConcept() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(name: "amlodipine", meshTerms: ["Amlodipine"], keywords: ["amlodipine"])
+        ])
+
+        let result = EuropePMCQueryBuilder.build(from: query)
+
+        // Should contain MeSH in TITLE_ABS field (quoted)
+        XCTAssertTrue(result.contains("TITLE_ABS:\"Amlodipine\""))
+        // Should contain keyword in TITLE_ABS field
+        XCTAssertTrue(result.contains("TITLE_ABS:amlodipine"))
+        // Should contain abstract filter
+        XCTAssertTrue(result.contains("HAS_ABSTRACT:y"))
+        // Should exclude preprints by default
+        XCTAssertTrue(result.contains("NOT SRC:PPR"))
+    }
+
+    func testEuropePMCQueryBuilderIncludePreprints() {
+        let query = StructuredQuery(
+            concepts: [
+                SearchConcept(name: "test", meshTerms: ["Test"])
+            ],
+            excludePreprints: false
+        )
+
+        let result = EuropePMCQueryBuilder.build(from: query)
+
+        // Should NOT contain preprint exclusion
+        XCTAssertFalse(result.contains("NOT SRC:PPR"))
+    }
+
+    func testEuropePMCQueryBuilderNoAbstractFilter() {
+        let query = StructuredQuery(
+            concepts: [
+                SearchConcept(name: "test", meshTerms: ["Test"])
+            ],
+            requireAbstract: false
+        )
+
+        let result = EuropePMCQueryBuilder.build(from: query)
+
+        // Should NOT contain abstract filter at the end
+        // (It should still have the base query but without HAS_ABSTRACT:y as a filter)
+        XCTAssertTrue(result.contains("TITLE_ABS:\"Test\""))
+        XCTAssertFalse(result.contains("HAS_ABSTRACT:y"))
+    }
+
+    // MARK: - QueryBuilderFactory Tests
+
+    func testQueryBuilderFactoryRoutesPubMed() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(name: "test", meshTerms: ["Test"])
+        ])
+
+        let result = QueryBuilderFactory.build(from: query, for: .pubmed)
+
+        // Should use PubMed syntax
+        XCTAssertTrue(result.contains("[MeSH]"))
+        XCTAssertFalse(result.contains("TITLE_ABS:"))
+    }
+
+    func testQueryBuilderFactoryRoutesEuropePMC() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(name: "test", meshTerms: ["Test"])
+        ])
+
+        let result = QueryBuilderFactory.build(from: query, for: .europePMC)
+
+        // Should use Europe PMC syntax
+        XCTAssertTrue(result.contains("TITLE_ABS:"))
+        XCTAssertFalse(result.contains("[MeSH]"))
+    }
+
+    func testQueryBuilderFactoryBothDefaultsToPubMed() {
+        let query = StructuredQuery(concepts: [
+            SearchConcept(name: "test", meshTerms: ["Test"])
+        ])
+
+        let result = QueryBuilderFactory.build(from: query, for: .both)
+
+        // Should default to PubMed syntax for "both"
+        XCTAssertTrue(result.contains("[MeSH]"))
+    }
+}
+
+// MARK: - ResponseParser Structured Query Tests
+
+final class ResponseParserStructuredQueryTests: XCTestCase {
+
+    func testParseStructuredQueryArrayValidJSON() {
+        let json = """
+        [
+          {"concepts": [{"name": "drug", "mesh_terms": ["Aspirin"], "keywords": ["aspirin"]}]},
+          {"concepts": [{"name": "condition", "mesh_terms": ["Pain"], "keywords": ["pain relief"]}]}
+        ]
+        """
+
+        let queries = ResponseParser.parseStructuredQueryArray(json)
+
+        XCTAssertEqual(queries.count, 2)
+        XCTAssertEqual(queries[0].concepts[0].name, "drug")
+        XCTAssertEqual(queries[0].concepts[0].meshTerms, ["Aspirin"])
+        XCTAssertEqual(queries[1].concepts[0].name, "condition")
+    }
+
+    func testParseStructuredQueryArrayMarkdownWrapped() {
+        let json = """
+        Here are the queries:
+        ```json
+        [
+          {"concepts": [{"name": "test", "mesh_terms": ["TestMeSH"], "keywords": []}]}
+        ]
+        ```
+        """
+
+        let queries = ResponseParser.parseStructuredQueryArray(json)
+
+        XCTAssertEqual(queries.count, 1)
+        XCTAssertEqual(queries[0].concepts[0].name, "test")
+    }
+
+    func testParseStructuredQueryArraySkipsEmptyConcepts() {
+        let json = """
+        [
+          {"concepts": [{"name": "valid", "mesh_terms": ["Term"], "keywords": []}]},
+          {"concepts": [{"name": "empty", "mesh_terms": [], "keywords": []}]}
+        ]
+        """
+
+        let queries = ResponseParser.parseStructuredQueryArray(json)
+
+        // Should only have 1 query since the second one has empty concepts
+        XCTAssertEqual(queries.count, 1)
+        XCTAssertEqual(queries[0].concepts[0].name, "valid")
+    }
+
+    func testParseStructuredQueryArrayInvalidJSON() {
+        let invalid = "Not valid JSON"
+        let queries = ResponseParser.parseStructuredQueryArray(invalid)
+        XCTAssertTrue(queries.isEmpty)
+    }
+
+    func testParseStructuredQueryArrayEmptyArray() {
+        let json = "[]"
+        let queries = ResponseParser.parseStructuredQueryArray(json)
+        XCTAssertTrue(queries.isEmpty)
+    }
+
+    func testParseStructuredQueryArrayMissingConceptsKey() {
+        let json = """
+        [
+          {"name": "no concepts key"}
+        ]
+        """
+
+        let queries = ResponseParser.parseStructuredQueryArray(json)
+        XCTAssertTrue(queries.isEmpty)
+    }
+}
+
+// MARK: - QueryConstants Tests
+
+final class QueryConstantsTests: XCTestCase {
+
+    func testTermLimitsArePositive() {
+        XCTAssertGreaterThan(QueryConstants.maxMeSHTermsPerConcept, 0)
+        XCTAssertGreaterThan(QueryConstants.maxKeywordsPerConcept, 0)
+    }
+
+    func testPublicationTypesNotEmpty() {
+        XCTAssertFalse(QueryConstants.pubmedIncludedPublicationTypes.isEmpty)
+        XCTAssertFalse(QueryConstants.excludedPublicationTypes.isEmpty)
+    }
+
+    func testPubMedFieldTagsNotEmpty() {
+        XCTAssertFalse(QueryConstants.pubmedMeSHFieldTag.isEmpty)
+        XCTAssertFalse(QueryConstants.pubmedTitleAbstractFieldTag.isEmpty)
+        XCTAssertFalse(QueryConstants.pubmedHasAbstractFilter.isEmpty)
+    }
+
+    func testEuropePMCFieldsNotEmpty() {
+        XCTAssertFalse(QueryConstants.europePMCTitleAbstractField.isEmpty)
+        XCTAssertFalse(QueryConstants.europePMCHasAbstractFilter.isEmpty)
+        XCTAssertFalse(QueryConstants.europePMCExcludePreprintsFilter.isEmpty)
+    }
+}
