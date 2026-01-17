@@ -92,9 +92,9 @@ temp/
 .claude/settings.local.json
 .claude/settings.json
 
-# iOS/Xcode
-ios/**/.build/
-ios/**/.swiftpm/
+# Swift Package Manager / Xcode
+**/.build/
+**/.swiftpm/
 *.xcuserstate
 xcuserdata/
 *.xcworkspacedata
