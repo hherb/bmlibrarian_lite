@@ -14,8 +14,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import BioMedLit
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // MARK: - Report Content View (Tab-friendly)
 
@@ -1198,8 +1201,15 @@ struct MarkdownReportView: View {
 
 /// Sheet showing document details when a reference is tapped.
 struct DocumentDetailSheet: View {
-    let document: Document
+    @Bindable var document: Document
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    // Full text state
+    @State private var isLoadingFullText = false
+    @State private var fullTextError: String?
+    @State private var showFullTextViewer = false
+    @State private var fullTextResult: AppFullTextResult?
 
     var body: some View {
         NavigationStack {
@@ -1248,14 +1258,13 @@ struct DocumentDetailSheet: View {
                         Divider()
                     }
 
-                    // Abstract
+                    // Abstract with markdown rendering
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Abstract")
                             .font(.subheadline)
                             .fontWeight(.medium)
 
-                        Text(document.abstract)
-                            .font(.body)
+                        DocumentDetailAbstractView(text: document.abstract)
                     }
 
                     // Citations from this document
@@ -1286,7 +1295,11 @@ struct DocumentDetailSheet: View {
                         }
                     }
 
-                    // PubMed Link
+                    // Full Text Section
+                    Divider()
+                    fullTextSection
+
+                    // External Links
                     Divider()
 
                     Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
@@ -1316,7 +1329,188 @@ struct DocumentDetailSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(isPresented: $showFullTextViewer) {
+                fullTextViewerSheet
+            }
         }
+    }
+
+    // MARK: - Full Text Section
+
+    /// Section displaying full text status and action button.
+    @ViewBuilder
+    private var fullTextSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Full Text")
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            if document.hasFullText {
+                // Already have full text - show view button
+                HStack {
+                    Button(action: { showFullTextViewer = true }) {
+                        Label("View Full Text", systemImage: "doc.text.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    if let source = document.fullTextSource,
+                       let fullTextSource = AppFullTextSource(rawValue: source) {
+                        FullTextSourceBadge(source: fullTextSource)
+                    }
+                }
+            } else if document.fullTextUnavailable {
+                // Already tried, not available
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                    Text("Full text not available from open access sources")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                // Still offer to open in browser
+                if let doi = document.doi,
+                   let url = PlatformHelper.doiURL(for: doi) {
+                    Link(destination: url) {
+                        Label("Open Publisher", systemImage: "safari")
+                            .font(.caption)
+                    }
+                }
+            } else {
+                // Not yet attempted - show fetch button
+                HStack(spacing: 12) {
+                    Button(action: fetchFullText) {
+                        if isLoadingFullText {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Label("Get Full Text", systemImage: "arrow.down.doc")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLoadingFullText)
+
+                    if let error = fullTextError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Full Text Viewer Sheet
+
+    /// Sheet content for displaying full text.
+    @ViewBuilder
+    private var fullTextViewerSheet: some View {
+        if let result = fullTextResult {
+            FullTextViewer(document: document, result: result)
+        } else if let content = document.fullTextContent {
+            FullTextViewer(
+                document: document,
+                result: AppFullTextResult(
+                    content: .markdown(content),
+                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
+                )
+            )
+        } else if let pdfPath = document.fullTextPDFPath,
+                  let url = URL(string: pdfPath) {
+            FullTextViewer(
+                document: document,
+                result: AppFullTextResult(
+                    content: .pdfURL(url),
+                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
+                )
+            )
+        }
+    }
+
+    // MARK: - Full Text Fetching
+
+    /// Fetch full text for the document.
+    private func fetchFullText() {
+        isLoadingFullText = true
+        fullTextError = nil
+
+        Task {
+            do {
+                let service = BMLFullTextService.create(from: .shared)
+                let bmlResult = try await service.fetchFullText(
+                    pmcId: document.pmcId,
+                    doi: document.doi,
+                    pmid: document.pmid
+                )
+                let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
+
+                await MainActor.run {
+                    // Update document model
+                    switch result.content {
+                    case .markdown(let content):
+                        document.fullTextContent = content
+                    case .pdfURL(let url):
+                        document.fullTextPDFPath = url.absoluteString
+                    case .webURL:
+                        // Don't store - just open
+                        break
+                    }
+                    document.fullTextSource = result.source.rawValue
+                    document.fullTextFetchedAt = Date()
+
+                    fullTextResult = result
+                    isLoadingFullText = false
+
+                    // For web URLs, open directly instead of showing viewer
+                    if case .webURL(let url) = result.content {
+                        openURL(url)
+                    } else {
+                        showFullTextViewer = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    if case FullTextError.noFullTextAvailable = error {
+                        document.fullTextUnavailable = true
+                    }
+                    fullTextError = error.localizedDescription
+                    isLoadingFullText = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Abstract View for Document Details
+
+/// View that renders abstract text with markdown formatting support for the document detail sheet.
+///
+/// Handles common markdown patterns found in PubMed abstracts like
+/// bold section headers (e.g., **OBJECTIVE:**) and emphasis.
+private struct DocumentDetailAbstractView: View {
+    /// The abstract text to render.
+    let text: String
+
+    var body: some View {
+        if let attributed = parseAbstractMarkdown(text) {
+            Text(attributed)
+                .font(.body)
+        } else {
+            Text(text)
+                .font(.body)
+        }
+    }
+
+    /// Parses markdown in abstract text and returns an AttributedString.
+    ///
+    /// - Parameter text: The abstract text to parse.
+    /// - Returns: An AttributedString with formatting, or nil if parsing fails.
+    private func parseAbstractMarkdown(_ text: String) -> AttributedString? {
+        try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )
     }
 }
 
