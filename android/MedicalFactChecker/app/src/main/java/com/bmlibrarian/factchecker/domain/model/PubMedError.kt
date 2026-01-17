@@ -28,8 +28,8 @@ package com.bmlibrarian.factchecker.domain.model
  * @property cause Underlying exception, if any
  */
 sealed class PubMedError(
-    open val message: String,
-    open val cause: Throwable? = null
+    override val message: String,
+    override val cause: Throwable? = null
 ) : Exception(message, cause) {
 
     /**

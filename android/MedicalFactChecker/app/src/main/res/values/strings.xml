@@ -37,7 +37,7 @@
 
     <!-- Progress indicators -->
     <string name="progress_documents_found">%d documents found</string>
-    <string name="progress_documents_scored">%d of %d scored</string>
+    <string name="progress_documents_scored">%1$d of %2$d scored</string>
     <string name="progress_relevant_found">%d relevant documents</string>
     <string name="progress_citations_extracted">%d citations extracted</string>
     <string name="progress_percent">%d%%</string>
@@ -168,7 +168,7 @@
     <string name="settings_max_run_budget">Max per run</string>
     <string name="settings_monthly_budget">Monthly limit</string>
     <string name="settings_budget_value">$%.2f</string>
-    <string name="settings_budget_used">Used: %s of %s</string>
+    <string name="settings_budget_used">Used: %1$s of %2$s</string>
     <string name="settings_budget_remaining">Remaining: %s</string>
 
     <!-- Batch settings -->
