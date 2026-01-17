@@ -16,7 +16,7 @@
 
 import Testing
 import Foundation
-@testable import MedicalFactCheckerMac
+@testable import Medical_Fact_Checker
 
 // MARK: - PubMed to Europe PMC: MeSH Terms
 

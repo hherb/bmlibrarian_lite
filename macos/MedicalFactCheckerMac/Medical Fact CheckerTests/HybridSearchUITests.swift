@@ -16,7 +16,7 @@
 
 import Testing
 import SwiftUI
-@testable import MedicalFactCheckerMac
+@testable import Medical_Fact_Checker
 
 // MARK: - MacProviderColors Tests
 

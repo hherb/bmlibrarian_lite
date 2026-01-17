@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000060 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000061 /* BioMedLit */; };
-		A1000062 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* BioMedLitAdapters.swift */; };
 		2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */; };
 		6F77FEB52F1A5DBD00B03EBF /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB42F1A5DBD00B03EBF /* StructuredQuery.swift */; };
 		6F77FEB72F1A5DD800B03EBF /* QueryBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */; };
@@ -45,7 +43,6 @@
 		A1000032 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = A2000035 /* PRIVACY.md */; };
 		A1000033 /* MacOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036 /* MacOnboardingView.swift */; };
 		A1000034 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037 /* Logger.swift */; };
-		A1000036 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039 /* JATSXMLParser.swift */; };
 		A1000037 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* FullTextSource.swift */; };
 		A1000039 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* FullTextSourceBadge.swift */; };
 		A1000040 /* MacFullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* MacFullTextViewer.swift */; };
@@ -57,6 +54,8 @@
 		A1000047 /* SearchServiceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SearchServiceFactory.swift */; };
 		A1000048 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051 /* QueryValidator.swift */; };
 		A1000049 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052 /* CloudKitConfiguration.swift */; };
+		A1000060 /* BioMedLitLib in Frameworks */ = {isa = PBXBuildFile; productRef = A1000061 /* BioMedLitLib */; };
+		A1000062 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* BioMedLitAdapters.swift */; };
 		D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */; };
 		DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */; };
 /* End PBXBuildFile section */
@@ -122,7 +121,6 @@
 		A2000035 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
 		A2000036 /* MacOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOnboardingView.swift; sourceTree = "<group>"; };
 		A2000037 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
-		A2000039 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
 		A2000040 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
 		A2000042 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
 		A2000043 /* MacFullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextViewer.swift; sourceTree = "<group>"; };
@@ -169,7 +167,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000060 /* BioMedLit in Frameworks */,
+				A1000060 /* BioMedLitLib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -304,7 +302,6 @@
 				6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */,
 				A2000052 /* CloudKitConfiguration.swift */,
 				A2000022 /* CostCalculator.swift */,
-				A2000039 /* JATSXMLParser.swift */,
 				A2000023 /* KeychainHelper.swift */,
 				A2000037 /* Logger.swift */,
 				A2000024 /* NotificationNames.swift */,
@@ -437,7 +434,7 @@
 			);
 			name = MedicalFactCheckerMac;
 			packageProductDependencies = (
-				A1000061 /* BioMedLit */,
+				A1000061 /* BioMedLitLib */,
 			);
 			productName = MedicalFactCheckerMac;
 			productReference = A2000029 /* Medical Fact Checker.app */;
@@ -585,7 +582,6 @@
 				A1000033 /* MacOnboardingView.swift in Sources */,
 				A1000034 /* Logger.swift in Sources */,
 				6F77FEB72F1A5DD800B03EBF /* QueryBuilder.swift in Sources */,
-				A1000036 /* JATSXMLParser.swift in Sources */,
 				A1000037 /* FullTextSource.swift in Sources */,
 				A1000039 /* FullTextSourceBadge.swift in Sources */,
 				A1000040 /* MacFullTextViewer.swift in Sources */,
@@ -926,7 +922,7 @@
 				CODE_SIGN_ENTITLEMENTS = MedicalFactCheckerMac.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
@@ -943,7 +939,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "Medical Fact Checker";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -959,7 +955,7 @@
 				CODE_SIGN_ENTITLEMENTS = MedicalFactCheckerMac.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				ENABLE_APP_SANDBOX = YES;
@@ -984,7 +980,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "Medical Fact Checker";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1045,14 +1041,14 @@
 /* Begin XCLocalSwiftPackageReference section */
 		A1000063 /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../Packages/BioMedLit";
+			relativePath = ../../Packages/BioMedLit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A1000061 /* BioMedLit */ = {
+		A1000061 /* BioMedLitLib */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = BioMedLit;
+			productName = BioMedLitLib;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

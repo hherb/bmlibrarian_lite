@@ -94,8 +94,9 @@ public final class JATSXMLParser: NSObject {
     private var currentAbstractTitle = ""
     private var currentAbstractText: [String] = []
 
-    // Body state
+    // Body and back matter state
     private var inBody = false
+    private var inBack = false
     private var sectionStack: [SectionBuilder] = []
 
     // Figure/Table state
@@ -931,6 +932,8 @@ extension JATSXMLParser: XMLParserDelegate {
             currentAbstractText = []
         case "body":
             inBody = true
+        case "back":
+            inBack = true
         case "sec":
             let builder = SectionBuilder()
             sectionStack.append(builder)
@@ -1142,7 +1145,8 @@ extension JATSXMLParser: XMLParserDelegate {
                 if !normalizedText.isEmpty {
                     currentAbstractText.append(normalizedText)
                 }
-            } else if inBody, !sectionStack.isEmpty {
+            } else if (inBody || inBack), !sectionStack.isEmpty {
+                // Capture paragraphs in both body and back matter sections
                 sectionStack[sectionStack.count - 1].paragraphs.append(normalizedText)
             } else if inFigure {
                 currentFigure?.caption += normalizedText
@@ -1150,9 +1154,11 @@ extension JATSXMLParser: XMLParserDelegate {
                 currentTable?.caption += normalizedText
             }
 
-        // Body sections
+        // Body and back matter sections
         case "body":
             inBody = false
+        case "back":
+            inBack = false
         case "sec":
             if let builder = sectionStack.popLast() {
                 let section = builder.build()
