@@ -136,6 +136,72 @@ enum BioMedLitAdapters {
         }
     }
 
+    // MARK: - Unified Search Result Conversion
+
+    /// Convert BioMedLit SearchResult to UnifiedSearchResult with pagination state.
+    ///
+    /// Creates appropriate pagination state based on the provider:
+    /// - PubMed: Uses offset-based pagination
+    /// - Europe PMC: Uses cursor-based pagination
+    ///
+    /// - Parameters:
+    ///   - result: The BioMedLit SearchResult.
+    ///   - appProvider: The app's search provider enum.
+    ///   - batchNumber: Which batch this result represents.
+    ///   - basePosition: Starting position for result numbering.
+    ///   - currentCursor: Current cursor for Europe PMC (optional).
+    ///   - nextCursor: Next cursor from Europe PMC response (optional).
+    /// - Returns: UnifiedSearchResult with proper pagination state.
+    static func toUnifiedSearchResult(
+        _ result: BMLSearchResult,
+        appProvider: SearchProvider,
+        batchNumber: Int,
+        basePosition: Int,
+        currentCursor: String? = nil,
+        nextCursor: String? = nil
+    ) -> UnifiedSearchResult {
+        // Convert articles
+        let articles = toArticleMetadataArray(
+            result,
+            batchNumber: batchNumber,
+            basePosition: basePosition
+        )
+
+        // Create appropriate pagination state based on provider
+        let pagination: any PaginationState
+        switch appProvider {
+        case .pubmed:
+            pagination = OffsetPaginationState(
+                totalCount: result.totalCount,
+                offset: basePosition,
+                batchSize: articles.count
+            )
+        case .europePMC:
+            // For Europe PMC, use cursor-based pagination
+            let hasMore = nextCursor != nil && !articles.isEmpty
+            pagination = CursorPaginationState(
+                totalCount: result.totalCount,
+                fetchedCount: basePosition + articles.count,
+                currentCursor: currentCursor,
+                nextCursor: hasMore ? nextCursor : nil
+            )
+        case .both:
+            // For merged results, use offset-based pagination as default
+            pagination = OffsetPaginationState(
+                totalCount: result.totalCount,
+                offset: basePosition,
+                batchSize: articles.count
+            )
+        }
+
+        return UnifiedSearchResult(
+            articles: articles,
+            totalCount: result.totalCount,
+            pagination: pagination,
+            provider: appProvider
+        )
+    }
+
     // MARK: - Search Provider Conversion
 
     /// Convert app SearchProvider to BioMedLit SearchProvider.
