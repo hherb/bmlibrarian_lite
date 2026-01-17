@@ -21,4 +21,10 @@ extension Notification.Name {
     ///
     /// The notification's userInfo contains the clicked URL under the "url" key.
     static let documentReferenceClicked = Notification.Name("documentReferenceClicked")
+
+    /// Posted when the user wants to view full text for a document.
+    ///
+    /// The notification's userInfo contains the document under the "document" key.
+    /// Used by document detail sheets to navigate to the Full Text tab.
+    static let showDocumentFullText = Notification.Name("showDocumentFullText")
 }

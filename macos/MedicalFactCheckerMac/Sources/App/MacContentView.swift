@@ -73,6 +73,12 @@ struct MacContentView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .showMacOnboarding)) { _ in
                     showingOnboardingFromSettings = true
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .showDocumentFullText)) { notification in
+                    if let document = notification.userInfo?["document"] as? Document {
+                        selectedFullTextDocument = document
+                        selectedNavItem = .fullText
+                    }
+                }
         }
     }
 
