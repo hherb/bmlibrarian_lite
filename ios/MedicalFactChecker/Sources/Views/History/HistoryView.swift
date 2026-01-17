@@ -17,11 +17,23 @@
 import SwiftUI
 import SwiftData
 
+/// A view displaying the history of fact-check sessions.
+///
+/// Shows a list of past fact-checks with their verdicts, statistics, and options
+/// to view reports, continue searching, or delete sessions. Sessions with more
+/// available evidence display a "Continue Search" button.
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FactCheckSession.createdAt, order: .reverse) private var sessions: [FactCheckSession]
 
+    /// Callback when user wants to continue searching from an existing session.
+    ///
+    /// Called when the user taps the "Continue Search" button or context menu item.
+    /// The parent view should restore the session's claim text and resume the workflow.
+    var onContinueSession: ((FactCheckSession) -> Void)?
+
     @State private var selectedReport: EvidenceReport?
+    @State private var sessionToDelete: FactCheckSession?
 
     var body: some View {
         NavigationStack {
@@ -31,13 +43,43 @@ struct HistoryView: View {
                 } else {
                     List {
                         ForEach(sessions) { session in
-                            SessionRow(session: session)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if let report = session.report {
-                                        selectedReport = report
+                            SessionRow(
+                                session: session,
+                                onContinueSearch: onContinueSession != nil ? {
+                                    onContinueSession?(session)
+                                } : nil
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if let report = session.report {
+                                    selectedReport = report
+                                }
+                            }
+                            .contextMenu {
+                                if session.report != nil {
+                                    Button {
+                                        selectedReport = session.report
+                                    } label: {
+                                        Label("View Report", systemImage: "doc.text")
                                     }
                                 }
+
+                                if session.canGetMoreEvidence {
+                                    Button {
+                                        onContinueSession?(session)
+                                    } label: {
+                                        Label("Continue Search", systemImage: "magnifyingglass.circle")
+                                    }
+                                }
+
+                                Divider()
+
+                                Button(role: .destructive) {
+                                    sessionToDelete = session
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                         .onDelete(perform: deleteSessions)
                     }
@@ -53,24 +95,60 @@ struct HistoryView: View {
             .sheet(item: $selectedReport) { report in
                 ReportView(report: report)
             }
+            .alert(
+                "Delete Session?",
+                isPresented: Binding(
+                    get: { sessionToDelete != nil },
+                    set: { if !$0 { sessionToDelete = nil } }
+                ),
+                presenting: sessionToDelete
+            ) { session in
+                Button("Cancel", role: .cancel) {
+                    sessionToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    deleteSession(session)
+                    sessionToDelete = nil
+                }
+            } message: { session in
+                Text("This will permanently delete the fact-check for \"\(session.claim.prefix(HistoryConstants.maxClaimPreviewLength))\(session.claim.count > HistoryConstants.maxClaimPreviewLength ? "..." : "")\" and all associated data.")
+            }
         }
     }
 
+    // MARK: - Private Methods
+
+    /// Deletes multiple sessions at the given offsets.
+    ///
+    /// Used by the swipe-to-delete gesture on the list.
+    /// - Parameter offsets: The index set of sessions to delete.
     private func deleteSessions(at offsets: IndexSet) {
         for index in offsets {
             modelContext.delete(sessions[index])
         }
         try? modelContext.save()
     }
+
+    /// Deletes a single session from the database.
+    ///
+    /// Used by the context menu delete action.
+    /// - Parameter session: The session to delete.
+    private func deleteSession(_ session: FactCheckSession) {
+        modelContext.delete(session)
+        try? modelContext.save()
+    }
 }
 
 // MARK: - Subviews
 
+/// Empty state view shown when there are no fact-check sessions in history.
+///
+/// Displays a clock icon and helpful text to indicate the history is empty.
 struct EmptyHistoryView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "clock")
-                .font(.system(size: 60))
+                .font(.system(size: HistoryConstants.emptyStateIconSize))
                 .foregroundColor(.secondary)
             Text("No Fact Checks Yet")
                 .font(.headline)
@@ -83,8 +161,18 @@ struct EmptyHistoryView: View {
     }
 }
 
+/// A row displaying a single fact-check session in the history list.
+///
+/// Shows the claim text, verdict badge, date, and statistics.
+/// Optionally displays a "Continue Search" button when more results are available.
 struct SessionRow: View {
+    /// The fact-check session to display.
     let session: FactCheckSession
+
+    /// Optional callback when the user taps the "Continue Search" button.
+    ///
+    /// If nil, the button is not shown even when more evidence is available.
+    var onContinueSearch: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -126,12 +214,45 @@ struct SessionRow: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             }
+
+            // More results indicator and continue button
+            if session.canGetMoreEvidence {
+                HStack {
+                    // Visual indicator
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus.magnifyingglass")
+                        Text("More results available")
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.accentColor)
+
+                    Spacer()
+
+                    // Continue search button (if callback provided)
+                    if let onContinueSearch {
+                        Button {
+                            onContinueSearch()
+                        } label: {
+                            Text("Continue Search")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
         }
         .padding(.vertical, 4)
     }
 }
 
+/// A compact badge displaying a fact-check verdict.
+///
+/// Shows the verdict text with a color-coded background indicating
+/// the level of evidence support (green for supported, red for not supported, etc.).
 struct SmallVerdictBadge: View {
+    /// The verdict to display.
     let verdict: Verdict
 
     var body: some View {
@@ -156,7 +277,12 @@ struct SmallVerdictBadge: View {
     }
 }
 
+/// A badge displaying the current workflow step status.
+///
+/// Shows an icon and text indicating the session's progress state,
+/// such as processing, paused, failed, or completed.
 struct StatusBadge: View {
+    /// The workflow step to display.
     let step: WorkflowStep
 
     var body: some View {
@@ -184,12 +310,14 @@ struct StatusBadge: View {
 }
 
 #Preview {
-    HistoryView()
-        .modelContainer(for: [
-            FactCheckSession.self,
-            Document.self,
-            Citation.self,
-            EvidenceReport.self,
-            UsageRecord.self,
-        ], inMemory: true)
+    HistoryView(onContinueSession: { session in
+        print("Continue session: \(session.claim)")
+    })
+    .modelContainer(for: [
+        FactCheckSession.self,
+        Document.self,
+        Citation.self,
+        EvidenceReport.self,
+        UsageRecord.self,
+    ], inMemory: true)
 }
