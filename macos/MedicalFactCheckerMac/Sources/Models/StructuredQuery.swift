@@ -47,7 +47,7 @@ import Foundation
 /// // Translate to Europe PMC syntax
 /// let europepmcQuery = EuropePMCQueryBuilder.build(from: query)
 /// ```
-struct StructuredQuery: Codable, Sendable {
+struct StructuredQuery: Codable, Sendable, Equatable {
     /// The search concepts, combined with AND logic.
     let concepts: [SearchConcept]
 
@@ -64,6 +64,13 @@ struct StructuredQuery: Codable, Sendable {
     var dateRange: DateRange?
 
     /// Initialize with concepts and default filters.
+    ///
+    /// - Parameters:
+    ///   - concepts: Array of search concepts to combine with AND logic.
+    ///   - requireAbstract: Whether to filter out articles without abstracts.
+    ///   - excludePublicationTypes: Publication types to exclude from results.
+    ///   - excludePreprints: Whether to exclude preprints (Europe PMC only).
+    ///   - dateRange: Optional date range filter.
     init(
         concepts: [SearchConcept],
         requireAbstract: Bool = true,
@@ -90,7 +97,7 @@ struct StructuredQuery: Codable, Sendable {
 ///
 /// Each concept represents one facet of the search (e.g., "the drug", "the condition",
 /// "the outcome"). Terms within a concept are combined with OR logic.
-struct SearchConcept: Codable, Sendable {
+struct SearchConcept: Codable, Sendable, Equatable {
     /// Human-readable name for this concept.
     let name: String
 
@@ -104,6 +111,11 @@ struct SearchConcept: Codable, Sendable {
     let keywords: [String]
 
     /// Initialize with name, MeSH terms, and keywords.
+    ///
+    /// - Parameters:
+    ///   - name: Human-readable name for this concept.
+    ///   - meshTerms: MeSH (Medical Subject Headings) terms.
+    ///   - keywords: Free-text keywords for title/abstract search.
     init(name: String, meshTerms: [String] = [], keywords: [String] = []) {
         self.name = name
         self.meshTerms = meshTerms
@@ -124,7 +136,7 @@ struct SearchConcept: Codable, Sendable {
 // MARK: - Date Range
 
 /// Date range filter for searches.
-struct DateRange: Codable, Sendable {
+struct DateRange: Codable, Sendable, Equatable {
     /// Start year (inclusive).
     let startYear: Int
 
@@ -132,12 +144,19 @@ struct DateRange: Codable, Sendable {
     let endYear: Int
 
     /// Initialize with start and end years.
+    ///
+    /// - Parameters:
+    ///   - startYear: Start year (inclusive).
+    ///   - endYear: End year (inclusive).
     init(startYear: Int, endYear: Int) {
         self.startYear = startYear
         self.endYear = endYear
     }
 
     /// Create a range for the last N years.
+    ///
+    /// - Parameter count: Number of years to include.
+    /// - Returns: A DateRange from (currentYear - count) to currentYear.
     static func lastYears(_ count: Int) -> DateRange {
         let currentYear = Calendar.current.component(.year, from: Date())
         return DateRange(startYear: currentYear - count, endYear: currentYear)
