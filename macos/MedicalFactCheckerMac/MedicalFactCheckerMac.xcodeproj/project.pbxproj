@@ -10,6 +10,7 @@
 		2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */; };
 		6F77FEB52F1A5DBD00B03EBF /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB42F1A5DBD00B03EBF /* StructuredQuery.swift */; };
 		6F77FEB72F1A5DD800B03EBF /* QueryBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */; };
+		6F77FEB92F1A5DE000B03EBF /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB82F1A5DE000B03EBF /* QueryConstants.swift */; };
 		A1000001 /* MedicalFactCheckerMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* MedicalFactCheckerMacApp.swift */; };
 		A1000002 /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* MacContentView.swift */; };
 		A1000003 /* MacFactCheckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* MacFactCheckView.swift */; };
@@ -81,6 +82,7 @@
 		2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFetchMoreView.swift; sourceTree = "<group>"; };
 		6F77FEB42F1A5DBD00B03EBF /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
 		6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryBuilder.swift; sourceTree = "<group>"; };
+		6F77FEB82F1A5DE000B03EBF /* QueryConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryConstants.swift; sourceTree = "<group>"; };
 		6FCBC9C52F16568000D6BF11 /* Medical Fact Checker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Medical Fact Checker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6FCBC9D32F16568100D6BF11 /* Medical Fact CheckerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Medical Fact CheckerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6FCBC9DD2F16568100D6BF11 /* Medical Fact CheckerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Medical Fact CheckerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -267,6 +269,7 @@
 		A4000009 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				6F77FEB82F1A5DE000B03EBF /* QueryConstants.swift */,
 				6F77FEB42F1A5DBD00B03EBF /* StructuredQuery.swift */,
 				A2000009 /* AppSettings.swift */,
 				A2000010 /* Citation.swift */,
@@ -561,6 +564,7 @@
 				A1000008 /* MacConstants.swift in Sources */,
 				A1000009 /* AppSettings.swift in Sources */,
 				6F77FEB52F1A5DBD00B03EBF /* StructuredQuery.swift in Sources */,
+				6F77FEB92F1A5DE000B03EBF /* QueryConstants.swift in Sources */,
 				A1000010 /* Citation.swift in Sources */,
 				A1000011 /* Document.swift in Sources */,
 				A1000012 /* Enums.swift in Sources */,

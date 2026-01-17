@@ -592,9 +592,15 @@ final class FactCheckWorkflow {
         }
         if provider == .europePMC || provider == .both {
             session.europePMCTotalResults = result.totalCount
-            session.europePMCCursor = result.nextCursorMark
+            // Extract cursor from pagination state if available
+            if let cursorPagination = result.pagination as? CursorPaginationState {
+                session.europePMCCursor = cursorPagination.nextCursor
+                session.europePMCHasMore = cursorPagination.hasMore
+            } else {
+                session.europePMCCursor = nil
+                session.europePMCHasMore = result.hasMore
+            }
             session.europePMCOffset = result.nextOffset
-            session.europePMCHasMore = result.nextCursorMark != nil
         }
         session.batchesFetched = batchNumber
 
