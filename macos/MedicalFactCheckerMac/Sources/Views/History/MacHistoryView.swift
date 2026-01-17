@@ -150,11 +150,21 @@ struct MacHistoryView: View {
     @ViewBuilder
     private var sessionDetail: some View {
         if let session = selectedSession {
-            MacSessionDetailView(session: session, onViewReport: {
-                if let report = session.report {
-                    onReportSelected?(report)
+            MacSessionDetailView(
+                session: session,
+                onViewReport: {
+                    if let report = session.report {
+                        onReportSelected?(report)
+                    }
+                },
+                onShowFullText: { document in
+                    NotificationCenter.default.post(
+                        name: .showDocumentFullText,
+                        object: nil,
+                        userInfo: ["document": document]
+                    )
                 }
-            })
+            )
         } else {
             VStack(spacing: MacSpacing.large) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -295,13 +305,17 @@ struct MacStatusBadge: View {
 
 /// Detail view showing comprehensive information about a fact-check session.
 ///
-/// Displays the session's claim, PubMed query, status, statistics, and provides
-/// a button to view the generated report.
+/// Displays the session's claim, PubMed query, status, statistics, scored documents,
+/// and provides a button to view the generated report.
 struct MacSessionDetailView: View {
+    @Environment(AppSettings.self) private var settings
+
     /// The session to display.
     let session: FactCheckSession
     /// Callback when the user wants to view the report.
     let onViewReport: () -> Void
+    /// Callback when the user wants to view full text for a document.
+    var onShowFullText: ((Document) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -412,6 +426,25 @@ struct MacSessionDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                }
+
+                // Scored Documents
+                if (session.documents ?? []).contains(where: { $0.isScored }) {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: MacSpacing.standard) {
+                        Text("Scored Documents")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+
+                        MacScoredDocumentsView(
+                            session: session,
+                            showEmbeddingScores: settings.embeddingScoringEnabled,
+                            onShowFullText: onShowFullText
+                        )
+                        .frame(minHeight: MacLayout.scoredDocumentsMinHeight)
+                    }
                 }
 
                 Spacer(minLength: MacSpacing.xLarge)

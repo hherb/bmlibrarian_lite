@@ -64,6 +64,7 @@ enum MacLayout {
     static let viewMinHeight: CGFloat = 500
     static let textEditorMinHeight: CGFloat = 120
     static let textEditorMaxHeight: CGFloat = 200
+    static let scoredDocumentsMinHeight: CGFloat = 300
 
     /// Button widths.
     static let submitButtonMinWidth: CGFloat = 140
