@@ -108,7 +108,9 @@ struct MacFactCheckView: View {
                 if let workflow = workflow, workflow.awaitingUserDecision {
                     MacUserDecisionSection(
                         prompt: workflow.userDecisionPrompt,
+                        showSmartSearchOption: workflow.awaitingSmartSearchDecision,
                         onContinue: { Task { await workflow.continueWithMoreDocuments() } },
+                        onSmartSearch: { Task { await workflow.continueWithSmartSearch() } },
                         onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
                     )
                 }
@@ -557,8 +559,12 @@ struct MacStepConnector: View {
 struct MacUserDecisionSection: View {
     /// The prompt message to display.
     let prompt: String
+    /// Whether to show smart search option instead of fetch more.
+    let showSmartSearchOption: Bool
     /// Callback when user chooses to continue fetching.
     let onContinue: () -> Void
+    /// Callback when user chooses to try smart search.
+    let onSmartSearch: (() -> Void)?
     /// Callback when user chooses to proceed with current documents.
     let onProceed: () -> Void
 
@@ -576,12 +582,19 @@ struct MacUserDecisionSection: View {
             }
 
             HStack(spacing: MacSpacing.standard) {
-                Button("Fetch More Documents") {
-                    onContinue()
+                if showSmartSearchOption {
+                    Button("Try Smart Search") {
+                        onSmartSearch?()
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Fetch More Documents") {
+                        onContinue()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
 
-                Button("Continue with Current") {
+                Button("Proceed with Current") {
                     onProceed()
                 }
                 .buttonStyle(.bordered)

@@ -50,6 +50,9 @@ final class FactCheckWorkflow {
     /// Set to true when waiting for user decision on fetching more docs.
     private(set) var awaitingUserDecision = false
 
+    /// Set to true when waiting for user decision on smart search activation.
+    private(set) var awaitingSmartSearchDecision = false
+
     /// Message to display when awaiting user decision.
     private(set) var userDecisionPrompt = ""
 
@@ -57,6 +60,7 @@ final class FactCheckWorkflow {
 
     var onProgress: ((WorkflowStep, String) -> Void)?
     var onNeedMoreDocuments: ((Int, Int, Int) -> Void)?  // (relevant, needed, available)
+    var onAskSmartSearch: ((_ message: String, _ completion: @escaping (Bool) -> Void) -> Void)?
     var onComplete: ((EvidenceReport) -> Void)?
     var onError: ((Error) -> Void)?
     var onBudgetExceeded: ((String) -> Void)?
@@ -159,6 +163,7 @@ final class FactCheckWorkflow {
     /// User declined fetching more documents - proceed with current results.
     func proceedWithCurrentDocuments() async {
         awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
         userDecisionPrompt = ""
 
         guard let session = session else { return }
@@ -168,6 +173,38 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         await runWorkflow()
+    }
+
+    /// User approved activating smart search.
+    func continueWithSmartSearch() async {
+        awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
+        userDecisionPrompt = ""
+
+        guard let session = session else { return }
+        isRunning = true
+
+        do {
+            try await executeSmartSearch()
+            // After smart search, return to decision point with new results
+            session.currentStep = .scoringDocuments
+            try? modelContext.save()
+            await runWorkflow()
+        } catch let error as BudgetError {
+            session.currentStep = .budgetExceeded
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .budgetExceeded
+            try? modelContext.save()
+            onBudgetExceeded?(error.localizedDescription)
+            isRunning = false
+        } catch {
+            session.currentStep = .failed
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .apiError
+            try? modelContext.save()
+            onError?(error)
+            isRunning = false
+        }
     }
 
     /// Cancel the current workflow.
@@ -226,7 +263,8 @@ final class FactCheckWorkflow {
             // Step 1: Fetch more documents
             if session.canFetchMoreDocuments {
                 // More results available from original query
-                updateProgress(.fetchingMoreEvidence, "Fetching more documents from PubMed...")
+                let providerName = (searchOptions?.provider ?? .pubmed).displayName
+                updateProgress(.fetchingMoreEvidence, "Fetching more documents from \(providerName)...")
                 try await searchPubMed()
 
                 // Score new documents
@@ -334,56 +372,59 @@ final class FactCheckWorkflow {
                 }
             }
 
-            // Check if we need more documents
+            // User decision point - ALWAYS prompt after scoring
             if session.currentStep == .scoringDocuments {
-                let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+                let relevant = (session.documents ?? []).filter {
+                    $0.meetsThreshold(settings.minScoreThreshold)
+                }.count
                 let needed = settings.minRelevantDocuments
-                let available = session.totalPubMedResults - session.currentSearchOffset
+                let available = session.estimatedRemainingResults
+                let canSearchMore = session.canFetchMoreDocuments
+                let canSmartSearch = !session.smartSearchEnabled
 
-                if relevant < needed {
-                    // Try smart search first if not already enabled
-                    if !session.smartSearchEnabled && relevant < smartSearchThreshold {
-                        updateProgress(.searchingPubMed, "Insufficient results, activating smart search...")
-                        try await executeSmartSearch()
+                session.currentStep = .awaitingUserDecision
+                try? modelContext.save()
+                awaitingUserDecision = true
 
-                        // Re-check after smart search
-                        let relevantAfterSmart = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
-                        if relevantAfterSmart >= needed {
-                            // Smart search found enough, proceed to citations
-                            session.currentStep = .extractingCitations
-                            try? modelContext.save()
-                        } else if available > 0 {
-                            // Still not enough, prompt user for more from original query
-                            session.currentStep = .awaitingUserDecision
-                            try? modelContext.save()
-
-                            awaitingUserDecision = true
-                            userDecisionPrompt = "Found \(relevantAfterSmart) relevant document(s) after smart search. Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more from original query?"
-                            onNeedMoreDocuments?(relevantAfterSmart, needed, available)
-
-                            isRunning = false
-                            return
+                if canSearchMore {
+                    // Primary provider has more results - offer to fetch more
+                    userDecisionPrompt = "Found \(relevant) relevant document(s) (minimum: \(needed)). \(available) more available. Fetch more or proceed?"
+                    onNeedMoreDocuments?(relevant, needed, available)
+                    isRunning = false
+                    return
+                } else if canSmartSearch {
+                    // Provider exhausted, smart search available - ASK user first
+                    awaitingSmartSearchDecision = true
+                    userDecisionPrompt = "Found \(relevant) relevant document(s). Primary search exhausted. Try alternative search strategies?"
+                    if let askCallback = onAskSmartSearch {
+                        askCallback(userDecisionPrompt) { [weak self] approved in
+                            Task { @MainActor in
+                                if approved {
+                                    await self?.continueWithSmartSearch()
+                                } else {
+                                    await self?.proceedWithCurrentDocuments()
+                                }
+                            }
                         }
-                    } else if available > 0 {
-                        // Smart search already tried or threshold met, prompt user
-                        session.currentStep = .awaitingUserDecision
-                        try? modelContext.save()
-
-                        awaitingUserDecision = true
-                        userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
-                        onNeedMoreDocuments?(relevant, needed, available)
-
-                        isRunning = false
-                        return  // Wait for user decision
+                    } else {
+                        // No callback set - use onNeedMoreDocuments as fallback
+                        onNeedMoreDocuments?(relevant, needed, 0)
                     }
+                    isRunning = false
+                    return
+                } else {
+                    // Nothing more available - auto-proceed to citations
+                    awaitingUserDecision = false
+                    awaitingSmartSearchDecision = false
+                    userDecisionPrompt = ""
+                    session.currentStep = .extractingCitations
+                    try? modelContext.save()
+                    // Fall through to extraction
                 }
             }
 
-            // Step 4: Extract citations
-            if session.currentStep == .scoringDocuments || session.currentStep == .awaitingUserDecision {
-                session.currentStep = .extractingCitations
-                try? modelContext.save()
-
+            // Step 4: Extract citations - handles both direct flow and resumed flow
+            if session.currentStep == .extractingCitations {
                 try await extractCitations()
             }
 
@@ -530,11 +571,17 @@ final class FactCheckWorkflow {
         let providerName = options.provider.displayName
         updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
 
-        // Use unified search factory
+        // Get cursor for Europe PMC pagination (if applicable)
+        let cursor: String? = (provider == .europePMC || provider == .both)
+            ? session.europePMCCursor
+            : nil
+
+        // Use unified search factory with cursor for Europe PMC
         let result = try await SearchServiceFactory.search(
             query: query,
             options: options,
-            settings: settings
+            settings: settings,
+            cursor: cursor
         )
 
         // Update session state
@@ -555,8 +602,36 @@ final class FactCheckWorkflow {
 
         updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
 
-        // Create Document objects from unified metadata
-        for article in result.articles {
+        // Build sets of existing identifiers for deduplication
+        let existingDocuments = session.documents ?? []
+        let existingPmids = Set(existingDocuments.map { $0.pmid })
+        let existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
+        let existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
+
+        // Filter out duplicates before adding
+        let newArticles = result.articles.filter { article in
+            // Check PMID (primary identifier)
+            if existingPmids.contains(article.pmid) {
+                return false
+            }
+            // Check DOI
+            if let doi = article.doi?.lowercased(), existingDois.contains(doi) {
+                return false
+            }
+            // Check PMC ID
+            if let pmcId = article.pmcId?.lowercased(), existingPmcIds.contains(pmcId) {
+                return false
+            }
+            return true
+        }
+
+        let duplicateCount = result.articles.count - newArticles.count
+        if duplicateCount > 0 {
+            print("[Search] Filtered out \(duplicateCount) duplicate(s) from \(result.articles.count) articles")
+        }
+
+        // Create Document objects from deduplicated articles
+        for article in newArticles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
@@ -578,7 +653,7 @@ final class FactCheckWorkflow {
             modelContext.insert(document)
         }
 
-        session.documentsFound += result.articles.count
+        session.documentsFound += newArticles.count
 
         // Update provider-specific pagination state
         switch options.provider {
@@ -1190,87 +1265,100 @@ final class FactCheckWorkflow {
     /// Minimum relevant documents before triggering smart search
     private let smartSearchThreshold = 3
 
-    /// Generate alternative search queries when initial search yields insufficient results.
-    private func generateAlternativeQueries() async throws -> [String] {
+    /// Generate alternative search strategies as structured queries.
+    ///
+    /// Uses a provider-agnostic format that can be translated to either
+    /// PubMed or Europe PMC syntax using `QueryBuilderFactory`.
+    ///
+    /// - Returns: Array of structured queries for alternative searches.
+    private func generateAlternativeStructuredQueries() async throws -> [StructuredQuery] {
         guard let session = session, let llmService = llmService else { return [] }
 
         try checkBudget()
 
         let prompt = """
-        The following medical question did not return enough relevant results with the initial PubMed search.
+        The following medical question did not return enough relevant results.
 
         Question: \(session.claim)
         Initial query: \(session.pubmedQuery ?? "N/A")
         Results found: \(session.totalPubMedResults)
         Relevant documents: \(session.relevantDocumentsFound)
 
-        Analyze the question and suggest 2-4 alternative search strategies. Consider:
+        Generate 2-4 alternative search strategies. Consider:
         1. If comparing two treatments/medications, search for each one separately
         2. Use different synonyms or related terms
         3. Break compound questions into simpler components
         4. Try broader or narrower search terms
         5. Focus on key outcomes or mechanisms
 
-        For comparison questions (e.g., "A vs B for condition C"), generate separate queries like:
-        - "A AND condition C AND outcome"
-        - "B AND condition C AND outcome"
+        For comparison questions (e.g., "A vs B for condition C"), generate separate strategies like:
+        - Separate query for "A" with the condition
+        - Separate query for "B" with the condition
 
-        Output a JSON array of alternative PubMed query strings. Each query should:
-        - Be a valid PubMed search syntax
-        - Include "AND hasabstract" at the end
-        - Be different from the original query
+        Output a JSON array of structured queries. Each query should have concepts with MeSH terms and keywords:
+        [
+          {"concepts": [{"name": "concept1", "mesh_terms": ["MeSH Term"], "keywords": ["keyword1", "keyword2"]}]},
+          {"concepts": [{"name": "concept1", "mesh_terms": ["..."], "keywords": ["..."]}, {"name": "concept2", "mesh_terms": ["..."], "keywords": ["..."]}]}
+        ]
 
-        Respond with ONLY a JSON array of strings, nothing else:
-        ["query1 AND hasabstract", "query2 AND hasabstract"]
+        Respond with ONLY the JSON array, nothing else.
         """
 
         let messages = [LLMService.userMessage(prompt)]
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.3,
-            maxTokens: 512,
+            maxTokens: 1024,
             jsonMode: true
         )
 
         recordUsage(usage, operationType: "smart_search")
 
-        // Parse the JSON array
-        let queries = ResponseParser.parseStringArray(response)
+        // Parse the structured query array
+        let queries = ResponseParser.parseStructuredQueryArray(response)
         return queries
     }
 
     /// Execute smart search with alternative queries.
+    ///
+    /// Generates provider-agnostic structured queries and executes them
+    /// against the currently selected search provider.
     private func executeSmartSearch() async throws {
         guard let session = session else { return }
 
-        // Generate alternative queries
+        let provider = searchOptions?.provider ?? .pubmed
+
+        // Generate alternative structured queries
         updateProgress(.searchingPubMed, "Generating alternative search strategies...")
-        let alternatives = try await generateAlternativeQueries()
+        let alternatives = try await generateAlternativeStructuredQueries()
 
         guard !alternatives.isEmpty else {
             // No alternatives generated, continue with what we have
             return
         }
 
-        // Store alternatives in session
-        session.alternativeQueries = try? JSONEncoder().encode(alternatives).base64EncodedString()
+        // Store alternatives as query strings for debugging/persistence
+        let queryStrings = alternatives.map { QueryBuilderFactory.build(from: $0, for: provider) }
+        session.alternativeQueries = try? JSONEncoder().encode(queryStrings).base64EncodedString()
         session.smartSearchEnabled = true
         session.currentAlternativeQueryIndex = 0
 
-        // Track already-fetched PMIDs
+        // Track already-fetched identifiers for deduplication
         let existingPmids = Set((session.documents ?? []).map { $0.pmid })
+        let existingDois = Set((session.documents ?? []).compactMap { $0.doi?.lowercased() })
         session.fetchedPmids = existingPmids.joined(separator: ",")
 
-        onSmartSearchActivated?("Trying \(alternatives.count) alternative search strategies...")
+        onSmartSearchActivated?("Trying \(alternatives.count) alternative \(provider.displayName) searches...")
 
-        // Execute each alternative query
-        for (index, query) in alternatives.enumerated() {
+        // Execute each alternative query using the selected provider
+        for (index, structuredQuery) in alternatives.enumerated() {
             try checkBudget()
 
             session.currentAlternativeQueryIndex = index
-            updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(query.prefix(50))...")
+            let queryString = QueryBuilderFactory.build(from: structuredQuery, for: provider)
+            updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(queryString.prefix(50))...")
 
-            try await executeAlternativeQuery(query)
+            try await executeAlternativeStructuredQuery(structuredQuery, existingPmids: existingPmids, existingDois: existingDois)
 
             // Check if we now have enough relevant documents
             let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
@@ -1283,21 +1371,50 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
-    /// Execute a single alternative query, avoiding duplicates.
-    private func executeAlternativeQuery(_ query: String) async throws {
-        guard let session = session, let pubmedService = pubmedService else { return }
+    /// Execute a single alternative structured query using the selected provider.
+    ///
+    /// Uses `SearchServiceFactory` to route to the correct provider (PubMed, Europe PMC, or both).
+    ///
+    /// - Parameters:
+    ///   - structuredQuery: The structured query to execute.
+    ///   - existingPmids: Set of already-fetched PMIDs for deduplication.
+    ///   - existingDois: Set of already-fetched DOIs for deduplication.
+    private func executeAlternativeStructuredQuery(
+        _ structuredQuery: StructuredQuery,
+        existingPmids: Set<String>,
+        existingDois: Set<String>
+    ) async throws {
+        guard let session = session else { return }
 
-        // Get already-fetched PMIDs
-        let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
+        let provider = searchOptions?.provider ?? .pubmed
 
-        let result = try await pubmedService.search(
+        // Build provider-specific query string
+        let query = QueryBuilderFactory.build(from: structuredQuery, for: provider)
+
+        // Build search options for this alternative query
+        var options = searchOptions ?? settings.buildSearchOptions()
+        options.offset = 0  // Start fresh for alternative query
+        options.maxResults = settings.batchSize
+
+        // Use SearchServiceFactory for provider-agnostic search
+        let result = try await SearchServiceFactory.search(
             query: query,
-            maxResults: settings.batchSize,
-            offset: 0
+            options: options,
+            settings: settings
         )
 
-        // Filter out already-fetched PMIDs from BioMedLit result
-        let newArticles = result.articles.filter { !fetchedPmidSet.contains($0.pmid) }
+        // Filter out duplicates (by PMID or DOI)
+        let newArticles = result.articles.filter { article in
+            // Check PMID
+            if existingPmids.contains(article.pmid) {
+                return false
+            }
+            // Check DOI (if present)
+            if let doi = article.doi?.lowercased(), existingDois.contains(doi) {
+                return false
+            }
+            return true
+        }
 
         guard !newArticles.isEmpty else {
             return  // No new results from this query
@@ -1305,29 +1422,14 @@ final class FactCheckWorkflow {
 
         let batchNumber = session.batchesFetched + 1
 
-        // Convert BioMedLit articles to unified format using adapter
-        let unifiedResult = BioMedLitAdapters.toUnifiedSearchResult(
-            SearchResult(
-                articles: newArticles,
-                totalCount: newArticles.count,
-                nextCursor: nil,
-                nextOffset: nil,
-                query: query,
-                provider: .pubmed
-            ),
-            appProvider: .pubmed,
-            batchNumber: batchNumber,
-            basePosition: session.documentsFound
-        )
-
-        // Create Document objects
-        for article in unifiedResult.articles {
+        // Create Document objects from deduplicated articles
+        for article in newArticles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
                 abstract: article.abstract,
                 authors: article.authors,
-                batchNumber: article.batchNumber,
+                batchNumber: batchNumber,
                 resultPosition: article.resultPosition
             )
             document.year = article.year
@@ -1336,24 +1438,26 @@ final class FactCheckWorkflow {
             document.pmcId = article.pmcId
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
+            document.searchSource = article.source.rawValue
+            document.hasFullTextInPMC = article.hasFullTextInPMC
             document.session = session
 
             modelContext.insert(document)
         }
 
         // Update tracking
-        session.documentsFound += unifiedResult.articles.count
+        session.documentsFound += newArticles.count
         session.batchesFetched += 1
 
-        // Update fetched PMIDs
-        var updatedPmids = fetchedPmidSet
+        // Update fetched PMIDs for future deduplication
+        var updatedPmids = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
         newArticles.forEach { updatedPmids.insert($0.pmid) }
         session.fetchedPmids = updatedPmids.joined(separator: ",")
 
         try? modelContext.save()
 
         // Score the new documents
-        try await scoreNewDocuments(unifiedResult.articles.map { $0.pmid })
+        try await scoreNewDocuments(newArticles.map { $0.pmid })
     }
 
     /// Score only specific documents (by PMID).
