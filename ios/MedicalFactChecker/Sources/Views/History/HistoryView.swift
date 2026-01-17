@@ -22,6 +22,10 @@ import SwiftData
 /// Shows a list of past fact-checks with their verdicts, statistics, and options
 /// to view reports, continue searching, or delete sessions. Sessions with more
 /// available evidence display a "Continue Search" button.
+///
+/// Tapping a session row restores the full session state in the Check tab,
+/// including the claim text, scored documents, and report. Use the context menu
+/// "View Report" option to view just the report as a popup.
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FactCheckSession.createdAt, order: .reverse) private var sessions: [FactCheckSession]
@@ -51,7 +55,11 @@ struct HistoryView: View {
                             )
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                if let report = session.report {
+                                // Restore full session state in Check tab
+                                if onContinueSession != nil {
+                                    onContinueSession?(session)
+                                } else if let report = session.report {
+                                    // Fallback: show report popup if no restore handler
                                     selectedReport = report
                                 }
                             }

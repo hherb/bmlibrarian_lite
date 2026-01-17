@@ -122,7 +122,10 @@ final class FactCheckWorkflow {
         await runWorkflow()
     }
 
-    /// Resume an existing session.
+    /// Resume an existing session and continue the workflow.
+    ///
+    /// This method resumes the workflow from where it left off, which is appropriate
+    /// when the user wants to continue processing (e.g., fetch more documents).
     func resumeSession(_ session: FactCheckSession) async {
         // Initialize services
         do {
@@ -136,6 +139,32 @@ final class FactCheckWorkflow {
         await loadMonthlyUsage()
         self.session = session
         await runWorkflow()
+    }
+
+    /// Restore a session for viewing without running the workflow.
+    ///
+    /// This method loads an existing session so its data (claim, documents, report)
+    /// can be displayed in the UI, without triggering any new processing.
+    /// Use this when the user taps a history item to review past results.
+    ///
+    /// - Parameter session: The fact-check session to restore for viewing.
+    func restoreForViewing(_ session: FactCheckSession) {
+        self.session = session
+        // Initialize services lazily - only if user triggers new actions
+        isRunning = false
+        awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
+        userDecisionPrompt = ""
+        progressMessage = ""
+
+        // Restore search options from session if available
+        if let providerRaw = session.searchProvider,
+           let provider = SearchProvider(rawValue: providerRaw) {
+            currentSearchOptions = SearchOptions(
+                provider: provider,
+                includePreprints: session.includePreprints
+            )
+        }
     }
 
     /// User approved fetching more documents.

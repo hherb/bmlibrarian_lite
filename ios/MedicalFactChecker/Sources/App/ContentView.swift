@@ -124,18 +124,20 @@ struct ContentView: View {
 
     // MARK: - Session Restoration
 
-    /// Restores a session from history, navigating to Check tab with the claim
-    /// and workflow ready to add more results.
+    /// Restores a session from history for viewing.
     ///
-    /// This method is called when the user selects "Continue Search" from the
-    /// History tab. It:
+    /// This method is called when the user taps a history item. It:
     /// 1. Restores the original claim text to the input field
-    /// 2. Creates a new workflow configured with the session's original search options
-    /// 3. Sets up all necessary callbacks for completion and error handling
-    /// 4. Navigates to the Check tab
-    /// 5. Resumes the session asynchronously
+    /// 2. Creates a workflow with the session loaded (without running it)
+    /// 3. Sets up callbacks for any subsequent actions (like "Add More Results")
+    /// 4. Sets the current report so the Report tab shows it
+    /// 5. Navigates to the Check tab
     ///
-    /// - Parameter session: The fact-check session to restore and continue.
+    /// The session's documents, scores, and report are displayed without
+    /// re-running the workflow. The user can then click "Add More Results"
+    /// to fetch additional documents if more are available.
+    ///
+    /// - Parameter session: The fact-check session to restore for viewing.
     private func restoreSession(_ session: FactCheckSession) {
         // Restore the claim text to the input field
         factCheckClaimText = session.claim
@@ -146,7 +148,7 @@ struct ContentView: View {
             settings: AppSettings.shared
         )
 
-        // Configure workflow callbacks
+        // Configure workflow callbacks for any subsequent actions
 
         // Called when workflow completes successfully with a report
         restoredWorkflow.onComplete = { report in
@@ -157,29 +159,28 @@ struct ContentView: View {
 
         // Called when an error occurs during workflow execution
         restoredWorkflow.onError = { error in
-            // Error is logged by FactCheckWorkflow; FactCheckView will display it
-            // via the workflow's session.errorMessage property
-            print("[ContentView] Workflow error during session restore: \(error.localizedDescription)")
+            print("[ContentView] Workflow error: \(error.localizedDescription)")
         }
 
         // Called when budget limit is exceeded
         restoredWorkflow.onBudgetExceeded = { message in
-            print("[ContentView] Budget exceeded during session restore: \(message)")
+            print("[ContentView] Budget exceeded: \(message)")
         }
+
+        // Restore session for viewing (does not run the workflow)
+        restoredWorkflow.restoreForViewing(session)
 
         // Set the workflow binding so FactCheckView receives it
         factCheckWorkflow = restoredWorkflow
 
+        // Set the current report so Report tab shows it
+        if let report = session.report {
+            currentReport = report
+        }
+
         // Navigate to Check tab
         visitedTabs.insert(.check)
         selectedTab = .check
-
-        // Resume the session asynchronously
-        // The workflow will pick up from where the session left off,
-        // using the session's stored pagination state
-        Task {
-            await restoredWorkflow.resumeSession(session)
-        }
     }
 }
 
