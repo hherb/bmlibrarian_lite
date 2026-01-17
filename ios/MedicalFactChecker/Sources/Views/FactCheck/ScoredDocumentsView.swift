@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import BioMedLit
 import SwiftData
 import SwiftUI
 
@@ -94,7 +95,7 @@ struct DocumentScoreRow: View {
     @State private var isLoadingFullText = false
     @State private var fullTextError: String?
     @State private var showFullTextViewer = false
-    @State private var fullTextResult: FullTextResult?
+    @State private var fullTextResult: AppFullTextResult?
 
     @Environment(\.openURL) private var openURL
 
@@ -160,9 +161,9 @@ struct DocumentScoreRow: View {
         } else if let content = document.fullTextContent {
             FullTextViewer(
                 document: document,
-                result: FullTextResult(
+                result: AppFullTextResult(
                     content: .markdown(content),
-                    source: FullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
+                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
                 )
             )
         }
@@ -268,7 +269,7 @@ struct DocumentScoreRow: View {
                 .tint(.blue)
 
                 if let source = document.fullTextSource,
-                   let fullTextSource = FullTextSource(rawValue: source) {
+                   let fullTextSource = AppFullTextSource(rawValue: source) {
                     FullTextSourceBadge(source: fullTextSource)
                 }
             }
@@ -336,8 +337,13 @@ struct DocumentScoreRow: View {
 
         Task {
             do {
-                let service = FullTextService.create(from: .shared)
-                let result = try await service.fetchFullText(for: document)
+                let service = BMLFullTextService.create(from: .shared)
+                let bmlResult = try await service.fetchFullText(
+                    pmcId: document.pmcId,
+                    doi: document.doi,
+                    pmid: document.pmid
+                )
+                let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {
                     // Update document model

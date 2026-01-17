@@ -17,7 +17,8 @@
 import Foundation
 
 /// Source from which full text was retrieved.
-enum FullTextSource: String, Codable, Sendable {
+/// Note: Renamed from FullTextSource to avoid collision with BioMedLit.FullTextSource.
+enum AppFullTextSource: String, Codable, Sendable {
     case europePMC = "europepmc"
     case unpaywall = "unpaywall"
     case doi = "doi"
@@ -45,7 +46,8 @@ enum FullTextSource: String, Codable, Sendable {
 }
 
 /// Result of a full-text retrieval attempt.
-struct FullTextResult: Sendable {
+/// Note: Renamed from FullTextResult to avoid collision with BioMedLit.FullTextResult.
+struct AppFullTextResult: Sendable {
     /// Type of content retrieved from full-text sources.
     enum ContentType: Sendable {
         case markdown(String)    // Europe PMC XML converted to markdown
@@ -54,7 +56,7 @@ struct FullTextResult: Sendable {
     }
 
     let content: ContentType
-    let source: FullTextSource
+    let source: AppFullTextSource
 
     /// Whether this result can be displayed in-app.
     var canDisplayInApp: Bool {

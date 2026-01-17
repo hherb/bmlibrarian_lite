@@ -1,3 +1,4 @@
+// swift-tools-version: 5.9
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //

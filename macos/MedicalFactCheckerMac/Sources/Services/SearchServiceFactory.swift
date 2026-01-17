@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import BioMedLit
 
 /// Factory for creating and executing literature searches across providers.
 ///
@@ -70,7 +71,8 @@ enum SearchServiceFactory {
         options: SearchOptions,
         settings: AppSettings
     ) async throws -> UnifiedSearchResult {
-        let service = PubMedService.create(from: settings)
+        // Use BioMedLit PubMedService
+        let service = BioMedLit.PubMedService.create(from: settings)
 
         // Execute search
         let searchResult = try await service.search(
@@ -79,46 +81,16 @@ enum SearchServiceFactory {
             offset: options.offset
         )
 
-        // Fetch article details
-        let articles = try await service.fetchArticles(
-            pmids: searchResult.pmids,
-            batchNumber: calculateBatchNumber(offset: options.offset, batchSize: options.maxResults),
+        // Convert BioMedLit articles to unified format using adapter
+        let batchNumber = calculateBatchNumber(offset: options.offset, batchSize: options.maxResults)
+        let unifiedResult = BioMedLitAdapters.toUnifiedSearchResult(
+            searchResult,
+            appProvider: .pubmed,
+            batchNumber: batchNumber,
             basePosition: options.offset
         )
 
-        // Convert to unified format
-        let unifiedArticles = articles.map { article in
-            UnifiedArticleMetadata(
-                pmid: article.pmid,
-                pmcId: article.pmcId,
-                doi: article.doi,
-                title: article.title,
-                abstract: article.abstract,
-                authors: article.authors,
-                journal: article.journal,
-                publicationDate: article.publicationDate,
-                year: article.year,
-                meshTerms: article.meshTerms,
-                source: .pubmed,
-                isPreprint: false,
-                hasFullTextInPMC: article.pmcId != nil,
-                batchNumber: article.batchNumber,
-                resultPosition: article.resultPosition
-            )
-        }
-
-        let pagination = OffsetPaginationState(
-            totalCount: searchResult.totalCount,
-            offset: options.offset,
-            batchSize: unifiedArticles.count
-        )
-
-        return UnifiedSearchResult(
-            articles: unifiedArticles,
-            totalCount: searchResult.totalCount,
-            pagination: pagination,
-            provider: .pubmed
-        )
+        return unifiedResult
     }
 
     // MARK: - Europe PMC Search
@@ -137,7 +109,8 @@ enum SearchServiceFactory {
         query: String,
         options: SearchOptions
     ) async throws -> UnifiedSearchResult {
-        let service = EuropePMCService.create()
+        // Use BioMedLit EuropePMCService
+        let service = BioMedLit.EuropePMCService.create()
 
         // Check if query is already in Europe PMC syntax
         let translatedQuery: String
@@ -164,26 +137,27 @@ enum SearchServiceFactory {
 
         // For offset-based pagination requests, we need to handle cursor conversion
         // Europe PMC uses cursors, but we expose offset-based interface
-        // For initial requests (offset 0), use nil cursor
+        // For initial requests (offset 0), use "*" cursor
         // For subsequent requests, the caller should use cursor-based pagination
-        let cursor: String? = options.offset == 0 ? nil : nil  // TODO: Track cursors per session
+        let cursor = "*"  // TODO: Track cursors per session for pagination
 
         let result = try await service.search(
             query: translatedQuery,
-            maxResults: options.maxResults,
+            pageSize: options.maxResults,
             cursor: cursor,
             includePreprints: options.includePreprints
         )
 
+        // Convert BioMedLit articles to unified format using adapter
         let batchNumber = calculateBatchNumber(offset: options.offset, batchSize: options.maxResults)
-        let unifiedArticles = result.articles.map { $0.toUnifiedMetadata(batchNumber: batchNumber) }
-
-        return UnifiedSearchResult(
-            articles: unifiedArticles,
-            totalCount: result.totalCount,
-            pagination: result.pagination,
-            provider: .europePMC
+        let unifiedResult = BioMedLitAdapters.toUnifiedSearchResult(
+            result,
+            appProvider: .europePMC,
+            batchNumber: batchNumber,
+            basePosition: options.offset
         )
+
+        return unifiedResult
     }
 
     // MARK: - Combined Search

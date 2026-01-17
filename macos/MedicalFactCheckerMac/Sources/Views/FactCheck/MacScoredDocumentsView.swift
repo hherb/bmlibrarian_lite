@@ -16,6 +16,7 @@
 
 import SwiftUI
 import SwiftData
+import BioMedLit
 
 /// macOS view for displaying scored documents as expandable cards.
 ///
@@ -521,19 +522,20 @@ struct MacDocumentCard: View {
 
     // MARK: - Full Text Actions
 
-    /// Fetch full text for this document using the FullTextService fallback chain.
+    /// Fetch full text for this document using the BioMedLit FullTextService.
     private func fetchFullText() {
         isLoadingFullText = true
         fullTextError = nil
 
         Task {
             do {
-                let service = FullTextService.create(from: .shared)
-                let result = try await service.fetchFullText(
+                let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
+                let bmlResult = try await service.fetchFullText(
                     pmcId: document.pmcId,
                     doi: document.doi,
                     pmid: document.pmid
                 )
+                let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {
                     // Update document model based on result type
@@ -575,7 +577,7 @@ struct MacDocumentCard: View {
     /// - Parameter url: The URL to download the PDF from.
     private func downloadAndCachePDF(from url: URL) async {
         do {
-            let service = FullTextService.create(from: .shared)
+            let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
             let path = try await service.downloadAndCachePDF(from: url, for: document.pmid)
 
             await MainActor.run {

@@ -16,6 +16,7 @@
 
 import SwiftUI
 import SwiftData
+import BioMedLit
 
 /// Main macOS app entry point.
 ///
@@ -24,6 +25,11 @@ import SwiftData
 struct MedicalFactCheckerMacApp: App {
     /// Window ID for the main fact-checking window.
     static let mainWindowID = "main-window"
+
+    init() {
+        // Configure BioMedLit library with app settings
+        configureBioMedLit()
+    }
 
     var sharedModelContainer: ModelContainer = {
         // Clear any pending config change flag from previous launch
@@ -168,5 +174,20 @@ struct HelpMenuCommands: View {
         Link("PubMed Website", destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/")!)
 
         Link("Report an Issue...", destination: URL(string: "https://github.com/hherb/bmlibrarian_lite/issues")!)
+    }
+}
+
+// MARK: - BioMedLit Configuration
+
+extension MedicalFactCheckerMacApp {
+    /// Configure the BioMedLit library with current app settings.
+    private func configureBioMedLit() {
+        let settings = AppSettings.shared
+        let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
+        let config = BioMedLitConfiguration(
+            ncbiEmail: email,
+            logger: nil  // Use default console logger in debug
+        )
+        BioMedLitLib.configure(with: config)
     }
 }

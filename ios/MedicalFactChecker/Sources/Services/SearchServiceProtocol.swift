@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import BioMedLit
 
 // MARK: - Unified Search Result
 
@@ -114,15 +115,17 @@ enum SearchServiceFactory {
         options: SearchOptions,
         settings: AppSettings
     ) async throws -> UnifiedSearchResult {
-        let service = PubMedService.create(from: settings)
+        // Use BioMedLit PubMedService
+        let service = BMLPubMedService.create(from: settings)
         let result = try await service.search(
             query: query,
             maxResults: options.maxResults,
             offset: options.offset
         )
 
-        let articles = try await service.fetchArticles(
-            pmids: result.pmids,
+        // Convert BioMedLit articles to app ArticleMetadata
+        let articles = BioMedLitAdapters.toArticleMetadataArray(
+            result,
             batchNumber: 1,
             basePosition: options.offset
         )
@@ -148,7 +151,8 @@ enum SearchServiceFactory {
         query: String,
         options: SearchOptions
     ) async throws -> UnifiedSearchResult {
-        let service = EuropePMCService.create()
+        // Use BioMedLit EuropePMCService
+        let service = BMLEuropePMCService.create()
 
         // Translate query from PubMed syntax to Europe PMC syntax
         let translatedQuery = QueryTranslator.pubmedToEuropePMC(query)
@@ -161,21 +165,26 @@ enum SearchServiceFactory {
 
         let result = try await service.search(
             query: translatedQuery,
-            maxResults: options.maxResults,
-            cursorMark: options.cursorMark,
+            pageSize: options.maxResults,
+            cursor: options.cursorMark ?? "*",
             includePreprints: options.includePreprints
         )
 
-        let articles = result.articles.map { $0.toArticleMetadata(batchNumber: 1) }
+        // Convert BioMedLit articles to app ArticleMetadata
+        let articles = BioMedLitAdapters.toArticleMetadataArray(
+            result,
+            batchNumber: 1,
+            basePosition: 0
+        )
 
         // Only include nextCursorMark if there are actually more results
-        // (Europe PMC returns the same cursor at the end of results)
+        let hasMore = result.nextCursor != nil && !result.articles.isEmpty
         return UnifiedSearchResult(
             articles: articles,
             totalCount: result.totalCount,
             offset: 0,  // Offset not used for cursor-based pagination
             provider: .europePMC,
-            nextCursorMark: result.hasMore ? result.nextCursorMark : nil
+            nextCursorMark: hasMore ? result.nextCursor : nil
         )
     }
 

@@ -97,7 +97,7 @@ public actor EuropePMCService {
             throw EuropePMCError.invalidQuery(query)
         }
 
-        BioMedLit.logger?.debug("Europe PMC search URL: \(url.absoluteString)", category: .search)
+        BioMedLitLib.logger?.debug("Europe PMC search URL: \(url.absoluteString)", category: .search)
 
         // Execute request with retry
         let data = try await RetryHelper.retry(
@@ -124,24 +124,38 @@ public actor EuropePMCService {
         // Parse response
         let response = try JSONDecoder().decode(EuropePMCResponse.self, from: data)
 
-        let articles = (response.resultList?.result ?? []).map { result in
-            SearchArticle(
-                pmid: result.pmid ?? result.id ?? "",
+        let results = response.resultList?.result ?? []
+        var articles: [SearchArticle] = []
+        articles.reserveCapacity(results.count)
+
+        for result in results {
+            let pmid = result.pmid ?? result.id ?? ""
+            let title = result.title ?? ""
+            let abstract = cleanAbstract(result.abstractText)
+            let authors = result.authorString ?? ""
+            let journal = result.journalTitle ?? result.journalInfo?.journal?.title ?? ""
+            let year = result.pubYear ?? ""
+            let hasFullText = result.inPMC == "Y"
+            let isOpenAccess = result.isOpenAccess == "Y"
+
+            let article = SearchArticle(
+                pmid: pmid,
                 pmcId: result.pmcid,
                 doi: result.doi,
-                title: result.title ?? "",
-                abstract: cleanAbstract(result.abstractText),
-                authors: result.authorString ?? "",
-                journal: result.journalTitle ?? result.journalInfo?.journal?.title ?? "",
-                year: result.pubYear ?? "",
+                title: title,
+                abstract: abstract,
+                authors: authors,
+                journal: journal,
+                year: year,
                 publicationDate: result.firstPublicationDate,
-                hasFullText: result.inPMC == "Y",
-                isOpenAccess: result.isOpenAccess == "Y",
+                hasFullText: hasFullText,
+                isOpenAccess: isOpenAccess,
                 source: .europePMC
             )
+            articles.append(article)
         }
 
-        BioMedLit.logger?.info(
+        BioMedLitLib.logger?.info(
             "Europe PMC search returned \(articles.count) of \(response.hitCount ?? 0) results",
             category: .search
         )

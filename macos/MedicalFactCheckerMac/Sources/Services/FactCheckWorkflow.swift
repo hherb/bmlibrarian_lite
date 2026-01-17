@@ -16,6 +16,7 @@
 
 import Foundation
 import SwiftData
+import BioMedLit
 
 /// Orchestrates the fact-checking workflow from claim input to report generation.
 ///
@@ -30,7 +31,7 @@ final class FactCheckWorkflow {
     // MARK: - Dependencies
 
     private var llmService: LLMService?
-    private var pubmedService: PubMedService?
+    private var pubmedService: BioMedLit.PubMedService?
     private let modelContext: ModelContext
     private let settings: AppSettings
 
@@ -83,7 +84,7 @@ final class FactCheckWorkflow {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
-            pubmedService = PubMedService.create(from: settings)
+            pubmedService = BioMedLit.PubMedService.create(from: settings)
         } catch {
             onError?(error)
             return
@@ -119,7 +120,7 @@ final class FactCheckWorkflow {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
-            pubmedService = PubMedService.create(from: settings)
+            pubmedService = BioMedLit.PubMedService.create(from: settings)
         } catch {
             onError?(error)
             return
@@ -201,7 +202,7 @@ final class FactCheckWorkflow {
         if llmService == nil || pubmedService == nil {
             do {
                 llmService = try LLMService.create(from: settings)
-                pubmedService = PubMedService.create(from: settings)
+                pubmedService = BioMedLit.PubMedService.create(from: settings)
             } catch {
                 onError?(error)
                 return
@@ -1295,22 +1296,32 @@ final class FactCheckWorkflow {
             offset: 0
         )
 
-        // Filter out already-fetched PMIDs
-        let newPmids = result.pmids.filter { !fetchedPmidSet.contains($0) }
+        // Filter out already-fetched PMIDs from BioMedLit result
+        let newArticles = result.articles.filter { !fetchedPmidSet.contains($0.pmid) }
 
-        guard !newPmids.isEmpty else {
+        guard !newArticles.isEmpty else {
             return  // No new results from this query
         }
 
-        // Fetch article metadata
-        let articles = try await pubmedService.fetchArticles(
-            pmids: newPmids,
-            batchNumber: session.batchesFetched + 1,
+        let batchNumber = session.batchesFetched + 1
+
+        // Convert BioMedLit articles to unified format using adapter
+        let unifiedResult = BioMedLitAdapters.toUnifiedSearchResult(
+            SearchResult(
+                articles: newArticles,
+                totalCount: newArticles.count,
+                nextCursor: nil,
+                nextOffset: nil,
+                query: query,
+                provider: .pubmed
+            ),
+            appProvider: .pubmed,
+            batchNumber: batchNumber,
             basePosition: session.documentsFound
         )
 
         // Create Document objects
-        for article in articles {
+        for article in unifiedResult.articles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
@@ -1331,18 +1342,18 @@ final class FactCheckWorkflow {
         }
 
         // Update tracking
-        session.documentsFound += articles.count
+        session.documentsFound += unifiedResult.articles.count
         session.batchesFetched += 1
 
         // Update fetched PMIDs
         var updatedPmids = fetchedPmidSet
-        newPmids.forEach { updatedPmids.insert($0) }
+        newArticles.forEach { updatedPmids.insert($0.pmid) }
         session.fetchedPmids = updatedPmids.joined(separator: ",")
 
         try? modelContext.save()
 
         // Score the new documents
-        try await scoreNewDocuments(articles.map { $0.pmid })
+        try await scoreNewDocuments(unifiedResult.articles.map { $0.pmid })
     }
 
     /// Score only specific documents (by PMID).

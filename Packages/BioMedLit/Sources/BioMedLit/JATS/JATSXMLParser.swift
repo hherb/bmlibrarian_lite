@@ -1356,7 +1356,7 @@ extension JATSXMLParser: XMLParserDelegate {
 
     public func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
         self.parseError = parseError
-        BioMedLit.logger?.error("JATS XML parse error: \(parseError.localizedDescription)", category: .parsing)
+        BioMedLitLib.logger?.error("JATS XML parse error: \(parseError.localizedDescription)", category: .parsing)
     }
 
     // MARK: - Helper Methods

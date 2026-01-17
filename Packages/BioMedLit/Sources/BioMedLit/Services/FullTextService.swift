@@ -77,7 +77,7 @@ public actor FullTextService {
         doi: String?,
         pmid: String
     ) async throws -> FullTextResult {
-        BioMedLit.logger?.info(
+        BioMedLitLib.logger?.info(
             "Fetching full text for PMID \(pmid) (PMC: \(pmcId ?? "none"), DOI: \(doi ?? "none"))",
             category: .fullText
         )
@@ -86,13 +86,13 @@ public actor FullTextService {
         if let pmcId = pmcId, !pmcId.isEmpty {
             do {
                 let content = try await fetchEuropePMCWithRetry(pmcId: pmcId)
-                BioMedLit.logger?.info(
+                BioMedLitLib.logger?.info(
                     "Successfully retrieved Europe PMC full text for \(pmcId)",
                     category: .fullText
                 )
                 return .europePMC(html: content.html, markdown: content.markdown)
             } catch {
-                BioMedLit.logger?.warning(
+                BioMedLitLib.logger?.warning(
                     "Europe PMC failed for \(pmcId): \(error.localizedDescription)",
                     category: .fullText
                 )
@@ -103,13 +103,13 @@ public actor FullTextService {
         if let doi = doi, !doi.isEmpty {
             do {
                 let pdfURL = try await fetchUnpaywallPDFWithRetry(doi: doi)
-                BioMedLit.logger?.info(
+                BioMedLitLib.logger?.info(
                     "Successfully found Unpaywall PDF for DOI \(doi)",
                     category: .fullText
                 )
                 return .unpaywall(pdfURL: pdfURL)
             } catch {
-                BioMedLit.logger?.warning(
+                BioMedLitLib.logger?.warning(
                     "Unpaywall failed for DOI \(doi): \(error.localizedDescription)",
                     category: .fullText
                 )
@@ -119,17 +119,17 @@ public actor FullTextService {
         // Fallback to DOI or PubMed URL
         if let doi = doi, !doi.isEmpty,
            let url = URL(string: "\(BioMedLitConstants.doiBaseURL)/\(doi)") {
-            BioMedLit.logger?.info("Falling back to DOI URL for \(doi)", category: .fullText)
+            BioMedLitLib.logger?.info("Falling back to DOI URL for \(doi)", category: .fullText)
             return .doi(webURL: url)
         }
 
         // Final fallback: PubMed page
         if let url = URL(string: "\(BioMedLitConstants.pubmedWebBaseURL)/\(pmid)/") {
-            BioMedLit.logger?.info("Falling back to PubMed URL for PMID \(pmid)", category: .fullText)
+            BioMedLitLib.logger?.info("Falling back to PubMed URL for PMID \(pmid)", category: .fullText)
             return .doi(webURL: url)
         }
 
-        BioMedLit.logger?.error("No full text available for PMID \(pmid)", category: .fullText)
+        BioMedLitLib.logger?.error("No full text available for PMID \(pmid)", category: .fullText)
         throw FullTextError.noFullTextAvailable
     }
 
@@ -158,7 +158,7 @@ public actor FullTextService {
             throw FullTextError.invalidResponse("Invalid PMC ID format")
         }
 
-        BioMedLit.logger?.debug("Fetching Europe PMC XML from: \(url.absoluteString)", category: .fullText)
+        BioMedLitLib.logger?.debug("Fetching Europe PMC XML from: \(url.absoluteString)", category: .fullText)
 
         var request = URLRequest(url: url)
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
@@ -170,7 +170,7 @@ public actor FullTextService {
             throw FullTextError.networkError("Invalid server response")
         }
 
-        BioMedLit.logger?.debug("Europe PMC response status: \(httpResponse.statusCode)", category: .fullText)
+        BioMedLitLib.logger?.debug("Europe PMC response status: \(httpResponse.statusCode)", category: .fullText)
 
         let statusCode = httpResponse.statusCode
         switch statusCode {
@@ -180,7 +180,7 @@ public actor FullTextService {
             throw FullTextError.noFullTextAvailable
         case _ where BioMedLitConstants.retryableStatusCodes.contains(statusCode):
             // Server errors and rate limiting - retryable
-            BioMedLit.logger?.warning(
+            BioMedLitLib.logger?.warning(
                 "Europe PMC server error (\(statusCode)), will retry with backoff",
                 category: .fullText
             )
@@ -230,7 +230,7 @@ public actor FullTextService {
             throw FullTextError.invalidResponse("Invalid DOI format")
         }
 
-        BioMedLit.logger?.debug("Fetching Unpaywall data from: \(url.absoluteString)", category: .fullText)
+        BioMedLitLib.logger?.debug("Fetching Unpaywall data from: \(url.absoluteString)", category: .fullText)
 
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -242,7 +242,7 @@ public actor FullTextService {
             throw FullTextError.networkError("Invalid server response")
         }
 
-        BioMedLit.logger?.debug("Unpaywall response status: \(httpResponse.statusCode)", category: .fullText)
+        BioMedLitLib.logger?.debug("Unpaywall response status: \(httpResponse.statusCode)", category: .fullText)
 
         guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
             if httpResponse.statusCode == BioMedLitConstants.httpStatusNotFound {
@@ -256,7 +256,7 @@ public actor FullTextService {
         do {
             result = try JSONDecoder().decode(UnpaywallResponse.self, from: data)
         } catch {
-            BioMedLit.logger?.error(
+            BioMedLitLib.logger?.error(
                 "Failed to decode Unpaywall response: \(error.localizedDescription)",
                 category: .fullText
             )
@@ -267,7 +267,7 @@ public actor FullTextService {
         if let bestOA = result.bestOaLocation,
            let urlString = bestOA.urlForPdf ?? bestOA.url,
            let pdfURL = URL(string: urlString) {
-            BioMedLit.logger?.debug("Found best OA location: \(pdfURL.absoluteString)", category: .fullText)
+            BioMedLitLib.logger?.debug("Found best OA location: \(pdfURL.absoluteString)", category: .fullText)
             return pdfURL
         }
 
@@ -275,7 +275,7 @@ public actor FullTextService {
         for location in result.oaLocations ?? [] {
             if let urlString = location.urlForPdf ?? location.url,
                let pdfURL = URL(string: urlString) {
-                BioMedLit.logger?.debug("Found OA location: \(pdfURL.absoluteString)", category: .fullText)
+                BioMedLitLib.logger?.debug("Found OA location: \(pdfURL.absoluteString)", category: .fullText)
                 return pdfURL
             }
         }
@@ -293,7 +293,7 @@ public actor FullTextService {
     /// - Returns: Local file path to the cached PDF.
     /// - Throws: `FullTextError` on failure.
     public func downloadAndCachePDF(from url: URL, for pmid: String) async throws -> String {
-        BioMedLit.logger?.info(
+        BioMedLitLib.logger?.info(
             "Downloading PDF for PMID \(pmid) from \(url.absoluteString)",
             category: .fullText
         )
@@ -319,7 +319,7 @@ public actor FullTextService {
 
         // Cache the PDF
         let filePath = try cachePDF(data: data, for: pmid)
-        BioMedLit.logger?.info("Cached PDF at: \(filePath)", category: .fullText)
+        BioMedLitLib.logger?.info("Cached PDF at: \(filePath)", category: .fullText)
 
         return filePath
     }
@@ -333,7 +333,7 @@ public actor FullTextService {
             try data.write(to: fileURL, options: .atomic)
             return fileURL.path
         } catch {
-            BioMedLit.logger?.error("Failed to cache PDF: \(error.localizedDescription)", category: .fullText)
+            BioMedLitLib.logger?.error("Failed to cache PDF: \(error.localizedDescription)", category: .fullText)
             throw FullTextError.cachingFailed(error.localizedDescription)
         }
     }
@@ -355,7 +355,7 @@ public actor FullTextService {
                 withIntermediateDirectories: true
             )
         } catch {
-            BioMedLit.logger?.error(
+            BioMedLitLib.logger?.error(
                 "Failed to create PDF cache directory: \(error.localizedDescription)",
                 category: .fullText
             )
@@ -395,9 +395,9 @@ public actor FullTextService {
             for fileURL in contents where fileURL.pathExtension == BioMedLitConstants.pdfExtension {
                 try FileManager.default.removeItem(at: fileURL)
             }
-            BioMedLit.logger?.info("Cleared PDF cache", category: .fullText)
+            BioMedLitLib.logger?.info("Cleared PDF cache", category: .fullText)
         } catch {
-            BioMedLit.logger?.error(
+            BioMedLitLib.logger?.error(
                 "Failed to clear PDF cache: \(error.localizedDescription)",
                 category: .fullText
             )

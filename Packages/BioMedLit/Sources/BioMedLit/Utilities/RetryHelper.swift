@@ -119,7 +119,7 @@ public enum RetryHelper {
                 }
 
                 // Log the retry attempt
-                BioMedLit.logger?.warning(
+                BioMedLitLib.logger?.warning(
                     "Retry attempt \(attempt)/\(config.maxAttempts) after error: \(error.localizedDescription)",
                     category: .network
                 )

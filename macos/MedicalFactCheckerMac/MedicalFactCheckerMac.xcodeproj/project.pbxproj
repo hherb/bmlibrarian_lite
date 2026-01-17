@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1000060 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000061 /* BioMedLit */; };
+		A1000062 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* BioMedLitAdapters.swift */; };
 		2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7978C2AA34972DF4D00125 /* MacFetchMoreView.swift */; };
 		6F77FEB52F1A5DBD00B03EBF /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB42F1A5DBD00B03EBF /* StructuredQuery.swift */; };
 		6F77FEB72F1A5DD800B03EBF /* QueryBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */; };
@@ -30,7 +32,6 @@
 		A1000018 /* FactCheckWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018 /* FactCheckWorkflow.swift */; };
 		A1000019 /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019 /* LLMService.swift */; };
 		A1000020 /* ModelFetchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* ModelFetchService.swift */; };
-		A1000021 /* PubMedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* PubMedService.swift */; };
 		A1000022 /* CostCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* CostCalculator.swift */; };
 		A1000023 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* KeychainHelper.swift */; };
 		A1000024 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* NotificationNames.swift */; };
@@ -44,16 +45,13 @@
 		A1000032 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = A2000035 /* PRIVACY.md */; };
 		A1000033 /* MacOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036 /* MacOnboardingView.swift */; };
 		A1000034 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037 /* Logger.swift */; };
-		A1000035 /* RetryHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038 /* RetryHelper.swift */; };
 		A1000036 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039 /* JATSXMLParser.swift */; };
 		A1000037 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* FullTextSource.swift */; };
-		A1000038 /* FullTextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* FullTextService.swift */; };
 		A1000039 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* FullTextSourceBadge.swift */; };
 		A1000040 /* MacFullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* MacFullTextViewer.swift */; };
 		A1000041 /* MacFullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000044 /* MacFullTextTab.swift */; };
 		A1000042 /* SearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000045 /* SearchProvider.swift */; };
 		A1000043 /* SearchTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000046 /* SearchTypes.swift */; };
-		A1000044 /* EuropePMCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000047 /* EuropePMCService.swift */; };
 		A1000045 /* QueryTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000048 /* QueryTranslator.swift */; };
 		A1000046 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000049 /* SearchResultMerger.swift */; };
 		A1000047 /* SearchServiceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SearchServiceFactory.swift */; };
@@ -108,7 +106,6 @@
 		A2000018 /* FactCheckWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactCheckWorkflow.swift; sourceTree = "<group>"; };
 		A2000019 /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
 		A2000020 /* ModelFetchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelFetchService.swift; sourceTree = "<group>"; };
-		A2000021 /* PubMedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubMedService.swift; sourceTree = "<group>"; };
 		A2000022 /* CostCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostCalculator.swift; sourceTree = "<group>"; };
 		A2000023 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A2000024 /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
@@ -125,21 +122,19 @@
 		A2000035 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
 		A2000036 /* MacOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOnboardingView.swift; sourceTree = "<group>"; };
 		A2000037 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
-		A2000038 /* RetryHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryHelper.swift; sourceTree = "<group>"; };
 		A2000039 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
 		A2000040 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
-		A2000041 /* FullTextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextService.swift; sourceTree = "<group>"; };
 		A2000042 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
 		A2000043 /* MacFullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextViewer.swift; sourceTree = "<group>"; };
 		A2000044 /* MacFullTextTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFullTextTab.swift; sourceTree = "<group>"; };
 		A2000045 /* SearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProvider.swift; sourceTree = "<group>"; };
 		A2000046 /* SearchTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTypes.swift; sourceTree = "<group>"; };
-		A2000047 /* EuropePMCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EuropePMCService.swift; sourceTree = "<group>"; };
 		A2000048 /* QueryTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryTranslator.swift; sourceTree = "<group>"; };
 		A2000049 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
 		A2000050 /* SearchServiceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceFactory.swift; sourceTree = "<group>"; };
 		A2000051 /* QueryValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValidator.swift; sourceTree = "<group>"; };
 		A2000052 /* CloudKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitConfiguration.swift; sourceTree = "<group>"; };
+		A2000060 /* BioMedLitAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BioMedLitAdapters.swift; sourceTree = "<group>"; };
 		B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -174,6 +169,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000060 /* BioMedLit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -292,12 +288,9 @@
 			isa = PBXGroup;
 			children = (
 				A2000017 /* EmbeddingService.swift */,
-				A2000047 /* EuropePMCService.swift */,
 				A2000018 /* FactCheckWorkflow.swift */,
-				A2000041 /* FullTextService.swift */,
 				A2000019 /* LLMService.swift */,
 				A2000020 /* ModelFetchService.swift */,
-				A2000021 /* PubMedService.swift */,
 				A2000050 /* SearchServiceFactory.swift */,
 				A2000046 /* SearchTypes.swift */,
 			);
@@ -307,6 +300,7 @@
 		A400000B /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				A2000060 /* BioMedLitAdapters.swift */,
 				6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */,
 				A2000052 /* CloudKitConfiguration.swift */,
 				A2000022 /* CostCalculator.swift */,
@@ -318,7 +312,6 @@
 				A2000048 /* QueryTranslator.swift */,
 				A2000051 /* QueryValidator.swift */,
 				A2000026 /* ResponseParser.swift */,
-				A2000038 /* RetryHelper.swift */,
 				A2000049 /* SearchResultMerger.swift */,
 				A2000032 /* StringArrayTransformer.swift */,
 			);
@@ -443,6 +436,9 @@
 			dependencies = (
 			);
 			name = MedicalFactCheckerMac;
+			packageProductDependencies = (
+				A1000061 /* BioMedLit */,
+			);
 			productName = MedicalFactCheckerMac;
 			productReference = A2000029 /* Medical Fact Checker.app */;
 			productType = "com.apple.product-type.application";
@@ -482,6 +478,9 @@
 				Base,
 			);
 			mainGroup = A4000001;
+			packageReferences = (
+				A1000063 /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */,
+			);
 			productRefGroup = A4000010 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -576,7 +575,6 @@
 				A1000018 /* FactCheckWorkflow.swift in Sources */,
 				A1000019 /* LLMService.swift in Sources */,
 				A1000020 /* ModelFetchService.swift in Sources */,
-				A1000021 /* PubMedService.swift in Sources */,
 				A1000022 /* CostCalculator.swift in Sources */,
 				A1000023 /* KeychainHelper.swift in Sources */,
 				A1000024 /* NotificationNames.swift in Sources */,
@@ -586,22 +584,20 @@
 				A1000030 /* MacHelpViews.swift in Sources */,
 				A1000033 /* MacOnboardingView.swift in Sources */,
 				A1000034 /* Logger.swift in Sources */,
-				A1000035 /* RetryHelper.swift in Sources */,
 				6F77FEB72F1A5DD800B03EBF /* QueryBuilder.swift in Sources */,
 				A1000036 /* JATSXMLParser.swift in Sources */,
 				A1000037 /* FullTextSource.swift in Sources */,
-				A1000038 /* FullTextService.swift in Sources */,
 				A1000039 /* FullTextSourceBadge.swift in Sources */,
 				A1000040 /* MacFullTextViewer.swift in Sources */,
 				A1000041 /* MacFullTextTab.swift in Sources */,
 				A1000042 /* SearchProvider.swift in Sources */,
 				A1000043 /* SearchTypes.swift in Sources */,
-				A1000044 /* EuropePMCService.swift in Sources */,
 				A1000045 /* QueryTranslator.swift in Sources */,
 				A1000048 /* QueryValidator.swift in Sources */,
 				A1000046 /* SearchResultMerger.swift in Sources */,
 				A1000047 /* SearchServiceFactory.swift in Sources */,
 				A1000049 /* CloudKitConfiguration.swift in Sources */,
+				A1000062 /* BioMedLitAdapters.swift in Sources */,
 				D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */,
 				2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */,
 				DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */,
@@ -1045,6 +1041,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A1000063 /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../Packages/BioMedLit";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1000061 /* BioMedLit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BioMedLit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A5000010 /* Project object */;
 }

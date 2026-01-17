@@ -41,7 +41,7 @@ private enum SourceBadgeConstants {
 /// (Europe PMC, Unpaywall, Publisher, or Cached).
 struct FullTextSourceBadge: View {
     /// The source to display.
-    let source: FullTextSource
+    let source: AppFullTextSource
 
     var body: some View {
         HStack(spacing: 4) {

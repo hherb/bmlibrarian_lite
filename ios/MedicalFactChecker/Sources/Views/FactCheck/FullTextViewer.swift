@@ -43,7 +43,7 @@ struct FullTextViewer: View {
     let document: Document
 
     /// The full-text result to display.
-    let result: FullTextResult
+    let result: AppFullTextResult
 
     @Environment(\.dismiss) private var dismiss
 
@@ -333,6 +333,6 @@ struct PDFKitRepresentableMac: NSViewRepresentable {
 
     return FullTextViewer(
         document: doc,
-        result: FullTextResult(content: .markdown(sampleMarkdown), source: .europePMC)
+        result: AppFullTextResult(content: .markdown(sampleMarkdown), source: .europePMC)
     )
 }

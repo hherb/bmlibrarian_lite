@@ -131,3 +131,32 @@ public enum BioMedLitConstants {
     /// PDF magic bytes ("%PDF").
     public static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
 }
+
+// MARK: - PubMed Filters
+
+/// PubMed publication type filters for clinical relevance.
+///
+/// Use these filters to narrow search results to specific publication types
+/// commonly considered high-quality evidence in evidence-based medicine.
+public enum PubMedFilters {
+    /// Filter for high-quality clinical publication types.
+    ///
+    /// Includes: Randomized Controlled Trials, Meta-Analyses, Systematic Reviews,
+    /// Clinical Trials, Reviews, Guidelines, and Practice Guidelines.
+    public static let clinicalPublicationFilter = """
+        AND (Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR \
+        Systematic Review[pt] OR Clinical Trial[pt] OR Review[pt] OR \
+        Guideline[pt] OR Practice Guideline[pt])
+        """
+
+    /// Filter for human studies only.
+    public static let humanFilter = "AND humans[MeSH]"
+
+    /// Filter for English language articles.
+    public static let englishFilter = "AND English[lang]"
+
+    /// Combined filter for clinical human studies in English.
+    public static let combinedClinicalFilter = """
+        \(clinicalPublicationFilter) \(humanFilter) \(englishFilter)
+        """
+}

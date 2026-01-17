@@ -151,7 +151,7 @@ public actor PubMedService {
             throw PubMedError.invalidQuery(query)
         }
 
-        BioMedLit.logger?.debug("PubMed search URL: \(url.absoluteString)", category: .search)
+        BioMedLitLib.logger?.debug("PubMed search URL: \(url.absoluteString)", category: .search)
 
         let data = try await RetryHelper.retry(
             config: .networkDefault,
@@ -178,7 +178,7 @@ public actor PubMedService {
         let response = try JSONDecoder().decode(PubMedSearchResponse.self, from: data)
         let pmids = response.esearchresult?.idlist ?? []
 
-        BioMedLit.logger?.info(
+        BioMedLitLib.logger?.info(
             "PubMed search found \(pmids.count) PMIDs (total: \(response.esearchresult?.count ?? "0"))",
             category: .search
         )
@@ -247,6 +247,7 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
     case serverError(statusCode: Int)
     case parseError(String)
     case rateLimited
+    case noResults
 
     public var errorDescription: String? {
         switch self {
@@ -262,6 +263,8 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
             return "Failed to parse response: \(message)"
         case .rateLimited:
             return "Rate limited. Please wait and try again."
+        case .noResults:
+            return "No results found for the search query"
         }
     }
 
@@ -269,7 +272,7 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
         switch self {
         case .serverError, .networkError, .rateLimited:
             return true
-        case .invalidQuery, .httpError, .parseError:
+        case .invalidQuery, .httpError, .parseError, .noResults:
             return false
         }
     }

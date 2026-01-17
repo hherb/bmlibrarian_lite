@@ -16,9 +16,15 @@
 
 import SwiftUI
 import SwiftData
+import BioMedLit
 
 @main
 struct MedicalFactCheckerApp: App {
+    init() {
+        // Configure BioMedLit library with app settings
+        configureBioMedLit()
+    }
+
     var sharedModelContainer: ModelContainer = {
         // Clear any pending config change flag from previous launch
         CloudKitConfiguration.clearPendingChange()
@@ -75,6 +81,17 @@ struct MedicalFactCheckerApp: App {
                 })
         }
         .modelContainer(sharedModelContainer)
+    }
+
+    /// Configure the BioMedLit library with current app settings.
+    private func configureBioMedLit() {
+        let settings = AppSettings.shared
+        let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
+        let config = BioMedLitConfiguration(
+            ncbiEmail: email,
+            logger: nil  // Use default console logger in debug
+        )
+        BioMedLitLib.configure(with: config)
     }
 }
 

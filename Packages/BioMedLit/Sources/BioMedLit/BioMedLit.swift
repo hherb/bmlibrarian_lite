@@ -16,7 +16,7 @@
 
 import Foundation
 
-/// BioMedLit: A Swift library for biomedical literature retrieval and parsing.
+/// BioMedLitLib: Configuration and version namespace for the BioMedLit library.
 ///
 /// This library provides services for:
 /// - Searching PubMed and Europe PMC databases
@@ -30,7 +30,7 @@ import Foundation
 ///
 /// // Configure the library
 /// let config = BioMedLitConfiguration(ncbiEmail: "your@email.com")
-/// BioMedLit.configure(with: config)
+/// BioMedLitLib.configure(with: config)
 ///
 /// // Search for articles
 /// let searchService = EuropePMCService()
@@ -40,7 +40,11 @@ import Foundation
 /// let fullTextService = FullTextService(email: config.ncbiEmail)
 /// let fullText = try await fullTextService.fetchFullText(pmcId: "PMC1234567", doi: nil, pmid: "12345678")
 /// ```
-public enum BioMedLit {
+///
+/// > Note: The namespace enum is named `BioMedLitLib` (not `BioMedLit`) to avoid
+/// > Swift's module name collision issue where a type with the same name as the
+/// > module prevents proper type resolution (e.g., `BioMedLit.SearchResult`).
+public enum BioMedLitLib {
     /// Current version of the BioMedLit library.
     public static let version = "1.0.0"
 
