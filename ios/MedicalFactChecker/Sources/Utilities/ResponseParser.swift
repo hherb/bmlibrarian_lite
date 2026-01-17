@@ -354,6 +354,84 @@ enum ResponseParser {
         return array.filter { !$0.isEmpty }
     }
 
+    // MARK: - Structured Query Parsing
+
+    /// Parse an array of structured queries from an LLM response.
+    ///
+    /// Expected JSON format:
+    /// ```json
+    /// [
+    ///   {"concepts": [{"name": "...", "mesh_terms": ["..."], "keywords": ["..."]}]},
+    ///   {"concepts": [...]}
+    /// ]
+    /// ```
+    ///
+    /// Handles common LLM response patterns:
+    /// - Pure JSON array
+    /// - JSON wrapped in markdown code blocks
+    /// - JSON with leading/trailing text
+    ///
+    /// - Parameter response: Raw JSON string from LLM.
+    /// - Returns: Array of StructuredQuery objects, or empty array if parsing fails.
+    static func parseStructuredQueryArray(_ response: String) -> [StructuredQuery] {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Try to extract JSON array
+        var jsonString = trimmed
+
+        // Handle markdown code blocks
+        if let codeBlockMatch = trimmed.range(of: "```(?:json)?\\s*([\\s\\S]*?)```",
+                                               options: .regularExpression) {
+            jsonString = trimmed[codeBlockMatch]
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Find array bounds
+        if let startIndex = jsonString.firstIndex(of: "["),
+           let endIndex = jsonString.lastIndex(of: "]") {
+            jsonString = String(jsonString[startIndex...endIndex])
+        }
+
+        guard let data = jsonString.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            print("[ResponseParser] Failed to parse structured query array from: \(response.prefix(200))")
+            return []
+        }
+
+        return array.compactMap { parseStructuredQueryDict($0) }
+    }
+
+    /// Parse a single structured query dictionary.
+    ///
+    /// - Parameter dict: Dictionary containing query data with "concepts" key.
+    /// - Returns: StructuredQuery if parsing succeeds, nil otherwise.
+    private static func parseStructuredQueryDict(_ dict: [String: Any]) -> StructuredQuery? {
+        guard let conceptsArray = dict["concepts"] as? [[String: Any]] else {
+            return nil
+        }
+
+        let concepts = conceptsArray.compactMap { conceptDict -> SearchConcept? in
+            let name = conceptDict["name"] as? String ?? ""
+            let meshTerms = conceptDict["mesh_terms"] as? [String] ?? []
+            let keywords = conceptDict["keywords"] as? [String] ?? []
+
+            // Skip empty concepts
+            if meshTerms.isEmpty && keywords.isEmpty {
+                return nil
+            }
+
+            return SearchConcept(name: name, meshTerms: meshTerms, keywords: keywords)
+        }
+
+        guard !concepts.isEmpty else {
+            return nil
+        }
+
+        return StructuredQuery(concepts: concepts)
+    }
+
     // MARK: - Helpers
 
     /// Clamp a score to the valid range of 1-5.

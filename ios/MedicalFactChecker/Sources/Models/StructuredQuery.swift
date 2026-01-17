@@ -42,10 +42,10 @@ import Foundation
 /// )
 ///
 /// // Translate to PubMed syntax
-/// let pubmedQuery = PubMedQueryBuilder.build(from: query)
+/// let pubmedQuery = QueryBuilderFactory.build(from: query, for: .pubmed)
 ///
 /// // Translate to Europe PMC syntax
-/// let europepmcQuery = EuropePMCQueryBuilder.build(from: query)
+/// let europepmcQuery = QueryBuilderFactory.build(from: query, for: .europePMC)
 /// ```
 struct StructuredQuery: Codable, Sendable, Equatable {
     /// The search concepts, combined with AND logic.
@@ -181,7 +181,6 @@ extension StructuredQuery {
     /// - Parameter json: JSON string from LLM.
     /// - Returns: Parsed StructuredQuery, or nil if parsing fails.
     static func parse(from json: String) -> StructuredQuery? {
-        // Try to extract JSON if wrapped in markdown
         let cleanJSON = extractJSON(from: json)
 
         guard let data = cleanJSON.data(using: .utf8) else {
@@ -198,8 +197,16 @@ extension StructuredQuery {
     }
 
     /// Extract JSON from a string that may have markdown wrapping.
+    ///
+    /// Handles common LLM response patterns:
+    /// - Pure JSON
+    /// - JSON wrapped in ```json ... ``` code blocks
+    /// - JSON with leading/trailing text
+    ///
+    /// - Parameter text: Text potentially containing JSON.
+    /// - Returns: Extracted JSON string.
     private static func extractJSON(from text: String) -> String {
-        // Try markdown code block
+        // Try markdown code block with json tag
         if let range = text.range(of: "```json"),
            let endRange = text.range(of: "```", range: range.upperBound..<text.endIndex) {
             return String(text[range.upperBound..<endRange.lowerBound])
@@ -223,7 +230,7 @@ extension StructuredQuery {
     }
 }
 
-// MARK: - LLM Response Decoding
+// MARK: - LLM Response Decoding (Private)
 
 /// Internal struct for decoding LLM JSON response.
 private struct LLMQueryResponse: Codable {
