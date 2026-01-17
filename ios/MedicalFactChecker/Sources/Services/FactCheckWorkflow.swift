@@ -865,7 +865,9 @@ final class FactCheckWorkflow {
 
         // Build query string from stored structured query or fallback to session query
         let queryString: String
-        if let structuredQuery = self.structuredQuery {
+        if var structuredQuery = self.structuredQuery {
+            // Apply user's preprint preference from search options
+            structuredQuery.excludePreprints = !options.includePreprints
             // Build provider-specific query from structured query
             queryString = QueryBuilderFactory.build(from: structuredQuery, for: options.provider)
         } else if let storedQuery = session.pubmedQuery {
@@ -1615,9 +1617,11 @@ final class FactCheckWorkflow {
         // Get already-fetched PMIDs
         let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
 
-        // Build provider-specific query string
+        // Build provider-specific query string with user's preprint preference
         let provider = currentSearchOptions?.provider ?? .pubmed
-        let queryString = QueryBuilderFactory.build(from: query, for: provider)
+        var queryWithPrefs = query
+        queryWithPrefs.excludePreprints = !(currentSearchOptions?.includePreprints ?? false)
+        let queryString = QueryBuilderFactory.build(from: queryWithPrefs, for: provider)
 
         // Build search options
         let options = SearchOptions(

@@ -545,7 +545,11 @@ final class FactCheckWorkflow {
         let query: String
         let provider = searchOptions?.provider ?? .pubmed
 
-        if let structured = structuredQuery {
+        if var structured = structuredQuery {
+            // Apply user's preprint preference from search options
+            if let options = searchOptions {
+                structured.excludePreprints = !options.includePreprints
+            }
             // Use the new structured query system
             query = QueryBuilderFactory.build(from: structured, for: provider)
             print("[Search] Using structured query for \(provider.displayName): \(query)")
@@ -1403,8 +1407,14 @@ final class FactCheckWorkflow {
 
         let provider = searchOptions?.provider ?? .pubmed
 
+        // Apply user's preprint preference from search options
+        var queryWithPrefs = structuredQuery
+        if let options = searchOptions {
+            queryWithPrefs.excludePreprints = !options.includePreprints
+        }
+
         // Build provider-specific query string
-        let query = QueryBuilderFactory.build(from: structuredQuery, for: provider)
+        let query = QueryBuilderFactory.build(from: queryWithPrefs, for: provider)
 
         // Build search options for this alternative query
         var options = searchOptions ?? settings.buildSearchOptions()
