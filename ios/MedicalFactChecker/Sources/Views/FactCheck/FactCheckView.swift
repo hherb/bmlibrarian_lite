@@ -56,7 +56,7 @@ struct FactCheckView: View {
                         }
                     )
 
-                    // Search Options (collapsible)
+                    // Search Options
                     SearchOptionsView(
                         options: $searchOptions,
                         isDisabled: workflow?.isRunning ?? false
@@ -74,7 +74,9 @@ struct FactCheckView: View {
                         if workflow.awaitingUserDecision {
                             UserDecisionSection(
                                 prompt: workflow.userDecisionPrompt,
+                                showSmartSearchOption: workflow.awaitingSmartSearchDecision,
                                 onContinue: { Task { await workflow.continueWithMoreDocuments() } },
+                                onSmartSearch: { Task { await workflow.continueWithSmartSearch() } },
                                 onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
                             )
                         }
@@ -359,9 +361,28 @@ struct StepIndicator: View {
     }
 }
 
+/// View displayed when user input is needed during workflow.
+///
+/// Shows appropriate action buttons based on workflow state:
+/// - Smart Search option when initial search found few relevant results
+/// - Fetch More option when more documents are available from current query
+/// - Proceed option to continue with current results
 struct UserDecisionSection: View {
+    /// Message explaining the current situation to the user.
     let prompt: String
+
+    /// Whether to show "Try Smart Search" as the primary action.
+    ///
+    /// When true, shows smart search button. When false, shows "Fetch More Documents".
+    let showSmartSearchOption: Bool
+
+    /// Called when user wants to fetch more documents from current query.
     let onContinue: () -> Void
+
+    /// Called when user wants to try smart search with alternative queries.
+    let onSmartSearch: (() -> Void)?
+
+    /// Called when user wants to proceed with current results.
     let onProceed: () -> Void
 
     var body: some View {
@@ -374,15 +395,36 @@ struct UserDecisionSection: View {
             }
 
             HStack(spacing: 12) {
-                Button("Fetch More") {
-                    onContinue()
+                // Primary action: Smart Search or Fetch More
+                if showSmartSearchOption {
+                    Button {
+                        onSmartSearch?()
+                    } label: {
+                        Label("Try Smart Search", systemImage: "wand.and.stars")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityLabel("Try Smart Search")
+                    .accessibilityHint("Generates alternative search queries to find more relevant documents")
+                } else {
+                    Button {
+                        onContinue()
+                    } label: {
+                        Label("Fetch More Documents", systemImage: "arrow.down.doc")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityLabel("Fetch More Documents")
+                    .accessibilityHint("Retrieves additional documents from the current search")
                 }
-                .buttonStyle(.borderedProminent)
 
-                Button("Continue Anyway") {
+                // Secondary action: Proceed with current
+                Button {
                     onProceed()
+                } label: {
+                    Text("Proceed with Current")
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Proceed with Current Results")
+                .accessibilityHint("Continues to generate report with currently available documents")
             }
         }
         .padding()
