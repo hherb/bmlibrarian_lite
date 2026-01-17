@@ -4,11 +4,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BMLibrarian Lite is a lightweight biomedical literature research tool that provides AI-powered systematic review and document interrogation capabilities. The project includes:
+BMLibrarian Lite is a cross-platform biomedical literature research tool that provides AI-powered systematic review and medical fact-checking capabilities. The project includes:
 
 1. **Desktop Application** (Python/PySide6): Uses SQLite + sqlite-vec for storage, FastEmbed for CPU-optimized embeddings, and supports Anthropic Claude or Ollama for LLM inference.
 
 2. **iOS App** (Swift/SwiftUI): Native mobile app for medical fact-checking with SwiftData persistence, Apple NLEmbedding for on-device semantic similarity, and OpenAI-compatible LLM API support.
+
+3. **macOS App** (Swift/SwiftUI): Native desktop app sharing code with iOS via the BioMedLit Swift package.
+
+4. **Android App** (Kotlin/Jetpack Compose): Native mobile app using Room for persistence, Hilt for dependency injection, and the same OpenAI-compatible LLM API approach.
+
+## Cross-Platform Architecture
+
+### Shared Swift Package: BioMedLit
+
+The `Packages/BioMedLit/` Swift package provides reusable, side-effect-free components shared between iOS and macOS:
+
+- **JATS XML Parsing** (`JATSXMLParser`): Converts JATS XML to HTML and Markdown with figure URLs, table extraction, and reference parsing
+- **Europe PMC Service** (`EuropePMCService`): Cursor-based search with pagination
+- **PubMed Service** (`PubMedService`): NCBI E-utilities wrapper with rate limiting
+- **Full-Text Service** (`FullTextService`): Unified retrieval with fallback chain (Europe PMC XML → Unpaywall PDF → DOI resolution)
+- **Retry Helper** (`RetryHelper`): Exponential backoff with jitter
+
+### Cross-Platform Documentation
+
+All architectural decisions and platform-agnostic algorithms are documented in `doc/cross_platform/` using pseudocode that translates easily to Python, Swift, or Kotlin. Key documents:
+
+- `hybrid_search.md` - Combined PubMed + Europe PMC search with pagination and deduplication
+- `jats_parsing.md` - JATS XML parsing strategies and edge cases
+- `fulltext_retrieval.md` - Full-text acquisition fallback chain
+
+When implementing features, improvements should flow across all platforms:
+1. Document the algorithm in `doc/cross_platform/`
+2. Implement in the BioMedLit Swift package (iOS/macOS)
+3. Port to Python for the desktop app
+4. Port to Kotlin for Android
+
+### Search Provider Strategy
+
+BMLibrarian supports hybrid search across PubMed and Europe PMC:
+
+- **PubMed**: NCBI E-utilities with offset-based pagination (max 9999)
+- **Europe PMC**: REST API with cursor-based pagination (more scalable)
+
+Both providers are queried in parallel, with results deduplicated by PMID → DOI → PMC ID → title similarity (Jaccard > 0.8).
+
+### Full-Text Retrieval Chain
+
+1. **Europe PMC XML** (preferred): Machine-readable JATS format
+2. **Unpaywall PDF**: Open access PDFs via `https://api.unpaywall.org/v2/{doi}`
+3. **DOI Resolution**: Fall back to publisher website
 
 ## Common Commands
 
@@ -74,13 +119,15 @@ python bmlibrarian_lite.py clear        # Clear all data
 - Specialized agents: `SearchAgent`, `ScoringAgent`, `CitationAgent`, `ReportingAgent`, `InterrogationAgent`
 - Agents inherit config and share LLM client instance
 
-**PubMed Integration** (`pubmed/`)
-- `PubMedSearchClient` - Wrapper around NCBI E-utilities API
-- Converts natural language to PubMed queries
-- Europe PMC full-text XML retrieval support
+**Search Integration** (`pubmed/`, `europepmc.py`, `search_merger.py`)
+- `PubMedSearchClient` - NCBI E-utilities wrapper with offset pagination
+- `EuropePMCClient` - Europe PMC REST API with cursor pagination
+- `SearchResultMerger` - Deduplicates and merges results from both providers
+- `QueryTranslator` - Converts PubMed queries to Europe PMC syntax
 
-**PDF Discovery** (`pdf_discovery.py`)
-- `PDFDiscoverer` - Finds and downloads PDFs from PubMed Central, Unpaywall, and DOI resolution
+**Full-Text Discovery** (`fulltext_discovery.py`, `pdf_discovery.py`)
+- `FullTextDiscoverer` - Tries Europe PMC XML, Unpaywall, DOI resolution
+- `PDFDiscoverer` - Legacy PDF-focused discovery
 
 **Quality Assessment** (`quality/`)
 - Study classification, evidence grading, and quality scoring
@@ -91,9 +138,6 @@ python bmlibrarian_lite.py clear        # Clear all data
 - Compare multiple LLM models on document scoring tasks
 - `BenchmarkRunner` - Orchestrates benchmark execution with caching and progress tracking
 - `BenchmarkResult` - Complete results with per-evaluator statistics and agreement matrix
-- `EvaluatorStats` - Per-model metrics (mean score, latency, tokens, cost)
-- `DocumentComparison` - Per-document scores across all evaluators
-- Statistics functions: `compute_agreement_matrix`, `compute_evaluator_stats`
 
 ### GUI Structure (`gui/`)
 
@@ -113,14 +157,11 @@ The Research Questions tab (`research_questions_tab.py`) enables re-running past
 - **Deduplication**: Skips documents already scored for this question
 - **IncrementalSearchWorker**: Background worker for paginated search with progress
 
-**Key Signals:**
-- `new_documents_found(str, list)` - New documents found (question, documents)
-
 #### Audit Trail Tab
 
 The Audit Trail provides transparency into the systematic review workflow with three sub-tabs:
 
-- **Queries Tab** (`audit_queries_tab.py`): Displays generated PubMed queries with statistics (docs found, scored, citations extracted)
+- **Queries Tab** (`audit_queries_tab.py`): Displays generated PubMed queries with statistics
 - **Literature Tab** (`audit_literature_tab.py`): Scrollable document cards with relevance scores and quality badges
 - **Citations Tab** (`audit_citations_tab.py`): Document cards with highlighted citation passages
 
@@ -128,51 +169,17 @@ The Audit Trail provides transparency into the systematic review workflow with t
 - Collapsible cards - click to expand and show abstract
 - Quality badges (RCT, SR, etc.) with color-coded study design
 - Score badges (1-5) with color gradients
+- Source badges showing PubMed, Europe PMC, or both
 - LLM rationale display for scoring and quality decisions
-- Right-click context menu to send documents to interrogator
-- Pale blue header background for visual distinction
-
-**Key Audit Trail Signals:**
-- `workflow_started` - Clears previous audit data
-- `query_generated(str)` - New PubMed query generated
-- `documents_found(list[LiteDocument])` - Documents retrieved
-- `document_scored(ScoredDocument)` - Relevance score assigned
-- `quality_assessed(str, QualityAssessment)` - Quality assessment complete
-- `citation_extracted(Citation)` - Citation passage extracted
-
-Background operations use `QThread` workers in `workers.py` to keep the UI responsive.
-
-#### Benchmarking Dialogs
-
-The benchmarking system adds model comparison capabilities:
-
-- **BenchmarkConfirmDialog** (`benchmark_dialog.py`): Configure benchmark runs - select models, sampling, view cost estimates
-- **BenchmarkProgressDialog** (`benchmark_dialog.py`): Show progress during benchmark execution
-- **BenchmarkResultsDialog** (`benchmark_results_dialog.py`): Four-tab results display:
-  - *Model Comparison*: Table with mean score, std dev, latency, tokens, cost per evaluator
-  - *Agreement Matrix*: Pairwise agreement percentages (within ±1 score tolerance)
-  - *Score Distribution*: Score counts (1-5) per evaluator
-  - *Document Details*: Per-document scores with filter for disagreements
-
-**Benchmark Workflow:**
-1. After scoring completes, "Run Benchmark" button appears (if benchmarking enabled in settings)
-2. User configures models and sample size in confirmation dialog
-3. `BenchmarkWorker` executes benchmark in background thread
-4. Results dialog displays comparison with export options (CSV, JSON)
-
-**Benchmark Signals:**
-- `BenchmarkWorker.progress(int, int, str)` - Progress updates (current, total, message)
-- `BenchmarkWorker.finished(BenchmarkResult)` - Benchmark complete
-- `BenchmarkWorker.error(str)` - Error occurred
 
 ### Data Flow
 
-1. User enters research question → `SearchAgent` converts to PubMed query
-2. `PubMedSearchClient` fetches articles → stored in `LiteStorage`
-3. `LiteEmbedder` (FastEmbed) creates embeddings → stored in ChromaDB
-4. `QualityManager` assesses study quality (optional)
-5. `ScoringAgent` scores relevance → `CitationAgent` extracts citations
-6. (Optional) `BenchmarkRunner` compares multiple models on scored documents
+1. User enters research question → `SearchAgent` converts to search queries
+2. `SearchService` fetches from PubMed + Europe PMC in parallel
+3. `SearchResultMerger` deduplicates results → stored in `LiteStorage`
+4. `LiteEmbedder` (FastEmbed) creates embeddings → stored in ChromaDB
+5. `QualityManager` assesses study quality (optional)
+6. `ScoringAgent` scores relevance → `CitationAgent` extracts citations
 7. `ReportingAgent` generates final report
 8. Audit Trail tab displays real-time progress throughout
 
@@ -186,25 +193,19 @@ The benchmarking system adds model comparison capabilities:
 
 ## Constants (from `constants.py`)
 
+Key search constants:
+- `EUROPEPMC_SEARCH_PAGE_SIZE` - Europe PMC batch size (default: 100)
+- `EUROPEPMC_INITIAL_CURSOR` - Initial cursor value ("*")
+- `TITLE_SIMILARITY_THRESHOLD` - Jaccard threshold for deduplication (0.8)
+
 Key audit trail constants:
 - `AUDIT_CARD_PADDING`, `AUDIT_CARD_SPACING` - Card layout dimensions
-- `AUDIT_CARD_BORDER_RADIUS`, `AUDIT_CARD_MIN_HEIGHT` - Card styling
 - `AUDIT_CARD_HEADER_COLOR` - Pale light blue header (`#E3F2FD`)
-- `AUDIT_RATIONALE_COLOR` - Muted text for LLM rationales (`#555555`)
-- `AUDIT_ABSTRACT_MAX_LINES` - Maximum abstract lines before scroll (15)
 - `MAX_AUTHORS_BEFORE_ET_AL` - Authors to show before "et al." (3)
 
 Key benchmarking constants:
 - `MODEL_PRICING` - Cost per 1M tokens for each supported model
-- `DEFAULT_MODEL_PRICING` - Fallback pricing for unknown models
-- `get_model_pricing(model_string)` - Get pricing for a model
-- `calculate_cost(model, input_tokens, output_tokens)` - Calculate cost in USD
 - `BENCHMARK_QUESTION_HASH_LENGTH` - Hash length for question matching (16)
-
-Key incremental search constants:
-- `INCREMENTAL_SEARCH_BATCH_SIZE` - Batch size for PubMed offset pagination (100)
-- `DEFAULT_TARGET_NEW_DOCUMENTS` - Default target new documents (50)
-- `MAX_PUBMED_SEARCH_OFFSET` - Maximum PubMed API offset (9999)
 
 ## Environment Variables
 
@@ -217,15 +218,22 @@ Key incremental search constants:
 
 ```
 doc/
-├── user/           # End-user documentation
-│   └── guide.md    # User guide
-├── developer/      # Developer documentation
-│   └── guide.md    # Developer guide
-├── llm/            # LLM assistant context
-│   ├── context.md  # General LLM context
-│   ├── database-schema.md  # Database schema reference
-│   └── golden_rules.md     # Coding standards
-└── planning/       # Planning documents
+├── user/              # End-user documentation
+│   └── guide.md
+├── developer/         # Developer documentation
+│   ├── guide.md
+│   └── europepmc_and_pubmed.md  # API integration guide
+├── llm/               # LLM assistant context
+│   ├── context.md
+│   ├── database-schema.md
+│   └── golden_rules.md
+├── cross_platform/    # Platform-agnostic algorithms (pseudocode)
+│   ├── hybrid_search.md
+│   ├── jats_parsing.md
+│   └── fulltext_retrieval.md
+└── planning/          # Planning documents
+    ├── android/       # Android implementation plans
+    └── fulltext_retrieval/  # Full-text feature plans
 ```
 
 ## iOS App Architecture (`ios/MedicalFactChecker/`)
@@ -243,80 +251,184 @@ ios/MedicalFactChecker/
 │   ├── Models/
 │   │   ├── AppSettings.swift            # UserDefaults + Keychain settings
 │   │   ├── FactCheckSession.swift       # @Model for workflow sessions
-│   │   ├── Document.swift               # @Model for PubMed documents
-│   │   ├── Citation.swift               # @Model for extracted citations
-│   │   ├── EvidenceReport.swift         # @Model for generated reports
-│   │   └── UsageRecord.swift            # @Model for budget tracking
+│   │   ├── Document.swift               # @Model for documents
+│   │   ├── SearchProvider.swift         # PubMed, Europe PMC, or both
+│   │   ├── StructuredQuery.swift        # Cross-provider query representation
+│   │   └── QueryConstants.swift         # Query builder constants
 │   ├── Services/
 │   │   ├── FactCheckWorkflow.swift      # Main workflow orchestration
+│   │   ├── SearchServiceProtocol.swift  # Unified search interface
 │   │   ├── LLMService.swift             # OpenAI-compatible API client
-│   │   ├── PubMedService.swift          # NCBI E-utilities integration
 │   │   └── EmbeddingService.swift       # Apple NLEmbedding scoring
 │   ├── Views/
 │   │   ├── FactCheck/
 │   │   │   ├── FactCheckView.swift      # Main fact-checking UI
-│   │   │   └── ScoredDocumentsView.swift # Document cards with dual scores
-│   │   ├── Report/
-│   │   │   └── ReportView.swift         # Evidence report with clickable refs
-│   │   ├── History/
-│   │   │   └── HistoryView.swift        # Past session browser
-│   │   └── Settings/
-│   │       └── SettingsView.swift       # Configuration UI
+│   │   │   ├── ScoredDocumentsView.swift # Document cards
+│   │   │   └── FullTextViewer.swift     # JATS/PDF viewer
+│   │   └── Components/
+│   │       ├── SearchOptionsView.swift  # Provider selection
+│   │       ├── DocumentSourceBadge.swift # Source indicator
+│   │       └── FullTextSourceBadge.swift # Full-text source indicator
 │   └── Utilities/
-│       ├── CostCalculator.swift         # Token cost estimation
-│       ├── KeychainHelper.swift         # Secure credential storage
-│       └── ResponseParser.swift         # LLM response parsing
-└── Tests/
-    └── MedicalFactCheckerTests.swift
+│       ├── BioMedLitAdapters.swift      # Adapters for BioMedLit package
+│       ├── SearchResultMerger.swift     # Deduplication logic
+│       ├── QueryTranslator.swift        # PubMed ↔ Europe PMC queries
+│       └── JATSXMLParser.swift          # Legacy (now uses BioMedLit)
+└── Package.swift                         # BioMedLit dependency
 ```
 
 ### Key iOS Patterns
 
 **SwiftData Models**
 - All data models use `@Model` macro for SwiftData persistence
-- Relationships use `@Relationship` with cascade delete rules
-- `Document.embeddingScore` is a stored property; `embeddingScoreNormalized` is computed
+- `Document.source` tracks origin (PubMed, Europe PMC, or both)
+- `Document.fullTextSource` tracks how full text was obtained
 
-**SwiftUI Observation**
-- Use `@Bindable` for SwiftData models in views that need to observe property changes
-- Use `@Environment(AppSettings.self)` for accessing shared settings
-- Use `sheet(item:)` instead of `sheet(isPresented:)` for proper item binding
+**Search Provider Selection**
+- `SearchProvider` enum: `.pubMed`, `.europePMC`, `.both`
+- `StructuredQuery` represents provider-agnostic queries
+- `QueryTranslator` converts between provider-specific syntaxes
 
-**Embedding Scoring with HyDE**
-- `EmbeddingService` uses Apple's `NLEmbedding.sentenceEmbedding(for: .english)`
-- HyDE (Hypothetical Document Embedding) generates a synthetic abstract before embedding
-- Raw scores (0.0-1.0) are normalized to 1-5 scale for comparison with LLM scores
+**Full-Text Viewing**
+- `FullTextViewer` displays JATS XML (via BioMedLit parser) or PDFs
+- Figure images loaded from Europe PMC URLs
+- HTML rendering for complex tables
 
 **Workflow Steps** (in `FactCheckWorkflow`)
-1. `convertingQuery` - LLM converts claim to PubMed query
-2. `searchingPubMed` - Fetch documents via NCBI E-utilities
-3. `scoringDocuments` - LLM scores relevance + optional HyDE embedding scores
-4. `extractingCitations` - Extract key passages from relevant documents
-5. `generatingReport` - Synthesize evidence report with verdict
+1. `convertingQuery` - LLM converts claim to structured query
+2. `searchingPubMed` - Fetch from selected providers
+3. `scoringDocuments` - LLM + embedding scoring
+4. `extractingCitations` - Extract key passages
+5. `generatingReport` - Synthesize evidence report
 
-**Budget Management**
-- `AppSettings.maxRunBudgetUSD` - Per-run spending limit
-- `AppSettings.monthlyBudgetUSD` - Monthly spending cap
-- `UsageRecord` @Model tracks token usage per session
-- `CostCalculator` estimates costs based on model pricing
+## macOS App Architecture (`macos/MedicalFactCheckerMac/`)
 
-**Reference Clicks in Reports**
-- References use custom URL scheme: `docref://lookup?type=id&value=pmid-12345`
-- `MarkdownReportView` parses references and makes them tappable
-- Notification-based handling via `documentReferenceClicked`
+The macOS app shares most code with iOS via the BioMedLit package.
 
-### iOS Code Style
+### Key Differences from iOS
 
-- **Docstrings**: Use `///` documentation comments on all public types and methods
-- **MARK comments**: Use `// MARK: -` to organize code sections
-- **Property wrappers**: Prefer `@Bindable` for observed SwiftData models
-- **Error handling**: Use `do/catch` with appropriate error types
-- **Async/await**: Use Swift concurrency for all async operations
+- Uses `MacContentView` instead of `ContentView`
+- Platform-specific views prefixed with `Mac` (e.g., `MacFactCheckView`)
+- Larger layouts optimized for desktop
+- Menu bar integration
+
+### Shared via BioMedLit Package
+
+- `JATSXMLParser` - JATS XML parsing
+- `EuropePMCService` - Search API client
+- `PubMedService` - Search API client
+- `FullTextService` - Full-text retrieval
+- `RetryHelper` - Network retry logic
+
+## Android App Architecture (`android/MedicalFactChecker/`)
+
+The Android app uses Jetpack Compose with MVVM architecture.
+
+### Project Structure
+
+```
+android/MedicalFactChecker/
+├── app/src/main/java/com/bmlibrarian/factchecker/
+│   ├── data/
+│   │   ├── local/
+│   │   │   ├── AppDatabase.kt           # Room database
+│   │   │   ├── dao/                     # Data access objects
+│   │   │   └── entity/                  # Room entities
+│   │   ├── remote/
+│   │   │   ├── pubmed/                  # PubMed API
+│   │   │   ├── europepmc/               # Europe PMC API
+│   │   │   │   ├── EuropePMCApi.kt      # Retrofit interface
+│   │   │   │   ├── EuropePMCService.kt  # Service wrapper
+│   │   │   │   └── EuropePMCModels.kt   # Response models
+│   │   │   └── llm/                     # LLM API
+│   │   └── repository/                  # Repository pattern
+│   ├── domain/
+│   │   ├── model/
+│   │   │   ├── SearchProvider.kt        # Provider enum
+│   │   │   └── EuropePMCError.kt        # Error types
+│   │   ├── usecase/                     # Use cases
+│   │   └── workflow/
+│   │       ├── FactCheckWorkflow.kt     # Workflow orchestration
+│   │       └── WorkflowState.kt         # State machine
+│   ├── ui/
+│   │   ├── factcheck/                   # Fact check screen
+│   │   │   ├── FactCheckScreen.kt
+│   │   │   ├── FactCheckViewModel.kt
+│   │   │   └── components/
+│   │   │       ├── DocumentCard.kt
+│   │   │       └── SearchProviderSelector.kt
+│   │   ├── settings/                    # Settings screen
+│   │   ├── history/                     # History screen
+│   │   └── report/                      # Report screen
+│   ├── di/                              # Hilt modules
+│   │   ├── NetworkModule.kt
+│   │   └── WorkflowModule.kt
+│   └── util/
+│       ├── Constants.kt                 # App constants
+│       ├── NetworkRetry.kt              # Retry logic
+│       └── ResponseParser.kt            # LLM response parsing
+└── app/src/test/                        # Unit tests
+```
+
+### Key Android Patterns
+
+**Architecture**
+- MVVM with Hilt dependency injection
+- Room for local persistence
+- Retrofit + OkHttp for networking
+- Kotlin coroutines + Flow for async
+
+**Search Integration**
+- `SearchProvider` enum mirrors iOS/macOS
+- `EuropePMCService` implements cursor-based pagination
+- `NetworkRetry.withExponentialBackoff()` for resilient requests
+
+**State Management**
+- `WorkflowState` sealed class for workflow states
+- `StateFlow` for reactive UI updates
+- `ViewModel` survives configuration changes
+
+## BioMedLit Swift Package (`Packages/BioMedLit/`)
+
+Reusable Swift package for biomedical literature services.
+
+### Public API
+
+```swift
+// Configuration
+BioMedLit.configure(with: BioMedLitConfiguration(
+    ncbiEmail: "your@email.com",
+    logger: MyLogger()
+))
+
+// JATS Parsing
+let parser = JATSXMLParser(data: xmlData, knownPMCId: "PMC1234567")
+let markdown = try parser.parseToMarkdown()
+let html = try parser.parseToHTML()
+let article = try parser.parseToArticle()
+
+// Search
+let europePMC = EuropePMCService()
+let results = try await europePMC.search(query: "COVID-19")
+
+let pubmed = PubMedService(email: "your@email.com")
+let results = try await pubmed.search(query: "COVID-19")
+
+// Full Text
+let fullText = FullTextService(email: "your@email.com")
+let result = try await fullText.fetchFullText(pmcId: "PMC1234567")
+```
+
+### Key Types
+
+- `JATSArticle` - Parsed article with sections, figures, tables, references
+- `SearchArticle` - Search result from either provider
+- `SearchResult` - Results container with pagination
+- `FullTextResult` - Enum for different full-text sources
 
 ## Related Documentation
 
 - `doc/llm/golden_rules.md` - MUST READ: Coding standards and rules
-- `doc/llm/database-schema.md` - Database schema reference
-- `doc/llm/context.md` - Extended LLM context
-- `doc/developer/guide.md` - Developer guide
-- `doc/user/guide.md` - User guide
+- `doc/developer/europepmc_and_pubmed.md` - API integration details
+- `doc/cross_platform/` - Platform-agnostic algorithm documentation
+- `Packages/BioMedLit/README.md` - Swift package documentation
