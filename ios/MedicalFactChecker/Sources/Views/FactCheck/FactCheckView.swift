@@ -398,10 +398,10 @@ struct ProgressSection: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Generated PubMed query (show once generated)
+            // Generated query (show once generated)
             if let query = workflow.session?.pubmedQuery, !query.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("PubMed Query:")
+                    Text(queryLabel)
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
@@ -430,6 +430,21 @@ struct ProgressSection: View {
 
     private var mainSteps: [WorkflowStep] {
         [.convertingQuery, .searchingPubMed, .scoringDocuments, .extractingCitations, .generatingReport]
+    }
+
+    /// Dynamic label for the query based on the selected search provider.
+    private var queryLabel: String {
+        guard let provider = workflow.session?.searchProviderEnum else {
+            return "PubMed Query:"
+        }
+        switch provider {
+        case .pubmed:
+            return "PubMed Query:"
+        case .europePMC:
+            return "Europe PMC Query:"
+        case .both:
+            return "Search Query:"
+        }
     }
 }
 
