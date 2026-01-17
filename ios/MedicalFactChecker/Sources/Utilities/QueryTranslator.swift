@@ -74,6 +74,70 @@ enum QueryTranslator {
         return result
     }
 
+    // MARK: - Query Syntax Detection
+
+    /// Detect if a query appears to be in PubMed syntax.
+    ///
+    /// Checks for common PubMed-specific patterns like field tags in brackets.
+    ///
+    /// - Parameter query: Query string to analyze.
+    /// - Returns: True if query appears to be PubMed syntax.
+    static func isPubMedSyntax(_ query: String) -> Bool {
+        let pubmedPatterns = [
+            #"\[MeSH\]"#,
+            #"\[mesh\]"#,
+            #"\[Mesh\]"#,
+            #"\[tiab\]"#,
+            #"\[ti\]"#,
+            #"\[ab\]"#,
+            #"\[au\]"#,
+            #"\[ta\]"#,
+            #"\[dp\]"#,
+            #"\[pt\]"#,
+            #"\[la\]"#,
+            #"\[sb\]"#,
+            "hasabstract"
+        ]
+
+        for pattern in pubmedPatterns {
+            if query.range(of: pattern, options: .regularExpression) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Detect if a query appears to be in Europe PMC syntax.
+    ///
+    /// Checks for common Europe PMC-specific patterns like field prefixes.
+    ///
+    /// - Parameter query: Query string to analyze.
+    /// - Returns: True if query appears to be Europe PMC syntax.
+    static func isEuropePMCSyntax(_ query: String) -> Bool {
+        let europePMCPatterns = [
+            "MeSH_TERM:",
+            "TITLE_ABS:",
+            "TITLE:",
+            "ABSTRACT:",
+            "AUTH:",
+            "JOURNAL:",
+            "PUB_YEAR:",
+            "HAS_ABSTRACT:",
+            "OPEN_ACCESS:",
+            "LANG:",
+            "PUB_TYPE:",
+            "SRC:"
+        ]
+
+        let uppercasedQuery = query.uppercased()
+        for pattern in europePMCPatterns {
+            if uppercasedQuery.contains(pattern) {
+                return true
+            }
+        }
+        return false
+    }
+
     // MARK: - Translation Direction
 
     /// Direction of query translation.

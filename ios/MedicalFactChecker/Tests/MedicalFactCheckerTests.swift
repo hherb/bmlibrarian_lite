@@ -832,3 +832,428 @@ final class QueryConstantsTests: XCTestCase {
         XCTAssertFalse(QueryConstants.europePMCExcludePreprintsFilter.isEmpty)
     }
 }
+
+// MARK: - Pagination State Tests (Phase 4)
+
+final class OffsetPaginationStateTests: XCTestCase {
+
+    func testFetchedCount() {
+        let state = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        XCTAssertEqual(state.fetchedCount, 30)
+    }
+
+    func testHasMoreWhenResultsRemain() {
+        let state = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        XCTAssertTrue(state.hasMore)
+    }
+
+    func testHasMoreWhenExhausted() {
+        let state = OffsetPaginationState(totalCount: 100, offset: 90, batchSize: 10)
+        XCTAssertFalse(state.hasMore)
+    }
+
+    func testHasMoreWhenExactlyAtEnd() {
+        let state = OffsetPaginationState(totalCount: 50, offset: 40, batchSize: 10)
+        XCTAssertFalse(state.hasMore)
+    }
+
+    func testLogicalOffset() {
+        let state = OffsetPaginationState(totalCount: 100, offset: 40, batchSize: 20)
+        XCTAssertEqual(state.logicalOffset, 40)
+    }
+
+    func testNextOffset() {
+        let state = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 15)
+        XCTAssertEqual(state.nextOffset, 35)
+    }
+
+    func testEquatable() {
+        let state1 = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let state2 = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let state3 = OffsetPaginationState(totalCount: 100, offset: 30, batchSize: 10)
+
+        XCTAssertEqual(state1, state2)
+        XCTAssertNotEqual(state1, state3)
+    }
+}
+
+final class CursorPaginationStateTests: XCTestCase {
+
+    func testInitialCursor() {
+        XCTAssertEqual(CursorPaginationState.initialCursor, "*")
+    }
+
+    func testHasMoreWithNextCursor() {
+        let state = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 20,
+            currentCursor: "*",
+            nextCursor: "AoJxyz123"
+        )
+        XCTAssertTrue(state.hasMore)
+    }
+
+    func testHasMoreWithNilCursor() {
+        let state = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 100,
+            currentCursor: "AoJxyz123",
+            nextCursor: nil
+        )
+        XCTAssertFalse(state.hasMore)
+    }
+
+    func testHasMoreWhenFetchedEqualsTotal() {
+        let state = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 50,
+            currentCursor: "*",
+            nextCursor: "sometoken"  // Even with next cursor, should be false
+        )
+        XCTAssertFalse(state.hasMore)
+    }
+
+    func testLogicalOffset() {
+        let state = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 40,
+            currentCursor: "*",
+            nextCursor: nil
+        )
+        XCTAssertEqual(state.logicalOffset, 40)
+    }
+
+    func testInitialFactory() {
+        let state = CursorPaginationState.initial()
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertEqual(state.fetchedCount, 0)
+        XCTAssertNil(state.currentCursor)
+        XCTAssertNil(state.nextCursor)
+        XCTAssertFalse(state.hasMore)
+    }
+
+    func testEquatable() {
+        let state1 = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 20,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let state2 = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 20,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let state3 = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 20,
+            currentCursor: "*",
+            nextCursor: "xyz"
+        )
+
+        XCTAssertEqual(state1, state2)
+        XCTAssertNotEqual(state1, state3)
+    }
+}
+
+final class CombinedPaginationStateTests: XCTestCase {
+
+    func testTotalCountCombinesBoth() {
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 15,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertEqual(combined.totalCount, 150)
+    }
+
+    func testFetchedCountCombinesBoth() {
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 15,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        // PubMed: 20 + 10 = 30, Europe PMC: 15
+        XCTAssertEqual(combined.fetchedCount, 45)
+    }
+
+    func testHasMoreWhenBothHaveMore() {
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 15,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertTrue(combined.hasMore)
+    }
+
+    func testHasMoreWhenOnlyPubMedHasMore() {
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 50,
+            currentCursor: "abc",
+            nextCursor: nil
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertTrue(combined.hasMore)
+    }
+
+    func testHasMoreWhenOnlyEuropePMCHasMore() {
+        let pubmed = OffsetPaginationState(totalCount: 30, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 15,
+            currentCursor: "*",
+            nextCursor: "abc"
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertTrue(combined.hasMore)
+    }
+
+    func testHasMoreWhenBothExhausted() {
+        let pubmed = OffsetPaginationState(totalCount: 30, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 50,
+            currentCursor: "abc",
+            nextCursor: nil
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertFalse(combined.hasMore)
+    }
+
+    func testNextPubMedOffset() {
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let europePMC = CursorPaginationState.initial()
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertEqual(combined.nextPubMedOffset, 30)
+    }
+
+    func testNextEuropePMCCursor() {
+        let pubmed = OffsetPaginationState(totalCount: 100, offset: 0, batchSize: 10)
+        let europePMC = CursorPaginationState(
+            totalCount: 50,
+            fetchedCount: 15,
+            currentCursor: "*",
+            nextCursor: "AoJxyz123"
+        )
+        let combined = CombinedPaginationState(
+            pubmedPagination: pubmed,
+            europePMCPagination: europePMC
+        )
+
+        XCTAssertEqual(combined.nextEuropePMCCursor, "AoJxyz123")
+    }
+}
+
+// MARK: - UnifiedSearchResult Tests (Phase 4)
+
+final class UnifiedSearchResultTests: XCTestCase {
+
+    func testEmptyResultFactory() {
+        let result = UnifiedSearchResult.empty(provider: .pubmed)
+
+        XCTAssertTrue(result.articles.isEmpty)
+        XCTAssertEqual(result.totalCount, 0)
+        XCTAssertEqual(result.provider, .pubmed)
+        XCTAssertFalse(result.hasMore)
+    }
+
+    func testEmptyResultForEuropePMC() {
+        let result = UnifiedSearchResult.empty(provider: .europePMC)
+
+        XCTAssertEqual(result.provider, .europePMC)
+        XCTAssertNil(result.nextCursorMark)
+    }
+
+    func testHasMoreDelegatesToPagination() {
+        let pagination = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let result = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: pagination,
+            provider: .pubmed
+        )
+
+        XCTAssertTrue(result.hasMore)
+    }
+
+    func testNextCursorMarkWithCursorPagination() {
+        let pagination = CursorPaginationState(
+            totalCount: 100,
+            fetchedCount: 20,
+            currentCursor: "*",
+            nextCursor: "AoJxyz123"
+        )
+        let result = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: pagination,
+            provider: .europePMC
+        )
+
+        XCTAssertEqual(result.nextCursorMark, "AoJxyz123")
+    }
+
+    func testNextCursorMarkWithOffsetPagination() {
+        let pagination = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
+        let result = UnifiedSearchResult(
+            articles: [],
+            totalCount: 100,
+            pagination: pagination,
+            provider: .pubmed
+        )
+
+        XCTAssertNil(result.nextCursorMark)
+    }
+}
+
+// MARK: - SearchError Tests (Phase 4)
+
+final class SearchErrorTests: XCTestCase {
+
+    func testPartialFailureDescription() {
+        let error = SearchError.partialFailure(successfulProvider: .pubmed)
+        XCTAssertTrue(error.errorDescription?.contains("PubMed") ?? false)
+    }
+
+    func testNoResultsDescription() {
+        let error = SearchError.noResults
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertTrue(error.errorDescription?.contains("No results") ?? false)
+    }
+
+    func testInvalidConfigurationDescription() {
+        let error = SearchError.invalidConfiguration("Missing API key")
+        XCTAssertTrue(error.errorDescription?.contains("Missing API key") ?? false)
+    }
+
+    func testNetworkErrorDescription() {
+        let error = SearchError.networkError("Connection timeout")
+        XCTAssertTrue(error.errorDescription?.contains("Connection timeout") ?? false)
+    }
+
+    func testEquatable() {
+        let error1 = SearchError.noResults
+        let error2 = SearchError.noResults
+        let error3 = SearchError.invalidConfiguration("test")
+
+        XCTAssertEqual(error1, error2)
+        XCTAssertNotEqual(error1, error3)
+    }
+}
+
+// MARK: - Query Syntax Detection Tests (Phase 4)
+
+final class QuerySyntaxDetectionTests: XCTestCase {
+
+    // MARK: - isPubMedSyntax Tests
+
+    func testIsPubMedSyntaxWithMeSHTag() {
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("\"Aspirin\"[MeSH]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("\"Aspirin\"[mesh]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("\"Aspirin\"[Mesh]"))
+    }
+
+    func testIsPubMedSyntaxWithFieldTags() {
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("aspirin[tiab]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("aspirin[ti]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("aspirin[ab]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("\"Smith J\"[au]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("JAMA[ta]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("2020[dp]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("\"Review\"[pt]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("english[la]"))
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("free full text[sb]"))
+    }
+
+    func testIsPubMedSyntaxWithHasAbstract() {
+        XCTAssertTrue(QueryTranslator.isPubMedSyntax("aspirin AND hasabstract"))
+    }
+
+    func testIsPubMedSyntaxWithPlainText() {
+        XCTAssertFalse(QueryTranslator.isPubMedSyntax("aspirin cardiovascular"))
+        XCTAssertFalse(QueryTranslator.isPubMedSyntax("vitamin D supplementation"))
+    }
+
+    func testIsPubMedSyntaxWithEuropePMCSyntax() {
+        XCTAssertFalse(QueryTranslator.isPubMedSyntax("TITLE_ABS:aspirin"))
+        XCTAssertFalse(QueryTranslator.isPubMedSyntax("HAS_ABSTRACT:y"))
+    }
+
+    // MARK: - isEuropePMCSyntax Tests
+
+    func testIsEuropePMCSyntaxWithMeSHTerm() {
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("MeSH_TERM:\"Aspirin\""))
+    }
+
+    func testIsEuropePMCSyntaxWithFieldPrefixes() {
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("TITLE_ABS:aspirin"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("TITLE:aspirin"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("ABSTRACT:aspirin"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("AUTH:\"Smith J\""))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("JOURNAL:\"JAMA\""))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("PUB_YEAR:2020"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("PUB_TYPE:\"review\""))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("LANG:\"eng\""))
+    }
+
+    func testIsEuropePMCSyntaxWithFilters() {
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("HAS_ABSTRACT:y"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("OPEN_ACCESS:y"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("NOT SRC:PPR"))
+    }
+
+    func testIsEuropePMCSyntaxCaseInsensitive() {
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("title_abs:aspirin"))
+        XCTAssertTrue(QueryTranslator.isEuropePMCSyntax("has_abstract:y"))
+    }
+
+    func testIsEuropePMCSyntaxWithPlainText() {
+        XCTAssertFalse(QueryTranslator.isEuropePMCSyntax("aspirin cardiovascular"))
+        XCTAssertFalse(QueryTranslator.isEuropePMCSyntax("vitamin D supplementation"))
+    }
+
+    func testIsEuropePMCSyntaxWithPubMedSyntax() {
+        XCTAssertFalse(QueryTranslator.isEuropePMCSyntax("\"Aspirin\"[MeSH]"))
+        XCTAssertFalse(QueryTranslator.isEuropePMCSyntax("aspirin[tiab]"))
+    }
+}

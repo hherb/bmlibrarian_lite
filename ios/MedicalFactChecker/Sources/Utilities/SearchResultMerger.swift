@@ -41,7 +41,7 @@ enum SearchResultMerger {
     /// - Parameters:
     ///   - pubmedResult: Results from PubMed.
     ///   - europePMCResult: Results from Europe PMC.
-    /// - Returns: Merged, deduplicated result with Europe PMC cursor preserved.
+    /// - Returns: Merged, deduplicated result with combined pagination state.
     static func merge(
         pubmedResult: UnifiedSearchResult,
         europePMCResult: UnifiedSearchResult
@@ -73,12 +73,18 @@ enum SearchResultMerger {
         // Estimate total (may have duplicates we removed)
         let estimatedTotal = pubmedResult.totalCount + europePMCResult.totalCount
 
+        // Create combined pagination state
+        // We track both offset (for PubMed) and cursor (for Europe PMC)
+        let combinedPagination = CombinedPaginationState(
+            pubmedPagination: pubmedResult.pagination,
+            europePMCPagination: europePMCResult.pagination
+        )
+
         return UnifiedSearchResult(
             articles: sorted,
             totalCount: estimatedTotal,
-            offset: pubmedResult.offset,
-            provider: .both,
-            nextCursorMark: europePMCResult.nextCursorMark
+            pagination: combinedPagination,
+            provider: .both
         )
     }
 
