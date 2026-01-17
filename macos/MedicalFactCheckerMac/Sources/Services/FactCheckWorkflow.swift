@@ -137,7 +137,7 @@ final class FactCheckWorkflow {
                 provider: provider,
                 includePreprints: session.includePreprints,
                 maxResults: settings.batchSize,
-                offset: session.currentSearchOffset
+                offset: session.pubmedOffset
             )
         } else {
             searchOptions = settings.buildSearchOptions()
@@ -565,7 +565,7 @@ final class FactCheckWorkflow {
 
         // Build search options from settings
         var options = searchOptions ?? settings.buildSearchOptions()
-        options.offset = session.currentSearchOffset
+        options.offset = session.pubmedOffset
         options.maxResults = settings.batchSize
 
         let providerName = options.provider.displayName
@@ -584,9 +584,18 @@ final class FactCheckWorkflow {
             cursor: cursor
         )
 
-        // Update session state
-        session.totalPubMedResults = result.totalCount
-        session.currentSearchOffset = result.nextOffset
+        // Update session state based on provider
+        if provider == .pubmed || provider == .both {
+            session.pubmedTotalResults = result.totalCount
+            session.pubmedOffset = result.nextOffset
+            session.pubmedHasMore = result.nextOffset < result.totalCount
+        }
+        if provider == .europePMC || provider == .both {
+            session.europePMCTotalResults = result.totalCount
+            session.europePMCCursor = result.nextCursorMark
+            session.europePMCOffset = result.nextOffset
+            session.europePMCHasMore = result.nextCursorMark != nil
+        }
         session.batchesFetched = batchNumber
 
         // Track provider-specific state
@@ -1281,7 +1290,7 @@ final class FactCheckWorkflow {
 
         Question: \(session.claim)
         Initial query: \(session.pubmedQuery ?? "N/A")
-        Results found: \(session.totalPubMedResults)
+        Results found: \(session.pubmedTotalResults)
         Relevant documents: \(session.relevantDocumentsFound)
 
         Generate 2-4 alternative search strategies. Consider:
