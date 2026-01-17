@@ -113,7 +113,7 @@ struct FactCheckView: View {
                             isFetching: workflow.isRunning,
                             onFetchMore: {
                                 Task {
-                                    await workflow.fetchMoreEvidence()
+                                    await workflow.fetchMoreEvidence(searchOptions: searchOptions)
                                 }
                             }
                         )
@@ -139,6 +139,17 @@ struct FactCheckView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(errorMessage)
+            }
+            .onChange(of: workflow?.session?.searchProvider) { _, newProvider in
+                // Sync search options from restored session
+                if let providerRaw = newProvider,
+                   let provider = SearchProvider(rawValue: providerRaw),
+                   let session = workflow?.session {
+                    searchOptions = SearchOptions(
+                        provider: provider,
+                        includePreprints: session.includePreprints
+                    )
+                }
             }
         }
     }
@@ -195,8 +206,9 @@ struct FactCheckView: View {
     private func handleSubmit() {
         if isResumedSession, let workflow = workflow {
             // Resumed session: fetch more evidence to append to existing documents
+            // Pass current search options to allow provider switching mid-session
             Task {
-                await workflow.fetchMoreEvidence()
+                await workflow.fetchMoreEvidence(searchOptions: searchOptions)
             }
         } else {
             // New fact-check: start fresh

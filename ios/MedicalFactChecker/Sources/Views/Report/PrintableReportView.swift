@@ -246,7 +246,7 @@ struct PrintableReportView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(document.title)
+                    Text(document.displayTitle)
                         .font(.subheadline)
                         .fontWeight(.medium)
                     Text(document.formattedAuthors)

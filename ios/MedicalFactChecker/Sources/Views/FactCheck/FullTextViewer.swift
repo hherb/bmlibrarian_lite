@@ -50,7 +50,7 @@ struct FullTextViewer: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle(document.title)
+                .navigationTitle(document.displayTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {

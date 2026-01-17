@@ -454,8 +454,37 @@ final class FactCheckWorkflow {
     /// 4. Regenerate the report with all accumulated evidence
     ///
     /// Can be called multiple times until PubMed is exhausted and smart search has been tried.
-    func fetchMoreEvidence() async {
+    /// Fetches additional evidence for the current session.
+    ///
+    /// - Parameter searchOptions: Optional updated search options. If provided,
+    ///   these will override the session's stored search options, allowing the
+    ///   user to switch providers (e.g., from Europe PMC to PubMed) when fetching
+    ///   more evidence.
+    func fetchMoreEvidence(searchOptions: SearchOptions? = nil) async {
         guard let session = session else { return }
+
+        // Update search options if provided (allows changing provider mid-session)
+        if let newOptions = searchOptions {
+            currentSearchOptions = newOptions
+            session.searchProvider = newOptions.provider.rawValue
+            session.includePreprints = newOptions.includePreprints
+
+            // Reset pagination state for the new provider
+            if newOptions.provider == .pubmed {
+                // Switching to PubMed: reset PubMed state, keep Europe PMC state
+                session.pubmedOffset = 0
+                session.pubmedHasMore = true
+            } else if newOptions.provider == .europePMC {
+                // Switching to Europe PMC: reset Europe PMC state, keep PubMed state
+                session.europePMCOffset = 0
+                session.europePMCCursor = nil
+                session.europePMCHasMore = true
+            }
+            // For .both, both providers are used so we don't reset
+
+            try? modelContext.save()
+            print("[FetchMoreEvidence] Updated search options to: \(newOptions.provider.displayName)")
+        }
 
         // Initialize services if needed
         if llmService == nil || pubmedService == nil {

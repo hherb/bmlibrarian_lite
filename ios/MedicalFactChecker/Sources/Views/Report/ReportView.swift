@@ -704,7 +704,7 @@ struct DocumentCard: View {
             // Header with score badge
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(document.title)
+                    Text(document.displayTitle)
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .lineLimit(2)
@@ -1216,7 +1216,7 @@ struct DocumentDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Title
-                    Text(document.title)
+                    Text(document.displayTitle)
                         .font(.headline)
 
                     // Authors

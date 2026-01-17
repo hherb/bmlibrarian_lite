@@ -160,6 +160,14 @@ final class Document {
 
     // MARK: - Computed Properties
 
+    /// Title with HTML entities decoded and tags stripped for display.
+    ///
+    /// PubMed and Europe PMC titles often contain HTML entities (`&lt;i&gt;`)
+    /// and formatting tags (`<i>`, `<sup>`) that should be rendered as plain text.
+    var displayTitle: String {
+        decodeHTMLEntities(title)
+    }
+
     /// Formatted author string for display.
     var formattedAuthors: String {
         guard !authors.isEmpty else { return "Unknown" }
@@ -255,5 +263,89 @@ final class Document {
         set {
             sourceProviderRaw = newValue?.rawValue
         }
+    }
+
+    // MARK: - Private Helpers
+
+    /// Decodes HTML entities and removes HTML tags for plain text display.
+    ///
+    /// Handles common entities found in PubMed/Europe PMC titles:
+    /// - Named entities: `&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;`, `&nbsp;`
+    /// - Numeric entities: `&#60;`, `&#x3C;`
+    /// - HTML tags: `<i>`, `</i>`, `<b>`, `<sup>`, etc.
+    private func decodeHTMLEntities(_ string: String) -> String {
+        var result = string
+
+        // Named HTML entities
+        let namedEntities: [String: String] = [
+            "&lt;": "<",
+            "&gt;": ">",
+            "&amp;": "&",
+            "&quot;": "\"",
+            "&apos;": "'",
+            "&nbsp;": " ",
+            "&ndash;": "–",
+            "&mdash;": "—",
+            "&lsquo;": "'",
+            "&rsquo;": "'",
+            "&ldquo;": "\u{201C}",
+            "&rdquo;": "\u{201D}",
+            "&hellip;": "…",
+            "&deg;": "°",
+            "&plusmn;": "±",
+            "&times;": "×",
+            "&divide;": "÷",
+            "&micro;": "µ",
+            "&alpha;": "α",
+            "&beta;": "β",
+            "&gamma;": "γ",
+            "&delta;": "δ",
+        ]
+
+        for (entity, replacement) in namedEntities {
+            result = result.replacingOccurrences(of: entity, with: replacement)
+        }
+
+        // Numeric entities (decimal): &#60; -> <
+        if let regex = try? NSRegularExpression(pattern: "&#(\\d+);", options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+
+            for match in matches.reversed() {
+                if let codeRange = Range(match.range(at: 1), in: result),
+                   let code = Int(result[codeRange]),
+                   let scalar = Unicode.Scalar(code) {
+                    let char = String(Character(scalar))
+                    if let fullRange = Range(match.range, in: result) {
+                        result.replaceSubrange(fullRange, with: char)
+                    }
+                }
+            }
+        }
+
+        // Numeric entities (hex): &#x3C; -> <
+        if let regex = try? NSRegularExpression(pattern: "&#[xX]([0-9a-fA-F]+);", options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+
+            for match in matches.reversed() {
+                if let codeRange = Range(match.range(at: 1), in: result),
+                   let code = Int(result[codeRange], radix: 16),
+                   let scalar = Unicode.Scalar(code) {
+                    let char = String(Character(scalar))
+                    if let fullRange = Range(match.range, in: result) {
+                        result.replaceSubrange(fullRange, with: char)
+                    }
+                }
+            }
+        }
+
+        // Remove HTML tags (after decoding entities, since tags might have been encoded)
+        if let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
+        }
+
+        return result
     }
 }

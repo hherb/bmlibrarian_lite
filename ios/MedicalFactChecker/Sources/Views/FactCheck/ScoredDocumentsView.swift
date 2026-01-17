@@ -109,7 +109,7 @@ struct DocumentScoreRow: View {
 
                     // Title and metadata
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(document.title)
+                        Text(document.displayTitle)
                             .font(.subheadline)
                             .lineLimit(isExpanded ? nil : 2)
                             .multilineTextAlignment(.leading)
