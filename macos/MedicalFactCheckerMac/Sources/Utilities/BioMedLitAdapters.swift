@@ -50,7 +50,7 @@ enum BioMedLitAdapters {
             title: article.title,
             abstract: article.abstract,
             authors: authorsArray,
-            journal: article.journal ?? "",
+            journal: article.journal,
             publicationDate: article.publicationDate,
             year: Int(article.year),
             meshTerms: [],  // BioMedLit doesn't parse MeSH terms yet

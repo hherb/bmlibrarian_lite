@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000055001 /* BioMedLitLib in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLitLib */; };
+		A1000055001 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLit */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -124,7 +124,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000055001 /* BioMedLitLib in Frameworks */,
+				A1000055001 /* BioMedLit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,7 +320,7 @@
 			);
 			name = MedicalFactChecker;
 			packageProductDependencies = (
-				A1000055000 /* BioMedLitLib */,
+				A1000055000 /* BioMedLit */,
 			);
 			productName = MedicalFactChecker;
 			productReference = A1000000000 /* MedicalFactChecker.app */;
@@ -584,7 +584,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -617,7 +617,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -657,9 +657,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A1000055000 /* BioMedLitLib */ = {
+		A1000055000 /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = BioMedLitLib;
+			package = A1000056000 /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */;
+			productName = BioMedLit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

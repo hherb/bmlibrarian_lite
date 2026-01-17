@@ -55,7 +55,7 @@
 		A1000047 /* SearchServiceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SearchServiceFactory.swift */; };
 		A1000048 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051 /* QueryValidator.swift */; };
 		A1000049 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052 /* CloudKitConfiguration.swift */; };
-		A1000060 /* BioMedLitLib in Frameworks */ = {isa = PBXBuildFile; productRef = A1000061 /* BioMedLitLib */; };
+		A1000060 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000061 /* BioMedLit */; };
 		A1000062 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* BioMedLitAdapters.swift */; };
 		D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */; };
 		DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */; };
@@ -169,7 +169,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000060 /* BioMedLitLib in Frameworks */,
+				A1000060 /* BioMedLit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -437,7 +437,7 @@
 			);
 			name = MedicalFactCheckerMac;
 			packageProductDependencies = (
-				A1000061 /* BioMedLitLib */,
+				A1000061 /* BioMedLit */,
 			);
 			productName = MedicalFactCheckerMac;
 			productReference = A2000029 /* Medical Fact Checker.app */;
@@ -653,7 +653,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-Checker";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -699,7 +699,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-Checker";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -721,7 +721,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -742,7 +742,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -762,7 +762,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -782,7 +782,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -1050,9 +1050,9 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A1000061 /* BioMedLitLib */ = {
+		A1000061 /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = BioMedLitLib;
+			productName = BioMedLit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
