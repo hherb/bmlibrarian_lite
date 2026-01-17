@@ -113,7 +113,7 @@ final class FactCheckWorkflow {
         let newSession = FactCheckSession(claim: claim)
         newSession.modelName = settings.llmModel
         newSession.providerName = settings.selectedProvider.displayName
-        newSession.searchProvider = currentSearchOptions?.provider
+        newSession.searchProvider = currentSearchOptions?.provider.rawValue
         newSession.includePreprints = currentSearchOptions?.includePreprints ?? false
         modelContext.insert(newSession)
         try? modelContext.save()

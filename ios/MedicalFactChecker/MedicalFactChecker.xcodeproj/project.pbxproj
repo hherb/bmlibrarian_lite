@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000055001 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLit */; };
+		A1000055001 /* BioMedLitLib in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLitLib */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -40,6 +40,8 @@
 		A1000034001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000034000 /* OnboardingView.swift */; };
 		A1000035001 /* SearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000035000 /* SearchProvider.swift */; };
 		A1000036001 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000036000 /* FullTextSource.swift */; };
+		A1000057001 /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057000 /* StructuredQuery.swift */; };
+		A1000058001 /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000058000 /* QueryConstants.swift */; };
 		A1000039001 /* SearchServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000039000 /* SearchServiceProtocol.swift */; };
 		A1000040001 /* FullTextConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000040000 /* FullTextConstants.swift */; };
 		A1000041001 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041000 /* JATSXMLParser.swift */; };
@@ -98,6 +100,8 @@
 		A1000034000 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A1000035000 /* SearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProvider.swift; sourceTree = "<group>"; };
 		A1000036000 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
+		A1000057000 /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
+		A1000058000 /* QueryConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryConstants.swift; sourceTree = "<group>"; };
 		A1000039000 /* SearchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceProtocol.swift; sourceTree = "<group>"; };
 		A1000040000 /* FullTextConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextConstants.swift; sourceTree = "<group>"; };
 		A1000041000 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
@@ -120,7 +124,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000055001 /* BioMedLit in Frameworks */,
+				A1000055001 /* BioMedLitLib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,7 +176,9 @@
 				A1000008000 /* FactCheckSession.swift */,
 				A1000036000 /* FullTextSource.swift */,
 				A1000024000 /* LLMProvider.swift */,
+				A1000058000 /* QueryConstants.swift */,
 				A1000035000 /* SearchProvider.swift */,
+				A1000057000 /* StructuredQuery.swift */,
 				A1000009000 /* UsageRecord.swift */,
 			);
 			path = Models;
@@ -314,7 +320,7 @@
 			);
 			name = MedicalFactChecker;
 			packageProductDependencies = (
-				A1000055000 /* BioMedLit */,
+				A1000055000 /* BioMedLitLib */,
 			);
 			productName = MedicalFactChecker;
 			productReference = A1000000000 /* MedicalFactChecker.app */;
@@ -407,6 +413,8 @@
 				A1000034001 /* OnboardingView.swift in Sources */,
 				A1000035001 /* SearchProvider.swift in Sources */,
 				A1000036001 /* FullTextSource.swift in Sources */,
+				A1000057001 /* StructuredQuery.swift in Sources */,
+				A1000058001 /* QueryConstants.swift in Sources */,
 				A1000039001 /* SearchServiceProtocol.swift in Sources */,
 				A1000040001 /* FullTextConstants.swift in Sources */,
 				A1000041001 /* JATSXMLParser.swift in Sources */,
@@ -649,9 +657,9 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A1000055000 /* BioMedLit */ = {
+		A1000055000 /* BioMedLitLib */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = BioMedLit;
+			productName = BioMedLitLib;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

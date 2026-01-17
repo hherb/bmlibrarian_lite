@@ -500,8 +500,8 @@ enum SearchServiceFactory {
             offset: options.offset
         )
 
-        // Use non-throwing TaskGroup with Result to handle partial failures gracefully
-        return try await withTaskGroup(of: Result<UnifiedSearchResult, Error>.self) { group in
+        // Use throwing TaskGroup with Result to handle partial failures gracefully
+        return try await withThrowingTaskGroup(of: Result<UnifiedSearchResult, Error>.self) { group in
             group.addTask {
                 do {
                     let result = try await searchPubMed(query: query, options: pubmedOptions, settings: settings)
@@ -526,7 +526,7 @@ enum SearchServiceFactory {
             var firstError: Error?
 
             // Collect results from both providers
-            for await result in group {
+            for try await result in group {
                 switch result {
                 case .success(let searchResult):
                     switch searchResult.provider {
