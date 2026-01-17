@@ -50,11 +50,17 @@ struct FactCheckView: View {
                         isRunning: workflow?.isRunning ?? false,
                         canSubmit: canSubmit,
                         isTextEditorFocused: $isTextEditorFocused,
+                        buttonText: buttonText,
                         onSubmit: {
                             isTextEditorFocused = false
                             startFactCheck()
                         }
                     )
+
+                    // Resumed Session Banner
+                    if isResumedSession, let session = workflow?.session {
+                        ResumedSessionBanner(session: session)
+                    }
 
                     // Search Options
                     SearchOptionsView(
@@ -91,6 +97,23 @@ struct FactCheckView: View {
                         }
                     }
 
+                    // Get More Evidence Section (for completed sessions)
+                    if let workflow = workflow,
+                       let session = workflow.session,
+                       session.report != nil,
+                       session.canGetMoreEvidence,
+                       !workflow.isRunning {
+                        GetMoreEvidenceSection(
+                            session: workflow.session,
+                            isFetching: workflow.isRunning,
+                            onFetchMore: {
+                                Task {
+                                    await workflow.fetchMoreEvidence()
+                                }
+                            }
+                        )
+                    }
+
                     Spacer(minLength: 20)
                 }
                 .padding()
@@ -117,6 +140,41 @@ struct FactCheckView: View {
 
     // MARK: - Computed Properties
 
+    /// Whether the current workflow is resuming an existing session with documents and a report.
+    ///
+    /// Returns true when:
+    /// - A workflow exists with a session
+    /// - The session has at least one document
+    /// - The session has an existing report
+    ///
+    /// This is used to display the resumed session banner and modify UI text accordingly.
+    private var isResumedSession: Bool {
+        guard let session = workflow?.session else { return false }
+        return (session.documents?.count ?? 0) > 0 && session.report != nil
+    }
+
+    /// The text to display on the submit button based on workflow state.
+    ///
+    /// Shows context-appropriate text:
+    /// - "Checking..." when workflow is running
+    /// - "Add More Results" when resuming an existing session
+    /// - "Check Evidence" for new fact-checks
+    private var buttonText: String {
+        if workflow?.isRunning ?? false {
+            return "Checking..."
+        } else if isResumedSession {
+            return "Add More Results"
+        } else {
+            return "Check Evidence"
+        }
+    }
+
+    /// Whether the user can submit a fact-check request.
+    ///
+    /// Returns true when:
+    /// - Claim text is not empty (after trimming whitespace)
+    /// - LLM is configured in settings
+    /// - No workflow is currently running
     private var canSubmit: Bool {
         let trimmed = claimText.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && settings.isLLMConfigured && !(workflow?.isRunning ?? false)
@@ -167,10 +225,25 @@ struct ConfigurationWarningView: View {
 }
 
 struct ClaimInputSection: View {
+    /// Binding to the claim text entered by the user.
     @Binding var claimText: String
+
+    /// Whether a workflow is currently running.
     let isRunning: Bool
+
+    /// Whether the submit button should be enabled.
     let canSubmit: Bool
+
+    /// Focus state binding for the text editor.
     var isTextEditorFocused: FocusState<Bool>.Binding
+
+    /// Text to display on the submit button.
+    ///
+    /// Allows the parent view to customize the button text based on context
+    /// (e.g., "Check Evidence" for new searches, "Add More Results" for resumed sessions).
+    let buttonText: String
+
+    /// Callback when user submits the claim.
     let onSubmit: () -> Void
 
     var body: some View {
@@ -201,7 +274,7 @@ struct ClaimInputSection: View {
                     } else {
                         Image(systemName: "magnifyingglass")
                     }
-                    Text(isRunning ? "Checking..." : "Check Evidence")
+                    Text(buttonText)
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -358,6 +431,48 @@ struct StepIndicator: View {
         case .generatingReport: return "Report"
         default: return ""
         }
+    }
+}
+
+/// Banner displayed when continuing a search from history.
+///
+/// Shows information about the resumed session including:
+/// - Document count and scored count
+/// - Indicator if more evidence is available
+///
+/// Styled with a light blue background to distinguish from other UI elements.
+struct ResumedSessionBanner: View {
+    /// The session being resumed.
+    let session: FactCheckSession
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.uturn.forward.circle.fill")
+                .font(.title2)
+                .foregroundColor(.blue)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Continuing previous search")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                let docCount = session.documents?.count ?? 0
+                let scoredCount = session.documents?.filter { $0.isScored }.count ?? 0
+                Text("\(docCount) documents found, \(scoredCount) scored")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if session.canGetMoreEvidence {
+                Image(systemName: "plus.circle")
+                    .foregroundColor(.green)
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(12)
     }
 }
 
