@@ -182,18 +182,6 @@ final class FactCheckWorkflow {
                 includePreprints: session.includePreprints
             )
         }
-
-        // Debug: Log restored session state
-        print("[RestoreForViewing] Restored session:")
-        print("  - claim: \(session.claim.prefix(50))...")
-        print("  - documents: \(session.documents?.count ?? 0)")
-        print("  - searchProvider: \(session.searchProvider ?? "nil")")
-        print("  - pubmedHasMore: \(session.pubmedHasMore)")
-        print("  - pubmedOffset: \(session.pubmedOffset)")
-        print("  - europePMCHasMore: \(session.europePMCHasMore)")
-        print("  - smartSearchEnabled: \(session.smartSearchEnabled)")
-        print("  - canFetchMoreDocuments: \(session.canFetchMoreDocuments)")
-        print("  - canGetMoreEvidence: \(session.canGetMoreEvidence)")
     }
 
     /// Refreshes pagination state by re-executing the search from the beginning.
@@ -213,7 +201,6 @@ final class FactCheckWorkflow {
         guard let session = session else { return 0 }
 
         let existingCount = session.documents?.count ?? 0
-        print("[RefreshPagination] Starting refresh, existing docs: \(existingCount)")
 
         // Reset pagination to start
         var currentOffset = 0
@@ -236,8 +223,6 @@ final class FactCheckWorkflow {
         guard let queryString = session.pubmedQuery else {
             throw SearchError.invalidConfiguration("No query available for pagination refresh")
         }
-
-        print("[RefreshPagination] Will fetch until offset >= \(existingCount)")
 
         while currentOffset < existingCount {
             // Check budget before each batch
@@ -299,22 +284,18 @@ final class FactCheckWorkflow {
 
             currentOffset = result.nextOffset
             currentCursor = result.nextCursorMark
-            print("[RefreshPagination] Batch complete: offset now \(currentOffset), target \(existingCount)")
 
             // Check if search is exhausted
             if result.articles.isEmpty {
-                print("[RefreshPagination] Search returned no results, stopping")
                 break
             }
             if provider == .europePMC || provider == .both {
                 if currentCursor == nil {
-                    print("[RefreshPagination] Europe PMC cursor exhausted")
                     break
                 }
             }
             if provider == .pubmed || provider == .both {
                 if currentOffset >= result.totalCount {
-                    print("[RefreshPagination] PubMed offset reached total")
                     break
                 }
             }
@@ -337,14 +318,6 @@ final class FactCheckWorkflow {
             session.documentsFound += newDocumentsFound
         }
         try? modelContext.save()
-
-        print("[RefreshPagination] Complete:")
-        print("  - newDocumentsFound: \(newDocumentsFound)")
-        print("  - finalOffset: \(currentOffset)")
-        print("  - cursor: \(currentCursor ?? "nil")")
-        print("  - totalResults: \(lastTotalCount)")
-        print("  - pubmedHasMore: \(session.pubmedHasMore)")
-        print("  - canFetchMoreDocuments: \(session.canFetchMoreDocuments)")
 
         return newDocumentsFound
     }
@@ -483,7 +456,6 @@ final class FactCheckWorkflow {
             // For .both, both providers are used so we don't reset
 
             try? modelContext.save()
-            print("[FetchMoreEvidence] Updated search options to: \(newOptions.provider.displayName)")
         }
 
         // Initialize services if needed
@@ -510,24 +482,10 @@ final class FactCheckWorkflow {
         session.currentStep = .fetchingMoreEvidence
         try? modelContext.save()
 
-        // Debug: Log pagination state
-        print("[FetchMoreEvidence] Session state:")
-        print("  - searchProvider: \(session.searchProvider ?? "nil")")
-        print("  - pubmedHasMore: \(session.pubmedHasMore)")
-        print("  - pubmedOffset: \(session.pubmedOffset)")
-        print("  - pubmedTotalResults: \(session.pubmedTotalResults)")
-        print("  - europePMCHasMore: \(session.europePMCHasMore)")
-        print("  - europePMCCursor: \(session.europePMCCursor ?? "nil")")
-        print("  - smartSearchEnabled: \(session.smartSearchEnabled)")
-        print("  - canFetchMoreDocuments: \(session.canFetchMoreDocuments)")
-        print("  - canGetMoreEvidence: \(session.canGetMoreEvidence)")
-        print("  - currentSearchOptions: \(String(describing: currentSearchOptions))")
-
         do {
             // For resumed sessions, refresh pagination state first
             // This handles expired server-side cursors and catches new articles
             if isResumedSession {
-                print("[FetchMoreEvidence] Resumed session - refreshing pagination state...")
                 let newDocsFromRefresh = try await refreshPaginationState()
 
                 if newDocsFromRefresh > 0 {
@@ -542,13 +500,11 @@ final class FactCheckWorkflow {
                 }
 
                 isResumedSession = false // Clear flag after refresh
-                print("[FetchMoreEvidence] Pagination refresh complete, continuing with normal fetch...")
             }
 
             // Step 1: Fetch more documents (beyond the original set)
             if session.canFetchMoreDocuments {
                 // More results available from original query
-                print("[FetchMoreEvidence] Branch: canFetchMoreDocuments=true, fetching more from search...")
                 updateProgress(.fetchingMoreEvidence, "Fetching additional documents...")
                 try await searchPubMed()
 
@@ -562,12 +518,10 @@ final class FactCheckWorkflow {
                 }
             } else if !session.smartSearchEnabled {
                 // PubMed exhausted but smart search not tried - try alternative queries
-                print("[FetchMoreEvidence] Branch: canFetchMoreDocuments=false, smartSearchEnabled=false, trying smart search...")
                 updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
                 try await executeSmartSearch()
             } else {
                 // Both exhausted - nothing more we can do
-                print("[FetchMoreEvidence] Branch: No more evidence sources available (canFetch=false, smartSearch=true)")
                 session.currentStep = .completed
                 try? modelContext.save()
                 isRunning = false
@@ -604,7 +558,6 @@ final class FactCheckWorkflow {
             }
 
         } catch let error as BudgetError {
-            print("[FetchMoreEvidence] Budget error: \(error.localizedDescription)")
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
             session.stopReason = .budgetExceeded
@@ -613,7 +566,6 @@ final class FactCheckWorkflow {
         } catch {
             // Restore to completed state on error - original report is preserved
             // since we only delete it after successful regeneration
-            print("[FetchMoreEvidence] Error: \(error.localizedDescription)")
             session.currentStep = .completed
             session.errorMessage = error.localizedDescription
             try? modelContext.save()
@@ -802,7 +754,6 @@ final class FactCheckWorkflow {
         if let parsed = StructuredQuery.parse(from: response) {
             // Store structured query for provider-specific translation
             self.structuredQuery = parsed
-            print("[QueryConversion] Parsed structured query with \(parsed.concepts.count) concept(s)")
 
             // Build provider-specific query string
             let provider = currentSearchOptions?.provider ?? .pubmed
@@ -810,7 +761,6 @@ final class FactCheckWorkflow {
             session.pubmedQuery = query
         } else {
             // Fallback to legacy parsing for backwards compatibility
-            print("[QueryConversion] Structured query parsing failed, using legacy fallback")
             let query = buildQueryFromJSON(response, claim: session.claim)
             session.pubmedQuery = query
         }
@@ -905,13 +855,6 @@ final class FactCheckWorkflow {
         let provider = currentSearchOptions?.provider ?? .pubmed
         let providerName = provider.displayName
 
-        print("[SearchPubMed] Starting search:")
-        print("  - batchNumber: \(batchNumber)")
-        print("  - provider: \(providerName)")
-        print("  - pubmedOffset: \(session.pubmedOffset)")
-        print("  - europePMCCursor: \(session.europePMCCursor ?? "nil")")
-        print("  - pubmedQuery: \(session.pubmedQuery?.prefix(100) ?? "nil")...")
-
         updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
 
         // Build search options with current pagination state
@@ -925,25 +868,20 @@ final class FactCheckWorkflow {
         if let structuredQuery = self.structuredQuery {
             // Build provider-specific query from structured query
             queryString = QueryBuilderFactory.build(from: structuredQuery, for: options.provider)
-            print("[Search] Using structured query for \(options.provider.displayName)")
         } else if let storedQuery = session.pubmedQuery {
             // Fallback for resumed sessions without structured query
             queryString = storedQuery
-            print("[Search] Using stored query string (legacy mode): \(storedQuery.prefix(100))...")
         } else {
-            print("[Search] ERROR: No query available!")
             throw SearchError.invalidConfiguration("No query available for search")
         }
 
         // Use unified search service
-        print("[Search] Executing search with offset=\(options.offset), cursor=\(options.cursorMark ?? "nil"), maxResults=\(options.maxResults)")
         let result = try await SearchServiceFactory.search(
             query: queryString,
             options: options,
             settings: settings,
             cursor: options.cursorMark
         )
-        print("[Search] Results: totalCount=\(result.totalCount), articlesReturned=\(result.articles.count), nextOffset=\(result.nextOffset)")
 
         // Update session state based on provider
         if provider == .pubmed || provider == .both {
@@ -989,11 +927,6 @@ final class FactCheckWorkflow {
                 return false
             }
             return true
-        }
-
-        let duplicateCount = result.articles.count - newArticles.count
-        if duplicateCount > 0 {
-            print("[Search] Filtered out \(duplicateCount) duplicate(s) from \(result.articles.count) articles")
         }
 
         // Create Document objects from deduplicated articles
@@ -1089,16 +1022,14 @@ final class FactCheckWorkflow {
                     break
                 }
 
-                // Parse failed, log and retry
+                // Parse failed, retry with backoff
                 lastParseError = parsed.explanation
-                print("[Scoring] Parse attempt \(attempt + 1)/\(Self.maxParseRetries) failed: \(lastParseError)")
 
                 if attempt < Self.maxParseRetries - 1 {
                     // Exponential backoff with jitter
                     let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
                     let jitter = delay * Double.random(in: -0.25...0.25)
                     let totalDelay = delay + jitter
-                    print("[Scoring] Retrying in \(String(format: "%.1f", totalDelay))s...")
                     try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
                 }
             }
@@ -1115,7 +1046,6 @@ final class FactCheckWorkflow {
                 }
             } else {
                 // All retries failed - mark as parse failed
-                print("[Scoring] All \(Self.maxParseRetries) parse attempts failed for document \(document.pmid)")
                 document.scoreParseFailed = true
                 document.scoreExplanation = lastParseError
                 document.scoredAt = Date()
@@ -1137,26 +1067,21 @@ final class FactCheckWorkflow {
     /// This produces better similarity scores than comparing short claims to long abstracts.
     private func computeEmbeddingScores() async {
         guard let session = session else {
-            print("[Embedding] No session available")
             return
         }
 
         let unscoredDocs = (session.documents ?? []).filter { $0.embeddingScore == nil }
         guard !unscoredDocs.isEmpty else {
-            print("[Embedding] No unscored documents found")
             return
         }
 
-        print("[Embedding] Computing scores for \(unscoredDocs.count) documents using HyDE")
         updateProgress(.scoringDocuments, "Generating hypothetical document...")
 
         // Generate HyDE - a hypothetical abstract that would answer the claim
         let hydeText: String
         do {
             hydeText = try await generateHypotheticalDocument(for: session.claim)
-            print("[Embedding] HyDE generated (\(hydeText.count) chars)")
         } catch {
-            print("[Embedding] HyDE generation failed: \(error), falling back to raw claim")
             hydeText = session.claim
         }
 
@@ -1174,20 +1099,12 @@ final class FactCheckWorkflow {
         )
 
         // Apply scores to documents
-        var successCount = 0
-        var failCount = 0
         for (index, document) in unscoredDocs.enumerated() {
             if let score = scores[index] {
                 document.embeddingScore = score
-                successCount += 1
-                print("[Embedding] Doc \(document.pmid): score=\(score), normalized=\(document.embeddingScoreNormalized ?? -1)")
-            } else {
-                failCount += 1
-                print("[Embedding] Doc \(document.pmid): failed to compute score")
             }
         }
 
-        print("[Embedding] Completed: \(successCount) success, \(failCount) failed")
         try? modelContext.save()
     }
 
@@ -1279,13 +1196,6 @@ final class FactCheckWorkflow {
 
             // Parse passages using ResponseParser
             let passages = ResponseParser.parsePassagesResponse(response)
-
-            if passages.isEmpty {
-                print("[Citation] Warning: No passages extracted from document \(document.pmid)")
-                print("[Citation] Response (first 500 chars): \(String(response.prefix(500)))")
-            } else {
-                print("[Citation] Extracted \(passages.count) passage(s) from document \(document.pmid)")
-            }
 
             for passage in passages {
                 let citation = Citation(passage: passage.text, context: passage.relevance)
@@ -1640,7 +1550,6 @@ final class FactCheckWorkflow {
 
         // Parse the structured query array
         let queries = ResponseParser.parseStructuredQueryArray(response)
-        print("[SmartSearch] Generated \(queries.count) alternative structured queries")
         return queries
     }
 
@@ -1709,7 +1618,6 @@ final class FactCheckWorkflow {
         // Build provider-specific query string
         let provider = currentSearchOptions?.provider ?? .pubmed
         let queryString = QueryBuilderFactory.build(from: query, for: provider)
-        print("[SmartSearch] Executing query for \(provider.displayName): \(queryString.prefix(80))...")
 
         // Build search options
         let options = SearchOptions(
@@ -1733,7 +1641,6 @@ final class FactCheckWorkflow {
             return  // No new results from this query
         }
 
-        print("[SmartSearch] Found \(newArticles.count) new article(s)")
         let batchNumber = session.batchesFetched + 1
 
         // Create Document objects from ArticleMetadata
@@ -1831,9 +1738,8 @@ final class FactCheckWorkflow {
                     break
                 }
 
-                // Parse failed, log and retry
+                // Parse failed, retry with backoff
                 lastParseError = parsed.explanation
-                print("[Scoring] Parse attempt \(attempt + 1)/\(Self.maxParseRetries) failed: \(lastParseError)")
 
                 if attempt < Self.maxParseRetries - 1 {
                     let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
@@ -1855,7 +1761,6 @@ final class FactCheckWorkflow {
                 }
             } else {
                 // All retries failed - mark as parse failed
-                print("[Scoring] All \(Self.maxParseRetries) parse attempts failed for document \(document.pmid)")
                 document.scoreParseFailed = true
                 document.scoreExplanation = lastParseError
                 document.scoredAt = Date()
