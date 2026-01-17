@@ -15,6 +15,14 @@ The iOS `SearchServiceFactory` has:
 - `UnifiedSearchResult` with `nextCursorMark` support
 - `SearchOptions` with `cursorMark` property
 
+**iOS already has these utilities (no need to create):**
+- `QueryTranslator.swift` - Query syntax translation
+- `QueryValidator.swift` - Query validation
+- `SearchResultMerger.swift` - Result merging for "both" provider
+- `BioMedLitAdapters.swift` - Type conversion utilities
+
+Check if `QueryTranslator` already has `isEuropePMCSyntax()` and `isPubMedSyntax()` methods before adding them.
+
 ## Changes Required
 
 ### 1. Update SearchServiceFactory.search() Signature

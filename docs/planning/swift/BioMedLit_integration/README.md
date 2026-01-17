@@ -33,19 +33,27 @@ This document outlines the migration of macOS changes (since commit `1f79a8e`) t
 ```
 Phase 1 (FactCheckSession)
     │
-    ├──► Phase 2 (ResponseParser) ──► Phase 3 (StructuredQuery)
-    │                                      │
-    │                                      ▼
-    └──────────────────────────────► Phase 4 (SearchService)
-                                           │
-                                           ▼
-                                     Phase 5 (Workflow)
-                                           │
-                                           ▼
-                                     Phase 6 (Views)
+    └──► Phase 3 (StructuredQuery) ──► Phase 2 (ResponseParser)
+                    │                         │
+                    ▼                         │
+              Phase 4 (SearchService) ◄───────┘
+                    │
+                    ▼
+              Phase 5 (Workflow)
+                    │
+                    ▼
+              Phase 6 (Views)
 ```
 
-Phases 1-3 can be done in parallel. Phase 4 requires Phase 3. Phase 5 requires Phases 1-4. Phase 6 requires Phase 5.
+**Execution Order:**
+1. Phase 1 (FactCheckSession) - can start immediately
+2. Phase 3 (StructuredQuery) - can start immediately, no dependencies
+3. Phase 2 (ResponseParser) - requires Phase 3 (uses StructuredQuery types)
+4. Phase 4 (SearchService) - requires Phase 3
+5. Phase 5 (Workflow) - requires Phases 1-4
+6. Phase 6 (Views) - requires Phase 5
+
+**Note:** Phase 1 and Phase 3 can run in parallel. Phase 2 and Phase 4 can run in parallel after Phase 3 completes.
 
 ## Key Differences Between macOS and iOS
 

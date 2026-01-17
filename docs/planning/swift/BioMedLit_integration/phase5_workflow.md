@@ -86,9 +86,11 @@ private func searchForDocuments() async throws {
     progressMessage = "Searching for documents..."
 
     // Build search options
+    // NOTE: session.searchProvider is computed SearchProvider? wrapping searchProviderRaw
+    // NOTE: session.includedPreprints is the iOS property name (not includePreprints)
     let options = SearchOptions(
         provider: session.searchProvider ?? .pubmed,
-        includePreprints: session.includePreprints,
+        includePreprints: session.includedPreprints,  // iOS uses includedPreprints
         maxResults: settings.batchSize,
         offset: session.currentSearchOffset,
         cursorMark: nil  // Initial search has no cursor
@@ -106,11 +108,12 @@ private func searchForDocuments() async throws {
     }
 
     // Execute search
+    // NOTE: iOS uses europePMCCursorMark (not europePMCCursor)
     let result = try await SearchServiceFactory.search(
         query: queryString,
         options: options,
         settings: settings,
-        cursor: session.europePMCCursor
+        cursor: session.europePMCCursorMark  // iOS property name
     )
 
     // Store pagination state
@@ -119,7 +122,7 @@ private func searchForDocuments() async throws {
 
     // Update cursor for Europe PMC
     if result.provider == .europePMC || result.provider == .both {
-        session.europePMCCursor = result.nextCursorMark
+        session.europePMCCursorMark = result.nextCursorMark  // iOS property name
         session.europePMCHasMore = result.nextCursorMark != nil
     }
     if result.provider == .pubmed || result.provider == .both {
@@ -130,8 +133,24 @@ private func searchForDocuments() async throws {
     let newArticles = deduplicateArticles(result.articles, session: session)
 
     // Create Document models from articles
-    for article in newArticles {
-        let document = Document(from: article)
+    // NOTE: iOS Document initializer is Document(pmid:title:abstract:authors:batchNumber:resultPosition:)
+    // NOT Document(from: ArticleMetadata) - need to map fields manually
+    for (index, article) in newArticles.enumerated() {
+        let document = Document(
+            pmid: article.pmid,
+            title: article.title,
+            abstract: article.abstract,
+            authors: article.authors,
+            batchNumber: article.batchNumber,
+            resultPosition: article.resultPosition
+        )
+        // Set additional metadata
+        document.doi = article.doi
+        document.pmcId = article.pmcId
+        document.journal = article.journal
+        document.year = article.year
+        document.publicationDate = article.publicationDate
+        document.meshTerms = article.meshTerms
         document.session = session
         session.documents?.append(document)
         modelContext.insert(document)
@@ -141,6 +160,11 @@ private func searchForDocuments() async throws {
     session.batchesFetched += 1
 }
 ```
+
+**Important iOS-specific notes:**
+- `session.includedPreprints` (not `includePreprints`)
+- `session.europePMCCursorMark` (not `europePMCCursor`)
+- Document initialization requires explicit field mapping, not a convenience initializer
 
 ### 4. Add Improved Deduplication
 
@@ -162,22 +186,23 @@ private func deduplicateArticles(
     let existingDocs = session.documents ?? []
 
     // Build sets of existing identifiers
-    let existingPmids = Set(existingDocs.compactMap { $0.pmid })
+    // NOTE: Document.pmid is non-optional String, ArticleMetadata.pmid is also non-optional
+    let existingPmids = Set(existingDocs.map { $0.pmid })
     let existingDois = Set(existingDocs.compactMap { $0.doi?.lowercased() })
     let existingPmcIds = Set(existingDocs.compactMap { $0.pmcId })
 
     return articles.filter { article in
-        // Check PMID
-        if let pmid = article.pmid, existingPmids.contains(pmid) {
+        // Check PMID (non-optional in ArticleMetadata)
+        if existingPmids.contains(article.pmid) {
             return false
         }
 
-        // Check DOI (case-insensitive)
+        // Check DOI (case-insensitive, optional in ArticleMetadata)
         if let doi = article.doi?.lowercased(), existingDois.contains(doi) {
             return false
         }
 
-        // Check PMC ID
+        // Check PMC ID (optional in ArticleMetadata)
         if let pmcId = article.pmcId, existingPmcIds.contains(pmcId) {
             return false
         }
@@ -186,6 +211,8 @@ private func deduplicateArticles(
     }
 }
 ```
+
+**Note:** `ArticleMetadata.pmid` is a non-optional `String` (see `BioMedLitAdapters.swift:58`), so no optional unwrapping needed for PMID checks.
 
 ### 5. Update User Decision Logic
 

@@ -12,34 +12,25 @@ Align the iOS `FactCheckSession` model with the macOS version to support multi-p
 
 The iOS `FactCheckSession` has:
 - `searchProviderRaw: String?` - provider stored as raw string
+- `searchProvider: SearchProvider?` - computed getter/setter wrapping `searchProviderRaw`
 - `totalEuropePMCResults: Int` - total results count
 - `europePMCCursorMark: String?` - cursor for pagination
-- `includedPreprints: Bool` - typo in naming
+- `includedPreprints: Bool` - typo in naming (should be `includePreprints`)
 
 ## Target State (Match macOS)
 
-Add/rename these properties to match macOS:
+The macOS version uses a simpler pattern: store `searchProvider` directly as a `String?` instead of using a raw/computed property pair.
 
 ### Properties to Add
 
 ```swift
 // MARK: - Search Provider State
 
-/// The search provider used for this session (stored as raw value).
-/// Options: "pubmed", "europepmc", "both".
-var searchProvider: String?  // NOTE: rename from searchProviderRaw
-
-/// Whether preprints were included in the search.
-var includePreprints: Bool = false  // NOTE: rename from includedPreprints
-
 /// Pagination offset for PubMed when using "both" provider.
 var pubmedOffset: Int = 0
 
 /// Pagination offset for Europe PMC when using "both" provider.
 var europePMCOffset: Int = 0
-
-/// Cursor for Europe PMC pagination (cursor-based API).
-var europePMCCursor: String?  // NOTE: rename from europePMCCursorMark
 
 /// Whether more results are available from PubMed.
 var pubmedHasMore: Bool = true
@@ -48,9 +39,34 @@ var pubmedHasMore: Bool = true
 var europePMCHasMore: Bool = true
 ```
 
+### Properties to Rename (with Compatibility)
+
+Due to SwiftData persistence, property renames require careful handling:
+
+**Option A: Keep both (recommended for backwards compatibility)**
+```swift
+// Keep existing properties, add new ones
+var searchProviderRaw: String?      // Keep for existing data
+var europePMCCursorMark: String?    // Keep for existing data
+var includedPreprints: Bool = false // Keep for existing data
+
+// Add computed aliases that use the old storage
+var searchProviderString: String? { searchProviderRaw }
+var europePMCCursor: String? { europePMCCursorMark }
+var includePreprints: Bool { includedPreprints }
+```
+
+**Option B: Rename with migration (cleaner but requires migration)**
+```swift
+// Rename stored properties (requires SwiftData schema migration)
+var searchProvider: String?      // was searchProviderRaw
+var europePMCCursor: String?     // was europePMCCursorMark
+var includePreprints: Bool = false  // was includedPreprints
+```
+
 ### Computed Properties to Update
 
-Replace the existing computed properties with these macOS versions:
+Update `canFetchMoreFromAnyProvider` to use the hasMore flags:
 
 ```swift
 /// Check if more documents can be fetched from the current provider.
@@ -60,7 +76,8 @@ var canFetchMoreDocuments: Bool {
 
 /// Check if more documents can be fetched from any active provider.
 var canFetchMoreFromAnyProvider: Bool {
-    guard let providerString = searchProvider,
+    // Use searchProviderRaw (or searchProvider if renamed)
+    guard let providerString = searchProviderRaw,
           let provider = SearchProvider(rawValue: providerString) else {
         // Fall back to legacy PubMed-only check
         return currentSearchOffset < totalPubMedResults
@@ -78,9 +95,8 @@ var canFetchMoreFromAnyProvider: Bool {
 
 /// Estimated remaining results for the current provider.
 var estimatedRemainingResults: Int {
-    guard let providerString = searchProvider,
+    guard let providerString = searchProviderRaw,
           let provider = SearchProvider(rawValue: providerString) else {
-        // Legacy fallback for sessions without provider set
         return remainingPubMedResults
     }
 
@@ -88,7 +104,6 @@ var estimatedRemainingResults: Int {
     case .pubmed:
         return pubmedHasMore ? remainingPubMedResults : 0
     case .europePMC:
-        // Cursor-based pagination - estimate based on hasMore flag
         return europePMCHasMore ? 100 : 0
     case .both:
         return (pubmedHasMore ? remainingPubMedResults : 0) +
@@ -97,9 +112,9 @@ var estimatedRemainingResults: Int {
 }
 ```
 
-### Properties to Remove
+### Keep Existing Computed Property
 
-Remove the computed `searchProvider` getter/setter that wraps `searchProviderRaw`. Instead, store `searchProvider` directly as a String.
+Keep the existing `searchProvider: SearchProvider?` computed property that wraps `searchProviderRaw` - this provides type-safe access while maintaining SwiftData compatibility.
 
 ## Migration Considerations
 
