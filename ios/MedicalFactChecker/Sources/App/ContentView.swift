@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
+import SwiftData
 
 /// Tab identifiers for the main navigation.
 enum AppTab: Int {
@@ -25,6 +26,8 @@ enum AppTab: Int {
 }
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+
     @State private var selectedTab: AppTab = .check
     @State private var hasAcceptedDisclaimer = UserDefaults.standard.bool(forKey: "hasAcceptedDisclaimer")
     @State private var hasSeenOnboarding = UserDefaults.standard.bool(forKey: "hasSeenOnboarding")
@@ -83,7 +86,9 @@ struct ContentView: View {
             .tag(AppTab.report)
 
             LazyTabContent(tab: .history, visitedTabs: $visitedTabs) {
-                HistoryView()
+                HistoryView(onContinueSession: { session in
+                    restoreSession(session)
+                })
             }
             .tabItem {
                 Label("History", systemImage: "clock")
@@ -114,6 +119,66 @@ struct ContentView: View {
         UserDefaults.standard.set(true, forKey: "hasSeenOnboarding")
         withAnimation {
             hasSeenOnboarding = true
+        }
+    }
+
+    // MARK: - Session Restoration
+
+    /// Restores a session from history, navigating to Check tab with the claim
+    /// and workflow ready to add more results.
+    ///
+    /// This method is called when the user selects "Continue Search" from the
+    /// History tab. It:
+    /// 1. Restores the original claim text to the input field
+    /// 2. Creates a new workflow configured with the session's original search options
+    /// 3. Sets up all necessary callbacks for completion and error handling
+    /// 4. Navigates to the Check tab
+    /// 5. Resumes the session asynchronously
+    ///
+    /// - Parameter session: The fact-check session to restore and continue.
+    private func restoreSession(_ session: FactCheckSession) {
+        // Restore the claim text to the input field
+        factCheckClaimText = session.claim
+
+        // Create a new workflow for this session
+        let restoredWorkflow = FactCheckWorkflow(
+            modelContext: modelContext,
+            settings: AppSettings.shared
+        )
+
+        // Configure workflow callbacks
+
+        // Called when workflow completes successfully with a report
+        restoredWorkflow.onComplete = { report in
+            currentReport = report
+            visitedTabs.insert(.report)
+            selectedTab = .report
+        }
+
+        // Called when an error occurs during workflow execution
+        restoredWorkflow.onError = { error in
+            // Error is logged by FactCheckWorkflow; FactCheckView will display it
+            // via the workflow's session.errorMessage property
+            print("[ContentView] Workflow error during session restore: \(error.localizedDescription)")
+        }
+
+        // Called when budget limit is exceeded
+        restoredWorkflow.onBudgetExceeded = { message in
+            print("[ContentView] Budget exceeded during session restore: \(message)")
+        }
+
+        // Set the workflow binding so FactCheckView receives it
+        factCheckWorkflow = restoredWorkflow
+
+        // Navigate to Check tab
+        visitedTabs.insert(.check)
+        selectedTab = .check
+
+        // Resume the session asynchronously
+        // The workflow will pick up from where the session left off,
+        // using the session's stored pagination state
+        Task {
+            await restoredWorkflow.resumeSession(session)
         }
     }
 }
