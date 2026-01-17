@@ -227,11 +227,9 @@ final class FactCheckWorkflow {
         var existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
         var existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
 
-        // Re-fetch until we've covered the original result count
-        // Use the larger of existing docs or recorded total to handle cases where
-        // totalResults might be stale
-        let targetCount = max(existingCount, session.pubmedTotalResults)
-        var fetchedCount = 0
+        // We need to re-fetch until our pagination position covers all existing documents.
+        // The goal is to get our cursor/offset to a position BEYOND what was already fetched,
+        // so subsequent fetches return new documents. We continue until currentOffset >= existingCount.
         var lastTotalCount = 0
 
         // Get query string - required for refresh
@@ -239,7 +237,9 @@ final class FactCheckWorkflow {
             throw SearchError.invalidConfiguration("No query available for pagination refresh")
         }
 
-        while fetchedCount < targetCount {
+        print("[RefreshPagination] Will fetch until offset >= \(existingCount)")
+
+        while currentOffset < existingCount {
             // Check budget before each batch
             try checkBudget()
 
@@ -250,12 +250,13 @@ final class FactCheckWorkflow {
             options.cursorMark = currentCursor
 
             updateProgress(.fetchingMoreEvidence,
-                "Refreshing search state (\(fetchedCount)/\(targetCount))...")
+                "Refreshing search state (offset \(currentOffset)/\(existingCount))...")
 
             let result = try await SearchServiceFactory.search(
                 query: queryString,
                 options: options,
-                settings: settings
+                settings: settings,
+                cursor: options.cursorMark
             )
 
             lastTotalCount = result.totalCount
@@ -296,9 +297,9 @@ final class FactCheckWorkflow {
                 if let pmcId = article.pmcId { existingPmcIds.insert(pmcId.lowercased()) }
             }
 
-            fetchedCount += result.articles.count
             currentOffset = result.nextOffset
             currentCursor = result.nextCursorMark
+            print("[RefreshPagination] Batch complete: offset now \(currentOffset), target \(existingCount)")
 
             // Check if search is exhausted
             if result.articles.isEmpty {
@@ -337,9 +338,13 @@ final class FactCheckWorkflow {
         }
         try? modelContext.save()
 
-        print("[RefreshPagination] Complete. New docs: \(newDocumentsFound), " +
-              "offset: \(currentOffset), cursor: \(currentCursor ?? "nil"), " +
-              "hasMore: \(session.canFetchMoreDocuments)")
+        print("[RefreshPagination] Complete:")
+        print("  - newDocumentsFound: \(newDocumentsFound)")
+        print("  - finalOffset: \(currentOffset)")
+        print("  - cursor: \(currentCursor ?? "nil")")
+        print("  - totalResults: \(lastTotalCount)")
+        print("  - pubmedHasMore: \(session.pubmedHasMore)")
+        print("  - canFetchMoreDocuments: \(session.canFetchMoreDocuments)")
 
         return newDocumentsFound
     }
@@ -902,11 +907,12 @@ final class FactCheckWorkflow {
         }
 
         // Use unified search service
-        print("[Search] Executing search with offset=\(options.offset), maxResults=\(options.maxResults)")
+        print("[Search] Executing search with offset=\(options.offset), cursor=\(options.cursorMark ?? "nil"), maxResults=\(options.maxResults)")
         let result = try await SearchServiceFactory.search(
             query: queryString,
             options: options,
-            settings: settings
+            settings: settings,
+            cursor: options.cursorMark
         )
         print("[Search] Results: totalCount=\(result.totalCount), articlesReturned=\(result.articles.count), nextOffset=\(result.nextOffset)")
 

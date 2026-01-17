@@ -59,7 +59,10 @@ struct FactCheckView: View {
 
                     // Resumed Session Banner
                     if isResumedSession, let session = workflow?.session {
-                        ResumedSessionBanner(session: session)
+                        ResumedSessionBanner(
+                            session: session,
+                            onNewQuestion: startNewQuestion
+                        )
                     }
 
                     // Search Options
@@ -97,12 +100,14 @@ struct FactCheckView: View {
                         }
                     }
 
-                    // Get More Evidence Section (for completed sessions)
+                    // Get More Evidence Section (for completed sessions that weren't resumed)
+                    // For resumed sessions, the top "Add More Results" button handles this
                     if let workflow = workflow,
                        let session = workflow.session,
                        session.report != nil,
                        session.canGetMoreEvidence,
-                       !workflow.isRunning {
+                       !workflow.isRunning,
+                       !isResumedSession {
                         GetMoreEvidenceSection(
                             session: workflow.session,
                             isFetching: workflow.isRunning,
@@ -197,6 +202,15 @@ struct FactCheckView: View {
             // New fact-check: start fresh
             startFactCheck()
         }
+    }
+
+    /// Clears the current resumed session and prepares for a new question.
+    ///
+    /// Resets the claim text and workflow state so the user can enter a fresh
+    /// research question without the previous session's data.
+    private func startNewQuestion() {
+        claimText = ""
+        workflow = nil
     }
 
     private func startFactCheck() {
@@ -462,6 +476,9 @@ struct ResumedSessionBanner: View {
     /// The session being resumed.
     let session: FactCheckSession
 
+    /// Called when user wants to start a new question instead.
+    var onNewQuestion: (() -> Void)?
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.uturn.forward.circle.fill")
@@ -481,6 +498,16 @@ struct ResumedSessionBanner: View {
             }
 
             Spacer()
+
+            if let onNewQuestion {
+                Button(action: onNewQuestion) {
+                    Text("New Question")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
 
             if session.canGetMoreEvidence {
                 Image(systemName: "plus.circle")
