@@ -48,7 +48,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val llmService: com.bmlibrarian.factchecker.data.remote.llm.LLMService
 ) : ViewModel() {
 
     // ==================== Observable State ====================
@@ -67,6 +68,10 @@ class SettingsViewModel @Inject constructor(
     /** Status message for user feedback. */
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    /** Whether a connection test is in progress. */
+    private val _isTestingConnection = MutableStateFlow(false)
+    val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
 
     /** Available LLM providers. */
     val providers: List<LLMProvider> = LLMProvider.ALL_PROVIDERS
@@ -217,6 +222,50 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.deleteApiKey(providerId)
         _apiKeyInput.value = ""
         showStatus("API key removed")
+    }
+
+    /**
+     * Test the LLM connection with a simple request.
+     *
+     * Sends a minimal request to verify the API key works.
+     */
+    fun testConnection() {
+        if (_isTestingConnection.value) return
+
+        val apiKey = settingsRepository.getLlmApiKey()
+        if (apiKey.isEmpty()) {
+            showStatus("Please save an API key first")
+            return
+        }
+
+        viewModelScope.launch {
+            _isTestingConnection.value = true
+            try {
+                val provider = LLMProvider.fromId(settings.value.llmProviderId) ?: LLMProvider.OPENAI
+                val model = settings.value.modelId
+
+                val result = llmService.chat(
+                    provider = provider,
+                    apiKey = apiKey,
+                    model = model,
+                    systemPrompt = "You are a helpful assistant.",
+                    userPrompt = "Say 'OK' to confirm the connection works.",
+                    maxTokens = 10,
+                    temperature = 0.0
+                )
+
+                if (result.isSuccess) {
+                    showStatus("✓ Connection successful!")
+                } else {
+                    val error = result.exceptionOrNull()
+                    showStatus("✗ Connection failed: ${error?.message ?: "Unknown error"}")
+                }
+            } catch (e: Exception) {
+                showStatus("✗ Connection failed: ${e.message ?: "Unknown error"}")
+            } finally {
+                _isTestingConnection.value = false
+            }
+        }
     }
 
     /**

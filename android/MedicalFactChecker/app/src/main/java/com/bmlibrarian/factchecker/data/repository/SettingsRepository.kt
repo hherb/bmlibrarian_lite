@@ -82,6 +82,13 @@ class SettingsRepository @Inject constructor(
     /** Observable state flow of current settings. */
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    // Configuration version counter - increments on any configuration change
+    // This allows observers to detect changes even when only API key changes
+    private val _configurationVersion = MutableStateFlow(0)
+
+    /** Observable flow that emits on any configuration change (settings or API keys). */
+    val configurationVersion: StateFlow<Int> = _configurationVersion.asStateFlow()
+
     // ==================== Settings State Management ====================
 
     /**
@@ -146,6 +153,7 @@ class SettingsRepository @Inject constructor(
             apply()
         }
         _settings.value = settings
+        _configurationVersion.value++
     }
 
     /**
@@ -194,6 +202,7 @@ class SettingsRepository @Inject constructor(
             apply()
         }
         apiKeyCache[providerId] = apiKey
+        _configurationVersion.value++
     }
 
     /**
@@ -224,6 +233,7 @@ class SettingsRepository @Inject constructor(
     fun deleteApiKey(providerId: String) {
         encryptedPrefs.edit().remove(KEY_API_KEY_PREFIX + providerId).apply()
         apiKeyCache.remove(providerId)
+        _configurationVersion.value++
     }
 
     // ==================== NCBI API Key ====================

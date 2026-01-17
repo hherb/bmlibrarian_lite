@@ -89,7 +89,11 @@ class LLMService @Inject constructor(
     }
 
     /**
-     * Convert a medical claim to a PubMed query.
+     * Convert a medical claim to a structured query.
+     *
+     * Uses a structured JSON approach for better cross-platform consistency
+     * and more reliable query generation. The structured query is then
+     * translated to provider-specific syntax.
      *
      * @param provider The LLM provider configuration
      * @param apiKey The API key for authentication
@@ -103,24 +107,48 @@ class LLMService @Inject constructor(
         model: String,
         claim: String
     ): Result<String> {
+        // Use structured JSON prompt for better local model compatibility
+        // Mirrors the iOS approach for cross-platform consistency
         val systemPrompt = """
-            You are a medical librarian expert at converting natural language medical claims
-            into effective PubMed search queries. Convert the given claim into a PubMed query
-            that will find relevant systematic reviews, meta-analyses, and clinical trials.
+            Convert this research question into a concise PubMed search query.
 
-            Return ONLY the PubMed query string, nothing else. Use MeSH terms where appropriate.
-            Include filters for study types when relevant (e.g., systematic review, meta-analysis, RCT).
+            Research Question: $claim
+
+            Instructions:
+            1. Identify 2-3 key concepts from the question
+            2. For each concept, provide 1-2 MeSH terms and 1-2 keywords
+            3. Keep it CONCISE - fewer specific terms work better than many broad terms
+            4. DO NOT add filters like hasabstract or publication type filters - those will be added automatically
+
+            Output ONLY valid JSON in this exact format:
+            {
+              "concepts": [
+                {"name": "concept1", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]},
+                {"name": "concept2", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]}
+              ]
+            }
+
+            Example for "amlodipine improves arterial stiffness":
+            {
+              "concepts": [
+                {"name": "amlodipine", "mesh_terms": ["Amlodipine"], "keywords": ["amlodipine"]},
+                {"name": "arterial stiffness", "mesh_terms": ["Vascular Stiffness"], "keywords": ["arterial stiffness", "pulse wave velocity"]}
+              ]
+            }
+
+            Generate JSON for the research question:
         """.trimIndent()
 
         return chat(
             provider = provider,
             apiKey = apiKey,
             model = model,
-            systemPrompt = systemPrompt,
-            userPrompt = claim,
-            maxTokens = Constants.LLM_QUERY_MAX_TOKENS
+            systemPrompt = "You are a medical librarian expert at converting natural language medical claims into effective PubMed search queries.",
+            userPrompt = systemPrompt,
+            maxTokens = Constants.LLM_QUERY_MAX_TOKENS,
+            temperature = 0.1
         ).map { result ->
-            ResponseParser.parsePubMedQueryResponse(result.content)
+            ResponseParser.parseStructuredQueryResponse(result.content, claim)
         }
     }
 

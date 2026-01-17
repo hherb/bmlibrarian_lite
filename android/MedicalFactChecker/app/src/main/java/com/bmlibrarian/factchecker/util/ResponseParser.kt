@@ -179,15 +179,36 @@ object ResponseParser {
     }
 
     /**
-     * Parse a PubMed query conversion response from LLM.
+     * Parse a structured query response from LLM and convert to PubMed query string.
      *
-     * The LLM should return just the query string, but may include
-     * explanatory text that needs to be stripped.
+     * Uses the structured JSON approach for better cross-platform consistency.
+     * Falls back to claim-based search if parsing fails.
      *
      * @param response Raw LLM response text
+     * @param claim Original claim for fallback
+     * @return The PubMed query string
+     */
+    fun parseStructuredQueryResponse(response: String, claim: String): String {
+        // Try to parse as structured query first
+        val structuredQuery = com.bmlibrarian.factchecker.domain.model.StructuredQuery.parse(response)
+
+        if (structuredQuery != null && !structuredQuery.isEmpty) {
+            // Build PubMed query from structured query
+            return com.bmlibrarian.factchecker.domain.model.PubMedQueryBuilder.build(structuredQuery)
+        }
+
+        // Fallback: try legacy parsing
+        return parsePubMedQueryResponseLegacy(response, claim)
+    }
+
+    /**
+     * Legacy PubMed query parsing (fallback).
+     *
+     * @param response Raw LLM response text
+     * @param claim Original claim for fallback
      * @return The extracted PubMed query string
      */
-    fun parsePubMedQueryResponse(response: String): String {
+    private fun parsePubMedQueryResponseLegacy(response: String, claim: String): String {
         val trimmed = response.trim()
 
         // If response is JSON, extract the query field
@@ -217,8 +238,26 @@ object ResponseParser {
             }
         }
 
-        // Return the first line if multi-line
-        return withoutCodeBlocks.lines().first().trim()
+        // If we got something useful, use the first line
+        val firstLine = withoutCodeBlocks.lines().first().trim()
+        if (firstLine.isNotEmpty() && firstLine.length > 10) {
+            return firstLine
+        }
+
+        // Final fallback: use claim with basic filters
+        return "$claim AND hasabstract AND (Clinical Trial[pt] OR Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR Systematic Review[pt] OR Review[pt])"
+    }
+
+    /**
+     * Parse a PubMed query conversion response from LLM.
+     *
+     * @deprecated Use parseStructuredQueryResponse instead
+     * @param response Raw LLM response text
+     * @return The extracted PubMed query string
+     */
+    @Deprecated("Use parseStructuredQueryResponse instead", ReplaceWith("parseStructuredQueryResponse(response, claim)"))
+    fun parsePubMedQueryResponse(response: String): String {
+        return parseStructuredQueryResponse(response, "")
     }
 
     /**

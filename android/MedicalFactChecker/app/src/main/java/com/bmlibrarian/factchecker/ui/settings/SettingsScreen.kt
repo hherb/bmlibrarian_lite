@@ -88,6 +88,7 @@ fun SettingsScreen(
     val currentModels by viewModel.currentModels.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val estimatedCostPerRun by viewModel.estimatedCostPerRun.collectAsState()
+    val isTestingConnection by viewModel.isTestingConnection.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
     var showApiKey by remember { mutableStateOf(false) }
@@ -127,6 +128,7 @@ fun SettingsScreen(
                 hasApiKey = hasApiKey,
                 requiresApiKey = requiresApiKey,
                 showApiKey = showApiKey,
+                isTestingConnection = isTestingConnection,
                 currentModels = currentModels,
                 providers = viewModel.providers,
                 onProviderSelected = viewModel::setProvider,
@@ -135,6 +137,7 @@ fun SettingsScreen(
                 onToggleApiKeyVisibility = { showApiKey = !showApiKey },
                 onSaveApiKey = viewModel::saveApiKey,
                 onClearApiKey = viewModel::clearApiKey,
+                onTestConnection = viewModel::testConnection,
                 onCustomBaseUrlChange = viewModel::setCustomBaseUrl
             )
 
@@ -206,6 +209,7 @@ private fun LLMProviderSection(
     hasApiKey: Boolean,
     requiresApiKey: Boolean,
     showApiKey: Boolean,
+    isTestingConnection: Boolean,
     currentModels: List<com.bmlibrarian.factchecker.domain.model.ModelInfo>,
     providers: List<LLMProvider>,
     onProviderSelected: (String) -> Unit,
@@ -214,6 +218,7 @@ private fun LLMProviderSection(
     onToggleApiKeyVisibility: () -> Unit,
     onSaveApiKey: () -> Unit,
     onClearApiKey: () -> Unit,
+    onTestConnection: () -> Unit,
     onCustomBaseUrlChange: (String) -> Unit
 ) {
     SettingsSection(title = "LLM Provider") {
@@ -287,6 +292,12 @@ private fun LLMProviderSection(
                         )
                     ) {
                         Text("Clear")
+                    }
+                    OutlinedButton(
+                        onClick = onTestConnection,
+                        enabled = !isTestingConnection
+                    ) {
+                        Text(if (isTestingConnection) "Testing..." else "Test Connection")
                     }
                 }
                 Button(

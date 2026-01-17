@@ -72,7 +72,10 @@ data class FactCheckUiState(
     val monthlyBudgetUsd: Double = Constants.DEFAULT_MONTHLY_BUDGET_USD.toDouble(),
 
     /** Per-run budget limit. */
-    val runBudgetUsd: Double = Constants.DEFAULT_MAX_RUN_BUDGET_USD.toDouble()
+    val runBudgetUsd: Double = Constants.DEFAULT_MAX_RUN_BUDGET_USD.toDouble(),
+
+    /** Generated PubMed query (displayed once generated). */
+    val generatedQuery: String? = null
 )
 
 /**
@@ -104,7 +107,7 @@ class FactCheckViewModel @Inject constructor(
     init {
         observeWorkflowState()
         observeWorkflowProgress()
-        checkConfiguration()
+        observeConfiguration()
         loadBudgetInfo()
     }
 
@@ -122,6 +125,11 @@ class FactCheckViewModel @Inject constructor(
                             is WorkflowState.Failed -> state.error
                             is WorkflowState.BudgetExceeded -> state.message
                             else -> null
+                        },
+                        // Extract query from Searching state
+                        generatedQuery = when (state) {
+                            is WorkflowState.Searching -> state.query
+                            else -> it.generatedQuery // Keep existing query
                         }
                     )
                 }
@@ -141,15 +149,21 @@ class FactCheckViewModel @Inject constructor(
     }
 
     /**
-     * Check if the app is properly configured.
+     * Observe configuration changes and update UI state accordingly.
      *
-     * Shows a warning if API key is missing for providers that require one,
-     * or if other required settings are not configured.
+     * This observes the configurationVersion StateFlow to reactively update the
+     * configuration warning when any configuration changes (settings or API key).
+     * This ensures the warning disappears immediately after saving an API key.
      */
-    private fun checkConfiguration() {
-        val isConfigured = settingsRepository.isConfigured()
-        _uiState.update {
-            it.copy(showConfigWarning = !isConfigured)
+    private fun observeConfiguration() {
+        viewModelScope.launch {
+            settingsRepository.configurationVersion.collect { _ ->
+                // Re-check configuration whenever any configuration changes
+                val isConfigured = settingsRepository.isConfigured()
+                _uiState.update {
+                    it.copy(showConfigWarning = !isConfigured)
+                }
+            }
         }
     }
 
@@ -189,6 +203,9 @@ class FactCheckViewModel @Inject constructor(
     fun startFactCheck() {
         val claim = _uiState.value.claimText.trim()
         if (claim.isEmpty()) return
+
+        // Clear previous query and documents when starting a new fact check
+        _uiState.update { it.copy(generatedQuery = null, documents = emptyList()) }
 
         viewModelScope.launch {
             try {

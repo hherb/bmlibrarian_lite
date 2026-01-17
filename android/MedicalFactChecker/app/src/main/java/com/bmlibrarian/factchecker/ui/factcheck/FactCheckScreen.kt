@@ -101,6 +101,14 @@ fun FactCheckScreen(
 
         Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
+        // Generated query display (show once generated)
+        uiState.generatedQuery?.let { query ->
+            if (query.isNotEmpty()) {
+                GeneratedQueryDisplay(query = query)
+                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+            }
+        }
+
         // Progress/State section
         when (val state = uiState.workflowState) {
             is WorkflowState.Idle -> {
@@ -171,6 +179,38 @@ fun FactCheckScreen(
                     DocumentCard(document = document)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Display for the generated PubMed query.
+ *
+ * Shows the query in a collapsible card for transparency and debugging.
+ */
+@Composable
+private fun GeneratedQueryDisplay(query: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
+        ) {
+            Text(
+                text = "PubMed Query:",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = query,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 4
+            )
         }
     }
 }
