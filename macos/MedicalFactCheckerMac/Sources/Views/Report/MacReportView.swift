@@ -29,6 +29,9 @@ struct MacReportView: View {
     let report: EvidenceReport?
     var workflow: FactCheckWorkflow?
 
+    /// Callback when user requests more evidence (triggers navigation to Fact Check tab).
+    var onRequestMoreEvidence: (() -> Void)?
+
     @State private var selectedDocument: Document?
     @State private var exportFormat: ExportFormat = .pdf
 
@@ -44,35 +47,10 @@ struct MacReportView: View {
 
     var body: some View {
         if let report = report {
-            ZStack {
-                reportContent(report)
-
-                // Progress overlay when fetching more evidence
-                if isFetchingEvidence {
-                    fetchingProgressOverlay
-                }
-            }
+            reportContent(report)
         } else {
             emptyState
         }
-    }
-
-    /// Overlay shown when fetching more evidence.
-    private var fetchingProgressOverlay: some View {
-        VStack(spacing: MacSpacing.large) {
-            ProgressView()
-                .scaleEffect(1.5)
-            Text(workflow?.progressMessage ?? "Fetching more evidence...")
-                .font(.headline)
-            if let session = report?.session {
-                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(MacSpacing.xxLarge)
-        .background(.regularMaterial)
-        .cornerRadius(MacCornerRadius.xLarge)
     }
 
     private func reportContent(_ report: EvidenceReport) -> some View {
@@ -345,18 +323,15 @@ struct MacReportView: View {
                 .foregroundColor(.secondary)
 
             Button(action: {
+                // Navigate to Fact Check tab first, then start fetching
+                onRequestMoreEvidence?()
                 Task {
                     await workflow?.fetchMoreEvidence()
                 }
             }) {
                 HStack {
-                    if isFetchingEvidence {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    Text(isFetchingEvidence ? "Fetching..." : "Get More Evidence")
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Get More Evidence")
                 }
             }
             .buttonStyle(.borderedProminent)

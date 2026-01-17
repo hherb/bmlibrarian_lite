@@ -586,8 +586,36 @@ final class FactCheckWorkflow {
 
         updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
 
-        // Create Document objects from unified results
-        for article in result.articles {
+        // Build sets of existing identifiers for deduplication
+        let existingDocuments = session.documents ?? []
+        let existingPmids = Set(existingDocuments.map { $0.pmid })
+        let existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
+        let existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
+
+        // Filter out duplicates before adding
+        let newArticles = result.articles.filter { article in
+            // Check PMID (primary identifier)
+            if existingPmids.contains(article.pmid) {
+                return false
+            }
+            // Check DOI
+            if let doi = article.doi?.lowercased(), existingDois.contains(doi) {
+                return false
+            }
+            // Check PMC ID
+            if let pmcId = article.pmcId?.lowercased(), existingPmcIds.contains(pmcId) {
+                return false
+            }
+            return true
+        }
+
+        let duplicateCount = result.articles.count - newArticles.count
+        if duplicateCount > 0 {
+            print("[Search] Filtered out \(duplicateCount) duplicate(s) from \(result.articles.count) articles")
+        }
+
+        // Create Document objects from deduplicated articles
+        for article in newArticles {
             let document = Document(
                 pmid: article.pmid,
                 title: article.title,
@@ -608,7 +636,7 @@ final class FactCheckWorkflow {
             modelContext.insert(document)
         }
 
-        session.documentsFound += result.articles.count
+        session.documentsFound += newArticles.count
         try? modelContext.save()
     }
 

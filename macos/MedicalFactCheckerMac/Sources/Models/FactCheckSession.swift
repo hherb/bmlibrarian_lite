@@ -153,9 +153,13 @@ final class FactCheckSession {
 
     // MARK: - Computed Properties
 
-    /// Check if more documents can be fetched from PubMed.
+    /// Check if more documents can be fetched from the current provider.
+    ///
+    /// Delegates to `canFetchMoreFromAnyProvider` to correctly handle
+    /// different pagination strategies (offset-based for PubMed,
+    /// cursor-based for Europe PMC).
     var canFetchMoreDocuments: Bool {
-        currentSearchOffset < totalPubMedResults
+        canFetchMoreFromAnyProvider
     }
 
     /// Check if more documents can be fetched from any active provider.
@@ -190,6 +194,30 @@ final class FactCheckSession {
     /// Number of additional PubMed results available to fetch.
     var remainingPubMedResults: Int {
         max(0, totalPubMedResults - currentSearchOffset)
+    }
+
+    /// Estimated remaining results for the current provider.
+    ///
+    /// For offset-based pagination (PubMed), returns exact count.
+    /// For cursor-based pagination (Europe PMC), returns an estimate
+    /// since exact counts aren't available until exhausted.
+    var estimatedRemainingResults: Int {
+        guard let providerString = searchProvider,
+              let provider = SearchProvider(rawValue: providerString) else {
+            // Legacy fallback for sessions without provider set
+            return remainingPubMedResults
+        }
+
+        switch provider {
+        case .pubmed:
+            return pubmedHasMore ? remainingPubMedResults : 0
+        case .europePMC:
+            // Cursor-based pagination - estimate based on hasMore flag
+            return europePMCHasMore ? 100 : 0
+        case .both:
+            return (pubmedHasMore ? remainingPubMedResults : 0) +
+                   (europePMCHasMore ? 100 : 0)
+        }
     }
 
     /// Documents that have been scored with relevance >= threshold.

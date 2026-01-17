@@ -221,6 +221,11 @@ struct MacDocumentCard: View {
                     if let sourceString = document.fullTextSource {
                         FullTextSourceBadge(sourceString: sourceString)
                     }
+
+                    // Batch indicator for documents fetched in later batches
+                    if document.batchNumber > 1 {
+                        MacBatchBadge(batchNumber: document.batchNumber)
+                    }
                 }
             }
 
@@ -691,6 +696,29 @@ struct MacAbstractView: View {
             return attributed
         }
         return nil
+    }
+}
+
+// MARK: - Batch Badge
+
+/// Compact badge showing which batch a document was fetched in.
+///
+/// Displayed for documents fetched in later batches (batch 2+) to help users
+/// identify which documents came from each search iteration. Uses distinct
+/// colors for different batch numbers.
+struct MacBatchBadge: View {
+    /// The batch number (1-indexed).
+    let batchNumber: Int
+
+    var body: some View {
+        Text("Batch \(batchNumber)")
+            .font(.system(size: 10, weight: .medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(MacColors.batchColor(for: batchNumber).opacity(0.15))
+            .foregroundColor(MacColors.batchColor(for: batchNumber))
+            .cornerRadius(4)
+            .help("Fetched in batch \(batchNumber)")
     }
 }
 

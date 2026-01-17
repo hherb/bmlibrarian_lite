@@ -38,22 +38,24 @@ enum SearchServiceFactory {
     ///   - query: The search query string (in PubMed or plain text syntax).
     ///   - options: Search configuration options.
     ///   - settings: App settings for service configuration.
+    ///   - cursor: Optional cursor for Europe PMC pagination. Pass nil for initial search.
     /// - Returns: Unified search result with articles and pagination.
     /// - Throws: Provider-specific errors if search fails.
     static func search(
         query: String,
         options: SearchOptions,
-        settings: AppSettings
+        settings: AppSettings,
+        cursor: String? = nil
     ) async throws -> UnifiedSearchResult {
         switch options.provider {
         case .pubmed:
             return try await searchPubMed(query: query, options: options, settings: settings)
 
         case .europePMC:
-            return try await searchEuropePMC(query: query, options: options)
+            return try await searchEuropePMC(query: query, options: options, cursor: cursor)
 
         case .both:
-            return try await searchBoth(query: query, options: options, settings: settings)
+            return try await searchBoth(query: query, options: options, settings: settings, cursor: cursor)
         }
     }
 
@@ -104,10 +106,12 @@ enum SearchServiceFactory {
     /// - Parameters:
     ///   - query: Query string (ideally Europe PMC syntax, PubMed syntax auto-translated).
     ///   - options: Search options.
+    ///   - cursor: Optional cursor for pagination. Pass nil or "*" for initial search.
     /// - Returns: Unified search result.
     private static func searchEuropePMC(
         query: String,
-        options: SearchOptions
+        options: SearchOptions,
+        cursor: String? = nil
     ) async throws -> UnifiedSearchResult {
         // Use BioMedLit EuropePMCService
         let service = BioMedLit.EuropePMCService.create()
@@ -135,16 +139,14 @@ enum SearchServiceFactory {
             translatedQuery = query
         }
 
-        // For offset-based pagination requests, we need to handle cursor conversion
-        // Europe PMC uses cursors, but we expose offset-based interface
-        // For initial requests (offset 0), use "*" cursor
-        // For subsequent requests, the caller should use cursor-based pagination
-        let cursor = "*"  // TODO: Track cursors per session for pagination
+        // Use provided cursor or "*" for initial request
+        let searchCursor = cursor ?? "*"
+        AppLogger.search.debug("Europe PMC search with cursor: \(searchCursor == "*" ? "initial" : searchCursor.prefix(20))")
 
         let result = try await service.search(
             query: translatedQuery,
             pageSize: options.maxResults,
-            cursor: cursor,
+            cursor: searchCursor,
             includePreprints: options.includePreprints
         )
 
@@ -171,11 +173,13 @@ enum SearchServiceFactory {
     ///   - query: Query string.
     ///   - options: Search options.
     ///   - settings: App settings.
+    ///   - cursor: Optional cursor for Europe PMC pagination.
     /// - Returns: Merged, deduplicated search result.
     private static func searchBoth(
         query: String,
         options: SearchOptions,
-        settings: AppSettings
+        settings: AppSettings,
+        cursor: String? = nil
     ) async throws -> UnifiedSearchResult {
         // Create options for each provider
         let pubmedOptions = SearchOptions(
@@ -198,7 +202,7 @@ enum SearchServiceFactory {
                 try await searchPubMed(query: query, options: pubmedOptions, settings: settings)
             }
             group.addTask {
-                try await searchEuropePMC(query: query, options: europePMCOptions)
+                try await searchEuropePMC(query: query, options: europePMCOptions, cursor: cursor)
             }
 
             var pubmedResult: UnifiedSearchResult?

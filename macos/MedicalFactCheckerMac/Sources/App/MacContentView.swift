@@ -120,7 +120,13 @@ struct MacContentView: View {
                 selectedDocument: $selectedFullTextDocument
             )
         case .report:
-            MacReportView(report: currentReport, workflow: activeWorkflow)
+            MacReportView(
+                report: currentReport,
+                workflow: activeWorkflow,
+                onRequestMoreEvidence: {
+                    selectedNavItem = .factCheck
+                }
+            )
         case .history:
             MacHistoryView(
                 onReportSelected: { report in

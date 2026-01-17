@@ -209,6 +209,21 @@ enum MacColors {
 
     /// Accent color for LLM reasoning icon.
     static let reasoningAccent = Color(red: 0.6, green: 0.55, blue: 0.4)
+
+    // MARK: - Batch Number Colors
+
+    /// Returns the color for a batch number badge.
+    ///
+    /// Uses distinct colors for different batches to help users identify
+    /// which documents came from which search iteration.
+    ///
+    /// - Parameter batchNumber: The batch number (1-indexed).
+    /// - Returns: A color for the batch badge.
+    static func batchColor(for batchNumber: Int) -> Color {
+        let colors: [Color] = [.blue, .purple, .orange, .teal, .pink]
+        let index = (batchNumber - 1) % colors.count
+        return colors[index]
+    }
 }
 
 // MARK: - PDF Export Constants

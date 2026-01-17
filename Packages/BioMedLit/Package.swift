@@ -25,7 +25,7 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "BioMedLit",
+            name: "BioMedLitLib",
             targets: ["BioMedLit"]
         ),
     ],
