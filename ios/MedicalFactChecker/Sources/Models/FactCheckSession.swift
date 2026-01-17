@@ -60,28 +60,43 @@ final class FactCheckSession {
 
     // MARK: - Search State (for batch pagination)
 
-    /// Total results available in PubMed for this query.
-    var totalPubMedResults: Int = 0
-
-    /// Current offset for next batch fetch.
-    var currentSearchOffset: Int = 0
-
     /// Number of batches fetched so far.
     var batchesFetched: Int = 0
 
     // MARK: - Search Provider State
 
-    /// The search provider used for this session (raw value string).
-    var searchProviderRaw: String?
+    /// The search provider used for this session (stored as raw value).
+    ///
+    /// Options: "pubmed", "europepmc", "both".
+    var searchProvider: String?
 
-    /// Total results from Europe PMC (when using europePMC or both).
-    var totalEuropePMCResults: Int = 0
+    /// Whether preprints are included in the search.
+    var includePreprints: Bool = false
 
-    /// Cursor mark for Europe PMC pagination (nil for first page).
-    var europePMCCursorMark: String?
+    // MARK: - PubMed Pagination State
 
-    /// Whether preprints were included in Europe PMC search.
-    var includedPreprints: Bool = false
+    /// Total results available from PubMed for this query.
+    var pubmedTotalResults: Int = 0
+
+    /// Pagination offset for PubMed (offset-based pagination).
+    var pubmedOffset: Int = 0
+
+    /// Whether more results are available from PubMed.
+    var pubmedHasMore: Bool = true
+
+    // MARK: - Europe PMC Pagination State
+
+    /// Total results available from Europe PMC for this query.
+    var europePMCTotalResults: Int = 0
+
+    /// Pagination offset for Europe PMC (offset-based pagination).
+    var europePMCOffset: Int = 0
+
+    /// Cursor for Europe PMC pagination (cursor-based API).
+    var europePMCCursor: String?
+
+    /// Whether more results are available from Europe PMC.
+    var europePMCHasMore: Bool = true
 
     // MARK: - Smart Search State
 
@@ -142,44 +157,99 @@ final class FactCheckSession {
 
     // MARK: - Computed Properties
 
-    /// The search provider used for this session.
-    var searchProvider: SearchProvider? {
+    /// Type-safe access to the search provider enum.
+    ///
+    /// Returns the `SearchProvider` enum value for this session, or nil if not set.
+    var searchProviderEnum: SearchProvider? {
         get {
-            guard let raw = searchProviderRaw else { return nil }
+            guard let raw = searchProvider else { return nil }
             return SearchProvider(rawValue: raw)
         }
         set {
-            searchProviderRaw = newValue?.rawValue
+            searchProvider = newValue?.rawValue
         }
     }
 
-    /// Check if more documents can be fetched from PubMed.
-    var canFetchMoreDocuments: Bool {
-        currentSearchOffset < totalPubMedResults
+    /// Total number of unique documents fetched for this session.
+    ///
+    /// Computed from the documents relationship for accuracy.
+    var totalFetchedDocuments: Int {
+        documents?.count ?? 0
     }
 
-    /// Check if more documents can be fetched from Europe PMC.
-    var canFetchMoreFromEuropePMC: Bool {
-        europePMCCursorMark != nil
-    }
-
-    /// Check if more documents can be fetched from any provider.
+    /// Check if more documents can be fetched from any active provider.
+    ///
+    /// Takes into account the selected search provider and its pagination state.
+    /// For PubMed, uses the hasMore flag which is derived from offset vs total.
+    /// For Europe PMC, uses the hasMore flag and cursor availability.
     var canFetchMoreFromAnyProvider: Bool {
-        canFetchMoreDocuments || canFetchMoreFromEuropePMC
+        guard let provider = searchProviderEnum else {
+            // Legacy fallback: check PubMed offset-based pagination
+            return pubmedOffset < pubmedTotalResults
+        }
+
+        switch provider {
+        case .pubmed:
+            return pubmedHasMore
+        case .europePMC:
+            return europePMCHasMore
+        case .both:
+            return pubmedHasMore || europePMCHasMore
+        }
     }
 
-    /// Check if more evidence can be gathered (either more PubMed results or smart search available).
+    /// Check if more documents can be fetched (alias for canFetchMoreFromAnyProvider).
+    ///
+    /// This is the primary property to check for pagination availability.
+    var canFetchMoreDocuments: Bool {
+        canFetchMoreFromAnyProvider
+    }
+
+    /// Check if more evidence can be gathered (either more results or smart search available).
     ///
     /// Returns true if:
-    /// - More documents available in current PubMed query, OR
+    /// - More documents available from any active provider, OR
     /// - Smart search hasn't been tried yet (can generate alternative queries)
     var canGetMoreEvidence: Bool {
-        canFetchMoreDocuments || !smartSearchEnabled
+        canFetchMoreFromAnyProvider || !smartSearchEnabled
     }
 
     /// Number of additional PubMed results available to fetch.
     var remainingPubMedResults: Int {
-        max(0, totalPubMedResults - currentSearchOffset)
+        max(0, pubmedTotalResults - pubmedOffset)
+    }
+
+    /// Number of additional Europe PMC results available to fetch.
+    ///
+    /// For cursor-based pagination, returns an estimate based on batch size
+    /// since exact counts aren't available until exhausted.
+    var remainingEuropePMCResults: Int {
+        // Europe PMC uses cursor-based pagination, so we estimate
+        // Returns 0 if no more results, otherwise the difference or estimate
+        guard europePMCHasMore else { return 0 }
+        let remaining = europePMCTotalResults - europePMCOffset
+        return remaining > 0 ? remaining : SearchProviderConstants.defaultMaxResults
+    }
+
+    /// Estimated remaining results for the current provider.
+    ///
+    /// For offset-based pagination (PubMed), returns exact count.
+    /// For cursor-based pagination (Europe PMC), returns an estimate
+    /// since exact counts aren't available until exhausted.
+    var estimatedRemainingResults: Int {
+        guard let provider = searchProviderEnum else {
+            // Legacy fallback for sessions without provider set
+            return remainingPubMedResults
+        }
+
+        switch provider {
+        case .pubmed:
+            return pubmedHasMore ? remainingPubMedResults : 0
+        case .europePMC:
+            return remainingEuropePMCResults
+        case .both:
+            return (pubmedHasMore ? remainingPubMedResults : 0) + remainingEuropePMCResults
+        }
     }
 
     /// Documents that have been scored with relevance >= threshold.

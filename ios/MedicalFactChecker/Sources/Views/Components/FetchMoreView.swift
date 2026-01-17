@@ -253,7 +253,7 @@ struct FetchMoreView: View {
     let session = FactCheckSession(claim: "Test claim")
     session.documentsFound = 25
     session.relevantDocumentsFound = 8
-    session.totalPubMedResults = 150
+    session.pubmedTotalResults = 150
 
     return FetchMoreView(
         session: session,

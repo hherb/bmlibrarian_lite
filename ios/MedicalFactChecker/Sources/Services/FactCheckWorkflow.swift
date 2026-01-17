@@ -104,7 +104,7 @@ final class FactCheckWorkflow {
         newSession.modelName = settings.llmModel
         newSession.providerName = settings.selectedProvider.displayName
         newSession.searchProvider = currentSearchOptions?.provider
-        newSession.includedPreprints = currentSearchOptions?.includePreprints ?? false
+        newSession.includePreprints = currentSearchOptions?.includePreprints ?? false
         modelContext.insert(newSession)
         try? modelContext.save()
 
@@ -322,7 +322,7 @@ final class FactCheckWorkflow {
             if session.currentStep == .scoringDocuments {
                 let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
                 let needed = settings.minRelevantDocuments
-                let available = session.totalPubMedResults - session.currentSearchOffset
+                let available = session.estimatedRemainingResults
 
                 if relevant < needed {
                     // Try smart search first if not already enabled
@@ -556,8 +556,8 @@ final class FactCheckWorkflow {
         // Build search options with current pagination state
         var options = currentSearchOptions ?? settings.buildSearchOptions()
         options.maxResults = settings.batchSize
-        options.offset = session.currentSearchOffset
-        options.cursorMark = session.europePMCCursorMark
+        options.offset = session.pubmedOffset
+        options.cursorMark = session.europePMCCursor
 
         // Use unified search service
         let result = try await SearchServiceFactory.search(
@@ -568,12 +568,15 @@ final class FactCheckWorkflow {
 
         // Update session state based on provider
         if provider == .pubmed || provider == .both {
-            session.totalPubMedResults = result.totalCount
-            session.currentSearchOffset = result.nextOffset
+            session.pubmedTotalResults = result.totalCount
+            session.pubmedOffset = result.nextOffset
+            session.pubmedHasMore = result.nextOffset < result.totalCount
         }
         if provider == .europePMC || provider == .both {
-            session.totalEuropePMCResults = result.totalCount
-            session.europePMCCursorMark = result.nextCursorMark
+            session.europePMCTotalResults = result.totalCount
+            session.europePMCCursor = result.nextCursorMark
+            session.europePMCOffset = result.nextOffset
+            session.europePMCHasMore = result.nextCursorMark != nil
         }
         session.batchesFetched = batchNumber
 
@@ -1212,7 +1215,7 @@ final class FactCheckWorkflow {
 
         Question: \(session.claim)
         Initial query: \(session.pubmedQuery ?? "N/A")
-        Results found: \(session.totalPubMedResults)
+        Results found: \(session.pubmedTotalResults)
         Relevant documents: \(session.relevantDocumentsFound)
 
         Analyze the question and suggest 2-4 alternative search strategies. Consider:

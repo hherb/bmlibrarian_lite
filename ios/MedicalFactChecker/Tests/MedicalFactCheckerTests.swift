@@ -227,3 +227,243 @@ final class EmbeddingServiceTests: XCTestCase {
         }
     }
 }
+
+// MARK: - FactCheckSession Pagination Tests
+
+final class FactCheckSessionPaginationTests: XCTestCase {
+
+    // MARK: - searchProviderEnum Tests
+
+    func testSearchProviderEnumNilWhenNotSet() {
+        let session = FactCheckSession(claim: "Test claim")
+        XCTAssertNil(session.searchProviderEnum)
+    }
+
+    func testSearchProviderEnumPubMed() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "pubmed"
+        XCTAssertEqual(session.searchProviderEnum, .pubmed)
+    }
+
+    func testSearchProviderEnumEuropePMC() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "europepmc"
+        XCTAssertEqual(session.searchProviderEnum, .europePMC)
+    }
+
+    func testSearchProviderEnumBoth() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "both"
+        XCTAssertEqual(session.searchProviderEnum, .both)
+    }
+
+    func testSearchProviderEnumSetter() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProviderEnum = .europePMC
+        XCTAssertEqual(session.searchProvider, "europepmc")
+    }
+
+    // MARK: - canFetchMoreFromAnyProvider Tests
+
+    func testCanFetchMoreFromAnyProviderLegacyFallback() {
+        // When no provider is set, falls back to PubMed offset check
+        let session = FactCheckSession(claim: "Test claim")
+        session.pubmedTotalResults = 100
+        session.pubmedOffset = 20
+
+        XCTAssertTrue(session.canFetchMoreFromAnyProvider)
+
+        session.pubmedOffset = 100
+        XCTAssertFalse(session.canFetchMoreFromAnyProvider)
+    }
+
+    func testCanFetchMoreFromAnyProviderPubMed() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "pubmed"
+        session.pubmedHasMore = true
+
+        XCTAssertTrue(session.canFetchMoreFromAnyProvider)
+
+        session.pubmedHasMore = false
+        XCTAssertFalse(session.canFetchMoreFromAnyProvider)
+    }
+
+    func testCanFetchMoreFromAnyProviderEuropePMC() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "europepmc"
+        session.europePMCHasMore = true
+
+        XCTAssertTrue(session.canFetchMoreFromAnyProvider)
+
+        session.europePMCHasMore = false
+        XCTAssertFalse(session.canFetchMoreFromAnyProvider)
+    }
+
+    func testCanFetchMoreFromAnyProviderBoth() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "both"
+
+        // Both have more
+        session.pubmedHasMore = true
+        session.europePMCHasMore = true
+        XCTAssertTrue(session.canFetchMoreFromAnyProvider)
+
+        // Only PubMed has more
+        session.pubmedHasMore = true
+        session.europePMCHasMore = false
+        XCTAssertTrue(session.canFetchMoreFromAnyProvider)
+
+        // Only Europe PMC has more
+        session.pubmedHasMore = false
+        session.europePMCHasMore = true
+        XCTAssertTrue(session.canFetchMoreFromAnyProvider)
+
+        // Neither has more
+        session.pubmedHasMore = false
+        session.europePMCHasMore = false
+        XCTAssertFalse(session.canFetchMoreFromAnyProvider)
+    }
+
+    // MARK: - canFetchMoreDocuments Tests
+
+    func testCanFetchMoreDocumentsAliasesAnyProvider() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "pubmed"
+        session.pubmedHasMore = true
+
+        XCTAssertEqual(session.canFetchMoreDocuments, session.canFetchMoreFromAnyProvider)
+    }
+
+    // MARK: - remainingPubMedResults Tests
+
+    func testRemainingPubMedResults() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.pubmedTotalResults = 150
+        session.pubmedOffset = 50
+
+        XCTAssertEqual(session.remainingPubMedResults, 100)
+    }
+
+    func testRemainingPubMedResultsNeverNegative() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.pubmedTotalResults = 50
+        session.pubmedOffset = 100  // Offset exceeds total
+
+        XCTAssertEqual(session.remainingPubMedResults, 0)
+    }
+
+    // MARK: - remainingEuropePMCResults Tests
+
+    func testRemainingEuropePMCResultsWhenNoMore() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.europePMCHasMore = false
+
+        XCTAssertEqual(session.remainingEuropePMCResults, 0)
+    }
+
+    func testRemainingEuropePMCResultsWithKnownTotal() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.europePMCHasMore = true
+        session.europePMCTotalResults = 200
+        session.europePMCOffset = 50
+
+        XCTAssertEqual(session.remainingEuropePMCResults, 150)
+    }
+
+    func testRemainingEuropePMCResultsFallsBackToDefault() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.europePMCHasMore = true
+        session.europePMCTotalResults = 0
+        session.europePMCOffset = 0
+
+        // Should fall back to defaultMaxResults (20)
+        XCTAssertEqual(session.remainingEuropePMCResults, SearchProviderConstants.defaultMaxResults)
+    }
+
+    // MARK: - estimatedRemainingResults Tests
+
+    func testEstimatedRemainingResultsLegacyFallback() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.pubmedTotalResults = 100
+        session.pubmedOffset = 30
+
+        XCTAssertEqual(session.estimatedRemainingResults, 70)
+    }
+
+    func testEstimatedRemainingResultsPubMed() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "pubmed"
+        session.pubmedTotalResults = 100
+        session.pubmedOffset = 25
+        session.pubmedHasMore = true
+
+        XCTAssertEqual(session.estimatedRemainingResults, 75)
+
+        session.pubmedHasMore = false
+        XCTAssertEqual(session.estimatedRemainingResults, 0)
+    }
+
+    func testEstimatedRemainingResultsEuropePMC() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "europepmc"
+        session.europePMCTotalResults = 80
+        session.europePMCOffset = 20
+        session.europePMCHasMore = true
+
+        XCTAssertEqual(session.estimatedRemainingResults, 60)
+
+        session.europePMCHasMore = false
+        XCTAssertEqual(session.estimatedRemainingResults, 0)
+    }
+
+    func testEstimatedRemainingResultsBoth() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "both"
+        session.pubmedTotalResults = 100
+        session.pubmedOffset = 30
+        session.pubmedHasMore = true
+        session.europePMCTotalResults = 50
+        session.europePMCOffset = 10
+        session.europePMCHasMore = true
+
+        // PubMed: 70, Europe PMC: 40, Total: 110
+        XCTAssertEqual(session.estimatedRemainingResults, 110)
+    }
+
+    // MARK: - canGetMoreEvidence Tests
+
+    func testCanGetMoreEvidenceWithResults() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "pubmed"
+        session.pubmedHasMore = true
+        session.smartSearchEnabled = true
+
+        XCTAssertTrue(session.canGetMoreEvidence)
+    }
+
+    func testCanGetMoreEvidenceWithSmartSearch() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.searchProvider = "pubmed"
+        session.pubmedHasMore = false
+        session.smartSearchEnabled = false
+
+        // Smart search not yet tried
+        XCTAssertTrue(session.canGetMoreEvidence)
+
+        session.smartSearchEnabled = true
+        XCTAssertFalse(session.canGetMoreEvidence)
+    }
+
+    // MARK: - totalFetchedDocuments Tests
+
+    func testTotalFetchedDocumentsEmpty() {
+        let session = FactCheckSession(claim: "Test claim")
+        XCTAssertEqual(session.totalFetchedDocuments, 0)
+    }
+
+    func testTotalFetchedDocumentsNilDocuments() {
+        let session = FactCheckSession(claim: "Test claim")
+        session.documents = nil
+        XCTAssertEqual(session.totalFetchedDocuments, 0)
+    }
+}
