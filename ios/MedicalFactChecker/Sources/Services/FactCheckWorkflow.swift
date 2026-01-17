@@ -53,6 +53,14 @@ final class FactCheckWorkflow {
     /// Set to true when specifically waiting for smart search decision.
     private(set) var awaitingSmartSearchDecision = false
 
+    /// Whether this workflow was restored from history.
+    ///
+    /// When true, the first call to `fetchMoreEvidence()` will refresh pagination
+    /// state by re-executing the search from the beginning. This handles expired
+    /// server-side cursors and catches any new articles published since the
+    /// original search.
+    private(set) var isResumedSession = false
+
     /// The structured query parsed from LLM response.
     ///
     /// Stored in memory (not persisted) so we can rebuild provider-specific
@@ -157,6 +165,9 @@ final class FactCheckWorkflow {
         userDecisionPrompt = ""
         progressMessage = ""
 
+        // Mark as resumed so fetchMoreEvidence will refresh pagination state
+        isResumedSession = true
+
         // Restore search options from session if available
         if let providerRaw = session.searchProvider,
            let provider = SearchProvider(rawValue: providerRaw) {
@@ -164,7 +175,173 @@ final class FactCheckWorkflow {
                 provider: provider,
                 includePreprints: session.includePreprints
             )
+        } else {
+            // Legacy sessions without provider - default to PubMed
+            currentSearchOptions = SearchOptions(
+                provider: .pubmed,
+                includePreprints: session.includePreprints
+            )
         }
+
+        // Debug: Log restored session state
+        print("[RestoreForViewing] Restored session:")
+        print("  - claim: \(session.claim.prefix(50))...")
+        print("  - documents: \(session.documents?.count ?? 0)")
+        print("  - searchProvider: \(session.searchProvider ?? "nil")")
+        print("  - pubmedHasMore: \(session.pubmedHasMore)")
+        print("  - pubmedOffset: \(session.pubmedOffset)")
+        print("  - europePMCHasMore: \(session.europePMCHasMore)")
+        print("  - smartSearchEnabled: \(session.smartSearchEnabled)")
+        print("  - canFetchMoreDocuments: \(session.canFetchMoreDocuments)")
+        print("  - canGetMoreEvidence: \(session.canGetMoreEvidence)")
+    }
+
+    /// Refreshes pagination state by re-executing the search from the beginning.
+    ///
+    /// When resuming a session after a long period, server-side cursors (especially
+    /// for Europe PMC) may have expired. This method re-fetches results from the
+    /// start, deduplicates against existing documents, and updates the pagination
+    /// state for subsequent fetches.
+    ///
+    /// Only new documents (not already in the session) are added and will need
+    /// scoring. The method updates the session's cursor/offset to the correct
+    /// position for fetching additional results beyond the original set.
+    ///
+    /// - Returns: Number of new documents found during the refresh.
+    /// - Throws: SearchError if no query is available, or network errors.
+    private func refreshPaginationState() async throws -> Int {
+        guard let session = session else { return 0 }
+
+        let existingCount = session.documents?.count ?? 0
+        print("[RefreshPagination] Starting refresh, existing docs: \(existingCount)")
+
+        // Reset pagination to start
+        var currentOffset = 0
+        var currentCursor: String? = "*"
+        var newDocumentsFound = 0
+        let provider = currentSearchOptions?.provider ?? .pubmed
+
+        // Build existing identifier sets for deduplication
+        let existingDocuments = session.documents ?? []
+        var existingPmids = Set(existingDocuments.map { $0.pmid })
+        var existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
+        var existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
+
+        // Re-fetch until we've covered the original result count
+        // Use the larger of existing docs or recorded total to handle cases where
+        // totalResults might be stale
+        let targetCount = max(existingCount, session.pubmedTotalResults)
+        var fetchedCount = 0
+        var lastTotalCount = 0
+
+        // Get query string - required for refresh
+        guard let queryString = session.pubmedQuery else {
+            throw SearchError.invalidConfiguration("No query available for pagination refresh")
+        }
+
+        while fetchedCount < targetCount {
+            // Check budget before each batch
+            try checkBudget()
+
+            // Build options for this batch
+            var options = currentSearchOptions ?? settings.buildSearchOptions()
+            options.maxResults = settings.batchSize
+            options.offset = currentOffset
+            options.cursorMark = currentCursor
+
+            updateProgress(.fetchingMoreEvidence,
+                "Refreshing search state (\(fetchedCount)/\(targetCount))...")
+
+            let result = try await SearchServiceFactory.search(
+                query: queryString,
+                options: options,
+                settings: settings
+            )
+
+            lastTotalCount = result.totalCount
+
+            // Process articles - add only those not in existing set
+            for article in result.articles {
+                // Skip if already exists (by PMID)
+                if existingPmids.contains(article.pmid) { continue }
+                // Skip if DOI matches
+                if let doi = article.doi?.lowercased(), existingDois.contains(doi) { continue }
+                // Skip if PMC ID matches
+                if let pmcId = article.pmcId?.lowercased(), existingPmcIds.contains(pmcId) { continue }
+
+                // New document - add to session
+                let document = Document(
+                    pmid: article.pmid,
+                    title: article.title,
+                    abstract: article.abstract,
+                    authors: article.authors,
+                    batchNumber: session.batchesFetched + 1,
+                    resultPosition: article.resultPosition
+                )
+                document.year = article.year
+                document.journal = article.journal
+                document.doi = article.doi
+                document.pmcId = article.pmcId
+                document.meshTerms = article.meshTerms
+                document.publicationDate = article.publicationDate
+                document.session = session
+                document.sourceProvider = result.provider
+
+                modelContext.insert(document)
+                newDocumentsFound += 1
+
+                // Update dedup sets for subsequent iterations
+                existingPmids.insert(article.pmid)
+                if let doi = article.doi { existingDois.insert(doi.lowercased()) }
+                if let pmcId = article.pmcId { existingPmcIds.insert(pmcId.lowercased()) }
+            }
+
+            fetchedCount += result.articles.count
+            currentOffset = result.nextOffset
+            currentCursor = result.nextCursorMark
+
+            // Check if search is exhausted
+            if result.articles.isEmpty {
+                print("[RefreshPagination] Search returned no results, stopping")
+                break
+            }
+            if provider == .europePMC || provider == .both {
+                if currentCursor == nil {
+                    print("[RefreshPagination] Europe PMC cursor exhausted")
+                    break
+                }
+            }
+            if provider == .pubmed || provider == .both {
+                if currentOffset >= result.totalCount {
+                    print("[RefreshPagination] PubMed offset reached total")
+                    break
+                }
+            }
+        }
+
+        // Update session pagination state with fresh values
+        if provider == .pubmed || provider == .both {
+            session.pubmedTotalResults = lastTotalCount
+            session.pubmedOffset = currentOffset
+            session.pubmedHasMore = currentOffset < lastTotalCount
+        }
+        if provider == .europePMC || provider == .both {
+            session.europePMCTotalResults = lastTotalCount
+            session.europePMCCursor = currentCursor
+            session.europePMCOffset = currentOffset
+            session.europePMCHasMore = currentCursor != nil
+        }
+
+        if newDocumentsFound > 0 {
+            session.documentsFound += newDocumentsFound
+        }
+        try? modelContext.save()
+
+        print("[RefreshPagination] Complete. New docs: \(newDocumentsFound), " +
+              "offset: \(currentOffset), cursor: \(currentCursor ?? "nil"), " +
+              "hasMore: \(session.canFetchMoreDocuments)")
+
+        return newDocumentsFound
     }
 
     /// User approved fetching more documents.
@@ -299,11 +476,46 @@ final class FactCheckWorkflow {
         session.currentStep = .fetchingMoreEvidence
         try? modelContext.save()
 
+        // Debug: Log pagination state
+        print("[FetchMoreEvidence] Session state:")
+        print("  - searchProvider: \(session.searchProvider ?? "nil")")
+        print("  - pubmedHasMore: \(session.pubmedHasMore)")
+        print("  - pubmedOffset: \(session.pubmedOffset)")
+        print("  - pubmedTotalResults: \(session.pubmedTotalResults)")
+        print("  - europePMCHasMore: \(session.europePMCHasMore)")
+        print("  - europePMCCursor: \(session.europePMCCursor ?? "nil")")
+        print("  - smartSearchEnabled: \(session.smartSearchEnabled)")
+        print("  - canFetchMoreDocuments: \(session.canFetchMoreDocuments)")
+        print("  - canGetMoreEvidence: \(session.canGetMoreEvidence)")
+        print("  - currentSearchOptions: \(String(describing: currentSearchOptions))")
+
         do {
-            // Step 1: Fetch more documents
+            // For resumed sessions, refresh pagination state first
+            // This handles expired server-side cursors and catches new articles
+            if isResumedSession {
+                print("[FetchMoreEvidence] Resumed session - refreshing pagination state...")
+                let newDocsFromRefresh = try await refreshPaginationState()
+
+                if newDocsFromRefresh > 0 {
+                    // Score ONLY the new documents found during refresh
+                    updateProgress(.fetchingMoreEvidence, "Scoring \(newDocsFromRefresh) new documents...")
+                    try await scoreDocuments()
+
+                    // Compute embedding scores for new docs if enabled
+                    if settings.embeddingScoringEnabled {
+                        await computeEmbeddingScores()
+                    }
+                }
+
+                isResumedSession = false // Clear flag after refresh
+                print("[FetchMoreEvidence] Pagination refresh complete, continuing with normal fetch...")
+            }
+
+            // Step 1: Fetch more documents (beyond the original set)
             if session.canFetchMoreDocuments {
                 // More results available from original query
-                updateProgress(.fetchingMoreEvidence, "Fetching more documents from PubMed...")
+                print("[FetchMoreEvidence] Branch: canFetchMoreDocuments=true, fetching more from search...")
+                updateProgress(.fetchingMoreEvidence, "Fetching additional documents...")
                 try await searchPubMed()
 
                 // Score new documents
@@ -316,11 +528,12 @@ final class FactCheckWorkflow {
                 }
             } else if !session.smartSearchEnabled {
                 // PubMed exhausted but smart search not tried - try alternative queries
+                print("[FetchMoreEvidence] Branch: canFetchMoreDocuments=false, smartSearchEnabled=false, trying smart search...")
                 updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
                 try await executeSmartSearch()
             } else {
                 // Both exhausted - nothing more we can do
-                print("[FetchMoreEvidence] No more evidence sources available")
+                print("[FetchMoreEvidence] Branch: No more evidence sources available (canFetch=false, smartSearch=true)")
                 session.currentStep = .completed
                 try? modelContext.save()
                 isRunning = false
@@ -357,6 +570,7 @@ final class FactCheckWorkflow {
             }
 
         } catch let error as BudgetError {
+            print("[FetchMoreEvidence] Budget error: \(error.localizedDescription)")
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
             session.stopReason = .budgetExceeded
@@ -365,6 +579,7 @@ final class FactCheckWorkflow {
         } catch {
             // Restore to completed state on error - original report is preserved
             // since we only delete it after successful regeneration
+            print("[FetchMoreEvidence] Error: \(error.localizedDescription)")
             session.currentStep = .completed
             session.errorMessage = error.localizedDescription
             try? modelContext.save()
@@ -656,6 +871,13 @@ final class FactCheckWorkflow {
         let provider = currentSearchOptions?.provider ?? .pubmed
         let providerName = provider.displayName
 
+        print("[SearchPubMed] Starting search:")
+        print("  - batchNumber: \(batchNumber)")
+        print("  - provider: \(providerName)")
+        print("  - pubmedOffset: \(session.pubmedOffset)")
+        print("  - europePMCCursor: \(session.europePMCCursor ?? "nil")")
+        print("  - pubmedQuery: \(session.pubmedQuery?.prefix(100) ?? "nil")...")
+
         updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
 
         // Build search options with current pagination state
@@ -673,17 +895,20 @@ final class FactCheckWorkflow {
         } else if let storedQuery = session.pubmedQuery {
             // Fallback for resumed sessions without structured query
             queryString = storedQuery
-            print("[Search] Using stored query string (legacy mode)")
+            print("[Search] Using stored query string (legacy mode): \(storedQuery.prefix(100))...")
         } else {
+            print("[Search] ERROR: No query available!")
             throw SearchError.invalidConfiguration("No query available for search")
         }
 
         // Use unified search service
+        print("[Search] Executing search with offset=\(options.offset), maxResults=\(options.maxResults)")
         let result = try await SearchServiceFactory.search(
             query: queryString,
             options: options,
             settings: settings
         )
+        print("[Search] Results: totalCount=\(result.totalCount), articlesReturned=\(result.articles.count), nextOffset=\(result.nextOffset)")
 
         // Update session state based on provider
         if provider == .pubmed || provider == .both {
