@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = 6F36EF612F1C5A5200C0AAEA /* BioMedLit */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -126,6 +127,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */,
 				A1000055001 /* BioMedLit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -324,6 +326,7 @@
 			name = MedicalFactChecker;
 			packageProductDependencies = (
 				A1000055000 /* BioMedLit */,
+				6F36EF612F1C5A5200C0AAEA /* BioMedLit */,
 			);
 			productName = MedicalFactChecker;
 			productReference = A1000000000 /* MedicalFactChecker.app */;
@@ -353,7 +356,7 @@
 			);
 			mainGroup = A1000000010;
 			packageReferences = (
-				A1000056000 /* XCLocalSwiftPackageReference "BioMedLit" */,
+				6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A1000000030 /* Products */;
@@ -654,13 +657,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A1000056000 /* XCLocalSwiftPackageReference "BioMedLit" */ = {
+		6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../Packages/BioMedLit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		6F36EF612F1C5A5200C0AAEA /* BioMedLit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BioMedLit;
+		};
 		A1000055000 /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BioMedLit;
