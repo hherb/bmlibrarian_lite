@@ -22,16 +22,30 @@ import SwiftData
 /// Features:
 /// - Searchable session list
 /// - Sortable columns
-/// - Quick actions (delete, export)
+/// - Quick actions (delete, export, continue search)
 /// - Session detail on selection
+/// - Tap row to restore session in Fact Check tab
+///
+/// Sessions with more available evidence display a "Continue Search" button.
+/// Tapping a session row restores the full session state in the Check tab,
+/// including the claim text, scored documents, and report.
 struct MacHistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FactCheckSession.createdAt, order: .reverse) private var sessions: [FactCheckSession]
 
+    /// Callback when the user wants to view a report.
     let onReportSelected: ((EvidenceReport) -> Void)?
+
+    /// Callback when user wants to continue searching from an existing session.
+    ///
+    /// Called when the user taps a session row, clicks the "Continue Search" button,
+    /// or uses the context menu item. The parent view should restore the session's
+    /// claim text and resume the workflow.
+    let onContinueSession: ((FactCheckSession) -> Void)?
 
     @State private var searchText = ""
     @State private var selectedSession: FactCheckSession?
+    @State private var sessionToDelete: FactCheckSession?
     @State private var sortOrder: [KeyPathComparator<FactCheckSession>] = [
         .init(\.createdAt, order: .reverse)
     ]
@@ -55,6 +69,24 @@ struct MacHistoryView: View {
             // Right: Session detail
             sessionDetail
                 .frame(minWidth: MacLayout.detailColumnMinWidth)
+        }
+        .alert(
+            "Delete Session?",
+            isPresented: Binding(
+                get: { sessionToDelete != nil },
+                set: { if !$0 { sessionToDelete = nil } }
+            ),
+            presenting: sessionToDelete
+        ) { session in
+            Button("Cancel", role: .cancel) {
+                sessionToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                deleteSession(session)
+                sessionToDelete = nil
+            }
+        } message: { session in
+            Text("This will permanently delete the fact-check for \"\(session.claim.prefix(MacHistoryConstants.maxClaimPreviewLength))\(session.claim.count > MacHistoryConstants.maxClaimPreviewLength ? "..." : "")\" and all associated data.")
         }
     }
 
@@ -83,8 +115,8 @@ struct MacHistoryView: View {
                 .cornerRadius(MacCornerRadius.medium)
 
                 // Delete button
-                if selectedSession != nil {
-                    Button(action: deleteSelectedSession) {
+                if let session = selectedSession {
+                    Button(action: { sessionToDelete = session }) {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.bordered)
@@ -102,23 +134,44 @@ struct MacHistoryView: View {
             } else {
                 List(selection: $selectedSession) {
                     ForEach(filteredSessions) { session in
-                        MacSessionRow(session: session)
-                            .tag(session)
-                            .contextMenu {
-                                if session.report != nil {
-                                    Button("View Report") {
-                                        if let report = session.report {
-                                            onReportSelected?(report)
-                                        }
+                        MacSessionRow(
+                            session: session,
+                            onContinueSearch: onContinueSession != nil ? {
+                                onContinueSession?(session)
+                            } : nil
+                        )
+                        .tag(session)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            // Restore full session state in Check tab
+                            if onContinueSession != nil {
+                                onContinueSession?(session)
+                            } else if let report = session.report {
+                                // Fallback: show report popup if no restore handler
+                                onReportSelected?(report)
+                            }
+                        }
+                        .contextMenu {
+                            if session.report != nil {
+                                Button("View Report") {
+                                    if let report = session.report {
+                                        onReportSelected?(report)
                                     }
                                 }
+                            }
 
-                                Divider()
-
-                                Button("Delete", role: .destructive) {
-                                    deleteSession(session)
+                            if session.canGetMoreEvidence {
+                                Button("Continue Search") {
+                                    onContinueSession?(session)
                                 }
                             }
+
+                            Divider()
+
+                            Button("Delete", role: .destructive) {
+                                sessionToDelete = session
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)
@@ -163,6 +216,9 @@ struct MacHistoryView: View {
                         object: nil,
                         userInfo: ["document": document]
                     )
+                },
+                onContinueSession: {
+                    onContinueSession?(session)
                 }
             )
         } else {
@@ -187,11 +243,12 @@ struct MacHistoryView: View {
 
     // MARK: - Actions
 
-    private func deleteSelectedSession() {
-        guard let session = selectedSession else { return }
-        deleteSession(session)
-    }
-
+    /// Deletes a session from the database.
+    ///
+    /// Clears the selection if the deleted session was selected, then removes
+    /// the session from the model context and saves.
+    ///
+    /// - Parameter session: The session to delete.
     private func deleteSession(_ session: FactCheckSession) {
         if selectedSession == session {
             selectedSession = nil
@@ -205,10 +262,16 @@ struct MacHistoryView: View {
 
 /// A single row displaying a fact-check session in the history list.
 ///
-/// Shows the claim text, verdict or status badge, document statistics, and timestamp.
+/// Shows the claim text, verdict or status badge, document statistics, timestamp,
+/// and optionally a "Continue Search" button when more results are available.
 struct MacSessionRow: View {
     /// The session to display.
     let session: FactCheckSession
+
+    /// Optional callback when the user taps the "Continue Search" button.
+    ///
+    /// If nil, the button is not shown even when more evidence is available.
+    var onContinueSearch: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.medium) {
@@ -247,6 +310,34 @@ struct MacSessionRow: View {
                     Text(session.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+            }
+
+            // More results indicator and continue button
+            if session.canGetMoreEvidence {
+                HStack {
+                    // Visual indicator
+                    HStack(spacing: MacSpacing.xSmall) {
+                        Image(systemName: "plus.magnifyingglass")
+                        Text("More results available")
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.accentColor)
+
+                    Spacer()
+
+                    // Continue search button (if callback provided)
+                    if let onContinueSearch {
+                        Button {
+                            onContinueSearch()
+                        } label: {
+                            Text("Continue Search")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                 }
             }
         }
@@ -306,7 +397,7 @@ struct MacStatusBadge: View {
 /// Detail view showing comprehensive information about a fact-check session.
 ///
 /// Displays the session's claim, PubMed query, status, statistics, scored documents,
-/// and provides a button to view the generated report.
+/// and provides buttons to view the report and continue searching.
 struct MacSessionDetailView: View {
     @Environment(AppSettings.self) private var settings
 
@@ -316,6 +407,8 @@ struct MacSessionDetailView: View {
     let onViewReport: () -> Void
     /// Callback when the user wants to view full text for a document.
     var onShowFullText: ((Document) -> Void)?
+    /// Callback when the user wants to continue searching from this session.
+    var onContinueSession: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -416,16 +509,31 @@ struct MacSessionDetailView: View {
                 Divider()
 
                 // Actions
-                if session.report != nil {
-                    Button(action: onViewReport) {
-                        HStack {
-                            Image(systemName: "doc.text")
-                            Text("View Report")
+                VStack(spacing: MacSpacing.standard) {
+                    if session.report != nil {
+                        Button(action: onViewReport) {
+                            HStack {
+                                Image(systemName: "doc.text")
+                                Text("View Report")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+
+                    // Continue Search button
+                    if session.canGetMoreEvidence {
+                        Button(action: { onContinueSession?() }) {
+                            HStack {
+                                Image(systemName: "magnifyingglass.circle")
+                                Text("Continue Search")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    }
                 }
 
                 // Scored Documents
@@ -477,13 +585,18 @@ struct MacDetailStatItem: View {
 }
 
 #Preview {
-    MacHistoryView(onReportSelected: nil)
-        .modelContainer(for: [
-            FactCheckSession.self,
-            Document.self,
-            Citation.self,
-            EvidenceReport.self,
-            UsageRecord.self,
-        ], inMemory: true)
-        .frame(width: 900, height: 600)
+    MacHistoryView(
+        onReportSelected: nil,
+        onContinueSession: { session in
+            print("Continue session: \(session.claim)")
+        }
+    )
+    .modelContainer(for: [
+        FactCheckSession.self,
+        Document.self,
+        Citation.self,
+        EvidenceReport.self,
+        UsageRecord.self,
+    ], inMemory: true)
+    .frame(width: 900, height: 600)
 }
