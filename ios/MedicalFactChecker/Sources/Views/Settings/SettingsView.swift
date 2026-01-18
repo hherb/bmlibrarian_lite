@@ -224,14 +224,27 @@ struct SettingsView: View {
                         }
 
                         if let apiKeyURL = settings.selectedProvider.apiKeyURL {
-                            Button {
-                                openURL(apiKeyURL)
-                            } label: {
-                                HStack {
-                                    Text("Get API Key")
-                                    Spacer()
-                                    Image(systemName: "arrow.up.right.square")
+                            HStack {
+                                Button {
+                                    openURL(apiKeyURL)
+                                } label: {
+                                    HStack {
+                                        Text("Get API Key")
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right.square")
+                                    }
                                 }
+
+                                Button {
+                                    if let helpURL = URL(string: "https://bmlibrarian.org/user-manual/api-keys/") {
+                                        openURL(helpURL)
+                                    }
+                                } label: {
+                                    Image(systemName: "questionmark.circle")
+                                        .foregroundColor(.accentColor)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Learn more about API keys")
                             }
                         }
                     } else {

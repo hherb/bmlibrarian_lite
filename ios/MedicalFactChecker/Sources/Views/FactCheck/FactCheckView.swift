@@ -255,15 +255,25 @@ struct FactCheckView: View {
 
 struct ConfigurationWarningView: View {
     var body: some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
-            Text("Configure your LLM API in Settings to start fact-checking")
-                .font(.subheadline)
+        Button {
+            NotificationCenter.default.post(name: .navigateToSettings, object: nil)
+        } label: {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                Text("Configure your LLM API in Settings to start fact-checking")
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            .padding()
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(10)
         }
-        .padding()
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(10)
+        .buttonStyle(.plain)
     }
 }
 

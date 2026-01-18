@@ -106,6 +106,10 @@ struct ContentView: View {
         .onChange(of: selectedTab) { _, newTab in
             visitedTabs.insert(newTab)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToSettings)) { _ in
+            visitedTabs.insert(.settings)
+            selectedTab = .settings
+        }
     }
 
     private func acceptDisclaimer() {
@@ -189,6 +193,9 @@ struct ContentView: View {
 extension Notification.Name {
     /// Posted when the user wants to view onboarding again from settings.
     static let showOnboarding = Notification.Name("showOnboarding")
+
+    /// Posted when the user taps the configuration warning to navigate to settings.
+    static let navigateToSettings = Notification.Name("navigateToSettings")
 }
 
 // MARK: - Lazy Tab Content
