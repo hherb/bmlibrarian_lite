@@ -86,7 +86,7 @@ struct MacHistoryView: View {
                 sessionToDelete = nil
             }
         } message: { session in
-            Text("This will permanently delete the fact-check for \"\(session.claim.prefix(MacHistoryConstants.maxClaimPreviewLength))\(session.claim.count > MacHistoryConstants.maxClaimPreviewLength ? "..." : "")\" and all associated data.")
+            Text("This will permanently delete the fact-check for \"\(session.claim.prefix(50))\(session.claim.count > 50 ? "..." : "")\" and all associated data.")
         }
     }
 

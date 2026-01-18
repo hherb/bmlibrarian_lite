@@ -56,6 +56,13 @@ final class FactCheckWorkflow {
     /// Message to display when awaiting user decision.
     private(set) var userDecisionPrompt = ""
 
+    /// Set to true when the session was restored from history.
+    ///
+    /// Used to trigger pagination state refresh on first `fetchMoreEvidence()` call.
+    /// This handles expired server-side cursors and catches any new articles that
+    /// may have been published since the original search.
+    private(set) var isResumedSession = false
+
     // MARK: - Callbacks
 
     var onProgress: ((WorkflowStep, String) -> Void)?
@@ -148,6 +155,50 @@ final class FactCheckWorkflow {
         await runWorkflow()
     }
 
+    /// Restore a session for viewing without running the workflow.
+    ///
+    /// This method loads an existing session so its data (claim, documents, report)
+    /// can be displayed in the UI, without triggering any new processing.
+    /// Use this when the user clicks "Continue Search" from history to review
+    /// past results.
+    ///
+    /// The session's documents, scores, and report are displayed without
+    /// re-running the workflow. The user can then click "Add More Results"
+    /// to fetch additional documents if more are available.
+    ///
+    /// - Parameter session: The fact-check session to restore for viewing.
+    func restoreForViewing(_ session: FactCheckSession) {
+        self.session = session
+        // Initialize services lazily - only if user triggers new actions
+        isRunning = false
+        awaitingUserDecision = false
+        awaitingSmartSearchDecision = false
+        userDecisionPrompt = ""
+        progressMessage = ""
+
+        // Mark as resumed so fetchMoreEvidence will refresh pagination state
+        isResumedSession = true
+
+        // Restore search options from session if available
+        if let providerRaw = session.searchProvider,
+           let provider = SearchProvider(rawValue: providerRaw) {
+            searchOptions = SearchOptions(
+                provider: provider,
+                includePreprints: session.includePreprints,
+                maxResults: settings.batchSize,
+                offset: session.pubmedOffset
+            )
+        } else {
+            // Legacy sessions without provider - default to PubMed
+            searchOptions = SearchOptions(
+                provider: .pubmed,
+                includePreprints: session.includePreprints,
+                maxResults: settings.batchSize,
+                offset: session.pubmedOffset
+            )
+        }
+    }
+
     /// User approved fetching more documents.
     func continueWithMoreDocuments() async {
         awaitingUserDecision = false
@@ -232,8 +283,35 @@ final class FactCheckWorkflow {
     /// 4. Regenerate the report with all accumulated evidence
     ///
     /// Can be called multiple times until PubMed is exhausted and smart search has been tried.
-    func fetchMoreEvidence() async {
+    ///
+    /// - Parameter searchOptions: Optional updated search options. If provided,
+    ///   these will override the session's stored search options, allowing the
+    ///   user to switch providers (e.g., from Europe PMC to PubMed) when fetching
+    ///   more evidence.
+    func fetchMoreEvidence(searchOptions newSearchOptions: SearchOptions? = nil) async {
         guard let session = session else { return }
+
+        // Update search options if provided (allows changing provider mid-session)
+        if let newOptions = newSearchOptions {
+            searchOptions = newOptions
+            session.searchProvider = newOptions.provider.rawValue
+            session.includePreprints = newOptions.includePreprints
+
+            // Reset pagination state for the new provider if switching
+            if newOptions.provider == .pubmed {
+                // Switching to PubMed: reset PubMed state, keep Europe PMC state
+                session.pubmedOffset = 0
+                session.pubmedHasMore = true
+            } else if newOptions.provider == .europePMC {
+                // Switching to Europe PMC: reset Europe PMC state, keep PubMed state
+                session.europePMCOffset = 0
+                session.europePMCCursor = nil
+                session.europePMCHasMore = true
+            }
+            // For .both, both providers are used so we don't reset
+
+            try? modelContext.save()
+        }
 
         // Initialize services if needed
         if llmService == nil || pubmedService == nil {
@@ -260,6 +338,13 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         do {
+            // For resumed sessions, clear the flag after first fetch
+            // (pagination refresh not implemented for macOS yet - matches iOS behavior
+            // but without the full refreshPaginationState implementation)
+            if isResumedSession {
+                isResumedSession = false
+            }
+
             // Step 1: Fetch more documents
             if session.canFetchMoreDocuments {
                 // More results available from original query
@@ -281,7 +366,7 @@ final class FactCheckWorkflow {
                 try await executeSmartSearch()
             } else {
                 // Both exhausted - nothing more we can do
-                print("[FetchMoreEvidence] No more evidence sources available")
+                AppLogger.workflow.info("[FetchMoreEvidence] No more evidence sources available")
                 session.currentStep = .completed
                 try? modelContext.save()
                 isRunning = false

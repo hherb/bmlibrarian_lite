@@ -16,6 +16,7 @@
 
 import SwiftUI
 import SwiftData
+import OSLog
 
 /// Sidebar navigation items.
 enum MacNavigationItem: String, CaseIterable, Identifiable {
@@ -43,6 +44,8 @@ enum MacNavigationItem: String, CaseIterable, Identifiable {
 /// - Content: Selected section content
 /// - Detail: Document details, reports, etc.
 struct MacContentView: View {
+    @Environment(\.modelContext) private var modelContext
+
     @State private var selectedNavItem: MacNavigationItem? = .factCheck
     @State private var hasAcceptedDisclaimer = UserDefaults.standard.bool(forKey: "hasAcceptedDisclaimer")
     @State private var hasSeenOnboarding = UserDefaults.standard.bool(forKey: "hasSeenOnboarding")
@@ -52,11 +55,20 @@ struct MacContentView: View {
     /// The active fact-check workflow (persisted across tab switches).
     @State private var activeWorkflow: FactCheckWorkflow?
 
+    /// The claim text for fact checking (persisted across tab switches).
+    @State private var claimText: String = ""
+
     /// The currently selected document for full-text viewing.
     @State private var selectedFullTextDocument: Document?
 
     /// Controls showing onboarding from settings.
     @State private var showingOnboardingFromSettings = false
+
+    /// Controls showing error alerts.
+    @State private var showingError = false
+
+    /// The error message to display in alerts.
+    @State private var errorMessage = ""
 
     var body: some View {
         if !hasAcceptedDisclaimer {
@@ -69,6 +81,11 @@ struct MacContentView: View {
                     MacOnboardingView(onComplete: {
                         showingOnboardingFromSettings = false
                     })
+                }
+                .alert("Error", isPresented: $showingError) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(errorMessage)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .showMacOnboarding)) { _ in
                     showingOnboardingFromSettings = true
@@ -111,6 +128,7 @@ struct MacContentView: View {
         case .factCheck:
             MacFactCheckView(
                 workflow: $activeWorkflow,
+                claimText: $claimText,
                 onReportGenerated: { report in
                     currentReport = report
                     selectedNavItem = .report
@@ -138,6 +156,9 @@ struct MacContentView: View {
                 onReportSelected: { report in
                     currentReport = report
                     selectedNavItem = .report
+                },
+                onContinueSession: { session in
+                    restoreSession(session)
                 }
             )
         case nil:
@@ -159,6 +180,75 @@ struct MacContentView: View {
         withAnimation {
             hasSeenOnboarding = true
         }
+    }
+
+    // MARK: - Session Restoration
+
+    /// Restores a session from history for viewing.
+    ///
+    /// This method is called when the user clicks "Continue Search" in history. It:
+    /// 1. Restores the original claim text to the input field
+    /// 2. Creates a workflow with the session loaded (without running it)
+    /// 3. Sets up callbacks for any subsequent actions (like "Add More Results")
+    /// 4. Sets the current report so the Report view shows it
+    /// 5. Navigates to the Fact Check view
+    ///
+    /// The session's documents, scores, and report are displayed without
+    /// re-running the workflow. The user can then click "Add More Results"
+    /// to fetch additional documents if more are available.
+    ///
+    /// - Parameter session: The fact-check session to restore for viewing.
+    private func restoreSession(_ session: FactCheckSession) {
+        AppLogger.workflow.info("[MacContentView] Restoring session: \(session.claim.prefix(50))...")
+
+        // Restore the claim text to the input field
+        claimText = session.claim
+
+        // Create a new workflow for this session
+        let restoredWorkflow = FactCheckWorkflow(
+            modelContext: modelContext,
+            settings: AppSettings.shared
+        )
+
+        // Configure workflow callbacks for any subsequent actions
+
+        // Called when workflow completes successfully with a report
+        restoredWorkflow.onComplete = { report in
+            currentReport = report
+            selectedNavItem = .report
+        }
+
+        // Called when an error occurs during workflow execution
+        restoredWorkflow.onError = { error in
+            AppLogger.workflow.error("[MacContentView] Workflow error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            showingError = true
+        }
+
+        // Called when budget limit is exceeded
+        restoredWorkflow.onBudgetExceeded = { message in
+            AppLogger.workflow.warning("[MacContentView] Budget exceeded: \(message)")
+            errorMessage = message
+            showingError = true
+        }
+
+        // Restore session for viewing (does NOT run the workflow)
+        // This sets isResumedSession = true so fetchMoreEvidence() will
+        // refresh pagination state before fetching new documents
+        restoredWorkflow.restoreForViewing(session)
+
+        // Set the workflow binding so MacFactCheckView receives it
+        activeWorkflow = restoredWorkflow
+
+        // Set the current report so Report view shows it
+        if let report = session.report {
+            currentReport = report
+        }
+
+        // Navigate to Fact Check
+        selectedNavItem = .factCheck
+
+        AppLogger.workflow.info("[MacContentView] Session restored with \(session.documents?.count ?? 0) documents")
     }
 }
 
