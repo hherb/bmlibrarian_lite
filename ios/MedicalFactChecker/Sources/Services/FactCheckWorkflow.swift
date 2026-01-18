@@ -271,7 +271,7 @@ final class FactCheckWorkflow {
                 document.meshTerms = article.meshTerms
                 document.publicationDate = article.publicationDate
                 document.session = session
-                document.sourceProvider = result.provider
+                document.searchSource = result.provider.rawValue
 
                 modelContext.insert(document)
                 newDocumentsFound += 1
@@ -948,7 +948,7 @@ final class FactCheckWorkflow {
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
             document.session = session
-            document.sourceProvider = result.provider
+            document.searchSource = result.provider.rawValue
 
             modelContext.insert(document)
         }
@@ -1663,7 +1663,7 @@ final class FactCheckWorkflow {
             document.pmcId = article.pmcId
             document.meshTerms = article.meshTerms
             document.publicationDate = article.publicationDate
-            document.sourceProvider = result.provider
+            document.searchSource = result.provider.rawValue
             document.session = session
 
             modelContext.insert(document)

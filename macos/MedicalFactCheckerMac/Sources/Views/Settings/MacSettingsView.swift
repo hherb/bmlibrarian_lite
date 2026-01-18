@@ -788,6 +788,8 @@ struct SyncSettingsTab: View {
 
 struct AboutTab: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(\.modelContext) private var modelContext
+    @State private var showingDeleteAllConfirmation = false
 
     var body: some View {
         VStack(spacing: MacSpacing.sectionSpacing) {
@@ -844,18 +846,46 @@ struct AboutTab: View {
 
             Spacer()
 
-            // Reset button
-            Button("Reset All Settings", role: .destructive) {
-                settings.resetToDefaults()
+            // Reset and delete buttons
+            VStack(spacing: MacSpacing.medium) {
+                Button("Reset All Settings", role: .destructive) {
+                    settings.resetToDefaults()
+                }
+
+                Button("Clear All Report Data", role: .destructive) {
+                    showingDeleteAllConfirmation = true
+                }
             }
             .padding(.bottom)
         }
         .padding(MacSpacing.section)
+        .alert("Delete All Reports?", isPresented: $showingDeleteAllConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete All", role: .destructive) {
+                deleteAllReportData()
+            }
+        } message: {
+            Text("This will permanently delete all fact-check sessions, documents, and reports. This action cannot be undone.")
+        }
+    }
+
+    /// Delete all fact-check sessions and their associated data.
+    ///
+    /// This removes all FactCheckSession objects from SwiftData,
+    /// which cascades to delete all Documents, Citations, and EvidenceReports.
+    private func deleteAllReportData() {
+        let descriptor = FetchDescriptor<FactCheckSession>()
+        if let sessions = try? modelContext.fetch(descriptor) {
+            for session in sessions {
+                modelContext.delete(session)
+            }
+            try? modelContext.save()
+        }
     }
 }
 
 #Preview {
     MacSettingsView()
         .environment(AppSettings.shared)
-        .modelContainer(for: [UsageRecord.self], inMemory: true)
+        .modelContainer(for: [UsageRecord.self, FactCheckSession.self], inMemory: true)
 }

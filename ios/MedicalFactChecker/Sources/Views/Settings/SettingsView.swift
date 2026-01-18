@@ -43,6 +43,9 @@ struct SettingsView: View {
     @State private var cloudStatus: CKAccountStatus = .couldNotDetermine
     @State private var showingRestartAlert = false
 
+    // Data deletion state
+    @State private var showingDeleteAllConfirmation = false
+
     /// Result of an API connection test.
     private enum APITestResult {
         case success(String)
@@ -460,6 +463,10 @@ struct SettingsView: View {
                         ncbiAPIKey = ""
                         showingCustomConfig = false
                     }
+
+                    Button("Clear All Report Data", role: .destructive) {
+                        showingDeleteAllConfirmation = true
+                    }
                 } header: {
                     Text("About")
                 }
@@ -469,6 +476,14 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text("API key saved securely to Keychain")
+            }
+            .alert("Delete All Reports?", isPresented: $showingDeleteAllConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete All", role: .destructive) {
+                    deleteAllReportData()
+                }
+            } message: {
+                Text("This will permanently delete all fact-check sessions, documents, and reports. This action cannot be undone.")
             }
             .onAppear {
                 loadCurrentValues()
@@ -496,6 +511,20 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    /// Delete all fact-check sessions and their associated data.
+    ///
+    /// This removes all FactCheckSession objects from SwiftData,
+    /// which cascades to delete all Documents, Citations, and EvidenceReports.
+    private func deleteAllReportData() {
+        let descriptor = FetchDescriptor<FactCheckSession>()
+        if let sessions = try? modelContext.fetch(descriptor) {
+            for session in sessions {
+                modelContext.delete(session)
+            }
+            try? modelContext.save()
+        }
+    }
 
     private func loadCurrentValues() {
         apiKey = settings.llmAPIKey

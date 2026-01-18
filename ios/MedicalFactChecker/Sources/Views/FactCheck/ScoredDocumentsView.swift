@@ -120,12 +120,10 @@ struct DocumentScoreRow: View {
                                 .foregroundColor(.secondary)
 
                             // Source provider badge
-                            if let provider = document.sourceProvider {
-                                DocumentSourceBadge(
-                                    provider: provider,
-                                    isPreprint: document.isPreprint
-                                )
-                            }
+                            DocumentSourceBadge(
+                                provider: document.searchSourceEnum,
+                                isPreprint: document.isPreprint
+                            )
                         }
                     }
 

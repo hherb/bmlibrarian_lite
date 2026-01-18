@@ -98,12 +98,24 @@ final class Document {
 
     // MARK: - Source Tracking
 
-    /// The search provider that returned this document (raw value string).
-    /// Values: "pubmed", "europepmc", or nil if unknown/legacy.
-    var sourceProviderRaw: String?
+    /// The search provider that returned this document.
+    ///
+    /// Stored as raw string value of `SearchProvider` enum:
+    /// - "pubmed": PubMed/NCBI
+    /// - "europePMC": Europe PMC
+    /// - "both": Found by both providers (merged result)
+    var searchSource: String?
 
     /// Whether this is a preprint (Europe PMC only).
     var isPreprint: Bool = false
+
+    /// The `SearchProvider` enum value for the stored source string.
+    ///
+    /// Returns `.pubmed` as default if no source is set (for backwards compatibility).
+    var searchSourceEnum: SearchProvider {
+        guard let source = searchSource else { return .pubmed }
+        return SearchProvider(rawValue: source) ?? .pubmed
+    }
 
     // MARK: - Full Text
 
@@ -127,6 +139,12 @@ final class Document {
 
     /// True if full text fetch was attempted but no source was available.
     var fullTextUnavailable: Bool = false
+
+    /// Whether full text is known to be available in PubMed Central.
+    ///
+    /// Set from search results metadata (Europe PMC `inPMC` flag or presence of PMC ID).
+    /// Used to display availability indicator before user attempts to fetch full text.
+    var hasFullTextInPMC: Bool = false
 
     // MARK: - Relationships
 
@@ -259,15 +277,68 @@ final class Document {
         return parts.joined(separator: ". ")
     }
 
-    /// The search provider that returned this document.
-    var sourceProvider: SearchProvider? {
-        get {
-            guard let raw = sourceProviderRaw else { return nil }
-            return SearchProvider(rawValue: raw)
+    /// The `AppFullTextSource` enum value for the stored source string.
+    ///
+    /// Returns nil if no source is set or if the string doesn't match a known source.
+    var fullTextSourceEnum: AppFullTextSource? {
+        guard let source = fullTextSource else { return nil }
+        return AppFullTextSource(rawValue: source)
+    }
+
+    /// SF Symbol icon name for the full text source.
+    var fullTextSourceIcon: String? {
+        fullTextSourceEnum?.iconName
+    }
+
+    // MARK: - Full Text Update Methods
+
+    /// Update the document with a successful full text result.
+    ///
+    /// - Parameter result: The full text retrieval result.
+    func applyFullTextResult(_ result: AppFullTextResult) {
+        fullTextSource = result.source.rawValue
+        fullTextFetchedAt = Date()
+        fullTextUnavailable = false
+
+        switch result.content {
+        case .markdown(let content):
+            fullTextContent = content
+            fullTextHTML = nil
+            fullTextPDFPath = nil
+        case .html(let htmlContent):
+            fullTextHTML = htmlContent
+            fullTextContent = nil
+            fullTextPDFPath = nil
+        case .pdfURL:
+            // PDF path will be set after download
+            fullTextContent = nil
+            fullTextHTML = nil
+        case .webURL:
+            // Web URLs don't store content locally
+            fullTextContent = nil
+            fullTextHTML = nil
+            fullTextPDFPath = nil
         }
-        set {
-            sourceProviderRaw = newValue?.rawValue
-        }
+    }
+
+    /// Mark the document as having no full text available.
+    func markFullTextUnavailable() {
+        fullTextUnavailable = true
+        fullTextFetchedAt = nil
+        fullTextContent = nil
+        fullTextHTML = nil
+        fullTextPDFPath = nil
+        fullTextSource = nil
+    }
+
+    /// Clear cached full text data to allow re-fetching.
+    func clearFullTextCache() {
+        fullTextContent = nil
+        fullTextHTML = nil
+        fullTextPDFPath = nil
+        fullTextSource = nil
+        fullTextFetchedAt = nil
+        fullTextUnavailable = false
     }
 
     // MARK: - Private Helpers
