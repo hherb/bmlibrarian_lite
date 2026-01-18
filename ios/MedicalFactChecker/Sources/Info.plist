@@ -48,5 +48,9 @@
 	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2025 Dr Horst Herb</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

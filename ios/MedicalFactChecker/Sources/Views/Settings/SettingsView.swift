@@ -453,7 +453,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.1.0")
+                        Text(Bundle.main.appVersionString)
                             .foregroundColor(.secondary)
                     }
 

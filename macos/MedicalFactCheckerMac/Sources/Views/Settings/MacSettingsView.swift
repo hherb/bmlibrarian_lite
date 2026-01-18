@@ -803,7 +803,7 @@ struct AboutTab: View {
                     .font(.title)
                     .fontWeight(.bold)
 
-                Text("Version 1.0.0")
+                Text("Version \(Bundle.main.appVersionString)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
