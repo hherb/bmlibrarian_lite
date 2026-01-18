@@ -110,6 +110,11 @@ final class Document {
     /// The full text content (markdown format for XML sources, nil for PDF-only).
     var fullTextContent: String?
 
+    /// The full text content in HTML format (from Europe PMC XML conversion).
+    ///
+    /// Preferred over markdown for proper table and figure rendering.
+    var fullTextHTML: String?
+
     /// URL to the locally cached PDF file, if available.
     var fullTextPDFPath: String?
 

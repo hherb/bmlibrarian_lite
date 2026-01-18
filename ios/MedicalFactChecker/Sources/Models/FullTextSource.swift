@@ -50,7 +50,8 @@ enum AppFullTextSource: String, Codable, Sendable {
 struct AppFullTextResult: Sendable {
     /// Type of content retrieved from full-text sources.
     enum ContentType: Sendable {
-        case markdown(String)    // Europe PMC XML converted to markdown
+        case html(String)        // Europe PMC XML converted to HTML (preferred)
+        case markdown(String)    // Fallback: plain markdown
         case pdfURL(URL)         // URL to downloadable PDF
         case webURL(URL)         // Fallback URL to open in browser
     }
@@ -61,11 +62,19 @@ struct AppFullTextResult: Sendable {
     /// Whether this result can be displayed in-app.
     var canDisplayInApp: Bool {
         switch content {
-        case .markdown, .pdfURL:
+        case .html, .markdown, .pdfURL:
             return true
         case .webURL:
             return false
         }
+    }
+
+    /// Get the HTML content if available.
+    var htmlContent: String? {
+        if case .html(let text) = content {
+            return text
+        }
+        return nil
     }
 
     /// Get the markdown content if available.

@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
+import WebKit
 #if canImport(PDFKit)
 import PDFKit
 #endif
@@ -68,6 +69,9 @@ struct FullTextViewer: View {
     @ViewBuilder
     private var content: some View {
         switch result.content {
+        case .html(let htmlContent):
+            HTMLContentView(htmlContent: htmlContent)
+
         case .markdown(let text):
             MarkdownScrollView(content: text)
 
@@ -99,10 +103,18 @@ struct FullTextViewer: View {
 
     private var shareMenu: some View {
         Menu {
-            if case .markdown(let text) = result.content {
+            // Copy text option for HTML or markdown content
+            switch result.content {
+            case .html(let html):
+                Button(action: { PlatformHelper.copyToClipboard(html) }) {
+                    Label("Copy HTML", systemImage: "doc.on.doc")
+                }
+            case .markdown(let text):
                 Button(action: { PlatformHelper.copyToClipboard(text) }) {
                     Label("Copy Text", systemImage: "doc.on.doc")
                 }
+            default:
+                EmptyView()
             }
 
             if let doi = document.doi,
@@ -133,9 +145,331 @@ struct FullTextViewer: View {
     }
 }
 
+// MARK: - HTML Content View
+
+/// SwiftUI view that renders HTML content using WKWebView.
+///
+/// Provides proper table rendering, semantic HTML structure, and
+/// clickable anchor links for navigation within the document.
+struct HTMLContentView: UIViewRepresentable {
+    /// The HTML body content to render (without HTML/head wrapper).
+    let htmlContent: String
+
+    /// Coordinator to handle WKWebView navigation and callbacks.
+    class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: HTMLContentView
+
+        init(_ parent: HTMLContentView) {
+            self.parent = parent
+        }
+
+        /// Handle navigation actions (e.g., anchor clicks, external links).
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Handle anchor links within the document
+            if url.scheme == nil || url.absoluteString.hasPrefix("#") {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Handle internal fragment navigation
+            if url.fragment != nil && url.host == nil {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Open external links in Safari
+            if url.scheme == "http" || url.scheme == "https" {
+                UIApplication.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+
+        // Enable JavaScript for anchor navigation
+        let preferences = WKPreferences()
+        configuration.preferences = preferences
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+
+        // Set appearance to match system
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+
+        // Load the HTML content
+        let fullHTML = wrapHTMLContent(htmlContent)
+        webView.loadHTMLString(fullHTML, baseURL: nil)
+
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        // Re-load content if it changed
+        let fullHTML = wrapHTMLContent(htmlContent)
+        webView.loadHTMLString(fullHTML, baseURL: nil)
+    }
+
+    /// Wrap HTML content in a full HTML document with CSS styling.
+    private func wrapHTMLContent(_ content: String) -> String {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+                \(htmlCSS)
+            </style>
+            <script>
+                \(htmlJavaScript)
+            </script>
+        </head>
+        <body>
+            \(content)
+        </body>
+        </html>
+        """
+    }
+
+    /// CSS styles for the HTML content.
+    private var htmlCSS: String {
+        """
+        :root {
+            color-scheme: light dark;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+            padding: 16px;
+            max-width: 100%;
+            margin: 0 auto;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            -webkit-text-size-adjust: 100%;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-color: #e0e0e0;
+                --bg-color: #1c1c1e;
+                --heading-color: #ffffff;
+                --link-color: #0a84ff;
+                --border-color: #444;
+                --table-header-bg: #2c2c2e;
+                --table-alt-bg: #252527;
+                --highlight-bg: #665500;
+            }
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --text-color: #333;
+                --bg-color: #ffffff;
+                --heading-color: #1a1a1a;
+                --link-color: #007aff;
+                --border-color: #ddd;
+                --table-header-bg: #f0f4f8;
+                --table-alt-bg: #fafafa;
+                --highlight-bg: #ffff00;
+            }
+        }
+
+        h1 {
+            font-size: 1.6em;
+            color: var(--heading-color);
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 8px;
+            margin-top: 0;
+        }
+
+        h2 {
+            font-size: 1.3em;
+            color: var(--heading-color);
+            margin-top: 1.5em;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 4px;
+        }
+
+        h3 {
+            font-size: 1.15em;
+            color: var(--heading-color);
+            margin-top: 1.2em;
+        }
+
+        h4, h5, h6 {
+            font-size: 1.05em;
+            color: var(--heading-color);
+            margin-top: 1em;
+        }
+
+        p {
+            margin: 0.8em 0;
+        }
+
+        a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+
+        a:hover, a:active {
+            text-decoration: underline;
+        }
+
+        /* Metadata styling */
+        .authors, .journal-info, .identifiers {
+            font-size: 0.95em;
+            margin: 0.5em 0;
+        }
+
+        /* Table styling */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+            font-size: 0.9em;
+            display: block;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            text-align: left;
+            vertical-align: top;
+            min-width: 80px;
+        }
+
+        th {
+            background-color: var(--table-header-bg);
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) {
+            background-color: var(--table-alt-bg);
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin: 1.5em 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-caption {
+            font-style: italic;
+            margin-bottom: 0.5em;
+            color: var(--text-color);
+            opacity: 0.8;
+        }
+
+        /* Figure styling */
+        figure {
+            margin: 1.5em 0;
+            padding: 1em;
+            background-color: var(--table-alt-bg);
+            border-radius: 8px;
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
+        figcaption {
+            margin-top: 0.5em;
+            font-size: 0.9em;
+            text-align: center;
+        }
+
+        figcaption strong {
+            display: block;
+            margin-bottom: 0.3em;
+        }
+
+        /* References styling */
+        .references {
+            font-size: 0.9em;
+        }
+
+        .references li {
+            margin-bottom: 0.8em;
+            padding-left: 0.5em;
+        }
+
+        /* iOS-specific adjustments */
+        * {
+            -webkit-touch-callout: default;
+            -webkit-user-select: text;
+        }
+        """
+    }
+
+    /// JavaScript for figure fallback and anchor navigation.
+    private var htmlJavaScript: String {
+        """
+        // Try alternative image extensions when loading fails
+        function tryAlternativeExtensions(img) {
+            var src = img.src;
+            var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+            var currentExt = src.match(/\\.[^.]+$/);
+
+            if (!currentExt) return;
+
+            var base = src.slice(0, -currentExt[0].length);
+            var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
+
+            for (var i = 0; i < extensions.length; i++) {
+                if (i !== currentIndex) {
+                    img.src = base + extensions[i];
+                    return;
+                }
+            }
+        }
+
+        // Smooth scroll to anchor
+        document.addEventListener('click', function(e) {
+            var target = e.target.closest('a[href^="#"]');
+            if (target) {
+                e.preventDefault();
+                var id = target.getAttribute('href').substring(1);
+                var element = document.getElementById(id);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
+        });
+        """
+    }
+}
+
 // MARK: - Markdown Scroll View
 
 /// Scrollable view for markdown content with proper text rendering.
+/// Note: This is a fallback for when HTML content is not available.
 struct MarkdownScrollView: View {
     /// The markdown content to display.
     let content: String
@@ -311,28 +645,40 @@ struct PDFKitRepresentableMac: NSViewRepresentable {
         abstract: "Background: Vitamin D has been proposed..."
     )
 
-    let sampleMarkdown = """
-    # Effect of Vitamin D Supplementation on COVID-19 Outcomes
+    let sampleHTML = """
+    <h1>Effect of Vitamin D Supplementation on COVID-19 Outcomes</h1>
 
-    **Authors:** Smith J, Jones A, Brown B
+    <p class="authors"><strong>Authors:</strong> Smith J, Jones A, Brown B et al.</p>
 
-    *Journal of Medical Virology* (2024)
+    <p class="journal-info"><em>Journal of Medical Virology</em> (2024)</p>
 
-    ## Abstract
+    <h2>Abstract</h2>
 
-    Vitamin D has been proposed to have immunomodulatory effects that may be beneficial in COVID-19.
+    <p>Vitamin D has been proposed to have immunomodulatory effects that may be beneficial in COVID-19.</p>
 
-    ## Methods
+    <h2>Methods</h2>
 
-    We conducted a systematic review and meta-analysis of randomized controlled trials.
+    <p>We conducted a systematic review and meta-analysis of randomized controlled trials.</p>
 
-    ## Results
+    <h2>Results</h2>
 
-    Ten studies with 5,234 participants were included. Vitamin D supplementation was associated with...
+    <table>
+        <thead>
+            <tr><th>Study</th><th>N</th><th>Effect Size</th><th>p-value</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Smith 2021</td><td>423</td><td>0.72</td><td>0.03</td></tr>
+            <tr><td>Jones 2022</td><td>856</td><td>0.68</td><td>0.01</td></tr>
+            <tr><td>Brown 2023</td><td>1,024</td><td>0.81</td><td>0.04</td></tr>
+        </tbody>
+    </table>
+
+    <p>Ten studies with 5,234 participants were included. Vitamin D supplementation was associated with
+    reduced ICU admission rates.</p>
     """
 
     return FullTextViewer(
         document: doc,
-        result: AppFullTextResult(content: .markdown(sampleMarkdown), source: .europePMC)
+        result: AppFullTextResult(content: .html(sampleHTML), source: .europePMC)
     )
 }

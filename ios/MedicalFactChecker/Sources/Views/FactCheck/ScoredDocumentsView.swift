@@ -348,6 +348,8 @@ struct DocumentScoreRow: View {
                 await MainActor.run {
                     // Update document model
                     switch result.content {
+                    case .html(let htmlContent):
+                        document.fullTextHTML = htmlContent
                     case .markdown(let content):
                         document.fullTextContent = content
                     case .pdfURL(let url):
