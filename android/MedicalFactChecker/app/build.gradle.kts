@@ -8,16 +8,17 @@ plugins {
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
     id("kotlin-parcelize")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.bmlibrarian.factchecker"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.bmlibrarian.factchecker"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
 
@@ -61,10 +62,6 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.10"
     }
 
     packaging {
