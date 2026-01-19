@@ -796,7 +796,7 @@ class JATSXMLParser(
         // Europe PMC figure URL pattern
         if (pmcId.isNotEmpty()) {
             val normalizedPmcId = normalizePmcId(pmcId)
-            val baseUrl = "$Constants.JATS_EUROPE_PMC_FIGURE_BASE_URL/$normalizedPmcId/bin/$path"
+            val baseUrl = "${Constants.JATS_EUROPE_PMC_FIGURE_BASE_URL}/$normalizedPmcId/bin/$path"
             return if (!hasExtension) "$baseUrl.jpg" else baseUrl
         }
 
