@@ -208,9 +208,9 @@ final class Document {
     var shortReference: String {
         let authorPart: String
         if let firstAuthor = authors.first {
-            // Extract last name
-            let lastName = firstAuthor.components(separatedBy: " ").first ?? firstAuthor
-            authorPart = authors.count > 1 ? "\(lastName) et al." : lastName
+            // Extract surname (before comma in "LastName, FirstName" format)
+            let surname = firstAuthor.components(separatedBy: ", ").first ?? firstAuthor
+            authorPart = authors.count > 1 ? "\(surname) et al." : surname
         } else {
             authorPart = "Unknown"
         }

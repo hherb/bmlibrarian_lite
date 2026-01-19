@@ -334,31 +334,37 @@ struct MacFactCheckView: View {
 // MARK: - Subviews
 
 /// Warning banner displayed when LLM is not configured.
+///
+/// The entire banner is tappable and opens the Settings window.
+/// A chevron indicator shows the banner is interactive.
 struct MacConfigurationWarningView: View {
     var body: some View {
-        HStack(spacing: MacSpacing.standard) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.title2)
-                .foregroundColor(.orange)
+        SettingsLink {
+            HStack(spacing: MacSpacing.standard) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundColor(.orange)
 
-            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
-                Text("LLM Not Configured")
-                    .font(.headline)
-                Text("Open Settings to configure your LLM API before fact-checking.")
+                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                    Text("LLM Not Configured")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text("Click to configure your LLM API before fact-checking.")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
                     .font(.body)
                     .foregroundColor(.secondary)
             }
-
-            Spacer()
-
-            SettingsLink {
-                Text("Open Settings")
-            }
-            .buttonStyle(.bordered)
+            .padding(MacSpacing.large)
+            .background(Color.orange.opacity(MacOpacity.subtle))
+            .cornerRadius(MacCornerRadius.large)
         }
-        .padding(MacSpacing.large)
-        .background(Color.orange.opacity(MacOpacity.subtle))
-        .cornerRadius(MacCornerRadius.large)
+        .buttonStyle(.plain)
     }
 }
 
