@@ -934,8 +934,33 @@ fun AppRoot() {
 }
 ```
 
-**Constants**:
-- Background color: `Color(0xFFFFF3E0)` (light orange)
+**Constants** (add to `ui/theme/Colors.kt` or `util/Constants.kt`):
+```kotlin
+// Disclaimer colors
+val DisclaimerBackgroundColor = Color(0xFFFFF3E0) // Light orange
+
+// Score badge colors (used in ScoreBadge, DocumentCard)
+object ScoreColors {
+    val Score5 = Color(0xFF4CAF50)  // Green - Directly relevant
+    val Score4 = Color(0xFF2196F3)  // Blue - Highly relevant
+    val Score3 = Color(0xFFFFEB3B)  // Yellow - Moderately relevant
+    val Score2 = Color(0xFFFF9800)  // Orange - Marginally relevant
+    val Score1 = Color(0xFFF44336)  // Red - Not relevant
+}
+
+// Full-text source colors
+object FullTextSourceColors {
+    val Unpaywall = Color(0xFF4CAF50)  // Green
+}
+
+// Code block colors for markdown
+object MarkdownColors {
+    val CodeBlockBackgroundDark = Color(0xFF2D2D2D)
+    val CodeBlockBackgroundLight = Color(0xFFF5F5F5)
+    val BlockQuoteDark = Color(0xFF4CAF50)
+    val BlockQuoteLight = Color(0xFF2196F3)
+}
+```
 - Icon size: 64.dp (app icon), 24.dp (point icons)
 - Button corner radius: 12.dp
 - Content padding: 16.dp
@@ -1252,6 +1277,7 @@ Typical costs:
 **Dependencies**:
 ```kotlin
 // In build.gradle.kts
+// Note: Check https://github.com/noties/Markwon for latest version
 implementation("io.noties.markwon:core:4.6.2")
 implementation("io.noties.markwon:html:4.6.2")
 implementation("io.noties.markwon:image:4.6.2")
@@ -2002,12 +2028,23 @@ suspend fun scoreDocumentsWithEmbedding(
 // In build.gradle.kts
 dependencies {
     // TensorFlow Lite
+    // Note: Check https://www.tensorflow.org/lite/android for latest versions
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 
     // Optional: NNAPI delegate for hardware acceleration
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 }
+```
+
+**Required Imports for EmbeddingService**:
+```kotlin
+import kotlin.math.sqrt
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
+import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.nnapi.NnApiDelegate
 ```
 
 **Model Download Note**:
@@ -2117,7 +2154,7 @@ suspend fun scoreDocumentsWithEmbedding(
     }
 
     // Prepare HyDE abstract
-    await prepareForEmbeddingScoring()
+    prepareForEmbeddingScoring()
 
     // Use HyDE abstract if available, otherwise fall back to raw claim
     val queryText = session.hydeAbstract ?: claim
@@ -2424,10 +2461,14 @@ class CloudSyncService @Inject constructor(
             if (localSession == null) {
                 // New session from another device
                 sessionRepository.insert(remoteSession.toEntity())
-            } else if (remoteSession.updatedAt > localSession.updatedAt) {
-                // Remote is newer, update local
-                if (remoteSession.deviceId != deviceId) {
-                    sessionRepository.update(remoteSession.toEntity())
+            } else {
+                // Compare timestamps (convert Firestore Timestamp to millis)
+                val remoteMillis = remoteSession.updatedAt.toDate().time
+                if (remoteMillis > localSession.updatedAt) {
+                    // Remote is newer, update local
+                    if (remoteSession.deviceId != deviceId) {
+                        sessionRepository.update(remoteSession.toEntity())
+                    }
                 }
             }
             // If local is newer, uploadSession will handle it
@@ -2505,7 +2546,9 @@ class CloudSyncService @Inject constructor(
             val cloudSession = doc.toObject(SessionCloud::class.java) ?: return@forEach
             val localSession = sessionRepository.getById(cloudSession.id)
 
-            if (localSession == null || cloudSession.updatedAt > localSession.updatedAt) {
+            // Compare timestamps (convert Firestore Timestamp to millis)
+            val cloudMillis = cloudSession.updatedAt.toDate().time
+            if (localSession == null || cloudMillis > localSession.updatedAt) {
                 sessionRepository.insertOrUpdate(cloudSession.toEntity())
             }
         }
@@ -2945,9 +2988,8 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-auth-ktx")
 
-    // Pager for onboarding
-    implementation("com.google.accompanist:accompanist-pager:0.32.0")
-    implementation("com.google.accompanist:accompanist-pager-indicators:0.32.0")
+    // Note: HorizontalPager is now part of Compose Foundation (1.4.0+)
+    // No separate pager dependency needed if using Compose BOM 2024.01.00+
 }
 ```
 
