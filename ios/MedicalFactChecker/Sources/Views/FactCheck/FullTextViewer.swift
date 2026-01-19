@@ -564,6 +564,18 @@ struct PDFContentView: View {
                   httpResponse.statusCode == FullTextConstants.httpStatusOK else {
                 throw URLError(.badServerResponse)
             }
+
+            // Validate PDF magic bytes (%PDF)
+            let pdfMagic = Data(FullTextConstants.pdfMagicBytes)
+            guard data.count > pdfMagic.count,
+                  data.prefix(pdfMagic.count) == pdfMagic else {
+                await MainActor.run {
+                    self.error = "The URL did not return a valid PDF file. Try opening in browser."
+                    self.isLoading = false
+                }
+                return
+            }
+
             await MainActor.run {
                 self.pdfData = data
                 self.isLoading = false
@@ -581,16 +593,43 @@ struct PDFContentView: View {
 
 #if canImport(PDFKit)
 /// Cross-platform PDFKit view wrapper.
+///
+/// Validates that the PDF document can be created and displays an error if it fails.
 struct PDFKitView: View {
     /// The PDF data to display.
     let data: Data
 
+    /// Whether the PDF document could be created successfully.
+    private var canCreateDocument: Bool {
+        PDFKit.PDFDocument(data: data) != nil
+    }
+
     var body: some View {
-        #if os(iOS)
-        PDFKitRepresentable(data: data)
-        #elseif os(macOS)
-        PDFKitRepresentableMac(data: data)
-        #endif
+        if canCreateDocument {
+            #if os(iOS)
+            PDFKitRepresentable(data: data)
+            #elseif os(macOS)
+            PDFKitRepresentableMac(data: data)
+            #endif
+        } else {
+            pdfLoadFailedView
+        }
+    }
+
+    /// View shown when PDF document creation fails.
+    private var pdfLoadFailedView: some View {
+        VStack(spacing: FullTextViewerConstants.stackSpacing) {
+            Image(systemName: "doc.badge.xmark")
+                .font(.largeTitle)
+                .foregroundColor(.orange)
+            Text("Unable to render this PDF")
+                .font(.headline)
+            Text("The file may be corrupted or in an unsupported format.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(FullTextViewerConstants.contentPadding)
     }
 }
 
@@ -605,9 +644,8 @@ struct PDFKitRepresentable: UIViewRepresentable {
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
-        if let document = PDFKit.PDFDocument(data: data) {
-            pdfView.document = document
-        }
+        // Document creation already validated by PDFKitView
+        pdfView.document = PDFKit.PDFDocument(data: data)
         return pdfView
     }
 

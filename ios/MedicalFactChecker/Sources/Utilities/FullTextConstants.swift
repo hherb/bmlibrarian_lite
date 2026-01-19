@@ -75,4 +75,9 @@ enum FullTextConstants {
     /// Fallback email for API identification when user hasn't configured one.
     /// Note: APIs like Unpaywall prefer a real email for contact purposes.
     static let fallbackEmail = "user@medicalfactchecker.app"
+
+    // MARK: - PDF Validation
+
+    /// PDF magic bytes ("%PDF") for validating downloaded data.
+    static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
 }
