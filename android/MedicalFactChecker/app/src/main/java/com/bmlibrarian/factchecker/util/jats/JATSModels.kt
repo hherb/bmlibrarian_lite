@@ -18,6 +18,8 @@
 
 package com.bmlibrarian.factchecker.util.jats
 
+import com.bmlibrarian.factchecker.util.Constants
+
 /**
  * Errors that can occur during JATS XML parsing.
  */
@@ -162,7 +164,7 @@ data class JATSReferenceInfo(
 
             // Authors
             if (authors.isNotEmpty()) {
-                if (authors.size <= MAX_AUTHORS_BEFORE_ET_AL) {
+                if (authors.size <= Constants.JATS_MAX_AUTHORS_BEFORE_ET_AL) {
                     parts.add(authors.joinToString(", "))
                 } else {
                     parts.add("${authors[0]}, ${authors[1]}, et al.")
@@ -213,10 +215,6 @@ data class JATSReferenceInfo(
             // If we have structured data, use it; otherwise fall back to raw citation
             return if (parts.isEmpty()) citation else parts.joinToString(". ")
         }
-
-    companion object {
-        private const val MAX_AUTHORS_BEFORE_ET_AL = 3
-    }
 }
 
 /**
