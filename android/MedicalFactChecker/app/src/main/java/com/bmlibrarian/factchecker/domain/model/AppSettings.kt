@@ -54,7 +54,8 @@ data class AppSettings(
     val monthlyBudgetUsd: Double = Constants.DEFAULT_MONTHLY_BUDGET_USD.toDouble(),
     val hasAcceptedDisclaimer: Boolean = false,
     val hasCompletedOnboarding: Boolean = false,
-    val ncbiEmail: String = ""
+    val ncbiEmail: String = "",
+    val unpaywallEmail: String = ""
 ) {
     /**
      * Get the current LLM provider configuration.
