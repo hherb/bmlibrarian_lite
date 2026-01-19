@@ -21,7 +21,6 @@ package com.bmlibrarian.factchecker.data.remote.fulltext
 import android.content.Context
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
-import com.bmlibrarian.factchecker.domain.model.EuropePMCError
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import com.bmlibrarian.factchecker.util.jats.JATSParseError

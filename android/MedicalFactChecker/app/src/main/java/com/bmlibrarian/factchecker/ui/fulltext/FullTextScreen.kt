@@ -351,9 +351,9 @@ private fun WebUrlContent(
                 Icon(
                     imageVector = Icons.Default.OpenInBrowser,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(Constants.UI_ICON_SIZE.dp)
                 )
-                Spacer(modifier = Modifier.padding(4.dp))
+                Spacer(modifier = Modifier.padding(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                 Text("Open in Browser")
             }
         }
@@ -441,9 +441,9 @@ private fun UnavailableContent(
                     Icon(
                         imageVector = Icons.Default.OpenInBrowser,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(Constants.UI_ICON_SIZE.dp)
                     )
-                    Spacer(modifier = Modifier.padding(4.dp))
+                    Spacer(modifier = Modifier.padding(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                     Text("Try Publisher Website")
                 }
             }

@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.util.jats
 
 import android.util.Log
+import com.bmlibrarian.factchecker.util.Constants
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
@@ -55,10 +56,6 @@ class JATSXMLParser(
 ) {
     companion object {
         private const val TAG = "JATSXMLParser"
-        private const val MAX_HEADING_LEVEL = 6
-        private const val MAX_AUTHORS_BEFORE_ET_AL = 3
-        private const val MIN_PMID_LENGTH = 7
-        private const val EUROPE_PMC_FIGURE_BASE_URL = "https://europepmc.org/articles"
 
         /** Elements that accumulate their own text content. */
         private val TEXT_ACCUMULATING_ELEMENTS = setOf(
@@ -587,7 +584,7 @@ class JATSXMLParser(
                 if (inRefCitation) {
                     when {
                         text.startsWith("10.") -> currentReference?.doi = text
-                        text.all { it.isDigit() } && text.length >= MIN_PMID_LENGTH -> {
+                        text.all { it.isDigit() } && text.length >= Constants.JATS_MIN_PMID_LENGTH -> {
                             currentReference?.pmid = text
                         }
                     }
@@ -735,10 +732,10 @@ class JATSXMLParser(
             }
         }
 
-        return if (authorNames.size <= MAX_AUTHORS_BEFORE_ET_AL) {
+        return if (authorNames.size <= Constants.JATS_MAX_AUTHORS_BEFORE_ET_AL) {
             authorNames.joinToString(", ")
         } else {
-            "${authorNames.take(MAX_AUTHORS_BEFORE_ET_AL).joinToString(", ")} et al."
+            "${authorNames.take(Constants.JATS_MAX_AUTHORS_BEFORE_ET_AL).joinToString(", ")} et al."
         }
     }
 
@@ -799,7 +796,7 @@ class JATSXMLParser(
         // Europe PMC figure URL pattern
         if (pmcId.isNotEmpty()) {
             val normalizedPmcId = normalizePmcId(pmcId)
-            val baseUrl = "$EUROPE_PMC_FIGURE_BASE_URL/$normalizedPmcId/bin/$path"
+            val baseUrl = "$Constants.JATS_EUROPE_PMC_FIGURE_BASE_URL/$normalizedPmcId/bin/$path"
             return if (!hasExtension) "$baseUrl.jpg" else baseUrl
         }
 
@@ -809,7 +806,7 @@ class JATSXMLParser(
 
     private fun formatBodySection(section: JATSBodySection, level: Int): List<String> {
         val lines = mutableListOf<String>()
-        val headingPrefix = "#".repeat(minOf(level, MAX_HEADING_LEVEL))
+        val headingPrefix = "#".repeat(minOf(level, Constants.JATS_MAX_HEADING_LEVEL))
 
         if (section.title.isNotEmpty()) {
             lines.add("$headingPrefix ${section.title}")
@@ -975,7 +972,7 @@ class JATSXMLParser(
 
     private fun formatBodySectionHtml(section: JATSBodySection, level: Int): List<String> {
         val html = mutableListOf<String>()
-        val headingLevel = minOf(level, MAX_HEADING_LEVEL)
+        val headingLevel = minOf(level, Constants.JATS_MAX_HEADING_LEVEL)
 
         if (section.title.isNotEmpty()) {
             html.add("<h$headingLevel>${escapeHtml(section.title)}</h$headingLevel>")
@@ -1063,10 +1060,10 @@ class JATSXMLParser(
 
         // Authors
         if (ref.authors.isNotEmpty()) {
-            if (ref.authors.size <= MAX_AUTHORS_BEFORE_ET_AL) {
+            if (ref.authors.size <= Constants.JATS_MAX_AUTHORS_BEFORE_ET_AL) {
                 parts.add(escapeHtml(ref.authors.joinToString(", ")))
             } else {
-                val firstAuthors = ref.authors.take(MAX_AUTHORS_BEFORE_ET_AL - 1).joinToString(", ")
+                val firstAuthors = ref.authors.take(Constants.JATS_MAX_AUTHORS_BEFORE_ET_AL - 1).joinToString(", ")
                 parts.add(escapeHtml("$firstAuthors, et al."))
             }
         }
@@ -1180,7 +1177,7 @@ class JATSXMLParser(
         when {
             text.startsWith("10.") -> doi = text
             text.startsWith("PMC") -> pmcId = text
-            text.all { it.isDigit() } && text.length >= MIN_PMID_LENGTH -> {
+            text.all { it.isDigit() } && text.length >= Constants.JATS_MIN_PMID_LENGTH -> {
                 if (pmid.isEmpty()) pmid = text
             }
         }
