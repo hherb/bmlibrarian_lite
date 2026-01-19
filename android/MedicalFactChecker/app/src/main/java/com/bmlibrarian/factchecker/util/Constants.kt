@@ -194,6 +194,26 @@ object Constants {
     /** Full-text source: Cached from previous fetch. */
     const val FULLTEXT_SOURCE_CACHED = "cached"
 
+    // ==================== JATS Parsing Constants ====================
+
+    /** Maximum heading level in markdown output. */
+    const val JATS_MAX_HEADING_LEVEL = 6
+
+    /** Maximum authors before showing "et al." in JATS output. */
+    const val JATS_MAX_AUTHORS_BEFORE_ET_AL = 3
+
+    /** Minimum length for PMID detection. */
+    const val JATS_MIN_PMID_LENGTH = 7
+
+    /** Europe PMC figure base URL. */
+    const val JATS_EUROPE_PMC_FIGURE_BASE_URL = "https://europepmc.org/articles"
+
+    /** Europe PMC full text XML base URL. */
+    const val EUROPE_PMC_FULLTEXT_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/"
+
+    /** Default email for Unpaywall API (should be configured by user). */
+    const val UNPAYWALL_DEFAULT_EMAIL = "bmlibrarian@example.com"
+
     // ==================== External URL Prefixes ====================
 
     /** DOI resolver URL prefix. */

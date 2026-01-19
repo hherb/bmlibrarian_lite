@@ -18,13 +18,17 @@
 
 package com.bmlibrarian.factchecker.di
 
+import android.content.Context
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
+import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.UnpaywallApi
 import com.bmlibrarian.factchecker.data.remote.llm.AnthropicApi
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.data.remote.llm.OpenAIApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.bmlibrarian.factchecker.util.Constants
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
@@ -245,6 +249,49 @@ object NetworkModule {
     @Singleton
     fun provideEuropePMCService(api: EuropePMCApi): EuropePMCService {
         return EuropePMCService(api)
+    }
+
+    // ==================== Unpaywall API ====================
+
+    /**
+     * Provides the Unpaywall API interface.
+     *
+     * Used for looking up open access PDF versions of articles.
+     *
+     * @param retrofitBuilder The Retrofit builder to use
+     * @return Unpaywall API interface
+     */
+    @Provides
+    @Singleton
+    fun provideUnpaywallApi(retrofitBuilder: Retrofit.Builder): UnpaywallApi {
+        return retrofitBuilder
+            .baseUrl(UnpaywallApi.BASE_URL)
+            .build()
+            .create(UnpaywallApi::class.java)
+    }
+
+    // ==================== Full-Text Service ====================
+
+    /**
+     * Provides the Full-Text service.
+     *
+     * Orchestrates full-text retrieval from Europe PMC, Unpaywall, and DOI fallback.
+     *
+     * @param context Application context for caching
+     * @param europePmcService Europe PMC service
+     * @param unpaywallApi Unpaywall API interface
+     * @param okHttpClient HTTP client for PDF downloads
+     * @return Full-text service instance
+     */
+    @Provides
+    @Singleton
+    fun provideFullTextService(
+        @ApplicationContext context: Context,
+        europePmcService: EuropePMCService,
+        unpaywallApi: UnpaywallApi,
+        okHttpClient: OkHttpClient
+    ): FullTextService {
+        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient)
     }
 
     // ==================== Constants ====================
