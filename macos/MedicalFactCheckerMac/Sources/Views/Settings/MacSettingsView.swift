@@ -200,6 +200,17 @@ struct LLMSettingsTab: View {
                                 openURL(url)
                             }
                         }
+
+                        // Help button for API key documentation
+                        Button {
+                            if let helpURL = URL(string: "https://bmlibrarian.org/user-manual/api-keys/") {
+                                openURL(helpURL)
+                            }
+                        } label: {
+                            Image(systemName: "questionmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Learn more about API keys")
                     }
 
                     // Show test result

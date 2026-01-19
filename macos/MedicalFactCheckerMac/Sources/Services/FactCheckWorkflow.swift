@@ -764,18 +764,30 @@ final class FactCheckWorkflow {
         recordUsage(usage, operationType: "query_conversion")
 
         // Parse JSON response into StructuredQuery
-        if let parsed = StructuredQuery.parse(from: response) {
+        if var parsed = StructuredQuery.parse(from: response) {
+            // Apply user's preprint preference before building query
+            let includePreprints = searchOptions?.includePreprints ?? false
+            parsed.excludePreprints = !includePreprints
+
+            // Store structured query for provider-specific translation
             structuredQuery = parsed
-            // Store PubMed version for display/persistence (backwards compatibility)
-            session.pubmedQuery = PubMedQueryBuilder.build(from: parsed)
+
+            // Build provider-specific query string
+            let provider = searchOptions?.provider ?? .pubmed
+            session.pubmedQuery = QueryBuilderFactory.build(from: parsed, for: provider)
         } else {
             // Fallback: create a simple query from the claim
             print("[QueryConversion] Failed to parse structured query, using fallback")
-            let fallbackQuery = StructuredQuery(
+            var fallbackQuery = StructuredQuery(
                 concepts: [SearchConcept(name: "claim", keywords: session.claim.components(separatedBy: " "))]
             )
+            // Apply preprint preference to fallback query too
+            let includePreprints = searchOptions?.includePreprints ?? false
+            fallbackQuery.excludePreprints = !includePreprints
+
             structuredQuery = fallbackQuery
-            session.pubmedQuery = PubMedQueryBuilder.build(from: fallbackQuery)
+            let provider = searchOptions?.provider ?? .pubmed
+            session.pubmedQuery = QueryBuilderFactory.build(from: fallbackQuery, for: provider)
         }
 
         try? modelContext.save()
