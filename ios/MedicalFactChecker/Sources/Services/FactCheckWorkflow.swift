@@ -751,7 +751,11 @@ final class FactCheckWorkflow {
         recordUsage(usage, operationType: "query_conversion")
 
         // Parse the structured query from LLM response
-        if let parsed = StructuredQuery.parse(from: response) {
+        if var parsed = StructuredQuery.parse(from: response) {
+            // Apply user's preprint preference before building query
+            let includePreprints = currentSearchOptions?.includePreprints ?? false
+            parsed.excludePreprints = !includePreprints
+
             // Store structured query for provider-specific translation
             self.structuredQuery = parsed
 
