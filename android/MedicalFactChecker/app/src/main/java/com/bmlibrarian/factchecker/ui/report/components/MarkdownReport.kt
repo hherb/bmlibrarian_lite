@@ -102,64 +102,109 @@ fun MarkdownReport(
             }
         },
         update = { textView ->
-            // First render markdown with Markwon
-            val spanned = markwon.toMarkdown(markdown)
+            // STEP 1: Pre-process - extract references and their document IDs BEFORE Markwon
+            // This is critical because Markwon will consume the (doc:...) link syntax
+            val (processedMarkdown, referenceMap) = extractReferences(markdown)
 
-            // Then process references to make them clickable
-            val processedText = processReferences(
+            // STEP 2: Let Markwon render the cleaned markdown
+            // processedMarkdown has [Author, Year] without the (doc:...) part
+            val spanned = markwon.toMarkdown(processedMarkdown)
+
+            // STEP 3: Apply clickable spans using the stored reference info
+            val finalText = applyReferenceSpans(
                 text = spanned,
+                referenceMap = referenceMap,
                 linkColor = linkColor,
                 onReferenceClick = onReferenceClick
             )
 
-            textView.text = processedText
+            textView.text = finalText
         },
         modifier = modifier.fillMaxWidth()
     )
 }
 
 /**
- * Process markdown text to add clickable reference spans.
+ * Extract references from raw markdown before Markwon processing.
  *
- * Finds author/year references like [Smith et al., 2021](doc:pmid-12345678)
- * and wraps them in ClickableSpan instances that trigger the callback when tapped.
+ * Finds patterns like [Author, Year](doc:pmid-12345678), extracts the document ID,
+ * and returns cleaned markdown with just [Author, Year] (which Markwon won't process
+ * as a link since there's no URL).
+ *
+ * @param markdown The raw markdown text
+ * @return Pair of (cleaned markdown, map of display text to ReferenceInfo)
+ */
+private fun extractReferences(markdown: String): Pair<String, Map<String, ReferenceInfo>> {
+    val referenceMap = mutableMapOf<String, ReferenceInfo>()
+    val pattern = Pattern.compile(Constants.REFERENCE_PATTERN)
+    val matcher = pattern.matcher(markdown)
+    val result = StringBuffer()
+
+    while (matcher.find()) {
+        val displayText = matcher.group(1) ?: continue
+        val documentId = matcher.group(2) // May be null for legacy format
+        val (authorName, year) = parseAuthorYear(displayText)
+
+        // Store the reference info keyed by display text
+        referenceMap[displayText] = ReferenceInfo(
+            documentId = documentId,
+            displayText = displayText,
+            authorName = authorName,
+            year = year
+        )
+
+        // Replace [Author, Year](doc:xxx) with just [Author, Year]
+        // Escape $ in replacement string to avoid regex group reference issues
+        val replacement = "[$displayText]"
+        matcher.appendReplacement(result, Regex.escapeReplacement(replacement))
+    }
+    matcher.appendTail(result)
+
+    return result.toString() to referenceMap
+}
+
+/**
+ * Apply clickable spans to bracketed references using the pre-extracted reference map.
+ *
+ * Finds all [Author, Year] patterns in the Markwon-rendered text and applies
+ * ClickableSpan instances that trigger the callback when tapped.
  *
  * @param text The spannable text from Markwon
+ * @param referenceMap Map of display text to ReferenceInfo from pre-processing
  * @param linkColor Color for reference links
  * @param onReferenceClick Callback when a reference is clicked
  * @return SpannableStringBuilder with clickable references
  */
-private fun processReferences(
+private fun applyReferenceSpans(
     text: CharSequence,
+    referenceMap: Map<String, ReferenceInfo>,
     linkColor: Int,
     onReferenceClick: (ReferenceInfo) -> Unit
 ): SpannableStringBuilder {
     val builder = SpannableStringBuilder(text)
-
-    // Try new author/year format first
     val matches = mutableListOf<ReferenceMatch>()
-    val pattern = Pattern.compile(Constants.REFERENCE_PATTERN)
-    val matcher = pattern.matcher(builder)
+
+    // Find all [Author, Year] patterns in the rendered text
+    // This pattern matches bracketed text with author name(s) and a 4-digit year
+    val bracketPattern = Pattern.compile("\\[([^\\]]+?,\\s*\\d{4}[a-z]?)\\]")
+    val matcher = bracketPattern.matcher(builder)
 
     while (matcher.find()) {
-        val start = matcher.start()
-        val end = matcher.end()
         val displayText = matcher.group(1) ?: continue
-        val documentId = matcher.group(2) // May be null for legacy format
 
-        // Parse author and year from display text
-        val (authorName, year) = parseAuthorYear(displayText)
+        // Look up the pre-extracted reference info, or create a fallback
+        val info = referenceMap[displayText] ?: ReferenceInfo(
+            documentId = null,
+            displayText = displayText,
+            authorName = parseAuthorYear(displayText).first,
+            year = parseAuthorYear(displayText).second
+        )
 
         matches.add(
             ReferenceMatch(
-                start = start,
-                end = end,
-                info = ReferenceInfo(
-                    documentId = documentId,
-                    displayText = displayText,
-                    authorName = authorName,
-                    year = year
-                )
+                start = matcher.start(),
+                end = matcher.end(),
+                info = info
             )
         )
     }
