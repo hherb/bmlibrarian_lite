@@ -305,6 +305,9 @@ object Constants {
     /** Text size in SP for markdown content. */
     const val MARKDOWN_TEXT_SIZE_SP = 16f
 
+    /** Text size in SP for abstract content (smaller than main markdown). */
+    const val ABSTRACT_TEXT_SIZE_SP = 14f
+
     // ==================== Progress Indicator ====================
 
     /** Stroke width for small circular progress indicators in dp. */

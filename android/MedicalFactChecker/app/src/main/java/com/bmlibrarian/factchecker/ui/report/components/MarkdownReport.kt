@@ -96,9 +96,12 @@ fun MarkdownReport(
                 setTextColor(textColor)
                 setLinkTextColor(linkColor)
                 textSize = Constants.MARKDOWN_TEXT_SIZE_SP
-                movementMethod = LinkMovementMethod.getInstance()
                 // Enable selectable text for copy/paste
                 setTextIsSelectable(true)
+                // IMPORTANT: Set movementMethod AFTER setTextIsSelectable
+                // setTextIsSelectable(true) resets movementMethod to ArrowKeyMovementMethod,
+                // which would break ClickableSpan functionality if set first
+                movementMethod = LinkMovementMethod.getInstance()
             }
         },
         update = { textView ->

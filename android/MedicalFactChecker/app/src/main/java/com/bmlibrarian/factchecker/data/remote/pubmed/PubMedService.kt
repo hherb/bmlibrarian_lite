@@ -114,7 +114,7 @@ class PubMedService @Inject constructor(
                 doi = article.doi,
                 pmcId = article.pmcId,
                 title = article.title,
-                abstractText = article.abstractText,
+                abstractText = formatAbstractText(article),
                 authors = article.authors,
                 journal = article.journal,
                 publicationDate = article.publicationDate,
@@ -125,6 +125,32 @@ class PubMedService @Inject constructor(
                 batchNumber = batchNumber,
                 resultPosition = startPosition + index
             )
+        }
+    }
+
+    /**
+     * Format abstract text with section labels for structured abstracts.
+     *
+     * If the article has structured abstract sections (with labels like
+     * "Background", "Methods", etc.), formats them with bold markdown
+     * labels and proper line breaks. Falls back to plain abstract text
+     * if no structured sections are available.
+     *
+     * @param article The parsed article
+     * @return Formatted abstract text with section labels, or plain abstract
+     */
+    private fun formatAbstractText(article: ParsedArticle): String? {
+        val sections = article.abstractSections
+        if (sections.isNullOrEmpty()) {
+            return article.abstractText
+        }
+
+        return sections.joinToString("\n\n") { section ->
+            if (section.label != null) {
+                "**${section.label}:** ${section.text}"
+            } else {
+                section.text
+            }
         }
     }
 

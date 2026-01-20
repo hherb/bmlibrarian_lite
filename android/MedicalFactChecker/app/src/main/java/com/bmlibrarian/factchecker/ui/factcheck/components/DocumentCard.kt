@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.ui.common.MarkdownText
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
 
@@ -179,7 +180,7 @@ fun DocumentCard(
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 }
 
-                // Abstract
+                // Abstract (rendered as markdown for structured abstracts)
                 document.abstractText?.let { abstract ->
                     Text(
                         text = "Abstract",
@@ -187,10 +188,9 @@ fun DocumentCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
-                    Text(
+                    MarkdownText(
                         text = abstract,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        textSizeSp = Constants.ABSTRACT_TEXT_SIZE_SP
                     )
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 }
