@@ -143,6 +143,9 @@ object Constants {
     /** Large icon size for placeholder screens. */
     const val UI_ICON_SIZE_LARGE = 64
 
+    /** Height of compact context header when scrolled (dp). */
+    const val UI_COMPACT_HEADER_HEIGHT = 56
+
     // ==================== LLM Configuration ====================
 
     /** Default temperature for LLM requests (0.0 = deterministic). */
