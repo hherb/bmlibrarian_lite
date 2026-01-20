@@ -12,6 +12,8 @@ This document researches options for synchronizing user data across iOS, macOS, 
 4. **Collision-free** - handle concurrent edits without data loss
 5. **Cross-platform** - iOS, macOS, Android, Python desktop
 6. **Data integrity** - checksums to detect and prevent corruption
+7. **Selective sync** - manually choose which records to sync per device
+8. **Local-only deletion** - free space without affecting other devices
 
 ## Data Models to Sync
 
@@ -847,6 +849,394 @@ CHAIN_VERIFY_DEPTH = 100  # Verify last N changes on each sync
 - Store quarantined files in `~/.bmlibrarian_lite/.quarantine`
 - Use Python `logging` module
 
+## Selective Sync & Storage Management
+
+Users may have limited storage on some devices (e.g., 64GB phone vs 2TB desktop). The sync system must support:
+
+1. **Selective sync** - manually choose which records to sync to a device
+2. **Local-only deletion** - free up space without affecting other devices
+3. **On-demand fetch** - download specific records when needed
+
+### Sync Scope Model
+
+Each device maintains a **sync scope** that defines what it wants:
+
+```
+/BMLibrarian/devices/{device_id}.json
+```
+
+```json
+{
+  "_integrity": { ... },
+  "_content": {
+    "deviceId": "iphone_abc123",
+    "name": "John's iPhone",
+    "platform": "ios",
+    "lastSeen": "2024-01-20T15:00:00Z",
+    "syncScope": {
+      "mode": "selective",
+      "sessions": {
+        "mode": "whitelist",
+        "ids": [
+          "session-uuid-1",
+          "session-uuid-2"
+        ]
+      },
+      "maxLocalStorageMB": 500,
+      "autoEvictOlderThanDays": 90
+    }
+  }
+}
+```
+
+### Sync Scope Modes
+
+| Mode | Description |
+|------|-------------|
+| `full` | Sync everything (default for desktops) |
+| `selective` | Only sync whitelisted sessions |
+| `recent` | Only sync sessions from last N days |
+| `minimal` | Only sync metadata, fetch content on-demand |
+
+### Record States
+
+Each record on a device can be in one of these states:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Record States                              │
+├─────────────────────────────────────────────────────────────────┤
+│  FULL         - Complete record with all content                │
+│  STUB         - Metadata only, content available on-demand      │
+│  EVICTED      - Was full, now stub (freed local storage)        │
+│  LOCAL_ONLY   - Exists only on this device, not synced          │
+│  DELETED_LOCAL- Deleted locally, still exists in cloud          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Local Database Schema Extension
+
+```sql
+-- Add to each synced table
+ALTER TABLE sessions ADD COLUMN sync_state TEXT DEFAULT 'full';
+-- Values: 'full', 'stub', 'evicted', 'local_only', 'deleted_local'
+
+ALTER TABLE sessions ADD COLUMN sync_scope TEXT DEFAULT 'synced';
+-- Values: 'synced', 'local_only'
+
+ALTER TABLE sessions ADD COLUMN evicted_at TIMESTAMP NULL;
+ALTER TABLE sessions ADD COLUMN content_size_bytes INTEGER DEFAULT 0;
+```
+
+### Selective Sync Operations
+
+#### 1. Add Session to Sync Scope
+
+User manually selects a session to sync to their device:
+
+```python
+def add_to_sync_scope(session_id: str):
+    """Add a session to this device's sync scope."""
+    # Update local sync scope
+    scope = get_local_sync_scope()
+    scope['sessions']['ids'].append(session_id)
+    save_sync_scope(scope)
+
+    # Upload updated device config
+    upload_device_config()
+
+    # Fetch the session content
+    fetch_session_content(session_id)
+```
+
+#### 2. Remove from Sync Scope (Keep in Cloud)
+
+User removes a session from sync but keeps it in cloud:
+
+```python
+def remove_from_sync_scope(session_id: str, delete_local: bool = True):
+    """Remove session from sync scope, optionally delete local copy."""
+    # Update sync scope
+    scope = get_local_sync_scope()
+    scope['sessions']['ids'].remove(session_id)
+    save_sync_scope(scope)
+
+    if delete_local:
+        # Convert to stub (keep metadata, delete content)
+        evict_session_content(session_id)
+
+    # Upload updated device config
+    upload_device_config()
+
+    # NOTE: Does NOT create a delete operation in change log
+    # The session remains in cloud for other devices
+```
+
+#### 3. Evict Content (Free Local Storage)
+
+Convert full records to stubs to free space:
+
+```python
+def evict_session_content(session_id: str):
+    """Free local storage by removing content, keeping metadata."""
+    session = get_session(session_id)
+
+    # Store minimal metadata
+    stub = {
+        'id': session.id,
+        'claim': session.claim,
+        'created_at': session.created_at,
+        'document_count': len(session.documents),
+        'has_report': session.report is not None,
+        'content_size_bytes': calculate_size(session)
+    }
+
+    # Delete content (documents, citations, full text, report)
+    delete_session_content(session_id)
+
+    # Update state
+    update_session_state(session_id,
+        sync_state='evicted',
+        evicted_at=now()
+    )
+
+    # Keep stub for UI display
+    save_session_stub(stub)
+```
+
+#### 4. Fetch On-Demand
+
+When user opens an evicted/stub session:
+
+```python
+def fetch_session_on_demand(session_id: str) -> Session:
+    """Fetch full session content from cloud."""
+    if get_sync_state(session_id) == 'full':
+        return get_session(session_id)
+
+    # Find which device has the full content
+    source_device = find_device_with_content(session_id)
+
+    if source_device:
+        # Fetch from that device's change log
+        content = fetch_from_device(source_device, session_id)
+    else:
+        # Fetch from latest snapshot
+        content = fetch_from_snapshot(session_id)
+
+    # Store locally
+    save_session_full(content)
+    update_session_state(session_id, sync_state='full')
+
+    return content
+```
+
+### Local-Only Deletion
+
+Delete locally without propagating to other devices:
+
+```python
+def delete_local_only(session_id: str):
+    """Delete session from this device only."""
+    # Mark as deleted locally (don't create sync operation)
+    update_session_state(session_id, sync_state='deleted_local')
+
+    # Remove from local database
+    delete_session_local(session_id)
+
+    # Add to local exclusion list (prevent re-sync)
+    add_to_local_exclusions(session_id)
+
+    # NOTE: No change log entry created
+    # Other devices still have the session
+```
+
+**Exclusion List:**
+
+```json
+{
+  "localExclusions": {
+    "sessions": ["session-uuid-deleted-locally"],
+    "reason": {
+      "session-uuid-deleted-locally": "user_deleted_local"
+    }
+  }
+}
+```
+
+### Global Deletion (All Devices)
+
+When user wants to delete everywhere:
+
+```python
+def delete_globally(session_id: str):
+    """Delete session from all devices."""
+    # Create delete operation in change log
+    operation = {
+        "type": "delete",
+        "entity": "session",
+        "id": session_id,
+        "cascade": True,  # Also delete documents, citations, report
+        "timestamp": now_ms(),
+        "previousHash": get_previous_hash()
+    }
+
+    # Write to local change log
+    write_change(operation)
+
+    # Delete locally
+    delete_session_local(session_id)
+
+    # Upload change (will propagate to other devices)
+    upload_pending_changes()
+```
+
+### Storage Management UI
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Storage Management                                    [?] Help │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Local Storage: 450 MB / 500 MB limit                          │
+│  ████████████████████████████████████░░░░░  90%                │
+│                                                                 │
+│  Cloud Storage: 2.3 GB (shared across devices)                  │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Sessions on this device:                                       │
+│                                                                 │
+│  ☑ Aspirin cardiovascular study      125 MB   [Evict] [Delete] │
+│    └─ 45 documents, report generated                            │
+│                                                                 │
+│  ☑ Metformin diabetes meta-analysis  230 MB   [Evict] [Delete] │
+│    └─ 120 documents, report generated                           │
+│                                                                 │
+│  ☐ COVID vaccine efficacy (stub)      --      [Fetch] [Remove] │
+│    └─ 89 documents (not downloaded)                             │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Available in cloud (not on this device):                       │
+│                                                                 │
+│  ☐ Statin muscle pain review         340 MB   [Add to device]  │
+│  ☐ Blood pressure medication study   180 MB   [Add to device]  │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  [Auto-manage storage]  [Evict oldest]  [Sync settings]        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Auto-Eviction Policy
+
+For devices with limited storage:
+
+```json
+{
+  "syncScope": {
+    "mode": "selective",
+    "autoEviction": {
+      "enabled": true,
+      "maxLocalStorageMB": 500,
+      "evictionStrategy": "lru",
+      "keepMinimumSessions": 5,
+      "neverEvict": ["session-uuid-pinned"],
+      "evictOlderThanDays": 90
+    }
+  }
+}
+```
+
+**Eviction Strategies:**
+
+| Strategy | Description |
+|----------|-------------|
+| `lru` | Least Recently Used - evict oldest accessed first |
+| `largest` | Evict largest sessions first |
+| `oldest` | Evict by creation date |
+| `no_report` | Evict sessions without reports first |
+
+```python
+def auto_evict_if_needed():
+    """Automatically evict content if storage limit exceeded."""
+    current_size = get_local_storage_size()
+    max_size = get_max_storage_size()
+
+    if current_size <= max_size:
+        return
+
+    sessions = get_sessions_by_eviction_priority()
+    pinned = get_pinned_sessions()
+
+    for session in sessions:
+        if session.id in pinned:
+            continue
+
+        if session.sync_state == 'evicted':
+            continue
+
+        evict_session_content(session.id)
+        current_size = get_local_storage_size()
+
+        if current_size <= max_size * 0.9:  # 90% threshold
+            break
+```
+
+### Sync Protocol with Selective Sync
+
+Updated sync to respect device scope:
+
+```python
+def sync_with_scope():
+    """Sync respecting this device's sync scope."""
+    scope = get_local_sync_scope()
+    exclusions = get_local_exclusions()
+
+    for device_id, manifest in fetch_remote_manifests().items():
+        if device_id == MY_DEVICE_ID:
+            continue
+
+        for change in get_new_changes(device_id, manifest):
+            # Skip if entity is excluded locally
+            if is_excluded(change['entity'], change['id'], exclusions):
+                update_watermark(device_id, change['sequence'])
+                continue
+
+            # Check if in sync scope
+            if not is_in_scope(change['entity'], change['id'], scope):
+                # Store as stub only
+                if change['type'] == 'upsert':
+                    store_as_stub(change)
+                update_watermark(device_id, change['sequence'])
+                continue
+
+            # Full sync for in-scope entities
+            apply_change(change)
+            update_watermark(device_id, change['sequence'])
+```
+
+### Integrity Considerations
+
+Selective sync must maintain integrity guarantees:
+
+1. **Stubs have checksums too** - metadata stub has its own integrity envelope
+2. **Exclusions are local** - not synced, stored in local config
+3. **Chain integrity preserved** - watermarks advance even for skipped changes
+4. **On-demand fetch verifies** - fetched content verified against original checksum
+
+```python
+def fetch_and_verify(session_id: str, expected_checksum: str) -> dict:
+    """Fetch content and verify against known checksum."""
+    content = fetch_session_content(session_id)
+    actual_checksum = calculate_checksum(content)
+
+    if actual_checksum != expected_checksum:
+        raise IntegrityError(
+            f"Fetched content checksum mismatch for {session_id}"
+        )
+
+    return content
+```
+
 ### Encryption (Optional)
 
 For sensitive medical research data:
@@ -896,13 +1286,22 @@ User provides passphrase; each platform derives the same key.
 - [ ] Implement periodic full-state verification
 - [ ] Add integrity status to sync UI
 
-### Milestone 5: Additional Providers
+### Milestone 5: Selective Sync & Storage Management
+
+- [ ] Implement sync scope model (full, selective, recent, minimal)
+- [ ] Add record states (full, stub, evicted, local_only, deleted_local)
+- [ ] Implement local-only deletion with exclusion list
+- [ ] Implement on-demand content fetch
+- [ ] Add auto-eviction policies (LRU, largest, oldest)
+- [ ] Build storage management UI for all platforms
+
+### Milestone 6: Additional Providers
 
 - [ ] Implement `DropboxSyncProvider`
 - [ ] Implement `GoogleDriveSyncProvider` for Python
 - [ ] Add sync UI to all platforms
 
-### Milestone 6: Polish
+### Milestone 7: Polish
 
 - [ ] Implement encryption (AES-256-GCM)
 - [ ] Add conflict resolution UI for edge cases
@@ -975,8 +1374,11 @@ The **file-based sync with LWW CRDT semantics** approach best meets BMLibrarian'
 4. **Collision-resistant**: Per-device change directories + LWW merge
 5. **Auditable**: Full change history preserved
 6. **Data integrity guaranteed**: Multi-layer checksums prevent corruption
-7. **Implementable incrementally**: Start with Python, add mobile platforms
+7. **Storage-efficient**: Selective sync and local-only deletion for constrained devices
+8. **Implementable incrementally**: Start with Python, add mobile platforms
 
 The user's intuition about "simple text files with unique naming" is validated by modern local-first architecture patterns. Adding vector clocks and LWW semantics provides the collision avoidance needed for multi-device use.
 
 The four-layer integrity system (per-file checksums, device manifests, chain hashes, and snapshot verification) ensures that corrupt data is never silently accepted. SHA-256 provides cryptographic strength while being available natively on all target platforms (Python `hashlib`, Swift `CryptoKit`, Kotlin `MessageDigest`).
+
+The selective sync model (sync scopes, stubs, on-demand fetch, local-only deletion) allows users with limited device storage to participate fully in sync without downloading everything. Auto-eviction policies help manage storage automatically while preserving user control over what stays local.
