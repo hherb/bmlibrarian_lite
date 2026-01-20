@@ -27,67 +27,120 @@ This phase integrates the sync system with the iOS and macOS apps, including Swi
 
 ## UI Constants
 
-Add these constants for sync settings UI. Create separate constants files for iOS and macOS.
+Sync UI constants are split between the shared BioMedLit package (for cross-platform values) and platform-specific files (for platform-specific layouts).
 
-**File**: `ios/MedicalFactChecker/Sources/Constants/SyncUIConstants.swift`
+### Shared Constants (BioMedLit Package)
+
+**File**: `Packages/BioMedLit/Sources/BioMedLit/Sync/SyncUIConstants.swift`
 
 ```swift
 import Foundation
-import SwiftUI
 
-/// UI constants for sync settings views.
+// MARK: - Sync UI Constants
+
+/// Shared UI constants for sync settings views.
 ///
-/// All magic numbers for sync-related UI are centralized here
-/// to comply with golden rules and ensure consistency.
+/// These constants are used by both iOS and macOS apps for consistent
+/// behavior. Platform-specific layout constants should be defined in
+/// the respective app targets.
+///
+/// Usage:
+/// ```swift
+/// import BioMedLit
+///
+/// let ratio = Double(used) / Double(limit)
+/// if ratio > SyncUIConstants.storageCriticalThreshold {
+///     // Show critical warning
+/// }
+/// ```
 public enum SyncUIConstants {
-    // MARK: - Storage Slider
+    // MARK: - Storage Slider (Shared)
 
     /// Minimum storage limit in GB for the slider.
+    ///
+    /// This is the absolute minimum across all platforms.
     public static let minStorageLimitGB: Double = 0.5
 
-    /// Maximum storage limit in GB for the slider.
-    public static let maxStorageLimitGB: Double = 10.0
+    /// Default maximum storage limit in GB for iOS devices.
+    ///
+    /// iOS devices typically have less storage than Macs.
+    public static let defaultMaxStorageLimitGB: Double = 10.0
 
     /// Step size for the storage slider in GB.
     public static let storageLimitStepGB: Double = 0.5
 
-    /// Width for the storage limit text display.
-    public static let storageLimitTextWidth: CGFloat = 60
-
     // MARK: - Storage Thresholds
 
     /// Storage usage ratio above which color is red (critical).
+    ///
+    /// When usage exceeds 90% of limit, show critical warning.
     public static let storageCriticalThreshold: Double = 0.9
 
     /// Storage usage ratio above which color is orange (warning).
+    ///
+    /// When usage exceeds 70% of limit, show warning.
     public static let storageWarningThreshold: Double = 0.7
 
     // MARK: - Progress Indicators
 
     /// Scale factor for inline progress views.
+    ///
+    /// Used when showing a ProgressView inline with other content.
     public static let inlineProgressScale: Double = 0.7
 
     // MARK: - Layout Spacing
 
     /// Vertical spacing in storage info sections.
     public static let storageInfoSpacing: CGFloat = 4
+
+    /// Width for the storage limit text display.
+    public static let storageLimitTextWidth: CGFloat = 60
 }
 ```
+
+### iOS-Specific Constants
+
+**File**: `ios/MedicalFactChecker/Sources/Constants/iOSSyncUIConstants.swift`
+
+```swift
+import Foundation
+import SwiftUI
+import BioMedLit
+
+/// iOS-specific UI constants for sync settings views.
+///
+/// These extend the shared SyncUIConstants with iOS-specific layout values.
+/// Import BioMedLit to access shared constants like `SyncUIConstants.storageCriticalThreshold`.
+public enum iOSSyncUIConstants {
+    // MARK: - Storage Slider
+
+    /// Maximum storage limit in GB for iOS devices.
+    ///
+    /// iOS devices typically have 64-256GB, so 10GB is a reasonable max.
+    public static let maxStorageLimitGB: Double = SyncUIConstants.defaultMaxStorageLimitGB
+}
+```
+
+### macOS-Specific Constants
 
 **File**: `macos/MedicalFactCheckerMac/Sources/Constants/MacSyncUIConstants.swift`
 
 ```swift
 import Foundation
 import SwiftUI
+import BioMedLit
 
-/// UI constants for macOS sync settings views.
+/// macOS-specific UI constants for sync settings views.
 ///
-/// Extends SyncUIConstants with macOS-specific values for
-/// larger displays and table-based layouts.
+/// These extend the shared SyncUIConstants with macOS-specific layout values
+/// for larger displays and table-based layouts.
+/// Import BioMedLit to access shared constants like `SyncUIConstants.storageCriticalThreshold`.
 public enum MacSyncUIConstants {
-    // MARK: - Storage Slider (macOS has more storage typically)
+    // MARK: - Storage Slider
 
     /// Maximum storage limit in GB for macOS.
+    ///
+    /// Macs typically have 256GB-2TB storage, so allow up to 50GB for sync.
     public static let maxStorageLimitGB: Double = 50.0
 
     // MARK: - Window Sizing
@@ -776,14 +829,14 @@ struct SyncSettingsView: View {
 
                     Slider(
                         value: $storageLimitGB,
-                        in: SyncUIConstants.minStorageLimitGB...SyncUIConstants.maxStorageLimitGB,
+                        in: SyncUIConstants.minStorageLimitGB...iOSSyncUIConstants.maxStorageLimitGB,
                         step: SyncUIConstants.storageLimitStepGB
                     ) {
                         Text("Storage Limit")
                     } minimumValueLabel: {
                         Text("\(Int(SyncUIConstants.minStorageLimitGB * 1024))MB")
                     } maximumValueLabel: {
-                        Text("\(Int(SyncUIConstants.maxStorageLimitGB))GB")
+                        Text("\(Int(iOSSyncUIConstants.maxStorageLimitGB))GB")
                     }
                     .onChange(of: storageLimitGB) { _, newValue in
                         Task {
@@ -1935,10 +1988,15 @@ public func handleSyncError(_ error: Error) {
 
 ## Files to Create
 
+### BioMedLit Package (Shared)
+| File | Description |
+|------|-------------|
+| `Sync/SyncUIConstants.swift` | Shared UI constants (thresholds, spacing) |
+
 ### iOS Files
 | File | Description |
 |------|-------------|
-| `Constants/SyncUIConstants.swift` | UI constants for sync views |
+| `Constants/iOSSyncUIConstants.swift` | iOS-specific UI constants |
 | `Services/SyncChangeObserver.swift` | SwiftData change observer |
 | `Services/AppSyncDelegate.swift` | Sync engine delegate |
 | `Services/BackgroundSyncService.swift` | Background sync |
