@@ -4,7 +4,7 @@
     MedicalFactChecker Android App
 
     Vector drawable for adaptive icon foreground.
-    Displays a medical checkmark symbol.
+    Matches iOS app icon: white medical cross with green checkmark badge.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -12,26 +12,45 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Background circle -->
+    <!-- White medical cross (plus sign) - centered slightly left -->
+    <!-- Vertical bar of cross -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
-
-    <!-- Checkmark -->
+        android:pathData="M42,28L52,28L52,46L42,46Z"/>
+    <!-- Horizontal bar of cross -->
     <path
-        android:fillColor="#1976D2"
-        android:strokeWidth="0"
-        android:pathData="M45,54L51,60L63,48"
-        android:strokeColor="#1976D2"
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,38L62,38L62,48L32,48Z"/>
+    <!-- Extended vertical bar (bottom) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,46L52,46L52,72L42,72Z"/>
+
+    <!-- Subtle shadow/depth effect on cross -->
+    <path
+        android:fillColor="#D0D0D0"
+        android:fillAlpha="0.3"
+        android:pathData="M47,28L52,28L52,72L47,72Z"/>
+
+    <!-- Green circle badge (bottom-right) -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M68,68m-16,0a16,16 0,1 1,32 0a16,16 0,1 1,-32 0"/>
+
+    <!-- Darker green border on circle -->
+    <path
+        android:fillColor="#388E3C"
+        android:pathData="M68,68m-16,0a16,16 0,1 1,32 0a16,16 0,1 1,-32 0"
+        android:strokeColor="#388E3C"
+        android:strokeWidth="1"/>
+
+    <!-- White checkmark inside green circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"/>
-
-    <!-- Medical cross -->
-    <path
-        android:fillColor="#1976D2"
-        android:pathData="M52,32h4v12h-4z"/>
-    <path
-        android:fillColor="#1976D2"
-        android:pathData="M48,36h12v4h-12z"/>
+        android:strokeLineJoin="round"
+        android:pathData="M60,68L66,74L77,62"/>
 
 </vector>
