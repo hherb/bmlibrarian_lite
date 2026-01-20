@@ -17,6 +17,10 @@
 import Foundation
 import os.log
 
+#if os(iOS)
+import UIKit
+#endif
+
 // MARK: - Workspace Initializer
 
 /// Initializes a sync workspace for a new or existing device.
@@ -336,7 +340,3 @@ public struct SystemDeviceInfoProvider: DeviceInfoProvider {
         #endif
     }
 }
-
-#if os(iOS)
-import UIKit
-#endif

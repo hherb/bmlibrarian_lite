@@ -436,14 +436,13 @@ public final class SyncCoordinator: ObservableObject {
 
     /// Resets the sync state for troubleshooting.
     ///
-    /// Clears local sync state but preserves the device registration.
+    /// Clears pending changes count. Note: full watermark reset requires
+    /// adding a `resetWatermarks` method to `SyncStateManager`.
     /// Use this if sync gets into a bad state.
     public func resetSyncState() async {
-        guard let stateManager = stateManager else { return }
-
         logger.warning("Resetting sync state")
-        await stateManager.resetWatermarks()
         pendingChangesCount = 0
+        // TODO: Add watermark reset when SyncStateManager.resetWatermarks() is implemented
     }
 }
 
@@ -476,14 +475,3 @@ public enum SyncCoordinatorStatus: Equatable, Sendable {
     }
 }
 
-// MARK: - Sync State Manager Extension
-
-extension SyncStateManager {
-    /// Resets all watermarks to zero.
-    ///
-    /// Used for troubleshooting when sync state becomes inconsistent.
-    func resetWatermarks() async {
-        // This would need to be implemented in the actual SyncStateManager
-        // For now, this is a placeholder
-    }
-}
