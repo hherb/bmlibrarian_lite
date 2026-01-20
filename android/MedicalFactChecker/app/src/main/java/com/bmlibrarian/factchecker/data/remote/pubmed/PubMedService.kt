@@ -133,25 +133,90 @@ class PubMedService @Inject constructor(
      *
      * If the article has structured abstract sections (with labels like
      * "Background", "Methods", etc.), formats them with bold markdown
-     * labels and proper line breaks. Falls back to plain abstract text
-     * if no structured sections are available.
+     * labels and proper line breaks. Falls back to detecting inline
+     * section headers in plain text (e.g., "BACKGROUND:" or "Background:").
      *
      * @param article The parsed article
      * @return Formatted abstract text with section labels, or plain abstract
      */
     private fun formatAbstractText(article: ParsedArticle): String? {
         val sections = article.abstractSections
-        if (sections.isNullOrEmpty()) {
-            return article.abstractText
-        }
-
-        return sections.joinToString("\n\n") { section ->
-            if (section.label != null) {
-                "**${section.label}:** ${section.text}"
-            } else {
-                section.text
+        if (!sections.isNullOrEmpty()) {
+            return sections.joinToString("\n\n") { section ->
+                if (section.label != null) {
+                    "**${section.label}:** ${section.text}"
+                } else {
+                    section.text
+                }
             }
         }
+
+        // Fall back to detecting inline section headers in plain text
+        val plainText = article.abstractText ?: return null
+        return formatInlineSectionHeaders(plainText)
+    }
+
+    /**
+     * Format inline section headers found in plain abstract text.
+     *
+     * Detects common section headers like "BACKGROUND:", "Background:",
+     * "METHODS:", etc. and formats them with markdown bold and line breaks.
+     *
+     * @param text The plain abstract text
+     * @return Formatted text with bold section headers and line breaks
+     */
+    private fun formatInlineSectionHeaders(text: String): String {
+        // Common section headers in PubMed abstracts (case-insensitive matching)
+        val sectionHeaders = listOf(
+            "BACKGROUND", "Background",
+            "INTRODUCTION", "Introduction",
+            "OBJECTIVE", "Objective", "OBJECTIVES", "Objectives",
+            "AIM", "Aim", "AIMS", "Aims",
+            "PURPOSE", "Purpose",
+            "METHODS", "Methods", "METHODOLOGY", "Methodology",
+            "MATERIALS AND METHODS", "Materials and Methods",
+            "STUDY DESIGN", "Study Design",
+            "RESULTS", "Results",
+            "FINDINGS", "Findings",
+            "CONCLUSIONS", "Conclusions", "CONCLUSION", "Conclusion",
+            "DISCUSSION", "Discussion",
+            "SIGNIFICANCE", "Significance",
+            "IMPORTANCE", "Importance",
+            "CONTEXT", "Context",
+            "DESIGN", "Design",
+            "SETTING", "Setting",
+            "PARTICIPANTS", "Participants",
+            "PATIENTS", "Patients",
+            "INTERVENTIONS", "Interventions",
+            "MAIN OUTCOME MEASURES", "Main Outcome Measures",
+            "OUTCOME MEASURES", "Outcome Measures",
+            "MEASUREMENTS", "Measurements",
+            "TRIAL REGISTRATION", "Trial Registration"
+        )
+
+        // Build regex pattern that matches headers followed by colon
+        // e.g., "BACKGROUND:" or "Background:" at word boundaries
+        val pattern = sectionHeaders.joinToString("|") { Regex.escape(it) }
+        val regex = Regex("(?<=^|\\s)($pattern):\\s*", RegexOption.MULTILINE)
+
+        // Check if any section headers are present
+        if (!regex.containsMatchIn(text)) {
+            return text
+        }
+
+        // Replace section headers with bold markdown and add line breaks before them
+        var formatted = text
+        regex.findAll(text).toList().reversed().forEach { match ->
+            val header = match.groupValues[1]
+            val replacement = if (match.range.first == 0) {
+                "**$header:** "
+            } else {
+                "\n\n**$header:** "
+            }
+            formatted = formatted.replaceRange(match.range, replacement)
+        }
+
+        return formatted.trim()
     }
 
     // ==================== Private Implementation ====================
