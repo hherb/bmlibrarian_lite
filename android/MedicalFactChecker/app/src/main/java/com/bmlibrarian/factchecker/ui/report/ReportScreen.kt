@@ -99,8 +99,13 @@ fun ReportScreen(
     // Document detail bottom sheet state
     val sheetState = rememberModalBottomSheetState()
 
+    // Track which sessionId we've loaded to detect changes
+    // Using a unique key ensures the effect runs on every composition with a new sessionId
+    val loadKey = remember(sessionId) { sessionId ?: "latest_${System.currentTimeMillis()}" }
+
     // Load the appropriate report based on sessionId
-    LaunchedEffect(sessionId) {
+    // The loadKey ensures this runs even when sessionId is null but we navigated fresh
+    LaunchedEffect(loadKey) {
         if (sessionId != null) {
             viewModel.loadReport(sessionId)
         } else {

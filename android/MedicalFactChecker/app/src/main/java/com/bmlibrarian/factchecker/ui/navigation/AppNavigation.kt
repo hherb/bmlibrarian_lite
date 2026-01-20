@@ -130,13 +130,14 @@ fun AppNavigation() {
             composable(NavRoute.History.route) {
                 HistoryScreen(
                     onSessionClick = { sessionId ->
-                        // Navigate to report for this session with sessionId
+                        // Navigate to report for this specific session
+                        // Do NOT restore state - we want to load the selected session's report
                         navController.navigate(NavRoute.Report.createRoute(sessionId)) {
                             popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+                                saveState = false
                             }
-                            launchSingleTop = true
-                            restoreState = true
+                            launchSingleTop = false
+                            restoreState = false
                         }
                     }
                 )

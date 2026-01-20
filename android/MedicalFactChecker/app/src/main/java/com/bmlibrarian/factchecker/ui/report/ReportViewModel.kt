@@ -142,32 +142,41 @@ class ReportViewModel @Inject constructor(
     /** Current session ID being displayed. */
     private var currentSessionId: String? = null
 
-    init {
-        loadLatestReport()
-    }
+    /** Job for the current report loading operation, cancelled when a new load starts. */
+    private var loadJob: kotlinx.coroutines.Job? = null
 
     /**
      * Load report for a specific session.
      *
      * Fetches the report and associated documents from the database.
+     * Cancels any in-progress load operation before starting a new one.
+     * Clears previous state immediately to avoid showing stale data.
      *
      * @param sessionId The session ID to load the report for
      */
     fun loadReport(sessionId: String) {
+        // Cancel any previous load operation to prevent race conditions
+        loadJob?.cancel()
         currentSessionId = sessionId
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
 
+        // Clear previous state immediately to avoid showing stale data
+        _uiState.update {
+            it.copy(
+                report = null,
+                documents = emptyList(),
+                isLoading = true
+            )
+        }
+
+        loadJob = viewModelScope.launch {
             try {
                 // Load report
                 val report = reportRepository.getReportBySession(sessionId)
                 _uiState.update { it.copy(report = report) }
 
-                // Load documents for reference lookup
-                documentRepository.getScoredDocumentsBySession(sessionId)
-                    .collect { docs ->
-                        _uiState.update { it.copy(documents = docs, isLoading = false) }
-                    }
+                // Load documents for reference lookup (use first() to get single emission)
+                val docs = documentRepository.getScoredDocumentsBySession(sessionId).first()
+                _uiState.update { it.copy(documents = docs, isLoading = false) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false) }
                 _events.send(ReportUiEvent.ShowSnackbar("Failed to load report: ${e.message}"))
@@ -179,17 +188,36 @@ class ReportViewModel @Inject constructor(
      * Load the most recent report.
      *
      * Finds the latest completed session and loads its report.
+     * Cancels any in-progress load operation before starting a new one.
+     * Clears previous state immediately to avoid showing stale data.
      */
     fun loadLatestReport() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+        // Cancel any previous load operation to prevent race conditions
+        loadJob?.cancel()
 
+        // Clear previous state immediately to avoid showing stale data
+        _uiState.update {
+            it.copy(
+                report = null,
+                documents = emptyList(),
+                isLoading = true
+            )
+        }
+
+        loadJob = viewModelScope.launch {
             try {
                 val sessions = sessionRepository.getCompletedSessions().first()
                 val latestSession = sessions.firstOrNull()
 
                 if (latestSession != null) {
-                    loadReport(latestSession.id)
+                    // Load the report directly instead of calling loadReport()
+                    // to avoid creating a separate job
+                    currentSessionId = latestSession.id
+                    val report = reportRepository.getReportBySession(latestSession.id)
+                    _uiState.update { it.copy(report = report) }
+
+                    val docs = documentRepository.getScoredDocumentsBySession(latestSession.id).first()
+                    _uiState.update { it.copy(documents = docs, isLoading = false) }
                 } else {
                     _uiState.update { it.copy(report = null, isLoading = false) }
                 }
