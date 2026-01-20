@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = 6F36EF612F1C5A5200C0AAEA /* BioMedLit */; };
-		6F5748C42F1D0C7E00B07EF1 /* LocumTrackerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6F5748C32F1D0C7E00B07EF1 /* LocumTrackerCore */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -128,7 +127,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6F5748C42F1D0C7E00B07EF1 /* LocumTrackerCore in Frameworks */,
 				6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */,
 				A1000055001 /* BioMedLit in Frameworks */,
 			);
@@ -329,7 +327,6 @@
 			packageProductDependencies = (
 				A1000055000 /* BioMedLit */,
 				6F36EF612F1C5A5200C0AAEA /* BioMedLit */,
-				6F5748C32F1D0C7E00B07EF1 /* LocumTrackerCore */,
 			);
 			productName = MedicalFactChecker;
 			productReference = A1000000000 /* MedicalFactChecker.app */;
@@ -578,7 +575,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Sources/MedicalFactChecker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_PREVIEWS = YES;
@@ -611,7 +608,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Sources/MedicalFactChecker.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				DEVELOPMENT_TEAM = X5DWXB4283;
 				ENABLE_PREVIEWS = YES;
@@ -675,10 +672,6 @@
 		6F36EF612F1C5A5200C0AAEA /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BioMedLit;
-		};
-		6F5748C32F1D0C7E00B07EF1 /* LocumTrackerCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = LocumTrackerCore;
 		};
 		A1000055000 /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
