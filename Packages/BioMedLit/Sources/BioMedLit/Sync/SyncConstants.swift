@@ -30,6 +30,10 @@ public enum SyncConstants {
     /// Increment when envelope format changes.
     public static let integrityVersion = 1
 
+    /// Current workspace configuration version.
+    /// Increment when workspace config format changes.
+    public static let workspaceConfigVersion = 1
+
     /// Hash algorithm identifier used for checksums.
     /// Using SHA-256 for strong collision resistance.
     public static let integrityAlgorithm = "sha256"

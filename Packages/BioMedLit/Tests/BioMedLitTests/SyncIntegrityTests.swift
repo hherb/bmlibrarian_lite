@@ -457,16 +457,16 @@ final class SyncIntegrityTests: XCTestCase {
     /// Test manifest checksum computation.
     func testComputeManifestChecksum() {
         let files = [
-            ManifestFileEntry(sequence: 1, filename: "f1", checksum: "aaa", size: 100, timestamp: 1000),
-            ManifestFileEntry(sequence: 2, filename: "f2", checksum: "bbb", size: 200, timestamp: 2000)
+            ManifestFileEntry(sequence: 1, filename: "f1", checksum: "aaa", entryChecksum: "eee1", size: 100, timestamp: 1000),
+            ManifestFileEntry(sequence: 2, filename: "f2", checksum: "bbb", entryChecksum: "eee2", size: 200, timestamp: 2000)
         ]
 
         let checksum1 = computeManifestChecksum(files)
 
         // Same files in different order should produce same checksum
         let reversedFiles = [
-            ManifestFileEntry(sequence: 2, filename: "f2", checksum: "bbb", size: 200, timestamp: 2000),
-            ManifestFileEntry(sequence: 1, filename: "f1", checksum: "aaa", size: 100, timestamp: 1000)
+            ManifestFileEntry(sequence: 2, filename: "f2", checksum: "bbb", entryChecksum: "eee2", size: 200, timestamp: 2000),
+            ManifestFileEntry(sequence: 1, filename: "f1", checksum: "aaa", entryChecksum: "eee1", size: 100, timestamp: 1000)
         ]
 
         let checksum2 = computeManifestChecksum(reversedFiles)

@@ -289,6 +289,7 @@ final class ChangeTrackingTests: XCTestCase {
             sequence: 1,
             filename: "000001_123_session_upsert.json",
             checksum: "abc123",
+            entryChecksum: "entry456",
             size: 1024,
             timestamp: 123
         )

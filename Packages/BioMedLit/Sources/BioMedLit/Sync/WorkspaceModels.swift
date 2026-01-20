@@ -52,13 +52,13 @@ public struct WorkspaceConfig: Codable, Sendable, Equatable {
     /// Creates workspace configuration.
     ///
     /// - Parameters:
-    ///   - version: Configuration format version. Defaults to 1.
+    ///   - version: Configuration format version. Defaults to current.
     ///   - schemaVersion: Data schema version. Defaults to current.
     ///   - minCompatibleVersion: Minimum readable version. Defaults to current.
     ///   - createdAt: Creation timestamp. Defaults to now.
     ///   - encryption: Encryption mode. Defaults to none.
     public init(
-        version: Int = 1,
+        version: Int = SyncConstants.workspaceConfigVersion,
         schemaVersion: Int = SyncConstants.schemaVersion,
         minCompatibleVersion: Int = SyncConstants.minCompatibleSchemaVersion,
         createdAt: Date = Date(),

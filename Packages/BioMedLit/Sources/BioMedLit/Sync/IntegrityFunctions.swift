@@ -292,8 +292,14 @@ public struct ManifestFileEntry: Codable, Sendable, Equatable {
     /// Filename of the change file.
     public let filename: String
 
-    /// SHA-256 checksum of the file contents.
+    /// SHA-256 checksum of the file contents (the envelope).
     public let checksum: String
+
+    /// SHA-256 checksum of the change entry (for chain linking).
+    ///
+    /// This is the hash used in the `previousHash` field of the next change.
+    /// It's computed from the ChangeLogEntry content, not the file.
+    public let entryChecksum: String
 
     /// File size in bytes.
     public let size: Int
@@ -307,18 +313,21 @@ public struct ManifestFileEntry: Codable, Sendable, Equatable {
     ///   - sequence: Sequence number of the change.
     ///   - filename: Change file name.
     ///   - checksum: SHA-256 checksum of file contents.
+    ///   - entryChecksum: SHA-256 checksum of the change entry for chain linking.
     ///   - size: File size in bytes.
     ///   - timestamp: Timestamp in milliseconds.
     public init(
         sequence: Int,
         filename: String,
         checksum: String,
+        entryChecksum: String,
         size: Int,
         timestamp: Int64
     ) {
         self.sequence = sequence
         self.filename = filename
         self.checksum = checksum
+        self.entryChecksum = entryChecksum
         self.size = size
         self.timestamp = timestamp
     }

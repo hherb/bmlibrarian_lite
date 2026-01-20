@@ -52,13 +52,6 @@ public struct ChangeLogReader: Sendable {
     /// This device's ID (to skip own changes).
     private let myDeviceId: String
 
-    /// JSON decoder configured for sync files.
-    private let decoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
-
     // MARK: - Initialization
 
     /// Creates a change log reader.

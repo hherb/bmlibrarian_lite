@@ -250,14 +250,16 @@ public actor ChangeLogWriter {
         let path = SyncFileNaming.changeFilePath(deviceId: deviceId, filename: filename)
         try await storage.writeFile(fileData, at: path)
 
-        // Compute hash for chain linking
-        lastChangeHash = try calculateChecksum(change)
+        // Compute hash of the change entry for chain linking
+        let entryChecksum = try calculateChecksum(change)
+        lastChangeHash = entryChecksum
 
-        // Update manifest
+        // Update manifest with both file checksum and entry checksum
         let fileEntry = ManifestFileEntry(
             sequence: currentSequence,
             filename: filename,
             checksum: calculateChecksum(fileData),
+            entryChecksum: entryChecksum,
             size: fileData.count,
             timestamp: timestamp
         )
@@ -313,22 +315,12 @@ public enum ChangeLogWriterFactory {
         let manifestData = try await storage.readFile(at: manifestPath)
         let manifest: DeviceManifest = try verifyAndExtract(from: manifestData)
 
-        // Find the last change hash if there are files
-        var lastHash: String? = nil
-        if let lastFile = manifest.files.max(by: { $0.sequence < $1.sequence }) {
-            let lastPath = SyncFileNaming.changeFilePath(
-                deviceId: deviceId,
-                filename: lastFile.filename
-            )
-            let lastData = try await storage.readFile(at: lastPath)
+        // Get the entry checksum from the last file for chain linking
+        let lastHash = manifest.files
+            .max(by: { $0.sequence < $1.sequence })?
+            .entryChecksum
 
-            // We need to decode as generic type - use a simple decoder
-            // that extracts just the envelope checksum
-            lastHash = lastFile.checksum
-        }
-
-        // Reconstruct vector clock from last file if available
-        // For now, start with a clock incremented to current sequence
+        // Reconstruct vector clock from manifest
         var clock = VectorClock()
         clock.clocks[deviceId] = manifest.headSequence
 
