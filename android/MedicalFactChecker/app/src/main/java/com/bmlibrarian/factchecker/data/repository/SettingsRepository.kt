@@ -126,7 +126,8 @@ class SettingsRepository @Inject constructor(
             monthlyBudgetUsd = regularPrefs.getFloat(KEY_MONTHLY_BUDGET, Constants.DEFAULT_MONTHLY_BUDGET_USD).toDouble(),
             hasAcceptedDisclaimer = regularPrefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false),
             hasCompletedOnboarding = regularPrefs.getBoolean(KEY_ONBOARDING_COMPLETE, false),
-            ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: ""
+            ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: "",
+            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: ""
         )
     }
 
@@ -150,6 +151,7 @@ class SettingsRepository @Inject constructor(
             putBoolean(KEY_DISCLAIMER_ACCEPTED, settings.hasAcceptedDisclaimer)
             putBoolean(KEY_ONBOARDING_COMPLETE, settings.hasCompletedOnboarding)
             putString(KEY_NCBI_EMAIL, settings.ncbiEmail)
+            putString(KEY_UNPAYWALL_EMAIL, settings.unpaywallEmail)
             apply()
         }
         _settings.value = settings
@@ -529,5 +531,6 @@ class SettingsRepository @Inject constructor(
         private const val KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted"
         private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         private const val KEY_NCBI_EMAIL = "ncbi_email"
+        private const val KEY_UNPAYWALL_EMAIL = "unpaywall_email"
     }
 }

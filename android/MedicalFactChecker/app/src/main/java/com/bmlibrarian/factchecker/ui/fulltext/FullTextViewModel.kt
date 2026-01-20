@@ -219,7 +219,7 @@ class FullTextViewModel @Inject constructor(
      */
     private suspend fun fetchFullText(doc: DocumentEntity) {
         try {
-            val settings = settingsRepository.settingsFlow.first()
+            val settings = settingsRepository.settings.first()
 
             val result = fullTextService.fetchFullText(
                 pmcId = doc.pmcId,
