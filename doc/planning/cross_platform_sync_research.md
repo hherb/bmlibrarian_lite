@@ -116,27 +116,29 @@ For BMLibrarian's use case (single-user, multi-device), LWW is appropriate:
 
 ```python
 # Pseudocode for sync process
+from typing import Any
 
-def sync():
+def sync() -> None:
+    """Synchronize changes with remote devices."""
     # 1. Discover changes from other devices
     remote_changes = list_remote_change_files()
-    local_last_seen = get_local_watermarks()
+    local_watermarks = get_local_watermarks()
 
-    new_changes = []
+    new_changes: list[dict[str, Any]] = []
     for device_id, files in remote_changes.items():
         if device_id == MY_DEVICE_ID:
             continue
-        for file in files:
-            if file.sequence > local_last_seen.get(device_id, 0):
-                new_changes.append(read_json(file))
+        for file_info in files:
+            if file_info["sequence"] > local_watermarks.get(device_id, 0):
+                new_changes.append(read_json(file_info["path"]))
 
-    # 2. Sort by vector clock / timestamp
-    new_changes.sort(key=lambda c: (c.timestamp, c.deviceId))
+    # 2. Sort by timestamp then device ID for deterministic ordering
+    new_changes.sort(key=lambda c: (c["timestamp"], c["deviceId"]))
 
     # 3. Apply changes with LWW merge
     for change in new_changes:
         apply_with_lww_merge(change)
-        update_watermark(change.deviceId, change.sequence)
+        update_watermark(change["deviceId"], change["sequence"])
 
     # 4. Upload local pending changes
     for pending in get_pending_local_changes():
@@ -417,39 +419,55 @@ Every sync file includes an integrity envelope:
 ```python
 import hashlib
 import json
+from typing import Any
 
-def calculate_checksum(content: dict) -> str:
+# Constants (define in constants.py)
+INTEGRITY_VERSION = 1
+INTEGRITY_ALGORITHM = "sha256"
+
+
+class IntegrityError(Exception):
+    """Raised when data integrity verification fails."""
+    pass
+
+
+def to_canonical_json(content: dict[str, Any]) -> bytes:
+    """Convert content to canonical JSON bytes (sorted keys, compact, UTF-8)."""
+    return json.dumps(content, sort_keys=True, separators=(',', ':')).encode('utf-8')
+
+
+def calculate_checksum(content: dict[str, Any]) -> str:
     """Calculate SHA-256 checksum of content."""
-    # Canonical JSON: sorted keys, no extra whitespace, UTF-8
-    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    return hashlib.sha256(to_canonical_json(content)).hexdigest()
 
-def create_integrity_envelope(content: dict) -> dict:
+
+def create_integrity_envelope(content: dict[str, Any]) -> dict[str, Any]:
     """Wrap content with integrity metadata."""
-    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
+    canonical_bytes = to_canonical_json(content)
     return {
         "_integrity": {
-            "version": 1,
-            "algorithm": "sha256",
-            "checksum": hashlib.sha256(canonical.encode('utf-8')).hexdigest(),
-            "contentLength": len(canonical.encode('utf-8'))
+            "version": INTEGRITY_VERSION,
+            "algorithm": INTEGRITY_ALGORITHM,
+            "checksum": hashlib.sha256(canonical_bytes).hexdigest(),
+            "contentLength": len(canonical_bytes)
         },
         "_content": content
     }
 
-def verify_and_extract(envelope: dict) -> dict:
-    """Verify integrity and return content, or raise exception."""
+
+def verify_and_extract(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Verify integrity and return content, or raise IntegrityError."""
     integrity = envelope.get("_integrity")
     content = envelope.get("_content")
 
     if not integrity or not content:
         raise IntegrityError("Missing integrity envelope")
 
-    if integrity["algorithm"] != "sha256":
+    if integrity["algorithm"] != INTEGRITY_ALGORITHM:
         raise IntegrityError(f"Unsupported algorithm: {integrity['algorithm']}")
 
-    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
-    actual_checksum = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    canonical_bytes = to_canonical_json(content)
+    actual_checksum = hashlib.sha256(canonical_bytes).hexdigest()
 
     if actual_checksum != integrity["checksum"]:
         raise IntegrityError(
@@ -457,7 +475,7 @@ def verify_and_extract(envelope: dict) -> dict:
             f"got {actual_checksum}"
         )
 
-    if len(canonical.encode('utf-8')) != integrity["contentLength"]:
+    if len(canonical_bytes) != integrity["contentLength"]:
         raise IntegrityError("Content length mismatch")
 
     return content
@@ -469,6 +487,44 @@ def verify_and_extract(envelope: dict) -> dict:
 import CryptoKit
 import Foundation
 
+// MARK: - Constants
+
+enum IntegrityConstants {
+    static let version = 1
+    static let algorithm = "sha256"
+}
+
+// MARK: - Error Types
+
+enum IntegrityError: Error, LocalizedError {
+    case missingEnvelope
+    case unsupportedAlgorithm(String)
+    case checksumMismatch(expected: String, actual: String)
+    case lengthMismatch(expected: Int, actual: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingEnvelope:
+            return "Missing integrity envelope"
+        case .unsupportedAlgorithm(let algo):
+            return "Unsupported algorithm: \(algo)"
+        case .checksumMismatch(let expected, let actual):
+            return "Checksum mismatch: expected \(expected), got \(actual)"
+        case .lengthMismatch(let expected, let actual):
+            return "Length mismatch: expected \(expected), got \(actual)"
+        }
+    }
+}
+
+// MARK: - Data Types
+
+struct IntegrityMetadata: Codable {
+    let version: Int
+    let algorithm: String
+    let checksum: String
+    let contentLength: Int
+}
+
 struct IntegrityEnvelope<T: Codable>: Codable {
     let integrity: IntegrityMetadata
     let content: T
@@ -479,28 +535,41 @@ struct IntegrityEnvelope<T: Codable>: Codable {
     }
 }
 
-struct IntegrityMetadata: Codable {
-    let version: Int
-    let algorithm: String
-    let checksum: String
-    let contentLength: Int
+// MARK: - Pure Functions
+
+func toCanonicalJSON<T: Encodable>(_ content: T) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    return try encoder.encode(content)
 }
 
-func calculateChecksum<T: Encodable>(_ content: T) throws -> String {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    let data = try encoder.encode(content)
-    let hash = SHA256.hash(data: data)
-    return hash.compactMap { String(format: "%02x", $0) }.joined()
+func calculateChecksum(_ data: Data) -> String {
+    SHA256.hash(data: data)
+        .compactMap { String(format: "%02x", $0) }
+        .joined()
 }
 
-func verifyAndExtract<T: Decodable>(_ envelope: IntegrityEnvelope<T>) throws -> T {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    let contentData = try encoder.encode(envelope.content)
+func createIntegrityEnvelope<T: Codable>(_ content: T) throws -> IntegrityEnvelope<T> {
+    let canonicalData = try toCanonicalJSON(content)
+    let metadata = IntegrityMetadata(
+        version: IntegrityConstants.version,
+        algorithm: IntegrityConstants.algorithm,
+        checksum: calculateChecksum(canonicalData),
+        contentLength: canonicalData.count
+    )
+    return IntegrityEnvelope(integrity: metadata, content: content)
+}
 
-    let actualChecksum = SHA256.hash(data: contentData)
-        .compactMap { String(format: "%02x", $0) }.joined()
+func verifyAndExtract<T: Codable>(from data: Data) throws -> T {
+    let decoder = JSONDecoder()
+    let envelope = try decoder.decode(IntegrityEnvelope<T>.self, from: data)
+
+    guard envelope.integrity.algorithm == IntegrityConstants.algorithm else {
+        throw IntegrityError.unsupportedAlgorithm(envelope.integrity.algorithm)
+    }
+
+    let canonicalData = try toCanonicalJSON(envelope.content)
+    let actualChecksum = calculateChecksum(canonicalData)
 
     guard actualChecksum == envelope.integrity.checksum else {
         throw IntegrityError.checksumMismatch(
@@ -509,8 +578,11 @@ func verifyAndExtract<T: Decodable>(_ envelope: IntegrityEnvelope<T>) throws -> 
         )
     }
 
-    guard contentData.count == envelope.integrity.contentLength else {
-        throw IntegrityError.lengthMismatch
+    guard canonicalData.count == envelope.integrity.contentLength else {
+        throw IntegrityError.lengthMismatch(
+            expected: envelope.integrity.contentLength,
+            actual: canonicalData.count
+        )
     }
 
     return envelope.content
@@ -521,9 +593,28 @@ func verifyAndExtract<T: Decodable>(_ envelope: IntegrityEnvelope<T>) throws -> 
 
 ```kotlin
 import java.security.MessageDigest
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
 
+// Constants
+object IntegrityConstants {
+    const val VERSION = 1
+    const val ALGORITHM = "sha256"
+}
+
+// Error types
+sealed class IntegrityError(message: String) : Exception(message) {
+    class MissingEnvelope : IntegrityError("Missing integrity envelope")
+    class UnsupportedAlgorithm(algo: String) : IntegrityError("Unsupported algorithm: $algo")
+    class ChecksumMismatch(expected: String, actual: String) :
+        IntegrityError("Checksum mismatch: expected $expected, got $actual")
+    class LengthMismatch(expected: Int, actual: Int) :
+        IntegrityError("Length mismatch: expected $expected, got $actual")
+}
+
+// Data types
+@Serializable
 data class IntegrityMetadata(
     val version: Int,
     val algorithm: String,
@@ -531,28 +622,68 @@ data class IntegrityMetadata(
     val contentLength: Int
 )
 
-fun calculateChecksum(content: Any): String {
-    val json = Json {
-        prettyPrint = false
-        encodeDefaults = true
-    }
-    val canonical = json.encodeToString(content)
-    val digest = MessageDigest.getInstance("SHA-256")
-    val hashBytes = digest.digest(canonical.toByteArray(Charsets.UTF_8))
-    return hashBytes.joinToString("") { "%02x".format(it) }
+@Serializable
+data class IntegrityEnvelope<T>(
+    @kotlinx.serialization.SerialName("_integrity")
+    val integrity: IntegrityMetadata,
+    @kotlinx.serialization.SerialName("_content")
+    val content: T
+)
+
+// Canonical JSON encoder (compact, sorted keys)
+private val canonicalJson = Json {
+    prettyPrint = false
+    encodeDefaults = true
+    // Note: kotlinx.serialization preserves declaration order by default
 }
 
-fun <T> verifyAndExtract(envelope: IntegrityEnvelope<T>): T {
-    val json = Json { prettyPrint = false }
-    val contentJson = json.encodeToString(envelope.content)
-    val actualChecksum = calculateChecksum(envelope.content)
+// Pure functions
+fun calculateChecksum(data: ByteArray): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    return digest.digest(data).joinToString("") { "%02x".format(it) }
+}
 
-    require(actualChecksum == envelope.integrity.checksum) {
-        "Checksum mismatch: expected ${envelope.integrity.checksum}, got $actualChecksum"
+fun <T> toCanonicalBytes(content: T, serializer: KSerializer<T>): ByteArray {
+    return canonicalJson.encodeToString(serializer, content).toByteArray(Charsets.UTF_8)
+}
+
+fun <T> createIntegrityEnvelope(
+    content: T,
+    serializer: KSerializer<T>
+): IntegrityEnvelope<T> {
+    val canonicalBytes = toCanonicalBytes(content, serializer)
+    val metadata = IntegrityMetadata(
+        version = IntegrityConstants.VERSION,
+        algorithm = IntegrityConstants.ALGORITHM,
+        checksum = calculateChecksum(canonicalBytes),
+        contentLength = canonicalBytes.size
+    )
+    return IntegrityEnvelope(integrity = metadata, content = content)
+}
+
+fun <T> verifyAndExtract(
+    envelope: IntegrityEnvelope<T>,
+    contentSerializer: KSerializer<T>
+): T {
+    if (envelope.integrity.algorithm != IntegrityConstants.ALGORITHM) {
+        throw IntegrityError.UnsupportedAlgorithm(envelope.integrity.algorithm)
     }
 
-    require(contentJson.toByteArray(Charsets.UTF_8).size == envelope.integrity.contentLength) {
-        "Content length mismatch"
+    val canonicalBytes = toCanonicalBytes(envelope.content, contentSerializer)
+    val actualChecksum = calculateChecksum(canonicalBytes)
+
+    if (actualChecksum != envelope.integrity.checksum) {
+        throw IntegrityError.ChecksumMismatch(
+            expected = envelope.integrity.checksum,
+            actual = actualChecksum
+        )
+    }
+
+    if (canonicalBytes.size != envelope.integrity.contentLength) {
+        throw IntegrityError.LengthMismatch(
+            expected = envelope.integrity.contentLength,
+            actual = canonicalBytes.size
+        )
     }
 
     return envelope.content
@@ -813,14 +944,20 @@ def sync_with_integrity():
         update_manifest()
 ```
 
-### Integrity Constants
+### Sync Constants
+
+All magic numbers should be defined as named constants:
 
 ```python
-# constants.py additions
+# constants.py - Sync module constants
 
 # Integrity
 INTEGRITY_ALGORITHM = "sha256"
 INTEGRITY_VERSION = 1
+SCHEMA_VERSION = 1
+
+# File naming
+SEQUENCE_DIGITS = 6  # Zero-pad to this width (e.g., 000001)
 
 # Corruption handling
 QUARANTINE_DIR = ".quarantine"
@@ -830,6 +967,15 @@ CORRUPTION_LOG_FILE = "corruption.log"
 # Verification thresholds
 FULL_VERIFY_INTERVAL_HOURS = 24
 CHAIN_VERIFY_DEPTH = 100  # Verify last N changes on each sync
+
+# Storage management
+EVICTION_TARGET_RATIO = 0.9  # Evict until storage at 90% of max
+DEFAULT_MAX_STORAGE_MB = 500
+DEFAULT_MIN_SESSIONS_TO_KEEP = 5
+DEFAULT_AUTO_EVICT_DAYS = 90
+
+# Sync scope defaults
+DEFAULT_SYNC_MODE = "full"
 ```
 
 ### Platform-Specific Notes
@@ -848,6 +994,39 @@ CHAIN_VERIFY_DEPTH = 100  # Verify last N changes on each sync
 - Use `hashlib.sha256` for checksums
 - Store quarantined files in `~/.bmlibrarian_lite/.quarantine`
 - Use Python `logging` module
+
+### Cross-Platform JSON Canonicalization
+
+**Critical**: All platforms must produce identical JSON bytes for the same content, or checksums will fail.
+
+**Requirements for canonical JSON:**
+1. **Sorted keys**: All object keys sorted lexicographically (Unicode code point order)
+2. **Compact format**: No whitespace between elements (use `,` and `:` separators)
+3. **UTF-8 encoding**: All strings encoded as UTF-8
+4. **No trailing newlines**: Output ends immediately after closing bracket
+5. **Number format**: No unnecessary decimal points or leading zeros
+
+**Testing canonicalization:**
+
+```python
+# Test vector - all platforms must produce this exact output
+TEST_CONTENT = {"z": 1, "a": {"nested": True}, "m": [3, 2, 1]}
+EXPECTED_CANONICAL = b'{"a":{"nested":true},"m":[3,2,1],"z":1}'
+
+def test_canonicalization():
+    result = to_canonical_json(TEST_CONTENT)
+    assert result == EXPECTED_CANONICAL, f"Got: {result}"
+```
+
+**Platform-specific notes:**
+
+| Platform | Library | Sorted Keys | Notes |
+|----------|---------|-------------|-------|
+| Python | `json.dumps(sort_keys=True, separators=(',',':'))` | Yes | Built-in |
+| Swift | `JSONEncoder().outputFormatting = [.sortedKeys]` | Yes | iOS 11+ |
+| Kotlin | Custom comparator or manual sorting | No* | kotlinx.serialization preserves declaration order |
+
+*For Kotlin, either ensure data classes have alphabetically ordered properties, or implement a custom JSON serializer that sorts keys.
 
 ## Selective Sync & Storage Management
 
@@ -1156,7 +1335,10 @@ For devices with limited storage:
 | `no_report` | Evict sessions without reports first |
 
 ```python
-def auto_evict_if_needed():
+# Constants (define in constants.py)
+EVICTION_TARGET_RATIO = 0.9  # Evict until storage is at 90% of max
+
+def auto_evict_if_needed() -> None:
     """Automatically evict content if storage limit exceeded."""
     current_size = get_local_storage_size()
     max_size = get_max_storage_size()
@@ -1164,11 +1346,12 @@ def auto_evict_if_needed():
     if current_size <= max_size:
         return
 
+    target_size = int(max_size * EVICTION_TARGET_RATIO)
     sessions = get_sessions_by_eviction_priority()
-    pinned = get_pinned_sessions()
+    pinned_ids = get_pinned_session_ids()
 
     for session in sessions:
-        if session.id in pinned:
+        if session.id in pinned_ids:
             continue
 
         if session.sync_state == 'evicted':
@@ -1177,7 +1360,7 @@ def auto_evict_if_needed():
         evict_session_content(session.id)
         current_size = get_local_storage_size()
 
-        if current_size <= max_size * 0.9:  # 90% threshold
+        if current_size <= target_size:
             break
 ```
 
@@ -1224,7 +1407,7 @@ Selective sync must maintain integrity guarantees:
 4. **On-demand fetch verifies** - fetched content verified against original checksum
 
 ```python
-def fetch_and_verify(session_id: str, expected_checksum: str) -> dict:
+def fetch_and_verify(session_id: str, expected_checksum: str) -> dict[str, Any]:
     """Fetch content and verify against known checksum."""
     content = fetch_session_content(session_id)
     actual_checksum = calculate_checksum(content)
@@ -1236,6 +1419,120 @@ def fetch_and_verify(session_id: str, expected_checksum: str) -> dict:
 
     return content
 ```
+
+### Bootstrapping a New Device
+
+When a device joins the sync for the first time:
+
+```python
+def bootstrap_new_device(device_name: str, platform: str) -> str:
+    """Initialize sync for a new device."""
+    # 1. Generate unique device ID
+    device_id = generate_uuid_v4()
+
+    # 2. Create device registration
+    device_config = {
+        "deviceId": device_id,
+        "name": device_name,
+        "platform": platform,
+        "createdAt": now_iso8601(),
+        "lastSeen": now_iso8601(),
+        "syncScope": {
+            "mode": "full"  # Default to full sync, user can change
+        }
+    }
+
+    # 3. Upload device config (with integrity envelope)
+    envelope = create_integrity_envelope(device_config)
+    upload_file(f"devices/{device_id}.json", envelope)
+
+    # 4. Initialize local watermarks (start from 0 for all devices)
+    for other_device in list_all_devices():
+        set_watermark(other_device["deviceId"], 0)
+
+    # 5. Perform initial sync (download everything or latest snapshot)
+    if snapshot_exists():
+        restore_from_latest_snapshot()
+    else:
+        sync()  # Full sync from change logs
+
+    return device_id
+```
+
+### Schema Versioning
+
+To handle schema evolution across app versions:
+
+```json
+{
+  "_integrity": { ... },
+  "_content": {
+    "schemaVersion": 2,
+    "operation": { ... }
+  }
+}
+```
+
+**Migration strategy:**
+
+```python
+# Schema version constants
+CURRENT_SCHEMA_VERSION = 2
+
+# Migration functions (pure, versioned)
+MIGRATIONS: dict[int, Callable[[dict], dict]] = {
+    1: migrate_v1_to_v2,
+    # Future: 2: migrate_v2_to_v3,
+}
+
+def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """Migrate schema v1 to v2: add searchProvider field."""
+    if "searchProvider" not in data:
+        data["searchProvider"] = "pubmed"  # Default for old records
+    return data
+
+def apply_migrations(data: dict[str, Any], from_version: int) -> dict[str, Any]:
+    """Apply all necessary migrations to bring data to current schema."""
+    current = from_version
+    while current < CURRENT_SCHEMA_VERSION:
+        if current in MIGRATIONS:
+            data = MIGRATIONS[current](data)
+        current += 1
+    return data
+
+def process_change(change: dict[str, Any]) -> dict[str, Any]:
+    """Process a change, applying migrations if needed."""
+    schema_version = change.get("schemaVersion", 1)
+
+    if schema_version > CURRENT_SCHEMA_VERSION:
+        raise SchemaError(
+            f"Change requires schema v{schema_version}, "
+            f"but this app only supports up to v{CURRENT_SCHEMA_VERSION}. "
+            "Please update the app."
+        )
+
+    if schema_version < CURRENT_SCHEMA_VERSION:
+        change = apply_migrations(change, schema_version)
+        change["schemaVersion"] = CURRENT_SCHEMA_VERSION
+
+    return change
+```
+
+**Workspace schema version** (in `workspace.json`):
+
+```json
+{
+  "_content": {
+    "version": 1,
+    "schemaVersion": 2,
+    "minCompatibleVersion": 1,
+    "createdAt": "2024-01-20T00:00:00Z"
+  }
+}
+```
+
+- `schemaVersion`: Current schema version used by writers
+- `minCompatibleVersion`: Minimum version required to read (for breaking changes)
 
 ### Encryption (Optional)
 
