@@ -132,6 +132,14 @@ public enum SyncConstants {
     /// Minimum interval between background syncs in seconds.
     /// 15 minutes balances battery life and freshness.
     public static let backgroundSyncIntervalSeconds: TimeInterval = 15 * 60
+
+    // MARK: - Time Constants
+
+    /// Seconds in one hour.
+    public static let secondsPerHour: TimeInterval = 3600
+
+    /// Seconds in one day.
+    public static let secondsPerDay: TimeInterval = 86400
 }
 
 // MARK: - Sync Mode

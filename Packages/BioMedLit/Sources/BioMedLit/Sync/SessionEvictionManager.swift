@@ -233,9 +233,8 @@ public actor SessionEvictionManager {
 
     /// Selects eviction candidates based on strategy.
     ///
-    /// This is a pure function that deterministically sorts sessions
-    /// for eviction based on the specified strategy. Sessions that are
-    /// already stubs or evicted are filtered out.
+    /// Convenience wrapper around the pure `selectEvictionCandidates` function.
+    /// Allows calling the selection logic from actor context.
     ///
     /// - Parameters:
     ///   - sessions: Available sessions to consider.
@@ -247,46 +246,76 @@ public actor SessionEvictionManager {
         strategy: EvictionStrategy,
         minKeep: Int
     ) -> [SessionStorageInfo] {
-        // Filter to only full sessions (stubs/evicted already have no content)
-        var candidates = sessions.filter { session in
-            session.syncState == .full
-        }
-
-        // Sort by strategy
-        switch strategy {
-        case .lru:
-            // Least recently accessed first (oldest access = evict first)
-            candidates.sort { $0.lastAccessedAt < $1.lastAccessedAt }
-
-        case .largest:
-            // Largest sessions first (most space recovery)
-            candidates.sort { $0.sizeMB > $1.sizeMB }
-
-        case .oldest:
-            // Oldest by creation date
-            candidates.sort { $0.createdAt < $1.createdAt }
-
-        case .noReport:
-            // Sessions without reports first, then by last accessed
-            candidates.sort { session1, session2 in
-                // First sort by hasReport (false before true)
-                if session1.hasReport != session2.hasReport {
-                    return !session1.hasReport
-                }
-                // Then by last accessed (older first)
-                return session1.lastAccessedAt < session2.lastAccessedAt
-            }
-        }
-
-        // Protect the most recent sessions (keep at least minKeep)
-        if candidates.count > minKeep {
-            // Remove the last minKeep items (most valuable by sort order)
-            return Array(candidates.dropLast(minKeep))
-        }
-
-        // Not enough candidates to meet minKeep - don't evict any
-        return []
+        BioMedLit.selectEvictionCandidates(
+            from: sessions,
+            strategy: strategy,
+            minKeep: minKeep
+        )
     }
+}
+
+// MARK: - Pure Functions
+
+/// Selects eviction candidates based on strategy.
+///
+/// This is a pure function that deterministically sorts sessions
+/// for eviction based on the specified strategy. Sessions that are
+/// already stubs or evicted are filtered out.
+///
+/// The function is side-effect free and can be used for:
+/// - Testing eviction logic in isolation
+/// - Previewing what would be evicted
+/// - Reusing the logic in different contexts
+///
+/// - Parameters:
+///   - sessions: Available sessions to consider.
+///   - strategy: Eviction strategy determining sort order.
+///   - minKeep: Minimum sessions to keep (protects most recent).
+/// - Returns: Sorted candidates where first item should be evicted first.
+public func selectEvictionCandidates(
+    from sessions: [SessionStorageInfo],
+    strategy: EvictionStrategy,
+    minKeep: Int
+) -> [SessionStorageInfo] {
+    // Filter to only full sessions (stubs/evicted already have no content)
+    var candidates = sessions.filter { session in
+        session.syncState == .full
+    }
+
+    // Sort by strategy
+    switch strategy {
+    case .lru:
+        // Least recently accessed first (oldest access = evict first)
+        candidates.sort { $0.lastAccessedAt < $1.lastAccessedAt }
+
+    case .largest:
+        // Largest sessions first (most space recovery)
+        candidates.sort { $0.sizeMB > $1.sizeMB }
+
+    case .oldest:
+        // Oldest by creation date
+        candidates.sort { $0.createdAt < $1.createdAt }
+
+    case .noReport:
+        // Sessions without reports first, then by last accessed
+        candidates.sort { session1, session2 in
+            // First sort by hasReport (false before true)
+            if session1.hasReport != session2.hasReport {
+                return !session1.hasReport
+            }
+            // Then by last accessed (older first)
+            return session1.lastAccessedAt < session2.lastAccessedAt
+        }
+    }
+
+    // Protect the most recent sessions (keep at least minKeep)
+    if candidates.count > minKeep {
+        // Remove the last minKeep items (most valuable by sort order)
+        return Array(candidates.dropLast(minKeep))
+    }
+
+    // Not enough candidates to meet minKeep - don't evict any
+    return []
 }
 
 // MARK: - Session Eviction Delegate

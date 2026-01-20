@@ -26,19 +26,15 @@ final class SelectiveSyncTests: XCTestCase {
     // MARK: - Eviction Candidate Selection Tests
 
     /// Tests that LRU strategy selects least recently accessed sessions first.
-    func testEvictionCandidateLRU() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionCandidateLRU() {
         let sessions = [
-            makeSession(id: "1", lastAccessed: Date(timeIntervalSinceNow: -3600)), // oldest access
-            makeSession(id: "2", lastAccessed: Date(timeIntervalSinceNow: -1800)), // middle
+            makeSession(id: "1", lastAccessed: Date(timeIntervalSinceNow: -SyncConstants.secondsPerHour)), // oldest
+            makeSession(id: "2", lastAccessed: Date(timeIntervalSinceNow: -SyncConstants.secondsPerHour / 2)), // middle
             makeSession(id: "3", lastAccessed: Date()) // newest access
         ]
 
-        let candidates = await manager.selectEvictionCandidates(
+        // Test using the pure function directly
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .lru,
             minKeep: 1
@@ -53,19 +49,15 @@ final class SelectiveSyncTests: XCTestCase {
     }
 
     /// Tests that largest strategy selects biggest sessions first.
-    func testEvictionCandidateLargest() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionCandidateLargest() {
         let sessions = [
             makeSession(id: "1", sizeMB: 100),
             makeSession(id: "2", sizeMB: 500), // largest
             makeSession(id: "3", sizeMB: 200)
         ]
 
-        let candidates = await manager.selectEvictionCandidates(
+        // Test using the pure function directly
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .largest,
             minKeep: 1
@@ -78,19 +70,15 @@ final class SelectiveSyncTests: XCTestCase {
     }
 
     /// Tests that oldest strategy selects sessions by creation date.
-    func testEvictionCandidateOldest() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionCandidateOldest() {
         let sessions = [
-            makeSession(id: "1", createdAt: Date(timeIntervalSinceNow: -86400 * 30)), // oldest
-            makeSession(id: "2", createdAt: Date(timeIntervalSinceNow: -86400 * 7)),
+            makeSession(id: "1", createdAt: Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay * 30)), // oldest
+            makeSession(id: "2", createdAt: Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay * 7)),
             makeSession(id: "3", createdAt: Date()) // newest
         ]
 
-        let candidates = await manager.selectEvictionCandidates(
+        // Test using the pure function directly
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .oldest,
             minKeep: 1
@@ -101,19 +89,15 @@ final class SelectiveSyncTests: XCTestCase {
     }
 
     /// Tests that noReport strategy prioritizes sessions without reports.
-    func testEvictionCandidateNoReport() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionCandidateNoReport() {
         let sessions = [
             makeSession(id: "1", hasReport: true),
             makeSession(id: "2", hasReport: false), // no report - prioritize
             makeSession(id: "3", hasReport: true)
         ]
 
-        let candidates = await manager.selectEvictionCandidates(
+        // Test using the pure function directly
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .noReport,
             minKeep: 1
@@ -124,12 +108,7 @@ final class SelectiveSyncTests: XCTestCase {
     }
 
     /// Tests that minKeep is respected in eviction selection.
-    func testEvictionRespectsMinKeep() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionRespectsMinKeep() {
         let sessions = [
             makeSession(id: "1"),
             makeSession(id: "2"),
@@ -137,7 +116,7 @@ final class SelectiveSyncTests: XCTestCase {
         ]
 
         // minKeep = 3 means keep all 3
-        let candidates = await manager.selectEvictionCandidates(
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .lru,
             minKeep: 3
@@ -148,19 +127,14 @@ final class SelectiveSyncTests: XCTestCase {
     }
 
     /// Tests that minKeep prevents eviction when sessions are fewer.
-    func testEvictionMinKeepExceedsCount() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionMinKeepExceedsCount() {
         let sessions = [
             makeSession(id: "1"),
             makeSession(id: "2")
         ]
 
         // minKeep = 5 exceeds session count
-        let candidates = await manager.selectEvictionCandidates(
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .lru,
             minKeep: 5
@@ -171,19 +145,15 @@ final class SelectiveSyncTests: XCTestCase {
     }
 
     /// Tests that stub sessions are filtered out of eviction candidates.
-    func testEvictionFiltersStubs() async throws {
-        let manager = SessionEvictionManager(
-            storageMonitor: createMockStorageMonitor(),
-            delegate: MockEvictionDelegate()
-        )
-
+    func testEvictionFiltersStubs() {
         let sessions = [
             makeSession(id: "1", syncState: .full),
             makeSession(id: "2", syncState: .stub), // already a stub
             makeSession(id: "3", syncState: .evicted) // already evicted
         ]
 
-        let candidates = await manager.selectEvictionCandidates(
+        // Test using the pure function directly
+        let candidates = selectEvictionCandidates(
             from: sessions,
             strategy: .lru,
             minKeep: 0
@@ -377,12 +347,12 @@ final class SelectiveSyncTests: XCTestCase {
 
         let manager = SyncScopeManager(storage: storage, deviceConfig: deviceConfig)
 
-        // Recent session should be in scope
-        let recentDate = Date(timeIntervalSinceNow: -86400 * 7) // 7 days ago
+        // Recent session should be in scope (7 days ago)
+        let recentDate = Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay * 7)
         XCTAssertTrue(await manager.isInScope("session-1", sessionDate: recentDate))
 
-        // Old session should be out of scope
-        let oldDate = Date(timeIntervalSinceNow: -86400 * 60) // 60 days ago
+        // Old session should be out of scope (60 days ago)
+        let oldDate = Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay * 60)
         XCTAssertFalse(await manager.isInScope("session-2", sessionDate: oldDate))
     }
 
@@ -477,14 +447,15 @@ final class SelectiveSyncTests: XCTestCase {
 
     /// Tests session stub creation.
     func testSessionStubCreation() {
+        let tenMegabytes = 10 * 1024 * 1024
         let stub = SessionStub(
             id: "test-session",
             claim: "Test research claim",
-            createdAt: Date(timeIntervalSinceNow: -86400),
+            createdAt: Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay),
             documentCount: 25,
             citationCount: 50,
             hasReport: true,
-            contentSizeBytes: 1024 * 1024 * 10 // 10 MB
+            contentSizeBytes: tenMegabytes
         )
 
         XCTAssertEqual(stub.id, "test-session")
@@ -492,7 +463,7 @@ final class SelectiveSyncTests: XCTestCase {
         XCTAssertEqual(stub.documentCount, 25)
         XCTAssertEqual(stub.citationCount, 50)
         XCTAssertTrue(stub.hasReport)
-        XCTAssertEqual(stub.contentSizeBytes, 10 * 1024 * 1024)
+        XCTAssertEqual(stub.contentSizeBytes, tenMegabytes)
     }
 
     /// Tests session stub encoding and decoding.
@@ -535,13 +506,22 @@ final class SelectiveSyncTests: XCTestCase {
 
     // MARK: - Helper Methods
 
-    /// Creates a mock session with specified properties.
+    /// Creates a mock session with specified properties for testing.
+    ///
+    /// - Parameters:
+    ///   - id: Unique session identifier.
+    ///   - sizeMB: Storage size in megabytes. Defaults to 100.
+    ///   - hasReport: Whether session has a report. Defaults to true.
+    ///   - lastAccessed: Last access timestamp. Defaults to now.
+    ///   - createdAt: Creation timestamp. Defaults to one day ago.
+    ///   - syncState: Sync state. Defaults to full.
+    /// - Returns: A configured SessionStorageInfo for testing.
     private func makeSession(
         id: String,
         sizeMB: Int = 100,
         hasReport: Bool = true,
         lastAccessed: Date = Date(),
-        createdAt: Date = Date(timeIntervalSinceNow: -86400),
+        createdAt: Date = Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay),
         syncState: RecordSyncState = .full
     ) -> SessionStorageInfo {
         SessionStorageInfo(
