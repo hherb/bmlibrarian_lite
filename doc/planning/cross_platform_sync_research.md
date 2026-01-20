@@ -11,6 +11,7 @@ This document researches options for synchronizing user data across iOS, macOS, 
 3. **Offline-first** - work fully offline, sync when connected
 4. **Collision-free** - handle concurrent edits without data loss
 5. **Cross-platform** - iOS, macOS, Android, Python desktop
+6. **Data integrity** - checksums to detect and prevent corruption
 
 ## Data Models to Sync
 
@@ -360,6 +361,492 @@ This fragments the user experience and requires three separate implementations.
     └── 2024-01-20_abc123.json.gz
 ```
 
+## Data Integrity Guarantees
+
+Data integrity is critical to prevent corruption from incomplete transfers, storage failures, or transmission errors. This section defines a multi-layered integrity system.
+
+### Integrity Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Integrity Layers                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 1: Per-File Checksum (SHA-256)                           │
+│  - Every file includes its own checksum                         │
+│  - Verified on read, before any processing                      │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 2: Manifest File (Per-Device)                            │
+│  - Lists all files with checksums and sizes                     │
+│  - Allows detection of missing or extra files                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 3: Chain Hash (Merkle-like)                              │
+│  - Each change references previous change's hash                │
+│  - Detects gaps or reordering in change log                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 4: Periodic Snapshots with Full Verification             │
+│  - Complete state checksum for recovery validation              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Layer 1: Per-File Checksums
+
+Every sync file includes an integrity envelope:
+
+```json
+{
+  "_integrity": {
+    "version": 1,
+    "algorithm": "sha256",
+    "checksum": "a1b2c3d4e5f6...",
+    "contentLength": 1234
+  },
+  "_content": {
+    "version": 1,
+    "deviceId": "550e8400-e29b-41d4-a716-446655440000",
+    "sequence": 142,
+    "timestamp": 1705772400000,
+    "operation": { ... }
+  }
+}
+```
+
+**Checksum Calculation:**
+
+```python
+import hashlib
+import json
+
+def calculate_checksum(content: dict) -> str:
+    """Calculate SHA-256 checksum of content."""
+    # Canonical JSON: sorted keys, no extra whitespace, UTF-8
+    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+def create_integrity_envelope(content: dict) -> dict:
+    """Wrap content with integrity metadata."""
+    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
+    return {
+        "_integrity": {
+            "version": 1,
+            "algorithm": "sha256",
+            "checksum": hashlib.sha256(canonical.encode('utf-8')).hexdigest(),
+            "contentLength": len(canonical.encode('utf-8'))
+        },
+        "_content": content
+    }
+
+def verify_and_extract(envelope: dict) -> dict:
+    """Verify integrity and return content, or raise exception."""
+    integrity = envelope.get("_integrity")
+    content = envelope.get("_content")
+
+    if not integrity or not content:
+        raise IntegrityError("Missing integrity envelope")
+
+    if integrity["algorithm"] != "sha256":
+        raise IntegrityError(f"Unsupported algorithm: {integrity['algorithm']}")
+
+    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
+    actual_checksum = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+    if actual_checksum != integrity["checksum"]:
+        raise IntegrityError(
+            f"Checksum mismatch: expected {integrity['checksum']}, "
+            f"got {actual_checksum}"
+        )
+
+    if len(canonical.encode('utf-8')) != integrity["contentLength"]:
+        raise IntegrityError("Content length mismatch")
+
+    return content
+```
+
+**Swift Implementation:**
+
+```swift
+import CryptoKit
+import Foundation
+
+struct IntegrityEnvelope<T: Codable>: Codable {
+    let integrity: IntegrityMetadata
+    let content: T
+
+    enum CodingKeys: String, CodingKey {
+        case integrity = "_integrity"
+        case content = "_content"
+    }
+}
+
+struct IntegrityMetadata: Codable {
+    let version: Int
+    let algorithm: String
+    let checksum: String
+    let contentLength: Int
+}
+
+func calculateChecksum<T: Encodable>(_ content: T) throws -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let data = try encoder.encode(content)
+    let hash = SHA256.hash(data: data)
+    return hash.compactMap { String(format: "%02x", $0) }.joined()
+}
+
+func verifyAndExtract<T: Decodable>(_ envelope: IntegrityEnvelope<T>) throws -> T {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let contentData = try encoder.encode(envelope.content)
+
+    let actualChecksum = SHA256.hash(data: contentData)
+        .compactMap { String(format: "%02x", $0) }.joined()
+
+    guard actualChecksum == envelope.integrity.checksum else {
+        throw IntegrityError.checksumMismatch(
+            expected: envelope.integrity.checksum,
+            actual: actualChecksum
+        )
+    }
+
+    guard contentData.count == envelope.integrity.contentLength else {
+        throw IntegrityError.lengthMismatch
+    }
+
+    return envelope.content
+}
+```
+
+**Kotlin Implementation:**
+
+```kotlin
+import java.security.MessageDigest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+
+data class IntegrityMetadata(
+    val version: Int,
+    val algorithm: String,
+    val checksum: String,
+    val contentLength: Int
+)
+
+fun calculateChecksum(content: Any): String {
+    val json = Json {
+        prettyPrint = false
+        encodeDefaults = true
+    }
+    val canonical = json.encodeToString(content)
+    val digest = MessageDigest.getInstance("SHA-256")
+    val hashBytes = digest.digest(canonical.toByteArray(Charsets.UTF_8))
+    return hashBytes.joinToString("") { "%02x".format(it) }
+}
+
+fun <T> verifyAndExtract(envelope: IntegrityEnvelope<T>): T {
+    val json = Json { prettyPrint = false }
+    val contentJson = json.encodeToString(envelope.content)
+    val actualChecksum = calculateChecksum(envelope.content)
+
+    require(actualChecksum == envelope.integrity.checksum) {
+        "Checksum mismatch: expected ${envelope.integrity.checksum}, got $actualChecksum"
+    }
+
+    require(contentJson.toByteArray(Charsets.UTF_8).size == envelope.integrity.contentLength) {
+        "Content length mismatch"
+    }
+
+    return envelope.content
+}
+```
+
+### Layer 2: Device Manifest
+
+Each device maintains a manifest file listing all its change files:
+
+```
+/BMLibrarian/changes/{device_id}/manifest.json
+```
+
+```json
+{
+  "_integrity": {
+    "version": 1,
+    "algorithm": "sha256",
+    "checksum": "...",
+    "contentLength": 2048
+  },
+  "_content": {
+    "deviceId": "550e8400-e29b-41d4-a716-446655440000",
+    "lastUpdated": "2024-01-20T15:30:00Z",
+    "headSequence": 142,
+    "files": [
+      {
+        "sequence": 1,
+        "filename": "000001_1705600000000_session_create.json",
+        "checksum": "abc123...",
+        "size": 512,
+        "timestamp": 1705600000000
+      },
+      {
+        "sequence": 2,
+        "filename": "000002_1705600100000_document_score.json",
+        "checksum": "def456...",
+        "size": 1024,
+        "timestamp": 1705600100000
+      }
+    ],
+    "manifestChecksum": "xyz789..."
+  }
+}
+```
+
+The `manifestChecksum` is computed over all file entries, providing a quick way to verify the entire change log:
+
+```python
+def compute_manifest_checksum(files: list[dict]) -> str:
+    """Compute checksum over all file checksums."""
+    combined = ''.join(f['checksum'] for f in sorted(files, key=lambda x: x['sequence']))
+    return hashlib.sha256(combined.encode('utf-8')).hexdigest()
+```
+
+### Layer 3: Chain Hash (Change Log Integrity)
+
+Each change references the previous change's hash, creating an unbroken chain:
+
+```json
+{
+  "_content": {
+    "sequence": 142,
+    "previousHash": "hash_of_change_141",
+    "operation": { ... }
+  }
+}
+```
+
+**Verification:**
+
+```python
+def verify_change_chain(changes: list[dict]) -> bool:
+    """Verify the integrity of the change chain."""
+    if not changes:
+        return True
+
+    # First change has no previous
+    if changes[0].get('previousHash') is not None:
+        raise IntegrityError("First change should not have previousHash")
+
+    for i in range(1, len(changes)):
+        expected_hash = calculate_checksum(changes[i-1])
+        actual_previous = changes[i].get('previousHash')
+
+        if expected_hash != actual_previous:
+            raise IntegrityError(
+                f"Chain broken at sequence {changes[i]['sequence']}: "
+                f"expected {expected_hash}, got {actual_previous}"
+            )
+
+    return True
+```
+
+**Benefits:**
+- Detects missing changes (gap in chain)
+- Detects reordered changes
+- Detects tampering with historical changes
+- Allows partial verification (only need to verify back to last known-good state)
+
+### Layer 4: Snapshot Integrity
+
+Periodic snapshots include a comprehensive integrity block:
+
+```json
+{
+  "_integrity": {
+    "version": 1,
+    "algorithm": "sha256",
+    "checksum": "...",
+    "contentLength": 50000
+  },
+  "_content": {
+    "snapshotId": "uuid",
+    "deviceId": "...",
+    "timestamp": "2024-01-20T00:00:00Z",
+    "basedOnSequence": 142,
+    "changeLogHash": "hash_of_manifest",
+    "entityCounts": {
+      "sessions": 15,
+      "documents": 450,
+      "citations": 120,
+      "reports": 15
+    },
+    "entities": {
+      "sessions": [ ... ],
+      "documents": [ ... ],
+      "citations": [ ... ],
+      "reports": [ ... ]
+    }
+  }
+}
+```
+
+### Handling Corrupt Data
+
+When corruption is detected:
+
+```python
+class CorruptionHandler:
+    def handle_corrupt_file(self, file_path: str, error: IntegrityError):
+        """Handle a corrupt sync file."""
+
+        # 1. Log the corruption
+        self.log_corruption(file_path, error)
+
+        # 2. Quarantine the corrupt file (don't delete - for forensics)
+        quarantine_path = self.quarantine_file(file_path)
+
+        # 3. Check if we can recover
+        recovery_options = self.assess_recovery_options(file_path)
+
+        if recovery_options.can_skip:
+            # Non-critical file, skip and continue
+            self.mark_as_skipped(file_path)
+            return RecoveryResult.SKIPPED
+
+        elif recovery_options.can_rebuild_from_snapshot:
+            # Rebuild from last good snapshot
+            self.rebuild_from_snapshot(recovery_options.snapshot_id)
+            return RecoveryResult.REBUILT
+
+        elif recovery_options.can_request_resend:
+            # Request the source device to resend
+            self.request_resend(file_path)
+            return RecoveryResult.PENDING_RESEND
+
+        else:
+            # Unrecoverable - notify user
+            self.notify_user_corruption(file_path, recovery_options)
+            return RecoveryResult.FAILED
+
+    def verify_full_state(self) -> IntegrityReport:
+        """Full integrity verification of all sync data."""
+        report = IntegrityReport()
+
+        # Verify workspace.json
+        report.add(self.verify_file("workspace.json"))
+
+        # Verify all device manifests
+        for device_dir in self.list_device_directories():
+            manifest = self.verify_manifest(device_dir)
+            report.add(manifest)
+
+            # Verify all changes for this device
+            for change_file in self.list_changes(device_dir):
+                report.add(self.verify_change_file(change_file))
+
+            # Verify chain integrity
+            report.add(self.verify_chain(device_dir))
+
+        # Verify snapshots
+        for snapshot in self.list_snapshots():
+            report.add(self.verify_snapshot(snapshot))
+
+        return report
+```
+
+### Sync Protocol with Integrity
+
+Updated sync protocol incorporating integrity checks:
+
+```python
+def sync_with_integrity():
+    """Sync with full integrity verification."""
+
+    # 1. Fetch remote manifest
+    remote_manifests = fetch_remote_manifests()
+
+    for device_id, manifest in remote_manifests.items():
+        if device_id == MY_DEVICE_ID:
+            continue
+
+        # 2. Verify manifest integrity
+        try:
+            verified_manifest = verify_and_extract(manifest)
+        except IntegrityError as e:
+            handle_corrupt_manifest(device_id, e)
+            continue
+
+        # 3. Compare with local watermark
+        local_watermark = get_watermark(device_id)
+
+        # 4. Fetch and verify new changes
+        for file_info in verified_manifest['files']:
+            if file_info['sequence'] <= local_watermark:
+                continue
+
+            # Download file
+            file_data = download_file(device_id, file_info['filename'])
+
+            # Verify file checksum matches manifest
+            if calculate_checksum(file_data) != file_info['checksum']:
+                handle_corrupt_file(file_info['filename'], "Manifest mismatch")
+                continue
+
+            # Verify internal integrity
+            try:
+                change = verify_and_extract(file_data)
+            except IntegrityError as e:
+                handle_corrupt_file(file_info['filename'], e)
+                continue
+
+            # Verify chain (optional, for extra safety)
+            if not verify_chain_link(change, local_watermark):
+                handle_chain_break(device_id, change['sequence'])
+                continue
+
+            # Apply change
+            apply_change(change)
+            update_watermark(device_id, change['sequence'])
+
+    # 5. Upload local changes with integrity
+    for pending in get_pending_changes():
+        envelope = create_integrity_envelope(pending)
+        upload_with_retry(envelope)
+        update_manifest()
+```
+
+### Integrity Constants
+
+```python
+# constants.py additions
+
+# Integrity
+INTEGRITY_ALGORITHM = "sha256"
+INTEGRITY_VERSION = 1
+
+# Corruption handling
+QUARANTINE_DIR = ".quarantine"
+MAX_RESEND_ATTEMPTS = 3
+CORRUPTION_LOG_FILE = "corruption.log"
+
+# Verification thresholds
+FULL_VERIFY_INTERVAL_HOURS = 24
+CHAIN_VERIFY_DEPTH = 100  # Verify last N changes on each sync
+```
+
+### Platform-Specific Notes
+
+**iOS/macOS:**
+- Use `CryptoKit.SHA256` for checksums
+- Store quarantined files in app's `Caches` directory
+- Use `OSLog` for corruption logging
+
+**Android:**
+- Use `java.security.MessageDigest` for SHA-256
+- Store quarantined files in `context.cacheDir`
+- Use `android.util.Log` for corruption logging
+
+**Python:**
+- Use `hashlib.sha256` for checksums
+- Store quarantined files in `~/.bmlibrarian_lite/.quarantine`
+- Use Python `logging` module
+
 ### Encryption (Optional)
 
 For sensitive medical research data:
@@ -377,9 +864,12 @@ User provides passphrase; each platform derives the same key.
 
 ## Implementation Roadmap
 
-### Milestone 1: Foundation
+### Milestone 1: Foundation & Integrity Core
 
 - [ ] Define canonical JSON schema for all entities
+- [ ] Implement integrity envelope (SHA-256 checksums)
+- [ ] Implement `verify_and_extract()` for all platforms
+- [ ] Create `IntegrityError` exception hierarchy
 - [ ] Implement `SyncStorageProvider` protocol
 - [ ] Implement `LocalFolderSyncProvider` for testing
 - [ ] Add change tracking to Python desktop app
@@ -388,26 +878,37 @@ User provides passphrase; each platform derives the same key.
 
 - [ ] Implement `iCloudSyncProvider` using iCloud Drive
 - [ ] Add change tracking to SwiftData models
+- [ ] Implement integrity verification (CryptoKit)
 - [ ] Implement background sync with `BGTaskScheduler`
 
 ### Milestone 3: Android Sync
 
 - [ ] Implement `GoogleDriveSyncProvider`
 - [ ] Add change tracking to Room DAOs
+- [ ] Implement integrity verification (MessageDigest)
 - [ ] Implement WorkManager for background sync
 
-### Milestone 4: Additional Providers
+### Milestone 4: Advanced Integrity
+
+- [ ] Implement device manifest with file checksums
+- [ ] Implement chain hash verification
+- [ ] Add corruption quarantine and recovery
+- [ ] Implement periodic full-state verification
+- [ ] Add integrity status to sync UI
+
+### Milestone 5: Additional Providers
 
 - [ ] Implement `DropboxSyncProvider`
 - [ ] Implement `GoogleDriveSyncProvider` for Python
 - [ ] Add sync UI to all platforms
 
-### Milestone 5: Polish
+### Milestone 6: Polish
 
-- [ ] Implement encryption
+- [ ] Implement encryption (AES-256-GCM)
 - [ ] Add conflict resolution UI for edge cases
 - [ ] Implement change log compaction
 - [ ] Add sync status indicators
+- [ ] Comprehensive integrity test suite
 
 ## Alternative: Automerge + File Sync
 
@@ -473,6 +974,9 @@ The **file-based sync with LWW CRDT semantics** approach best meets BMLibrarian'
 3. **Offline-first**: Local database is authoritative
 4. **Collision-resistant**: Per-device change directories + LWW merge
 5. **Auditable**: Full change history preserved
-6. **Implementable incrementally**: Start with Python, add mobile platforms
+6. **Data integrity guaranteed**: Multi-layer checksums prevent corruption
+7. **Implementable incrementally**: Start with Python, add mobile platforms
 
 The user's intuition about "simple text files with unique naming" is validated by modern local-first architecture patterns. Adding vector clocks and LWW semantics provides the collision avoidance needed for multi-device use.
+
+The four-layer integrity system (per-file checksums, device manifests, chain hashes, and snapshot verification) ensures that corrupt data is never silently accepted. SHA-256 provides cryptographic strength while being available natively on all target platforms (Python `hashlib`, Swift `CryptoKit`, Kotlin `MessageDigest`).
