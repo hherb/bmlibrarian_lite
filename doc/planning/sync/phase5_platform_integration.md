@@ -1199,6 +1199,588 @@ final class MacBackgroundSyncService {
 }
 ```
 
+### Step 9: Create macOS Sync Settings View
+
+**File**: `macos/MedicalFactCheckerMac/Sources/Views/Settings/MacSyncSettingsView.swift`
+
+```swift
+import SwiftUI
+import BioMedLit
+
+/// Settings view for sync configuration on macOS.
+///
+/// Provides larger, desktop-optimized layout compared to iOS version.
+struct MacSyncSettingsView: View {
+    @EnvironmentObject var syncCoordinator: SyncCoordinator
+    @EnvironmentObject var selectiveSyncCoordinator: SelectiveSyncCoordinator
+
+    @State private var isEnabled = false
+    @State private var syncMode: SyncMode = .full
+    @State private var storageLimitGB: Double = 2.0
+    @State private var autoEvictionEnabled = false
+    @State private var showingStorageManagement = false
+
+    /// Minimum storage limit in GB.
+    private let minStorageLimitGB: Double = 0.5
+
+    /// Maximum storage limit in GB.
+    private let maxStorageLimitGB: Double = 50.0
+
+    var body: some View {
+        Form {
+            Section("Sync Status") {
+                Toggle("Enable iCloud Sync", isOn: $isEnabled)
+                    .onChange(of: isEnabled) { _, newValue in
+                        Task {
+                            await handleSyncToggle(newValue)
+                        }
+                    }
+
+                if isEnabled {
+                    syncStatusRow
+                }
+            }
+
+            if isEnabled {
+                Section("Sync Mode") {
+                    Picker("Mode", selection: $syncMode) {
+                        Text("Full Sync").tag(SyncMode.full)
+                        Text("Selective").tag(SyncMode.selective)
+                        Text("Recent Only").tag(SyncMode.recent)
+                        Text("Minimal").tag(SyncMode.minimal)
+                    }
+                    .pickerStyle(.radioGroup)
+                    .onChange(of: syncMode) { _, newValue in
+                        Task {
+                            await selectiveSyncCoordinator.setSyncMode(newValue)
+                        }
+                    }
+
+                    Text(syncModeDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Storage") {
+                    storageRow
+
+                    HStack {
+                        Text("Limit")
+                        Slider(
+                            value: $storageLimitGB,
+                            in: minStorageLimitGB...maxStorageLimitGB,
+                            step: 0.5
+                        )
+                        Text("\(storageLimitGB, specifier: "%.1f") GB")
+                            .frame(width: 60)
+                    }
+                    .onChange(of: storageLimitGB) { _, newValue in
+                        Task {
+                            await selectiveSyncCoordinator.setStorageLimit(Int(newValue * 1024))
+                        }
+                    }
+
+                    Toggle("Auto-Evict Old Sessions", isOn: $autoEvictionEnabled)
+                        .onChange(of: autoEvictionEnabled) { _, newValue in
+                            Task {
+                                let config = newValue ? AutoEvictionConfig(enabled: true) : nil
+                                await selectiveSyncCoordinator.setAutoEviction(config)
+                            }
+                        }
+
+                    Button("Manage Storage...") {
+                        showingStorageManagement = true
+                    }
+                }
+
+                Section("Actions") {
+                    HStack {
+                        Button("Sync Now") {
+                            Task {
+                                await syncCoordinator.sync()
+                            }
+                        }
+                        .disabled(syncCoordinator.status == .syncing)
+
+                        if syncCoordinator.status == .syncing {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        }
+
+                        Spacer()
+
+                        if let lastSync = syncCoordinator.lastSyncTime {
+                            Text("Last sync: \(lastSync, style: .relative) ago")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .sheet(isPresented: $showingStorageManagement) {
+            MacStorageManagementView()
+                .environmentObject(selectiveSyncCoordinator)
+        }
+        .onAppear {
+            loadCurrentSettings()
+        }
+    }
+
+    @ViewBuilder
+    private var syncStatusRow: some View {
+        HStack {
+            Text("Status:")
+            Spacer()
+            switch syncCoordinator.status {
+            case .idle:
+                Label("Ready", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            case .initializing:
+                Label("Initializing...", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.orange)
+            case .syncing:
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Syncing...")
+                }
+            case .error(let error):
+                Label("Error: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var storageRow: some View {
+        if let info = selectiveSyncCoordinator.storageInfo {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Used: \(info.usedMB) MB")
+                    Text("•")
+                        .foregroundStyle(.secondary)
+                    Text("\(info.fullSessionCount) sessions")
+                    Spacer()
+                }
+
+                ProgressView(
+                    value: Double(info.usedMB),
+                    total: Double(selectiveSyncCoordinator.storageLimit)
+                )
+                .tint(storageColor(used: info.usedMB, limit: selectiveSyncCoordinator.storageLimit))
+            }
+        }
+    }
+
+    private var syncModeDescription: String {
+        switch syncMode {
+        case .full:
+            return "Sync all sessions to this Mac. Best for devices with ample storage."
+        case .selective:
+            return "Only sync selected sessions. You choose what to keep locally."
+        case .recent:
+            return "Only sync recent sessions. Older sessions are fetched on-demand."
+        case .minimal:
+            return "Only sync metadata. All content is fetched on-demand."
+        }
+    }
+
+    private func storageColor(used: Int, limit: Int) -> Color {
+        let ratio = Double(used) / Double(limit)
+        if ratio > 0.9 {
+            return .red
+        } else if ratio > 0.7 {
+            return .orange
+        }
+        return .blue
+    }
+
+    private func loadCurrentSettings() {
+        syncMode = selectiveSyncCoordinator.syncMode
+        storageLimitGB = Double(selectiveSyncCoordinator.storageLimit) / 1024.0
+        autoEvictionEnabled = selectiveSyncCoordinator.autoEvictionEnabled
+    }
+
+    private func handleSyncToggle(_ enabled: Bool) async {
+        // Enable/disable sync via UserDefaults
+        // Actual sync initialization handled by app entry point
+        UserDefaults.standard.set(enabled, forKey: "syncEnabled")
+    }
+}
+```
+
+### Step 10: Create macOS Storage Management View
+
+**File**: `macos/MedicalFactCheckerMac/Sources/Views/Settings/MacStorageManagementView.swift`
+
+```swift
+import SwiftUI
+import BioMedLit
+
+/// Storage management view for macOS.
+///
+/// Provides a desktop-optimized interface for managing sync storage.
+struct MacStorageManagementView: View {
+    @EnvironmentObject var selectiveSyncCoordinator: SelectiveSyncCoordinator
+    @Environment(\.dismiss) var dismiss
+
+    @State private var selectedTab = 0
+    @State private var selectedSession: String?
+
+    /// Minimum window width.
+    private let minWidth: CGFloat = 600
+
+    /// Minimum window height.
+    private let minHeight: CGFloat = 400
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header with storage summary
+            storageSummaryHeader
+                .padding()
+                .background(Color(.windowBackgroundColor))
+
+            Divider()
+
+            // Tab bar
+            Picker("View", selection: $selectedTab) {
+                Text("On This Mac").tag(0)
+                Text("Available in Cloud").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding()
+
+            // Content
+            if selectedTab == 0 {
+                localSessionsTable
+            } else {
+                availableSessionsTable
+            }
+        }
+        .frame(minWidth: minWidth, minHeight: minHeight)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Evict Oldest Sessions") {
+                        Task {
+                            await selectiveSyncCoordinator.checkAndAutoEvict()
+                        }
+                    }
+
+                    Divider()
+
+                    Button("Refresh") {
+                        Task {
+                            await selectiveSyncCoordinator.refresh()
+                        }
+                    }
+                } label: {
+                    Label("Actions", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var storageSummaryHeader: some View {
+        if let info = selectiveSyncCoordinator.storageInfo {
+            HStack(spacing: 20) {
+                VStack(alignment: .leading) {
+                    Text("\(info.usedMB) MB")
+                        .font(.title.bold())
+                    Text("of \(selectiveSyncCoordinator.storageLimit) MB used")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ProgressView(
+                    value: Double(info.usedMB),
+                    total: Double(selectiveSyncCoordinator.storageLimit)
+                )
+                .frame(width: 200)
+
+                Spacer()
+
+                VStack(alignment: .trailing) {
+                    Text("\(info.fullSessionCount)")
+                        .font(.title.bold())
+                    Text("sessions on this Mac")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var localSessionsTable: some View {
+        Table(selectiveSyncCoordinator.localSessions, selection: $selectedSession) {
+            TableColumn("Title") { session in
+                HStack {
+                    Text(session.title)
+                        .lineLimit(1)
+                    if session.isPinned {
+                        Image(systemName: "pin.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                    }
+                }
+            }
+            .width(min: 200)
+
+            TableColumn("Documents") { session in
+                Text("\(session.documentCount)")
+            }
+            .width(80)
+
+            TableColumn("Report") { session in
+                if session.hasReport {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Image(systemName: "minus.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .width(60)
+
+            TableColumn("Size") { session in
+                Text("\(session.sizeMB) MB")
+            }
+            .width(80)
+
+            TableColumn("Status") { session in
+                syncStateLabel(session.syncState)
+            }
+            .width(100)
+        }
+        .contextMenu(forSelectionType: String.self) { selection in
+            if let sessionId = selection.first {
+                Button("Evict") {
+                    Task {
+                        await selectiveSyncCoordinator.evictSession(sessionId)
+                    }
+                }
+
+                if selectiveSyncCoordinator.localSessions.first(where: { $0.id == sessionId })?.isPinned == true {
+                    Button("Unpin") {
+                        Task {
+                            await selectiveSyncCoordinator.unpinSession(sessionId)
+                        }
+                    }
+                } else {
+                    Button("Pin") {
+                        Task {
+                            await selectiveSyncCoordinator.pinSession(sessionId)
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button("Delete from This Mac", role: .destructive) {
+                    Task {
+                        await selectiveSyncCoordinator.deleteLocalOnly(sessionId)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var availableSessionsTable: some View {
+        Table(selectiveSyncCoordinator.availableSessions, selection: $selectedSession) {
+            TableColumn("Title") { session in
+                Text(session.title)
+                    .lineLimit(1)
+            }
+            .width(min: 200)
+
+            TableColumn("Documents") { session in
+                Text("\(session.documentCount)")
+            }
+            .width(80)
+
+            TableColumn("Size") { session in
+                Text("\(session.sizeMB) MB")
+            }
+            .width(80)
+
+            TableColumn("Status") { session in
+                syncStateLabel(session.syncState)
+            }
+            .width(100)
+        }
+        .contextMenu(forSelectionType: String.self) { selection in
+            if let sessionId = selection.first {
+                Button("Fetch to This Mac") {
+                    Task {
+                        await selectiveSyncCoordinator.fetchSession(sessionId)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func syncStateLabel(_ state: RecordSyncState) -> some View {
+        switch state {
+        case .full:
+            Label("On Mac", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .stub, .evicted:
+            Label("In Cloud", systemImage: "icloud")
+                .foregroundStyle(.blue)
+        case .localOnly:
+            Label("Local Only", systemImage: "desktopcomputer")
+                .foregroundStyle(.gray)
+        case .deletedLocal:
+            Label("Deleted", systemImage: "trash")
+                .foregroundStyle(.red)
+        }
+    }
+}
+```
+
+### Step 11: Update macOS App Entry Point
+
+**File**: Update `macos/MedicalFactCheckerMac/Sources/App/MedicalFactCheckerMacApp.swift`
+
+Add sync initialization similar to iOS, using the existing model container:
+
+```swift
+import SwiftUI
+import SwiftData
+import BioMedLit
+
+@main
+struct MedicalFactCheckerMacApp: App {
+    // ... existing code ...
+
+    @StateObject private var syncCoordinator = SyncCoordinator()
+    @StateObject private var selectiveSyncCoordinator = SelectiveSyncCoordinator()
+
+    var body: some Scene {
+        WindowGroup {
+            MacContentView()
+                .modelContainer(sharedModelContainer)
+                .environmentObject(syncCoordinator)
+                .environmentObject(selectiveSyncCoordinator)
+                .task {
+                    await initializeSync()
+                }
+        }
+
+        Settings {
+            MacSettingsView()
+                .environmentObject(syncCoordinator)
+                .environmentObject(selectiveSyncCoordinator)
+        }
+    }
+
+    private func initializeSync() async {
+        guard UserDefaults.standard.bool(forKey: "syncEnabled") else {
+            return
+        }
+
+        let delegate = AppSyncDelegate(modelContainer: sharedModelContainer)
+
+        do {
+            try await syncCoordinator.initializeWithiCloud(
+                deviceName: Host.current().localizedName ?? "Mac",
+                platform: .macos,
+                delegate: delegate
+            )
+
+            // Set up background sync
+            MacBackgroundSyncService.shared.setCoordinator(syncCoordinator)
+            MacBackgroundSyncService.shared.startBackgroundSync()
+
+            // Initial sync
+            await syncCoordinator.sync()
+
+        } catch {
+            print("Sync initialization failed: \(error)")
+        }
+    }
+}
+```
+
+## Integration Notes
+
+### Working with Existing CloudKit Configuration
+
+The iOS and macOS apps already use CloudKit for SwiftData sync via `CloudKitConfiguration`. The BioMedLit sync module provides an **additional** sync layer for:
+
+1. **File-based sync** that doesn't require CloudKit database schemas
+2. **Selective sync** with storage management
+3. **Cross-platform compatibility** including Android and Python desktop
+
+To integrate with existing apps:
+
+1. **Keep existing CloudKit sync**: The existing `ModelConfiguration` with iCloud sync can coexist
+2. **Add BioMedLit sync as opt-in**: Let users enable file-based sync in settings
+3. **Use change observer selectively**: Only record changes when sync is enabled
+
+### Recommended Integration Pattern
+
+```swift
+// In your app's initialization
+private func initializeSync() async {
+    // Check if file-based sync is enabled
+    guard UserDefaults.standard.bool(forKey: "fileBasedSyncEnabled") else {
+        return
+    }
+
+    // Create observer and register for SwiftData changes
+    let observer = SyncChangeObserver(
+        coordinator: syncCoordinator,
+        modelContainer: sharedModelContainer
+    )
+
+    // Store observer reference
+    self.changeObserver = observer
+
+    // Initialize sync infrastructure
+    // ... rest of initialization
+}
+```
+
+### Error Handling Best Practices
+
+All sync operations should handle errors gracefully:
+
+```swift
+public func handleSyncError(_ error: Error) {
+    // Log error for debugging
+    logger.error("Sync error: \(error.localizedDescription)")
+
+    // Update UI state
+    lastError = error
+
+    // Determine if retry is appropriate
+    switch error {
+    case SyncStorageError.networkUnavailable:
+        // Schedule retry when network available
+        scheduleRetryWhenOnline()
+    case IntegrityError.checksumMismatch:
+        // Quarantine corrupt file and continue
+        break
+    default:
+        // Show user-facing error
+        break
+    }
+}
+```
+
 ## Files to Create
 
 ### iOS Files
@@ -1215,6 +1797,7 @@ final class MacBackgroundSyncService {
 |------|-------------|
 | `Services/MacBackgroundSyncService.swift` | macOS background sync |
 | `Views/Settings/MacSyncSettingsView.swift` | macOS sync settings |
+| `Views/Settings/MacStorageManagementView.swift` | macOS storage management |
 
 ## Acceptance Criteria
 
