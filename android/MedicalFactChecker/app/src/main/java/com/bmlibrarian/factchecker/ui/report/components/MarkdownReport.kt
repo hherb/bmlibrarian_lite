@@ -41,20 +41,42 @@ import io.noties.markwon.ext.tables.TablePlugin
 import java.util.regex.Pattern
 
 /**
+ * Information about a clicked reference.
+ *
+ * Contains either a document ID (from embedded link) or author/year
+ * information for fallback lookup.
+ *
+ * @property documentId Document ID if embedded in reference (e.g., "pmid-12345678")
+ * @property displayText Display text of the reference (e.g., "Smith et al., 2021")
+ * @property authorName Parsed author name for fallback lookup
+ * @property year Parsed year for fallback lookup
+ */
+data class ReferenceInfo(
+    val documentId: String? = null,
+    val displayText: String,
+    val authorName: String? = null,
+    val year: Int? = null
+)
+
+/**
  * Renders markdown content with clickable citation references.
  *
  * Uses Markwon library for markdown rendering and adds custom handling
- * for [1], [2], etc. style references that can be clicked to show
- * the corresponding document.
+ * for author/year style references like [Smith et al., 2021](doc:pmid-12345678)
+ * that can be clicked to show the corresponding document.
+ *
+ * Supports two reference formats (matching iOS implementation):
+ * 1. With embedded ID: [Author, Year](doc:pmid-12345678)
+ * 2. Legacy format: [Author, Year]
  *
  * @param markdown The markdown content to render
- * @param onReferenceClick Callback when a reference is clicked, passes the reference number
+ * @param onReferenceClick Callback when a reference is clicked, passes reference info
  * @param modifier Modifier for customizing the component
  */
 @Composable
 fun MarkdownReport(
     markdown: String,
-    onReferenceClick: (Int) -> Unit,
+    onReferenceClick: (ReferenceInfo) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -99,8 +121,8 @@ fun MarkdownReport(
 /**
  * Process markdown text to add clickable reference spans.
  *
- * Finds all [1], [2], etc. patterns in the text and wraps them
- * in ClickableSpan instances that trigger the callback when tapped.
+ * Finds author/year references like [Smith et al., 2021](doc:pmid-12345678)
+ * and wraps them in ClickableSpan instances that trigger the callback when tapped.
  *
  * @param text The spannable text from Markwon
  * @param linkColor Color for reference links
@@ -110,22 +132,61 @@ fun MarkdownReport(
 private fun processReferences(
     text: CharSequence,
     linkColor: Int,
-    onReferenceClick: (Int) -> Unit
+    onReferenceClick: (ReferenceInfo) -> Unit
 ): SpannableStringBuilder {
     val builder = SpannableStringBuilder(text)
+
+    // Try new author/year format first
+    val matches = mutableListOf<ReferenceMatch>()
     val pattern = Pattern.compile(Constants.REFERENCE_PATTERN)
     val matcher = pattern.matcher(builder)
-
-    // Find all matches and store their positions
-    // We need to do this because adding spans while iterating can cause issues
-    val matches = mutableListOf<ReferenceMatch>()
 
     while (matcher.find()) {
         val start = matcher.start()
         val end = matcher.end()
-        val refNumber = matcher.group(1)?.toIntOrNull() ?: continue
+        val displayText = matcher.group(1) ?: continue
+        val documentId = matcher.group(2) // May be null for legacy format
 
-        matches.add(ReferenceMatch(start, end, refNumber))
+        // Parse author and year from display text
+        val (authorName, year) = parseAuthorYear(displayText)
+
+        matches.add(
+            ReferenceMatch(
+                start = start,
+                end = end,
+                info = ReferenceInfo(
+                    documentId = documentId,
+                    displayText = displayText,
+                    authorName = authorName,
+                    year = year
+                )
+            )
+        )
+    }
+
+    // If no author/year matches found, try legacy numeric pattern
+    if (matches.isEmpty()) {
+        val legacyPattern = Pattern.compile(Constants.LEGACY_REFERENCE_PATTERN)
+        val legacyMatcher = legacyPattern.matcher(builder)
+
+        while (legacyMatcher.find()) {
+            val start = legacyMatcher.start()
+            val end = legacyMatcher.end()
+            val refNumber = legacyMatcher.group(1)?.toIntOrNull() ?: continue
+
+            matches.add(
+                ReferenceMatch(
+                    start = start,
+                    end = end,
+                    info = ReferenceInfo(
+                        documentId = null,
+                        displayText = "[$refNumber]",
+                        authorName = null,
+                        year = null
+                    )
+                )
+            )
+        }
     }
 
     // Apply spans in reverse order to avoid position shifts
@@ -133,7 +194,7 @@ private fun processReferences(
         // Add clickable span
         val clickableSpan = object : ClickableSpan() {
             override fun onClick(widget: View) {
-                onReferenceClick(match.referenceNumber)
+                onReferenceClick(match.info)
             }
 
             override fun updateDrawState(ds: android.text.TextPaint) {
@@ -171,14 +232,45 @@ private fun processReferences(
 }
 
 /**
+ * Parse author name and year from reference display text.
+ *
+ * Handles formats like:
+ * - "Smith et al., 2021"
+ * - "Smith, 2021"
+ * - "Smith and Jones, 2021"
+ *
+ * @param displayText The display text to parse
+ * @return Pair of (authorName, year) - either may be null
+ */
+private fun parseAuthorYear(displayText: String): Pair<String?, Int?> {
+    // Split by comma to separate author part from year
+    val parts = displayText.split(",")
+    if (parts.size < 2) return null to null
+
+    // Author is everything before the last comma
+    val authorPart = parts.dropLast(1).joinToString(",").trim()
+        .replace(" et al.", "")
+        .replace(" and ", " ")
+
+    // Year is after the last comma, remove any suffix letters (2021a -> 2021)
+    val yearPart = parts.last().trim()
+        .filter { it.isDigit() }
+
+    val authorName = authorPart.split(" ").firstOrNull()?.lowercase()
+    val year = yearPart.toIntOrNull()
+
+    return authorName to year
+}
+
+/**
  * Data class to hold reference match information.
  *
  * @property start Start position in the text
  * @property end End position in the text
- * @property referenceNumber The extracted reference number
+ * @property info Reference information for lookup
  */
 private data class ReferenceMatch(
     val start: Int,
     val end: Int,
-    val referenceNumber: Int
+    val info: ReferenceInfo
 )

@@ -279,6 +279,14 @@ class LLMService @Inject constructor(
             You are a medical evidence synthesizer creating a fact-check report.
             Based on the provided citations, determine a verdict and write a clear report.
 
+            EVIDENCE WEIGHING PRINCIPLES:
+            When synthesizing evidence, consider both supporting AND refuting findings. Evidence quality hierarchy:
+            1. Systematic reviews and meta-analyses (strongest)
+            2. Randomized controlled trials (RCTs)
+            3. Cohort studies (prospective stronger than retrospective)
+            4. Case-control studies
+            5. Case series and case reports (weakest)
+
             Verdicts:
             - SUPPORTED: Strong evidence supports the claim
             - LIKELY_SUPPORTED: Evidence tends to support the claim
@@ -286,18 +294,35 @@ class LLMService @Inject constructor(
             - LIKELY_REFUTED: Evidence tends to refute the claim
             - REFUTED: Strong evidence refutes the claim
 
+            CRITICAL - Citation format:
+            Use this EXACT format for all inline citations: [Author, Year](doc:ID)
+            Example: [Smith et al., 2021](doc:pmid-12345678)
+            The ID must be copied EXACTLY from the "ID:" field provided for each citation.
+            Do NOT invent or modify IDs - use only the IDs provided.
+
+            IMPORTANT: Use proper markdown with:
+            - ## Headers for sections
+            - **Bold** for emphasis
+            - Bullet points with -
+
             Respond in JSON format:
             {
                 "verdict": "<SUPPORTED|LIKELY_SUPPORTED|UNCLEAR|LIKELY_REFUTED|REFUTED>",
                 "summary": "<2-3 sentence summary>",
-                "report": "<full markdown report with citations>"
+                "report": "<full markdown report with inline citations using [Author, Year](doc:ID) format>"
             }
-
-            Use [1], [2], etc. to reference documents in the report.
         """.trimIndent()
 
         val citationsText = citations.mapIndexed { index, citation ->
-            "[${index + 1}] ${citation.title}\n${citation.passage}"
+            val authorCitation = citation.formattedAuthorCitation()
+            val yearStr = citation.year?.toString() ?: "n.d."
+            val docId = citation.pmid?.let { "pmid-$it" } ?: citation.documentId ?: "doc-${index + 1}"
+            """
+            [${index + 1}] ID: $docId
+            Authors: $authorCitation ($yearStr)
+            Title: ${citation.title}
+            Passage: "${citation.passage}"
+            """.trimIndent()
         }.joinToString("\n\n")
 
         val userPrompt = """
@@ -493,8 +518,22 @@ class LLMService @Inject constructor(
     data class DocumentCitation(
         val title: String,
         val passage: String,
-        val pmid: String? = null
-    )
+        val pmid: String? = null,
+        val authors: List<String> = emptyList(),
+        val year: Int? = null,
+        val documentId: String? = null
+    ) {
+        /**
+         * Get formatted author citation text.
+         *
+         * Returns "Smith et al." for multiple authors or "Smith" for single author.
+         */
+        fun formattedAuthorCitation(): String {
+            if (authors.isEmpty()) return "Unknown"
+            val firstAuthor = authors.first().split(" ").firstOrNull() ?: authors.first()
+            return if (authors.size > 1) "$firstAuthor et al." else firstAuthor
+        }
+    }
 
     /**
      * Report generation result.
