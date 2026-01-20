@@ -14,6 +14,9 @@ This phase integrates the sync system with the iOS and macOS apps, including Swi
 
 - Phase 1-4 complete
 - BioMedLit package sync module ready
+- **Minimum Deployment Targets**:
+  - iOS 17.0+ (for `onChange(of:)` two-parameter syntax)
+  - macOS 14.0+ (for `onChange(of:)` and Table context menus)
 
 ## Golden Rules Compliance
 
@@ -21,6 +24,106 @@ This phase integrates the sync system with the iOS and macOS apps, including Swi
 - **Error handling**: All errors logged and shown to user
 - **Type hints**: Full Swift type annotations
 - **Docstrings**: Documentation on all public APIs
+
+## UI Constants
+
+Add these constants for sync settings UI. Create separate constants files for iOS and macOS.
+
+**File**: `ios/MedicalFactChecker/Sources/Constants/SyncUIConstants.swift`
+
+```swift
+import Foundation
+import SwiftUI
+
+/// UI constants for sync settings views.
+///
+/// All magic numbers for sync-related UI are centralized here
+/// to comply with golden rules and ensure consistency.
+public enum SyncUIConstants {
+    // MARK: - Storage Slider
+
+    /// Minimum storage limit in GB for the slider.
+    public static let minStorageLimitGB: Double = 0.5
+
+    /// Maximum storage limit in GB for the slider.
+    public static let maxStorageLimitGB: Double = 10.0
+
+    /// Step size for the storage slider in GB.
+    public static let storageLimitStepGB: Double = 0.5
+
+    /// Width for the storage limit text display.
+    public static let storageLimitTextWidth: CGFloat = 60
+
+    // MARK: - Storage Thresholds
+
+    /// Storage usage ratio above which color is red (critical).
+    public static let storageCriticalThreshold: Double = 0.9
+
+    /// Storage usage ratio above which color is orange (warning).
+    public static let storageWarningThreshold: Double = 0.7
+
+    // MARK: - Progress Indicators
+
+    /// Scale factor for inline progress views.
+    public static let inlineProgressScale: Double = 0.7
+
+    // MARK: - Layout Spacing
+
+    /// Vertical spacing in storage info sections.
+    public static let storageInfoSpacing: CGFloat = 4
+}
+```
+
+**File**: `macos/MedicalFactCheckerMac/Sources/Constants/MacSyncUIConstants.swift`
+
+```swift
+import Foundation
+import SwiftUI
+
+/// UI constants for macOS sync settings views.
+///
+/// Extends SyncUIConstants with macOS-specific values for
+/// larger displays and table-based layouts.
+public enum MacSyncUIConstants {
+    // MARK: - Storage Slider (macOS has more storage typically)
+
+    /// Maximum storage limit in GB for macOS.
+    public static let maxStorageLimitGB: Double = 50.0
+
+    // MARK: - Window Sizing
+
+    /// Minimum width for storage management sheet.
+    public static let storageSheetMinWidth: CGFloat = 600
+
+    /// Minimum height for storage management sheet.
+    public static let storageSheetMinHeight: CGFloat = 400
+
+    // MARK: - Storage Summary
+
+    /// Horizontal spacing in storage summary header.
+    public static let storageSummarySpacing: CGFloat = 20
+
+    /// Width for progress bar in storage summary.
+    public static let storageProgressWidth: CGFloat = 200
+
+    // MARK: - Table Columns
+
+    /// Minimum width for title column.
+    public static let titleColumnMinWidth: CGFloat = 200
+
+    /// Width for document count column.
+    public static let countColumnWidth: CGFloat = 80
+
+    /// Width for report status column.
+    public static let reportColumnWidth: CGFloat = 60
+
+    /// Width for size column.
+    public static let sizeColumnWidth: CGFloat = 80
+
+    /// Width for sync status column.
+    public static let statusColumnWidth: CGFloat = 100
+}
+```
 
 ## Implementation Steps
 
@@ -673,14 +776,14 @@ struct SyncSettingsView: View {
 
                     Slider(
                         value: $storageLimitGB,
-                        in: 0.1...5.0,
-                        step: 0.1
+                        in: SyncUIConstants.minStorageLimitGB...SyncUIConstants.maxStorageLimitGB,
+                        step: SyncUIConstants.storageLimitStepGB
                     ) {
                         Text("Storage Limit")
                     } minimumValueLabel: {
-                        Text("100MB")
+                        Text("\(Int(SyncUIConstants.minStorageLimitGB * 1024))MB")
                     } maximumValueLabel: {
-                        Text("5GB")
+                        Text("\(Int(SyncUIConstants.maxStorageLimitGB))GB")
                     }
                     .onChange(of: storageLimitGB) { _, newValue in
                         Task {
@@ -742,7 +845,7 @@ struct SyncSettingsView: View {
                     .foregroundStyle(.orange)
             case .syncing:
                 ProgressView()
-                    .padding(.trailing, 4)
+                    .padding(.trailing, SyncUIConstants.storageInfoSpacing)
                 Text("Syncing...")
             case .error(_):
                 Label("Error", systemImage: "exclamationmark.triangle")
@@ -751,10 +854,11 @@ struct SyncSettingsView: View {
         }
     }
 
+    /// Displays current storage usage with a progress bar.
     @ViewBuilder
     private var storageRow: some View {
         if let info = selectiveSyncCoordinator.storageInfo {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: SyncUIConstants.storageInfoSpacing) {
                 HStack {
                     Text("Used Storage")
                     Spacer()
@@ -784,11 +888,17 @@ struct SyncSettingsView: View {
         }
     }
 
+    /// Returns the appropriate color for storage usage display.
+    ///
+    /// - Parameters:
+    ///   - used: Current storage usage in MB.
+    ///   - limit: Storage limit in MB.
+    /// - Returns: Color indicating storage status (blue/orange/red).
     private func storageColor(used: Int, limit: Int) -> Color {
         let ratio = Double(used) / Double(limit)
-        if ratio > 0.9 {
+        if ratio > SyncUIConstants.storageCriticalThreshold {
             return .red
-        } else if ratio > 0.7 {
+        } else if ratio > SyncUIConstants.storageWarningThreshold {
             return .orange
         }
         return .blue
@@ -1210,9 +1320,21 @@ import BioMedLit
 /// Settings view for sync configuration on macOS.
 ///
 /// Provides larger, desktop-optimized layout compared to iOS version.
+/// Requires macOS 14.0+ for onChange(of:) syntax.
+///
+/// Usage:
+/// ```swift
+/// MacSyncSettingsView()
+///     .environmentObject(syncCoordinator)
+///     .environmentObject(selectiveSyncCoordinator)
+/// ```
 struct MacSyncSettingsView: View {
+    // MARK: - Environment
+
     @EnvironmentObject var syncCoordinator: SyncCoordinator
     @EnvironmentObject var selectiveSyncCoordinator: SelectiveSyncCoordinator
+
+    // MARK: - State
 
     @State private var isEnabled = false
     @State private var syncMode: SyncMode = .full
@@ -1220,11 +1342,7 @@ struct MacSyncSettingsView: View {
     @State private var autoEvictionEnabled = false
     @State private var showingStorageManagement = false
 
-    /// Minimum storage limit in GB.
-    private let minStorageLimitGB: Double = 0.5
-
-    /// Maximum storage limit in GB.
-    private let maxStorageLimitGB: Double = 50.0
+    // MARK: - Body
 
     var body: some View {
         Form {
@@ -1268,11 +1386,11 @@ struct MacSyncSettingsView: View {
                         Text("Limit")
                         Slider(
                             value: $storageLimitGB,
-                            in: minStorageLimitGB...maxStorageLimitGB,
-                            step: 0.5
+                            in: SyncUIConstants.minStorageLimitGB...MacSyncUIConstants.maxStorageLimitGB,
+                            step: SyncUIConstants.storageLimitStepGB
                         )
                         Text("\(storageLimitGB, specifier: "%.1f") GB")
-                            .frame(width: 60)
+                            .frame(width: SyncUIConstants.storageLimitTextWidth)
                     }
                     .onChange(of: storageLimitGB) { _, newValue in
                         Task {
@@ -1304,7 +1422,7 @@ struct MacSyncSettingsView: View {
 
                         if syncCoordinator.status == .syncing {
                             ProgressView()
-                                .scaleEffect(0.7)
+                                .scaleEffect(SyncUIConstants.inlineProgressScale)
                         }
 
                         Spacer()
@@ -1328,6 +1446,9 @@ struct MacSyncSettingsView: View {
         }
     }
 
+    // MARK: - Private Views
+
+    /// Displays the current sync status with appropriate icon and color.
     @ViewBuilder
     private var syncStatusRow: some View {
         HStack {
@@ -1343,7 +1464,7 @@ struct MacSyncSettingsView: View {
             case .syncing:
                 HStack {
                     ProgressView()
-                        .scaleEffect(0.7)
+                        .scaleEffect(SyncUIConstants.inlineProgressScale)
                     Text("Syncing...")
                 }
             case .error(let error):
@@ -1353,10 +1474,11 @@ struct MacSyncSettingsView: View {
         }
     }
 
+    /// Displays current storage usage with progress bar.
     @ViewBuilder
     private var storageRow: some View {
         if let info = selectiveSyncCoordinator.storageInfo {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: SyncUIConstants.storageInfoSpacing) {
                 HStack {
                     Text("Used: \(info.usedMB) MB")
                     Text("•")
@@ -1374,6 +1496,9 @@ struct MacSyncSettingsView: View {
         }
     }
 
+    // MARK: - Computed Properties
+
+    /// Returns a description of the current sync mode for user display.
     private var syncModeDescription: String {
         switch syncMode {
         case .full:
@@ -1387,11 +1512,17 @@ struct MacSyncSettingsView: View {
         }
     }
 
+    /// Returns the appropriate color for storage usage display.
+    ///
+    /// - Parameters:
+    ///   - used: Current storage usage in MB.
+    ///   - limit: Storage limit in MB.
+    /// - Returns: Color indicating storage status (blue/orange/red).
     private func storageColor(used: Int, limit: Int) -> Color {
         let ratio = Double(used) / Double(limit)
-        if ratio > 0.9 {
+        if ratio > SyncUIConstants.storageCriticalThreshold {
             return .red
-        } else if ratio > 0.7 {
+        } else if ratio > SyncUIConstants.storageWarningThreshold {
             return .orange
         }
         return .blue
@@ -1422,18 +1553,25 @@ import BioMedLit
 /// Storage management view for macOS.
 ///
 /// Provides a desktop-optimized interface for managing sync storage.
+/// Requires macOS 14.0+ for Table context menus.
+///
+/// Usage:
+/// ```swift
+/// MacStorageManagementView()
+///     .environmentObject(selectiveSyncCoordinator)
+/// ```
 struct MacStorageManagementView: View {
+    // MARK: - Environment
+
     @EnvironmentObject var selectiveSyncCoordinator: SelectiveSyncCoordinator
     @Environment(\.dismiss) var dismiss
+
+    // MARK: - State
 
     @State private var selectedTab = 0
     @State private var selectedSession: String?
 
-    /// Minimum window width.
-    private let minWidth: CGFloat = 600
-
-    /// Minimum window height.
-    private let minHeight: CGFloat = 400
+    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1459,7 +1597,10 @@ struct MacStorageManagementView: View {
                 availableSessionsTable
             }
         }
-        .frame(minWidth: minWidth, minHeight: minHeight)
+        .frame(
+            minWidth: MacSyncUIConstants.storageSheetMinWidth,
+            minHeight: MacSyncUIConstants.storageSheetMinHeight
+        )
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Done") {
@@ -1489,10 +1630,13 @@ struct MacStorageManagementView: View {
         }
     }
 
+    // MARK: - Private Views
+
+    /// Displays the storage summary with usage bar.
     @ViewBuilder
     private var storageSummaryHeader: some View {
         if let info = selectiveSyncCoordinator.storageInfo {
-            HStack(spacing: 20) {
+            HStack(spacing: MacSyncUIConstants.storageSummarySpacing) {
                 VStack(alignment: .leading) {
                     Text("\(info.usedMB) MB")
                         .font(.title.bold())
@@ -1505,7 +1649,7 @@ struct MacStorageManagementView: View {
                     value: Double(info.usedMB),
                     total: Double(selectiveSyncCoordinator.storageLimit)
                 )
-                .frame(width: 200)
+                .frame(width: MacSyncUIConstants.storageProgressWidth)
 
                 Spacer()
 
@@ -1520,6 +1664,7 @@ struct MacStorageManagementView: View {
         }
     }
 
+    /// Table showing sessions stored locally on this Mac.
     @ViewBuilder
     private var localSessionsTable: some View {
         Table(selectiveSyncCoordinator.localSessions, selection: $selectedSession) {
@@ -1534,12 +1679,12 @@ struct MacStorageManagementView: View {
                     }
                 }
             }
-            .width(min: 200)
+            .width(min: MacSyncUIConstants.titleColumnMinWidth)
 
             TableColumn("Documents") { session in
                 Text("\(session.documentCount)")
             }
-            .width(80)
+            .width(MacSyncUIConstants.countColumnWidth)
 
             TableColumn("Report") { session in
                 if session.hasReport {
@@ -1550,17 +1695,17 @@ struct MacStorageManagementView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .width(60)
+            .width(MacSyncUIConstants.reportColumnWidth)
 
             TableColumn("Size") { session in
                 Text("\(session.sizeMB) MB")
             }
-            .width(80)
+            .width(MacSyncUIConstants.sizeColumnWidth)
 
             TableColumn("Status") { session in
                 syncStateLabel(session.syncState)
             }
-            .width(100)
+            .width(MacSyncUIConstants.statusColumnWidth)
         }
         .contextMenu(forSelectionType: String.self) { selection in
             if let sessionId = selection.first {
@@ -1595,6 +1740,7 @@ struct MacStorageManagementView: View {
         }
     }
 
+    /// Table showing sessions available in iCloud but not on this Mac.
     @ViewBuilder
     private var availableSessionsTable: some View {
         Table(selectiveSyncCoordinator.availableSessions, selection: $selectedSession) {
@@ -1602,22 +1748,22 @@ struct MacStorageManagementView: View {
                 Text(session.title)
                     .lineLimit(1)
             }
-            .width(min: 200)
+            .width(min: MacSyncUIConstants.titleColumnMinWidth)
 
             TableColumn("Documents") { session in
                 Text("\(session.documentCount)")
             }
-            .width(80)
+            .width(MacSyncUIConstants.countColumnWidth)
 
             TableColumn("Size") { session in
                 Text("\(session.sizeMB) MB")
             }
-            .width(80)
+            .width(MacSyncUIConstants.sizeColumnWidth)
 
             TableColumn("Status") { session in
                 syncStateLabel(session.syncState)
             }
-            .width(100)
+            .width(MacSyncUIConstants.statusColumnWidth)
         }
         .contextMenu(forSelectionType: String.self) { selection in
             if let sessionId = selection.first {
@@ -1630,6 +1776,12 @@ struct MacStorageManagementView: View {
         }
     }
 
+    // MARK: - Helper Functions
+
+    /// Returns a labeled view for the sync state with appropriate icon and color.
+    ///
+    /// - Parameter state: The sync state to display.
+    /// - Returns: A labeled view with icon.
     @ViewBuilder
     private func syncStateLabel(_ state: RecordSyncState) -> some View {
         switch state {
@@ -1786,6 +1938,7 @@ public func handleSyncError(_ error: Error) {
 ### iOS Files
 | File | Description |
 |------|-------------|
+| `Constants/SyncUIConstants.swift` | UI constants for sync views |
 | `Services/SyncChangeObserver.swift` | SwiftData change observer |
 | `Services/AppSyncDelegate.swift` | Sync engine delegate |
 | `Services/BackgroundSyncService.swift` | Background sync |
@@ -1795,6 +1948,7 @@ public func handleSyncError(_ error: Error) {
 ### macOS Files
 | File | Description |
 |------|-------------|
+| `Constants/MacSyncUIConstants.swift` | macOS-specific UI constants |
 | `Services/MacBackgroundSyncService.swift` | macOS background sync |
 | `Views/Settings/MacSyncSettingsView.swift` | macOS sync settings |
 | `Views/Settings/MacStorageManagementView.swift` | macOS storage management |
