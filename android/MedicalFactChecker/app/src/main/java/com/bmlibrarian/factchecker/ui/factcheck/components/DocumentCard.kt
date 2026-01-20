@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.ui.factcheck.components
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,9 +28,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -43,11 +46,33 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
+
+/**
+ * Colors for LLM reasoning/explanation display.
+ *
+ * Provides a visually distinct style for AI-generated explanations
+ * to help users distinguish them from source text like abstracts.
+ */
+private object ReasoningColors {
+    /** Background color for reasoning blocks (warm off-white). */
+    val background = Color(0xFFFAF8EE)
+
+    /** Border color for reasoning blocks. */
+    val border = Color(0xFFD9D1B8)
+
+    /** Text color for reasoning content. */
+    val text = Color(0xFF595959)
+
+    /** Accent color for reasoning icon. */
+    val accent = Color(0xFF998C66)
+}
 
 /**
  * Card displaying a scored document.
@@ -142,7 +167,35 @@ fun DocumentCard(
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
 
-                // Source badges
+                // LLM Reasoning - visually distinct box (shown first like iOS)
+                document.scoreRationale?.let { rationale ->
+                    Text(
+                        text = "LLM Reasoning",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    LLMReasoningBox(rationale = rationale)
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+                }
+
+                // Abstract
+                document.abstractText?.let { abstract ->
+                    Text(
+                        text = "Abstract",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text(
+                        text = abstract,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+                }
+
+                // Source badges and metadata
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
                 ) {
@@ -157,36 +210,6 @@ fun DocumentCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                }
-
-                // Abstract
-                document.abstractText?.let { abstract ->
-                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
-                    Text(
-                        text = "Abstract",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
-                    Text(
-                        text = abstract,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                // Score rationale
-                document.scoreRationale?.let { rationale ->
-                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
-                    Text(
-                        text = "Relevance Assessment",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
-                    Text(
-                        text = rationale,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
@@ -271,5 +294,46 @@ private fun PreprintBadge() {
                 vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
             )
         )
+    }
+}
+
+/**
+ * Styled box displaying LLM reasoning/explanation.
+ *
+ * Renders the LLM's rationale in a visually distinct box with a warm
+ * off-white background, border, and brain icon to distinguish it from
+ * source text like abstracts.
+ *
+ * @param rationale The LLM explanation text
+ * @param modifier Modifier for the component
+ */
+@Composable
+private fun LLMReasoningBox(
+    rationale: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = ReasoningColors.background,
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, ReasoningColors.border),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING_SMALL.dp),
+            horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Psychology,
+                contentDescription = "LLM reasoning",
+                tint = ReasoningColors.accent,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = rationale,
+                style = MaterialTheme.typography.bodySmall,
+                fontStyle = FontStyle.Italic,
+                color = ReasoningColors.text
+            )
+        }
     }
 }
