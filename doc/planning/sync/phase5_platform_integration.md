@@ -58,7 +58,7 @@ public final class SyncChangeObserver: ObservableObject {
     private var debounceTask: Task<Void, Never>?
 
     /// Debounce interval in seconds.
-    private let debounceInterval: TimeInterval = 1.0
+    private let debounceInterval: TimeInterval = SyncConstants.changeDebounceIntervalSeconds
 
     /// Creates a change observer.
     ///
@@ -539,7 +539,7 @@ final class BackgroundSyncService {
     )
 
     /// Minimum interval between background syncs (in seconds).
-    private let minimumInterval: TimeInterval = 15 * 60 // 15 minutes
+    private let minimumInterval: TimeInterval = SyncConstants.backgroundSyncIntervalSeconds
 
     private init() {}
 
@@ -744,7 +744,7 @@ struct SyncSettingsView: View {
                 ProgressView()
                     .padding(.trailing, 4)
                 Text("Syncing...")
-            case .error:
+            case .error(_):
                 Label("Error", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red)
             }
@@ -1178,7 +1178,7 @@ final class MacBackgroundSyncService {
             identifier: "com.bmlibrarian.factchecker.mac.sync"
         )
         scheduler.repeats = true
-        scheduler.interval = 15 * 60 // 15 minutes
+        scheduler.interval = SyncConstants.backgroundSyncIntervalSeconds
         scheduler.qualityOfService = .utility
 
         scheduler.schedule { completion in

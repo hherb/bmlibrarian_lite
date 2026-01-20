@@ -109,6 +109,20 @@ public enum SyncConstants {
 
     /// Default sync mode for new devices.
     public static let defaultSyncMode = SyncMode.full
+
+    // MARK: - Timing
+
+    /// Maximum seconds to wait for iCloud file download.
+    public static let iCloudDownloadTimeoutSeconds = 30
+
+    /// Cache duration for storage info in seconds.
+    public static let storageCacheDurationSeconds: TimeInterval = 60
+
+    /// Debounce interval for change observation in seconds.
+    public static let changeDebounceIntervalSeconds: TimeInterval = 1.0
+
+    /// Minimum interval between background syncs in seconds.
+    public static let backgroundSyncIntervalSeconds: TimeInterval = 15 * 60
 }
 
 // MARK: - Enums

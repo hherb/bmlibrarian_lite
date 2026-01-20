@@ -42,7 +42,7 @@ public actor StorageMonitor {
     private var cacheTime: Date?
 
     /// Cache duration in seconds.
-    private let cacheDuration: TimeInterval = 60
+    private let cacheDuration: TimeInterval = SyncConstants.storageCacheDurationSeconds
 
     /// Creates a storage monitor.
     ///
@@ -1136,7 +1136,7 @@ final class SelectiveSyncTests: XCTestCase {
 
     func testEvictionCandidateLRU() async {
         let manager = SessionEvictionManager(
-            storageMonitor: MockStorageMonitor(),
+            storageMonitor: createcreateMockStorageMonitor(),
             delegate: MockEvictionDelegate()
         )
 
@@ -1158,7 +1158,7 @@ final class SelectiveSyncTests: XCTestCase {
 
     func testEvictionCandidateLargest() async {
         let manager = SessionEvictionManager(
-            storageMonitor: MockStorageMonitor(),
+            storageMonitor: createMockStorageMonitor(),
             delegate: MockEvictionDelegate()
         )
 
@@ -1179,7 +1179,7 @@ final class SelectiveSyncTests: XCTestCase {
 
     func testEvictionCandidateNoReport() async {
         let manager = SessionEvictionManager(
-            storageMonitor: MockStorageMonitor(),
+            storageMonitor: createMockStorageMonitor(),
             delegate: MockEvictionDelegate()
         )
 
@@ -1200,7 +1200,7 @@ final class SelectiveSyncTests: XCTestCase {
 
     func testEvictionRespectsMinKeep() async {
         let manager = SessionEvictionManager(
-            storageMonitor: MockStorageMonitor(),
+            storageMonitor: createMockStorageMonitor(),
             delegate: MockEvictionDelegate()
         )
 
@@ -1221,7 +1221,7 @@ final class SelectiveSyncTests: XCTestCase {
 
     func testPinnedSessionNotEvicted() async {
         let manager = SessionEvictionManager(
-            storageMonitor: MockStorageMonitor(),
+            storageMonitor: createMockStorageMonitor(),
             delegate: MockEvictionDelegate()
         )
 
@@ -1306,10 +1306,10 @@ final class SelectiveSyncTests: XCTestCase {
 
 // MARK: - Mocks
 
-final class MockStorageMonitor: StorageMonitor {
-    init() {
-        super.init(delegate: MockStorageDelegate())
-    }
+/// Creates a mock storage monitor for testing.
+/// Note: Since StorageMonitor is an actor, we create a real instance with a mock delegate.
+func createcreateMockStorageMonitor() -> StorageMonitor {
+    StorageMonitor(delegate: MockStorageDelegate())
 }
 
 final class MockStorageDelegate: StorageMonitorDelegate {

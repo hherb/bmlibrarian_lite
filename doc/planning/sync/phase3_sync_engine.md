@@ -645,8 +645,7 @@ public actor iCloudSyncStorage: SyncStorageProtocol {
         try fileManager.startDownloadingUbiquitousItem(at: url)
 
         // Wait for download (with timeout)
-        let maxWaitSeconds = 30
-        for _ in 0..<maxWaitSeconds {
+        for _ in 0..<SyncConstants.iCloudDownloadTimeoutSeconds {
             if let resourceValues = try? url.resourceValues(
                 forKeys: [.ubiquitousItemDownloadingStatusKey]
             ) {
