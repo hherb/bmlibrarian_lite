@@ -45,25 +45,58 @@ enum ConcurrencyMode:
     AGGRESSIVE = 5      # 5 concurrent requests
     AUTO = -1           # Auto-detect from provider
 
-function detect_concurrency(provider_url: string) -> int:
+# Known large-scale providers that support parallel requests
+PARALLEL_PROVIDERS = [
+    "api.anthropic.com",
+    "api.openai.com",
+    "api.deepseek.com",
+    "generativelanguage.googleapis.com",  # Google AI
+    "api.groq.com",
+    "api.together.xyz",
+    "api.fireworks.ai",
+    "api.mistral.ai",
+    "api.cohere.ai",
+]
+
+function detect_concurrency(provider_url: string, user_override: int? = None) -> int:
     """
     Detect appropriate concurrency level based on provider URL.
 
     Args:
         provider_url: The LLM API endpoint URL.
+        user_override: Optional user-specified concurrency level.
 
     Returns:
         Number of concurrent requests to allow.
     """
+    # User override takes precedence
+    if user_override is not None:
+        return user_override
+
     host = parse_url(provider_url).host.lowercase()
 
-    # Local inference - no parallelism benefit (single GPU)
-    if host in ["localhost", "127.0.0.1"] or "ollama" in host:
-        return CONCURRENCY_SEQUENTIAL
+    # Check against known large-scale providers
+    for provider in PARALLEL_PROVIDERS:
+        if provider in host:
+            return CONCURRENCY_CLOUD_DEFAULT
 
-    # Cloud APIs support concurrent requests
-    return CONCURRENCY_CLOUD_DEFAULT
+    # Local inference or unknown providers - sequential by default
+    # Users can override if they know their provider supports concurrency
+    return CONCURRENCY_SEQUENTIAL
 ```
+
+### User Override
+
+Users can override auto-detection via settings:
+
+```yaml
+parallel_processing:
+  # Override auto-detection: sequential (1), moderate (3), aggressive (5)
+  # Set to null/omit for auto-detection
+  concurrency_override: null
+```
+
+This allows users with self-hosted infrastructure that supports concurrency to enable it manually.
 
 ## Strategy 1: Parallel Concurrent Requests
 
@@ -233,6 +266,16 @@ Return exactly {len(docs)} results in order.
 | Error handling | Isolated failures | Batch fails together |
 | Context window | ~1-2K tokens | ~5-10K tokens |
 | Parsing complexity | Simple | More complex |
+
+### When Batching Helps
+
+Batching provides benefit primarily through:
+1. **Eliminating N-1 round-trip latencies** - network overhead reduced
+2. **System prompt sent once** - saves tokens on repeated instructions
+
+Batching does NOT provide separate context windows per document - all documents share the same context. Given typical abstract sizes (~300-500 tokens), a batch of 3 documents uses ~1500-2000 tokens for input.
+
+**Recommendation**: Parallel concurrent requests (Strategy 1) is the primary optimization. Batching is a secondary optimization, most useful when rate-limited by the provider.
 
 ### Recommended Batch Sizes
 
@@ -468,6 +511,369 @@ class RateLimiter:
         return await func(*args)
 ```
 
+## Checkpointing and Resumption
+
+Per-document checkpointing enables graceful recovery from interruptions.
+
+```pseudocode
+function process_with_checkpointing(
+    documents: List[Document],
+    claim: string,
+    session_id: string,
+    step: ProcessingStep  # SCORING, CITATION
+) -> List[ProcessedDocument]:
+    """
+    Process documents with per-document checkpointing.
+
+    Args:
+        documents: Documents to process.
+        claim: The claim being evaluated.
+        session_id: Current session identifier.
+        step: Which processing step (scoring or citation).
+
+    Returns:
+        List of processed documents (including previously checkpointed).
+    """
+    results = []
+
+    for doc in documents:
+        # Check for existing checkpoint
+        existing = load_checkpoint(session_id, doc.pmid, step)
+
+        if existing is not None:
+            # Already processed - skip
+            results.append(existing)
+            emit_progress_increment(doc.pmid, step, skipped=True)
+            continue
+
+        # Process document
+        try:
+            if step == SCORING:
+                result = score_single_document(doc, claim)
+            else:
+                result = extract_citations(doc, claim)
+
+            # Save checkpoint immediately
+            save_checkpoint(session_id, doc.pmid, step, result)
+            results.append(result)
+            emit_progress_increment(doc.pmid, step, skipped=false)
+
+        except ProcessingError as e:
+            # Log error but continue with other documents
+            emit_error(doc.pmid, step, e)
+
+    return results
+
+function save_checkpoint(session_id: string, pmid: string, step: ProcessingStep, result: Any):
+    """Persist processing result for resumption capability."""
+    storage.upsert(
+        table="processing_checkpoints",
+        key=(session_id, pmid, step),
+        value=serialize(result),
+        timestamp=now()
+    )
+
+function load_checkpoint(session_id: string, pmid: string, step: ProcessingStep) -> Any?:
+    """Load existing checkpoint if available."""
+    row = storage.get(
+        table="processing_checkpoints",
+        key=(session_id, pmid, step)
+    )
+    return deserialize(row.value) if row else None
+
+function resume_session(session_id: string) -> ResumeState:
+    """
+    Determine resumption state for a session.
+
+    Returns which documents need processing for each step.
+    """
+    all_docs = load_session_documents(session_id)
+    scored = set(load_checkpointed_pmids(session_id, SCORING))
+    cited = set(load_checkpointed_pmids(session_id, CITATION))
+
+    return ResumeState(
+        needs_scoring=[d for d in all_docs if d.pmid not in scored],
+        needs_citation=[d for d in all_docs if d.pmid in scored and d.pmid not in cited],
+        completed=[d for d in all_docs if d.pmid in cited]
+    )
+```
+
+## Progress Reporting
+
+Per-document progress updates enable responsive UI feedback.
+
+```pseudocode
+# Progress message types
+enum ProgressType:
+    DOCUMENT_STARTED     # Document processing began
+    DOCUMENT_COMPLETED   # Document processing finished
+    DOCUMENT_SKIPPED     # Document already checkpointed
+    DOCUMENT_FAILED      # Document processing failed
+    BATCH_COMPLETED      # Batch of documents finished
+    PHASE_COMPLETED      # Scoring or citation phase finished
+
+struct ProgressMessage:
+    type: ProgressType
+    pmid: string?
+    step: ProcessingStep
+    current: int         # Current document index
+    total: int           # Total documents in this phase
+    error: string?       # Error message if failed
+
+function emit_progress_increment(
+    pmid: string,
+    step: ProcessingStep,
+    skipped: bool = false,
+    error: string? = None
+):
+    """Emit progress update to UI queue."""
+    message = ProgressMessage(
+        type=DOCUMENT_SKIPPED if skipped else
+             DOCUMENT_FAILED if error else
+             DOCUMENT_COMPLETED,
+        pmid=pmid,
+        step=step,
+        error=error
+    )
+    progress_queue.put(message)
+
+# UI consumer
+function progress_ui_worker(queue: Queue[ProgressMessage]):
+    """Update UI elements from progress messages."""
+    while True:
+        msg = queue.get()
+        if msg is SENTINEL:
+            break
+
+        # Update progress bar
+        progress_bar.increment()
+
+        # Update document card status
+        update_document_card(msg.pmid, msg.type)
+
+        # If error, add to error queue
+        if msg.type == DOCUMENT_FAILED:
+            error_queue.add(msg.pmid, msg.step, msg.error)
+```
+
+## Cancellation Support
+
+Graceful cancellation requires coordination between workers and UI.
+
+```pseudocode
+class CancellationToken:
+    """Thread-safe cancellation signal."""
+    _cancelled: bool = false
+    _lock: Lock
+
+    function cancel():
+        """Signal cancellation to all workers."""
+        with _lock:
+            _cancelled = true
+
+    function is_cancelled() -> bool:
+        """Check if cancellation was requested."""
+        with _lock:
+            return _cancelled
+
+function process_with_cancellation(
+    documents: List[Document],
+    claim: string,
+    cancellation_token: CancellationToken,
+    on_cancelled: Callable
+) -> List[ProcessedDocument]:
+    """
+    Process documents with cancellation support.
+
+    Args:
+        documents: Documents to process.
+        claim: The claim being evaluated.
+        cancellation_token: Token to check for cancellation.
+        on_cancelled: Callback when cancellation completes.
+
+    Returns:
+        List of documents processed before cancellation (if any).
+    """
+    results = []
+
+    for doc in documents:
+        # Check cancellation before starting each document
+        if cancellation_token.is_cancelled():
+            break
+
+        result = process_document(doc, claim)
+        results.append(result)
+
+        # Check cancellation after processing
+        if cancellation_token.is_cancelled():
+            break
+
+    if cancellation_token.is_cancelled():
+        # Notify UI of clean termination
+        on_cancelled(
+            processed_count=len(results),
+            remaining_count=len(documents) - len(results)
+        )
+
+    return results
+
+# For parallel workers
+function parallel_worker_with_cancellation(
+    queue: Queue[Document],
+    cancellation_token: CancellationToken
+):
+    """Worker that respects cancellation token."""
+    while not cancellation_token.is_cancelled():
+        doc = queue.get(timeout=0.1)
+        if doc is None:
+            continue
+
+        if cancellation_token.is_cancelled():
+            # Put document back for potential resumption
+            queue.put(doc)
+            break
+
+        process_document(doc)
+```
+
+### Cancellation UI Feedback
+
+```pseudocode
+function handle_cancel_request():
+    """Handle user cancel button click."""
+    # Update UI immediately
+    show_status("Cancelling... waiting for in-flight requests")
+    disable_cancel_button()
+
+    # Signal workers
+    cancellation_token.cancel()
+
+    # Wait for workers with timeout
+    workers_finished = wait_for_workers(timeout=30)
+
+    if workers_finished:
+        show_status(f"Cancelled. {processed_count} documents completed, {remaining_count} skipped.")
+    else:
+        show_status("Cancellation timed out. Some requests may still be pending.")
+
+    enable_new_search_button()
+```
+
+## Error Queue UI
+
+Collapsible error display that appears only when errors occur.
+
+```pseudocode
+class ErrorQueueWidget:
+    """
+    Collapsible widget displaying accumulated errors.
+
+    Hidden when empty, expands to show error list when populated.
+    """
+    errors: List[ErrorEntry] = []
+    is_expanded: bool = false
+
+    function add_error(pmid: string, step: ProcessingStep, message: string):
+        """Add error to queue and make widget visible."""
+        entry = ErrorEntry(
+            pmid=pmid,
+            step=step,
+            message=message,
+            timestamp=now()
+        )
+        errors.append(entry)
+        update_visibility()
+
+    function update_visibility():
+        """Show widget if errors exist, hide if empty."""
+        if len(errors) > 0:
+            show()
+            update_header(f"Errors ({len(errors)})")
+        else:
+            hide()
+
+    function clear():
+        """Clear all errors and hide widget."""
+        errors.clear()
+        hide()
+
+    function retry_failed():
+        """Re-queue failed documents for processing."""
+        failed_pmids = [e.pmid for e in errors]
+        emit_retry_request(failed_pmids)
+        clear()
+
+struct ErrorEntry:
+    pmid: string
+    step: ProcessingStep
+    message: string
+    timestamp: DateTime
+```
+
+## Agent Instance Considerations
+
+Multiple agent instances can run concurrently for parallel processing.
+
+### Requirements for Safe Parallelism
+
+```pseudocode
+# Agent instances are safe if:
+# 1. No shared mutable state between instances
+# 2. Each instance has own LLM client (or shared client is thread-safe)
+# 3. Database writes use proper locking
+# 4. Audit trail logging is thread-safe
+
+class ParallelScoringAgent(LiteBaseAgent):
+    """
+    Scoring agent designed for parallel execution.
+
+    Each instance is independent with no shared mutable state.
+    """
+
+    function __init__(config: Config, llm_client: LLMClient):
+        # Each instance gets its own client or a thread-safe shared client
+        self.llm_client = llm_client
+        self.config = config  # Immutable, safe to share
+
+    async function score(doc: Document, claim: string) -> ScoringResult:
+        # Instance method - no shared state modified
+        prompt = self._build_prompt(doc, claim)
+        response = await self.llm_client.chat(prompt)
+        return self._parse_response(response)
+
+# Safe instantiation for parallel processing
+function create_scoring_workers(count: int, config: Config) -> List[ParallelScoringAgent]:
+    """Create independent agent instances for parallel execution."""
+    workers = []
+    for i in range(count):
+        # Each worker gets own LLM client instance
+        client = LLMClient(config)
+        agent = ParallelScoringAgent(config, client)
+        workers.append(agent)
+    return workers
+```
+
+### Thread-Safe Audit Trail
+
+```pseudocode
+class ThreadSafeAuditTrail:
+    """Audit trail that safely handles concurrent writes."""
+    _lock: Lock
+    _queue: Queue[AuditEntry]
+
+    function log(entry: AuditEntry):
+        """Thread-safe logging."""
+        _queue.put(entry)
+
+    function _writer_thread():
+        """Single writer consumes queue and persists."""
+        while True:
+            entry = _queue.get()
+            if entry is SENTINEL:
+                break
+            storage.insert("audit_trail", entry)
+```
+
 ## Platform-Specific Notes
 
 ### Swift (iOS/macOS)
@@ -547,6 +953,145 @@ metrics:
   - speedup_factor           # sequential_time / actual_time
 ```
 
+## Testing Strategy
+
+Testing parallel processing requires verifying both correctness and graceful degradation.
+
+### Unit Tests
+
+```pseudocode
+# Test all workers return results
+function test_all_workers_return_results():
+    documents = create_test_documents(10)
+    mock_llm = MockLLMClient(response_delay=0.1)
+
+    results = score_documents_parallel(documents, "test claim", max_concurrent=3)
+
+    assert len(results) == len(documents)
+    assert all(r.score is not None for r in results)
+    assert all(r.pmid in [d.pmid for d in documents] for r in results)
+
+# Test graceful cancellation
+function test_graceful_cancellation():
+    documents = create_test_documents(100)
+    mock_llm = MockLLMClient(response_delay=0.5)  # Slow responses
+    cancellation_token = CancellationToken()
+
+    # Cancel after 1 second
+    schedule_after(1.0, cancellation_token.cancel)
+
+    results = process_with_cancellation(
+        documents, "test claim", cancellation_token,
+        on_cancelled=lambda p, r: None
+    )
+
+    # Should have processed some but not all
+    assert 0 < len(results) < len(documents)
+    # All returned results should be complete
+    assert all(r.is_complete for r in results)
+
+# Test checkpoint resumption
+function test_checkpoint_resumption():
+    documents = create_test_documents(10)
+    session_id = "test_session"
+
+    # Process first 5 documents
+    partial_results = process_with_checkpointing(
+        documents[:5], "test claim", session_id, SCORING
+    )
+
+    # Resume should skip already processed
+    resume_state = resume_session(session_id)
+    assert len(resume_state.needs_scoring) == 5
+    assert len(resume_state.completed) == 0  # Not cited yet
+
+    # Process remaining
+    all_results = process_with_checkpointing(
+        documents, "test claim", session_id, SCORING
+    )
+    assert len(all_results) == 10
+
+# Test error isolation
+function test_error_isolation():
+    documents = create_test_documents(5)
+    mock_llm = MockLLMClient(
+        fail_on_pmids=["PMID2", "PMID4"]  # 2 failures
+    )
+
+    results = score_batch_resilient(documents, "test claim")
+
+    successful = [r for r in results if not r.is_error]
+    failed = [r for r in results if r.is_error]
+
+    assert len(successful) == 3
+    assert len(failed) == 2
+```
+
+### Integration Tests
+
+```pseudocode
+# Test end-to-end parallel workflow
+function test_parallel_workflow_integration():
+    # Use real LLM with test API key
+    config = load_test_config()
+    documents = fetch_real_documents(pmids=["12345678", "87654321"])
+
+    results = process_documents_optimized(
+        documents, "Does aspirin reduce heart attack risk?", config
+    )
+
+    # Verify structure
+    assert all(hasattr(r, 'score') for r in results)
+    assert all(hasattr(r, 'citations') for r in results)
+
+# Test provider detection
+function test_provider_detection():
+    assert detect_concurrency("https://api.anthropic.com/v1") == 3
+    assert detect_concurrency("https://api.openai.com/v1") == 3
+    assert detect_concurrency("http://localhost:11434") == 1
+    assert detect_concurrency("http://my-server.local:8080") == 1
+    # User override
+    assert detect_concurrency("http://localhost:11434", user_override=5) == 5
+
+# Test progress reporting
+function test_progress_messages():
+    progress_messages = []
+    progress_queue = Queue()
+
+    # Capture messages
+    spawn_thread(lambda: capture_messages(progress_queue, progress_messages))
+
+    documents = create_test_documents(5)
+    process_with_progress(documents, "test claim", progress_queue)
+
+    # Should have 5 completion messages
+    completed = [m for m in progress_messages if m.type == DOCUMENT_COMPLETED]
+    assert len(completed) == 5
+```
+
+### Load Tests
+
+```pseudocode
+# Test concurrent request handling under load
+function test_concurrent_load():
+    documents = create_test_documents(100)
+    mock_llm = MockLLMClient(
+        response_delay=random(0.1, 0.5),
+        occasional_timeout_rate=0.05  # 5% timeout
+    )
+
+    start = now()
+    results = score_documents_parallel(documents, "test claim", max_concurrent=5)
+    elapsed = now() - start
+
+    # Should complete faster than sequential
+    sequential_estimate = 100 * 0.3  # 30 seconds
+    assert elapsed < sequential_estimate / 3
+
+    # Should handle timeouts gracefully
+    assert len([r for r in results if not r.is_error]) >= 90  # At least 90% success
+```
+
 ## Summary
 
 | Strategy | Best For | Speedup |
@@ -555,5 +1100,9 @@ metrics:
 | Batched prompts | Reduce API call overhead | 1.5-2x |
 | Pipeline processing | Overlap scoring/citations | 1.2-1.5x |
 | Combined | Maximum throughput | 5-10x |
+
+**Primary optimization**: Parallel concurrent requests (Strategy 1) for cloud APIs.
+
+**Secondary optimization**: Batched prompts when rate-limited.
 
 For Ollama/local inference, only batched prompts provide benefit (minimal).
