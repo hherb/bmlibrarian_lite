@@ -166,14 +166,15 @@ final class FactCheckWorkflow {
     /// re-running the workflow. The user can then click "Add More Results"
     /// to fetch additional documents if more are available.
     ///
+    /// If the session was in the `awaitingUserDecision` state when the app was
+    /// terminated, this state is restored so the user sees the decision prompt
+    /// and can continue the workflow.
+    ///
     /// - Parameter session: The fact-check session to restore for viewing.
     func restoreForViewing(_ session: FactCheckSession) {
         self.session = session
         // Initialize services lazily - only if user triggers new actions
         isRunning = false
-        awaitingUserDecision = false
-        awaitingSmartSearchDecision = false
-        userDecisionPrompt = ""
         progressMessage = ""
 
         // Mark as resumed so fetchMoreEvidence will refresh pagination state
@@ -196,6 +197,33 @@ final class FactCheckWorkflow {
                 maxResults: settings.batchSize,
                 offset: session.pubmedOffset
             )
+        }
+
+        // Restore awaitingUserDecision state if the session was paused waiting for input
+        if session.currentStep == .awaitingUserDecision {
+            awaitingUserDecision = true
+            // Rebuild the decision prompt based on current session state
+            let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+            let needed = settings.minRelevantDocuments
+            let available = session.estimatedRemainingResults
+
+            // Check if smart search is available but hasn't been tried
+            if !session.smartSearchEnabled && relevant < smartSearchThreshold {
+                awaitingSmartSearchDecision = true
+                userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Would you like to try smart search with alternative queries?"
+            } else if available > 0 {
+                awaitingSmartSearchDecision = false
+                userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
+            } else {
+                // No more options available - proceed with current
+                awaitingUserDecision = false
+                awaitingSmartSearchDecision = false
+                userDecisionPrompt = ""
+            }
+        } else {
+            awaitingUserDecision = false
+            awaitingSmartSearchDecision = false
+            userDecisionPrompt = ""
         }
     }
 
@@ -415,6 +443,98 @@ final class FactCheckWorkflow {
 
         isRunning = false
         awaitingUserDecision = false
+    }
+
+    // MARK: - Retry Report Generation
+
+    /// Whether the workflow can retry report generation.
+    ///
+    /// Returns true when:
+    /// - A session exists
+    /// - The session failed (has errorMessage set)
+    /// - The session has relevant documents with citations extracted
+    /// - The workflow is not currently running
+    var canRetryReportGeneration: Bool {
+        guard let session = session,
+              !isRunning,
+              session.errorMessage != nil else {
+            return false
+        }
+
+        // Check if we have documents with citations (report generation prerequisites)
+        let citationCount = (session.documents ?? [])
+            .filter { $0.meetsThreshold(settings.minScoreThreshold) }
+            .flatMap { $0.citations ?? [] }
+            .count
+
+        return citationCount > 0
+    }
+
+    /// Retry report generation after a failure.
+    ///
+    /// This method allows users to retry just the report generation step when it
+    /// fails (e.g., due to timeout, network issues, or LLM errors). It skips
+    /// all previous workflow steps and directly attempts to regenerate the report.
+    ///
+    /// Prerequisites:
+    /// - Session must have relevant documents with citations already extracted
+    /// - Previous report generation must have failed
+    func retryReportGeneration() async {
+        guard let session = session else { return }
+
+        // Initialize services if needed
+        if llmService == nil {
+            do {
+                llmService = try LLMService.create(from: settings)
+            } catch {
+                onError?(error)
+                return
+            }
+        }
+
+        // Load monthly usage
+        await loadMonthlyUsage()
+
+        // Check monthly budget
+        if monthlyUsedUSD >= settings.monthlyBudgetUSD {
+            onBudgetExceeded?("Monthly budget of \(CostCalculator.formatCost(settings.monthlyBudgetUSD)) exceeded")
+            return
+        }
+
+        isRunning = true
+        session.currentStep = .generatingReport
+        session.errorMessage = nil  // Clear previous error
+        try? modelContext.save()
+
+        do {
+            updateProgress(.generatingReport, "Retrying report generation...")
+            try await generateReport()
+
+            // Complete
+            session.currentStep = .completed
+            session.stopReason = .completed
+            session.updatedAt = Date()
+            try? modelContext.save()
+
+            if let report = session.report {
+                onComplete?(report)
+            }
+
+        } catch let error as BudgetError {
+            session.currentStep = .budgetExceeded
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .budgetExceeded
+            try? modelContext.save()
+            onBudgetExceeded?(error.localizedDescription)
+        } catch {
+            session.currentStep = .failed
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .apiError
+            try? modelContext.save()
+            onError?(error)
+        }
+
+        isRunning = false
     }
 
     // MARK: - Fetch More Evidence

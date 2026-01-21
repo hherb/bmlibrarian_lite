@@ -90,6 +90,19 @@ struct FactCheckView: View {
                             )
                         }
 
+                        // Retry Report Generation Section (shown when report generation fails)
+                        if workflow.canRetryReportGeneration {
+                            RetryReportSection(
+                                errorMessage: workflow.session?.errorMessage,
+                                isRetrying: workflow.isRunning,
+                                onRetry: {
+                                    Task {
+                                        await workflow.retryReportGeneration()
+                                    }
+                                }
+                            )
+                        }
+
                         // Scored Documents Section
                         if let session = workflow.session,
                            !(session.documents ?? []).filter({ $0.isScored }).isEmpty {
@@ -625,6 +638,63 @@ struct UserDecisionSection: View {
         }
         .padding()
         .background(Color.orange.opacity(0.1))
+        .cornerRadius(10)
+    }
+}
+
+/// View displayed when report generation fails and can be retried.
+///
+/// Shows the error message and provides a button to retry report generation.
+/// The retry will skip all earlier workflow steps and directly attempt to
+/// regenerate the report using existing scored documents and citations.
+struct RetryReportSection: View {
+    /// The error message from the failed report generation.
+    let errorMessage: String?
+
+    /// Whether report generation is currently being retried.
+    let isRetrying: Bool
+
+    /// Called when user taps the retry button.
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Report Generation Failed")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    if let error = errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Button {
+                onRetry()
+            } label: {
+                HStack {
+                    if isRetrying {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Text(isRetrying ? "Retrying..." : "Retry Report Generation")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRetrying)
+            .accessibilityLabel("Retry Report Generation")
+            .accessibilityHint("Attempts to regenerate the report using existing documents and citations")
+        }
+        .padding()
+        .background(Color.red.opacity(0.1))
         .cornerRadius(10)
     }
 }

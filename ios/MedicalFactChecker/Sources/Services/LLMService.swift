@@ -33,6 +33,20 @@ actor LLMService {
     /// Maximum delay in seconds between retries.
     private static let maxDelaySeconds: Double = 10.0
 
+    // MARK: - Timeout Configuration
+
+    /// Default timeout in seconds for individual requests.
+    private static let defaultRequestTimeout: TimeInterval = 60
+
+    /// Default timeout in seconds for total resource operations.
+    private static let defaultResourceTimeout: TimeInterval = 120
+
+    /// Extended timeout in seconds for individual requests (for slower providers like Ollama).
+    private static let extendedRequestTimeout: TimeInterval = 120
+
+    /// Extended timeout in seconds for total resource operations (for slower providers like Ollama).
+    private static let extendedResourceTimeout: TimeInterval = 300
+
     // MARK: - Configuration
 
     private var baseURL: URL
@@ -54,9 +68,15 @@ actor LLMService {
         self.model = model
         self.provider = provider
 
+        // Use extended timeouts for Ollama since local models can be slower,
+        // especially for report generation with longer outputs
+        let useExtendedTimeout = provider == .ollama
+        let requestTimeout = useExtendedTimeout ? Self.extendedRequestTimeout : Self.defaultRequestTimeout
+        let resourceTimeout = useExtendedTimeout ? Self.extendedResourceTimeout : Self.defaultResourceTimeout
+
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 120
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = resourceTimeout
         self.session = URLSession(configuration: config)
     }
 
