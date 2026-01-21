@@ -23,35 +23,44 @@ Enable parallel LLM requests for cloud providers while maintaining sequential be
 
 **File**: `src/bmlibrarian_lite/constants.py`
 
+Add these constants to the existing file (note: retry constants already exist, reuse them):
+
 ```python
-# Parallel processing constants
-CONCURRENCY_SEQUENTIAL = 1
-CONCURRENCY_MODERATE = 3
-CONCURRENCY_AGGRESSIVE = 5
-CONCURRENCY_CLOUD_DEFAULT = 3
+# =============================================================================
+# Parallel Processing Settings
+# =============================================================================
+
+# Concurrency levels for parallel LLM requests
+CONCURRENCY_SEQUENTIAL = 1      # One request at a time (local inference)
+CONCURRENCY_MODERATE = 3        # Moderate parallelism
+CONCURRENCY_AGGRESSIVE = 5      # High parallelism
+CONCURRENCY_CLOUD_DEFAULT = 3   # Default for cloud APIs
 
 # Known large-scale providers that support parallel requests
-PARALLEL_PROVIDERS = [
+# These providers have infrastructure to handle concurrent requests efficiently
+PARALLEL_PROVIDERS: tuple[str, ...] = (
     "api.anthropic.com",
     "api.openai.com",
     "api.deepseek.com",
-    "generativelanguage.googleapis.com",
+    "generativelanguage.googleapis.com",  # Google AI
     "api.groq.com",
     "api.together.xyz",
     "api.fireworks.ai",
     "api.mistral.ai",
     "api.cohere.ai",
-]
+)
 
-# Retry constants
-RETRY_BASE_DELAY_SECONDS = 1.0
-RETRY_MAX_DELAY_SECONDS = 10.0
-RETRY_JITTER_MIN = 0.75
-RETRY_JITTER_MAX = 1.25
-MAX_LLM_RETRIES = 3
+# Cancellation check interval for async workers (seconds)
+CANCELLATION_CHECK_INTERVAL_SECONDS = 0.1
 
-# Rate limiting
-RATE_LIMIT_MIN_INTERVAL_SECONDS = 0.1
+# Cancellation timeout for waiting on workers (seconds)
+CANCELLATION_TIMEOUT_SECONDS = 30
+
+# Note: Reuse existing retry constants:
+# - DEFAULT_MAX_RETRIES (3)
+# - DEFAULT_RETRY_BASE_DELAY (1.0)
+# - DEFAULT_RETRY_MAX_DELAY (10.0)
+# - DEFAULT_RETRY_JITTER_FACTOR (0.2)
 ```
 
 #### 1.2 Provider Detection
@@ -119,42 +128,77 @@ def get_provider_url_from_config(config) -> str:
 **File**: `src/bmlibrarian_lite/agents/parallel_scoring.py` (new file)
 
 ```python
-"""Parallel document scoring using asyncio."""
+"""
+Parallel document scoring using asyncio.
+
+This module provides parallel execution of document scoring, wrapping
+the existing LiteScoringAgent for concurrent processing.
+"""
 
 import asyncio
+import logging
 import random
 from dataclasses import dataclass
-from typing import List, Optional, Callable
+from typing import Callable, Optional
 
 from ..constants import (
-    RETRY_BASE_DELAY_SECONDS,
-    RETRY_MAX_DELAY_SECONDS,
-    RETRY_JITTER_MIN,
-    RETRY_JITTER_MAX,
-    MAX_LLM_RETRIES,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_RETRY_BASE_DELAY,
+    DEFAULT_RETRY_MAX_DELAY,
+    DEFAULT_RETRY_EXPONENTIAL_BASE,
+    DEFAULT_RETRY_JITTER_FACTOR,
 )
-from ..models import LiteDocument
-from .scoring_agent import ScoringAgent
+from ..data_models import LiteDocument, ScoredDocument
+from .scoring_agent import LiteScoringAgent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ScoringResult:
-    """Result of scoring a single document."""
+class ParallelScoringResult:
+    """
+    Result of parallel scoring operation.
 
-    document: LiteDocument
-    score: Optional[int]
-    rationale: Optional[str]
+    Wraps ScoredDocument with additional error tracking for parallel execution.
+
+    Attributes:
+        scored_document: The scored document result (None if failed).
+        error: Error message if scoring failed.
+    """
+
+    scored_document: Optional[ScoredDocument]
     error: Optional[str] = None
 
     @property
     def is_error(self) -> bool:
         """Check if this result represents an error."""
-        return self.error is not None
+        return self.error is not None or (
+            self.scored_document is not None and self.scored_document.score < 0
+        )
+
+    @property
+    def document(self) -> Optional[LiteDocument]:
+        """Get the underlying document."""
+        return self.scored_document.document if self.scored_document else None
+
+    @property
+    def score(self) -> Optional[int]:
+        """Get the score (None if error)."""
+        if self.scored_document and self.scored_document.score > 0:
+            return self.scored_document.score
+        return None
+
+    @property
+    def explanation(self) -> Optional[str]:
+        """Get the explanation."""
+        return self.scored_document.explanation if self.scored_document else None
 
 
 def calculate_backoff_delay(attempt: int) -> float:
     """
     Calculate exponential backoff delay with jitter.
+
+    Uses the existing retry constants from constants.py.
 
     Args:
         attempt: Zero-based attempt number.
@@ -162,112 +206,137 @@ def calculate_backoff_delay(attempt: int) -> float:
     Returns:
         Delay in seconds with jitter applied.
     """
-    base_delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
-    jitter = random.uniform(RETRY_JITTER_MIN, RETRY_JITTER_MAX)
-    return min(base_delay * jitter, RETRY_MAX_DELAY_SECONDS)
+    base_delay = DEFAULT_RETRY_BASE_DELAY * (DEFAULT_RETRY_EXPONENTIAL_BASE ** attempt)
+    # Apply jitter: delay * (1 ± jitter_factor)
+    jitter_range = base_delay * DEFAULT_RETRY_JITTER_FACTOR
+    jittered_delay = base_delay + random.uniform(-jitter_range, jitter_range)
+    return min(max(jittered_delay, 0), DEFAULT_RETRY_MAX_DELAY)
 
 
 async def score_single_document_async(
-    agent: ScoringAgent,
+    agent: LiteScoringAgent,
+    question: str,
     document: LiteDocument,
-    claim: str,
-) -> ScoringResult:
+) -> ParallelScoringResult:
     """
-    Score a single document with retry logic.
+    Score a single document asynchronously.
+
+    Wraps the synchronous LiteScoringAgent.score_document() method
+    to run in a thread pool executor.
+
+    Note: The agent itself handles retries via @llm_retry decorator.
+    This function provides the async wrapper for parallel execution.
 
     Args:
         agent: The scoring agent instance.
+        question: Research question for scoring.
         document: The document to score.
-        claim: The medical claim being fact-checked.
 
     Returns:
-        ScoringResult with document, score, and rationale.
+        ParallelScoringResult with scored document or error.
     """
-    for attempt in range(MAX_LLM_RETRIES):
-        try:
-            # Run blocking scoring in thread pool
-            loop = asyncio.get_event_loop()
-            score, rationale = await loop.run_in_executor(
-                None, agent.score_document, document, claim
+    try:
+        loop = asyncio.get_running_loop()
+        # Run blocking score_document in thread pool
+        # Note: score_document(question, document) - question is first parameter
+        scored_doc = await loop.run_in_executor(
+            None, agent.score_document, question, document
+        )
+
+        # Check for error codes (negative scores indicate failures)
+        if scored_doc.score < 0:
+            return ParallelScoringResult(
+                scored_document=scored_doc,
+                error=scored_doc.explanation,
             )
 
-            return ScoringResult(
-                document=document,
-                score=score,
-                rationale=rationale,
-            )
+        return ParallelScoringResult(scored_document=scored_doc)
 
-        except Exception as e:
-            if attempt < MAX_LLM_RETRIES - 1:
-                delay = calculate_backoff_delay(attempt)
-                await asyncio.sleep(delay)
-            else:
-                return ScoringResult(
-                    document=document,
-                    score=None,
-                    rationale=None,
-                    error=str(e),
-                )
+    except Exception as e:
+        logger.error(f"Unexpected error scoring document {document.id}: {e}")
+        return ParallelScoringResult(
+            scored_document=None,
+            error=str(e),
+        )
 
 
 async def score_documents_parallel(
-    documents: List[LiteDocument],
-    claim: str,
-    agent_factory: Callable[[], ScoringAgent],
+    documents: list[LiteDocument],
+    question: str,
+    agent_factory: Callable[[], LiteScoringAgent],
     max_concurrent: int,
     on_progress: Optional[Callable[[str, int, int], None]] = None,
-) -> List[ScoringResult]:
+) -> list[ParallelScoringResult]:
     """
     Score multiple documents in parallel.
 
     Args:
         documents: List of documents to score.
-        claim: The medical claim being fact-checked.
-        agent_factory: Factory function to create ScoringAgent instances.
+        question: Research question for scoring.
+        agent_factory: Factory function to create LiteScoringAgent instances.
+            Each concurrent task gets its own agent instance.
         max_concurrent: Maximum number of concurrent requests.
         on_progress: Optional callback(pmid, current, total) for progress updates.
 
     Returns:
-        List of ScoringResult objects.
+        List of ParallelScoringResult objects in same order as input documents.
     """
     semaphore = asyncio.Semaphore(max_concurrent)
-    results: List[ScoringResult] = []
     completed = 0
     total = len(documents)
+    lock = asyncio.Lock()
 
-    async def score_with_limit(doc: LiteDocument) -> ScoringResult:
+    async def score_with_limit(doc: LiteDocument) -> ParallelScoringResult:
         nonlocal completed
         async with semaphore:
             agent = agent_factory()
-            result = await score_single_document_async(agent, doc, claim)
+            result = await score_single_document_async(agent, question, doc)
 
-            completed += 1
-            if on_progress:
-                on_progress(doc.pmid, completed, total)
+            async with lock:
+                completed += 1
+                current = completed
+
+            if on_progress and doc.pmid:
+                on_progress(doc.pmid, current, total)
 
             return result
 
     tasks = [score_with_limit(doc) for doc in documents]
     results = await asyncio.gather(*tasks, return_exceptions=False)
 
-    return results
+    return list(results)
 
 
 def run_parallel_scoring(
-    documents: List[LiteDocument],
-    claim: str,
-    agent_factory: Callable[[], ScoringAgent],
+    documents: list[LiteDocument],
+    question: str,
+    agent_factory: Callable[[], LiteScoringAgent],
     max_concurrent: int,
     on_progress: Optional[Callable[[str, int, int], None]] = None,
-) -> List[ScoringResult]:
+) -> list[ParallelScoringResult]:
     """
     Synchronous wrapper for parallel scoring.
 
-    Use this from non-async code (e.g., Qt workers).
+    Creates a new event loop to run the async scoring. Use this from
+    non-async code such as Qt worker threads.
+
+    Warning: Do not call this from within an existing async context
+    or from the Qt main thread. Use score_documents_parallel directly
+    in async contexts.
+
+    Args:
+        documents: List of documents to score.
+        question: Research question for scoring.
+        agent_factory: Factory function to create LiteScoringAgent instances.
+        max_concurrent: Maximum number of concurrent requests.
+        on_progress: Optional callback(pmid, current, total) for progress updates.
+
+    Returns:
+        List of ParallelScoringResult objects.
     """
     return asyncio.run(
         score_documents_parallel(
-            documents, claim, agent_factory, max_concurrent, on_progress
+            documents, question, agent_factory, max_concurrent, on_progress
         )
     )
 ```
@@ -279,41 +348,75 @@ def run_parallel_scoring(
 Modify the scoring worker to use parallel processing when appropriate:
 
 ```python
-# In the scoring worker class
-from ..llm.concurrency import detect_concurrency, get_provider_url_from_config
-from ..agents.parallel_scoring import run_parallel_scoring, ScoringResult
+"""Worker thread for parallel document scoring."""
 
-class ScoringWorker(QThread):
-    """Worker thread for document scoring."""
+from PySide6.QtCore import QThread, Signal
+
+from ..data_models import LiteDocument
+from ..llm.concurrency import detect_concurrency, get_provider_url_from_config
+from ..agents.parallel_scoring import run_parallel_scoring, ParallelScoringResult
+from ..agents.scoring_agent import LiteScoringAgent
+
+
+class ParallelScoringWorker(QThread):
+    """
+    Worker thread for parallel document scoring.
+
+    Automatically detects appropriate concurrency level based on the
+    configured LLM provider.
+
+    Signals:
+        progress: Emitted for each completed document (pmid, current, total).
+        finished: Emitted when all documents are scored.
+        error: Emitted if an unrecoverable error occurs.
+    """
 
     progress = Signal(str, int, int)  # pmid, current, total
-    finished = Signal(list)  # List[ScoringResult]
+    finished = Signal(list)  # list[ParallelScoringResult]
     error = Signal(str)
 
-    def __init__(self, documents, claim, config, parent=None):
+    def __init__(
+        self,
+        documents: list[LiteDocument],
+        question: str,
+        config,
+        parent=None,
+    ):
+        """
+        Initialize the scoring worker.
+
+        Args:
+            documents: Documents to score.
+            question: Research question for relevance scoring.
+            config: Application configuration with LLM settings.
+            parent: Optional parent QObject.
+        """
         super().__init__(parent)
         self.documents = documents
-        self.claim = claim
+        self.question = question
         self.config = config
 
-    def run(self):
+    def run(self) -> None:
+        """Execute parallel scoring in background thread."""
         try:
-            # Detect appropriate concurrency
+            # Detect appropriate concurrency level
             provider_url = get_provider_url_from_config(self.config)
             max_concurrent = detect_concurrency(
                 provider_url,
-                user_override=getattr(self.config, 'concurrency_override', None)
+                user_override=getattr(self.config, "concurrency_override", None),
             )
 
-            def agent_factory():
-                return ScoringAgent(self.config)
+            def agent_factory() -> LiteScoringAgent:
+                """Create a new agent instance for each concurrent task."""
+                return LiteScoringAgent(self.config)
 
-            def on_progress(pmid, current, total):
+            def on_progress(pmid: str, current: int, total: int) -> None:
+                """Emit progress signal for UI updates."""
                 self.progress.emit(pmid, current, total)
 
             results = run_parallel_scoring(
                 self.documents,
-                self.claim,
+                self.question,
                 agent_factory,
                 max_concurrent,
                 on_progress,
@@ -1060,7 +1163,7 @@ async def score_documents_cancellable(
         while tasks and not cancellation_token.is_cancelled():
             done, _ = await asyncio.wait(
                 tasks.keys(),
-                timeout=0.1,
+                timeout=CANCELLATION_CHECK_INTERVAL_SECONDS,
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
