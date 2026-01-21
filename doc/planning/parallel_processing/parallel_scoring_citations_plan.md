@@ -23,26 +23,144 @@ The primary bottleneck is **network round-trip latency**:
 
 ## Proposed Architecture
 
-### 1. Concurrency Mode Enum
+### 1. Constants
+
+Add to a new `ParallelProcessingConstants.swift` file or existing constants:
 
 ```swift
-enum ConcurrencyMode: String, Codable, CaseIterable {
+// MARK: - Parallel Processing Constants
+
+/// Default concurrency levels for different modes.
+enum ConcurrencyDefaults {
+    /// Sequential processing (Ollama/local inference).
+    static let sequential = 1
+    /// Moderate concurrency for cloud APIs.
+    static let moderate = 3
+    /// Aggressive concurrency for high-throughput APIs.
+    static let aggressive = 5
+    /// Default for auto-detection with cloud providers.
+    static let cloudDefault = 3
+}
+
+/// Batch size limits.
+enum BatchSizeDefaults {
+    /// Default documents per scoring prompt.
+    static let scoring = 3
+    /// Default documents per citation prompt.
+    static let citation = 2
+    /// Maximum scoring batch size.
+    static let maxScoring = 10
+    /// Maximum citation batch size.
+    static let maxCitation = 5
+}
+
+/// Retry and backoff constants.
+enum RetryConstants {
+    /// Base delay for exponential backoff (seconds).
+    static let baseDelaySeconds: Double = 1.0
+    /// Maximum delay cap (seconds).
+    static let maxDelaySeconds: Double = 10.0
+    /// Minimum jitter multiplier.
+    static let jitterMin: Double = 0.75
+    /// Maximum jitter multiplier.
+    static let jitterMax: Double = 1.25
+}
+
+/// Rate limiting constants.
+enum RateLimitConstants {
+    /// Minimum interval between requests (seconds).
+    static let minIntervalSeconds: Double = 0.1
+}
+
+/// Memory thresholds for adaptive batch sizing.
+enum MemoryThresholds {
+    /// Low memory threshold in bytes (4GB).
+    static let lowMemoryBytes: UInt64 = 4_000_000_000
+    /// Reduced batch size for low-memory devices.
+    static let lowMemoryBatchSize = 3
+}
+```
+
+### 2. Concurrency Mode Enum
+
+```swift
+/// Concurrency mode for parallel LLM requests.
+///
+/// Controls how many concurrent API requests can be made during
+/// scoring and citation extraction phases.
+enum ConcurrencyMode: String, CaseIterable, Identifiable {
     case sequential     // Ollama, limited hardware
     case moderate       // 3 concurrent requests
     case aggressive     // 5 concurrent requests
     case auto           // Detect from provider
+
+    var id: String { rawValue }
+
+    /// Human-readable display name for UI.
+    var displayName: String {
+        switch self {
+        case .sequential: return "Sequential (Ollama/Local)"
+        case .moderate: return "Moderate (\(ConcurrencyDefaults.moderate) concurrent)"
+        case .aggressive: return "Aggressive (\(ConcurrencyDefaults.aggressive) concurrent)"
+        case .auto: return "Auto-detect"
+        }
+    }
+
+    /// Maximum concurrent requests for this mode.
+    var maxConcurrent: Int {
+        switch self {
+        case .sequential: return ConcurrencyDefaults.sequential
+        case .moderate: return ConcurrencyDefaults.moderate
+        case .aggressive: return ConcurrencyDefaults.aggressive
+        case .auto: return ConcurrencyDefaults.sequential // Overridden at runtime
+        }
+    }
 }
 ```
 
-### 2. Configuration Settings
+### 3. Configuration Settings
 
-Add to `AppSettings.swift`:
+Add to `AppSettings.swift` (using existing UserDefaults pattern):
 
 ```swift
-@AppStorage("concurrencyMode") var concurrencyMode: ConcurrencyMode = .auto
-@AppStorage("scoringBatchSize") var scoringBatchSize: Int = 5
-@AppStorage("citationBatchSize") var citationBatchSize: Int = 3
-@AppStorage("enablePipelineProcessing") var enablePipelineProcessing: Bool = true
+// MARK: - Parallel Processing Settings
+
+/// Concurrency mode for LLM requests.
+var concurrencyMode: ConcurrencyMode {
+    didSet { UserDefaults.standard.set(concurrencyMode.rawValue, forKey: Keys.concurrencyMode) }
+}
+
+/// Number of documents per scoring prompt (batched prompts).
+var scoringBatchSize: Int {
+    didSet { UserDefaults.standard.set(scoringBatchSize, forKey: Keys.scoringBatchSize) }
+}
+
+/// Number of documents per citation prompt (batched prompts).
+var citationBatchSize: Int {
+    didSet { UserDefaults.standard.set(citationBatchSize, forKey: Keys.citationBatchSize) }
+}
+
+/// Whether to enable pipeline processing (overlap scoring and citation extraction).
+var enablePipelineProcessing: Bool {
+    didSet { UserDefaults.standard.set(enablePipelineProcessing, forKey: Keys.enablePipelineProcessing) }
+}
+
+// Add to Keys enum:
+static let concurrencyMode = "concurrency_mode"
+static let scoringBatchSize = "scoring_batch_size"
+static let citationBatchSize = "citation_batch_size"
+static let enablePipelineProcessing = "enable_pipeline_processing"
+
+// Add to init():
+if let modeString = defaults.string(forKey: Keys.concurrencyMode),
+   let mode = ConcurrencyMode(rawValue: modeString) {
+    self.concurrencyMode = mode
+} else {
+    self.concurrencyMode = .auto
+}
+self.scoringBatchSize = defaults.object(forKey: Keys.scoringBatchSize) as? Int ?? BatchSizeDefaults.scoring
+self.citationBatchSize = defaults.object(forKey: Keys.citationBatchSize) as? Int ?? BatchSizeDefaults.citation
+self.enablePipelineProcessing = defaults.object(forKey: Keys.enablePipelineProcessing) as? Bool ?? true
 ```
 
 ### 3. Processing Strategies
@@ -127,55 +245,30 @@ Proposed (3 docs/call):
 
 **File**: `AppSettings.swift`
 
+Add computed properties to `AppSettings`:
+
 ```swift
-// MARK: - Concurrency Settings
+// MARK: - Computed Properties for Concurrency
 
-enum ConcurrencyMode: String, Codable, CaseIterable, Identifiable {
-    case sequential = "sequential"
-    case moderate = "moderate"      // 3 concurrent
-    case aggressive = "aggressive"  // 5 concurrent
-    case auto = "auto"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .sequential: return "Sequential (Ollama/Local)"
-        case .moderate: return "Moderate (3 concurrent)"
-        case .aggressive: return "Aggressive (5 concurrent)"
-        case .auto: return "Auto-detect"
-        }
-    }
-
-    var maxConcurrent: Int {
-        switch self {
-        case .sequential: return 1
-        case .moderate: return 3
-        case .aggressive: return 5
-        case .auto: return 1 // Will be overridden
-        }
-    }
-}
-
-@AppStorage("concurrencyMode") var concurrencyMode: ConcurrencyMode = .auto
-@AppStorage("scoringBatchSize") var scoringBatchSize: Int = 3
-@AppStorage("citationBatchSize") var citationBatchSize: Int = 2
-@AppStorage("enablePipelineProcessing") var enablePipelineProcessing: Bool = true
-
+/// Effective concurrency level based on mode and provider detection.
+///
+/// Returns the actual number of concurrent requests to use, taking into
+/// account auto-detection for local vs cloud providers.
 var effectiveConcurrency: Int {
     if concurrencyMode == .auto {
-        // Auto-detect based on provider
-        if isOllamaProvider {
-            return 1  // Ollama is single-threaded
-        } else {
-            return 3  // Cloud APIs support concurrency
-        }
+        return isOllamaProvider
+            ? ConcurrencyDefaults.sequential
+            : ConcurrencyDefaults.cloudDefault
     }
     return concurrencyMode.maxConcurrent
 }
 
+/// Whether the current provider is Ollama or another local inference server.
+///
+/// Local providers don't benefit from concurrent requests since they're
+/// typically single-threaded on the GPU.
 var isOllamaProvider: Bool {
-    guard let url = URL(string: llmEndpoint) else { return false }
+    guard let url = URL(string: llmBaseURL) else { return false }
     let host = url.host?.lowercased() ?? ""
     return host == "localhost" || host == "127.0.0.1" || host.contains("ollama")
 }
@@ -183,29 +276,41 @@ var isOllamaProvider: Bool {
 
 #### 1.2 Parallel Scoring Implementation
 
-**File**: `FactCheckWorkflow.swift` - New method
+**File**: `FactCheckWorkflow.swift` - New methods
 
 ```swift
-/// Score documents with configurable concurrency
+/// Scoring result tuple type for clarity.
+typealias ScoringResult = (document: Document, score: Int, rationale: String)
+
+/// Score documents with configurable concurrency.
+///
+/// Processes documents in parallel batches based on the effective concurrency
+/// setting. Each batch runs concurrently, and results are persisted after
+/// each batch completes.
+///
+/// - Parameters:
+///   - documents: Documents to score.
+///   - claim: The medical claim being fact-checked.
+///   - settings: App settings containing concurrency configuration.
+/// - Throws: `WorkflowError.budgetExceeded` if budget limit reached.
 private func scoreDocumentsConcurrent(
     _ documents: [Document],
     claim: String,
     settings: AppSettings
 ) async throws {
-    let concurrency = settings.effectiveConcurrency
-    let batchSize = settings.scoringBatchSize
+    let maxConcurrent = settings.effectiveConcurrency
     let total = documents.count
     var completed = 0
 
     // Process in batches of concurrent requests
-    for batchStart in stride(from: 0, to: total, by: concurrency) {
+    for batchStart in stride(from: 0, to: total, by: maxConcurrent) {
         try checkBudget()
 
-        let batchEnd = min(batchStart + concurrency, total)
+        let batchEnd = min(batchStart + maxConcurrent, total)
         let batch = Array(documents[batchStart..<batchEnd])
 
         // Process batch concurrently
-        try await withThrowingTaskGroup(of: (Document, Int, String).self) { group in
+        try await withThrowingTaskGroup(of: ScoringResult.self) { group in
             for document in batch {
                 group.addTask {
                     let (score, rationale) = try await self.scoreDocument(
@@ -236,7 +341,17 @@ private func scoreDocumentsConcurrent(
     }
 }
 
-/// Score a single document (extracted for reuse)
+/// Score a single document with retry logic.
+///
+/// Attempts to score the document up to `maxParseRetries` times, using
+/// exponential backoff with jitter on parse failures.
+///
+/// - Parameters:
+///   - document: The document to score.
+///   - claim: The medical claim being fact-checked.
+///   - settings: App settings for LLM configuration.
+/// - Returns: Tuple of (score, rationale).
+/// - Throws: `WorkflowError.scoringFailed` if all retries exhausted.
 private func scoreDocument(
     _ document: Document,
     claim: String,
@@ -260,10 +375,8 @@ private func scoreDocument(
         }
 
         // Exponential backoff with jitter
-        let baseDelay = 1.0 * pow(2.0, Double(attempt))
-        let jitter = Double.random(in: 0.75...1.25)
-        let delay = min(baseDelay * jitter, 10.0)
-        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        let delay = calculateBackoffDelay(attempt: attempt)
+        try await Task.sleep(for: .seconds(delay))
     }
 
     guard let result = parseResult, !result.parseFailed else {
@@ -271,6 +384,16 @@ private func scoreDocument(
     }
 
     return (result.score, result.rationale)
+}
+
+/// Calculate exponential backoff delay with jitter.
+///
+/// - Parameter attempt: Zero-based attempt number.
+/// - Returns: Delay in seconds with jitter applied.
+private func calculateBackoffDelay(attempt: Int) -> Double {
+    let baseDelay = RetryConstants.baseDelaySeconds * pow(2.0, Double(attempt))
+    let jitter = Double.random(in: RetryConstants.jitterMin...RetryConstants.jitterMax)
+    return min(baseDelay * jitter, RetryConstants.maxDelaySeconds)
 }
 ```
 
@@ -359,43 +482,60 @@ private func buildBatchScoringPrompt(claim: String, documents: [Document]) -> St
 #### 2.1 Async Stream for Progressive Results
 
 ```swift
-/// Stream scoring results as they complete
+/// Stream scoring results as they complete, maintaining concurrency limit.
+///
+/// Yields results progressively as documents are scored, allowing downstream
+/// processing (e.g., citation extraction) to begin before all scoring completes.
+///
+/// - Parameters:
+///   - documents: Documents to score.
+///   - claim: The medical claim being fact-checked.
+///   - settings: App settings containing concurrency configuration.
+/// - Returns: An async stream that yields scoring results as they complete.
 func scoreDocumentsStreaming(
     _ documents: [Document],
     claim: String,
     settings: AppSettings
-) -> AsyncThrowingStream<(Document, Int, String), Error> {
+) -> AsyncThrowingStream<ScoringResult, Error> {
     AsyncThrowingStream { continuation in
         Task {
             do {
-                let concurrency = settings.effectiveConcurrency
+                let maxConcurrent = settings.effectiveConcurrency
 
-                try await withThrowingTaskGroup(of: (Document, Int, String).self) { group in
+                try await withThrowingTaskGroup(of: ScoringResult.self) { group in
                     var pending = documents[...]
-                    var running = 0
+                    var runningCount = 0
 
-                    // Initial batch
-                    while running < concurrency && !pending.isEmpty {
-                        let doc = pending.removeFirst()
-                        running += 1
+                    // Launch initial batch up to concurrency limit
+                    while runningCount < maxConcurrent && !pending.isEmpty {
+                        let document = pending.removeFirst()
+                        runningCount += 1
                         group.addTask {
-                            let (score, rationale) = try await self.scoreDocument(doc, claim: claim, settings: settings)
-                            return (doc, score, rationale)
+                            let (score, rationale) = try await self.scoreDocument(
+                                document,
+                                claim: claim,
+                                settings: settings
+                            )
+                            return (document, score, rationale)
                         }
                     }
 
-                    // Process as results arrive
+                    // Process results as they arrive and refill the pool
                     for try await result in group {
                         continuation.yield(result)
-                        running -= 1
+                        runningCount -= 1
 
-                        // Add next document
+                        // Add next document to maintain concurrency
                         if !pending.isEmpty {
-                            let doc = pending.removeFirst()
-                            running += 1
+                            let document = pending.removeFirst()
+                            runningCount += 1
                             group.addTask {
-                                let (score, rationale) = try await self.scoreDocument(doc, claim: claim, settings: settings)
-                                return (doc, score, rationale)
+                                let (score, rationale) = try await self.scoreDocument(
+                                    document,
+                                    claim: claim,
+                                    settings: settings
+                                )
+                                return (document, score, rationale)
                             }
                         }
                     }
@@ -413,7 +553,17 @@ func scoreDocumentsStreaming(
 #### 2.2 Pipeline: Score → Extract as Documents Complete
 
 ```swift
-/// Pipeline processing: start citation extraction as scoring completes
+/// Process documents with pipelined scoring and citation extraction.
+///
+/// When pipeline processing is enabled, citation extraction begins as soon as
+/// relevant documents are scored, rather than waiting for all scoring to complete.
+/// This reduces total wall-clock time by overlapping the two phases.
+///
+/// - Parameters:
+///   - documents: Documents to process.
+///   - claim: The medical claim being fact-checked.
+///   - settings: App settings containing processing configuration.
+/// - Throws: Errors from scoring or citation extraction.
 func processDocumentsPipelined(
     _ documents: [Document],
     claim: String,
@@ -422,13 +572,15 @@ func processDocumentsPipelined(
     guard settings.enablePipelineProcessing else {
         // Fall back to sequential: score all, then extract all
         try await scoreDocumentsConcurrent(documents, claim: claim, settings: settings)
-        let relevant = documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }
-        try await extractCitationsConcurrent(relevant, claim: claim, settings: settings)
+        let relevantDocuments = documents.filter { $0.meetsThreshold(settings.minScoreThreshold) }
+        try await extractCitationsConcurrent(relevantDocuments, claim: claim, settings: settings)
         return
     }
 
-    // Use actor for thread-safe collection of documents ready for citation extraction
+    // Use actor for thread-safe handoff between scoring and citation extraction
     let citationQueue = CitationQueue()
+
+    // Start citation extraction worker (consumes from queue)
     let extractionTask = Task {
         try await runCitationExtractionPipeline(
             queue: citationQueue,
@@ -438,7 +590,11 @@ func processDocumentsPipelined(
     }
 
     // Score documents and queue relevant ones for citation extraction
-    for try await (document, score, rationale) in scoreDocumentsStreaming(documents, claim: claim, settings: settings) {
+    for try await (document, score, rationale) in scoreDocumentsStreaming(
+        documents,
+        claim: claim,
+        settings: settings
+    ) {
         document.relevanceScore = score
         document.relevanceExplanation = rationale
         document.scoredAt = Date()
@@ -448,7 +604,7 @@ func processDocumentsPipelined(
         }
     }
 
-    // Signal no more documents coming
+    // Signal that scoring is complete
     await citationQueue.finish()
 
     // Wait for citation extraction to complete
@@ -457,35 +613,104 @@ func processDocumentsPipelined(
     try? modelContext.save()
 }
 
-/// Actor to safely queue documents between scoring and citation extraction
+/// Run citation extraction from the pipeline queue.
+///
+/// - Parameters:
+///   - queue: The citation queue to consume documents from.
+///   - claim: The medical claim being fact-checked.
+///   - settings: App settings for citation extraction configuration.
+/// - Throws: Errors from citation extraction.
+private func runCitationExtractionPipeline(
+    queue: CitationQueue,
+    claim: String,
+    settings: AppSettings
+) async throws {
+    for await document in queue.makeStream() {
+        try await extractCitationsForDocument(document, claim: claim, settings: settings)
+        try? modelContext.save()
+    }
+}
+
+/// Thread-safe queue for passing documents between scoring and citation extraction.
+///
+/// Uses AsyncStream to provide a producer-consumer pattern where the scoring
+/// phase enqueues documents and the citation extraction phase consumes them.
+///
+/// - Important: `makeStream()` should only be called once per queue instance.
 actor CitationQueue {
-    private var documents: [Document] = []
+    /// Buffer for documents added before the stream is created.
+    private var bufferedDocuments: [Document] = []
+
+    /// Whether the producer has signaled completion.
     private var isFinished = false
+
+    /// Stream continuation for yielding documents.
     private var continuation: AsyncStream<Document>.Continuation?
 
+    /// Whether the stream has been created.
+    private var streamCreated = false
+
+    /// Enqueue a document for citation extraction.
+    ///
+    /// If the stream has been created, yields immediately. Otherwise, buffers
+    /// the document until the stream is consumed.
+    ///
+    /// - Parameter document: The document to enqueue.
     func enqueue(_ document: Document) {
         if let continuation = continuation {
             continuation.yield(document)
         } else {
-            documents.append(document)
+            bufferedDocuments.append(document)
         }
     }
 
+    /// Signal that no more documents will be enqueued.
+    ///
+    /// Call this after all scoring is complete to allow the citation
+    /// extraction loop to terminate.
     func finish() {
         isFinished = true
         continuation?.finish()
     }
 
-    func stream() -> AsyncStream<Document> {
-        AsyncStream { continuation in
-            self.continuation = continuation
-            for doc in documents {
-                continuation.yield(doc)
-            }
-            documents.removeAll()
-            if isFinished {
+    /// Create an async stream of documents.
+    ///
+    /// - Important: This method should only be called once per queue instance.
+    ///   Calling it multiple times will result in undefined behavior.
+    ///
+    /// - Returns: An async stream that yields documents as they are enqueued.
+    func makeStream() -> AsyncStream<Document> {
+        precondition(!streamCreated, "makeStream() can only be called once")
+        streamCreated = true
+
+        return AsyncStream { [weak self] continuation in
+            guard let self = self else {
                 continuation.finish()
+                return
             }
+
+            Task {
+                // Set continuation and flush buffer atomically via actor isolation
+                await self.setupContinuation(continuation)
+            }
+        }
+    }
+
+    /// Set up the continuation and flush any buffered documents.
+    ///
+    /// - Parameter continuation: The stream continuation.
+    private func setupContinuation(_ continuation: AsyncStream<Document>.Continuation) {
+        self.continuation = continuation
+
+        // Yield all buffered documents
+        for document in bufferedDocuments {
+            continuation.yield(document)
+        }
+        bufferedDocuments.removeAll()
+
+        // If already finished, close the stream
+        if isFinished {
+            continuation.finish()
         }
     }
 }
@@ -561,16 +786,38 @@ Section("Performance") {
 Cloud APIs have rate limits. Implement backoff:
 
 ```swift
+/// Rate limiter to prevent exceeding API request limits.
+///
+/// Ensures a minimum interval between requests to avoid triggering
+/// provider rate limits (typically 10-100 requests/second).
 actor RateLimiter {
+    /// Time of the last request.
     private var lastRequestTime = Date.distantPast
-    private let minInterval: TimeInterval = 0.1  // 10 requests/sec max
 
+    /// Minimum interval between requests (from constants).
+    private let minInterval: TimeInterval = RateLimitConstants.minIntervalSeconds
+
+    /// Wait until a request slot is available.
+    ///
+    /// If called too soon after the previous request, sleeps for the
+    /// remaining time until the minimum interval has elapsed.
     func waitForSlot() async {
         let elapsed = Date().timeIntervalSince(lastRequestTime)
         if elapsed < minInterval {
-            try? await Task.sleep(nanoseconds: UInt64((minInterval - elapsed) * 1_000_000_000))
+            let waitTime = minInterval - elapsed
+            try? await Task.sleep(for: .seconds(waitTime))
         }
         lastRequestTime = Date()
+    }
+
+    /// Execute a function with rate limiting.
+    ///
+    /// - Parameter operation: The async operation to execute.
+    /// - Returns: The result of the operation.
+    /// - Throws: Any error thrown by the operation.
+    func execute<T>(_ operation: () async throws -> T) async rethrows -> T {
+        await waitForSlot()
+        return try await operation()
     }
 }
 ```
@@ -608,15 +855,23 @@ try await withThrowingTaskGroup(of: Result<ScoringResult, Error>.self) { group i
 Large batches can consume significant memory. Monitor and adapt:
 
 ```swift
-func adaptiveBatchSize(totalDocuments: Int) -> Int {
+/// Calculate adaptive batch size based on available system memory.
+///
+/// Reduces batch size on devices with limited RAM to prevent memory pressure
+/// during concurrent LLM request processing.
+///
+/// - Parameters:
+///   - requestedSize: The user-configured batch size.
+///   - settings: App settings (unused but available for future extensions).
+/// - Returns: Effective batch size, potentially reduced for low-memory devices.
+func adaptiveBatchSize(requestedSize: Int, settings: AppSettings) -> Int {
     let availableMemory = ProcessInfo.processInfo.physicalMemory
-    let baseSize = settings.scoringBatchSize
 
     // Reduce batch size on low-memory devices
-    if availableMemory < 4_000_000_000 {  // < 4GB
-        return min(baseSize, 3)
+    if availableMemory < MemoryThresholds.lowMemoryBytes {
+        return min(requestedSize, MemoryThresholds.lowMemoryBatchSize)
     }
-    return baseSize
+    return requestedSize
 }
 ```
 

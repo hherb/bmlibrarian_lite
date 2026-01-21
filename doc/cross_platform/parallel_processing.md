@@ -4,6 +4,38 @@
 
 This document describes platform-agnostic algorithms for parallelizing document scoring and citation extraction in the fact-checking workflow. The design supports both cloud APIs (which benefit from concurrent requests) and local inference (Ollama) where parallelism provides no benefit.
 
+## Constants
+
+All platforms should define these constants centrally:
+
+```pseudocode
+# Concurrency levels
+CONCURRENCY_SEQUENTIAL = 1      # One request at a time
+CONCURRENCY_MODERATE = 3        # Moderate parallelism
+CONCURRENCY_AGGRESSIVE = 5      # High parallelism
+CONCURRENCY_CLOUD_DEFAULT = 3   # Default for cloud APIs
+
+# Batch sizes
+SCORING_BATCH_SIZE_DEFAULT = 3
+CITATION_BATCH_SIZE_DEFAULT = 2
+SCORING_BATCH_SIZE_MAX = 10
+CITATION_BATCH_SIZE_MAX = 5
+
+# Retry constants
+RETRY_BASE_DELAY_SECONDS = 1.0
+RETRY_MAX_DELAY_SECONDS = 10.0
+RETRY_JITTER_MIN = 0.75
+RETRY_JITTER_MAX = 1.25
+MAX_RETRIES = 3
+
+# Rate limiting
+RATE_LIMIT_MIN_INTERVAL_SECONDS = 0.1  # 10 requests/sec max
+
+# Memory thresholds
+LOW_MEMORY_THRESHOLD_BYTES = 4_000_000_000  # 4GB
+LOW_MEMORY_BATCH_SIZE = 3
+```
+
 ## Concurrency Modes
 
 ```pseudocode
@@ -14,14 +46,23 @@ enum ConcurrencyMode:
     AUTO = -1           # Auto-detect from provider
 
 function detect_concurrency(provider_url: string) -> int:
+    """
+    Detect appropriate concurrency level based on provider URL.
+
+    Args:
+        provider_url: The LLM API endpoint URL.
+
+    Returns:
+        Number of concurrent requests to allow.
+    """
     host = parse_url(provider_url).host.lowercase()
 
-    # Local inference - no parallelism benefit
+    # Local inference - no parallelism benefit (single GPU)
     if host in ["localhost", "127.0.0.1"] or "ollama" in host:
-        return 1
+        return CONCURRENCY_SEQUENTIAL
 
     # Cloud APIs support concurrent requests
-    return 3  # Safe default for most providers
+    return CONCURRENCY_CLOUD_DEFAULT
 ```
 
 ## Strategy 1: Parallel Concurrent Requests
@@ -54,6 +95,19 @@ function score_documents_parallel(
     return results
 
 function score_single_document(doc: Document, claim: string) -> ScoringResult:
+    """
+    Score a single document with retry logic.
+
+    Args:
+        doc: The document to score.
+        claim: The medical claim being fact-checked.
+
+    Returns:
+        ScoringResult with document, score, and rationale.
+
+    Raises:
+        ScoringError: If all retry attempts fail.
+    """
     prompt = build_scoring_prompt(claim, doc)
 
     for attempt in range(MAX_RETRIES):
@@ -68,10 +122,24 @@ function score_single_document(doc: Document, claim: string) -> ScoringResult:
             )
 
         # Exponential backoff with jitter
-        delay = min(BASE_DELAY * (2 ** attempt) * random(0.75, 1.25), MAX_DELAY)
+        delay = calculate_backoff_delay(attempt)
         await sleep(delay)
 
     raise ScoringError(f"Failed to score {doc.pmid}")
+
+function calculate_backoff_delay(attempt: int) -> float:
+    """
+    Calculate exponential backoff delay with jitter.
+
+    Args:
+        attempt: Zero-based attempt number.
+
+    Returns:
+        Delay in seconds with jitter applied.
+    """
+    base_delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+    jitter = random(RETRY_JITTER_MIN, RETRY_JITTER_MAX)
+    return min(base_delay * jitter, RETRY_MAX_DELAY_SECONDS)
 ```
 
 ### Time Complexity
@@ -93,7 +161,7 @@ Send multiple documents in a single LLM request to reduce overhead.
 function score_documents_batched(
     documents: List[Document],
     claim: string,
-    batch_size: int = 3
+    batch_size: int = SCORING_BATCH_SIZE_DEFAULT
 ) -> List[ScoringResult]:
 
     results = []
@@ -318,17 +386,23 @@ function process_parallel_pipelined(
 
 ```yaml
 # Settings for parallel processing
+# Default values reference constants defined above
 parallel_processing:
   # Concurrency mode: auto, sequential, moderate, aggressive
   mode: auto
 
-  # Number of concurrent LLM requests (ignored if mode != auto)
+  # Number of concurrent LLM requests (used when mode is aggressive)
+  # Default: CONCURRENCY_AGGRESSIVE (5)
   max_concurrent: 5
 
   # Documents per scoring prompt (batched prompts)
+  # Default: SCORING_BATCH_SIZE_DEFAULT (3)
+  # Max: SCORING_BATCH_SIZE_MAX (10)
   scoring_batch_size: 3
 
   # Documents per citation prompt
+  # Default: CITATION_BATCH_SIZE_DEFAULT (2)
+  # Max: CITATION_BATCH_SIZE_MAX (5)
   citation_batch_size: 2
 
   # Enable pipeline processing (scoring → citations overlap)
@@ -336,8 +410,11 @@ parallel_processing:
 
   # Rate limiting
   rate_limit:
+    # Requests per second (1 / RATE_LIMIT_MIN_INTERVAL_SECONDS)
     requests_per_second: 10
+    # RETRY_BASE_DELAY_SECONDS
     backoff_base: 1.0
+    # RETRY_MAX_DELAY_SECONDS
     backoff_max: 10.0
 ```
 
@@ -369,16 +446,24 @@ function score_batch_resilient(batch: List[Document], claim: string) -> List[Res
 
 ```pseudocode
 class RateLimiter:
-    last_request_time: DateTime
-    min_interval: float  # seconds between requests
+    """
+    Rate limiter to prevent exceeding API request limits.
+
+    Ensures a minimum interval between requests to avoid triggering
+    provider rate limits.
+    """
+    last_request_time: DateTime = EPOCH
+    min_interval: float = RATE_LIMIT_MIN_INTERVAL_SECONDS
 
     async function wait_for_slot():
+        """Wait until a request slot is available."""
         elapsed = now() - last_request_time
         if elapsed < min_interval:
             await sleep(min_interval - elapsed)
         last_request_time = now()
 
     async function execute(func, *args):
+        """Execute a function with rate limiting."""
         await wait_for_slot()
         return await func(*args)
 ```
