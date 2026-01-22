@@ -84,13 +84,20 @@ struct ConcurrencyDetector {
 import Foundation
 
 /// Result of scoring a single document.
-struct ScoringResult {
+///
+/// Note: Phase 2 introduces a Codable `ScoringResult` variant for checkpointing.
+/// This struct is used during active scoring; the checkpoint version stores
+/// only the essential data (pmid, score, rationale).
+struct ScoringResult: Sendable {
     let document: Document
     let score: Int?
     let rationale: String?
     let error: Error?
 
     var isError: Bool { error != nil }
+
+    /// The document's PMID, if available.
+    var pmid: String { document.pmid ?? "" }
 }
 
 /// Service for parallel document scoring using Swift Concurrency.
@@ -146,7 +153,7 @@ actor ParallelScoringService {
             for await result in group {
                 results.append(result)
                 completed += 1
-                onProgress(result.document.pmid ?? "", completed, total)
+                onProgress(result.pmid, completed, total)
 
                 // Add next document to maintain concurrency level
                 if let doc = pending.popFirst() {

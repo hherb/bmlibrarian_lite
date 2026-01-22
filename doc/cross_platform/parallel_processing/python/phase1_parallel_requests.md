@@ -146,6 +146,10 @@ class ParallelScoringResult:
 
     Wraps ScoredDocument with additional error tracking for parallel execution.
 
+    Note: Phase 2 introduces a simpler `ScoringResult` for checkpointing that stores
+    only essential data (document, score, rationale). This class wraps the full
+    ScoredDocument for active scoring with access to all document metadata.
+
     Attributes:
         scored_document: The scored document result (None if failed).
         error: Error message if scoring failed.
@@ -177,6 +181,11 @@ class ParallelScoringResult:
     def explanation(self) -> Optional[str]:
         """Get the explanation."""
         return self.scored_document.explanation if self.scored_document else None
+
+    @property
+    def pmid(self) -> Optional[str]:
+        """Get the PMID of the document."""
+        return self.scored_document.document.pmid if self.scored_document else None
 
 
 def calculate_backoff_delay(attempt: int) -> float:

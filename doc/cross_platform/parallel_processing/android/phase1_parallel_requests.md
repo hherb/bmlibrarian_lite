@@ -86,6 +86,10 @@ package com.bmlibrarian.factchecker.domain.model
 
 /**
  * Result of scoring a single document.
+ *
+ * Note: Phase 2 introduces a serializable `CheckpointedScoringResult` for persistence.
+ * This sealed class is used during active scoring; the checkpoint version stores
+ * only the essential data (pmid, score, rationale) for resumption.
  */
 sealed class ScoringResult {
     abstract val document: Document
@@ -109,6 +113,10 @@ sealed class ScoringResult {
 
     val isError: Boolean
         get() = this is Error
+
+    /** The document's PMID. */
+    val pmid: String
+        get() = document.pmid
 }
 ```
 
@@ -119,9 +127,9 @@ sealed class ScoringResult {
 ```kotlin
 package com.bmlibrarian.factchecker.domain.usecase
 
+import com.bmlibrarian.factchecker.data.repository.ScoringRepository
 import com.bmlibrarian.factchecker.domain.model.Document
 import com.bmlibrarian.factchecker.domain.model.ScoringResult
-import com.bmlibrarian.factchecker.domain.repository.ScoringRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -142,10 +150,13 @@ class ParallelScoringUseCase @Inject constructor(
     /**
      * Score multiple documents in parallel.
      *
+     * Results are emitted in the original document order (not completion order)
+     * because we await deferreds sequentially.
+     *
      * @param documents Documents to score.
      * @param claim The medical claim to verify.
      * @param maxConcurrent Maximum concurrent requests.
-     * @return Flow emitting scoring results as they complete.
+     * @return Flow emitting scoring results in original document order.
      */
     suspend fun scoreDocuments(
         documents: List<Document>,
@@ -168,6 +179,7 @@ class ParallelScoringUseCase @Inject constructor(
                 }
             }
 
+            // Emit in original order by awaiting sequentially
             deferreds.forEach { deferred ->
                 emit(deferred.await())
             }
