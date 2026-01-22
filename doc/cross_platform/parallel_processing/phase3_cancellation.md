@@ -4,6 +4,14 @@
 
 Enable users to cancel in-progress processing with graceful termination and clear feedback.
 
+## Terminology Note
+
+The Python desktop app uses `question` (research question context) while the iOS/Android
+mobile apps use `claim` (medical fact-checking context). Both refer to the same concept:
+the text being evaluated against the document for relevance scoring. This document uses
+`question` for Python code and `claim` for Swift/Kotlin code to match each platform's
+existing conventions.
+
 ## Python Implementation
 
 ### 3.1 Cancellation Token
@@ -33,8 +41,11 @@ class CancellationToken:
                 for callback in self._callbacks:
                     try:
                         callback()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            f"Cancellation callback raised exception: {e}"
+                        )
 
     def is_cancelled(self) -> bool:
         """Check if cancellation was requested."""
@@ -65,7 +76,7 @@ Add cancellation support:
 ```python
 async def score_documents_cancellable(
     documents: List[LiteDocument],
-    claim: str,
+    question: str,
     session_id: str,
     storage: LiteStorage,
     agent_factory: Callable[[], ScoringAgent],
@@ -77,9 +88,13 @@ async def score_documents_cancellable(
     """
     Score documents with cancellation support.
 
+    Note: Results are NOT guaranteed to be in the same order as input documents
+    when using asyncio.wait with FIRST_COMPLETED. If order matters, maintain
+    a mapping from task to original index and reorder results after completion.
+
     Args:
         documents: List of documents to score.
-        claim: The medical claim being fact-checked.
+        question: The research question for scoring.
         session_id: Session identifier for checkpointing.
         storage: Storage instance for checkpoints.
         agent_factory: Factory function to create ScoringAgent instances.
@@ -89,7 +104,7 @@ async def score_documents_cancellable(
         on_cancelled: Optional callback(processed, remaining) when cancelled.
 
     Returns:
-        List of ScoringResult objects processed before cancellation.
+        List of ScoringResult objects processed before cancellation (order not guaranteed).
     """
     results = []
     pending = list(documents)
@@ -100,11 +115,17 @@ async def score_documents_cancellable(
             return None
 
         agent = agent_factory()
-        result = await score_single_document_async(agent, doc, claim)
+        result = await score_single_document_async(agent, question, doc)
 
         if not result.is_error and not cancellation_token.is_cancelled():
-            storage.save_checkpoint(
-                session_id, doc.pmid, "scoring",
+            # Run blocking I/O in executor to avoid blocking event loop
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                storage.save_checkpoint,
+                session_id,
+                doc.pmid,
+                "scoring",
                 {"score": result.score, "rationale": result.rationale},
             )
 
@@ -144,9 +165,12 @@ async def score_documents_cancellable(
     except asyncio.CancelledError:
         pass
 
-    # Cancel remaining tasks
+    # Cancel remaining tasks and wait for them to complete
     for task in tasks:
         task.cancel()
+    # Wait for cancelled tasks to complete (suppressing CancelledError)
+    if tasks:
+        await asyncio.gather(*tasks.keys(), return_exceptions=True)
 
     if cancellation_token.is_cancelled() and on_cancelled:
         on_cancelled(len(results), len(documents) - len(results))

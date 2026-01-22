@@ -4,6 +4,14 @@
 
 Provide a polished error display and allow users to re-order results after processing completes.
 
+## Terminology Note
+
+The Python desktop app uses `question` (research question context) while the iOS/Android
+mobile apps use `claim` (medical fact-checking context). Both refer to the same concept:
+the text being evaluated against the document for relevance scoring. This document uses
+`question` for Python code and `claim` for Swift/Kotlin code to match each platform's
+existing conventions.
+
 ## Python Implementation
 
 ### 4.1 Error Queue Widget
@@ -421,6 +429,7 @@ struct ScoredDocumentsView: View {
 package com.bmlibrarian.factchecker.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -435,6 +444,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 

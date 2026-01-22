@@ -4,6 +4,14 @@
 
 Enable parallel LLM requests for cloud providers while maintaining sequential behavior for local inference.
 
+## Terminology Note
+
+The Python desktop app uses `question` (research question context) while the iOS/Android
+mobile apps use `claim` (medical fact-checking context). Both refer to the same concept:
+the text being evaluated against the document for relevance scoring. This document uses
+`question` for Python code and `claim` for Swift/Kotlin code to match each platform's
+existing conventions.
+
 ## Python Implementation
 
 ### 1.1 Add Constants
@@ -181,11 +189,20 @@ class ParallelScoringResult:
         return self.scored_document.explanation if self.scored_document else None
 
 
+# Note: The calculate_backoff_delay function below is provided for reference
+# and potential use in custom retry logic. Currently, the LiteScoringAgent
+# handles retries internally via the @llm_retry decorator, so this function
+# is not called in the parallel scoring implementation. It may be useful for
+# future phases that require manual retry control.
+
 def calculate_backoff_delay(attempt: int) -> float:
     """
     Calculate exponential backoff delay with jitter.
 
     Uses the existing retry constants from constants.py.
+
+    Note: Currently unused as the agent handles retries via @llm_retry decorator.
+    Provided for potential use in custom retry scenarios.
 
     Args:
         attempt: Zero-based attempt number.

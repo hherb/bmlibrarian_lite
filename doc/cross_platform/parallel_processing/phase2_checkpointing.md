@@ -4,6 +4,14 @@
 
 Enable session resumption after interruption and provide real-time UI feedback during processing.
 
+## Terminology Note
+
+The Python desktop app uses `question` (research question context) while the iOS/Android
+mobile apps use `claim` (medical fact-checking context). Both refer to the same concept:
+the text being evaluated against the document for relevance scoring. This document uses
+`question` for Python code and `claim` for Swift/Kotlin code to match each platform's
+existing conventions.
+
 ## Python Implementation
 
 ### 2.1 Checkpoint Storage
@@ -22,7 +30,10 @@ CREATE TABLE IF NOT EXISTS processing_checkpoints (
     result_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (session_id, pmid, step)
-)
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoints_session_step
+ON processing_checkpoints(session_id, step);
 """
 
 class LiteStorage:
@@ -54,14 +65,15 @@ class LiteStorage:
         step: str,
     ) -> Optional[dict]:
         """Load existing checkpoint if available."""
-        row = self._conn.execute(
-            """
-            SELECT result_json FROM processing_checkpoints
-            WHERE session_id = ? AND pmid = ? AND step = ?
-            """,
-            (session_id, pmid, step),
-        ).fetchone()
-        return json.loads(row[0]) if row else None
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT result_json FROM processing_checkpoints
+                WHERE session_id = ? AND pmid = ? AND step = ?
+                """,
+                (session_id, pmid, step),
+            ).fetchone()
+            return json.loads(row[0]) if row else None
 
     def get_checkpointed_pmids(
         self,
@@ -116,9 +128,15 @@ class ProgressMessage:
 
 
 class ProgressSignals(QObject):
-    """Qt signals for progress updates."""
+    """Qt signals for progress updates.
 
-    document_progress = Signal(ProgressMessage)
+    Note: Qt signals can't easily pass custom Python dataclass objects across
+    threads. We use Signal(object) and the receiver should handle the
+    ProgressMessage dataclass appropriately.
+    """
+
+    # Use Signal(object) for ProgressMessage since Qt can't serialize dataclasses
+    document_progress = Signal(object)  # ProgressMessage
     phase_completed = Signal(str, int)  # step, count
     error_occurred = Signal(str, str, str)  # pmid, step, error_message
 ```
@@ -132,7 +150,7 @@ Add checkpointing support:
 ```python
 async def score_documents_with_checkpointing(
     documents: List[LiteDocument],
-    claim: str,
+    question: str,
     session_id: str,
     storage: LiteStorage,
     agent_factory: Callable[[], ScoringAgent],
@@ -144,7 +162,7 @@ async def score_documents_with_checkpointing(
 
     Args:
         documents: List of documents to score.
-        claim: The medical claim being fact-checked.
+        question: The research question for scoring.
         session_id: Session identifier for checkpointing.
         storage: Storage instance for checkpoints.
         agent_factory: Factory function to create ScoringAgent instances.
@@ -179,15 +197,21 @@ async def score_documents_with_checkpointing(
 
     # Process remaining documents
     semaphore = asyncio.Semaphore(max_concurrent)
+    counter_lock = asyncio.Lock()
+    completed_count = len(results)  # Start from checkpointed count
 
     async def score_and_checkpoint(doc: LiteDocument) -> ScoringResult:
+        nonlocal completed_count
         async with semaphore:
             agent = agent_factory()
-            result = await score_single_document_async(agent, doc, claim)
+            result = await score_single_document_async(agent, question, doc)
 
-            # Save checkpoint immediately
+            # Save checkpoint immediately (run in executor to avoid blocking)
             if not result.is_error:
-                storage.save_checkpoint(
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    storage.save_checkpoint,
                     session_id,
                     doc.pmid,
                     "scoring",
@@ -195,11 +219,14 @@ async def score_documents_with_checkpointing(
                 )
 
             if on_progress:
+                async with counter_lock:
+                    completed_count += 1
+                    current = completed_count
                 on_progress(ProgressMessage(
                     type=ProgressType.DOCUMENT_FAILED if result.is_error else ProgressType.DOCUMENT_COMPLETED,
                     pmid=doc.pmid,
                     step="scoring",
-                    current=len(results) + 1,
+                    current=current,
                     total=len(documents),
                     error=result.error,
                 ))
