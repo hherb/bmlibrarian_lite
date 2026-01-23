@@ -268,7 +268,7 @@ class FactCheckViewModel @Inject constructor(
 ```kotlin
 package com.bmlibrarian.factchecker.di
 
-import com.bmlibrarian.factchecker.domain.repository.ScoringRepository
+import com.bmlibrarian.factchecker.data.repository.ScoringRepository
 import com.bmlibrarian.factchecker.domain.usecase.ParallelScoringUseCase
 import dagger.Module
 import dagger.Provides
