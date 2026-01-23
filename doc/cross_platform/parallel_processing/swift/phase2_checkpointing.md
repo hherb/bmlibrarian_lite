@@ -47,25 +47,60 @@ actor CheckpointManager {
         self.modelContext = modelContext
     }
 
-    func saveCheckpoint(sessionId: String, pmid: String, step: String, result: Codable) throws {
+    /// Save a checkpoint for a processed document.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session identifier.
+    ///   - pmid: The document's PubMed ID.
+    ///   - step: Processing step ("scoring" or "citation").
+    ///   - result: Codable result data to persist.
+    func saveCheckpoint<T: Codable>(sessionId: String, pmid: String, step: String, result: T) throws {
         let encoder = JSONEncoder()
         let jsonData = try encoder.encode(result)
         let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
 
-        let checkpoint = ProcessingCheckpoint(
-            sessionId: sessionId,
-            pmid: pmid,
-            step: step,
-            resultJSON: jsonString
-        )
+        // Capture values for predicate (SwiftData requires this pattern)
+        let targetSessionId = sessionId
+        let targetPmid = pmid
+        let targetStep = step
 
-        modelContext.insert(checkpoint)
+        // Check for existing checkpoint and update or insert
+        let predicate = #Predicate<ProcessingCheckpoint> {
+            $0.sessionId == targetSessionId && $0.pmid == targetPmid && $0.step == targetStep
+        }
+        let descriptor = FetchDescriptor<ProcessingCheckpoint>(predicate: predicate)
+
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.resultJSON = jsonString
+            existing.createdAt = Date()
+        } else {
+            let checkpoint = ProcessingCheckpoint(
+                sessionId: sessionId,
+                pmid: pmid,
+                step: step,
+                resultJSON: jsonString
+            )
+            modelContext.insert(checkpoint)
+        }
+
         try modelContext.save()
     }
 
+    /// Load a checkpoint for a specific document.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session identifier.
+    ///   - pmid: The document's PubMed ID.
+    ///   - step: Processing step ("scoring" or "citation").
+    /// - Returns: The decoded checkpoint data, or nil if not found.
     func loadCheckpoint<T: Codable>(sessionId: String, pmid: String, step: String) -> T? {
+        // Capture values for predicate
+        let targetSessionId = sessionId
+        let targetPmid = pmid
+        let targetStep = step
+
         let predicate = #Predicate<ProcessingCheckpoint> {
-            $0.sessionId == sessionId && $0.pmid == pmid && $0.step == step
+            $0.sessionId == targetSessionId && $0.pmid == targetPmid && $0.step == targetStep
         }
         let descriptor = FetchDescriptor<ProcessingCheckpoint>(predicate: predicate)
 
@@ -77,9 +112,19 @@ actor CheckpointManager {
         return try? JSONDecoder().decode(T.self, from: data)
     }
 
+    /// Get all PMIDs that have been checkpointed for a session and step.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session identifier.
+    ///   - step: Processing step ("scoring" or "citation").
+    /// - Returns: Set of checkpointed PMIDs.
     func getCheckpointedPMIDs(sessionId: String, step: String) -> Set<String> {
+        // Capture values for predicate
+        let targetSessionId = sessionId
+        let targetStep = step
+
         let predicate = #Predicate<ProcessingCheckpoint> {
-            $0.sessionId == sessionId && $0.step == step
+            $0.sessionId == targetSessionId && $0.step == targetStep
         }
         let descriptor = FetchDescriptor<ProcessingCheckpoint>(predicate: predicate)
 
@@ -144,20 +189,33 @@ protocol ProgressDelegate: Sendable {
 ```swift
 import Foundation
 
-/// Result of scoring a single document.
-struct ScoringResult: Codable, Sendable {
+/// Codable checkpoint data for persisting scoring results.
+///
+/// This is separate from `ScoringResult` (Phase 1) which holds the full Document
+/// reference for active processing. This struct stores only the essential data
+/// needed for session resumption.
+struct ScoringCheckpoint: Codable, Sendable {
     let pmid: String
     let score: Int
     let rationale: String
     let isError: Bool
-    let error: String?
+    let errorMessage: String?
 
-    init(pmid: String, score: Int, rationale: String, isError: Bool = false, error: String? = nil) {
+    init(pmid: String, score: Int, rationale: String, isError: Bool = false, errorMessage: String? = nil) {
         self.pmid = pmid
         self.score = score
         self.rationale = rationale
         self.isError = isError
-        self.error = error
+        self.errorMessage = errorMessage
+    }
+
+    /// Create from a ScoringResult (Phase 1 type).
+    init(from result: ScoringResult) {
+        self.pmid = result.pmid
+        self.score = result.score ?? 0
+        self.rationale = result.rationale ?? ""
+        self.isError = result.isError
+        self.errorMessage = result.error?.localizedDescription
     }
 }
 
@@ -165,7 +223,10 @@ struct ScoringResult: Codable, Sendable {
 ///
 /// Requires `LLMService` to have:
 /// - `endpointURL: URL` - The API endpoint URL
-/// - `scoreDocument(document:claim:) async throws -> ScoringResult`
+/// - `scoreDocument(_:claim:) async throws -> (score: Int, rationale: String)`
+///
+/// Uses `ScoringResult` from Phase 1 for active processing and `ScoringCheckpoint`
+/// for persistence.
 actor CheckpointedScoringService {
     private let checkpointManager: CheckpointManager
     private let llmService: LLMService
@@ -182,7 +243,7 @@ actor CheckpointedScoringService {
     ///   - claim: The medical claim being fact-checked.
     ///   - sessionId: Session identifier for checkpointing.
     ///   - progressDelegate: Optional delegate for progress updates.
-    /// - Returns: List of ScoringResult objects (including from checkpoints).
+    /// - Returns: List of ScoringResult objects (including restored from checkpoints).
     func scoreDocuments(
         documents: [Document],
         claim: String,
@@ -190,27 +251,41 @@ actor CheckpointedScoringService {
         progressDelegate: ProgressDelegate? = nil
     ) async throws -> [ScoringResult] {
         // Check for existing checkpoints
-        let checkpointed = await checkpointManager.getCheckpointedPMIDs(sessionId: sessionId, step: "scoring")
-        let toProcess = documents.filter { !checkpointed.contains($0.pmid) }
+        let checkpointedPMIDs = await checkpointManager.getCheckpointedPMIDs(sessionId: sessionId, step: "scoring")
+
+        // Filter documents: those with valid PMIDs that haven't been checkpointed
+        let toProcess = documents.filter { doc in
+            guard let pmid = doc.pmid, !pmid.isEmpty else { return false }
+            return !checkpointedPMIDs.contains(pmid)
+        }
+
         var results: [ScoringResult] = []
 
-        // Load checkpointed results
+        // Load checkpointed results - only iterate documents that ARE checkpointed
         for doc in documents {
-            if checkpointed.contains(doc.pmid) {
-                if let checkpoint: ScoringResult = await checkpointManager.loadCheckpoint(
-                    sessionId: sessionId,
-                    pmid: doc.pmid,
-                    step: "scoring"
-                ) {
-                    results.append(checkpoint)
-                    await progressDelegate?.didReceiveProgress(ProgressMessage(
-                        type: .documentSkipped,
-                        pmid: doc.pmid,
-                        step: "scoring",
-                        current: results.count,
-                        total: documents.count
-                    ))
-                }
+            guard let pmid = doc.pmid, checkpointedPMIDs.contains(pmid) else { continue }
+
+            if let checkpoint: ScoringCheckpoint = await checkpointManager.loadCheckpoint(
+                sessionId: sessionId,
+                pmid: pmid,
+                step: "scoring"
+            ) {
+                // Reconstruct ScoringResult from checkpoint
+                let result = ScoringResult(
+                    document: doc,
+                    score: checkpoint.score,
+                    rationale: checkpoint.rationale,
+                    error: checkpoint.isError ? CheckpointError.restored(checkpoint.errorMessage) : nil
+                )
+                results.append(result)
+
+                await progressDelegate?.didReceiveProgress(ProgressMessage(
+                    type: .documentSkipped,
+                    pmid: pmid,
+                    step: "scoring",
+                    current: results.count,
+                    total: documents.count
+                ))
             }
         }
 
@@ -252,7 +327,7 @@ actor CheckpointedScoringService {
                     step: "scoring",
                     current: processedCount,
                     total: documents.count,
-                    error: result.error
+                    error: result.error?.localizedDescription
                 ))
 
                 // Add next document if available
@@ -282,26 +357,48 @@ actor CheckpointedScoringService {
         claim: String,
         sessionId: String
     ) async -> ScoringResult {
+        let pmid = document.pmid ?? ""
+
         do {
-            let result = try await llmService.scoreDocument(document: document, claim: claim)
+            // LLMService returns tuple (score, rationale)
+            let (score, rationale) = try await llmService.scoreDocument(document, claim: claim)
+
+            let result = ScoringResult(
+                document: document,
+                score: score,
+                rationale: rationale,
+                error: nil
+            )
 
             // Save checkpoint immediately
+            let checkpoint = ScoringCheckpoint(from: result)
             try? await checkpointManager.saveCheckpoint(
                 sessionId: sessionId,
-                pmid: document.pmid,
+                pmid: pmid,
                 step: "scoring",
-                result: result
+                result: checkpoint
             )
 
             return result
         } catch {
             return ScoringResult(
-                pmid: document.pmid,
-                score: 0,
-                rationale: "",
-                isError: true,
-                error: error.localizedDescription
+                document: document,
+                score: nil,
+                rationale: nil,
+                error: error
             )
+        }
+    }
+}
+
+/// Error type for restored checkpoint errors.
+enum CheckpointError: LocalizedError {
+    case restored(String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .restored(let message):
+            return message ?? "Error restored from checkpoint"
         }
     }
 }
@@ -365,6 +462,7 @@ struct ProcessingProgressView: View {
 ```swift
 // Unit tests for CheckpointManager
 import XCTest
+import SwiftData
 @testable import MedicalFactChecker
 
 final class CheckpointManagerTests: XCTestCase {
@@ -378,16 +476,22 @@ final class CheckpointManagerTests: XCTestCase {
         checkpointManager = CheckpointManager(modelContext: modelContainer.mainContext)
     }
 
+    override func tearDown() async throws {
+        modelContainer = nil
+        checkpointManager = nil
+    }
+
     func testSaveAndLoadCheckpoint() async throws {
-        let result = ScoringResult(pmid: "12345", score: 4, rationale: "Relevant study")
+        // Use ScoringCheckpoint (Codable) for persistence, not ScoringResult
+        let checkpoint = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Relevant study")
         try await checkpointManager.saveCheckpoint(
             sessionId: "session1",
             pmid: "12345",
             step: "scoring",
-            result: result
+            result: checkpoint
         )
 
-        let loaded: ScoringResult? = await checkpointManager.loadCheckpoint(
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
             sessionId: "session1",
             pmid: "12345",
             step: "scoring"
@@ -395,19 +499,49 @@ final class CheckpointManagerTests: XCTestCase {
 
         XCTAssertNotNil(loaded)
         XCTAssertEqual(loaded?.score, 4)
+        XCTAssertEqual(loaded?.rationale, "Relevant study")
     }
 
     func testGetCheckpointedPMIDs() async throws {
-        let result = ScoringResult(pmid: "12345", score: 4, rationale: "Relevant")
+        let checkpoint = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Relevant")
         try await checkpointManager.saveCheckpoint(
             sessionId: "session1",
             pmid: "12345",
             step: "scoring",
-            result: result
+            result: checkpoint
         )
 
         let pmids = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
         XCTAssertTrue(pmids.contains("12345"))
+    }
+
+    func testCheckpointOverwrite() async throws {
+        // Save initial checkpoint
+        let initial = ScoringCheckpoint(pmid: "12345", score: 3, rationale: "Initial")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: initial
+        )
+
+        // Overwrite with updated checkpoint
+        let updated = ScoringCheckpoint(pmid: "12345", score: 5, rationale: "Updated")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: updated
+        )
+
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertEqual(loaded?.score, 5)
+        XCTAssertEqual(loaded?.rationale, "Updated")
     }
 }
 ```
