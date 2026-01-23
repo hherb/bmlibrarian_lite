@@ -56,9 +56,21 @@ Issues found during iOS/Swift review that may also apply to Android and Python i
 
 ---
 
+### 5. Checkpoint Data Structure Inconsistency Between Phases
+
+**Problem**: Phase 3's checkpoint struct may have different fields than Phase 2's, causing incompatibility when resuming sessions.
+
+**Platforms to check**:
+- [ ] Android/Kotlin: Verify `ScoringCheckpoint` fields match between Phase 2 and Phase 3
+- [ ] Python: Verify checkpoint dict keys are consistent across phases
+
+**Fix applied in Swift**: Phase 3's `ScoringCheckpoint` now matches Phase 2 with all fields (pmid, score, rationale, isError, errorMessage).
+
+---
+
 ## Documentation Issues
 
-### 5. Service Naming Progression Unclear
+### 6. Service Naming Progression Unclear
 
 **Problem**: Phase 1 → 2 → 3 each introduce new service classes (`ParallelScoringService` → `CheckpointedScoringService` → `CancellableScoringService`) but don't clarify if they replace each other or coexist.
 
@@ -67,7 +79,7 @@ Issues found during iOS/Swift review that may also apply to Android and Python i
 
 ---
 
-### 6. Progress Callback Pattern Inconsistency
+### 7. Progress Callback Pattern Inconsistency
 
 **Problem**: Phase 1 and 3 use simple callbacks `(pmid, current, total) -> Void`, while Phase 2 introduces a delegate protocol with `ProgressMessage` objects.
 
@@ -86,3 +98,4 @@ Issues found during iOS/Swift review that may also apply to Android and Python i
 - [x] Fixed checkpoint loading to only iterate checkpointed documents
 - [x] Added type definitions to Phase 3 (was missing `ScoringResult`)
 - [x] Standardized `llmService.scoreDocument(_:claim:)` API signature
+- [x] Fixed Phase 3 `ScoringCheckpoint` to match Phase 2's definition (added pmid, isError, errorMessage fields)

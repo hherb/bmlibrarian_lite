@@ -31,9 +31,22 @@ struct ScoringResult: Sendable {
 }
 
 /// Codable checkpoint data for persisting scoring results (from Phase 2).
+/// Must match Phase 2's definition for cross-phase compatibility.
 struct ScoringCheckpoint: Codable, Sendable {
+    let pmid: String
     let score: Int
-    let rationale: String?
+    let rationale: String
+    let isError: Bool
+    let errorMessage: String?
+
+    /// Simplified initializer for successful scoring results.
+    init(pmid: String, score: Int, rationale: String) {
+        self.pmid = pmid
+        self.score = score
+        self.rationale = rationale
+        self.isError = false
+        self.errorMessage = nil
+    }
 }
 
 // MARK: - Service
@@ -139,11 +152,12 @@ actor CancellableScoringService {
             let (score, rationale) = try await llmService.scoreDocument(document, claim: claim)
 
             // Save checkpoint
+            let pmid = document.pmid ?? ""
             try? await checkpointManager.saveCheckpoint(
                 sessionId: sessionId,
-                pmid: document.pmid ?? "",
+                pmid: pmid,
                 step: "scoring",
-                result: ScoringCheckpoint(score: score, rationale: rationale)
+                result: ScoringCheckpoint(pmid: pmid, score: score, rationale: rationale)
             )
 
             return ScoringResult(document: document, score: score, rationale: rationale, error: nil)
