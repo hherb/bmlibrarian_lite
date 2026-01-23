@@ -11,6 +11,33 @@ Enable users to cancel in-progress processing with graceful termination and clea
 ```swift
 import Foundation
 
+// MARK: - Types
+
+/// Result of scoring a single document during active processing.
+/// Reuses the same type from Phase 1 for consistency.
+///
+/// - Note: This is the same `ScoringResult` from Phase 1. For checkpoint
+///   persistence, use `ScoringCheckpoint` from Phase 2.
+struct ScoringResult: Sendable {
+    let document: Document
+    let score: Int?
+    let rationale: String?
+    let error: Error?
+
+    var isError: Bool { error != nil }
+
+    /// The document's PMID, or empty string if unavailable.
+    var pmid: String { document.pmid ?? "" }
+}
+
+/// Codable checkpoint data for persisting scoring results (from Phase 2).
+struct ScoringCheckpoint: Codable, Sendable {
+    let score: Int
+    let rationale: String?
+}
+
+// MARK: - Service
+
 actor CancellableScoringService {
     private let llmService: LLMService
     private let checkpointManager: CheckpointManager
@@ -124,11 +151,6 @@ actor CancellableScoringService {
             return ScoringResult(document: document, score: nil, rationale: nil, error: error)
         }
     }
-}
-
-struct ScoringCheckpoint: Codable {
-    let score: Int
-    let rationale: String?
 }
 ```
 

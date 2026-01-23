@@ -83,11 +83,13 @@ struct ConcurrencyDetector {
 ```swift
 import Foundation
 
-/// Result of scoring a single document.
+/// Result of scoring a single document during active processing.
 ///
-/// Note: Phase 2 introduces a Codable `ScoringResult` variant for checkpointing.
-/// This struct is used during active scoring; the checkpoint version stores
-/// only the essential data (pmid, score, rationale).
+/// This struct holds the full document reference for UI updates during scoring.
+/// For checkpoint persistence, use `ScoringCheckpoint` (Phase 2) which stores
+/// only the essential Codable data (score, rationale).
+///
+/// - Note: `Document.pmid` is optional. Always use nil-coalescing when accessing.
 struct ScoringResult: Sendable {
     let document: Document
     let score: Int?
@@ -96,7 +98,7 @@ struct ScoringResult: Sendable {
 
     var isError: Bool { error != nil }
 
-    /// The document's PMID, if available.
+    /// The document's PMID, or empty string if unavailable.
     var pmid: String { document.pmid ?? "" }
 }
 
