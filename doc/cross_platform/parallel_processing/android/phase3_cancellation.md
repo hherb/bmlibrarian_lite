@@ -4,6 +4,8 @@
 
 Enable users to cancel in-progress processing with graceful termination and clear feedback.
 
+> **Note**: This is the final implementation that combines all features from Phase 1 (parallel requests) and Phase 2 (checkpointing). `CancellableScoringUseCase` is intended to replace `ParallelScoringUseCase` and `CheckpointedScoringUseCase` in production use. The earlier use cases remain as simpler alternatives for testing or specific use cases.
+
 ## 3.1 Cancellable Use Case
 
 **File**: `android/MedicalFactChecker/app/src/main/java/com/bmlibrarian/factchecker/domain/usecase/CancellableScoringUseCase.kt`
@@ -12,6 +14,7 @@ Enable users to cancel in-progress processing with graceful termination and clea
 package com.bmlibrarian.factchecker.domain.usecase
 
 import com.bmlibrarian.factchecker.data.repository.CheckpointRepository
+import com.bmlibrarian.factchecker.data.repository.ScoringRepository
 import com.bmlibrarian.factchecker.domain.model.Document
 import com.bmlibrarian.factchecker.domain.model.ScoringResult
 import kotlinx.coroutines.*
@@ -99,15 +102,20 @@ class CancellableScoringUseCase @Inject constructor(
         sessionId: String,
         claim: String
     ): ScoringResult {
+        val pmid = document.pmid ?: ""
         return try {
             val (score, rationale) = scoringRepository.scoreDocument(document, claim)
 
-            // Save checkpoint
+            // Save checkpoint - must include pmid for Phase 2 compatibility
             checkpointRepository.saveCheckpoint(
                 sessionId = sessionId,
-                pmid = document.pmid ?: "",
+                pmid = pmid,
                 step = "scoring",
-                result = ScoringCheckpoint(score, rationale)
+                result = ScoringCheckpoint(
+                    pmid = pmid,
+                    score = score,
+                    rationale = rationale
+                )
             )
 
             ScoringResult.Success(document, score, rationale)
@@ -117,10 +125,17 @@ class CancellableScoringUseCase @Inject constructor(
     }
 }
 
+/**
+ * Codable checkpoint data for persisting scoring results (from Phase 2).
+ * Must match Phase 2's CheckpointedScoringResult for cross-phase compatibility.
+ */
 @kotlinx.serialization.Serializable
 data class ScoringCheckpoint(
+    val pmid: String,
     val score: Int,
-    val rationale: String?
+    val rationale: String,
+    val isError: Boolean = false,
+    val errorMessage: String? = null
 )
 ```
 

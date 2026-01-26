@@ -73,7 +73,12 @@ class CheckpointRepository @Inject constructor(
     private val checkpointDao: ProcessingCheckpointDao,
     private val json: Json
 ) {
-    suspend fun <T> saveCheckpoint(sessionId: String, pmid: String, step: String, result: T) {
+    /**
+     * Save a checkpoint for a processed document.
+     *
+     * Note: Uses inline reified to enable kotlinx.serialization at call-site.
+     */
+    suspend inline fun <reified T> saveCheckpoint(sessionId: String, pmid: String, step: String, result: T) {
         val resultJson = json.encodeToString(result)
         checkpointDao.saveCheckpoint(
             ProcessingCheckpointEntity(
@@ -140,7 +145,7 @@ data class ProgressMessage(
 package com.bmlibrarian.factchecker.domain.usecase
 
 import com.bmlibrarian.factchecker.data.repository.CheckpointRepository
-import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.repository.ScoringRepository
 import com.bmlibrarian.factchecker.domain.model.Document
 import com.bmlibrarian.factchecker.domain.model.ProgressMessage
 import com.bmlibrarian.factchecker.domain.model.ProgressType
@@ -171,7 +176,7 @@ data class CheckpointedScoringResult(
 
 class CheckpointedScoringUseCase @Inject constructor(
     private val checkpointRepository: CheckpointRepository,
-    private val llmService: LLMService
+    private val scoringRepository: ScoringRepository
 ) {
     private val _progressFlow = MutableSharedFlow<ProgressMessage>()
     val progressFlow: SharedFlow<ProgressMessage> = _progressFlow
@@ -191,32 +196,38 @@ class CheckpointedScoringUseCase @Inject constructor(
     ): List<CheckpointedScoringResult> = coroutineScope {
         // Check for existing checkpoints
         val checkpointed = checkpointRepository.getCheckpointedPmids(sessionId, "scoring")
-        val toProcess = documents.filter { it.pmid !in checkpointed }
+
+        // Filter documents: those with valid PMIDs that haven't been checkpointed
+        val toProcess = documents.filter { doc ->
+            val pmid = doc.pmid
+            !pmid.isNullOrEmpty() && pmid !in checkpointed
+        }
         val results = mutableListOf<CheckpointedScoringResult>()
 
-        // Load checkpointed results
+        // Load checkpointed results - only iterate documents that ARE checkpointed
         for (doc in documents) {
-            if (doc.pmid in checkpointed) {
-                checkpointRepository.loadCheckpoint<CheckpointedScoringResult>(
-                    sessionId, doc.pmid, "scoring"
-                )?.let { checkpoint ->
+            val pmid = doc.pmid ?: continue
+            if (pmid !in checkpointed) continue
+
+            checkpointRepository.loadCheckpoint<CheckpointedScoringResult>(
+                sessionId, pmid, "scoring"
+            )?.let { checkpoint ->
                     results.add(checkpoint)
                     _progressFlow.emit(
                         ProgressMessage(
                             type = ProgressType.DOCUMENT_SKIPPED,
-                            pmid = doc.pmid,
+                            pmid = pmid,
                             step = "scoring",
                             current = results.size,
                             total = documents.size
                         )
                     )
                 }
-            }
         }
 
         // Process remaining documents in parallel
         // Uses ConcurrencyDetector from Phase 1
-        val maxConcurrent = ConcurrencyDetector.detectConcurrency(llmService.endpointUrl)
+        val maxConcurrent = ConcurrencyDetector.detectConcurrency(scoringRepository.endpointUrl)
         val semaphore = Semaphore(maxConcurrent)
 
         val newResults = toProcess.map { doc ->
@@ -249,13 +260,20 @@ class CheckpointedScoringUseCase @Inject constructor(
         total: Int,
         baseCount: Int
     ): CheckpointedScoringResult {
+        val pmid = document.pmid ?: ""
         return try {
-            val result = llmService.scoreDocument(document, claim)
+            // ScoringRepository returns tuple (score, rationale) for consistency with Phase 1 & 3
+            val (score, rationale) = scoringRepository.scoreDocument(document, claim)
+            val result = CheckpointedScoringResult(
+                pmid = pmid,
+                score = score,
+                rationale = rationale
+            )
 
             // Save checkpoint immediately
             checkpointRepository.saveCheckpoint(
                 sessionId = sessionId,
-                pmid = document.pmid,
+                pmid = pmid,
                 step = "scoring",
                 result = result
             )
@@ -273,7 +291,7 @@ class CheckpointedScoringUseCase @Inject constructor(
             result
         } catch (e: Exception) {
             val errorResult = CheckpointedScoringResult(
-                pmid = document.pmid,
+                pmid = pmid,
                 score = 0,
                 rationale = "",
                 isError = true,
