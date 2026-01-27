@@ -26,6 +26,7 @@ import BioMedLit
 /// - Resumable state (persisted after each step)
 /// - Progress reporting via callbacks
 /// - **Phase 2:** Per-document checkpointing for resumable scoring
+/// - **Phase 3:** Cancellation support with graceful termination
 @Observable
 @MainActor
 final class FactCheckWorkflow {
@@ -45,6 +46,19 @@ final class FactCheckWorkflow {
     private(set) var session: FactCheckSession?
     private(set) var isRunning = false
     private(set) var progressMessage = ""
+
+    /// Whether a cancellation has been requested (Phase 3).
+    ///
+    /// Set to true when `cancelFactCheck()` is called. Cleared when a new
+    /// workflow starts or when the workflow completes/fails.
+    private(set) var isCancelling = false
+
+    /// Current workflow task that can be cancelled (Phase 3).
+    ///
+    /// Stores the active workflow task so it can be cancelled by the user.
+    /// When cancelled, in-flight scoring requests complete but no new
+    /// documents are started.
+    private var workflowTask: Task<Void, Never>?
 
     /// Current search options being used.
     private(set) var currentSearchOptions: SearchOptions?
@@ -81,6 +95,17 @@ final class FactCheckWorkflow {
     var onError: ((Error) -> Void)?
     var onBudgetExceeded: ((String) -> Void)?
     var onSmartSearchActivated: ((String) -> Void)?  // Alternative query message
+    var onCancelled: ((Int, Int) -> Void)?  // (scored, remaining) - Phase 3
+
+    // MARK: - Computed Properties (Phase 3)
+
+    /// Whether the current workflow can be cancelled.
+    ///
+    /// Returns true when the workflow is actively running and not already
+    /// in the process of being cancelled.
+    var canCancel: Bool {
+        isRunning && !isCancelling
+    }
 
     // MARK: - Monthly Usage Tracking
 
@@ -158,7 +183,12 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         self.session = newSession
-        await runWorkflow()
+
+        // Phase 3: Store task reference for cancellation support
+        workflowTask = Task { [weak self] in
+            await self?.runWorkflow()
+        }
+        await workflowTask?.value
     }
 
     /// Resume an existing session and continue the workflow.
@@ -177,7 +207,12 @@ final class FactCheckWorkflow {
 
         await loadMonthlyUsage()
         self.session = session
-        await runWorkflow()
+
+        // Phase 3: Store task reference for cancellation support
+        workflowTask = Task { [weak self] in
+            await self?.runWorkflow()
+        }
+        await workflowTask?.value
     }
 
     /// Restore a session for viewing without running the workflow.
@@ -391,7 +426,11 @@ final class FactCheckWorkflow {
         session.currentStep = .searchingPubMed
         try? modelContext.save()
 
-        await runWorkflow()
+        // Phase 3: Store task reference for cancellation support
+        workflowTask = Task { [weak self] in
+            await self?.runWorkflow()
+        }
+        await workflowTask?.value
     }
 
     /// User declined fetching more documents - proceed with current results.
@@ -406,7 +445,11 @@ final class FactCheckWorkflow {
         session.currentStep = .extractingCitations
         try? modelContext.save()
 
-        await runWorkflow()
+        // Phase 3: Store task reference for cancellation support
+        workflowTask = Task { [weak self] in
+            await self?.runWorkflow()
+        }
+        await workflowTask?.value
     }
 
     /// User chose to continue with smart search (alternative queries).
@@ -421,8 +464,12 @@ final class FactCheckWorkflow {
         guard let session = session else { return }
 
         isRunning = true
+        isCancelling = false
 
         do {
+            // Phase 3: Check for cancellation before starting
+            try Task.checkCancellation()
+
             session.currentStep = .fetchingMoreEvidence
             try? modelContext.save()
 
@@ -437,7 +484,12 @@ final class FactCheckWorkflow {
                 // Proceed to citation extraction
                 session.currentStep = .extractingCitations
                 try? modelContext.save()
-                await runWorkflow()
+
+                // Phase 3: Store task reference for cancellation support
+                workflowTask = Task { [weak self] in
+                    await self?.runWorkflow()
+                }
+                await workflowTask?.value
             } else if session.canFetchMoreFromAnyProvider {
                 // Still not enough, but more documents available
                 awaitingUserDecision = true
@@ -447,9 +499,24 @@ final class FactCheckWorkflow {
                 // No more options, proceed with what we have
                 session.currentStep = .extractingCitations
                 try? modelContext.save()
-                await runWorkflow()
+
+                // Phase 3: Store task reference for cancellation support
+                workflowTask = Task { [weak self] in
+                    await self?.runWorkflow()
+                }
+                await workflowTask?.value
             }
 
+        } catch is CancellationError {
+            // Phase 3: Handle graceful cancellation
+            if !isCancelling {
+                session.currentStep = .awaitingUserDecision
+                session.errorMessage = "Cancelled"
+                session.stopReason = .userCancelled
+                try? modelContext.save()
+            }
+            isRunning = false
+            isCancelling = false
         } catch {
             session.currentStep = .failed
             session.errorMessage = error.localizedDescription
@@ -460,18 +527,68 @@ final class FactCheckWorkflow {
         }
     }
 
-    /// Cancel the current workflow.
+    /// Cancel the current workflow (legacy method, use cancelFactCheck() instead).
+    ///
+    /// This method is kept for backward compatibility but delegates to
+    /// `cancelFactCheck()` which provides Phase 3 cancellation support.
     func cancel() {
-        guard let session = session else { return }
+        cancelFactCheck()
+    }
 
-        session.currentStep = .failed
-        session.errorMessage = "Cancelled by user"
-        session.stopReason = .userCancelled
-        try? modelContext.save()
+    /// Cancel the current fact-check operation (Phase 3).
+    ///
+    /// Stops scoring at the next document boundary. Already-scored documents
+    /// are preserved via Phase 2 checkpointing and can be resumed later.
+    ///
+    /// ## Behavior
+    ///
+    /// - In-flight LLM requests complete (not aborted mid-request)
+    /// - No new documents are started after cancellation
+    /// - Checkpointed results are preserved for later resumption
+    /// - Session state is set to `awaitingUserDecision` to allow continuation
+    ///
+    /// ## Thread Safety
+    ///
+    /// This method can be called from any context (e.g., button tap).
+    /// The actual cancellation is coordinated through Swift's structured
+    /// concurrency using `Task.cancel()`.
+    func cancelFactCheck() {
+        guard isRunning else { return }
+
+        isCancelling = true
+        progressMessage = "Cancelling..."
+
+        // Cancel the workflow task (cooperative cancellation)
+        workflowTask?.cancel()
+        workflowTask = nil
+
+        // Update session state for resumption
+        if let session = session {
+            session.currentStep = .awaitingUserDecision
+            session.errorMessage = "Cancelled by user"
+            session.stopReason = .userCancelled
+            try? modelContext.save()
+        }
 
         isRunning = false
-        awaitingUserDecision = false
+        awaitingUserDecision = true
         awaitingSmartSearchDecision = false
+
+        // Build resumption prompt based on progress
+        let scoredCount = session?.documentsScored ?? 0
+        let totalDocs = session?.documentsFound ?? 0
+        let remaining = totalDocs - scoredCount
+
+        if remaining > 0 {
+            userDecisionPrompt = "Processing cancelled. \(scoredCount) document(s) scored, \(remaining) remaining. Resume to continue from where you left off."
+        } else {
+            userDecisionPrompt = "Processing cancelled. Resume to continue from where you left off."
+        }
+
+        // Notify callback
+        onCancelled?(scoredCount, remaining)
+
+        isCancelling = false
     }
 
     // MARK: - Retry Report Generation
@@ -531,11 +648,13 @@ final class FactCheckWorkflow {
         }
 
         isRunning = true
+        isCancelling = false
         session.currentStep = .generatingReport
         session.errorMessage = nil  // Clear previous error
         try? modelContext.save()
 
         do {
+            try Task.checkCancellation()
             updateProgress(.generatingReport, "Retrying report generation...")
             try await generateReport()
 
@@ -552,6 +671,14 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
+        } catch is CancellationError {
+            // Phase 3: Handle graceful cancellation
+            if !isCancelling {
+                session.currentStep = .awaitingUserDecision
+                session.errorMessage = "Cancelled"
+                session.stopReason = .userCancelled
+                try? modelContext.save()
+            }
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -567,6 +694,7 @@ final class FactCheckWorkflow {
         }
 
         isRunning = false
+        isCancelling = false
     }
 
     // MARK: - Fetch More Evidence
@@ -633,22 +761,27 @@ final class FactCheckWorkflow {
         }
 
         isRunning = true
+        isCancelling = false
         session.currentStep = .fetchingMoreEvidence
         try? modelContext.save()
 
         do {
+            // Phase 3: Check for cancellation before starting
+            try Task.checkCancellation()
+
             // For resumed sessions, refresh pagination state first
             // This handles expired server-side cursors and catches new articles
             if isResumedSession {
                 let newDocsFromRefresh = try await refreshPaginationState()
 
                 if newDocsFromRefresh > 0 {
+                    try Task.checkCancellation()
                     // Score ONLY the new documents found during refresh
                     updateProgress(.fetchingMoreEvidence, "Scoring \(newDocsFromRefresh) new documents...")
                     try await scoreDocuments()
 
-                    // Compute embedding scores for new docs if enabled
-                    if settings.embeddingScoringEnabled {
+                    // Compute embedding scores for new docs if enabled (also check cancellation)
+                    if settings.embeddingScoringEnabled && !Task.isCancelled {
                         await computeEmbeddingScores()
                     }
                 }
@@ -658,19 +791,22 @@ final class FactCheckWorkflow {
 
             // Step 1: Fetch more documents (beyond the original set)
             if session.canFetchMoreDocuments {
+                try Task.checkCancellation()
                 // More results available from original query
                 updateProgress(.fetchingMoreEvidence, "Fetching additional documents...")
                 try await searchPubMed()
 
+                try Task.checkCancellation()
                 // Score new documents
                 updateProgress(.fetchingMoreEvidence, "Scoring new documents...")
                 try await scoreDocuments()
 
-                // Compute embedding scores if enabled
-                if settings.embeddingScoringEnabled {
+                // Compute embedding scores if enabled (also check cancellation)
+                if settings.embeddingScoringEnabled && !Task.isCancelled {
                     await computeEmbeddingScores()
                 }
             } else if !session.smartSearchEnabled {
+                try Task.checkCancellation()
                 // PubMed exhausted but smart search not tried - try alternative queries
                 updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
                 try await executeSmartSearch()
@@ -682,6 +818,7 @@ final class FactCheckWorkflow {
                 return
             }
 
+            try Task.checkCancellation()
             // Step 2: Extract citations from new relevant documents only
             updateProgress(.fetchingMoreEvidence, "Extracting citations from new documents...")
             try await extractCitations()
@@ -689,6 +826,7 @@ final class FactCheckWorkflow {
             // Step 3: Preserve existing report reference for recovery on error
             let previousReport = session.report
 
+            try Task.checkCancellation()
             // Step 4: Regenerate report with all evidence
             session.currentStep = .generatingReport
             try? modelContext.save()
@@ -714,6 +852,20 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
+        } catch is CancellationError {
+            // Phase 3: Handle graceful cancellation
+            // Preserve existing state - if we have a report, keep completed state
+            if !isCancelling {
+                if session.report != nil {
+                    session.currentStep = .completed
+                    session.errorMessage = "Additional evidence fetch cancelled"
+                } else {
+                    session.currentStep = .awaitingUserDecision
+                    session.errorMessage = "Cancelled"
+                }
+                session.stopReason = .userCancelled
+                try? modelContext.save()
+            }
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -730,6 +882,7 @@ final class FactCheckWorkflow {
         }
 
         isRunning = false
+        isCancelling = false
     }
 
     // MARK: - Workflow Execution
@@ -737,10 +890,14 @@ final class FactCheckWorkflow {
     private func runWorkflow() async {
         guard let session = session else { return }
         isRunning = true
+        isCancelling = false
 
         do {
             // Step 1: Convert claim to PubMed query
             if session.currentStep == .idle {
+                // Check for cancellation before starting each step (Phase 3)
+                try Task.checkCancellation()
+
                 session.currentStep = .convertingQuery
                 try? modelContext.save()
 
@@ -750,6 +907,8 @@ final class FactCheckWorkflow {
 
             // Step 2: Search PubMed (may loop for batch pagination)
             if session.currentStep == .convertingQuery || session.currentStep == .searchingPubMed {
+                try Task.checkCancellation()
+
                 session.currentStep = .searchingPubMed
                 try? modelContext.save()
 
@@ -758,13 +917,15 @@ final class FactCheckWorkflow {
 
             // Step 3: Score documents (LLM + optional embedding)
             if session.currentStep == .searchingPubMed {
+                try Task.checkCancellation()
+
                 session.currentStep = .scoringDocuments
                 try? modelContext.save()
 
                 try await scoreDocuments()
 
-                // Compute embedding scores if enabled
-                if settings.embeddingScoringEnabled {
+                // Compute embedding scores if enabled (also check cancellation)
+                if settings.embeddingScoringEnabled && !Task.isCancelled {
                     await computeEmbeddingScores()
                 }
             }
@@ -816,6 +977,8 @@ final class FactCheckWorkflow {
 
             // Step 4: Extract citations
             if session.currentStep == .scoringDocuments || session.currentStep == .awaitingUserDecision {
+                try Task.checkCancellation()
+
                 session.currentStep = .extractingCitations
                 try? modelContext.save()
 
@@ -824,6 +987,8 @@ final class FactCheckWorkflow {
 
             // Step 5: Generate report
             if session.currentStep == .extractingCitations {
+                try Task.checkCancellation()
+
                 session.currentStep = .generatingReport
                 try? modelContext.save()
 
@@ -844,6 +1009,17 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
+        } catch is CancellationError {
+            // Phase 3: Handle graceful cancellation
+            // Checkpoints are preserved by Phase 2, so no cleanup needed here.
+            // Session state is already set by cancelFactCheck(), just stop processing.
+            // Don't overwrite the state if cancellation was requested externally.
+            if !isCancelling {
+                session.currentStep = .awaitingUserDecision
+                session.errorMessage = "Cancelled"
+                session.stopReason = .userCancelled
+                try? modelContext.save()
+            }
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -859,6 +1035,8 @@ final class FactCheckWorkflow {
         }
 
         isRunning = false
+        isCancelling = false
+        workflowTask = nil
     }
 
     /// Clean up checkpoints for a completed session.
