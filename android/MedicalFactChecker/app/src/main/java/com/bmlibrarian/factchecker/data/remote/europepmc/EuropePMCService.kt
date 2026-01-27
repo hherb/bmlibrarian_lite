@@ -236,7 +236,7 @@ class EuropePMCService @Inject constructor(
             pmcId = pmcid,
             doi = doi,
             title = title,
-            abstractText = abstractText,
+            abstractText = formatAbstractText(abstractText),
             authors = parseAuthors(),
             journal = journalTitle,
             publicationDate = pubDate ?: firstPublicationDate,
@@ -272,5 +272,72 @@ class EuropePMCService @Inject constructor(
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
+    }
+
+    /**
+     * Format abstract text by detecting inline section headers.
+     *
+     * Detects common section headers like "BACKGROUND:", "Background:",
+     * "METHODS:", etc. and formats them with markdown bold and line breaks.
+     *
+     * @param text The plain abstract text
+     * @return Formatted text with bold section headers and line breaks, or null
+     */
+    private fun formatAbstractText(text: String?): String? {
+        if (text.isNullOrBlank()) return text
+
+        // Smart cast to non-null after the check
+        val abstractText: String = text
+
+        // Common section headers in abstracts (case-insensitive matching)
+        val sectionHeaders = listOf(
+            "BACKGROUND", "Background",
+            "INTRODUCTION", "Introduction",
+            "OBJECTIVE", "Objective", "OBJECTIVES", "Objectives",
+            "AIM", "Aim", "AIMS", "Aims",
+            "PURPOSE", "Purpose",
+            "METHODS", "Methods", "METHODOLOGY", "Methodology",
+            "MATERIALS AND METHODS", "Materials and Methods",
+            "STUDY DESIGN", "Study Design",
+            "RESULTS", "Results",
+            "FINDINGS", "Findings",
+            "CONCLUSIONS", "Conclusions", "CONCLUSION", "Conclusion",
+            "DISCUSSION", "Discussion",
+            "SIGNIFICANCE", "Significance",
+            "IMPORTANCE", "Importance",
+            "CONTEXT", "Context",
+            "DESIGN", "Design",
+            "SETTING", "Setting",
+            "PARTICIPANTS", "Participants",
+            "PATIENTS", "Patients",
+            "INTERVENTIONS", "Interventions",
+            "MAIN OUTCOME MEASURES", "Main Outcome Measures",
+            "OUTCOME MEASURES", "Outcome Measures",
+            "MEASUREMENTS", "Measurements",
+            "TRIAL REGISTRATION", "Trial Registration"
+        )
+
+        // Build regex pattern that matches headers followed by colon
+        val pattern = sectionHeaders.joinToString("|") { Regex.escape(it) }
+        val regex = Regex("(?<=^|\\s)($pattern):\\s*", RegexOption.MULTILINE)
+
+        // Check if any section headers are present
+        if (!regex.containsMatchIn(abstractText)) {
+            return abstractText
+        }
+
+        // Replace section headers with bold markdown and add line breaks before them
+        var formatted = abstractText
+        regex.findAll(abstractText).toList().reversed().forEach { match ->
+            val header = match.groupValues[1]
+            val replacement = if (match.range.first == 0) {
+                "**$header:** "
+            } else {
+                "\n\n**$header:** "
+            }
+            formatted = formatted.replaceRange(match.range, replacement)
+        }
+
+        return formatted.trim()
     }
 }

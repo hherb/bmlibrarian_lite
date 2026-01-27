@@ -143,6 +143,9 @@ object Constants {
     /** Large icon size for placeholder screens. */
     const val UI_ICON_SIZE_LARGE = 64
 
+    /** Height of compact context header when scrolled (dp). */
+    const val UI_COMPACT_HEADER_HEIGHT = 56
+
     // ==================== LLM Configuration ====================
 
     /** Default temperature for LLM requests (0.0 = deterministic). */
@@ -241,8 +244,20 @@ object Constants {
 
     // ==================== Report Screen Configuration ====================
 
-    /** Regex pattern to match citation references like [1], [2], etc. */
-    const val REFERENCE_PATTERN = "\\[(\\d+)\\]"
+    /**
+     * Regex pattern to match author/year citation references.
+     *
+     * Matches two formats:
+     * 1. With embedded ID: [Author, Year](doc:pmid-12345678)
+     * 2. Legacy format: [Author, Year]
+     *
+     * Group 1: Display text (e.g., "Smith et al., 2021")
+     * Group 2: Optional document ID (e.g., "pmid-12345678")
+     */
+    const val REFERENCE_PATTERN = "\\[([^\\]]+?,\\s*\\d{4}[a-z]?)\\](?:\\(doc:([^)]+)\\))?"
+
+    /** Legacy numeric reference pattern for backwards compatibility. */
+    const val LEGACY_REFERENCE_PATTERN = "\\[(\\d+)\\]"
 
     /** Bottom sheet peek height in dp. */
     const val BOTTOM_SHEET_PEEK_HEIGHT = 56
@@ -289,6 +304,9 @@ object Constants {
 
     /** Text size in SP for markdown content. */
     const val MARKDOWN_TEXT_SIZE_SP = 16f
+
+    /** Text size in SP for abstract content (smaller than main markdown). */
+    const val ABSTRACT_TEXT_SIZE_SP = 14f
 
     // ==================== Progress Indicator ====================
 

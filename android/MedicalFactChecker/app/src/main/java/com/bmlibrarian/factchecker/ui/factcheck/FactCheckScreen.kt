@@ -18,9 +18,16 @@
 
 package com.bmlibrarian.factchecker.ui.factcheck
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,20 +37,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.util.Constants
@@ -69,116 +81,150 @@ fun FactCheckScreen(
     onNavigateToReport: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val listState = rememberLazyListState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(Constants.UI_SCREEN_PADDING.dp)
-    ) {
-        // Configuration warning banner
-        if (uiState.showConfigWarning) {
-            ConfigWarningBanner()
-            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+    // Show compact header when scrolled past the claim input section
+    // The header becomes visible when user scrolls down past approximately the first 2 items
+    val showCompactHeader by remember {
+        derivedStateOf {
+            val hasContent = uiState.claimText.isNotBlank() || uiState.generatedQuery != null
+            val isScrolled = listState.firstVisibleItemIndex > 1 ||
+                (listState.firstVisibleItemIndex == 1 && listState.firstVisibleItemScrollOffset > 100)
+            hasContent && isScrolled
         }
+    }
 
-        // Budget display
-        BudgetDisplay(
-            monthlyUsed = uiState.monthlyUsedUsd,
-            monthlyBudget = uiState.monthlyBudgetUsd,
-            runBudget = uiState.runBudgetUsd
-        )
-
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Claim input section
-        ClaimInput(
-            claimText = uiState.claimText,
-            onClaimTextChange = viewModel::updateClaimText,
-            onSubmit = viewModel::startFactCheck,
-            isEnabled = !uiState.isRunning && !uiState.showConfigWarning,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Generated query display (show once generated)
-        uiState.generatedQuery?.let { query ->
-            if (query.isNotEmpty()) {
-                GeneratedQueryDisplay(query = query)
-                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
-            }
-        }
-
-        // Progress/State section
-        when (val state = uiState.workflowState) {
-            is WorkflowState.Idle -> {
-                if (uiState.documents.isEmpty()) {
-                    IdlePlaceholder()
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Main scrollable content
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(
+                start = Constants.UI_SCREEN_PADDING.dp,
+                end = Constants.UI_SCREEN_PADDING.dp,
+                // Add top padding when compact header is shown to avoid overlap
+                top = if (showCompactHeader) Constants.UI_COMPACT_HEADER_HEIGHT.dp else Constants.UI_SCREEN_PADDING.dp,
+                bottom = Constants.UI_SCREEN_PADDING.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(Constants.UI_SECTION_SPACING.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Configuration warning banner
+            if (uiState.showConfigWarning) {
+                item(key = "config_warning") {
+                    ConfigWarningBanner()
                 }
             }
 
-            is WorkflowState.AwaitingUserDecision -> {
-                FetchMorePrompt(
-                    relevantCount = state.relevantCount,
-                    targetCount = state.targetCount,
-                    availableCount = state.availableCount,
-                    onFetchMore = viewModel::fetchMoreDocuments,
-                    onSkip = viewModel::skipMoreDocuments
+            // Budget display
+            item(key = "budget") {
+                BudgetDisplay(
+                    monthlyUsed = uiState.monthlyUsedUsd,
+                    monthlyBudget = uiState.monthlyBudgetUsd,
+                    runBudget = uiState.runBudgetUsd
                 )
             }
 
-            is WorkflowState.Completed -> {
-                CompletedMessage(
-                    reportId = state.reportId,
-                    onViewReport = onNavigateToReport
+            // Claim input section
+            item(key = "claim_input") {
+                ClaimInput(
+                    claimText = uiState.claimText,
+                    onClaimTextChange = viewModel::updateClaimText,
+                    onSubmit = viewModel::startFactCheck,
+                    isEnabled = !uiState.isRunning && !uiState.showConfigWarning,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            is WorkflowState.Failed -> {
-                ErrorMessage(
-                    error = state.error,
-                    onDismiss = viewModel::clearError
-                )
+            // Generated query display (show once generated)
+            uiState.generatedQuery?.let { query ->
+                if (query.isNotEmpty()) {
+                    item(key = "query") {
+                        GeneratedQueryDisplay(query = query)
+                    }
+                }
             }
 
-            is WorkflowState.BudgetExceeded -> {
-                BudgetExceededMessage(
-                    message = state.message,
-                    currentCost = state.currentCostUsd,
-                    budgetLimit = state.budgetLimitUsd
-                )
+            // Progress/State section
+            item(key = "state") {
+                when (val state = uiState.workflowState) {
+                    is WorkflowState.Idle -> {
+                        if (uiState.documents.isEmpty()) {
+                            IdlePlaceholder()
+                        }
+                    }
+
+                    is WorkflowState.AwaitingUserDecision -> {
+                        FetchMorePrompt(
+                            relevantCount = state.relevantCount,
+                            targetCount = state.targetCount,
+                            availableCount = state.availableCount,
+                            onFetchMore = viewModel::fetchMoreDocuments,
+                            onSkip = viewModel::skipMoreDocuments
+                        )
+                    }
+
+                    is WorkflowState.Completed -> {
+                        CompletedMessage(
+                            reportId = state.reportId,
+                            onViewReport = onNavigateToReport
+                        )
+                    }
+
+                    is WorkflowState.Failed -> {
+                        ErrorMessage(
+                            error = state.error,
+                            onDismiss = viewModel::clearError
+                        )
+                    }
+
+                    is WorkflowState.BudgetExceeded -> {
+                        BudgetExceededMessage(
+                            message = state.message,
+                            currentCost = state.currentCostUsd,
+                            budgetLimit = state.budgetLimitUsd
+                        )
+                    }
+
+                    else -> {
+                        // Show progress for all active states
+                        SearchProgress(
+                            progress = uiState.progress,
+                            onCancel = viewModel::cancel
+                        )
+                    }
+                }
             }
 
-            else -> {
-                // Show progress for all active states
-                SearchProgress(
-                    progress = uiState.progress,
-                    onCancel = viewModel::cancel
-                )
-            }
-        }
+            // Scored documents section
+            if (uiState.documents.isNotEmpty()) {
+                item(key = "documents_header") {
+                    Text(
+                        text = "Scored Documents (${uiState.documents.size})",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
 
-        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-
-        // Scored documents list
-        if (uiState.documents.isNotEmpty()) {
-            Text(
-                text = "Scored Documents (${uiState.documents.size})",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = Constants.UI_ELEMENT_SPACING.dp)
-            )
-
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp),
-                modifier = Modifier.weight(1f)
-            ) {
                 items(
                     items = uiState.documents,
-                    key = { it.id }
+                    key = { "doc_${it.id}" }
                 ) { document ->
                     DocumentCard(document = document)
                 }
             }
+        }
+
+        // Compact sticky header (visible when scrolled)
+        AnimatedVisibility(
+            visible = showCompactHeader,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            CompactContextHeader(
+                claimText = uiState.claimText,
+                generatedQuery = uiState.generatedQuery,
+                documentCount = uiState.documents.size
+            )
         }
     }
 }
@@ -420,5 +466,72 @@ private fun BudgetExceededMessage(
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
         }
+    }
+}
+
+/**
+ * Compact sticky header shown when scrolled past the main content.
+ *
+ * Displays a condensed 2-line summary of the current claim and query
+ * to preserve context while maximizing screen space for documents.
+ *
+ * @param claimText The user's claim text
+ * @param generatedQuery The generated PubMed query, if any
+ * @param documentCount Number of scored documents
+ */
+@Composable
+private fun CompactContextHeader(
+    claimText: String,
+    generatedQuery: String?,
+    documentCount: Int
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(
+                horizontal = Constants.UI_SCREEN_PADDING.dp,
+                vertical = Constants.UI_ELEMENT_SPACING.dp
+            )
+    ) {
+        // First line: Claim text (truncated)
+        Text(
+            text = claimText.ifBlank { "Fact Check" },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        // Second line: Query preview and document count
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            generatedQuery?.let { query ->
+                Text(
+                    text = query,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (documentCount > 0) {
+                Text(
+                    text = "$documentCount docs",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = Constants.UI_ELEMENT_SPACING.dp)
+                )
+            }
+        }
+
+        HorizontalDivider(
+            modifier = Modifier.padding(top = Constants.UI_ELEMENT_SPACING.dp),
+            color = MaterialTheme.colorScheme.outlineVariant
+        )
     }
 }
