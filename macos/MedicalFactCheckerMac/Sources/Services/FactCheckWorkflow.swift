@@ -33,7 +33,11 @@ final class FactCheckWorkflow {
     private var llmService: LLMService?
     private var pubmedService: BioMedLit.PubMedService?
     private let modelContext: ModelContext
+    private let modelContainer: ModelContainer
     private let settings: AppSettings
+
+    /// Error persistence manager for Phase 4 error queue.
+    private let errorPersistenceManager: ErrorPersistenceManager
 
     /// Search options for the current workflow run.
     ///
@@ -63,6 +67,9 @@ final class FactCheckWorkflow {
     /// may have been published since the original search.
     private(set) var isResumedSession = false
 
+    /// Processing errors for Phase 4 error queue UI (transient, not persisted).
+    private(set) var processingErrors: [TransientErrorEntry] = []
+
     // MARK: - Callbacks
 
     var onProgress: ((WorkflowStep, String) -> Void)?
@@ -72,6 +79,7 @@ final class FactCheckWorkflow {
     var onError: ((Error) -> Void)?
     var onBudgetExceeded: ((String) -> Void)?
     var onSmartSearchActivated: ((String) -> Void)?  // Alternative query message
+    var onScoringError: ((String, String, String) -> Void)?  // (pmid, step, message) - Phase 4
 
     // MARK: - Monthly Usage Tracking
 
@@ -79,9 +87,11 @@ final class FactCheckWorkflow {
 
     // MARK: - Initialization
 
-    init(modelContext: ModelContext, settings: AppSettings = .shared) {
+    init(modelContext: ModelContext, modelContainer: ModelContainer, settings: AppSettings = .shared) {
         self.modelContext = modelContext
+        self.modelContainer = modelContainer
         self.settings = settings
+        self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
     }
 
     // MARK: - Main Entry Points
@@ -1096,6 +1106,16 @@ final class FactCheckWorkflow {
             session.documentsScored += 1
             if let score = result.score, score >= settings.minScoreThreshold {
                 session.relevantDocumentsFound += 1
+            } else if result.score == nil {
+                // Phase 4: Track scoring failure in error queue
+                document.scoreParseFailed = true
+                let errorMessage = result.explanation.isEmpty ? "Scoring failed" : result.explanation
+                handleScoringError(
+                    pmid: document.pmid,
+                    step: "scoring",
+                    message: errorMessage,
+                    sessionId: session.id.uuidString
+                )
             }
 
             try? modelContext.save()
@@ -1652,6 +1672,142 @@ final class FactCheckWorkflow {
             """
             return (summary, fullReport)
         }
+    }
+
+    // MARK: - Phase 4 Error Handling
+
+    /// Handle a scoring or citation error from document processing.
+    ///
+    /// Persists the error and notifies listeners via the `onScoringError` callback.
+    /// Errors are categorized automatically based on the error message.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID of the failed document.
+    ///   - step: Processing step ("scoring" or "citation").
+    ///   - message: Error message.
+    ///   - sessionId: Session identifier for persistence.
+    private func handleScoringError(
+        pmid: String,
+        step: String,
+        message: String,
+        sessionId: String
+    ) {
+        let category = categorizeErrorMessage(message)
+
+        // Add to in-memory errors for UI
+        let transientError = TransientErrorEntry(
+            pmid: pmid,
+            step: step,
+            message: message,
+            category: category
+        )
+        processingErrors.append(transientError)
+
+        // Persist error
+        Task {
+            do {
+                try await errorPersistenceManager.saveError(
+                    pmid: pmid,
+                    step: step,
+                    message: message,
+                    sessionId: sessionId
+                )
+            } catch {
+                // Log but don't fail the workflow on persistence errors
+            }
+        }
+
+        // Notify callback
+        onScoringError?(pmid, step, message)
+    }
+
+    /// Retry failed documents from the error queue.
+    ///
+    /// Re-queues documents that previously failed for another scoring attempt.
+    /// Clears the documents from the error queue and resets their failed status.
+    ///
+    /// - Parameter pmids: List of PMIDs to retry.
+    func retryFailedDocuments(pmids: [String]) async {
+        guard let session = session else { return }
+        let sessionId = session.id.uuidString
+
+        // Remove from in-memory errors
+        processingErrors.removeAll { pmids.contains($0.pmid) }
+
+        // Increment retry counts in persistence
+        do {
+            try await errorPersistenceManager.incrementRetryCount(
+                pmids: pmids,
+                sessionId: sessionId
+            )
+        } catch {
+            // Continue even if persistence fails
+        }
+
+        // Reset the documents' failed status so they can be re-scored
+        let documents = session.documents ?? []
+        for doc in documents where pmids.contains(doc.pmid) {
+            doc.scoreParseFailed = false
+            doc.relevanceScore = nil
+            doc.scoreExplanation = nil
+            doc.scoredAt = nil
+        }
+        try? modelContext.save()
+
+        // Re-run scoring for these documents
+        do {
+            try await scoreDocuments()
+
+            // On success, remove the errors from persistence
+            let successfulPmids = documents
+                .filter { pmids.contains($0.pmid) && $0.relevanceScore != nil }
+                .map { $0.pmid }
+
+            if !successfulPmids.isEmpty {
+                try await errorPersistenceManager.removeErrors(
+                    pmids: successfulPmids,
+                    sessionId: sessionId
+                )
+            }
+        } catch {
+            onError?(error)
+        }
+    }
+
+    /// Load persisted errors for the current session.
+    ///
+    /// Populates `processingErrors` with errors saved from previous runs.
+    func loadPersistedErrors() async {
+        guard let session = session else { return }
+
+        do {
+            let errors = try await errorPersistenceManager.loadTransientErrors(
+                sessionId: session.id.uuidString
+            )
+            processingErrors = errors
+        } catch {
+            processingErrors = []
+        }
+    }
+
+    /// Clear all errors for the current session.
+    func clearErrors() async {
+        guard let session = session else { return }
+
+        processingErrors = []
+
+        do {
+            try await errorPersistenceManager.clearErrors(
+                sessionId: session.id.uuidString
+            )
+        } catch {
+            // Ignore persistence errors
+        }
+    }
+
+    /// Get the count of processing errors.
+    var errorCount: Int {
+        processingErrors.count
     }
 
     // MARK: - Smart Search
