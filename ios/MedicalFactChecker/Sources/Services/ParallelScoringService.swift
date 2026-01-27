@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -81,17 +81,17 @@ struct ScoringResult: Sendable {
     /// Explanation/rationale for the score.
     let rationale: String?
 
-    /// Error that occurred during scoring, if any.
-    let error: Error?
+    /// Error message if scoring failed (stored as String for Sendable conformance).
+    let errorMessage: String?
 
     /// Token usage for this scoring request.
     let usage: LLMUsage?
 
     /// Whether scoring failed due to an error.
-    var isError: Bool { error != nil }
+    var isError: Bool { errorMessage != nil }
 
     /// Whether scoring succeeded with a valid score.
-    var isSuccess: Bool { score != nil && error == nil }
+    var isSuccess: Bool { score != nil && errorMessage == nil }
 
     /// Create a successful scoring result.
     static func success(
@@ -104,7 +104,7 @@ struct ScoringResult: Sendable {
             pmid: pmid,
             score: score,
             rationale: rationale,
-            error: nil,
+            errorMessage: nil,
             usage: usage
         )
     }
@@ -119,7 +119,7 @@ struct ScoringResult: Sendable {
             pmid: pmid,
             score: nil,
             rationale: nil,
-            error: error,
+            errorMessage: error.localizedDescription,
             usage: usage
         )
     }
@@ -134,7 +134,7 @@ struct ScoringResult: Sendable {
             pmid: pmid,
             score: nil,
             rationale: message,
-            error: ScoringError.parseFailed(message),
+            errorMessage: "Failed to parse score: \(message)",
             usage: usage
         )
     }
@@ -349,7 +349,7 @@ actor ParallelScoringService {
                 if attempt < Self.maxParseRetries - 1 {
                     let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
                     let jitter = delay * Double.random(in: -0.25...0.25)
-                    try await Task.sleep(nanoseconds: UInt64((delay + jitter) * 1_000_000_000))
+                    try await Task.sleep(for: .seconds(delay + jitter))
                 }
 
             } catch {

@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -1171,7 +1171,7 @@ final class FactCheckWorkflow {
             } else {
                 // Scoring failed (network error or parse failure)
                 document.scoreParseFailed = true
-                document.scoreExplanation = result.rationale ?? result.error?.localizedDescription
+                document.scoreExplanation = result.rationale ?? result.errorMessage
                 document.scoredAt = Date()
 
                 session.documentsScored += 1  // Count as scored (attempted)
@@ -1886,7 +1886,7 @@ final class FactCheckWorkflow {
                 }
             } else {
                 document.scoreParseFailed = true
-                document.scoreExplanation = result.rationale ?? result.error?.localizedDescription
+                document.scoreExplanation = result.rationale ?? result.errorMessage
                 document.scoredAt = Date()
 
                 session.documentsScored += 1
