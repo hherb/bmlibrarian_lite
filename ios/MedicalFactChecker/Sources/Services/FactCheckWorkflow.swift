@@ -515,16 +515,16 @@ final class FactCheckWorkflow {
                 session.stopReason = .userCancelled
                 try? modelContext.save()
             }
-            isRunning = false
-            isCancelling = false
         } catch {
             session.currentStep = .failed
             session.errorMessage = error.localizedDescription
             session.stopReason = .apiError
             try? modelContext.save()
             onError?(error)
-            isRunning = false
         }
+
+        isRunning = false
+        isCancelling = false
     }
 
     /// Cancel the current workflow (legacy method, use cancelFactCheck() instead).
@@ -588,7 +588,9 @@ final class FactCheckWorkflow {
         // Notify callback
         onCancelled?(scoredCount, remaining)
 
-        isCancelling = false
+        // Note: isCancelling is cleared by the CancellationError handlers in the
+        // workflow methods, not here. This prevents a race condition where we clear
+        // the flag before the catch block has a chance to check it.
     }
 
     // MARK: - Retry Report Generation
@@ -1856,8 +1858,12 @@ final class FactCheckWorkflow {
 
     // MARK: - Smart Search
 
-    /// Minimum relevant documents before triggering smart search
-    private let smartSearchThreshold = 3
+    /// Minimum relevant documents before triggering smart search.
+    ///
+    /// Uses centralized constant from `WorkflowConstants` for maintainability.
+    private var smartSearchThreshold: Int {
+        WorkflowConstants.smartSearchThreshold
+    }
 
     /// Generate alternative search queries when initial search yields insufficient results.
     ///
