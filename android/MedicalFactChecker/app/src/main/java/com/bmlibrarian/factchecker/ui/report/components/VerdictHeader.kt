@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.ui.report.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,11 +26,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -39,10 +49,11 @@ import com.bmlibrarian.factchecker.ui.theme.MedicalFactCheckerTheme
 import com.bmlibrarian.factchecker.util.Constants
 
 /**
- * Header component showing the verdict badge and summary.
+ * Header component showing the verdict badge and collapsible summary.
  *
  * Displays at the top of the report screen with a colored background
- * that corresponds to the verdict type.
+ * that corresponds to the verdict type. The summary is collapsible to
+ * save screen real estate.
  *
  * @param verdict The verdict to display
  * @param summary Brief summary text of the evidence
@@ -54,6 +65,8 @@ fun VerdictHeader(
     summary: String,
     modifier: Modifier = Modifier
 ) {
+    var isExpanded by remember { mutableStateOf(false) }
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = verdict.color.copy(alpha = Constants.VERDICT_BACKGROUND_ALPHA)
@@ -63,8 +76,10 @@ fun VerdictHeader(
         Column(
             modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
+            // Always visible: Verdict line with expand/collapse toggle
             Row(
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Verdict:",
@@ -75,22 +90,37 @@ fun VerdictHeader(
                 Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING.dp))
 
                 VerdictBadge(verdict = verdict)
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Expand/collapse chevron
+                IconButton(onClick = { isExpanded = !isExpanded }) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (isExpanded) "Collapse summary" else "Expand summary",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
-
-            Text(
-                text = summary,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            // Collapsible summary
+            AnimatedVisibility(visible = isExpanded) {
+                Column {
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
         }
     }
 }
 
 @Preview(showBackground = true)
 @Composable
-private fun VerdictHeaderSupportedPreview() {
+private fun VerdictHeaderCollapsedPreview() {
     MedicalFactCheckerTheme {
         VerdictHeader(
             verdict = Verdict.SUPPORTED,

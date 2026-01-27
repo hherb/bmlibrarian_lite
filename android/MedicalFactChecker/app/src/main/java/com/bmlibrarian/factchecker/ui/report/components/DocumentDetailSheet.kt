@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.ui.common.MarkdownText
 import com.bmlibrarian.factchecker.ui.theme.MedicalFactCheckerTheme
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
@@ -154,7 +155,7 @@ fun DocumentDetailSheet(
             }
         }
 
-        // Abstract
+        // Abstract (rendered as markdown for structured abstracts)
         document.abstractText?.let { abstract ->
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
@@ -166,10 +167,9 @@ fun DocumentDetailSheet(
 
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
-            Text(
+            MarkdownText(
                 text = abstract,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                textSizeSp = Constants.ABSTRACT_TEXT_SIZE_SP
             )
         }
 
@@ -218,11 +218,11 @@ private fun DocumentDetailSheetPreview() {
                 pmid = "12345678",
                 doi = "10.1234/example.2024",
                 title = "Effect of Regular Exercise on Cardiovascular Health: A Randomized Controlled Trial",
-                abstractText = "Background: Physical activity has been associated with reduced cardiovascular risk. " +
-                    "We conducted a randomized controlled trial to evaluate the effects of regular exercise. " +
-                    "Methods: 500 participants were randomized to exercise or control groups. " +
-                    "Results: The exercise group showed significant improvements in cardiovascular outcomes. " +
-                    "Conclusions: Regular exercise provides substantial cardiovascular benefits.",
+                abstractText = "**Background:** Physical activity has been associated with reduced cardiovascular risk. " +
+                    "We conducted a randomized controlled trial to evaluate the effects of regular exercise.\n\n" +
+                    "**Methods:** 500 participants were randomized to exercise or control groups.\n\n" +
+                    "**Results:** The exercise group showed significant improvements in cardiovascular outcomes.\n\n" +
+                    "**Conclusions:** Regular exercise provides substantial cardiovascular benefits.",
                 authors = listOf("Smith J", "Johnson M", "Williams K", "Brown R"),
                 journal = "New England Journal of Medicine",
                 publicationYear = 2024,

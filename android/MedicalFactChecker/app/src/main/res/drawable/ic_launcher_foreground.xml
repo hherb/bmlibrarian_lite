@@ -4,7 +4,16 @@
     MedicalFactChecker Android App
 
     Vector drawable for adaptive icon foreground.
-    Displays a medical checkmark symbol.
+    Matches iOS app icon: white medical cross with green checkmark badge.
+
+    iOS icon (1024x1024):
+    - Cross vertical bar: x=412-612, y=180-680 (200w x 500h)
+    - Cross horizontal bar: x=262-762, y=330-530 (500w x 200h)
+    - Checkmark circle: center (700, 700), radius 180
+
+    Android adaptive icon safe zone: center 66dp of 108dp (21-87)
+    Scale factor: 66/1024 ≈ 0.0645
+    Offset to center: 21dp
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -12,26 +21,50 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Background circle -->
+    <!-- Subtle document/paper element behind cross (matches iOS opacity 0.15) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+        android:fillAlpha="0.12"
+        android:pathData="M38,52 L56,52 L56,88 L38,88 Z"/>
 
-    <!-- Checkmark -->
+    <!-- White medical cross - vertical bar with rounded corners -->
+    <!-- iOS: x=412-612 (200w), y=180-680 (500h), scaled and offset -->
     <path
-        android:fillColor="#1976D2"
-        android:strokeWidth="0"
-        android:pathData="M45,54L51,60L63,48"
-        android:strokeColor="#1976D2"
+        android:fillColor="#FFFFFF"
+        android:pathData="M45.5,30 L52.5,30 Q54.5,30 54.5,32 L54.5,70 Q54.5,72 52.5,72 L45.5,72 Q43.5,72 43.5,70 L43.5,32 Q43.5,30 45.5,30 Z"/>
+
+    <!-- White medical cross - horizontal bar with rounded corners -->
+    <!-- iOS: x=262-762 (500w), y=330-530 (200h), scaled and offset -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,42 L66,42 Q68,42 68,44 L68,51 Q68,53 66,53 L32,53 Q30,53 30,51 L30,44 Q30,42 32,42 Z"/>
+
+    <!-- Subtle gradient overlay on cross (right side) for depth -->
+    <path
+        android:fillColor="#E8F0FF"
+        android:fillAlpha="0.4"
+        android:pathData="M49,30 L52.5,30 Q54.5,30 54.5,32 L54.5,70 Q54.5,72 52.5,72 L49,72 Z"/>
+
+    <!-- Green circle badge (bottom-right) -->
+    <!-- iOS: center (700, 700), radius 180, scaled -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M66,66 m-12,0 a12,12 0,1 1,24 0 a12,12 0,1 1,-24 0"/>
+
+    <!-- Darker green inner shadow for depth -->
+    <path
+        android:fillColor="#2E7D32"
+        android:fillAlpha="0.3"
+        android:pathData="M66,66 m-12,0 a12,12 0,0 1,24 0"/>
+
+    <!-- White checkmark inside green circle -->
+    <!-- iOS path scaled: M590,700 L660,770 L810,600 with stroke 48 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"/>
-
-    <!-- Medical cross -->
-    <path
-        android:fillColor="#1976D2"
-        android:pathData="M52,32h4v12h-4z"/>
-    <path
-        android:fillColor="#1976D2"
-        android:pathData="M48,36h12v4h-12z"/>
+        android:strokeLineJoin="round"
+        android:pathData="M59,66 L64,71 L74,60"/>
 
 </vector>

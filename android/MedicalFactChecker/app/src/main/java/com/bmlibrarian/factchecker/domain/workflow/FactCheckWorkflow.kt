@@ -733,7 +733,10 @@ class FactCheckWorkflow @Inject constructor(
             LLMService.DocumentCitation(
                 title = doc.title,
                 passage = citation.passage,
-                pmid = doc.pmid
+                pmid = doc.pmid,
+                authors = doc.authors,
+                year = doc.publicationYear,
+                documentId = doc.id
             )
         }
 

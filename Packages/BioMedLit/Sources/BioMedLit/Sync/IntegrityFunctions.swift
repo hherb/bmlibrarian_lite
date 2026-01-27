@@ -332,3 +332,25 @@ public struct ManifestFileEntry: Codable, Sendable, Equatable {
         self.timestamp = timestamp
     }
 }
+
+// MARK: - Timestamp Utilities
+
+/// Creates a timestamp in milliseconds since Unix epoch.
+///
+/// This is the standard timestamp format used throughout the sync system.
+/// Using milliseconds provides sufficient precision for ordering without
+/// the complexity of nanoseconds.
+///
+/// - Parameter date: The date to convert. Defaults to current date/time.
+/// - Returns: Milliseconds since January 1, 1970 00:00:00 UTC.
+public func syncTimestamp(from date: Date = Date()) -> Int64 {
+    Int64(date.timeIntervalSince1970 * 1000)
+}
+
+/// Converts a sync timestamp back to a Date.
+///
+/// - Parameter timestamp: Milliseconds since Unix epoch.
+/// - Returns: The corresponding Date.
+public func dateFromSyncTimestamp(_ timestamp: Int64) -> Date {
+    Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000)
+}

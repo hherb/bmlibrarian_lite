@@ -25,6 +25,7 @@ import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
+import com.bmlibrarian.factchecker.ui.report.components.ReferenceInfo
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.PdfExporter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -231,15 +232,18 @@ class ReportViewModel @Inject constructor(
     /**
      * Handle click on a document reference in the report.
      *
-     * References are formatted as [1], [2], etc. and map to documents
-     * by their position in the scored documents list.
+     * References use the iOS-style format [Author, Year](doc:pmid-12345678).
+     * Lookup is performed by:
+     * 1. Direct PMID lookup if documentId contains "pmid-"
+     * 2. Fallback to author name and year matching
      *
-     * @param referenceNumber The 1-based reference number clicked
+     * @param referenceInfo Information about the clicked reference
      */
-    fun onReferenceClick(referenceNumber: Int) {
+    fun onReferenceClick(referenceInfo: ReferenceInfo) {
         val docs = _uiState.value.documents
-        if (referenceNumber in 1..docs.size) {
-            val document = docs[referenceNumber - 1]
+        val document = findDocumentByReference(docs, referenceInfo)
+
+        if (document != null) {
             _uiState.update {
                 it.copy(
                     selectedDocument = document,
@@ -247,6 +251,49 @@ class ReportViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Find a document matching the reference info.
+     *
+     * Tries multiple lookup strategies:
+     * 1. Direct PMID lookup from embedded document ID (e.g., "pmid-12345678")
+     * 2. Author name and year matching as fallback
+     *
+     * @param documents List of documents to search
+     * @param referenceInfo Reference information to match
+     * @return Matching document or null
+     */
+    private fun findDocumentByReference(
+        documents: List<DocumentEntity>,
+        referenceInfo: ReferenceInfo
+    ): DocumentEntity? {
+        // Try direct PMID lookup first
+        val docId = referenceInfo.documentId
+        if (docId != null) {
+            // Handle "pmid-12345678" format
+            if (docId.startsWith("pmid-")) {
+                val pmid = docId.removePrefix("pmid-")
+                documents.find { it.pmid == pmid }?.let { return it }
+            }
+            // Try matching by document ID directly
+            documents.find { it.id == docId }?.let { return it }
+        }
+
+        // Fallback to author/year matching
+        val authorName = referenceInfo.authorName
+        val year = referenceInfo.year
+
+        if (authorName != null && year != null) {
+            return documents.find { doc ->
+                doc.publicationYear == year && doc.authors.any { author ->
+                    val lastName = author.split(" ").firstOrNull()?.lowercase() ?: ""
+                    lastName == authorName || author.lowercase().contains(authorName)
+                }
+            }
+        }
+
+        return null
     }
 
     /**

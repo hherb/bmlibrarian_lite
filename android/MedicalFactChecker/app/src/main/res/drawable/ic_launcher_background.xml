@@ -4,7 +4,8 @@
     MedicalFactChecker Android App
 
     Vector drawable for adaptive icon background.
-    Blue gradient matching the app's primary color.
+    Blue gradient matching the iOS app icon.
+    iOS uses: #2D5BA8 (top-left) to #1A3A6E (bottom-right)
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -12,8 +13,15 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
+    <!-- Base dark blue (bottom-right color from iOS gradient) -->
     <path
-        android:fillColor="#1976D2"
+        android:fillColor="#1A3A6E"
         android:pathData="M0,0h108v108h-108z"/>
+
+    <!-- Lighter blue gradient overlay (top-left color from iOS) -->
+    <path
+        android:fillColor="#2D5BA8"
+        android:fillAlpha="0.7"
+        android:pathData="M0,0L108,0L0,108z"/>
 
 </vector>

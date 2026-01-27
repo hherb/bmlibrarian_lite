@@ -164,6 +164,137 @@ public enum SyncFileNaming {
     public static func manifestPath(deviceId: String) -> String {
         "\(SyncConstants.changesDirectory)/\(deviceId)/\(SyncConstants.manifestFile)"
     }
+
+    /// Extracts the device ID from a device file name.
+    ///
+    /// - Parameter filename: The device file name to parse.
+    /// - Returns: The device ID, or nil if the filename is invalid.
+    public static func parseDeviceFileName(_ filename: String) -> String? {
+        let expectedSuffix = ".\(SyncConstants.syncFileExtension)"
+        guard filename.hasSuffix(expectedSuffix) else {
+            return nil
+        }
+        return String(filename.dropLast(expectedSuffix.count))
+    }
+
+    /// Generates a filesystem-safe ISO8601 timestamp string for snapshot names.
+    ///
+    /// Standard ISO8601 uses colons which are problematic on some file systems
+    /// (especially Windows). This function replaces colons with dashes.
+    ///
+    /// - Parameter date: The date to format. Defaults to current date.
+    /// - Returns: Filesystem-safe timestamp string (e.g., "2024-01-20T12-00-00Z").
+    public static func snapshotTimestamp(from date: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let iso = formatter.string(from: date)
+        // Replace colons with dashes for filesystem safety
+        return iso.replacingOccurrences(of: ":", with: "-")
+    }
+
+    /// Generates the relative path for a snapshot file.
+    ///
+    /// - Parameter filename: The snapshot filename.
+    /// - Returns: Full relative path from sync root.
+    public static func snapshotFilePath(filename: String) -> String {
+        "\(SyncConstants.snapshotsDirectory)/\(filename)"
+    }
+
+    /// Generates a quarantine file path for a corrupt file.
+    ///
+    /// The quarantine path preserves the original filename with a timestamp
+    /// to avoid collisions.
+    ///
+    /// - Parameters:
+    ///   - originalPath: The original path of the corrupt file.
+    ///   - timestamp: When the file was quarantined. Defaults to now.
+    /// - Returns: Path in the quarantine directory.
+    public static func quarantineFilePath(
+        originalPath: String,
+        timestamp: Date = Date()
+    ) -> String {
+        let timestampStr = snapshotTimestamp(from: timestamp)
+        let filename = (originalPath as NSString).lastPathComponent
+        return "\(SyncConstants.quarantineDirectory)/\(timestampStr)_\(filename)"
+    }
+
+    // MARK: - Filtering Helpers
+
+    /// Filters change filenames to only those matching a specific entity type.
+    ///
+    /// This is useful for processing only certain types of changes without
+    /// reading file contents.
+    ///
+    /// - Parameters:
+    ///   - filenames: Array of change filenames.
+    ///   - entity: The entity type to filter for.
+    /// - Returns: Filenames matching the entity type.
+    public static func filterByEntity(
+        _ filenames: [String],
+        entity: SyncEntityType
+    ) -> [String] {
+        filenames.filter { filename in
+            guard let components = parseChangeFileName(filename) else {
+                return false
+            }
+            return components.entity == entity
+        }
+    }
+
+    /// Filters change filenames to only those matching a specific operation type.
+    ///
+    /// - Parameters:
+    ///   - filenames: Array of change filenames.
+    ///   - operation: The operation type to filter for.
+    /// - Returns: Filenames matching the operation type.
+    public static func filterByOperation(
+        _ filenames: [String],
+        operation: SyncOperationType
+    ) -> [String] {
+        filenames.filter { filename in
+            guard let components = parseChangeFileName(filename) else {
+                return false
+            }
+            return components.operation == operation
+        }
+    }
+
+    /// Filters change filenames to only those after a specific sequence number.
+    ///
+    /// This is useful for incremental sync - fetching only changes after
+    /// the last processed sequence.
+    ///
+    /// - Parameters:
+    ///   - filenames: Array of change filenames.
+    ///   - sequence: Minimum sequence number (exclusive).
+    /// - Returns: Filenames with sequence > the given value.
+    public static func filterAfterSequence(
+        _ filenames: [String],
+        sequence: Int
+    ) -> [String] {
+        filenames.filter { filename in
+            guard let components = parseChangeFileName(filename) else {
+                return false
+            }
+            return components.sequence > sequence
+        }
+    }
+
+    /// Sorts change filenames by sequence number.
+    ///
+    /// Because filenames use zero-padded sequences, lexicographic sorting
+    /// produces the same result. However, this function explicitly parses
+    /// and sorts by numeric value for clarity and correctness.
+    ///
+    /// - Parameter filenames: Array of change filenames.
+    /// - Returns: Filenames sorted by sequence (ascending).
+    public static func sortBySequence(_ filenames: [String]) -> [String] {
+        filenames.sorted { a, b in
+            let seqA = parseChangeFileName(a)?.sequence ?? 0
+            let seqB = parseChangeFileName(b)?.sequence ?? 0
+            return seqA < seqB
+        }
+    }
 }
 
 // MARK: - Parsed Components
