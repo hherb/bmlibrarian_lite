@@ -40,9 +40,7 @@ Phase 4 builds on all previous phases:
 ```python
 """Error categorization for processing failures."""
 
-from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 import re
 
 
@@ -186,10 +184,9 @@ def categorize_error_message(message: str) -> ErrorCategory:
 ```python
 """Error entry model for tracking processing failures."""
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-import json
+from typing import List, Dict, Any
 
 from ..utils.error_types import ErrorCategory, categorize_error_message
 
@@ -263,9 +260,7 @@ class ErrorEntry:
 ```python
 """Error persistence using LiteStorage."""
 
-from typing import List, Optional, Dict
-from pathlib import Path
-import json
+from typing import List, Dict
 
 from ..models.error_entry import ErrorEntry
 from ..utils.error_types import ErrorCategory
@@ -452,16 +447,12 @@ class ErrorStorageManager:
 ```python
 """Collapsible error queue widget with accessibility support."""
 
-from dataclasses import dataclass
-from datetime import datetime
-from typing import List, Optional, Callable, Dict
+from typing import List, Optional, Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QScrollArea, QFrame, QSizePolicy,
-    QButtonGroup, QApplication,
+    QPushButton, QScrollArea, QFrame, QButtonGroup,
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QColor, QPalette
 
 from ..dpi_scale import scaled
 from ..models.error_entry import ErrorEntry
@@ -570,7 +561,7 @@ class ErrorCardWidget(QFrame):
 
         if self._error.retry_count > 0:
             retry_label = QLabel(f"Retries: {self._error.retry_count}")
-            retry_label.setStyleSheet("color: #C62828; font-size: 10px;")
+            retry_label.setStyleSheet(f"color: #C62828; font-size: {scaled(10)}px;")
             header.addWidget(retry_label)
 
         layout.addLayout(header)
@@ -957,14 +948,24 @@ class SortingControlsWidget(QWidget):
 Add error queue and sorting controls:
 
 ```python
+from typing import List, Optional
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel
+from PySide6.QtCore import Signal
+
 from .error_queue_widget import ErrorQueueWidget
 from .sorting_controls_widget import SortingControlsWidget, SortOption, sort_documents
+from .document_card import DocumentCard  # Existing component
 from ..models.error_entry import ErrorEntry
+from ..models.lite_document import LiteDocument
 from ..storage.error_storage import ErrorStorageManager
+from ..storage import LiteStorage
 
 
 class AuditLiteratureTab(QWidget):
     """Tab for reviewing scored literature results."""
+
+    # Signal emitted when retry is requested for specific PMIDs
+    retry_documents_requested = Signal(list)
 
     def __init__(
         self,
@@ -1114,8 +1115,37 @@ class AuditLiteratureTab(QWidget):
 Add error reporting integration:
 
 ```python
+import asyncio
+from typing import List, Optional, Callable, Tuple
+
 from ..models.error_entry import ErrorEntry
+from ..models.lite_document import LiteDocument
+from ..models.scoring_result import ScoringResult
 from ..utils.error_types import categorize_error
+from ..utils.cancellation import CancellationToken
+from ..utils.progress import ProgressMessage
+from ..storage import LiteStorage
+from ..agents.scoring_agent import ScoringAgent
+
+
+async def score_single_document_async(
+    agent: ScoringAgent,
+    doc: LiteDocument,
+    question: str,
+) -> ScoringResult:
+    """
+    Score a single document asynchronously.
+
+    Args:
+        agent: The scoring agent instance.
+        doc: Document to score.
+        question: Research question.
+
+    Returns:
+        ScoringResult with score or error information.
+    """
+    # Implementation delegates to agent
+    return await agent.score_async(doc, question)
 
 
 async def score_documents_with_errors(

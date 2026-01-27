@@ -257,8 +257,8 @@ interface ErrorEntryDao {
     @Query("SELECT COUNT(*) FROM error_entries WHERE sessionId = :sessionId")
     suspend fun getErrorCount(sessionId: String): Int
 
-    @Query("SELECT COUNT(*) FROM error_entries WHERE sessionId = :sessionId GROUP BY category")
-    suspend fun getErrorCountsByCategory(sessionId: String): Map<String, Int>
+    @Query("SELECT category, COUNT(*) as count FROM error_entries WHERE sessionId = :sessionId GROUP BY category")
+    suspend fun getErrorCountsByCategory(sessionId: String): List<CategoryCount>
 
     @Query("UPDATE error_entries SET retryCount = retryCount + 1 WHERE sessionId = :sessionId AND pmid IN (:pmids)")
     suspend fun incrementRetryCount(sessionId: String, pmids: List<String>)
@@ -272,6 +272,14 @@ interface ErrorEntryDao {
     @Delete
     suspend fun delete(error: ErrorEntryEntity)
 }
+
+/**
+ * Data class for category count query results.
+ */
+data class CategoryCount(
+    val category: String,
+    val count: Int
+)
 ```
 
 ## 4.4 Error Repository
@@ -281,14 +289,22 @@ interface ErrorEntryDao {
 ```kotlin
 package com.bmlibrarian.factchecker.data.repository
 
+import com.bmlibrarian.factchecker.data.local.dao.CategoryCount
 import com.bmlibrarian.factchecker.data.local.dao.ErrorEntryDao
 import com.bmlibrarian.factchecker.data.local.entity.ErrorEntry
+import com.bmlibrarian.factchecker.data.local.entity.ErrorEntryEntity
 import com.bmlibrarian.factchecker.domain.model.ErrorCategory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Repository for managing error entries.
+ *
+ * Provides persistence and retrieval of processing errors
+ * with support for reactive updates via Flow.
+ */
 @Singleton
 class ErrorRepository @Inject constructor(
     private val errorEntryDao: ErrorEntryDao
@@ -675,14 +691,20 @@ package com.bmlibrarian.factchecker.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import com.bmlibrarian.factchecker.domain.model.Document
 
+/**
+ * Sort options for document results.
+ *
+ * Each option includes a display label and an accessibility description
+ * for screen readers.
+ */
 enum class SortOption(
     val label: String,
     val accessibilityDescription: String
@@ -748,7 +770,7 @@ fun SortingControls(
                 readOnly = true,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier
-                    .menuAnchor()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
                     .width(200.dp),
                 textStyle = MaterialTheme.typography.bodyMedium
             )
@@ -777,9 +799,24 @@ fun SortingControls(
 }
 
 /**
- * Extension function to sort documents by the selected option.
+ * Interface for sortable documents.
+ *
+ * Implement this in your Document model to enable sorting.
  */
-fun List<Document>.sortedBy(option: SortOption): List<Document> {
+interface SortableDocument {
+    val score: Int?
+    val title: String?
+    val year: Int?
+    val pmid: String?
+}
+
+/**
+ * Extension function to sort documents by the selected option.
+ *
+ * @param option The sort option to apply.
+ * @return Sorted list of documents.
+ */
+fun <T : SortableDocument> List<T>.sortedBy(option: SortOption): List<T> {
     return when (option) {
         SortOption.SCORE_HIGH_TO_LOW -> sortedByDescending { it.score ?: 0 }
         SortOption.SCORE_LOW_TO_HIGH -> sortedBy { it.score ?: 0 }
@@ -931,6 +968,24 @@ private fun ResultsSummary(
 Add error handling integration:
 
 ```kotlin
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.bmlibrarian.factchecker.data.local.entity.ErrorEntry
+import com.bmlibrarian.factchecker.data.repository.ErrorRepository
+import com.bmlibrarian.factchecker.domain.model.Document
+import com.bmlibrarian.factchecker.domain.usecase.CancellableScoringUseCase
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+/**
+ * ViewModel for fact-checking workflow with error handling.
+ *
+ * Integrates Phase 4 error queue with previous phases for
+ * parallel scoring, checkpointing, and cancellation.
+ */
 @HiltViewModel
 class FactCheckViewModel @Inject constructor(
     private val scoringUseCase: CancellableScoringUseCase,
@@ -938,12 +993,22 @@ class FactCheckViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
+    /** Current session ID from saved state or generated. */
+    private val currentSessionId: String
+        get() = savedStateHandle.get<String>("sessionId") ?: ""
+
     private val _uiState = MutableStateFlow(FactCheckUiState())
     val uiState: StateFlow<FactCheckUiState> = _uiState.asStateFlow()
 
-    // Errors flow from repository
-    val errors: StateFlow<List<ErrorEntry>> = errorRepository
-        .getErrors(currentSessionId)
+    /** Errors flow from repository, updated reactively. */
+    val errors: StateFlow<List<ErrorEntry>> = savedStateHandle.getStateFlow("sessionId", "")
+        .flatMapLatest { sessionId ->
+            if (sessionId.isNotEmpty()) {
+                errorRepository.getErrors(sessionId)
+            } else {
+                flowOf(emptyList())
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     // Persist sort preference
@@ -1019,16 +1084,31 @@ class FactCheckViewModel @Inject constructor(
         }.launchIn(viewModelScope)
     }
 
+    /**
+     * Retry scoring for failed documents.
+     *
+     * Increments retry count and re-queues documents for scoring.
+     *
+     * @param pmids List of PMIDs to retry.
+     */
     fun retryFailedDocuments(pmids: List<String>) {
         viewModelScope.launch {
-            // Increment retry count
+            // Increment retry count in repository
             errorRepository.incrementRetryCount(currentSessionId, pmids)
 
-            // Get documents to retry
-            val documentsToRetry = getDocumentsForPmids(pmids)
+            // Get documents to retry from current state
+            val currentDocs = _uiState.value.documents
+            val documentsToRetry = currentDocs.filter { it.pmid in pmids }
 
-            // Start scoring for these documents
-            // (reuse existing scoring logic)
+            if (documentsToRetry.isNotEmpty()) {
+                // Re-score using existing scoring use case
+                startScoring(
+                    documents = documentsToRetry,
+                    sessionId = currentSessionId,
+                    claim = _uiState.value.currentClaim,
+                    maxConcurrent = _uiState.value.maxConcurrent
+                )
+            }
         }
     }
 
@@ -1046,14 +1126,25 @@ class FactCheckViewModel @Inject constructor(
     }
 }
 
+/**
+ * UI state for fact-checking screen.
+ */
 data class FactCheckUiState(
     val isProcessing: Boolean = false,
     val isCancelling: Boolean = false,
     val processedCount: Int = 0,
     val totalCount: Int = 0,
     val statusMessage: String = "",
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    val documents: List<Document> = emptyList(),
+    val currentClaim: String = "",
+    val maxConcurrent: Int = DEFAULT_MAX_CONCURRENT
+) {
+    companion object {
+        /** Default maximum concurrent requests. */
+        const val DEFAULT_MAX_CONCURRENT = 5
+    }
+}
 ```
 
 ## 4.9 Database Migration

@@ -58,15 +58,24 @@ enum ErrorCategory: String, Codable, CaseIterable {
         }
     }
 
-    var color: String {
+    var color: Color {
         switch self {
-        case .network: return "orange"
-        case .llm: return "purple"
-        case .parsing: return "blue"
-        case .timeout: return "yellow"
-        case .unknown: return "gray"
+        case .network: return Color.orange
+        case .llm: return Color.purple
+        case .parsing: return Color.blue
+        case .timeout: return Color.yellow
+        case .unknown: return Color.gray
         }
     }
+}
+
+// MARK: - Constants
+
+private enum ErrorCategoryConstants {
+    static let networkKeywords = ["network", "connection", "offline", "internet", "unreachable"]
+    static let timeoutKeywords = ["timeout", "timed out"]
+    static let parsingKeywords = ["parse", "decode", "json", "xml", "invalid format", "malformed"]
+    static let llmKeywords = ["llm", "model", "api key", "rate limit", "token", "openai", "anthropic", "claude"]
 }
 
 /// Categorize an error based on its message or type.
@@ -255,34 +264,45 @@ actor ErrorPersistenceManager {
     }
 
     /// Increment retry count for specific PMIDs.
+    ///
+    /// - Parameters:
+    ///   - pmids: List of PMIDs to update.
+    ///   - sessionId: Session identifier.
     @MainActor
     func incrementRetryCount(pmids: [String], sessionId: String) throws {
         let context = modelContainer.mainContext
         let pmidSet = Set(pmids)
-        let predicate = #Predicate<ErrorEntry> {
-            $0.sessionId == sessionId && pmidSet.contains($0.pmid)
-        }
-        let descriptor = FetchDescriptor<ErrorEntry>(predicate: predicate)
-        let errors = try context.fetch(descriptor)
 
-        for error in errors {
+        // Fetch all errors for session, then filter in memory
+        // (SwiftData predicates don't support Set.contains)
+        let predicate = #Predicate<ErrorEntry> { $0.sessionId == sessionId }
+        let descriptor = FetchDescriptor<ErrorEntry>(predicate: predicate)
+        let allErrors = try context.fetch(descriptor)
+
+        let matchingErrors = allErrors.filter { pmidSet.contains($0.pmid) }
+        for error in matchingErrors {
             error.retryCount += 1
         }
         try context.save()
     }
 
     /// Remove errors for successfully retried PMIDs.
+    ///
+    /// - Parameters:
+    ///   - pmids: List of PMIDs to remove.
+    ///   - sessionId: Session identifier.
     @MainActor
     func removeErrors(pmids: [String], sessionId: String) throws {
         let context = modelContainer.mainContext
         let pmidSet = Set(pmids)
-        let predicate = #Predicate<ErrorEntry> {
-            $0.sessionId == sessionId && pmidSet.contains($0.pmid)
-        }
-        let descriptor = FetchDescriptor<ErrorEntry>(predicate: predicate)
-        let errors = try context.fetch(descriptor)
 
-        for error in errors {
+        // Fetch all errors for session, then filter in memory
+        let predicate = #Predicate<ErrorEntry> { $0.sessionId == sessionId }
+        let descriptor = FetchDescriptor<ErrorEntry>(predicate: predicate)
+        let allErrors = try context.fetch(descriptor)
+
+        let matchingErrors = allErrors.filter { pmidSet.contains($0.pmid) }
+        for error in matchingErrors {
             context.delete(error)
         }
         try context.save()
@@ -400,7 +420,7 @@ struct ErrorQueueView: View {
                             title: category.rawValue,
                             count: count,
                             isSelected: selectedCategory == category,
-                            color: Color(category.color)
+                            color: category.color
                         ) {
                             selectedCategory = category
                         }
@@ -467,11 +487,15 @@ struct CategoryFilterChip: View {
 struct ErrorCardView: View {
     let error: TransientErrorEntry
 
+    private var categoryColor: Color {
+        error.category.color
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: error.category.icon)
-                    .foregroundColor(Color(error.category.color))
+                    .foregroundColor(categoryColor)
                     .accessibilityHidden(true)
 
                 Text("PMID: \(error.pmid)")
@@ -487,7 +511,7 @@ struct ErrorCardView: View {
                     .font(.caption2)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color(error.category.color).opacity(0.2))
+                    .background(categoryColor.opacity(0.2))
                     .cornerRadius(4)
             }
 
@@ -563,10 +587,23 @@ struct SortingControlsView: View {
     }
 }
 
+// MARK: - Sortable Document Protocol
+
+/// Protocol for documents that can be sorted by score, title, or year.
+protocol SortableDocument {
+    var score: Int? { get }
+    var title: String? { get }
+    var year: Int? { get }
+}
+
 // MARK: - Document Sorting Extension
 
-extension Array where Element == Document {
-    func sorted(by option: SortOption) -> [Document] {
+extension Array where Element: SortableDocument {
+    /// Sort documents by the specified option.
+    ///
+    /// - Parameter option: The sort option to apply.
+    /// - Returns: Sorted array of documents.
+    func sorted(by option: SortOption) -> [Element] {
         switch option {
         case .scoreHighToLow:
             return sorted { ($0.score ?? 0) > ($1.score ?? 0) }
@@ -592,7 +629,10 @@ extension Array where Element == Document {
 ```swift
 import SwiftUI
 
-struct ScoredDocumentsView: View {
+/// View displaying scored documents with error queue and sorting.
+///
+/// Assumes `Document` conforms to `SortableDocument` and `Identifiable`.
+struct ScoredDocumentsView<Document: SortableDocument & Identifiable>: View {
     @State var documents: [Document]
     @State private var sortOption: SortOption = .scoreHighToLow
     @State private var errors: [TransientErrorEntry] = []
@@ -601,7 +641,7 @@ struct ScoredDocumentsView: View {
     let sessionId: String
     var onRetry: ([String]) -> Void
 
-    var sortedDocuments: [Document] {
+    private var sortedDocuments: [Document] {
         documents.sorted(by: sortOption)
     }
 
@@ -624,6 +664,8 @@ struct ScoredDocumentsView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(sortedDocuments) { document in
+                        // DocumentCardView is defined in your existing codebase
+                        // and should accept a Document conforming to SortableDocument
                         DocumentCardView(document: document)
                     }
                 }
