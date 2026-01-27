@@ -12,68 +12,49 @@ Enable users to cancel in-progress processing with graceful termination and clea
 import Foundation
 
 // MARK: - Types
-
-/// Result of scoring a single document during active processing.
-/// Reuses the same type from Phase 1 for consistency.
-///
-/// - Note: This is the same `ScoringResult` from Phase 1. For checkpoint
-///   persistence, use `ScoringCheckpoint` from Phase 2.
-struct ScoringResult: Sendable {
-    let document: Document
-    let score: Int?
-    let rationale: String?
-    let error: Error?
-
-    var isError: Bool { error != nil }
-
-    /// The document's PMID, or empty string if unavailable.
-    var pmid: String { document.pmid ?? "" }
-}
-
-/// Codable checkpoint data for persisting scoring results (from Phase 2).
-/// Must match Phase 2's definition for cross-phase compatibility.
-struct ScoringCheckpoint: Codable, Sendable {
-    let pmid: String
-    let score: Int
-    let rationale: String
-    let isError: Bool
-    let errorMessage: String?
-
-    /// Simplified initializer for successful scoring results.
-    init(pmid: String, score: Int, rationale: String) {
-        self.pmid = pmid
-        self.score = score
-        self.rationale = rationale
-        self.isError = false
-        self.errorMessage = nil
-    }
-}
+//
+// Uses types from Phase 1 and Phase 2:
+// - ScoringInput: Thread-safe input struct (from Phase 1)
+// - ScoringResult: Thread-safe result struct with errorMessage (from Phase 1)
+// - ScoringCheckpoint: Codable persistence struct (from Phase 2)
+// - ParallelScoringService: Core parallel processing (from Phase 1)
 
 // MARK: - Service
 
+/// Cancellable wrapper around ParallelScoringService.
+///
+/// Adds cancellation support while delegating actual scoring to Phase 1's
+/// ParallelScoringService. Uses Phase 2's CheckpointManager for persistence.
 actor CancellableScoringService {
-    private let llmService: LLMService
+    private let scoringService: ParallelScoringService
     private let checkpointManager: CheckpointManager
-    private let maxConcurrent: Int
 
     private var currentTask: Task<[ScoringResult], Never>?
 
     init(llmService: LLMService, checkpointManager: CheckpointManager, maxConcurrent: Int) {
-        self.llmService = llmService
+        self.scoringService = ParallelScoringService(llmService: llmService, maxConcurrent: maxConcurrent)
         self.checkpointManager = checkpointManager
-        self.maxConcurrent = maxConcurrent
     }
 
+    /// Score documents with cancellation support.
+    ///
+    /// - Parameters:
+    ///   - inputs: List of ScoringInput structs (from Phase 1).
+    ///   - sessionId: Session identifier for checkpointing.
+    ///   - claim: The medical claim being fact-checked.
+    ///   - onProgress: Progress callback (pmid, completed, total).
+    ///   - onCancelled: Called when cancelled (processed, remaining).
+    /// - Returns: Array of ScoringResult objects for completed documents.
     func scoreDocuments(
-        _ documents: [Document],
+        _ inputs: [ScoringInput],
         sessionId: String,
         claim: String,
-        onProgress: @escaping (String, Int, Int) -> Void,
-        onCancelled: @escaping (Int, Int) -> Void
+        onProgress: @escaping @Sendable (String, Int, Int) -> Void,
+        onCancelled: @escaping @Sendable (Int, Int) -> Void
     ) async -> [ScoringResult] {
         let task = Task {
             await self.performScoring(
-                documents,
+                inputs,
                 sessionId: sessionId,
                 claim: claim,
                 onProgress: onProgress,
@@ -85,32 +66,39 @@ actor CancellableScoringService {
         return await task.value
     }
 
+    /// Cancel the current scoring operation.
+    ///
+    /// In-flight requests will complete, but no new documents will be started.
+    /// Already-checkpointed results are preserved.
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
     }
 
     private func performScoring(
-        _ documents: [Document],
+        _ inputs: [ScoringInput],
         sessionId: String,
         claim: String,
-        onProgress: @escaping (String, Int, Int) -> Void,
-        onCancelled: @escaping (Int, Int) -> Void
+        onProgress: @escaping @Sendable (String, Int, Int) -> Void,
+        onCancelled: @escaping @Sendable (Int, Int) -> Void
     ) async -> [ScoringResult] {
         var results: [ScoringResult] = []
         var completed = 0
-        let total = documents.count
+        let total = inputs.count
 
+        // Use ParallelScoringService's TaskGroup internally, but wrap with cancellation checks
+        // For full cancellation support, we implement our own TaskGroup here
         await withTaskGroup(of: ScoringResult?.self) { group in
-            var pending = documents[...]
+            var pending = inputs[...]
 
-            // Launch initial batch
-            for _ in 0..<min(maxConcurrent, documents.count) {
-                if let doc = pending.popFirst() {
+            // Launch initial batch (using maxConcurrent from the scoring service)
+            let maxConcurrent = 3  // Match Phase 1's default for cloud providers
+            for _ in 0..<min(maxConcurrent, inputs.count) {
+                if let input = pending.popFirst() {
                     group.addTask {
                         // Check cancellation before starting
                         guard !Task.isCancelled else { return nil }
-                        return await self.scoreDocument(doc, sessionId: sessionId, claim: claim)
+                        return await self.scoreAndCheckpoint(input, sessionId: sessionId, claim: claim)
                     }
                 }
             }
@@ -127,14 +115,14 @@ actor CancellableScoringService {
                 if let result = result {
                     results.append(result)
                     completed += 1
-                    onProgress(result.document.pmid ?? "", completed, total)
+                    onProgress(result.pmid, completed, total)
                 }
 
-                // Add next document if not cancelled
-                if !Task.isCancelled, let doc = pending.popFirst() {
+                // Add next input if not cancelled
+                if !Task.isCancelled, let input = pending.popFirst() {
                     group.addTask {
                         guard !Task.isCancelled else { return nil }
-                        return await self.scoreDocument(doc, sessionId: sessionId, claim: claim)
+                        return await self.scoreAndCheckpoint(input, sessionId: sessionId, claim: claim)
                     }
                 }
             }
@@ -143,27 +131,38 @@ actor CancellableScoringService {
         return results
     }
 
-    private func scoreDocument(
-        _ document: Document,
+    /// Score a single document and save checkpoint.
+    ///
+    /// Uses the same scoring logic as ParallelScoringService but adds
+    /// checkpoint persistence after each successful score.
+    private func scoreAndCheckpoint(
+        _ input: ScoringInput,
         sessionId: String,
         claim: String
     ) async -> ScoringResult {
-        do {
-            let (score, rationale) = try await llmService.scoreDocument(document, claim: claim)
+        // Score using a single-document call to the scoring service
+        let results = await scoringService.scoreDocuments(
+            [input],
+            claim: claim,
+            onProgress: { _, _, _ in }  // Progress handled by outer loop
+        )
 
-            // Save checkpoint
-            let pmid = document.pmid ?? ""
+        guard let result = results.first else {
+            return .failure(pmid: input.pmid, error: ScoringError.allRetriesFailed("No result returned"), usage: nil)
+        }
+
+        // Save checkpoint for successful results
+        if result.isSuccess {
+            let checkpoint = ScoringCheckpoint(from: result)
             try? await checkpointManager.saveCheckpoint(
                 sessionId: sessionId,
-                pmid: pmid,
+                pmid: result.pmid,
                 step: "scoring",
-                result: ScoringCheckpoint(pmid: pmid, score: score, rationale: rationale)
+                result: checkpoint
             )
-
-            return ScoringResult(document: document, score: score, rationale: rationale, error: nil)
-        } catch {
-            return ScoringResult(document: document, score: nil, rationale: nil, error: error)
         }
+
+        return result
     }
 }
 ```
@@ -183,15 +182,18 @@ class FactCheckViewModel: ObservableObject {
 
     private var scoringService: CancellableScoringService?
 
-    func startScoring(documents: [Document], sessionId: String, claim: String) {
+    /// Start scoring with ScoringInput array (thread-safe, from Phase 1).
+    ///
+    /// Convert Documents to ScoringInput before calling to ensure thread safety.
+    func startScoring(inputs: [ScoringInput], sessionId: String, claim: String) {
         isProcessing = true
         isCancelling = false
-        totalCount = documents.count
+        totalCount = inputs.count
         processedCount = 0
 
         Task {
             let results = await scoringService?.scoreDocuments(
-                documents,
+                inputs,
                 sessionId: sessionId,
                 claim: claim,
                 onProgress: { [weak self] pmid, current, total in
@@ -222,6 +224,25 @@ class FactCheckViewModel: ObservableObject {
         }
     }
 }
+```
+
+### Converting Documents to ScoringInput
+
+Before calling `startScoring`, convert SwiftData `Document` models to `ScoringInput`:
+
+```swift
+// In the workflow or view controller:
+let inputs = documents.map { doc in
+    ScoringInput(
+        pmid: doc.pmid,
+        title: doc.title,
+        abstract: doc.abstract,
+        authors: doc.formattedAuthors,
+        year: doc.year ?? 0,
+        journal: doc.journal ?? "Unknown"
+    )
+}
+viewModel.startScoring(inputs: inputs, sessionId: session.id, claim: claim)
 ```
 
 ## Key Swift Patterns
