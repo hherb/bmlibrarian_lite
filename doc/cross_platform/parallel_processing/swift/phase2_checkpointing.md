@@ -191,8 +191,8 @@ import Foundation
 
 /// Codable checkpoint data for persisting scoring results.
 ///
-/// This is separate from `ScoringResult` (Phase 1) which holds the full Document
-/// reference for active processing. This struct stores only the essential data
+/// This is separate from `ScoringResult` (Phase 1) which is a lightweight Sendable
+/// struct for active processing. This struct stores only the essential data
 /// needed for session resumption.
 struct ScoringCheckpoint: Codable, Sendable {
     let pmid: String
@@ -215,37 +215,34 @@ struct ScoringCheckpoint: Codable, Sendable {
         self.score = result.score ?? 0
         self.rationale = result.rationale ?? ""
         self.isError = result.isError
-        self.errorMessage = result.error?.localizedDescription
+        self.errorMessage = result.errorMessage
     }
 }
 
 /// Service for parallel document scoring with checkpointing.
 ///
-/// Requires `LLMService` to have:
-/// - `endpointURL: URL` - The API endpoint URL
-/// - `scoreDocument(_:claim:) async throws -> (score: Int, rationale: String)`
-///
-/// Uses `ScoringResult` from Phase 1 for active processing and `ScoringCheckpoint`
+/// Wraps `ParallelScoringService` from Phase 1 with checkpoint persistence.
+/// Uses `ScoringInput` for thread-safe data transfer and `ScoringCheckpoint`
 /// for persistence.
 actor CheckpointedScoringService {
     private let checkpointManager: CheckpointManager
-    private let llmService: LLMService
+    private let scoringService: ParallelScoringService
 
-    init(checkpointManager: CheckpointManager, llmService: LLMService) {
+    init(checkpointManager: CheckpointManager, llmService: LLMService, maxConcurrent: Int) {
         self.checkpointManager = checkpointManager
-        self.llmService = llmService
+        self.scoringService = ParallelScoringService(llmService: llmService, maxConcurrent: maxConcurrent)
     }
 
     /// Score documents with per-document checkpointing.
     ///
     /// - Parameters:
-    ///   - documents: List of documents to score.
+    ///   - inputs: List of ScoringInput structs (from Phase 1).
     ///   - claim: The medical claim being fact-checked.
     ///   - sessionId: Session identifier for checkpointing.
     ///   - progressDelegate: Optional delegate for progress updates.
     /// - Returns: List of ScoringResult objects (including restored from checkpoints).
     func scoreDocuments(
-        documents: [Document],
+        inputs: [ScoringInput],
         claim: String,
         sessionId: String,
         progressDelegate: ProgressDelegate? = nil
@@ -253,97 +250,88 @@ actor CheckpointedScoringService {
         // Check for existing checkpoints
         let checkpointedPMIDs = await checkpointManager.getCheckpointedPMIDs(sessionId: sessionId, step: "scoring")
 
-        // Filter documents: those with valid PMIDs that haven't been checkpointed
-        let toProcess = documents.filter { doc in
-            guard let pmid = doc.pmid, !pmid.isEmpty else { return false }
-            return !checkpointedPMIDs.contains(pmid)
+        // Filter inputs: those that haven't been checkpointed
+        let toProcess = inputs.filter { input in
+            !checkpointedPMIDs.contains(input.pmid)
         }
 
         var results: [ScoringResult] = []
 
-        // Load checkpointed results - only iterate documents that ARE checkpointed
-        for doc in documents {
-            guard let pmid = doc.pmid, checkpointedPMIDs.contains(pmid) else { continue }
+        // Load checkpointed results - only iterate inputs that ARE checkpointed
+        for input in inputs {
+            guard checkpointedPMIDs.contains(input.pmid) else { continue }
 
             if let checkpoint: ScoringCheckpoint = await checkpointManager.loadCheckpoint(
                 sessionId: sessionId,
-                pmid: pmid,
+                pmid: input.pmid,
                 step: "scoring"
             ) {
                 // Reconstruct ScoringResult from checkpoint
-                let result = ScoringResult(
-                    document: doc,
-                    score: checkpoint.score,
-                    rationale: checkpoint.rationale,
-                    error: checkpoint.isError ? CheckpointError.restored(checkpoint.errorMessage) : nil
-                )
+                let result: ScoringResult
+                if checkpoint.isError {
+                    result = ScoringResult(
+                        pmid: checkpoint.pmid,
+                        score: nil,
+                        rationale: checkpoint.rationale,
+                        errorMessage: checkpoint.errorMessage,
+                        usage: nil
+                    )
+                } else {
+                    result = .success(
+                        pmid: checkpoint.pmid,
+                        score: checkpoint.score,
+                        rationale: checkpoint.rationale,
+                        usage: nil
+                    )
+                }
                 results.append(result)
 
                 await progressDelegate?.didReceiveProgress(ProgressMessage(
                     type: .documentSkipped,
-                    pmid: pmid,
+                    pmid: input.pmid,
                     step: "scoring",
                     current: results.count,
-                    total: documents.count
+                    total: inputs.count
                 ))
             }
         }
 
-        // Process remaining documents in parallel
-        // Uses ConcurrencyDetector from Phase 1
-        let maxConcurrent = ConcurrencyDetector.detectConcurrency(
-            providerURL: llmService.endpointURL
+        // Process remaining inputs using ParallelScoringService from Phase 1
+        // with a wrapper callback that saves checkpoints
+        let newResults = await scoringService.scoreDocuments(
+            toProcess,
+            claim: claim,
+            onProgress: { [checkpointManager, progressDelegate] pmid, completed, total in
+                // Progress is reported by Phase 1 service
+                let adjustedCurrent = results.count + completed
+                await progressDelegate?.didReceiveProgress(ProgressMessage(
+                    type: .documentCompleted,
+                    pmid: pmid,
+                    step: "scoring",
+                    current: adjustedCurrent,
+                    total: inputs.count
+                ))
+            }
         )
 
-        let newResults = await withTaskGroup(of: ScoringResult.self) { group in
-            var processedCount = results.count
-            var activeCount = 0
-            var iterator = toProcess.makeIterator()
-            var groupResults: [ScoringResult] = []
+        // Save checkpoints for all new results
+        for result in newResults {
+            let checkpoint = ScoringCheckpoint(from: result)
+            try? await checkpointManager.saveCheckpoint(
+                sessionId: sessionId,
+                pmid: result.pmid,
+                step: "scoring",
+                result: checkpoint
+            )
 
-            // Seed initial batch
-            while activeCount < maxConcurrent, let doc = iterator.next() {
-                activeCount += 1
-                group.addTask {
-                    await self.scoreAndCheckpoint(
-                        document: doc,
-                        claim: claim,
-                        sessionId: sessionId
-                    )
-                }
-            }
-
-            // Process as tasks complete
-            for await result in group {
-                groupResults.append(result)
-                processedCount += 1
-                activeCount -= 1
-
-                // Report progress
-                let progressType: ProgressType = result.isError ? .documentFailed : .documentCompleted
-                await progressDelegate?.didReceiveProgress(ProgressMessage(
-                    type: progressType,
-                    pmid: result.pmid,
+            // Report errors via delegate
+            if result.isError {
+                await progressDelegate?.didEncounterError(
+                    result.pmid,
                     step: "scoring",
-                    current: processedCount,
-                    total: documents.count,
-                    error: result.error?.localizedDescription
-                ))
-
-                // Add next document if available
-                if let nextDoc = iterator.next() {
-                    activeCount += 1
-                    group.addTask {
-                        await self.scoreAndCheckpoint(
-                            document: nextDoc,
-                            claim: claim,
-                            sessionId: sessionId
-                        )
-                    }
-                }
+                    error: result.errorMessage ?? "Unknown error"
+                )
             }
-
-            return groupResults
         }
 
         results.append(contentsOf: newResults)
@@ -351,57 +339,8 @@ actor CheckpointedScoringService {
         await progressDelegate?.didCompletePhase("scoring", count: results.count)
         return results
     }
-
-    private func scoreAndCheckpoint(
-        document: Document,
-        claim: String,
-        sessionId: String
-    ) async -> ScoringResult {
-        let pmid = document.pmid ?? ""
-
-        do {
-            // LLMService returns tuple (score, rationale)
-            let (score, rationale) = try await llmService.scoreDocument(document, claim: claim)
-
-            let result = ScoringResult(
-                document: document,
-                score: score,
-                rationale: rationale,
-                error: nil
-            )
-
-            // Save checkpoint immediately
-            let checkpoint = ScoringCheckpoint(from: result)
-            try? await checkpointManager.saveCheckpoint(
-                sessionId: sessionId,
-                pmid: pmid,
-                step: "scoring",
-                result: checkpoint
-            )
-
-            return result
-        } catch {
-            return ScoringResult(
-                document: document,
-                score: nil,
-                rationale: nil,
-                error: error
-            )
-        }
-    }
 }
 
-/// Error type for restored checkpoint errors.
-enum CheckpointError: LocalizedError {
-    case restored(String?)
-
-    var errorDescription: String? {
-        switch self {
-        case .restored(let message):
-            return message ?? "Error restored from checkpoint"
-        }
-    }
-}
 ```
 
 ## 2.5 SwiftUI Progress View
