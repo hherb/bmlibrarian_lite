@@ -25,6 +25,7 @@ import BioMedLit
 /// - Budget tracking (per-run and monthly limits)
 /// - Resumable state (persisted after each step)
 /// - Progress reporting via callbacks
+/// - **Phase 2:** Per-document checkpointing for resumable scoring
 @Observable
 @MainActor
 final class FactCheckWorkflow {
@@ -33,7 +34,11 @@ final class FactCheckWorkflow {
     private var llmService: LLMService?
     private var pubmedService: BMLPubMedService?
     private let modelContext: ModelContext
+    private let modelContainer: ModelContainer
     private let settings: AppSettings
+
+    /// Checkpoint manager for Phase 2 resumable processing.
+    private let checkpointManager: CheckpointManager
 
     // MARK: - State
 
@@ -83,9 +88,35 @@ final class FactCheckWorkflow {
 
     // MARK: - Initialization
 
-    init(modelContext: ModelContext, settings: AppSettings = .shared) {
+    /// Create a fact-check workflow.
+    ///
+    /// - Parameters:
+    ///   - modelContext: SwiftData model context for persistence.
+    ///   - modelContainer: SwiftData model container (required for checkpointing).
+    ///   - settings: App settings for configuration.
+    init(modelContext: ModelContext, modelContainer: ModelContainer, settings: AppSettings = .shared) {
         self.modelContext = modelContext
+        self.modelContainer = modelContainer
         self.settings = settings
+        self.checkpointManager = CheckpointManager(modelContainer: modelContainer)
+    }
+
+    /// Create a fact-check workflow using just the model context.
+    ///
+    /// This convenience initializer extracts the model container from the context.
+    /// Use this when you only have access to the model context.
+    ///
+    /// - Parameters:
+    ///   - modelContext: SwiftData model context for persistence.
+    ///   - settings: App settings for configuration.
+    convenience init(modelContext: ModelContext, settings: AppSettings = .shared) {
+        // Extract the model container from the context
+        // Note: This requires iOS 17+ / macOS 14+
+        self.init(
+            modelContext: modelContext,
+            modelContainer: modelContext.container,
+            settings: settings
+        )
     }
 
     // MARK: - Main Entry Points
@@ -514,6 +545,9 @@ final class FactCheckWorkflow {
             session.updatedAt = Date()
             try? modelContext.save()
 
+            // Clean up checkpoints now that session is complete (Phase 2)
+            await cleanupCheckpoints(for: session.id.uuidString)
+
             if let report = session.report {
                 onComplete?(report)
             }
@@ -673,6 +707,9 @@ final class FactCheckWorkflow {
             session.updatedAt = Date()
             try? modelContext.save()
 
+            // Clean up checkpoints now that session is complete (Phase 2)
+            await cleanupCheckpoints(for: session.id.uuidString)
+
             if let report = session.report {
                 onComplete?(report)
             }
@@ -800,6 +837,9 @@ final class FactCheckWorkflow {
             session.updatedAt = Date()
             try? modelContext.save()
 
+            // Clean up checkpoints now that session is complete (Phase 2)
+            await cleanupCheckpoints(for: session.id.uuidString)
+
             if let report = session.report {
                 onComplete?(report)
             }
@@ -819,6 +859,17 @@ final class FactCheckWorkflow {
         }
 
         isRunning = false
+    }
+
+    /// Clean up checkpoints for a completed session.
+    ///
+    /// Called when a session completes successfully to free storage used by
+    /// per-document checkpoints. This is safe because the results are now
+    /// persisted in the Document objects.
+    ///
+    /// - Parameter sessionId: The session identifier.
+    private func cleanupCheckpoints(for sessionId: String) async {
+        try? await checkpointManager.deleteCheckpoints(sessionId: sessionId)
     }
 
     // MARK: - Step Implementations
@@ -1081,10 +1132,13 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
-    /// Score documents using parallel processing for cloud providers.
+    /// Score documents using parallel processing with checkpointing.
     ///
-    /// Uses `ParallelScoringService` with `TaskGroup` to score multiple documents
-    /// concurrently. Concurrency level is auto-detected based on provider:
+    /// Uses `CheckpointedScoringService` to score multiple documents concurrently
+    /// with per-document checkpoint persistence. If the session is interrupted,
+    /// already-scored documents are restored from checkpoints on resume.
+    ///
+    /// Concurrency level is auto-detected based on provider:
     /// - Cloud APIs (Anthropic, OpenAI, etc.): 3 concurrent requests
     /// - Local inference (Ollama): 1 (sequential)
     ///
@@ -1124,28 +1178,38 @@ final class FactCheckWorkflow {
             documentsByPMID[doc.pmid] = doc
         }
 
-        // Create parallel scoring service
-        let scoringService = ParallelScoringService(
+        // Create checkpointed scoring service (Phase 2)
+        let scoringService = CheckpointedScoringService(
+            checkpointManager: checkpointManager,
             llmService: llmService,
             maxConcurrent: concurrency
         )
 
         let total = inputs.count
-        updateProgress(.scoringDocuments, "Scoring \(total) documents (concurrency: \(concurrency))...")
 
-        // Score documents in parallel with progress callback
-        let results = await scoringService.scoreDocuments(
-            inputs,
-            claim: session.claim,
-            onProgress: { [weak self] pmid, completed, total in
-                // Update progress on main actor
-                Task { @MainActor in
-                    self?.updateProgress(
-                        .scoringDocuments,
-                        "Scoring document \(completed)/\(total)..."
-                    )
-                }
+        // Check for existing checkpoints to report resume info
+        let checkpointedCount = await scoringService.getCheckpointedCount(
+            sessionId: session.id.uuidString
+        )
+        if checkpointedCount > 0 {
+            updateProgress(.scoringDocuments, "Resuming scoring: \(checkpointedCount) already scored, \(total - checkpointedCount) remaining...")
+        } else {
+            updateProgress(.scoringDocuments, "Scoring \(total) documents (concurrency: \(concurrency))...")
+        }
+
+        // Create progress tracker for UI updates
+        let progressTracker = WorkflowProgressTracker { [weak self] message in
+            Task { @MainActor in
+                self?.updateProgress(.scoringDocuments, "Scoring document \(message.current)/\(message.total)...")
             }
+        }
+
+        // Score documents with checkpointing
+        let results = try await scoringService.scoreDocuments(
+            inputs: inputs,
+            claim: session.claim,
+            sessionId: session.id.uuidString,
+            progressDelegate: progressTracker
         )
 
         // Apply results to documents (on main actor)
@@ -1154,7 +1218,7 @@ final class FactCheckWorkflow {
                 continue
             }
 
-            // Record usage for this document
+            // Record usage for this document (if available - checkpointed results won't have usage)
             if let usage = result.usage {
                 recordUsage(usage, operationType: "scoring")
             }
@@ -1806,9 +1870,10 @@ final class FactCheckWorkflow {
         try await scoreNewDocuments(newArticles.map { $0.pmid })
     }
 
-    /// Score only specific documents (by PMID) using parallel processing.
+    /// Score only specific documents (by PMID) using checkpointed parallel processing.
     ///
     /// Called when fetching more evidence to score just the newly retrieved documents.
+    /// Uses `CheckpointedScoringService` for resumable processing.
     private func scoreNewDocuments(_ pmids: [String]) async throws {
         guard let session = session, let llmService = llmService else { return }
 
@@ -1845,24 +1910,29 @@ final class FactCheckWorkflow {
             documentsByPMID[doc.pmid] = doc
         }
 
-        // Create parallel scoring service
-        let scoringService = ParallelScoringService(
+        // Create checkpointed scoring service (Phase 2)
+        let scoringService = CheckpointedScoringService(
+            checkpointManager: checkpointManager,
             llmService: llmService,
             maxConcurrent: concurrency
         )
 
-        // Score documents in parallel
-        let results = await scoringService.scoreDocuments(
-            inputs,
-            claim: session.claim,
-            onProgress: { [weak self] pmid, completed, total in
-                Task { @MainActor in
-                    self?.updateProgress(
-                        .scoringDocuments,
-                        "Scoring new document \(completed)/\(total)..."
-                    )
-                }
+        // Create progress tracker for UI updates
+        let progressTracker = WorkflowProgressTracker { [weak self] message in
+            Task { @MainActor in
+                self?.updateProgress(
+                    .scoringDocuments,
+                    "Scoring new document \(message.current)/\(message.total)..."
+                )
             }
+        }
+
+        // Score documents with checkpointing
+        let results = try await scoringService.scoreDocuments(
+            inputs: inputs,
+            claim: session.claim,
+            sessionId: session.id.uuidString,
+            progressDelegate: progressTracker
         )
 
         // Apply results to documents
@@ -1915,5 +1985,35 @@ enum BudgetError: LocalizedError {
         case .monthlyBudgetExceeded(let used, let limit):
             return "Monthly budget exceeded: \(CostCalculator.formatCost(used)) used of \(CostCalculator.formatCost(limit)) limit"
         }
+    }
+}
+
+// MARK: - Progress Tracking (Phase 2)
+
+/// Progress tracker that bridges CheckpointedScoringService progress to workflow UI.
+///
+/// This class implements `ProgressDelegate` to receive updates from the checkpointed
+/// scoring service and forwards them to the workflow's progress callback.
+final class WorkflowProgressTracker: ProgressDelegate, @unchecked Sendable {
+    /// Callback for progress updates (called on arbitrary queue).
+    private let onProgress: @Sendable (ProgressMessage) -> Void
+
+    /// Create a workflow progress tracker.
+    ///
+    /// - Parameter onProgress: Callback invoked on each progress update.
+    init(onProgress: @escaping @Sendable (ProgressMessage) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func didReceiveProgress(_ message: ProgressMessage) async {
+        onProgress(message)
+    }
+
+    func didCompletePhase(_ step: String, count: Int) async {
+        // Phase completion is handled by the workflow itself
+    }
+
+    func didEncounterError(_ pmid: String, step: String, error: String) async {
+        // Errors are captured in results, no separate handling needed
     }
 }

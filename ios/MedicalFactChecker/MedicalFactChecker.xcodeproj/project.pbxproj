@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */; };
 		6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = 6F36EF612F1C5A5200C0AAEA /* BioMedLit */; };
+		89576A25A7BF81151881CE38 /* ProcessingProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -19,7 +21,6 @@
 		A1000009001 /* UsageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000009000 /* UsageRecord.swift */; };
 		A1000010001 /* FactCheckWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000010000 /* FactCheckWorkflow.swift */; };
 		A1000011001 /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000011000 /* LLMService.swift */; };
-		A1000059001 /* ParallelScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059000 /* ParallelScoringService.swift */; };
 		A1000013001 /* CostCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000013000 /* CostCalculator.swift */; };
 		A1000014001 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014000 /* KeychainHelper.swift */; };
 		A1000015001 /* ResponseParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000015000 /* ResponseParser.swift */; };
@@ -62,11 +63,17 @@
 		A1000055001 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLit */; };
 		A1000057001 /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057000 /* StructuredQuery.swift */; };
 		A1000058001 /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000058000 /* QueryConstants.swift */; };
+		A1000059001 /* ParallelScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059000 /* ParallelScoringService.swift */; };
+		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
+		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
+		C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */; };
 		E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProcessingProgressView.swift; sourceTree = "<group>"; };
 		7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HistoryConstants.swift; sourceTree = "<group>"; };
+		8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProcessingCheckpoint.swift; sourceTree = "<group>"; };
 		A1000000000 /* MedicalFactChecker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MedicalFactChecker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000001000 /* MedicalFactCheckerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerApp.swift; sourceTree = "<group>"; };
 		A1000002000 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -79,7 +86,6 @@
 		A1000009000 /* UsageRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageRecord.swift; sourceTree = "<group>"; };
 		A1000010000 /* FactCheckWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactCheckWorkflow.swift; sourceTree = "<group>"; };
 		A1000011000 /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
-		A1000059000 /* ParallelScoringService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelScoringService.swift; sourceTree = "<group>"; };
 		A1000013000 /* CostCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostCalculator.swift; sourceTree = "<group>"; };
 		A1000014000 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A1000015000 /* ResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseParser.swift; sourceTree = "<group>"; };
@@ -122,6 +128,10 @@
 		A1000054000 /* BioMedLitAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BioMedLitAdapters.swift; sourceTree = "<group>"; };
 		A1000057000 /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
 		A1000058000 /* QueryConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryConstants.swift; sourceTree = "<group>"; };
+		A1000059000 /* ParallelScoringService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelScoringService.swift; sourceTree = "<group>"; };
+		A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointedScoringService.swift; sourceTree = "<group>"; };
+		F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointManager.swift; sourceTree = "<group>"; };
+		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -187,6 +197,7 @@
 				A1000057000 /* StructuredQuery.swift */,
 				A1000009000 /* UsageRecord.swift */,
 				7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */,
+				8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -200,6 +211,9 @@
 				A1000028000 /* ModelFetchService.swift */,
 				A1000059000 /* ParallelScoringService.swift */,
 				A1000039000 /* SearchServiceProtocol.swift */,
+				F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */,
+				FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */,
+				A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -299,6 +313,7 @@
 				A1000048000 /* FullTextSourceBadge.swift */,
 				A1000049000 /* SearchProgressView.swift */,
 				A1000050000 /* SearchOptionsView.swift */,
+				1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -359,8 +374,8 @@
 			);
 			mainGroup = A1000000010;
 			packageReferences = (
-				6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */,
-				6F5748C22F1D0C7E00B07EF1 /* XCLocalSwiftPackageReference "../../../locumtracker/Packages/LocumTrackerCore" */,
+				6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "BioMedLit" */,
+				6F5748C22F1D0C7E00B07EF1 /* XCLocalSwiftPackageReference "LocumTrackerCore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A1000000030 /* Products */;
@@ -441,6 +456,11 @@
 				A1000051001 /* FullTextViewer.swift in Sources */,
 				A1000052001 /* CloudKitConfiguration.swift in Sources */,
 				E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */,
+				63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */,
+				C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */,
+				AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */,
+				AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */,
+				89576A25A7BF81151881CE38 /* ProcessingProgressView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -662,11 +682,11 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */ = {
+		6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "BioMedLit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../Packages/BioMedLit;
 		};
-		6F5748C22F1D0C7E00B07EF1 /* XCLocalSwiftPackageReference "../../../locumtracker/Packages/LocumTrackerCore" */ = {
+		6F5748C22F1D0C7E00B07EF1 /* XCLocalSwiftPackageReference "LocumTrackerCore" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../../locumtracker/Packages/LocumTrackerCore;
 		};

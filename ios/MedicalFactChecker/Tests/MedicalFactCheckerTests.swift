@@ -1342,3 +1342,464 @@ final class QuerySyntaxDetectionTests: XCTestCase {
         XCTAssertFalse(QueryTranslator.isEuropePMCSyntax("aspirin[tiab]"))
     }
 }
+
+// MARK: - CheckpointManager Tests (Phase 2)
+
+final class CheckpointManagerTests: XCTestCase {
+    var modelContainer: ModelContainer!
+    var checkpointManager: CheckpointManager!
+
+    override func setUp() async throws {
+        // Create in-memory model container for testing
+        let schema = Schema([ProcessingCheckpoint.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        modelContainer = try ModelContainer(for: schema, configurations: [config])
+        checkpointManager = CheckpointManager(modelContainer: modelContainer)
+    }
+
+    override func tearDown() async throws {
+        modelContainer = nil
+        checkpointManager = nil
+    }
+
+    func testSaveAndLoadCheckpoint() async throws {
+        // Create a checkpoint using ScoringCheckpoint (Codable)
+        let checkpoint = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Relevant study")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint
+        )
+
+        // Load the checkpoint
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.score, 4)
+        XCTAssertEqual(loaded?.rationale, "Relevant study")
+        XCTAssertEqual(loaded?.pmid, "12345")
+        XCTAssertFalse(loaded?.isError ?? true)
+    }
+
+    func testGetCheckpointedPMIDs() async throws {
+        // Save multiple checkpoints
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Relevant")
+        let checkpoint2 = ScoringCheckpoint(pmid: "67890", score: 2, rationale: "Not relevant")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "67890",
+            step: "scoring",
+            result: checkpoint2
+        )
+
+        // Get checkpointed PMIDs
+        let pmids = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
+
+        XCTAssertTrue(pmids.contains("12345"))
+        XCTAssertTrue(pmids.contains("67890"))
+        XCTAssertEqual(pmids.count, 2)
+    }
+
+    func testCheckpointOverwrite() async throws {
+        // Save initial checkpoint
+        let initial = ScoringCheckpoint(pmid: "12345", score: 3, rationale: "Initial")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: initial
+        )
+
+        // Overwrite with updated checkpoint
+        let updated = ScoringCheckpoint(pmid: "12345", score: 5, rationale: "Updated")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: updated
+        )
+
+        // Load and verify it was updated
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertEqual(loaded?.score, 5)
+        XCTAssertEqual(loaded?.rationale, "Updated")
+    }
+
+    func testLoadCheckpointNotFound() async throws {
+        // Try to load a checkpoint that doesn't exist
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "nonexistent",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertNil(loaded)
+    }
+
+    func testGetCheckpointedPMIDsEmpty() async throws {
+        // Get PMIDs for a session with no checkpoints
+        let pmids = await checkpointManager.getCheckpointedPMIDs(sessionId: "empty_session", step: "scoring")
+
+        XCTAssertTrue(pmids.isEmpty)
+    }
+
+    func testCheckpointIsolationBySession() async throws {
+        // Save checkpoints for different sessions
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Session 1")
+        let checkpoint2 = ScoringCheckpoint(pmid: "12345", score: 2, rationale: "Session 2")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session2",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint2
+        )
+
+        // Verify isolation
+        let loaded1: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+        let loaded2: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session2",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertEqual(loaded1?.score, 4)
+        XCTAssertEqual(loaded2?.score, 2)
+    }
+
+    func testCheckpointIsolationByStep() async throws {
+        // Save checkpoints for different steps
+        let scoringCheckpoint = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Scoring")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: scoringCheckpoint
+        )
+
+        // Citation step should have no checkpoints
+        let citationPmids = await checkpointManager.getCheckpointedPMIDs(
+            sessionId: "session1",
+            step: "citation"
+        )
+
+        XCTAssertTrue(citationPmids.isEmpty)
+    }
+
+    func testDeleteCheckpoints() async throws {
+        // Save checkpoints
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Test 1")
+        let checkpoint2 = ScoringCheckpoint(pmid: "67890", score: 3, rationale: "Test 2")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "67890",
+            step: "scoring",
+            result: checkpoint2
+        )
+
+        // Verify they exist
+        let pmidsBefore = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
+        XCTAssertEqual(pmidsBefore.count, 2)
+
+        // Delete checkpoints
+        try await checkpointManager.deleteCheckpoints(sessionId: "session1")
+
+        // Verify they're gone
+        let pmidsAfter = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
+        XCTAssertTrue(pmidsAfter.isEmpty)
+    }
+
+    func testGetCheckpointCount() async throws {
+        // Save checkpoints
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Test 1")
+        let checkpoint2 = ScoringCheckpoint(pmid: "67890", score: 3, rationale: "Test 2")
+        let checkpoint3 = ScoringCheckpoint(pmid: "11111", score: 5, rationale: "Test 3")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "67890",
+            step: "scoring",
+            result: checkpoint2
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "11111",
+            step: "scoring",
+            result: checkpoint3
+        )
+
+        let count = await checkpointManager.getCheckpointCount(sessionId: "session1", step: "scoring")
+        XCTAssertEqual(count, 3)
+    }
+
+    func testErrorCheckpointPersistence() async throws {
+        // Save an error checkpoint
+        let errorCheckpoint = ScoringCheckpoint(
+            pmid: "12345",
+            score: 0,
+            rationale: "Parse error",
+            isError: true,
+            errorMessage: "Failed to parse LLM response"
+        )
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: errorCheckpoint
+        )
+
+        // Load and verify error data
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertNotNil(loaded)
+        XCTAssertTrue(loaded?.isError ?? false)
+        XCTAssertEqual(loaded?.errorMessage, "Failed to parse LLM response")
+    }
+}
+
+// MARK: - ScoringCheckpoint Tests (Phase 2)
+
+final class ScoringCheckpointTests: XCTestCase {
+
+    func testCreateFromScoringResultSuccess() {
+        // Create a successful ScoringResult
+        let result = ScoringResult.success(
+            pmid: "12345",
+            score: 4,
+            rationale: "Highly relevant study",
+            usage: nil
+        )
+
+        // Convert to checkpoint
+        let checkpoint = ScoringCheckpoint(from: result)
+
+        XCTAssertEqual(checkpoint.pmid, "12345")
+        XCTAssertEqual(checkpoint.score, 4)
+        XCTAssertEqual(checkpoint.rationale, "Highly relevant study")
+        XCTAssertFalse(checkpoint.isError)
+        XCTAssertNil(checkpoint.errorMessage)
+    }
+
+    func testCreateFromScoringResultFailure() {
+        // Create a failed ScoringResult
+        let result = ScoringResult.failure(
+            pmid: "12345",
+            error: NSError(domain: "test", code: 500, userInfo: [NSLocalizedDescriptionKey: "API timeout"]),
+            usage: nil
+        )
+
+        // Convert to checkpoint
+        let checkpoint = ScoringCheckpoint(from: result)
+
+        XCTAssertEqual(checkpoint.pmid, "12345")
+        XCTAssertEqual(checkpoint.score, 0)  // Default for errors
+        XCTAssertTrue(checkpoint.isError)
+        XCTAssertNotNil(checkpoint.errorMessage)
+    }
+
+    func testCreateFromScoringResultParseFailure() {
+        // Create a parse failure ScoringResult
+        let result = ScoringResult.parseFailure(
+            pmid: "12345",
+            message: "Could not extract score from response",
+            usage: nil
+        )
+
+        // Convert to checkpoint
+        let checkpoint = ScoringCheckpoint(from: result)
+
+        XCTAssertEqual(checkpoint.pmid, "12345")
+        XCTAssertTrue(checkpoint.isError)
+        XCTAssertEqual(checkpoint.rationale, "Could not extract score from response")
+    }
+
+    func testCodableRoundTrip() throws {
+        // Create a checkpoint
+        let original = ScoringCheckpoint(
+            pmid: "12345",
+            score: 4,
+            rationale: "Test rationale",
+            isError: false,
+            errorMessage: nil
+        )
+
+        // Encode to JSON
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(original)
+
+        // Decode from JSON
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(ScoringCheckpoint.self, from: data)
+
+        // Verify
+        XCTAssertEqual(decoded.pmid, original.pmid)
+        XCTAssertEqual(decoded.score, original.score)
+        XCTAssertEqual(decoded.rationale, original.rationale)
+        XCTAssertEqual(decoded.isError, original.isError)
+        XCTAssertEqual(decoded.errorMessage, original.errorMessage)
+    }
+}
+
+// MARK: - ProgressMessage Tests (Phase 2)
+
+final class ProgressMessageTests: XCTestCase {
+
+    func testProgressFraction() {
+        let message = ProgressMessage(
+            type: .documentCompleted,
+            pmid: "12345",
+            step: "scoring",
+            current: 5,
+            total: 20
+        )
+
+        XCTAssertEqual(message.progressFraction, 0.25, accuracy: 0.001)
+    }
+
+    func testProgressFractionZeroTotal() {
+        let message = ProgressMessage(
+            type: .documentCompleted,
+            pmid: "12345",
+            step: "scoring",
+            current: 0,
+            total: 0
+        )
+
+        XCTAssertEqual(message.progressFraction, 0)
+    }
+
+    func testIsError() {
+        let errorMessage = ProgressMessage(
+            type: .documentFailed,
+            pmid: "12345",
+            step: "scoring",
+            current: 5,
+            total: 20,
+            error: "API timeout"
+        )
+
+        XCTAssertTrue(errorMessage.isError)
+
+        let successMessage = ProgressMessage(
+            type: .documentCompleted,
+            pmid: "12345",
+            step: "scoring",
+            current: 5,
+            total: 20
+        )
+
+        XCTAssertFalse(successMessage.isError)
+    }
+}
+
+// MARK: - PhaseProgress Tests (Phase 2)
+
+final class PhaseProgressTests: XCTestCase {
+
+    func testProgressFraction() {
+        var progress = PhaseProgress(step: "scoring")
+        progress.total = 20
+        progress.completed = 10
+
+        XCTAssertEqual(progress.progressFraction, 0.5, accuracy: 0.001)
+    }
+
+    func testIsComplete() {
+        var progress = PhaseProgress(step: "scoring")
+        progress.total = 10
+        progress.completed = 10
+
+        XCTAssertTrue(progress.isComplete)
+
+        progress.completed = 5
+        XCTAssertFalse(progress.isComplete)
+    }
+
+    func testSuccessfulCount() {
+        var progress = PhaseProgress(step: "scoring")
+        progress.total = 20
+        progress.completed = 15
+        progress.skipped = 5
+        progress.failed = 2
+
+        // Successful = completed - skipped - failed = 15 - 5 - 2 = 8
+        XCTAssertEqual(progress.successful, 8)
+    }
+}
+
+// MARK: - ProcessingProgress Tests (Phase 2)
+
+final class ProcessingProgressTests: XCTestCase {
+
+    func testOverallProgress() {
+        var progress = ProcessingProgress()
+
+        progress.scoring.total = 20
+        progress.scoring.completed = 10
+        progress.citation.total = 10
+        progress.citation.completed = 5
+
+        // Total work: 30, completed: 15 = 50%
+        XCTAssertEqual(progress.overallProgress, 0.5, accuracy: 0.001)
+    }
+
+    func testIsComplete() {
+        var progress = ProcessingProgress()
+
+        progress.scoring.total = 10
+        progress.scoring.completed = 10
+        progress.citation.total = 5
+        progress.citation.completed = 5
+
+        XCTAssertTrue(progress.isComplete)
+
+        progress.citation.completed = 3
+        XCTAssertFalse(progress.isComplete)
+    }
+}

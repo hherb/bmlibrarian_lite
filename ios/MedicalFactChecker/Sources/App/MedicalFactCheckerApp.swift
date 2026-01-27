@@ -38,6 +38,7 @@ struct MedicalFactCheckerApp: App {
             Citation.self,
             EvidenceReport.self,
             UsageRecord.self,
+            ProcessingCheckpoint.self,
         ])
 
         // Use CloudKitConfiguration to determine sync settings
