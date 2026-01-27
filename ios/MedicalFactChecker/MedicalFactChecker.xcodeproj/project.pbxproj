@@ -19,6 +19,7 @@
 		A1000009001 /* UsageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000009000 /* UsageRecord.swift */; };
 		A1000010001 /* FactCheckWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000010000 /* FactCheckWorkflow.swift */; };
 		A1000011001 /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000011000 /* LLMService.swift */; };
+		A1000059001 /* ParallelScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059000 /* ParallelScoringService.swift */; };
 		A1000013001 /* CostCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000013000 /* CostCalculator.swift */; };
 		A1000014001 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014000 /* KeychainHelper.swift */; };
 		A1000015001 /* ResponseParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000015000 /* ResponseParser.swift */; };
@@ -78,6 +79,7 @@
 		A1000009000 /* UsageRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageRecord.swift; sourceTree = "<group>"; };
 		A1000010000 /* FactCheckWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactCheckWorkflow.swift; sourceTree = "<group>"; };
 		A1000011000 /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
+		A1000059000 /* ParallelScoringService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelScoringService.swift; sourceTree = "<group>"; };
 		A1000013000 /* CostCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostCalculator.swift; sourceTree = "<group>"; };
 		A1000014000 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A1000015000 /* ResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseParser.swift; sourceTree = "<group>"; };
@@ -196,6 +198,7 @@
 				A1000010000 /* FactCheckWorkflow.swift */,
 				A1000011000 /* LLMService.swift */,
 				A1000028000 /* ModelFetchService.swift */,
+				A1000059000 /* ParallelScoringService.swift */,
 				A1000039000 /* SearchServiceProtocol.swift */,
 			);
 			path = Services;
@@ -399,6 +402,7 @@
 				A1000009001 /* UsageRecord.swift in Sources */,
 				A1000010001 /* FactCheckWorkflow.swift in Sources */,
 				A1000011001 /* LLMService.swift in Sources */,
+				A1000059001 /* ParallelScoringService.swift in Sources */,
 				A1000054001 /* BioMedLitAdapters.swift in Sources */,
 				A1000013001 /* CostCalculator.swift in Sources */,
 				A1000014001 /* KeychainHelper.swift in Sources */,

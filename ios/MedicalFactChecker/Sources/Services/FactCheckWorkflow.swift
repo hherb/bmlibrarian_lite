@@ -1081,89 +1081,87 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
-    /// Maximum retries for JSON parse failures when scoring documents.
-    private static let maxParseRetries = 3
-
-    /// Base delay in seconds for exponential backoff on parse failures.
-    private static let parseRetryBaseDelay: Double = 1.0
-
+    /// Score documents using parallel processing for cloud providers.
+    ///
+    /// Uses `ParallelScoringService` with `TaskGroup` to score multiple documents
+    /// concurrently. Concurrency level is auto-detected based on provider:
+    /// - Cloud APIs (Anthropic, OpenAI, etc.): 3 concurrent requests
+    /// - Local inference (Ollama): 1 (sequential)
+    ///
+    /// User can override via `AppSettings.maxConcurrentRequests`.
     private func scoreDocuments() async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let unscoredDocs = session.unscoredDocuments
-        let total = unscoredDocs.count
+        // Filter documents that haven't been scored and haven't failed parsing
+        let unscoredDocs = session.unscoredDocuments.filter { !$0.scoreParseFailed }
+        guard !unscoredDocs.isEmpty else { return }
 
-        for (index, document) in unscoredDocs.enumerated() {
-            try checkBudget()
+        // Check budget before starting parallel scoring
+        try checkBudget()
 
-            updateProgress(.scoringDocuments, "Scoring document \(index + 1)/\(total)...")
+        // Determine concurrency level based on provider
+        let providerURL = URL(string: settings.llmBaseURL) ?? URL(string: "http://localhost")!
+        let concurrency = ConcurrencyDetector.detectConcurrency(
+            providerURL: providerURL,
+            userOverride: settings.maxConcurrentRequests
+        )
 
-            let prompt = """
-            Evaluate how relevant this document is to the following medical claim.
+        // Create scoring inputs from documents
+        let inputs = unscoredDocs.map { doc in
+            ScoringInput(
+                pmid: doc.pmid,
+                title: doc.title,
+                abstract: doc.abstract,
+                authors: doc.formattedAuthors,
+                year: doc.year ?? 0,
+                journal: doc.journal ?? "Unknown"
+            )
+        }
 
-            Claim: \(session.claim)
+        // Build PMID-to-Document mapping for applying results
+        var documentsByPMID: [String: Document] = [:]
+        for doc in unscoredDocs {
+            documentsByPMID[doc.pmid] = doc
+        }
 
-            Document Title: \(document.title)
-            Authors: \(document.formattedAuthors)
-            Year: \(document.year ?? 0)
-            Journal: \(document.journal ?? "Unknown")
+        // Create parallel scoring service
+        let scoringService = ParallelScoringService(
+            llmService: llmService,
+            maxConcurrent: concurrency
+        )
 
-            Abstract:
-            \(document.abstract)
+        let total = inputs.count
+        updateProgress(.scoringDocuments, "Scoring \(total) documents (concurrency: \(concurrency))...")
 
-            IMPORTANT: Relevance means how useful the document is for ANSWERING the research question or EVALUATING the claim. Evidence that REFUTES or contradicts the claim is EQUALLY valuable as evidence that supports it. A study showing negative results is highly relevant if it directly addresses the claim.
-
-            Score on a scale of 1-5:
-            - 5: Directly addresses the claim with strong evidence (supporting OR refuting)
-            - 4: Highly relevant, provides substantial information about the claim (positive or negative findings)
-            - 3: Moderately relevant, contains useful related information
-            - 2: Marginally relevant, tangentially related
-            - 1: Not relevant to the claim
-
-            Respond in JSON format only:
-            {"score": <1-5>, "explanation": "<brief explanation>"}
-            """
-
-            let messages = [LLMService.userMessage(prompt)]
-
-            // Retry loop for parse failures with exponential backoff
-            var parseResult: ResponseParser.ScoreResult?
-            var lastParseError: String = ""
-
-            for attempt in 0..<Self.maxParseRetries {
-                let (response, usage) = try await llmService.chat(
-                    messages: messages,
-                    temperature: 0.1,
-                    maxTokens: 512,
-                    jsonMode: true
-                )
-
-                recordUsage(usage, operationType: "scoring")
-
-                // Parse response using ResponseParser
-                let parsed = ResponseParser.parseScoreResponse(response)
-
-                if !parsed.parseFailed {
-                    parseResult = parsed
-                    break
-                }
-
-                // Parse failed, retry with backoff
-                lastParseError = parsed.explanation
-
-                if attempt < Self.maxParseRetries - 1 {
-                    // Exponential backoff with jitter
-                    let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
-                    let jitter = delay * Double.random(in: -0.25...0.25)
-                    let totalDelay = delay + jitter
-                    try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
+        // Score documents in parallel with progress callback
+        let results = await scoringService.scoreDocuments(
+            inputs,
+            claim: session.claim,
+            onProgress: { [weak self] pmid, completed, total in
+                // Update progress on main actor
+                Task { @MainActor in
+                    self?.updateProgress(
+                        .scoringDocuments,
+                        "Scoring document \(completed)/\(total)..."
+                    )
                 }
             }
+        )
 
-            // Process result
-            if let result = parseResult, let score = result.score {
+        // Apply results to documents (on main actor)
+        for result in results {
+            guard let document = documentsByPMID[result.pmid] else {
+                continue
+            }
+
+            // Record usage for this document
+            if let usage = result.usage {
+                recordUsage(usage, operationType: "scoring")
+            }
+
+            if result.isSuccess, let score = result.score {
                 document.relevanceScore = score
-                document.scoreExplanation = result.explanation
+                document.scoreExplanation = result.rationale
                 document.scoredAt = Date()
 
                 session.documentsScored += 1
@@ -1171,16 +1169,16 @@ final class FactCheckWorkflow {
                     session.relevantDocumentsFound += 1
                 }
             } else {
-                // All retries failed - mark as parse failed
+                // Scoring failed (network error or parse failure)
                 document.scoreParseFailed = true
-                document.scoreExplanation = lastParseError
+                document.scoreExplanation = result.rationale ?? result.error?.localizedDescription
                 document.scoredAt = Date()
 
                 session.documentsScored += 1  // Count as scored (attempted)
             }
-
-            try? modelContext.save()
         }
+
+        try? modelContext.save()
     }
 
     /// Compute embedding-based similarity scores for all documents using HyDE.
@@ -1808,79 +1806,78 @@ final class FactCheckWorkflow {
         try await scoreNewDocuments(newArticles.map { $0.pmid })
     }
 
-    /// Score only specific documents (by PMID).
+    /// Score only specific documents (by PMID) using parallel processing.
+    ///
+    /// Called when fetching more evidence to score just the newly retrieved documents.
     private func scoreNewDocuments(_ pmids: [String]) async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let docsToScore = (session.documents ?? []).filter { pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed }
+        let docsToScore = (session.documents ?? []).filter {
+            pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed
+        }
+        guard !docsToScore.isEmpty else { return }
 
-        for document in docsToScore {
-            try checkBudget()
+        // Check budget before starting
+        try checkBudget()
 
-            let prompt = """
-            Evaluate how relevant this document is to the following medical claim.
+        // Determine concurrency level based on provider
+        let providerURL = URL(string: settings.llmBaseURL) ?? URL(string: "http://localhost")!
+        let concurrency = ConcurrencyDetector.detectConcurrency(
+            providerURL: providerURL,
+            userOverride: settings.maxConcurrentRequests
+        )
 
-            Claim: \(session.claim)
+        // Create scoring inputs
+        let inputs = docsToScore.map { doc in
+            ScoringInput(
+                pmid: doc.pmid,
+                title: doc.title,
+                abstract: doc.abstract,
+                authors: doc.formattedAuthors,
+                year: doc.year ?? 0,
+                journal: doc.journal ?? "Unknown"
+            )
+        }
 
-            Document Title: \(document.title)
-            Authors: \(document.formattedAuthors)
-            Year: \(document.year ?? 0)
-            Journal: \(document.journal ?? "Unknown")
+        // Build PMID-to-Document mapping
+        var documentsByPMID: [String: Document] = [:]
+        for doc in docsToScore {
+            documentsByPMID[doc.pmid] = doc
+        }
 
-            Abstract:
-            \(document.abstract)
+        // Create parallel scoring service
+        let scoringService = ParallelScoringService(
+            llmService: llmService,
+            maxConcurrent: concurrency
+        )
 
-            IMPORTANT: Relevance means how useful the document is for ANSWERING the research question or EVALUATING the claim. Evidence that REFUTES or contradicts the claim is EQUALLY valuable as evidence that supports it. A study showing negative results is highly relevant if it directly addresses the claim.
-
-            Score on a scale of 1-5:
-            - 5: Directly addresses the claim with strong evidence (supporting OR refuting)
-            - 4: Highly relevant, provides substantial information about the claim (positive or negative findings)
-            - 3: Moderately relevant, contains useful related information
-            - 2: Marginally relevant, tangentially related
-            - 1: Not relevant to the claim
-
-            Respond in JSON format only:
-            {"score": <1-5>, "explanation": "<brief explanation>"}
-            """
-
-            let messages = [LLMService.userMessage(prompt)]
-
-            // Retry loop for parse failures with exponential backoff
-            var parseResult: ResponseParser.ScoreResult?
-            var lastParseError: String = ""
-
-            for attempt in 0..<Self.maxParseRetries {
-                let (response, usage) = try await llmService.chat(
-                    messages: messages,
-                    temperature: 0.1,
-                    maxTokens: 512,
-                    jsonMode: true
-                )
-
-                recordUsage(usage, operationType: "scoring")
-
-                let parsed = ResponseParser.parseScoreResponse(response)
-
-                if !parsed.parseFailed {
-                    parseResult = parsed
-                    break
-                }
-
-                // Parse failed, retry with backoff
-                lastParseError = parsed.explanation
-
-                if attempt < Self.maxParseRetries - 1 {
-                    let delay = Self.parseRetryBaseDelay * pow(2.0, Double(attempt))
-                    let jitter = delay * Double.random(in: -0.25...0.25)
-                    let totalDelay = delay + jitter
-                    try await Task.sleep(nanoseconds: UInt64(totalDelay * 1_000_000_000))
+        // Score documents in parallel
+        let results = await scoringService.scoreDocuments(
+            inputs,
+            claim: session.claim,
+            onProgress: { [weak self] pmid, completed, total in
+                Task { @MainActor in
+                    self?.updateProgress(
+                        .scoringDocuments,
+                        "Scoring new document \(completed)/\(total)..."
+                    )
                 }
             }
+        )
 
-            // Process result
-            if let result = parseResult, let score = result.score {
+        // Apply results to documents
+        for result in results {
+            guard let document = documentsByPMID[result.pmid] else {
+                continue
+            }
+
+            if let usage = result.usage {
+                recordUsage(usage, operationType: "scoring")
+            }
+
+            if result.isSuccess, let score = result.score {
                 document.relevanceScore = score
-                document.scoreExplanation = result.explanation
+                document.scoreExplanation = result.rationale
                 document.scoredAt = Date()
 
                 session.documentsScored += 1
@@ -1888,16 +1885,15 @@ final class FactCheckWorkflow {
                     session.relevantDocumentsFound += 1
                 }
             } else {
-                // All retries failed - mark as parse failed
                 document.scoreParseFailed = true
-                document.scoreExplanation = lastParseError
+                document.scoreExplanation = result.rationale ?? result.error?.localizedDescription
                 document.scoredAt = Date()
 
                 session.documentsScored += 1
             }
-
-            try? modelContext.save()
         }
+
+        try? modelContext.save()
     }
 
     private func updateProgress(_ step: WorkflowStep, _ message: String) {
