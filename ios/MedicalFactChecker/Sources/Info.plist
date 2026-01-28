@@ -51,6 +51,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.bmlibrarian.factchecker.recovery</string>
 	</array>
 </dict>
 </plist>

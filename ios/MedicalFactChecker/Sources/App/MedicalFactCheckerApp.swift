@@ -20,9 +20,17 @@ import BioMedLit
 
 @main
 struct MedicalFactCheckerApp: App {
+    /// Tracks the current scene phase for background handling.
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         // Configure BioMedLit library with app settings
         configureBioMedLit()
+
+        // Register background task handlers (iOS only)
+        Task {
+            await BackgroundTaskManager.shared.registerBackgroundTasks()
+        }
     }
 
     var sharedModelContainer: ModelContainer = {
@@ -82,6 +90,36 @@ struct MedicalFactCheckerApp: App {
                 })
         }
         .modelContainer(sharedModelContainer)
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            handleScenePhaseChange(from: oldPhase, to: newPhase)
+        }
+    }
+
+    /// Handle scene phase transitions for background processing.
+    ///
+    /// Notifies the BackgroundTaskManager when the app enters or exits
+    /// background state, allowing it to manage extended execution time
+    /// and schedule recovery tasks.
+    ///
+    /// - Parameters:
+    ///   - oldPhase: The previous scene phase.
+    ///   - newPhase: The new scene phase.
+    private func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
+        Task {
+            switch newPhase {
+            case .background:
+                await BackgroundTaskManager.shared.didEnterBackground()
+            case .active:
+                if oldPhase == .background {
+                    await BackgroundTaskManager.shared.willEnterForeground()
+                }
+            case .inactive:
+                // Transitional state - no action needed
+                break
+            @unknown default:
+                break
+            }
+        }
     }
 
     /// Configure the BioMedLit library with current app settings.

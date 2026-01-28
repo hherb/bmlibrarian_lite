@@ -96,6 +96,16 @@ final class FactCheckWorkflow {
     /// Used by `EnhancedScoredDocumentsView` to display the error queue.
     private(set) var processingErrors: [TransientErrorEntry] = []
 
+    /// Whether the workflow was paused due to app backgrounding.
+    ///
+    /// Set to true when processing is interrupted because the app entered
+    /// background and background time expired. When true, the UI should
+    /// show a banner allowing the user to resume.
+    private(set) var wasPausedByBackground = false
+
+    /// Observer token for background expiration notification.
+    private var backgroundExpirationObserver: NSObjectProtocol?
+
     /// The structured query parsed from LLM response.
     ///
     /// Stored in memory (not persisted) so we can rebuild provider-specific
@@ -124,6 +134,14 @@ final class FactCheckWorkflow {
         isRunning && !isCancelling
     }
 
+    /// Clear the background paused state without resuming.
+    ///
+    /// Called when user dismisses the background banner without resuming.
+    /// Clears the UI state but preserves the session for later resumption.
+    func clearBackgroundPausedState() {
+        wasPausedByBackground = false
+    }
+
     // MARK: - Monthly Usage Tracking
 
     private var monthlyUsedUSD: Double = 0
@@ -142,6 +160,71 @@ final class FactCheckWorkflow {
         self.settings = settings
         self.checkpointManager = CheckpointManager(modelContainer: modelContainer)
         self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
+        setupBackgroundObservers()
+    }
+
+    /// Set up observers for background lifecycle notifications.
+    ///
+    /// Listens for `.backgroundTaskExpiring` to save state immediately
+    /// before the app is suspended.
+    private func setupBackgroundObservers() {
+        backgroundExpirationObserver = NotificationCenter.default.addObserver(
+            forName: .backgroundTaskExpiring,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.handleBackgroundExpiration()
+            }
+        }
+    }
+
+    /// Handle background task expiration.
+    ///
+    /// Called when iOS is about to suspend the app. Saves session state
+    /// immediately and marks the workflow as paused so the user can resume
+    /// when the app returns to foreground.
+    private func handleBackgroundExpiration() async {
+        guard isRunning, let session = session else { return }
+
+        logger.info("Background expiring - saving state for session \(session.id)")
+
+        // Mark as paused by background
+        wasPausedByBackground = true
+
+        // Save session state for resumption
+        session.currentStep = .awaitingUserDecision
+        session.errorMessage = "Paused: App was backgrounded"
+        session.stopReason = .userCancelled
+        try? modelContext.save()
+
+        // Cancel the workflow task gracefully
+        isCancelling = true
+        workflowTask?.cancel()
+        workflowTask = nil
+
+        isRunning = false
+        awaitingUserDecision = true
+        awaitingSmartSearchDecision = false
+
+        // Build resumption prompt based on progress
+        let scoredCount = session.documentsScored ?? 0
+        let totalDocs = session.documentsFound ?? 0
+        let remaining = totalDocs - scoredCount
+
+        if remaining > 0 {
+            userDecisionPrompt = "Processing paused when app was backgrounded. \(scoredCount) document(s) scored, \(remaining) remaining."
+        } else {
+            userDecisionPrompt = "Processing paused when app was backgrounded."
+        }
+
+        // Notify BackgroundTaskManager that work is paused
+        await BackgroundTaskManager.shared.setActiveWork(false)
+
+        // Notify callback
+        onCancelled?(scoredCount, remaining)
+
+        isCancelling = false
     }
 
     /// Create a fact-check workflow using just the model context.
@@ -1095,6 +1178,10 @@ final class FactCheckWorkflow {
         guard let session = session else { return }
         isRunning = true
         isCancelling = false
+        wasPausedByBackground = false
+
+        // Notify BackgroundTaskManager that active work is in progress
+        await BackgroundTaskManager.shared.setActiveWork(true)
 
         do {
             // Step 1: Convert claim to PubMed query
@@ -1241,6 +1328,9 @@ final class FactCheckWorkflow {
         isRunning = false
         isCancelling = false
         workflowTask = nil
+
+        // Notify BackgroundTaskManager that active work has stopped
+        await BackgroundTaskManager.shared.setActiveWork(false)
     }
 
     /// Clean up checkpoints for a completed session.

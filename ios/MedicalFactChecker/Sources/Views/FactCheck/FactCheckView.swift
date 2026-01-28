@@ -44,6 +44,26 @@ struct FactCheckView: View {
                         ConfigurationWarningView()
                     }
 
+                    // Background Status Banner
+                    if let workflow = workflow, workflow.wasPausedByBackground {
+                        BackgroundStatusBanner(
+                            message: workflow.userDecisionPrompt.isEmpty
+                                ? "Processing was interrupted. Tap Resume to continue."
+                                : workflow.userDecisionPrompt,
+                            onResume: {
+                                Task {
+                                    await workflow.continueWithMoreDocuments()
+                                }
+                            },
+                            onDismiss: {
+                                // Clear the paused state without resuming
+                                Task { @MainActor in
+                                    workflow.clearBackgroundPausedState()
+                                }
+                            }
+                        )
+                    }
+
                     // Input Section
                     ClaimInputSection(
                         claimText: $claimText,

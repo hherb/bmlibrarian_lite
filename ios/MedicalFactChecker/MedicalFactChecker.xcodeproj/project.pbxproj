@@ -16,6 +16,8 @@
 		A1000063001 /* ErrorPersistenceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000063000 /* ErrorPersistenceManager.swift */; };
 		A1000064001 /* ErrorTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000064000 /* ErrorTypes.swift */; };
 		A1000065001 /* WorkflowConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000065000 /* WorkflowConstants.swift */; };
+		A1000067001 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000067000 /* BackgroundTaskManager.swift */; };
+		A1000068001 /* BackgroundStatusBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000068000 /* BackgroundStatusBanner.swift */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -146,6 +148,8 @@
 		A1000063000 /* ErrorPersistenceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPersistenceManager.swift; sourceTree = "<group>"; };
 		A1000064000 /* ErrorTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorTypes.swift; sourceTree = "<group>"; };
 		A1000065000 /* WorkflowConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowConstants.swift; sourceTree = "<group>"; };
+		A1000067000 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
+		A1000068000 /* BackgroundStatusBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundStatusBanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -221,6 +225,7 @@
 		A1000000023 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A1000067000 /* BackgroundTaskManager.swift */,
 				A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */,
 				F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */,
 				A1000022000 /* EmbeddingService.swift */,
@@ -327,6 +332,7 @@
 		A100000002C /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				A1000068000 /* BackgroundStatusBanner.swift */,
 				A1000046000 /* DocumentSourceBadge.swift */,
 				A1000061000 /* ErrorQueueView.swift */,
 				A1000047000 /* FetchMoreView.swift */,
@@ -489,6 +495,8 @@
 				A1000063001 /* ErrorPersistenceManager.swift in Sources */,
 				A1000064001 /* ErrorTypes.swift in Sources */,
 				A1000065001 /* WorkflowConstants.swift in Sources */,
+				A1000067001 /* BackgroundTaskManager.swift in Sources */,
+				A1000068001 /* BackgroundStatusBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
