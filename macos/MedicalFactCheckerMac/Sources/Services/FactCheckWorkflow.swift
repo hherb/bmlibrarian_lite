@@ -17,6 +17,7 @@
 import Foundation
 import SwiftData
 import BioMedLit
+import os.log
 
 /// Orchestrates the fact-checking workflow from claim input to report generation.
 ///
@@ -38,6 +39,12 @@ final class FactCheckWorkflow {
 
     /// Error persistence manager for Phase 4 error queue.
     private let errorPersistenceManager: ErrorPersistenceManager
+
+    /// Logger for workflow operations.
+    private let logger = Logger(
+        subsystem: "com.bmlibrarian.factchecker",
+        category: "FactCheckWorkflow"
+    )
 
     /// Search options for the current workflow run.
     ///
@@ -1713,7 +1720,7 @@ final class FactCheckWorkflow {
                     sessionId: sessionId
                 )
             } catch {
-                // Log but don't fail the workflow on persistence errors
+                logger.error("Failed to persist error for PMID \(pmid): \(error.localizedDescription)")
             }
         }
 
@@ -1741,7 +1748,7 @@ final class FactCheckWorkflow {
                 sessionId: sessionId
             )
         } catch {
-            // Continue even if persistence fails
+            logger.error("Failed to increment retry count: \(error.localizedDescription)")
         }
 
         // Reset the documents' failed status so they can be re-scored
@@ -1801,7 +1808,7 @@ final class FactCheckWorkflow {
                 sessionId: session.id.uuidString
             )
         } catch {
-            // Ignore persistence errors
+            logger.error("Failed to clear errors: \(error.localizedDescription)")
         }
     }
 
