@@ -41,6 +41,9 @@ final class FactCheckWorkflow {
     /// Checkpoint manager for Phase 2 resumable processing.
     private let checkpointManager: CheckpointManager
 
+    /// Error persistence manager for Phase 4 error queue.
+    private let errorPersistenceManager: ErrorPersistenceManager
+
     // MARK: - State
 
     private(set) var session: FactCheckSession?
@@ -80,6 +83,12 @@ final class FactCheckWorkflow {
     /// original search.
     private(set) var isResumedSession = false
 
+    /// Processing errors for Phase 4 error queue UI (transient, not persisted).
+    ///
+    /// Populated during scoring/citation phases when document processing fails.
+    /// Used by `EnhancedScoredDocumentsView` to display the error queue.
+    private(set) var processingErrors: [TransientErrorEntry] = []
+
     /// The structured query parsed from LLM response.
     ///
     /// Stored in memory (not persisted) so we can rebuild provider-specific
@@ -96,6 +105,7 @@ final class FactCheckWorkflow {
     var onBudgetExceeded: ((String) -> Void)?
     var onSmartSearchActivated: ((String) -> Void)?  // Alternative query message
     var onCancelled: ((Int, Int) -> Void)?  // (scored, remaining) - Phase 3
+    var onScoringError: ((String, String, String) -> Void)?  // (pmid, step, message) - Phase 4
 
     // MARK: - Computed Properties (Phase 3)
 
@@ -124,6 +134,7 @@ final class FactCheckWorkflow {
         self.modelContainer = modelContainer
         self.settings = settings
         self.checkpointManager = CheckpointManager(modelContainer: modelContainer)
+        self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
     }
 
     /// Create a fact-check workflow using just the model context.
@@ -275,6 +286,11 @@ final class FactCheckWorkflow {
             awaitingUserDecision = false
             awaitingSmartSearchDecision = false
             userDecisionPrompt = ""
+        }
+
+        // Phase 4: Load persisted errors asynchronously
+        Task { [weak self] in
+            await self?.loadPersistedErrors()
         }
     }
 
@@ -591,6 +607,185 @@ final class FactCheckWorkflow {
         // Note: isCancelling is cleared by the CancellationError handlers in the
         // workflow methods, not here. This prevents a race condition where we clear
         // the flag before the catch block has a chance to check it.
+    }
+
+    // MARK: - Phase 4 Error Handling
+
+    /// Handle a scoring or citation error from document processing.
+    ///
+    /// Persists the error and notifies listeners via the `onScoringError` callback.
+    /// Errors are categorized automatically based on the error message.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID of the failed document.
+    ///   - step: Processing step ("scoring" or "citation").
+    ///   - error: The error that occurred.
+    ///   - sessionId: Session identifier for persistence.
+    private func handleScoringError(
+        pmid: String,
+        step: String,
+        error: Error,
+        sessionId: String
+    ) async {
+        let message = error.localizedDescription
+        let category = categorizeError(error)
+
+        // Add to in-memory errors for UI
+        let transientError = TransientErrorEntry(
+            pmid: pmid,
+            step: step,
+            message: message,
+            category: category
+        )
+        processingErrors.append(transientError)
+
+        // Persist error (Phase 4)
+        do {
+            try await errorPersistenceManager.saveError(
+                pmid: pmid,
+                step: step,
+                message: message,
+                sessionId: sessionId
+            )
+        } catch {
+            // Log but don't fail the workflow on persistence errors
+        }
+
+        // Notify callback
+        onScoringError?(pmid, step, message)
+    }
+
+    /// Handle a scoring error from a string message.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID of the failed document.
+    ///   - step: Processing step ("scoring" or "citation").
+    ///   - message: Error message.
+    ///   - sessionId: Session identifier.
+    private func handleScoringErrorMessage(
+        pmid: String,
+        step: String,
+        message: String,
+        sessionId: String
+    ) async {
+        let category = categorizeErrorMessage(message)
+
+        // Add to in-memory errors for UI
+        let transientError = TransientErrorEntry(
+            pmid: pmid,
+            step: step,
+            message: message,
+            category: category
+        )
+        processingErrors.append(transientError)
+
+        // Persist error
+        do {
+            try await errorPersistenceManager.saveError(
+                pmid: pmid,
+                step: step,
+                message: message,
+                sessionId: sessionId
+            )
+        } catch {
+            // Log but don't fail the workflow on persistence errors
+        }
+
+        // Notify callback
+        onScoringError?(pmid, step, message)
+    }
+
+    /// Retry failed documents from the error queue.
+    ///
+    /// Re-queues documents that previously failed for another scoring attempt.
+    /// Clears the documents from the error queue and resets their failed status.
+    ///
+    /// - Parameter pmids: List of PMIDs to retry.
+    func retryFailedDocuments(pmids: [String]) async {
+        guard let session = session else { return }
+        let sessionId = session.id.uuidString
+
+        // Remove from in-memory errors
+        processingErrors.removeAll { pmids.contains($0.pmid) }
+
+        // Increment retry counts in persistence
+        do {
+            try await errorPersistenceManager.incrementRetryCount(
+                pmids: pmids,
+                sessionId: sessionId
+            )
+        } catch {
+            // Continue even if persistence fails
+        }
+
+        // Reset the documents' failed status so they can be re-scored
+        let documents = session.documents ?? []
+        for doc in documents where pmids.contains(doc.pmid) {
+            doc.scoreParseFailed = false
+            doc.relevanceScore = nil
+            doc.scoreExplanation = nil
+            doc.scoredAt = nil
+        }
+        try? modelContext.save()
+
+        // Re-run scoring for these documents
+        do {
+            try await scoreDocuments()
+
+            // On success, remove the errors from persistence
+            let successfulPmids = documents
+                .filter { pmids.contains($0.pmid) && $0.relevanceScore != nil }
+                .map { $0.pmid }
+
+            if !successfulPmids.isEmpty {
+                try await errorPersistenceManager.removeErrors(
+                    pmids: successfulPmids,
+                    sessionId: sessionId
+                )
+            }
+        } catch {
+            onError?(error)
+        }
+    }
+
+    /// Load persisted errors for the current session.
+    ///
+    /// Populates `processingErrors` with errors saved from previous runs.
+    /// Call this when restoring a session to display the error queue.
+    func loadPersistedErrors() async {
+        guard let session = session else { return }
+
+        do {
+            let errors = try await errorPersistenceManager.loadTransientErrors(
+                sessionId: session.id.uuidString
+            )
+            processingErrors = errors
+        } catch {
+            // Errors loading persisted errors - ignore and start fresh
+            processingErrors = []
+        }
+    }
+
+    /// Clear all errors for the current session.
+    ///
+    /// Removes errors from both in-memory storage and persistence.
+    func clearErrors() async {
+        guard let session = session else { return }
+
+        processingErrors = []
+
+        do {
+            try await errorPersistenceManager.clearErrors(
+                sessionId: session.id.uuidString
+            )
+        } catch {
+            // Ignore persistence errors
+        }
+    }
+
+    /// Get the count of processing errors.
+    var errorCount: Int {
+        processingErrors.count
     }
 
     // MARK: - Retry Report Generation
@@ -1419,6 +1614,16 @@ final class FactCheckWorkflow {
                 document.scoredAt = Date()
 
                 session.documentsScored += 1  // Count as scored (attempted)
+
+                // Phase 4: Track error in error queue
+                if let errorMessage = result.errorMessage {
+                    await handleScoringErrorMessage(
+                        pmid: result.pmid,
+                        step: "scoring",
+                        message: errorMessage,
+                        sessionId: session.id.uuidString
+                    )
+                }
             }
         }
 

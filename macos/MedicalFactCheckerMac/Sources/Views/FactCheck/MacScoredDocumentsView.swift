@@ -30,22 +30,30 @@ struct MacScoredDocumentsView: View {
     var onShowFullText: ((Document) -> Void)?
 
     @State private var expandedDocumentId: String?
-    @State private var sortOrder: DocumentSortOrder = .score
+
+    /// User-selected sort option with persistence.
+    @AppStorage("macScoredDocumentsSortOption")
+    private var sortOptionRaw: String = SortOption.scoreHighToLow.rawValue
+
+    /// Current sort option derived from persisted value.
+    private var sortOption: SortOption {
+        SortOption(rawValue: sortOptionRaw) ?? .scoreHighToLow
+    }
+
+    /// Binding for the sort option picker.
+    private var sortOptionBinding: Binding<SortOption> {
+        Binding(
+            get: { SortOption(rawValue: sortOptionRaw) ?? .scoreHighToLow },
+            set: { sortOptionRaw = $0.rawValue }
+        )
+    }
+
     @State private var filterThreshold: Int = 1
 
     private var scoredDocuments: [Document] {
         (session.documents ?? [])
             .filter { $0.isScored && ($0.relevanceScore ?? 0) >= filterThreshold }
-            .sorted { doc1, doc2 in
-                switch sortOrder {
-                case .score:
-                    return (doc1.relevanceScore ?? 0) > (doc2.relevanceScore ?? 0)
-                case .year:
-                    return (doc1.year ?? 0) > (doc2.year ?? 0)
-                case .title:
-                    return doc1.title < doc2.title
-                }
-            }
+            .sorted(by: sortOption)
     }
 
     var body: some View {
@@ -86,14 +94,8 @@ struct MacScoredDocumentsView: View {
 
     private var toolbar: some View {
         HStack(spacing: MacSpacing.large) {
-            // Sort picker
-            Picker("Sort by", selection: $sortOrder) {
-                ForEach(DocumentSortOrder.allCases) { order in
-                    Text(order.rawValue).tag(order)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(width: MacLayout.sortPickerWidth)
+            // Sort picker using new SortOption
+            MacSortingControlsView(selectedSort: sortOptionBinding)
 
             // Filter picker
             Picker("Min score", selection: $filterThreshold) {
@@ -116,7 +118,44 @@ struct MacScoredDocumentsView: View {
     }
 }
 
-/// Sort order options for document list.
+// MARK: - Enhanced Mac Scored Documents View
+
+/// Enhanced macOS view with error queue and sorting.
+///
+/// Extends MacScoredDocumentsView with error queue display
+/// and retry functionality for failed documents.
+struct EnhancedMacScoredDocumentsView: View {
+    @Bindable var session: FactCheckSession
+    let showEmbeddingScores: Bool
+
+    /// Binding to processing errors for display.
+    @Binding var errors: [TransientErrorEntry]
+
+    /// Callback for retrying failed documents.
+    var onRetry: ([String]) -> Void
+
+    /// Callback when user wants to view full text.
+    var onShowFullText: ((Document) -> Void)?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Error queue at top
+            if !errors.isEmpty {
+                MacErrorQueueView(errors: $errors, onRetry: onRetry)
+                    .padding()
+            }
+
+            // Main documents view
+            MacScoredDocumentsView(
+                session: session,
+                showEmbeddingScores: showEmbeddingScores,
+                onShowFullText: onShowFullText
+            )
+        }
+    }
+}
+
+/// Sort order options for document list (legacy - kept for backwards compatibility).
 enum DocumentSortOrder: String, CaseIterable, Identifiable {
     case score = "Score"
     case year = "Year"

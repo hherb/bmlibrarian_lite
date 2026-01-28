@@ -24,21 +24,47 @@ import SwiftUI
 private enum ScoredDocumentsConstants {
     /// Scale factor for inline progress indicators.
     static let inlineProgressScale: CGFloat = 0.8
+
+    /// UserDefaults key for persisting sort preference.
+    static let sortPreferenceKey = "scoredDocumentsSortOption"
 }
 
 /// Section displaying scored documents with both LLM and embedding scores.
 ///
 /// Shows a collapsible list of documents sorted by relevance score.
 /// Each document displays both scoring methods for comparison.
+/// Supports user-selectable sort order with persistence.
 struct ScoredDocumentsView: View {
     let session: FactCheckSession
     let showEmbeddingScores: Bool
 
     @State private var isExpanded = false
 
+    /// User-selected sort option with persistence.
+    @AppStorage(ScoredDocumentsConstants.sortPreferenceKey)
+    private var sortOptionRaw: String = SortOption.scoreHighToLow.rawValue
+
+    /// Current sort option derived from persisted value.
+    private var sortOption: SortOption {
+        get { SortOption(rawValue: sortOptionRaw) ?? .scoreHighToLow }
+    }
+
+    /// Binding for the sort option picker.
+    private var sortOptionBinding: Binding<SortOption> {
+        Binding(
+            get: { SortOption(rawValue: sortOptionRaw) ?? .scoreHighToLow },
+            set: { sortOptionRaw = $0.rawValue }
+        )
+    }
+
     /// Scored documents from the session, computed to trigger observation.
     private var scoredDocuments: [Document] {
         (session.documents ?? []).filter { $0.isScored }
+    }
+
+    /// Sorted documents based on the selected sort option.
+    private var sortedDocuments: [Document] {
+        scoredDocuments.sorted(by: sortOption)
     }
 
     var body: some View {
@@ -62,12 +88,11 @@ struct ScoredDocumentsView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                // Sort by LLM relevance score, highest first
-                let sortedDocs = scoredDocuments.sorted {
-                    ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
-                }
+                // Sorting controls
+                SortingControlsView(selectedSort: sortOptionBinding)
+                    .padding(.bottom, 4)
 
-                ForEach(sortedDocs, id: \.pmid) { document in
+                ForEach(sortedDocuments, id: \.pmid) { document in
                     DocumentScoreRow(
                         document: document,
                         showEmbeddingScore: showEmbeddingScores
@@ -78,6 +103,148 @@ struct ScoredDocumentsView: View {
         .padding()
         .background(Color.secondary.opacity(0.05))
         .cornerRadius(10)
+    }
+}
+
+// MARK: - Enhanced Scored Documents View
+
+/// Enhanced view displaying scored documents with error queue and sorting.
+///
+/// This view extends the basic ScoredDocumentsView with:
+/// - Error queue display at the top
+/// - Results summary showing success/failure counts
+/// - Full sorting controls
+/// - Retry functionality for failed documents
+///
+/// ## Usage
+///
+/// ```swift
+/// EnhancedScoredDocumentsView(
+///     session: session,
+///     showEmbeddingScores: true,
+///     errors: $errors,
+///     onRetry: { pmids in
+///         await workflow.retryDocuments(pmids: pmids)
+///     }
+/// )
+/// ```
+struct EnhancedScoredDocumentsView: View {
+    let session: FactCheckSession
+    let showEmbeddingScores: Bool
+
+    /// Binding to processing errors for display.
+    @Binding var errors: [TransientErrorEntry]
+
+    /// Callback for retrying failed documents.
+    var onRetry: ([String]) -> Void
+
+    @State private var isExpanded = true
+
+    /// User-selected sort option with persistence.
+    @AppStorage(ScoredDocumentsConstants.sortPreferenceKey)
+    private var sortOptionRaw: String = SortOption.scoreHighToLow.rawValue
+
+    /// Current sort option derived from persisted value.
+    private var sortOption: SortOption {
+        SortOption(rawValue: sortOptionRaw) ?? .scoreHighToLow
+    }
+
+    /// Binding for the sort option picker.
+    private var sortOptionBinding: Binding<SortOption> {
+        Binding(
+            get: { SortOption(rawValue: sortOptionRaw) ?? .scoreHighToLow },
+            set: { sortOptionRaw = $0.rawValue }
+        )
+    }
+
+    /// Scored documents from the session.
+    private var scoredDocuments: [Document] {
+        (session.documents ?? []).filter { $0.isScored }
+    }
+
+    /// Sorted documents based on the selected sort option.
+    private var sortedDocuments: [Document] {
+        scoredDocuments.sorted(by: sortOption)
+    }
+
+    /// Count of successfully scored documents.
+    private var successCount: Int {
+        scoredDocuments.filter { $0.relevanceScore != nil }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Error queue at top
+            ErrorQueueView(errors: $errors, onRetry: handleRetry)
+                .padding()
+
+            // Sorting controls
+            SortingControlsView(selectedSort: sortOptionBinding)
+
+            // Results summary
+            resultsSummaryView
+
+            // Document list
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(sortedDocuments, id: \.pmid) { document in
+                        DocumentScoreRow(
+                            document: document,
+                            showEmbeddingScore: showEmbeddingScores
+                        )
+                    }
+                }
+                .padding()
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Scored documents view")
+    }
+
+    // MARK: - Results Summary
+
+    /// Summary showing success and failure counts.
+    private var resultsSummaryView: some View {
+        HStack {
+            Label("\(successCount) scored", systemImage: "checkmark.circle")
+                .foregroundColor(.green)
+
+            if !errors.isEmpty {
+                Label("\(errors.count) failed", systemImage: "xmark.circle")
+                    .foregroundColor(.red)
+            }
+
+            Spacer()
+        }
+        .font(.caption)
+        .padding(.horizontal)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(successCount) documents scored successfully, \(errors.count) failed")
+    }
+
+    // MARK: - Actions
+
+    /// Add an error to the queue.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed identifier of the failed document.
+    ///   - step: Processing step where the error occurred.
+    ///   - message: Error message.
+    func addError(pmid: String, step: String, message: String) {
+        let entry = TransientErrorEntry(
+            pmid: pmid,
+            step: step,
+            message: message
+        )
+        errors.append(entry)
+    }
+
+    /// Handle retry request from error queue.
+    private func handleRetry(_ pmids: [String]) {
+        // Remove errors for these PMIDs
+        errors.removeAll { pmids.contains($0.pmid) }
+        // Trigger retry callback
+        onRetry(pmids)
     }
 }
 
