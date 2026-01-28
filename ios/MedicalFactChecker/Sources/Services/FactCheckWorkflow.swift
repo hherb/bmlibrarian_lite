@@ -1727,65 +1727,88 @@ final class FactCheckWorkflow {
         return response.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Extract citations from relevant documents using parallel processing.
+    ///
+    /// Uses `ParallelCitationService` to extract citations from multiple documents
+    /// concurrently. Concurrency level is auto-detected based on provider:
+    /// - Cloud APIs (Anthropic, OpenAI, etc.): 3 concurrent requests
+    /// - Local inference (Ollama): 1 (sequential)
     private func extractCitations() async throws {
         guard let session = session, let llmService = llmService else { return }
 
         let relevantDocs = (session.documents ?? []).filter {
             $0.meetsThreshold(settings.minScoreThreshold) && ($0.citations ?? []).isEmpty
         }
-        let total = relevantDocs.count
 
-        for (index, document) in relevantDocs.enumerated() {
-            try checkBudget()
+        guard !relevantDocs.isEmpty else { return }
 
-            updateProgress(.extractingCitations, "Extracting citations \(index + 1)/\(total)...")
+        // Check budget before starting
+        try checkBudget()
 
-            let prompt = """
-            Extract 1-2 key passages from this abstract that are most relevant to the claim.
+        // Auto-detect concurrency based on provider
+        let providerURL = URL(string: settings.llmBaseURL) ?? URL(string: "http://localhost")!
+        let concurrency = ConcurrencyDetector.detectConcurrency(
+            providerURL: providerURL,
+            userOverride: nil
+        )
 
-            Claim: \(session.claim)
+        // Build document lookup for applying results
+        var documentsByPMID: [String: Document] = [:]
+        for doc in relevantDocs {
+            documentsByPMID[doc.pmid] = doc
+        }
 
-            Document: \(document.title) (\(document.formattedAuthors), \(document.year ?? 0))
-
-            Abstract:
-            \(document.abstract)
-
-            Extract exact or close quotes that:
-            1. Directly address the claim (whether supporting OR refuting it)
-            2. Contain specific findings, data, or conclusions
-            3. Could be quoted in an evidence summary
-
-            For each passage, also identify:
-            - Whether the finding SUPPORTS or REFUTES the claim (or is NEUTRAL/UNCLEAR)
-            - The study type if identifiable (e.g., systematic review, meta-analysis, RCT, cohort study, case-control, case report, narrative review)
-            - Sample size if mentioned (e.g., "n=500", "1,234 participants")
-
-            Respond in JSON format only:
-            {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
-            """
-
-            let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 4096,
-                jsonMode: true
+        // Create citation inputs (thread-safe structs)
+        let inputs = relevantDocs.map { doc in
+            CitationInput(
+                pmid: doc.pmid,
+                title: doc.title,
+                abstract: doc.abstract,
+                authors: doc.formattedAuthors,
+                year: doc.year ?? 0
             )
+        }
 
-            recordUsage(usage, operationType: "citation")
+        // Create parallel citation service
+        let citationService = ParallelCitationService(
+            llmService: llmService,
+            maxConcurrent: concurrency
+        )
 
-            // Parse passages using ResponseParser
-            let passages = ResponseParser.parsePassagesResponse(response)
+        let total = inputs.count
+        updateProgress(.extractingCitations, "Extracting citations 0/\(total)...")
 
-            for passage in passages {
-                let citation = Citation(passage: passage.text, context: passage.relevance)
-                citation.document = document
-                modelContext.insert(citation)
-                session.citationsExtracted += 1
+        // Extract citations in parallel with progress reporting
+        let results = await citationService.extractCitations(
+            inputs,
+            claim: session.claim,
+            onProgress: { [weak self] (pmid: String, completed: Int, total: Int) in
+                Task { @MainActor in
+                    self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
+                }
+            }
+        )
+
+        // Apply results to documents (on main actor)
+        for result in results {
+            guard let document = documentsByPMID[result.pmid] else { continue }
+
+            if result.isSuccess {
+                for passage in result.passages {
+                    let citation = Citation(passage: passage.text, context: passage.relevance)
+                    citation.document = document
+                    modelContext.insert(citation)
+                    session.citationsExtracted += 1
+                }
             }
 
-            try? modelContext.save()
+            // Record usage if available
+            if let usage = result.usage {
+                recordUsage(usage, operationType: "citation")
+            }
         }
+
+        try? modelContext.save()
     }
 
     private func generateReport() async throws {

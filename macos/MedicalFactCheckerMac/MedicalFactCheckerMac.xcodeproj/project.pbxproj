@@ -59,6 +59,7 @@
 		A1000062 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* BioMedLitAdapters.swift */; };
 		D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */; };
 		DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */; };
+		A1000070 /* ParallelCitationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000070 /* ParallelCitationService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -136,6 +137,7 @@
 		A2000052 /* CloudKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitConfiguration.swift; sourceTree = "<group>"; };
 		A2000060 /* BioMedLitAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BioMedLitAdapters.swift; sourceTree = "<group>"; };
 		B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
+		A2000070 /* ParallelCitationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelCitationService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -292,6 +294,7 @@
 				A2000018 /* FactCheckWorkflow.swift */,
 				A2000019 /* LLMService.swift */,
 				A2000020 /* ModelFetchService.swift */,
+				A2000070 /* ParallelCitationService.swift */,
 				A2000050 /* SearchServiceFactory.swift */,
 				A2000046 /* SearchTypes.swift */,
 			);
@@ -576,6 +579,7 @@
 				A1000018 /* FactCheckWorkflow.swift in Sources */,
 				A1000019 /* LLMService.swift in Sources */,
 				A1000020 /* ModelFetchService.swift in Sources */,
+				A1000070 /* ParallelCitationService.swift in Sources */,
 				A1000022 /* CostCalculator.swift in Sources */,
 				A1000023 /* KeychainHelper.swift in Sources */,
 				A1000024 /* NotificationNames.swift in Sources */,

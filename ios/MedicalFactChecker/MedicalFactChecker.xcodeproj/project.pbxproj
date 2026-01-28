@@ -70,6 +70,7 @@
 		A1000057001 /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057000 /* StructuredQuery.swift */; };
 		A1000058001 /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000058000 /* QueryConstants.swift */; };
 		A1000059001 /* ParallelScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059000 /* ParallelScoringService.swift */; };
+		A1000066001 /* ParallelCitationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000066000 /* ParallelCitationService.swift */; };
 		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
 		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
 		C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */; };
@@ -135,6 +136,7 @@
 		A1000057000 /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
 		A1000058000 /* QueryConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryConstants.swift; sourceTree = "<group>"; };
 		A1000059000 /* ParallelScoringService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelScoringService.swift; sourceTree = "<group>"; };
+		A1000066000 /* ParallelCitationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelCitationService.swift; sourceTree = "<group>"; };
 		A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointedScoringService.swift; sourceTree = "<group>"; };
 		F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointManager.swift; sourceTree = "<group>"; };
 		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
@@ -226,6 +228,7 @@
 				A1000010000 /* FactCheckWorkflow.swift */,
 				A1000011000 /* LLMService.swift */,
 				A1000028000 /* ModelFetchService.swift */,
+				A1000066000 /* ParallelCitationService.swift */,
 				A1000059000 /* ParallelScoringService.swift */,
 				FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */,
 				A1000039000 /* SearchServiceProtocol.swift */,
@@ -436,6 +439,7 @@
 				A1000010001 /* FactCheckWorkflow.swift in Sources */,
 				A1000011001 /* LLMService.swift in Sources */,
 				A1000059001 /* ParallelScoringService.swift in Sources */,
+				A1000066001 /* ParallelCitationService.swift in Sources */,
 				A1000054001 /* BioMedLitAdapters.swift in Sources */,
 				A1000013001 /* CostCalculator.swift in Sources */,
 				A1000014001 /* KeychainHelper.swift in Sources */,

@@ -358,7 +358,7 @@ struct DocumentScoreRow: View {
         }
     }
 
-    /// Expanded content showing abstract, LLM reasoning, score comparison, and metadata.
+    /// Expanded content showing abstract, LLM reasoning, key passages, score comparison, and metadata.
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
@@ -388,6 +388,11 @@ struct DocumentScoreRow: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(ReasoningColors.border, lineWidth: 1)
                 )
+            }
+
+            // Key Passages (Citations) - shown before abstract
+            if !(document.citations ?? []).isEmpty {
+                keyPassagesSection
             }
 
             // Abstract - rendered with markdown
@@ -590,6 +595,36 @@ struct DocumentScoreRow: View {
             Label("PMID: \(document.pmid)", systemImage: "number")
                 .font(.caption2)
                 .foregroundColor(.secondary)
+        }
+    }
+
+    /// Section displaying extracted key passages (citations) from the document.
+    ///
+    /// Shows the extracted quotes that are most relevant to the claim being fact-checked.
+    /// Each passage is displayed with a quote icon and styled to stand out from the abstract.
+    private var keyPassagesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Key Passages (\((document.citations ?? []).count))")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+
+            ForEach(document.citations ?? [], id: \.id) { citation in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "quote.opening")
+                        .font(.caption)
+                        .foregroundColor(.accentColor)
+
+                    Text(citation.passage)
+                        .font(.caption)
+                        .italic()
+                        .textSelection(.enabled)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.08))
+                .cornerRadius(8)
+            }
         }
     }
 
