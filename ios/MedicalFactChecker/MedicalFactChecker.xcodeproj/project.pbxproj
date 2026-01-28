@@ -10,6 +10,12 @@
 		63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */; };
 		6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = 6F36EF612F1C5A5200C0AAEA /* BioMedLit */; };
 		89576A25A7BF81151881CE38 /* ProcessingProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */; };
+		A1000060001 /* SortingControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000060000 /* SortingControlsView.swift */; };
+		A1000061001 /* ErrorQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000061000 /* ErrorQueueView.swift */; };
+		A1000062001 /* ErrorEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000062000 /* ErrorEntry.swift */; };
+		A1000063001 /* ErrorPersistenceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000063000 /* ErrorPersistenceManager.swift */; };
+		A1000064001 /* ErrorTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000064000 /* ErrorTypes.swift */; };
+		A1000065001 /* WorkflowConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000065000 /* WorkflowConstants.swift */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -132,6 +138,12 @@
 		A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointedScoringService.swift; sourceTree = "<group>"; };
 		F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointManager.swift; sourceTree = "<group>"; };
 		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
+		A1000060000 /* SortingControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortingControlsView.swift; sourceTree = "<group>"; };
+		A1000061000 /* ErrorQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorQueueView.swift; sourceTree = "<group>"; };
+		A1000062000 /* ErrorEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorEntry.swift; sourceTree = "<group>"; };
+		A1000063000 /* ErrorPersistenceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPersistenceManager.swift; sourceTree = "<group>"; };
+		A1000064000 /* ErrorTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorTypes.swift; sourceTree = "<group>"; };
+		A1000065000 /* WorkflowConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowConstants.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -188,16 +200,18 @@
 				A1000004000 /* Citation.swift */,
 				A1000005000 /* Document.swift */,
 				A1000006000 /* Enums.swift */,
+				A1000062000 /* ErrorEntry.swift */,
+				A1000064000 /* ErrorTypes.swift */,
 				A1000007000 /* EvidenceReport.swift */,
 				A1000008000 /* FactCheckSession.swift */,
 				A1000036000 /* FullTextSource.swift */,
+				7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */,
 				A1000024000 /* LLMProvider.swift */,
+				8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */,
 				A1000058000 /* QueryConstants.swift */,
 				A1000035000 /* SearchProvider.swift */,
 				A1000057000 /* StructuredQuery.swift */,
 				A1000009000 /* UsageRecord.swift */,
-				7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */,
-				8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -205,15 +219,17 @@
 		A1000000023 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */,
+				F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */,
 				A1000022000 /* EmbeddingService.swift */,
+				A1000063000 /* ErrorPersistenceManager.swift */,
 				A1000010000 /* FactCheckWorkflow.swift */,
 				A1000011000 /* LLMService.swift */,
 				A1000028000 /* ModelFetchService.swift */,
 				A1000059000 /* ParallelScoringService.swift */,
-				A1000039000 /* SearchServiceProtocol.swift */,
-				F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */,
 				FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */,
-				A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */,
+				A1000039000 /* SearchServiceProtocol.swift */,
+				A1000065000 /* WorkflowConstants.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -309,11 +325,13 @@
 			isa = PBXGroup;
 			children = (
 				A1000046000 /* DocumentSourceBadge.swift */,
+				A1000061000 /* ErrorQueueView.swift */,
 				A1000047000 /* FetchMoreView.swift */,
 				A1000048000 /* FullTextSourceBadge.swift */,
-				A1000049000 /* SearchProgressView.swift */,
-				A1000050000 /* SearchOptionsView.swift */,
 				1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */,
+				A1000050000 /* SearchOptionsView.swift */,
+				A1000049000 /* SearchProgressView.swift */,
+				A1000060000 /* SortingControlsView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -461,6 +479,12 @@
 				AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */,
 				AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */,
 				89576A25A7BF81151881CE38 /* ProcessingProgressView.swift in Sources */,
+				A1000060001 /* SortingControlsView.swift in Sources */,
+				A1000061001 /* ErrorQueueView.swift in Sources */,
+				A1000062001 /* ErrorEntry.swift in Sources */,
+				A1000063001 /* ErrorPersistenceManager.swift in Sources */,
+				A1000064001 /* ErrorTypes.swift in Sources */,
+				A1000065001 /* WorkflowConstants.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

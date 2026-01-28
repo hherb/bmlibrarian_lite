@@ -144,7 +144,7 @@ protocol SortableDocument {
     var score: Int? { get }
 
     /// Document title for alphabetical sorting.
-    var title: String? { get }
+    var sortableTitle: String? { get }
 
     /// Publication year for chronological sorting.
     var year: Int? { get }
@@ -168,11 +168,11 @@ extension Array where Element: SortableDocument {
             return sorted { ($0.score ?? 0) < ($1.score ?? 0) }
         case .titleAZ:
             return sorted {
-                ($0.title ?? "").localizedCaseInsensitiveCompare($1.title ?? "") == .orderedAscending
+                ($0.sortableTitle ?? "").localizedCaseInsensitiveCompare($1.sortableTitle ?? "") == .orderedAscending
             }
         case .titleZA:
             return sorted {
-                ($0.title ?? "").localizedCaseInsensitiveCompare($1.title ?? "") == .orderedDescending
+                ($0.sortableTitle ?? "").localizedCaseInsensitiveCompare($1.sortableTitle ?? "") == .orderedDescending
             }
         case .yearNewest:
             return sorted { ($0.year ?? 0) > ($1.year ?? 0) }
@@ -191,8 +191,11 @@ extension Document: SortableDocument {
     /// Returns the LLM relevance score.
     var score: Int? { relevanceScore }
 
-    /// Returns the document title.
-    /// Note: Already has a `title` property, this provides protocol conformance.
+    /// Returns the document title as optional for protocol conformance.
+    ///
+    /// The Document model has a non-optional `title: String` property,
+    /// but the protocol requires `String?` for generic sorting support.
+    var sortableTitle: String? { title }
 }
 
 // MARK: - Preview
