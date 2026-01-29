@@ -76,8 +76,8 @@
 			isa = PBXContainerItemProxy;
 			containerPortal = A5000010 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 6FCBC9C42F16568000D6BF11;
-			remoteInfo = "Medical Fact Checker";
+			remoteGlobalIDString = A5000001;
+			remoteInfo = MedicalFactCheckerMac;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -86,7 +86,7 @@
 		6F77FEB42F1A5DBD00B03EBF /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
 		6F77FEB62F1A5DD800B03EBF /* QueryBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryBuilder.swift; sourceTree = "<group>"; };
 		6F77FEB82F1A5DE000B03EBF /* QueryConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryConstants.swift; sourceTree = "<group>"; };
-		6FCBC9C52F16568000D6BF11 /* Medical Fact Checker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Medical Fact Checker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		/* 6FCBC9C52F16568000D6BF11 removed - was duplicate legacy target */
 		6FCBC9D32F16568100D6BF11 /* Medical Fact CheckerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Medical Fact CheckerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6FCBC9DD2F16568100D6BF11 /* Medical Fact CheckerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Medical Fact CheckerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchOptionsToolbar.swift; sourceTree = "<group>"; };
@@ -150,13 +150,6 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		6FCBC9C22F16568000D6BF11 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		6FCBC9D02F16568100D6BF11 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -363,7 +356,6 @@
 			isa = PBXGroup;
 			children = (
 				A2000029 /* Medical Fact Checker.app */,
-				6FCBC9C52F16568000D6BF11 /* Medical Fact Checker.app */,
 				6FCBC9D32F16568100D6BF11 /* Medical Fact CheckerTests.xctest */,
 				6FCBC9DD2F16568100D6BF11 /* Medical Fact CheckerUITests.xctest */,
 			);
@@ -373,23 +365,6 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		6FCBC9C42F16568000D6BF11 /* Medical Fact Checker */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 6FCBC9EB2F16568100D6BF11 /* Build configuration list for PBXNativeTarget "Medical Fact Checker" */;
-			buildPhases = (
-				6FCBC9C12F16568000D6BF11 /* Sources */,
-				6FCBC9C22F16568000D6BF11 /* Frameworks */,
-				6FCBC9C32F16568000D6BF11 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "Medical Fact Checker";
-			productName = "Medical Fact Checker";
-			productReference = 6FCBC9C52F16568000D6BF11 /* Medical Fact Checker.app */;
-			productType = "com.apple.product-type.application";
-		};
 		6FCBC9D22F16568100D6BF11 /* Medical Fact CheckerTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 6FCBC9EC2F16568100D6BF11 /* Build configuration list for PBXNativeTarget "Medical Fact CheckerTests" */;
@@ -462,16 +437,13 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					6FCBC9C42F16568000D6BF11 = {
-						CreatedOnToolsVersion = 26.2;
-					};
 					6FCBC9D22F16568100D6BF11 = {
 						CreatedOnToolsVersion = 26.2;
-						TestTargetID = 6FCBC9C42F16568000D6BF11;
+						TestTargetID = A5000001;
 					};
 					6FCBC9DC2F16568100D6BF11 = {
 						CreatedOnToolsVersion = 26.2;
-						TestTargetID = 6FCBC9C42F16568000D6BF11;
+						TestTargetID = A5000001;
 					};
 					A5000001 = {
 						CreatedOnToolsVersion = 15.0;
@@ -495,7 +467,6 @@
 			projectRoot = "";
 			targets = (
 				A5000001 /* MedicalFactCheckerMac */,
-				6FCBC9C42F16568000D6BF11 /* Medical Fact Checker */,
 				6FCBC9D22F16568100D6BF11 /* Medical Fact CheckerTests */,
 				6FCBC9DC2F16568100D6BF11 /* Medical Fact CheckerUITests */,
 			);
@@ -503,13 +474,6 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		6FCBC9C32F16568000D6BF11 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		6FCBC9D12F16568100D6BF11 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -538,13 +502,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		6FCBC9C12F16568000D6BF11 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		6FCBC9CF2F16568100D6BF11 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -626,104 +583,12 @@
 		};
 		6FCBC9DF2F16568100D6BF11 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 6FCBC9C42F16568000D6BF11 /* Medical Fact Checker */;
+			target = A5000001 /* MedicalFactCheckerMac */;
 			targetProxy = 6FCBC9DE2F16568100D6BF11 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		6FCBC9E52F16568100D6BF11 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
-				DEAD_CODE_STRIPPING = YES;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
-				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
-				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
-				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
-				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
-				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
-				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
-				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
-				ENABLE_RESOURCE_ACCESS_PRINTING = YES;
-				ENABLE_RESOURCE_ACCESS_USB = NO;
-				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Medic al Fact Checker Mac";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-Checker";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		6FCBC9E62F16568100D6BF11 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
-				DEAD_CODE_STRIPPING = YES;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
-				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
-				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
-				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
-				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
-				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
-				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
-				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
-				ENABLE_RESOURCE_ACCESS_PRINTING = YES;
-				ENABLE_RESOURCE_ACCESS_USB = NO;
-				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Medic al Fact Checker Mac";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-Checker";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
 		6FCBC9E72F16568100D6BF11 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -732,9 +597,9 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.bmlibrarian.MedicalFactCheckerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -753,9 +618,9 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.bmlibrarian.MedicalFactCheckerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -773,16 +638,16 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.bmlibrarian.MedicalFactCheckerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = "Medical Fact Checker";
+				TEST_TARGET_NAME = MedicalFactCheckerMac;
 			};
 			name = Debug;
 		};
@@ -793,16 +658,16 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "hherb.Medical-Fact-CheckerUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.bmlibrarian.MedicalFactCheckerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = "Medical Fact Checker";
+				TEST_TARGET_NAME = MedicalFactCheckerMac;
 			};
 			name = Release;
 		};
@@ -957,6 +822,7 @@
 				);
 				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
+				PRODUCT_MODULE_NAME = MedicalFactChecker;
 				PRODUCT_NAME = "Medical Fact Checker";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -998,6 +864,7 @@
 				);
 				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
+				PRODUCT_MODULE_NAME = MedicalFactChecker;
 				PRODUCT_NAME = "Medical Fact Checker";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -1007,15 +874,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		6FCBC9EB2F16568100D6BF11 /* Build configuration list for PBXNativeTarget "Medical Fact Checker" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				6FCBC9E52F16568100D6BF11 /* Debug */,
-				6FCBC9E62F16568100D6BF11 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		6FCBC9EC2F16568100D6BF11 /* Build configuration list for PBXNativeTarget "Medical Fact CheckerTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
