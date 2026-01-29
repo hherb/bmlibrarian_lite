@@ -16,6 +16,59 @@
 
 import SwiftUI
 
+// MARK: - Constants
+
+/// Layout constants for printable report view.
+private enum PrintableReportConstants {
+    /// Margin around the content.
+    static let margin: CGFloat = 50
+
+    /// Horizontal padding for verdict badge.
+    static let badgeHorizontalPadding: CGFloat = 20
+
+    /// Vertical padding for verdict badge.
+    static let badgeVerticalPadding: CGFloat = 10
+
+    /// Corner radius for verdict badge.
+    static let badgeCornerRadius: CGFloat = 25
+
+    /// Standard section padding.
+    static let sectionPadding: CGFloat = 8
+
+    /// Standard corner radius for sections.
+    static let sectionCornerRadius: CGFloat = 8
+
+    /// Score badge size.
+    static let scoreBadgeSize: CGFloat = 24
+
+    /// Document card padding.
+    static let documentCardPadding: CGFloat = 8
+
+    /// Document card corner radius.
+    static let documentCardCornerRadius: CGFloat = 4
+
+    /// Disclaimer padding.
+    static let disclaimerPadding: CGFloat = 8
+
+    /// Disclaimer corner radius.
+    static let disclaimerCornerRadius: CGFloat = 6
+
+    /// Minimum relevance score to show in documents section.
+    static let minRelevanceScoreToShow = 3
+
+    /// Minimum spacer height in footer.
+    static let minFooterSpacerHeight: CGFloat = 20
+
+    /// Background opacity for sections.
+    static let sectionBackgroundOpacity: CGFloat = 0.1
+
+    /// Background opacity for document cards.
+    static let documentCardBackgroundOpacity: CGFloat = 0.05
+
+    /// Background opacity for disclaimer.
+    static let disclaimerBackgroundOpacity: CGFloat = 0.1
+}
+
 /// A non-interactive report view designed for PDF export and printing.
 ///
 /// This view renders the full report content without interactive elements
@@ -24,9 +77,6 @@ import SwiftUI
 struct PrintableReportView: View {
     let report: EvidenceReport
     let paperSize: PaperSize
-
-    /// Margin around the content.
-    private let margin: CGFloat = 50
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -65,12 +115,12 @@ struct PrintableReportView: View {
                 documentsSection(session.documents ?? [])
             }
 
-            Spacer(minLength: 20)
+            Spacer(minLength: PrintableReportConstants.minFooterSpacerHeight)
 
             // Footer
             footerSection
         }
-        .padding(margin)
+        .padding(PrintableReportConstants.margin)
         .frame(width: paperSize.size.width)
         .background(Color.white)
     }
@@ -103,11 +153,11 @@ struct PrintableReportView: View {
     private var printableVerdictBadge: some View {
         Text(report.verdict.rawValue)
             .font(.headline)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
+            .padding(.horizontal, PrintableReportConstants.badgeHorizontalPadding)
+            .padding(.vertical, PrintableReportConstants.badgeVerticalPadding)
             .background(verdictColor)
             .foregroundColor(.white)
-            .cornerRadius(25)
+            .cornerRadius(PrintableReportConstants.badgeCornerRadius)
     }
 
     private var verdictColor: Color {
@@ -142,14 +192,14 @@ struct PrintableReportView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color.gray.opacity(PrintableReportConstants.sectionBackgroundOpacity))
+        .cornerRadius(PrintableReportConstants.sectionCornerRadius)
     }
 
     // MARK: - Summary Section
 
     private var summarySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: PrintableReportConstants.sectionPadding) {
             Text("Summary")
                 .font(.headline)
             Text(report.summary)
@@ -157,8 +207,8 @@ struct PrintableReportView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color.blue.opacity(PrintableReportConstants.sectionBackgroundOpacity))
+        .cornerRadius(PrintableReportConstants.sectionCornerRadius)
     }
 
     // MARK: - Detailed Report Section
@@ -197,8 +247,8 @@ struct PrintableReportView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color.gray.opacity(PrintableReportConstants.sectionBackgroundOpacity))
+        .cornerRadius(PrintableReportConstants.sectionCornerRadius)
     }
 
     private func printableStatItem(label: String, value: String) -> some View {
@@ -224,8 +274,10 @@ struct PrintableReportView: View {
                 ($0.relevanceScore ?? 0) > ($1.relevanceScore ?? 0)
             }
 
-            // Only show relevant documents (score >= 3)
-            let relevantDocs = sortedDocs.filter { ($0.relevanceScore ?? 0) >= 3 }
+            // Only show relevant documents (score >= minRelevanceScoreToShow)
+            let relevantDocs = sortedDocs.filter {
+                ($0.relevanceScore ?? 0) >= PrintableReportConstants.minRelevanceScoreToShow
+            }
 
             ForEach(relevantDocs, id: \.pmid) { doc in
                 printableDocumentCard(doc)
@@ -264,7 +316,10 @@ struct PrintableReportView: View {
                         .font(.caption)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
-                        .frame(width: 24, height: 24)
+                        .frame(
+                            width: PrintableReportConstants.scoreBadgeSize,
+                            height: PrintableReportConstants.scoreBadgeSize
+                        )
                         .background(scoreColor(score))
                         .clipShape(Circle())
                 }
@@ -274,17 +329,21 @@ struct PrintableReportView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
-        .padding(8)
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(4)
+        .padding(PrintableReportConstants.documentCardPadding)
+        .background(Color.gray.opacity(PrintableReportConstants.documentCardBackgroundOpacity))
+        .cornerRadius(PrintableReportConstants.documentCardCornerRadius)
     }
 
+    /// Returns the appropriate color for a relevance score.
+    ///
+    /// - Parameter score: The relevance score (1-5).
+    /// - Returns: The color corresponding to the score.
     private func scoreColor(_ score: Int) -> Color {
         switch score {
         case 5: return .green
-        case 4: return Color(red: 0.4, green: 0.7, blue: 0.3)
+        case 4: return Color(red: 0.4, green: 0.7, blue: 0.3)  // Light green
         case 3: return .orange
-        case 2: return Color(red: 0.9, green: 0.5, blue: 0.2)
+        case 2: return Color(red: 0.9, green: 0.5, blue: 0.2)  // Orange-red
         default: return .red
         }
     }
@@ -314,10 +373,10 @@ struct PrintableReportView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
-            .padding(8)
+            .padding(PrintableReportConstants.disclaimerPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.1))
-            .cornerRadius(6)
+            .background(Color.orange.opacity(PrintableReportConstants.disclaimerBackgroundOpacity))
+            .cornerRadius(PrintableReportConstants.disclaimerCornerRadius)
 
             // App branding
             HStack {

@@ -229,12 +229,15 @@ actor CheckpointedScoringService {
         // Process remaining documents if any
         if !toProcess.isEmpty {
             let startCount = results.count
+            let total = inputs.count
 
             // Score using Phase 1 parallel service with progress callback
+            // Note: progressDelegate is captured strongly since this closure is short-lived
+            // and executes within the scope of this function
             let newResults = await scoringService.scoreDocuments(
                 toProcess,
                 claim: claim,
-                onProgress: { [weak progressDelegate, startCount, total = inputs.count] pmid, completed, _ in
+                onProgress: { pmid, completed, _ in
                     Task {
                         let adjustedCurrent = startCount + completed
                         await progressDelegate?.didReceiveProgress(ProgressMessage(
