@@ -322,8 +322,8 @@ actor ParallelScoringService {
             do {
                 let (response, usage) = try await llmService.chat(
                     messages: messages,
-                    temperature: 0.1,
-                    maxTokens: 512,
+                    temperature: WorkflowConstants.scoringTemperature,
+                    maxTokens: WorkflowConstants.scoringMaxTokens,
                     jsonMode: true
                 )
 

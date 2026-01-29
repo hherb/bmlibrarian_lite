@@ -31,6 +31,20 @@ enum WorkflowConstants {
     /// alternative search queries to find more evidence.
     static let smartSearchThreshold = 3
 
+    // MARK: - LLM Configuration for Document Scoring
+
+    /// Temperature for document scoring requests.
+    ///
+    /// Low temperature (0.1) produces more deterministic, consistent scoring
+    /// results across documents. Matches Python constants.py configuration.
+    static let scoringTemperature: Double = 0.1
+
+    /// Maximum tokens for document scoring responses.
+    ///
+    /// Scoring responses are structured JSON with score and brief explanation,
+    /// so 512 tokens is sufficient. Matches Python constants.py configuration.
+    static let scoringMaxTokens: Int = 512
+
     // MARK: - Concurrency
 
     /// Default number of concurrent requests for cloud LLM providers.

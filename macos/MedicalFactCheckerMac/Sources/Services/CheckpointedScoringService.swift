@@ -296,6 +296,10 @@ actor CheckpointedScoringService {
     ///
     /// - Parameter sessionId: The session identifier.
     func clearCheckpoints(sessionId: String) async {
-        try? await checkpointManager.deleteCheckpoints(sessionId: sessionId)
+        do {
+            try await checkpointManager.deleteCheckpoints(sessionId: sessionId)
+        } catch {
+            AppLogger.persistence.error("Failed to delete checkpoints for session \(sessionId): \(error)")
+        }
     }
 }
