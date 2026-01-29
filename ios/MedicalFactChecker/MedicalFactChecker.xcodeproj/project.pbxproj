@@ -77,6 +77,7 @@
 		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
 		C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */; };
 		E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */; };
+		A1000069001 /* SchemaVersions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000069000 /* SchemaVersions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -150,6 +151,7 @@
 		A1000065000 /* WorkflowConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowConstants.swift; sourceTree = "<group>"; };
 		A1000067000 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
 		A1000068000 /* BackgroundStatusBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundStatusBanner.swift; sourceTree = "<group>"; };
+		A1000069000 /* SchemaVersions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaVersions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -215,6 +217,7 @@
 				A1000024000 /* LLMProvider.swift */,
 				8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */,
 				A1000058000 /* QueryConstants.swift */,
+				A1000069000 /* SchemaVersions.swift */,
 				A1000035000 /* SearchProvider.swift */,
 				A1000057000 /* StructuredQuery.swift */,
 				A1000009000 /* UsageRecord.swift */,
@@ -497,6 +500,7 @@
 				A1000065001 /* WorkflowConstants.swift in Sources */,
 				A1000067001 /* BackgroundTaskManager.swift in Sources */,
 				A1000068001 /* BackgroundStatusBanner.swift in Sources */,
+				A1000069001 /* SchemaVersions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

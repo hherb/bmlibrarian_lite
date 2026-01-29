@@ -60,6 +60,8 @@
 		D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7154E413822677015180F7D6 /* MacSearchOptionsToolbar.swift */; };
 		DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */; };
 		A1000070 /* ParallelCitationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000070 /* ParallelCitationService.swift */; };
+		A1000071 /* ProcessingCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000071 /* ProcessingCheckpoint.swift */; };
+		A1000072 /* SchemaVersions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000072 /* SchemaVersions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -138,6 +140,8 @@
 		A2000060 /* BioMedLitAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BioMedLitAdapters.swift; sourceTree = "<group>"; };
 		B2CB7A63E9F00A058794FD5E /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
 		A2000070 /* ParallelCitationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelCitationService.swift; sourceTree = "<group>"; };
+		A2000071 /* ProcessingCheckpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCheckpoint.swift; sourceTree = "<group>"; };
+		A2000072 /* SchemaVersions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaVersions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -281,6 +285,8 @@
 				A2000014 /* FactCheckSession.swift */,
 				A2000040 /* FullTextSource.swift */,
 				A2000015 /* LLMProvider.swift */,
+				A2000071 /* ProcessingCheckpoint.swift */,
+				A2000072 /* SchemaVersions.swift */,
 				A2000045 /* SearchProvider.swift */,
 				A2000016 /* UsageRecord.swift */,
 			);
@@ -605,6 +611,8 @@
 				D5198B436A99893FB90B3A20 /* MacSearchOptionsToolbar.swift in Sources */,
 				2A2FD8A275EC77C35EA5255A /* MacFetchMoreView.swift in Sources */,
 				DA6CBE205A61F27B038ADAF7 /* MacSearchProgressView.swift in Sources */,
+				A1000071 /* ProcessingCheckpoint.swift in Sources */,
+				A1000072 /* SchemaVersions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
