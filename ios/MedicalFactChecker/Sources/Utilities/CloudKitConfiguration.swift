@@ -105,21 +105,26 @@ enum CloudKitConfiguration {
     static func makeModelContainerWithMigration() throws -> ModelContainer {
         let useCloudKit = isSyncEnabled && isCloudAvailable
 
+        // Create schema from the current version's models
+        let schema = Schema(versionedSchema: SchemaV2.self)
+
         let configuration: ModelConfiguration
         if useCloudKit {
             configuration = ModelConfiguration(
+                schema: schema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: .automatic
             )
         } else {
             configuration = ModelConfiguration(
+                schema: schema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: .none
             )
         }
 
         return try ModelContainer(
-            for: SchemaV2.models,
+            for: schema,
             migrationPlan: MedicalFactCheckerMigrationPlan.self,
             configurations: [configuration]
         )
