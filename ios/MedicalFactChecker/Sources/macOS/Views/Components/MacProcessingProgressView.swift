@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2026 Dr Horst Herb
 //
@@ -95,11 +95,7 @@ struct ProcessingProgressView: View {
             }
         }
         .padding()
-        #if os(iOS)
-        .background(Color(.secondarySystemBackground))
-        #else
         .background(Color(nsColor: .controlBackgroundColor))
-        #endif
         .cornerRadius(8)
     }
 }
@@ -186,11 +182,7 @@ struct DualPhaseProgressView: View {
             )
         }
         .padding()
-        #if os(iOS)
-        .background(Color(.secondarySystemBackground))
-        #else
         .background(Color(nsColor: .controlBackgroundColor))
-        #endif
         .cornerRadius(12)
     }
 }
@@ -303,4 +295,4 @@ private struct Badge: View {
     .padding()
 }
 
-#endif // os(iOS)
+#endif // os(macOS)

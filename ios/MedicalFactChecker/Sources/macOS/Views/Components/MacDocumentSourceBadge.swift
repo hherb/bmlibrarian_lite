@@ -1,6 +1,6 @@
-#if os(iOS)
+#if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -85,10 +85,10 @@ struct DocumentSourceBadge: View {
                     .cornerRadius(DocumentSourceBadgeConstants.badgeVerticalPadding)
             }
         }
-        .foregroundColor(provider.themeColor)
+        .foregroundColor(themeColor)
         .padding(.horizontal, DocumentSourceBadgeConstants.badgeHorizontalPadding)
         .padding(.vertical, DocumentSourceBadgeConstants.badgeVerticalPadding)
-        .background(provider.themeColor.opacity(DocumentSourceBadgeConstants.badgeBackgroundOpacity))
+        .background(themeColor.opacity(DocumentSourceBadgeConstants.badgeBackgroundOpacity))
         .cornerRadius(DocumentSourceBadgeConstants.badgeCornerRadius)
     }
 
@@ -105,6 +105,34 @@ struct DocumentSourceBadge: View {
             return "Both"
         }
     }
+
+    /// Theme color for the provider.
+    private var themeColor: Color {
+        switch provider {
+        case .pubmed:
+            return Color(nsColor: .systemBlue).opacity(0.8)
+        case .europePMC:
+            return Color(nsColor: .systemIndigo)
+        case .both:
+            return Color(nsColor: .systemCyan)
+        }
+    }
+}
+
+// MARK: - SearchProvider Extension
+
+extension SearchProvider {
+    /// Theme color for this search provider.
+    var themeColor: Color {
+        switch self {
+        case .pubmed:
+            return Color(nsColor: .systemBlue).opacity(0.8)
+        case .europePMC:
+            return Color(nsColor: .systemIndigo)
+        case .both:
+            return Color(nsColor: .systemCyan)
+        }
+    }
 }
 
 // MARK: - Preview
@@ -119,4 +147,4 @@ struct DocumentSourceBadge: View {
     .padding()
 }
 
-#endif // os(iOS)
+#endif // os(macOS)

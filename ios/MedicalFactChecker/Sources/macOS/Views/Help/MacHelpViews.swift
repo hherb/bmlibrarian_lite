@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //
@@ -19,23 +19,22 @@ import SwiftUI
 
 // MARK: - Help Window Constants
 
-/// Layout constants for help views.
-private enum HelpViewLayout {
-    static let contentPadding: CGFloat = 16
-    static let sectionSpacing: CGFloat = 12
+/// Layout constants for help windows.
+enum HelpWindowLayout {
+    static let windowWidth: CGFloat = 750
+    static let windowHeight: CGFloat = 650
+    static let contentPadding: CGFloat = 24
+    static let scrollViewPadding: CGFloat = 20
 }
 
 // MARK: - Markdown Content View
 
-/// A view that renders markdown content with proper styling for iOS.
-///
-/// Parses markdown line-by-line and renders headers, lists, tables,
-/// code blocks, and inline formatting as native SwiftUI views.
+/// A view that renders markdown content with proper styling.
 struct MarkdownContentView: View {
     let markdownString: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: HelpViewLayout.sectionSpacing) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(parseMarkdown().enumerated()), id: \.offset) { _, element in
                 element
             }
@@ -94,14 +93,14 @@ struct MarkdownContentView: View {
             }
 
             // Handle headers
-            if line.hasPrefix("#### ") {
-                views.append(AnyView(headerView(line.dropFirst(5), level: 4)))
-            } else if line.hasPrefix("### ") {
-                views.append(AnyView(headerView(line.dropFirst(4), level: 3)))
+            if line.hasPrefix("# ") {
+                views.append(AnyView(headerView(line.dropFirst(2), level: 1)))
             } else if line.hasPrefix("## ") {
                 views.append(AnyView(headerView(line.dropFirst(3), level: 2)))
-            } else if line.hasPrefix("# ") {
-                views.append(AnyView(headerView(line.dropFirst(2), level: 1)))
+            } else if line.hasPrefix("### ") {
+                views.append(AnyView(headerView(line.dropFirst(4), level: 3)))
+            } else if line.hasPrefix("#### ") {
+                views.append(AnyView(headerView(line.dropFirst(5), level: 4)))
             }
             // Handle horizontal rules
             else if line.trimmingCharacters(in: .whitespaces).hasPrefix("---") {
@@ -142,7 +141,7 @@ struct MarkdownContentView: View {
             Text(processInlineMarkdown(String(text)))
                 .font(headerFont(level: level))
                 .fontWeight(level == 1 ? .bold : .semibold)
-                .foregroundColor(.primary)
+                .foregroundColor(level == 1 ? .primary : .primary)
 
             if level <= 2 {
                 Rectangle()
@@ -186,7 +185,7 @@ struct MarkdownContentView: View {
             Text("\(number).")
                 .font(.body)
                 .foregroundColor(.secondary)
-                .frame(width: 24, alignment: .trailing)
+                .frame(width: 20, alignment: .trailing)
             Text(processInlineMarkdown(content))
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
@@ -196,11 +195,15 @@ struct MarkdownContentView: View {
 
     private func codeBlockView(_ code: String) -> some View {
         Text(code)
-            .font(.system(.footnote, design: .monospaced))
+            .font(.system(.body, design: .monospaced))
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(UIColor.systemGray6))
-            .cornerRadius(8)
+            .background(Color(NSColor.textBackgroundColor).opacity(0.5))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
     }
 
     private func tableView(_ rows: [[String]]) -> some View {
@@ -209,9 +212,10 @@ struct MarkdownContentView: View {
                 HStack(spacing: 0) {
                     ForEach(Array(row.enumerated()), id: \.offset) { colIndex, cell in
                         Text(processInlineMarkdown(cell))
-                            .font(index == 0 ? .subheadline.weight(.semibold) : .subheadline)
+                            .font(index == 0 ? .headline : .body)
+                            .fontWeight(index == 0 ? .semibold : .regular)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 6)
                             .padding(.horizontal, 8)
                             .background(index == 0 ? Color.secondary.opacity(0.1) : Color.clear)
 
@@ -226,10 +230,10 @@ struct MarkdownContentView: View {
                 }
             }
         }
-        .background(Color(UIColor.systemGray6).opacity(0.5))
-        .cornerRadius(8)
+        .background(Color(NSColor.textBackgroundColor).opacity(0.3))
+        .cornerRadius(6)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 6)
                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
         )
         .padding(.vertical, 4)
@@ -239,8 +243,7 @@ struct MarkdownContentView: View {
     private func processInlineMarkdown(_ text: String) -> AttributedString {
         var result = text
 
-        // Convert markdown links [text](url) to just text for display
-        // (links to external URLs don't work reliably in AttributedString)
+        // Convert markdown links [text](url) to just text (links don't work in AttributedString easily)
         let linkPattern = #"\[([^\]]+)\]\([^\)]+\)"#
         if let regex = try? NSRegularExpression(pattern: linkPattern) {
             let range = NSRange(result.startIndex..., in: result)
@@ -257,46 +260,63 @@ struct MarkdownContentView: View {
     }
 }
 
-// MARK: - Help View
+// MARK: - Help Window View
 
-/// View that displays the help documentation with native markdown rendering.
+/// macOS Help window content view.
 ///
-/// Loads and renders the HELP.md file bundled with the app, providing
-/// users with comprehensive guidance on using the app.
-struct HelpView: View {
+/// Displays the HELP.md content with proper markdown rendering in a dedicated window.
+struct MacHelpWindowView: View {
     @State private var markdownContent: String = "Loading..."
     @State private var loadError: String?
 
     var body: some View {
-        ScrollView {
-            if let error = loadError {
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundColor(.orange)
-                    Text("Could not load help content")
-                        .font(.headline)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.title)
+                    .foregroundColor(.accentColor)
+                Text("Medical Fact Checker Help")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            .padding(HelpWindowLayout.contentPadding)
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
+
+            // Content
+            ScrollView {
+                if let error = loadError {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 48))
+                            .foregroundColor(.orange)
+                        Text("Could not load help content")
+                            .font(.headline)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(HelpWindowLayout.contentPadding)
+                } else {
+                    MarkdownContentView(markdownString: markdownContent)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(HelpWindowLayout.scrollViewPadding)
                 }
-                .padding()
-            } else {
-                MarkdownContentView(markdownString: markdownContent)
-                    .textSelection(.enabled)
-                    .padding(HelpViewLayout.contentPadding)
             }
         }
-        .navigationTitle("Help")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
-        #endif
+        .frame(
+            minWidth: HelpWindowLayout.windowWidth,
+            minHeight: HelpWindowLayout.windowHeight
+        )
         .task {
             loadHelpContent()
         }
     }
-
-    // MARK: - Content Loading
 
     /// Loads the HELP.md content from the app bundle.
     private func loadHelpContent() {
@@ -308,7 +328,6 @@ struct HelpView: View {
         }
     }
 
-    /// Fallback help content if the bundle file is not available.
     private var fallbackHelpContent: String {
         """
         # Medical Fact Checker Help
@@ -318,7 +337,7 @@ struct HelpView: View {
         ## Quick Start
 
         1. Enter a medical claim or question
-        2. Tap "Check Evidence"
+        2. Click "Check Evidence"
         3. Review the evidence report
 
         ## Important Notes
@@ -339,43 +358,63 @@ struct HelpView: View {
     }
 }
 
-// MARK: - Privacy View
+// MARK: - Privacy Window View
 
-/// View that displays the privacy policy with native markdown rendering.
-struct PrivacyView: View {
+/// macOS Privacy Policy window content view.
+///
+/// Displays the PRIVACY.md content with proper markdown rendering in a dedicated window.
+struct MacPrivacyWindowView: View {
     @State private var markdownContent: String = "Loading..."
     @State private var loadError: String?
 
     var body: some View {
-        ScrollView {
-            if let error = loadError {
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundColor(.orange)
-                    Text("Could not load privacy policy")
-                        .font(.headline)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "hand.raised.fill")
+                    .font(.title)
+                    .foregroundColor(.accentColor)
+                Text("Privacy Policy")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            .padding(HelpWindowLayout.contentPadding)
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
+
+            // Content
+            ScrollView {
+                if let error = loadError {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 48))
+                            .foregroundColor(.orange)
+                        Text("Could not load privacy policy")
+                            .font(.headline)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(HelpWindowLayout.contentPadding)
+                } else {
+                    MarkdownContentView(markdownString: markdownContent)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(HelpWindowLayout.scrollViewPadding)
                 }
-                .padding()
-            } else {
-                MarkdownContentView(markdownString: markdownContent)
-                    .textSelection(.enabled)
-                    .padding(HelpViewLayout.contentPadding)
             }
         }
-        .navigationTitle("Privacy Policy")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
-        #endif
+        .frame(
+            minWidth: HelpWindowLayout.windowWidth,
+            minHeight: HelpWindowLayout.windowHeight
+        )
         .task {
             loadPrivacyContent()
         }
     }
-
-    // MARK: - Content Loading
 
     /// Loads the PRIVACY.md content from the app bundle.
     private func loadPrivacyContent() {
@@ -387,7 +426,6 @@ struct PrivacyView: View {
         }
     }
 
-    /// Fallback privacy content if the bundle file is not available.
     private var fallbackPrivacyContent: String {
         """
         # Privacy Policy
@@ -406,7 +444,7 @@ struct PrivacyView: View {
         - Medical claims and queries
         - Fact-check history
         - App settings
-        - API keys (stored in iOS Keychain)
+        - API keys (stored in macOS Keychain)
 
         ## Third-Party Services
 
@@ -424,16 +462,159 @@ struct PrivacyView: View {
     }
 }
 
-#Preview("Help") {
-    NavigationStack {
-        HelpView()
+// MARK: - Acknowledgments Window View
+
+/// macOS Acknowledgments window content view.
+///
+/// Displays acknowledgments and third-party licenses.
+struct MacAcknowledgmentsWindowView: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "heart.fill")
+                    .font(.title)
+                    .foregroundColor(.pink)
+                Text("Acknowledgments")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            .padding(HelpWindowLayout.contentPadding)
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
+
+            // Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    acknowledgementsSection
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(HelpWindowLayout.scrollViewPadding)
+            }
+        }
+        .frame(
+            minWidth: HelpWindowLayout.windowWidth - 100,
+            minHeight: HelpWindowLayout.windowHeight - 100
+        )
+    }
+
+    private var acknowledgementsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Medical Fact Checker")
+                .font(.headline)
+
+            Text("This application is built with the following technologies and services:")
+                .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                acknowledmentRow(
+                    name: "PubMed / NCBI",
+                    description: "Biomedical literature database provided by the National Center for Biotechnology Information",
+                    url: "https://pubmed.ncbi.nlm.nih.gov"
+                )
+
+                acknowledmentRow(
+                    name: "Apple NLEmbedding",
+                    description: "On-device natural language embedding for semantic similarity scoring",
+                    url: nil
+                )
+
+                acknowledmentRow(
+                    name: "SwiftUI & SwiftData",
+                    description: "Apple's modern declarative UI framework and data persistence",
+                    url: nil
+                )
+            }
+
+            Divider()
+                .padding(.vertical, 8)
+
+            Text("LLM Providers")
+                .font(.headline)
+
+            Text("This app supports the following AI providers for document analysis:")
+                .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                providerRow("Anthropic", "Claude models")
+                providerRow("OpenAI", "GPT models")
+                providerRow("DeepSeek", "DeepSeek models")
+                providerRow("Groq", "Fast Llama inference")
+                providerRow("Mistral", "Mistral models")
+                providerRow("Ollama", "Local model inference")
+            }
+
+            Divider()
+                .padding(.vertical, 8)
+
+            Text("Open Source")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Link(destination: URL(string: "https://github.com/hherb/bmlibrarian_lite")!) {
+                    HStack {
+                        Image(systemName: "link")
+                        Text("View source code on GitHub")
+                    }
+                }
+
+                Link(destination: URL(string: "https://github.com/hherb/bmlibrarian")!) {
+                    HStack {
+                        Image(systemName: "link")
+                        Text("BMLibrarian (full desktop version)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func acknowledmentRow(name: String, description: String, url: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let urlString = url, let linkURL = URL(string: urlString) {
+                Link(name, destination: linkURL)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            } else {
+                Text(name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            Text(description)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.leading, 8)
+    }
+
+    private func providerRow(_ name: String, _ description: String) -> some View {
+        HStack {
+            Text(name)
+                .font(.subheadline)
+                .frame(width: 80, alignment: .leading)
+            Text("-")
+                .foregroundColor(.secondary)
+            Text(description)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding(.leading, 8)
     }
 }
 
-#Preview("Privacy") {
-    NavigationStack {
-        PrivacyView()
-    }
+// MARK: - Previews
+
+#Preview("Help Window") {
+    MacHelpWindowView()
 }
 
-#endif // os(iOS)
+#Preview("Privacy Window") {
+    MacPrivacyWindowView()
+}
+
+#Preview("Acknowledgments") {
+    MacAcknowledgmentsWindowView()
+}
+
+#endif // os(macOS)

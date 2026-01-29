@@ -7,17 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		025762DFDDD01EF69FD3D9FC /* MacScoredDocumentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3280096E73BA9377D50E633D /* MacScoredDocumentsView.swift */; };
+		04F48E1AA099D0BEE1F62FDB /* MacSearchOptionsToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F111ED9AA6EE0B4437331914 /* MacSearchOptionsToolbar.swift */; };
+		132DF7E698F249C7F1447F83 /* MacFullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230B1CE1E585F2D941C23B56 /* MacFullTextViewer.swift */; };
+		14AEDA2386AD7A0819975B16 /* MacFullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CD6BDD1310D6A5AB67A4E8B /* MacFullTextTab.swift */; };
+		2409EA6178DF710FAC88B2D7 /* MacPrintableReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0CE2ABEECF6AF0F1729621A /* MacPrintableReportView.swift */; };
+		375C4E85319161BF2D602D28 /* MacConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8031F196CF9CD1A5029B0F75 /* MacConstants.swift */; };
+		37F9A838A7728EE5E957C8D8 /* MacFactCheckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C78409E9FDDEA5D9EA1CC80 /* MacFactCheckView.swift */; };
+		47C11C62C011ABF5BF86FD8B /* MacFetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02F4A54BEF425872F49B2BD9 /* MacFetchMoreView.swift */; };
+		636C1F74FBDE47D6BEFAE889 /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D3B6659F5FC046D2C99AA6 /* MacContentView.swift */; };
 		63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */; };
+		6D1E5885E9558E5B309ED347 /* MacReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D665F665F40DC4F821AED5FA /* MacReportView.swift */; };
 		6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = 6F36EF612F1C5A5200C0AAEA /* BioMedLit */; };
-		89576A25A7BF81151881CE38 /* ProcessingProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */; };
-		A1000060001 /* SortingControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000060000 /* SortingControlsView.swift */; };
-		A1000061001 /* ErrorQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000061000 /* ErrorQueueView.swift */; };
-		A1000062001 /* ErrorEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000062000 /* ErrorEntry.swift */; };
-		A1000063001 /* ErrorPersistenceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000063000 /* ErrorPersistenceManager.swift */; };
-		A1000064001 /* ErrorTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000064000 /* ErrorTypes.swift */; };
-		A1000065001 /* WorkflowConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000065000 /* WorkflowConstants.swift */; };
-		A1000067001 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000067000 /* BackgroundTaskManager.swift */; };
-		A1000068001 /* BackgroundStatusBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000068000 /* BackgroundStatusBanner.swift */; };
+		73BFAB4A43C95C46B19DE635 /* MacProcessingProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD189737C5701726FE9E52B7 /* MacProcessingProgressView.swift */; };
+		7A01BF566140E032179E58B9 /* MacHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3414FA46C1181D7951C1166 /* MacHistoryView.swift */; };
+		8A9AB921E8313735B980D52F /* MacOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D866E9F7E4E7DF2A8B5AE721 /* MacOnboardingView.swift */; };
 		A1000001001 /* MedicalFactCheckerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000 /* MedicalFactCheckerApp.swift */; };
 		A1000002001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002000 /* ContentView.swift */; };
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
@@ -72,18 +76,61 @@
 		A1000057001 /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057000 /* StructuredQuery.swift */; };
 		A1000058001 /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000058000 /* QueryConstants.swift */; };
 		A1000059001 /* ParallelScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059000 /* ParallelScoringService.swift */; };
+		A1000060001 /* SortingControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000060000 /* SortingControlsView.swift */; };
+		A1000061001 /* ErrorQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000061000 /* ErrorQueueView.swift */; };
+		A1000062001 /* ErrorEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000062000 /* ErrorEntry.swift */; };
+		A1000063001 /* ErrorPersistenceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000063000 /* ErrorPersistenceManager.swift */; };
+		A1000064001 /* ErrorTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000064000 /* ErrorTypes.swift */; };
+		A1000065001 /* WorkflowConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000065000 /* WorkflowConstants.swift */; };
 		A1000066001 /* ParallelCitationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000066000 /* ParallelCitationService.swift */; };
-		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
-		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
-		C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */; };
-		E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */; };
+		A1000067001 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000067000 /* BackgroundTaskManager.swift */; };
+		A1000068001 /* BackgroundStatusBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000068000 /* BackgroundStatusBanner.swift */; };
 		A1000069001 /* SchemaVersions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000069000 /* SchemaVersions.swift */; };
+		A5DF3C2C750F93571F536572 /* MedicalFactCheckerMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */; };
+		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
+		AC7F5F9D117D0C62AB84424D /* MacUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1A551C72E0132CF2D53022 /* MacUtilities.swift */; };
+		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
+		AF7C55453F1847A521E940C1 /* MacHelpViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2ED4E6BF01BA8A836174C9 /* MacHelpViews.swift */; };
+		B5E70E87E77A9A178DC702EE /* MacSortingControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DE2D66575DF0967DF2CF9A6 /* MacSortingControlsView.swift */; };
+		C44A67B1D246BAE4372826D2 /* MacFullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 678CD1CA1A539B9B54AFB397 /* MacFullTextSourceBadge.swift */; };
+		C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */; };
+		D1A27BC2679D5C85BD1B6DC5 /* MacDocumentSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57938901AE3B81A0E88815D1 /* MacDocumentSourceBadge.swift */; };
+		E10A8206211F4F148F5488A4 /* MacSearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFFCDCD81F58EC2F0CF438E8 /* MacSearchProgressView.swift */; };
+		E3523390EFEB6A4021F73BF3 /* MacErrorQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64577ADB5E841221E87D162B /* MacErrorQueueView.swift */; };
+		E705D3D03AE7C13929162654 /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A351474F50723CBC91DAC90F /* MacSettingsView.swift */; };
+		E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		02F4A54BEF425872F49B2BD9 /* MacFetchMoreView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFetchMoreView.swift; sourceTree = "<group>"; };
+		03BF6900473F00CF224B788C /* MacProcessingProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacProcessingProgressView.swift; sourceTree = "<group>"; };
 		1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProcessingProgressView.swift; sourceTree = "<group>"; };
+		1B1A551C72E0132CF2D53022 /* MacUtilities.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacUtilities.swift; sourceTree = "<group>"; };
+		1CD6BDD1310D6A5AB67A4E8B /* MacFullTextTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFullTextTab.swift; sourceTree = "<group>"; };
+		1D8F446B0C88FEB65FCE576D /* MacContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
+		1DBB604FFD5FF12970258015 /* MacOnboardingView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacOnboardingView.swift; sourceTree = "<group>"; };
+		230B1CE1E585F2D941C23B56 /* MacFullTextViewer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFullTextViewer.swift; sourceTree = "<group>"; };
+		3280096E73BA9377D50E633D /* MacScoredDocumentsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacScoredDocumentsView.swift; sourceTree = "<group>"; };
+		334AF96492FB938A13F7D1F3 /* MacReportView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacReportView.swift; sourceTree = "<group>"; };
+		37C73D048E3184FE2949212C /* MacFetchMoreView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFetchMoreView.swift; sourceTree = "<group>"; };
+		3B7615449DBB0B73EF03F81C /* MacDocumentSourceBadge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacDocumentSourceBadge.swift; sourceTree = "<group>"; };
+		518F35B597315290330EF64F /* MedicalFactCheckerMacApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerMacApp.swift; sourceTree = "<group>"; };
+		565DDF2BFF77552C84D39CD5 /* MacSearchOptionsToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchOptionsToolbar.swift; sourceTree = "<group>"; };
+		57938901AE3B81A0E88815D1 /* MacDocumentSourceBadge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacDocumentSourceBadge.swift; sourceTree = "<group>"; };
+		59D3B6659F5FC046D2C99AA6 /* MacContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
+		64577ADB5E841221E87D162B /* MacErrorQueueView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacErrorQueueView.swift; sourceTree = "<group>"; };
+		678CD1CA1A539B9B54AFB397 /* MacFullTextSourceBadge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFullTextSourceBadge.swift; sourceTree = "<group>"; };
+		6C78409E9FDDEA5D9EA1CC80 /* MacFactCheckView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFactCheckView.swift; sourceTree = "<group>"; };
+		6F6993229B1061A64B8D4A5B /* MacSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSettingsView.swift; sourceTree = "<group>"; };
+		7A2ED4E6BF01BA8A836174C9 /* MacHelpViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacHelpViews.swift; sourceTree = "<group>"; };
 		7AC80694695DEFBEBDF4A0C1 /* HistoryConstants.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HistoryConstants.swift; sourceTree = "<group>"; };
+		7DE2D66575DF0967DF2CF9A6 /* MacSortingControlsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSortingControlsView.swift; sourceTree = "<group>"; };
+		8031F196CF9CD1A5029B0F75 /* MacConstants.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacConstants.swift; sourceTree = "<group>"; };
+		80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerMacApp.swift; sourceTree = "<group>"; };
+		8609ECD39786325F66300830 /* MacFullTextSourceBadge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFullTextSourceBadge.swift; sourceTree = "<group>"; };
 		8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProcessingCheckpoint.swift; sourceTree = "<group>"; };
+		8C7AB21515CD9759373D7909 /* MacHelpViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacHelpViews.swift; sourceTree = "<group>"; };
+		94DD6295BD8BC95E72A05393 /* MacFactCheckView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFactCheckView.swift; sourceTree = "<group>"; };
 		A1000000000 /* MedicalFactChecker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MedicalFactChecker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000001000 /* MedicalFactCheckerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerApp.swift; sourceTree = "<group>"; };
 		A1000002000 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -139,19 +186,37 @@
 		A1000057000 /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
 		A1000058000 /* QueryConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryConstants.swift; sourceTree = "<group>"; };
 		A1000059000 /* ParallelScoringService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelScoringService.swift; sourceTree = "<group>"; };
-		A1000066000 /* ParallelCitationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelCitationService.swift; sourceTree = "<group>"; };
-		A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointedScoringService.swift; sourceTree = "<group>"; };
-		F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointManager.swift; sourceTree = "<group>"; };
-		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
 		A1000060000 /* SortingControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortingControlsView.swift; sourceTree = "<group>"; };
 		A1000061000 /* ErrorQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorQueueView.swift; sourceTree = "<group>"; };
 		A1000062000 /* ErrorEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorEntry.swift; sourceTree = "<group>"; };
 		A1000063000 /* ErrorPersistenceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPersistenceManager.swift; sourceTree = "<group>"; };
 		A1000064000 /* ErrorTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorTypes.swift; sourceTree = "<group>"; };
 		A1000065000 /* WorkflowConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowConstants.swift; sourceTree = "<group>"; };
+		A1000066000 /* ParallelCitationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelCitationService.swift; sourceTree = "<group>"; };
 		A1000067000 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
 		A1000068000 /* BackgroundStatusBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundStatusBanner.swift; sourceTree = "<group>"; };
 		A1000069000 /* SchemaVersions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaVersions.swift; sourceTree = "<group>"; };
+		A1000070000 /* MedicalFactCheckerMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MedicalFactCheckerMac.entitlements; sourceTree = "<group>"; };
+		A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointedScoringService.swift; sourceTree = "<group>"; };
+		A351474F50723CBC91DAC90F /* MacSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSettingsView.swift; sourceTree = "<group>"; };
+		AD189737C5701726FE9E52B7 /* MacProcessingProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacProcessingProgressView.swift; sourceTree = "<group>"; };
+		B0CE2ABEECF6AF0F1729621A /* MacPrintableReportView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacPrintableReportView.swift; sourceTree = "<group>"; };
+		B72567F930C22EDF8B08C55A /* MacErrorQueueView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacErrorQueueView.swift; sourceTree = "<group>"; };
+		B7B35FBE4AA82BE784BDCF42 /* MacScoredDocumentsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacScoredDocumentsView.swift; sourceTree = "<group>"; };
+		BFFCDCD81F58EC2F0CF438E8 /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
+		C6A6565B4B77FF9954064655 /* MacHistoryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacHistoryView.swift; sourceTree = "<group>"; };
+		CBF62923AC76EBB708CA3D81 /* MacFullTextTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFullTextTab.swift; sourceTree = "<group>"; };
+		CC12D5BB0EA4F618EED92F67 /* MacSortingControlsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSortingControlsView.swift; sourceTree = "<group>"; };
+		D2E8DE56179E1636636B4EFE /* MacFullTextViewer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFullTextViewer.swift; sourceTree = "<group>"; };
+		D665F665F40DC4F821AED5FA /* MacReportView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacReportView.swift; sourceTree = "<group>"; };
+		D866E9F7E4E7DF2A8B5AE721 /* MacOnboardingView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacOnboardingView.swift; sourceTree = "<group>"; };
+		DCC0CFE3DD7EA8DFE71E21F4 /* MacConstants.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacConstants.swift; sourceTree = "<group>"; };
+		E5FCF8379075BA58CDA7EB97 /* MacSearchProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchProgressView.swift; sourceTree = "<group>"; };
+		E991910364C9AAD05B3DBBE0 /* MacPrintableReportView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacPrintableReportView.swift; sourceTree = "<group>"; };
+		F0A9BED95302CC005E6E9DB0 /* CheckpointManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckpointManager.swift; sourceTree = "<group>"; };
+		F111ED9AA6EE0B4437331914 /* MacSearchOptionsToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchOptionsToolbar.swift; sourceTree = "<group>"; };
+		F3414FA46C1181D7951C1166 /* MacHistoryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacHistoryView.swift; sourceTree = "<group>"; };
+		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +232,80 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		029F162BFDCCC7ED32B9D2BC /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				6F6993229B1061A64B8D4A5B /* MacSettingsView.swift */,
+			);
+			name = Settings;
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		036065196BA11EBBAC77CEC0 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				3B7615449DBB0B73EF03F81C /* MacDocumentSourceBadge.swift */,
+				8609ECD39786325F66300830 /* MacFullTextSourceBadge.swift */,
+				B72567F930C22EDF8B08C55A /* MacErrorQueueView.swift */,
+				CC12D5BB0EA4F618EED92F67 /* MacSortingControlsView.swift */,
+				03BF6900473F00CF224B788C /* MacProcessingProgressView.swift */,
+			);
+			name = Components;
+			path = Components;
+			sourceTree = "<group>";
+		};
+		0F5C7A53540E9D534FD95210 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				D866E9F7E4E7DF2A8B5AE721 /* MacOnboardingView.swift */,
+			);
+			name = Onboarding;
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		2C814CC74E7312F1253921AE /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				FA5A56EB48DD26B3B2CF6A74 /* FactCheck */,
+				D08E944CAA7A953AD7D594D9 /* History */,
+				F2F33D819CB5DD7DE8D816CE /* Report */,
+				B2FC292678F5484E4D35D156 /* Settings */,
+				E234EBA156DBD1A91FB8F99D /* Help */,
+				0F5C7A53540E9D534FD95210 /* Onboarding */,
+				EDB44391F5FDA4E28B4D7061 /* Components */,
+			);
+			name = Views;
+			path = Views;
+			sourceTree = "<group>";
+		};
+		3DF4B4750146D78540AF8047 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				1DBB604FFD5FF12970258015 /* MacOnboardingView.swift */,
+			);
+			name = Onboarding;
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		6A091BC58EEF4D9212D360F6 /* Report */ = {
+			isa = PBXGroup;
+			children = (
+				334AF96492FB938A13F7D1F3 /* MacReportView.swift */,
+				E991910364C9AAD05B3DBBE0 /* MacPrintableReportView.swift */,
+			);
+			name = Report;
+			path = Report;
+			sourceTree = "<group>";
+		};
+		953BF2D28160D1721E3DA3E1 /* Help */ = {
+			isa = PBXGroup;
+			children = (
+				8C7AB21515CD9759373D7909 /* MacHelpViews.swift */,
+			);
+			name = Help;
+			path = Help;
+			sourceTree = "<group>";
+		};
 		A1000000010 = {
 			isa = PBXGroup;
 			children = (
@@ -188,6 +327,8 @@
 				A1000032000 /* HELP.md */,
 				A1000033000 /* PRIVACY.md */,
 				A1000053000 /* MedicalFactChecker.entitlements */,
+				A1000070000 /* MedicalFactCheckerMac.entitlements */,
+				E7210ACEEE6F00D966A72A7D /* macOS */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -356,6 +497,117 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		B2FC292678F5484E4D35D156 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A351474F50723CBC91DAC90F /* MacSettingsView.swift */,
+			);
+			name = Settings;
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		B3A893EE4305B5FA0F6E2733 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */,
+				59D3B6659F5FC046D2C99AA6 /* MacContentView.swift */,
+			);
+			name = App;
+			path = App;
+			sourceTree = "<group>";
+		};
+		D08E944CAA7A953AD7D594D9 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				F3414FA46C1181D7951C1166 /* MacHistoryView.swift */,
+			);
+			name = History;
+			path = History;
+			sourceTree = "<group>";
+		};
+		D99DB368DAC59E673E70BA5C /* History */ = {
+			isa = PBXGroup;
+			children = (
+				C6A6565B4B77FF9954064655 /* MacHistoryView.swift */,
+			);
+			name = History;
+			path = History;
+			sourceTree = "<group>";
+		};
+		E234EBA156DBD1A91FB8F99D /* Help */ = {
+			isa = PBXGroup;
+			children = (
+				7A2ED4E6BF01BA8A836174C9 /* MacHelpViews.swift */,
+			);
+			name = Help;
+			path = Help;
+			sourceTree = "<group>";
+		};
+		E7210ACEEE6F00D966A72A7D /* macOS */ = {
+			isa = PBXGroup;
+			children = (
+				B3A893EE4305B5FA0F6E2733 /* App */,
+				2C814CC74E7312F1253921AE /* Views */,
+				8031F196CF9CD1A5029B0F75 /* MacConstants.swift */,
+				1B1A551C72E0132CF2D53022 /* MacUtilities.swift */,
+			);
+			name = macOS;
+			path = macOS;
+			sourceTree = "<group>";
+		};
+		E82E7D56AE8BD99CCD70F576 /* FactCheck */ = {
+			isa = PBXGroup;
+			children = (
+				94DD6295BD8BC95E72A05393 /* MacFactCheckView.swift */,
+				37C73D048E3184FE2949212C /* MacFetchMoreView.swift */,
+				CBF62923AC76EBB708CA3D81 /* MacFullTextTab.swift */,
+				D2E8DE56179E1636636B4EFE /* MacFullTextViewer.swift */,
+				B7B35FBE4AA82BE784BDCF42 /* MacScoredDocumentsView.swift */,
+				565DDF2BFF77552C84D39CD5 /* MacSearchOptionsToolbar.swift */,
+				E5FCF8379075BA58CDA7EB97 /* MacSearchProgressView.swift */,
+			);
+			name = FactCheck;
+			path = FactCheck;
+			sourceTree = "<group>";
+		};
+		EDB44391F5FDA4E28B4D7061 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				57938901AE3B81A0E88815D1 /* MacDocumentSourceBadge.swift */,
+				678CD1CA1A539B9B54AFB397 /* MacFullTextSourceBadge.swift */,
+				64577ADB5E841221E87D162B /* MacErrorQueueView.swift */,
+				7DE2D66575DF0967DF2CF9A6 /* MacSortingControlsView.swift */,
+				AD189737C5701726FE9E52B7 /* MacProcessingProgressView.swift */,
+			);
+			name = Components;
+			path = Components;
+			sourceTree = "<group>";
+		};
+		F2F33D819CB5DD7DE8D816CE /* Report */ = {
+			isa = PBXGroup;
+			children = (
+				D665F665F40DC4F821AED5FA /* MacReportView.swift */,
+				B0CE2ABEECF6AF0F1729621A /* MacPrintableReportView.swift */,
+			);
+			name = Report;
+			path = Report;
+			sourceTree = "<group>";
+		};
+		FA5A56EB48DD26B3B2CF6A74 /* FactCheck */ = {
+			isa = PBXGroup;
+			children = (
+				6C78409E9FDDEA5D9EA1CC80 /* MacFactCheckView.swift */,
+				02F4A54BEF425872F49B2BD9 /* MacFetchMoreView.swift */,
+				1CD6BDD1310D6A5AB67A4E8B /* MacFullTextTab.swift */,
+				230B1CE1E585F2D941C23B56 /* MacFullTextViewer.swift */,
+				3280096E73BA9377D50E633D /* MacScoredDocumentsView.swift */,
+				F111ED9AA6EE0B4437331914 /* MacSearchOptionsToolbar.swift */,
+				BFFCDCD81F58EC2F0CF438E8 /* MacSearchProgressView.swift */,
+			);
+			name = FactCheck;
+			path = FactCheck;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -491,7 +743,6 @@
 				C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */,
 				AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */,
 				AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */,
-				89576A25A7BF81151881CE38 /* ProcessingProgressView.swift in Sources */,
 				A1000060001 /* SortingControlsView.swift in Sources */,
 				A1000061001 /* ErrorQueueView.swift in Sources */,
 				A1000062001 /* ErrorEntry.swift in Sources */,
@@ -501,6 +752,28 @@
 				A1000067001 /* BackgroundTaskManager.swift in Sources */,
 				A1000068001 /* BackgroundStatusBanner.swift in Sources */,
 				A1000069001 /* SchemaVersions.swift in Sources */,
+				A5DF3C2C750F93571F536572 /* MedicalFactCheckerMacApp.swift in Sources */,
+				636C1F74FBDE47D6BEFAE889 /* MacContentView.swift in Sources */,
+				375C4E85319161BF2D602D28 /* MacConstants.swift in Sources */,
+				AC7F5F9D117D0C62AB84424D /* MacUtilities.swift in Sources */,
+				37F9A838A7728EE5E957C8D8 /* MacFactCheckView.swift in Sources */,
+				47C11C62C011ABF5BF86FD8B /* MacFetchMoreView.swift in Sources */,
+				14AEDA2386AD7A0819975B16 /* MacFullTextTab.swift in Sources */,
+				132DF7E698F249C7F1447F83 /* MacFullTextViewer.swift in Sources */,
+				025762DFDDD01EF69FD3D9FC /* MacScoredDocumentsView.swift in Sources */,
+				04F48E1AA099D0BEE1F62FDB /* MacSearchOptionsToolbar.swift in Sources */,
+				E10A8206211F4F148F5488A4 /* MacSearchProgressView.swift in Sources */,
+				7A01BF566140E032179E58B9 /* MacHistoryView.swift in Sources */,
+				6D1E5885E9558E5B309ED347 /* MacReportView.swift in Sources */,
+				2409EA6178DF710FAC88B2D7 /* MacPrintableReportView.swift in Sources */,
+				E705D3D03AE7C13929162654 /* MacSettingsView.swift in Sources */,
+				AF7C55453F1847A521E940C1 /* MacHelpViews.swift in Sources */,
+				8A9AB921E8313735B980D52F /* MacOnboardingView.swift in Sources */,
+				D1A27BC2679D5C85BD1B6DC5 /* MacDocumentSourceBadge.swift in Sources */,
+				C44A67B1D246BAE4372826D2 /* MacFullTextSourceBadge.swift in Sources */,
+				E3523390EFEB6A4021F73BF3 /* MacErrorQueueView.swift in Sources */,
+				B5E70E87E77A9A178DC702EE /* MacSortingControlsView.swift in Sources */,
+				73BFAB4A43C95C46B19DE635 /* MacProcessingProgressView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -562,11 +835,14 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
+				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -622,10 +898,13 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				SDKROOT = iphoneos;
+				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_VERSION = 5.0;
 				VALIDATE_PRODUCT = YES;
@@ -637,11 +916,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Sources/MedicalFactChecker.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Sources/MedicalFactChecker.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Sources/MedicalFactChecker.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/MedicalFactCheckerMac.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				DEVELOPMENT_TEAM = X5DWXB4283;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -652,16 +934,25 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				LD_RUNPATH_SEARCH_PATHS = (
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				"TARGETED_DEVICE_FAMILY[sdk=iphoneos*]" = "1,2";
+				"TARGETED_DEVICE_FAMILY[sdk=iphonesimulator*]" = "1,2";
 			};
 			name = Debug;
 		};
@@ -670,11 +961,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Sources/MedicalFactChecker.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Sources/MedicalFactChecker.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Sources/MedicalFactChecker.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/MedicalFactCheckerMac.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Sources/Preview Content\"";
 				DEVELOPMENT_TEAM = X5DWXB4283;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -685,16 +979,25 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				LD_RUNPATH_SEARCH_PATHS = (
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bmlibrarian.MedicalFactChecker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				"TARGETED_DEVICE_FAMILY[sdk=iphoneos*]" = "1,2";
+				"TARGETED_DEVICE_FAMILY[sdk=iphonesimulator*]" = "1,2";
 			};
 			name = Release;
 		};

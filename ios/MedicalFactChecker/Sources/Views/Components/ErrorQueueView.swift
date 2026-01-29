@@ -1,3 +1,4 @@
+#if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2026 Dr Horst Herb
 //
@@ -406,3 +407,5 @@ struct CompactErrorQueueView: View {
     return ErrorCardView(error: error)
         .padding()
 }
+
+#endif // os(iOS)

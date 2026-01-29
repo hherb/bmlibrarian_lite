@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2026 Dr Horst Herb
 //
@@ -20,9 +20,6 @@ import SwiftUI
 // MARK: - Sort Option
 
 /// Available sort options for document lists.
-///
-/// Each option defines both the display name and an accessibility
-/// description for VoiceOver users.
 enum SortOption: String, CaseIterable, Codable {
     case scoreHighToLow = "Score (High to Low)"
     case scoreLowToHigh = "Score (Low to High)"
@@ -56,27 +53,10 @@ enum SortOption: String, CaseIterable, Codable {
     }
 }
 
-// MARK: - Sorting Controls View
+// MARK: - Mac Sorting Controls View
 
-/// A picker control for selecting document sort order.
-///
-/// Displays a dropdown menu with all available sort options and
-/// persists the selection using `@AppStorage`.
-///
-/// ## Accessibility
-///
-/// The control provides accessibility labels for both the picker
-/// and individual options, ensuring VoiceOver users can understand
-/// the current sort state.
-///
-/// ## Usage
-///
-/// ```swift
-/// @State var sortOption: SortOption = .scoreHighToLow
-///
-/// SortingControlsView(selectedSort: $sortOption)
-/// ```
-struct SortingControlsView: View {
+/// macOS-styled picker control for selecting document sort order.
+struct MacSortingControlsView: View {
     /// Binding to the currently selected sort option.
     @Binding var selectedSort: SortOption
 
@@ -94,58 +74,22 @@ struct SortingControlsView: View {
                 }
             }
             .pickerStyle(.menu)
+            .frame(width: 180)
             .accessibilityLabel("Sort order")
             .accessibilityValue(selectedSort.accessibilityDescription)
-
-            Spacer()
         }
-        .padding(.horizontal)
-    }
-}
-
-// MARK: - Compact Sorting Controls
-
-/// A compact sorting control for toolbar or header use.
-///
-/// Shows the current sort option with an icon, tapping reveals
-/// the full picker menu.
-struct CompactSortingControlsView: View {
-    /// Binding to the currently selected sort option.
-    @Binding var selectedSort: SortOption
-
-    var body: some View {
-        Menu {
-            ForEach(SortOption.allCases, id: \.self) { option in
-                Button {
-                    selectedSort = option
-                } label: {
-                    Label(option.rawValue, systemImage: option.icon)
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.up.arrow.down")
-                Text("Sort")
-                    .font(.caption)
-            }
-        }
-        .accessibilityLabel("Sort order: \(selectedSort.accessibilityDescription)")
-        .accessibilityHint("Tap to change sort order")
     }
 }
 
 // MARK: - Sortable Document Protocol
 
 /// Protocol for documents that can be sorted by score, title, or year.
-///
-/// Implement this protocol on document models to enable sorting
-/// using the `sorted(by:)` array extension.
 protocol SortableDocument {
     /// Relevance score (1-5 scale), or nil if not scored.
     var score: Int? { get }
 
     /// Document title for alphabetical sorting.
-    var sortableTitle: String? { get }
+    var title: String { get }
 
     /// Publication year for chronological sorting.
     var year: Int? { get }
@@ -155,9 +99,6 @@ protocol SortableDocument {
 
 extension Array where Element: SortableDocument {
     /// Sort documents by the specified option.
-    ///
-    /// Documents with nil values for the sort key are placed at the end
-    /// of the result.
     ///
     /// - Parameter option: The sort option to apply.
     /// - Returns: Sorted array of documents.
@@ -169,11 +110,11 @@ extension Array where Element: SortableDocument {
             return sorted { ($0.score ?? 0) < ($1.score ?? 0) }
         case .titleAZ:
             return sorted {
-                ($0.sortableTitle ?? "").localizedCaseInsensitiveCompare($1.sortableTitle ?? "") == .orderedAscending
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
         case .titleZA:
             return sorted {
-                ($0.sortableTitle ?? "").localizedCaseInsensitiveCompare($1.sortableTitle ?? "") == .orderedDescending
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending
             }
         case .yearNewest:
             return sorted { ($0.year ?? 0) > ($1.year ?? 0) }
@@ -186,48 +127,31 @@ extension Array where Element: SortableDocument {
 // MARK: - Document Conformance
 
 /// Extension to make Document conform to SortableDocument.
-///
-/// This enables using the `sorted(by:)` extension on arrays of Document.
 extension Document: SortableDocument {
     /// Returns the LLM relevance score.
     var score: Int? { relevanceScore }
-
-    /// Returns the document title as optional for protocol conformance.
-    ///
-    /// The Document model has a non-optional `title: String` property,
-    /// but the protocol requires `String?` for generic sorting support.
-    var sortableTitle: String? { title }
 }
 
 // MARK: - Preview
 
-#Preview("Sorting Controls") {
+#Preview("Mac Sorting Controls") {
     struct PreviewWrapper: View {
         @State var sortOption: SortOption = .scoreHighToLow
 
         var body: some View {
             VStack(spacing: 20) {
-                SortingControlsView(selectedSort: $sortOption)
-
-                Divider()
-
-                HStack {
-                    Text("Compact:")
-                    CompactSortingControlsView(selectedSort: $sortOption)
-                }
-                .padding()
-
-                Divider()
+                MacSortingControlsView(selectedSort: $sortOption)
 
                 Text("Selected: \(sortOption.rawValue)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
             .padding()
+            .frame(width: 300)
         }
     }
 
     return PreviewWrapper()
 }
 
-#endif // os(iOS)
+#endif // os(macOS)

@@ -1,3 +1,4 @@
+#if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //
@@ -15,14 +16,9 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 /// A single onboarding page with icon, title, and description.
-struct OnboardingPage: Identifiable {
+struct MacOnboardingPage: Identifiable {
     let id = UUID()
     let icon: String
     let iconColors: [Color]
@@ -34,10 +30,10 @@ struct OnboardingPage: Identifiable {
     var linkText: String? = nil
 }
 
-/// Swipeable onboarding view shown on first launch.
+/// macOS onboarding view shown on first launch.
 ///
 /// Walks users through the key features and workflow of the app.
-struct OnboardingView: View {
+struct MacOnboardingView: View {
     /// Callback when user completes onboarding.
     let onComplete: () -> Void
 
@@ -45,50 +41,50 @@ struct OnboardingView: View {
     @State private var currentPage = 0
 
     /// Onboarding pages content.
-    private let pages: [OnboardingPage] = [
-        OnboardingPage(
+    private let pages: [MacOnboardingPage] = [
+        MacOnboardingPage(
             icon: "checkmark.shield.fill",
             iconColors: [.blue, .cyan],
             title: "Welcome to Medical Fact Checker",
             description: "Evaluate medical claims using peer-reviewed scientific literature from PubMed and AI-powered analysis."
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "text.badge.checkmark",
             iconColors: [.green, .mint],
             title: "Enter a Medical Claim",
             description: "Type any health-related claim or question. For example: \"Vitamin D supplementation reduces respiratory infections\" or \"Does omega-3 help with depression?\""
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "magnifyingglass.circle.fill",
             iconColors: [.orange, .yellow],
             title: "AI Searches PubMed",
             description: "Your claim is converted into an optimized search query. The app retrieves relevant research abstracts from over 36 million biomedical citations."
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "chart.bar.doc.horizontal.fill",
             iconColors: [.purple, .pink],
             title: "Documents Are Scored",
             description: "Each document is scored 1-5 for relevance. Key passages are extracted as citations with information about whether findings support or refute your claim."
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "doc.text.fill",
             iconColors: [.indigo, .blue],
             title: "Get Your Evidence Report",
             description: "Receive a verdict (Supported, Not Supported, etc.) along with a detailed summary and clickable references to original PubMed articles."
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "key.fill",
             iconColors: [.orange, .red],
             title: "You'll Need an API Key",
             description: "This app uses AI language models (like ChatGPT) to analyze research. These services require an API key - a unique password that identifies you to the AI provider."
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "dollarsign.circle.fill",
             iconColors: [.green, .mint],
             title: "How Pricing Works",
             description: "AI providers charge per \"token\" (roughly 4 characters). A typical fact-check costs $0.01-$0.05. You control spending with budget limits in Settings."
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "star.fill",
             iconColors: [.yellow, .orange],
             title: "Start Free with Mistral",
@@ -96,30 +92,21 @@ struct OnboardingView: View {
             linkURL: URL(string: "https://console.mistral.ai"),
             linkText: "Open console.mistral.ai"
         ),
-        OnboardingPage(
+        MacOnboardingPage(
             icon: "gear.badge.checkmark",
             iconColors: [.gray, .secondary],
             title: "Quick Setup",
-            description: "In Settings: 1) Select your Provider (e.g., Mistral), 2) Paste your API key, 3) Tap \"Save API Key\". That's it - you're ready to fact-check!"
+            description: "In Settings: 1) Select your Provider (e.g., Mistral), 2) Paste your API key, 3) Click \"Save API Key\". That's it - you're ready to fact-check!"
         ),
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Page content
-            TabView(selection: $currentPage) {
-                ForEach(Array(pages.enumerated()), id: \.element.id) { index, page in
-                    OnboardingPageView(page: page)
-                        .tag(index)
-                }
-            }
-            #if os(iOS)
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #endif
-            .animation(.easeInOut, value: currentPage)
+        VStack(spacing: MacSpacing.large) {
+            // Page content area
+            pageContent
 
-            // Custom page indicator
-            HStack(spacing: 8) {
+            // Page indicator dots
+            HStack(spacing: MacSpacing.medium) {
                 ForEach(0..<pages.count, id: \.self) { index in
                     Circle()
                         .fill(index == currentPage ? Color.accentColor : Color.secondary.opacity(0.3))
@@ -127,78 +114,55 @@ struct OnboardingView: View {
                         .animation(.easeInOut(duration: 0.2), value: currentPage)
                 }
             }
-            .padding(.top, 16)
 
             // Navigation buttons
             HStack {
-                if currentPage > 0 {
-                    Button("Back") {
-                        withAnimation {
-                            currentPage -= 1
-                        }
+                Button("Back") {
+                    withAnimation {
+                        currentPage -= 1
                     }
-                    .foregroundColor(.secondary)
-                } else {
-                    Spacer()
-                        .frame(width: 60)
                 }
+                .disabled(currentPage == 0)
+                .opacity(currentPage == 0 ? 0.5 : 1.0)
 
                 Spacer()
 
                 if currentPage < pages.count - 1 {
+                    Button("Skip") {
+                        onComplete()
+                    }
+                    .foregroundColor(.secondary)
+
                     Button("Next") {
                         withAnimation {
                             currentPage += 1
                         }
                     }
-                    .fontWeight(.semibold)
+                    .buttonStyle(.borderedProminent)
                 } else {
                     Button("Get Started") {
                         onComplete()
                     }
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(Color.accentColor)
-                    .cornerRadius(10)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 20)
-
-            // Skip button (only on non-final pages)
-            if currentPage < pages.count - 1 {
-                Button("Skip") {
-                    onComplete()
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 16)
-            } else {
-                Spacer()
-                    .frame(height: 38)
-            }
+            .padding(.horizontal, MacSpacing.section)
+            .padding(.bottom, MacSpacing.large)
         }
-        #if os(iOS)
-        .background(Color(uiColor: .systemBackground))
-        #else
-        .background(Color(nsColor: .windowBackgroundColor))
-        #endif
+        .frame(minWidth: MacLayout.onboardingMinWidth, minHeight: MacLayout.onboardingMinHeight)
     }
-}
 
-/// Individual onboarding page content.
-struct OnboardingPageView: View {
-    let page: OnboardingPage
+    @ViewBuilder
+    private var pageContent: some View {
+        let page = pages[currentPage]
 
-    var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: MacSpacing.xxLarge) {
             Spacer()
 
             // Icon with gradient
             Image(systemName: page.icon)
-                .font(.system(size: 80))
+                .font(.system(size: MacIconSize.onboardingIcon))
                 .foregroundStyle(
                     LinearGradient(
                         colors: page.iconColors,
@@ -209,18 +173,19 @@ struct OnboardingPageView: View {
 
             // Title
             Text(page.title)
-                .font(.title2)
+                .font(.title)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, MacSpacing.section)
 
             // Description
             Text(page.description)
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .padding(.horizontal, MacSpacing.disclaimer)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: MacLayout.onboardingMaxContentWidth)
 
             // Optional link button
             if let url = page.linkURL, let text = page.linkText {
@@ -232,15 +197,18 @@ struct OnboardingPageView: View {
                     }
                     .foregroundColor(.accentColor)
                 }
-                .padding(.top, 8)
             }
 
             Spacer()
-            Spacer()
         }
+        .id(currentPage) // Force view refresh on page change
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.3), value: currentPage)
     }
 }
 
 #Preview {
-    OnboardingView(onComplete: {})
+    MacOnboardingView(onComplete: {})
 }
+
+#endif // os(macOS)

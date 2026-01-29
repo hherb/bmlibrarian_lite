@@ -18,6 +18,7 @@ import SwiftUI
 import SwiftData
 import BioMedLit
 
+#if os(iOS)
 @main
 struct MedicalFactCheckerApp: App {
     /// Tracks the current scene phase for background handling.
@@ -123,4 +124,4 @@ struct MedicalFactCheckerApp: App {
         BioMedLitLib.configure(with: config)
     }
 }
-
+#endif // os(iOS)
