@@ -102,6 +102,13 @@ enum CloudKitConfiguration {
     ///
     /// Uses the `MedicalFactCheckerMigrationPlan` to handle schema upgrades
     /// from previous versions, preserving user data during updates.
+    ///
+    /// ## Migration Strategy
+    ///
+    /// 1. First attempts staged migration with the full migration plan
+    /// 2. If that fails with "unknown model version", attempts without migration plan
+    ///    (allows SwiftData to perform automatic lightweight migration)
+    /// 3. If all else fails, deletes the corrupt/incompatible store and creates fresh
     static func makeModelContainerWithMigration() throws -> ModelContainer {
         let useCloudKit = isSyncEnabled && isCloudAvailable
 
@@ -123,11 +130,88 @@ enum CloudKitConfiguration {
             )
         }
 
+        // Strategy 1: Try staged migration with full plan
+        do {
+            return try ModelContainer(
+                for: schema,
+                migrationPlan: MedicalFactCheckerMigrationPlan.self,
+                configurations: [configuration]
+            )
+        } catch let error as NSError where error.code == 134_504 {
+            // Error 134504: "Cannot use staged migration with an unknown model version"
+            print("Staged migration failed, attempting automatic migration...")
+        } catch {
+            // Re-throw other errors
+            throw error
+        }
+
+        // Strategy 2: Try without migration plan (automatic lightweight migration)
+        do {
+            return try ModelContainer(
+                for: schema,
+                configurations: [configuration]
+            )
+        } catch let error as NSError where isMigrationError(error) {
+            print("Automatic migration failed: \(error.localizedDescription)")
+            print("Attempting store reset...")
+        } catch {
+            throw error
+        }
+
+        // Strategy 3: Delete corrupt/incompatible store and create fresh
+        deleteExistingStore()
+
         return try ModelContainer(
             for: schema,
-            migrationPlan: MedicalFactCheckerMigrationPlan.self,
             configurations: [configuration]
         )
+    }
+
+    // MARK: - Private Helpers
+
+    /// Check if an error is a migration-related error that warrants store reset.
+    private static func isMigrationError(_ error: NSError) -> Bool {
+        // Common migration error codes in NSCocoaErrorDomain
+        let migrationErrorCodes: Set<Int> = [
+            134_110,  // NSMigrationError
+            134_120,  // NSMigrationManagerSourceStoreError
+            134_130,  // NSMigrationMissingSourceModelError
+            134_140,  // NSMigrationMissingMappingModelError
+            134_504,  // Staged migration unknown version
+        ]
+        return error.domain == NSCocoaErrorDomain && migrationErrorCodes.contains(error.code)
+    }
+
+    /// Delete the existing SwiftData store files.
+    ///
+    /// Used as a last resort when migration is not possible.
+    /// This will lose all existing data but allows the app to start fresh.
+    private static func deleteExistingStore() {
+        let fileManager = FileManager.default
+        guard let appSupport = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return
+        }
+
+        let storeFiles = [
+            "default.store",
+            "default.store-shm",
+            "default.store-wal",
+        ]
+
+        for fileName in storeFiles {
+            let fileURL = appSupport.appendingPathComponent(fileName)
+            do {
+                if fileManager.fileExists(atPath: fileURL.path) {
+                    try fileManager.removeItem(at: fileURL)
+                    print("Deleted store file: \(fileName)")
+                }
+            } catch {
+                print("Failed to delete \(fileName): \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Sync Control
