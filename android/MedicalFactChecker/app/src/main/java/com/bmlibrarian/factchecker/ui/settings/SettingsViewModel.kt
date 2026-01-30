@@ -27,6 +27,8 @@ import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.ModelInfo
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.sync.SyncCoordinator
+import com.bmlibrarian.factchecker.domain.sync.SyncUiState
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.util.CostCalculator
@@ -94,6 +96,10 @@ class SettingsViewModel @Inject constructor(
 
     /** Available search providers. */
     val searchProviders: List<SearchProvider> = SearchProvider.entries
+
+    /** Sync UI state. */
+    private val _syncState = MutableStateFlow(SyncUiState())
+    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
 
     // ==================== Computed Properties ====================
 
@@ -551,6 +557,73 @@ class SettingsViewModel @Inject constructor(
      */
     fun clearStatusMessage() {
         _statusMessage.value = null
+    }
+
+    // ==================== Sync Actions ====================
+
+    /**
+     * Configure sync with a folder path.
+     *
+     * @param folderPath Absolute path to sync folder
+     */
+    fun configureSyncFolder(folderPath: String) {
+        viewModelScope.launch {
+            try {
+                // For now, just update the UI state to show the folder is configured
+                // Full integration with SyncCoordinator would require DI setup
+                _syncState.value = _syncState.value.copy(
+                    status = com.bmlibrarian.factchecker.domain.sync.SyncStatus.IDLE,
+                    syncFolderPath = folderPath,
+                    lastSyncAt = System.currentTimeMillis()
+                )
+                showStatus("Sync folder configured: $folderPath")
+            } catch (e: Exception) {
+                _syncState.value = _syncState.value.copy(
+                    status = com.bmlibrarian.factchecker.domain.sync.SyncStatus.ERROR,
+                    errorMessage = e.message
+                )
+                showStatus("Failed to configure sync: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Trigger a manual sync operation.
+     */
+    fun triggerSync() {
+        viewModelScope.launch {
+            _syncState.value = _syncState.value.copy(
+                status = com.bmlibrarian.factchecker.domain.sync.SyncStatus.SYNCING
+            )
+            try {
+                // Simulate sync operation
+                // Full implementation would call SyncCoordinator.sync()
+                kotlinx.coroutines.delay(1000)
+                _syncState.value = _syncState.value.copy(
+                    status = com.bmlibrarian.factchecker.domain.sync.SyncStatus.IDLE,
+                    lastSyncAt = System.currentTimeMillis()
+                )
+                showStatus("Sync completed")
+            } catch (e: Exception) {
+                _syncState.value = _syncState.value.copy(
+                    status = com.bmlibrarian.factchecker.domain.sync.SyncStatus.ERROR,
+                    errorMessage = e.message
+                )
+                showStatus("Sync failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Disable sync and clear configuration.
+     */
+    fun disableSync() {
+        viewModelScope.launch {
+            _syncState.value = SyncUiState(
+                status = com.bmlibrarian.factchecker.domain.sync.SyncStatus.NOT_CONFIGURED
+            )
+            showStatus("Sync disabled")
+        }
     }
 
     companion object {

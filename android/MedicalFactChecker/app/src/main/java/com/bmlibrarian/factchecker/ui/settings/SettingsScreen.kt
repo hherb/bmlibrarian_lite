@@ -59,12 +59,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.domain.sync.SyncUiState
 import com.bmlibrarian.factchecker.ui.settings.components.ModelPricingTable
 import com.bmlibrarian.factchecker.ui.settings.components.ModelSelector
 import com.bmlibrarian.factchecker.ui.settings.components.ProviderSelector
 import com.bmlibrarian.factchecker.ui.settings.components.SearchProviderSelector
 import com.bmlibrarian.factchecker.ui.settings.components.SettingsSection
 import com.bmlibrarian.factchecker.ui.settings.components.SliderSetting
+import com.bmlibrarian.factchecker.ui.settings.components.SyncFolderDialog
+import com.bmlibrarian.factchecker.ui.settings.components.SyncSettingsSection
 import com.bmlibrarian.factchecker.util.Constants
 import java.util.Locale
 
@@ -89,10 +92,12 @@ fun SettingsScreen(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val estimatedCostPerRun by viewModel.estimatedCostPerRun.collectAsState()
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
+    val syncState by viewModel.syncState.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
     var showClearDataDialog by remember { mutableStateOf(false) }
     var showApiKey by remember { mutableStateOf(false) }
+    var showSyncFolderDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Show status message in snackbar
@@ -188,6 +193,16 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
+            // Sync Settings Section
+            SyncSettingsSection(
+                syncState = syncState,
+                onSelectFolder = { showSyncFolderDialog = true },
+                onSyncNow = viewModel::triggerSync,
+                onDisableSync = viewModel::disableSync
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
             // Model Pricing Info
             if (currentModels.isNotEmpty()) {
                 SettingsSection(title = "Model Pricing") {
@@ -218,6 +233,18 @@ fun SettingsScreen(
                 showClearDataDialog = false
             },
             onDismiss = { showClearDataDialog = false }
+        )
+    }
+
+    // Sync folder selection dialog
+    if (showSyncFolderDialog) {
+        SyncFolderDialog(
+            currentPath = syncState.syncFolderPath,
+            onDismiss = { showSyncFolderDialog = false },
+            onConfirm = { path ->
+                viewModel.configureSyncFolder(path)
+                showSyncFolderDialog = false
+            }
         )
     }
 }
