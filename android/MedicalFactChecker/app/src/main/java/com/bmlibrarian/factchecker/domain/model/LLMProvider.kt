@@ -64,6 +64,7 @@ data class LLMProvider(
                 ModelInfo("claude-sonnet-4-20250514", "Claude Sonnet 4", 3.00, 15.00),
                 ModelInfo("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet", 3.00, 15.00)
             ),
+            supportsModelFetching = true,
             usesAnthropicFormat = true
         )
 
@@ -102,7 +103,8 @@ data class LLMProvider(
                 // DeepSeek V3.2 (Latest - January 2026)
                 ModelInfo("deepseek-chat", "DeepSeek V3.2 (Chat)", 0.28, 0.42),
                 ModelInfo("deepseek-reasoner", "DeepSeek V3.2 (Reasoner)", 0.28, 0.42)
-            )
+            ),
+            supportsModelFetching = true
         )
 
         /**

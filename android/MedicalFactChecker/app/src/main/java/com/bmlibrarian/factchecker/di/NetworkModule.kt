@@ -25,6 +25,8 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.UnpaywallApi
 import com.bmlibrarian.factchecker.data.remote.llm.AnthropicApi
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchService
+import com.bmlibrarian.factchecker.data.remote.llm.OllamaApi
 import com.bmlibrarian.factchecker.data.remote.llm.OpenAIApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
@@ -170,6 +172,23 @@ object NetworkModule {
     }
 
     /**
+     * Provides the Ollama API interface.
+     *
+     * Uses a placeholder base URL since actual URLs are provided dynamically.
+     *
+     * @param retrofitBuilder The Retrofit builder to use
+     * @return Ollama API interface
+     */
+    @Provides
+    @Singleton
+    fun provideOllamaApi(retrofitBuilder: Retrofit.Builder): OllamaApi {
+        return retrofitBuilder
+            .baseUrl(PLACEHOLDER_BASE_URL)
+            .build()
+            .create(OllamaApi::class.java)
+    }
+
+    /**
      * Provides the LLM service.
      *
      * @param openAIApi OpenAI-compatible API interface
@@ -183,6 +202,26 @@ object NetworkModule {
         anthropicApi: AnthropicApi
     ): LLMService {
         return LLMService(openAIApi, anthropicApi)
+    }
+
+    /**
+     * Provides the Model Fetch service.
+     *
+     * Used for dynamically fetching available models from LLM providers.
+     *
+     * @param openAIApi OpenAI-compatible API interface
+     * @param anthropicApi Anthropic API interface
+     * @param ollamaApi Ollama API interface
+     * @return Model fetch service instance
+     */
+    @Provides
+    @Singleton
+    fun provideModelFetchService(
+        openAIApi: OpenAIApi,
+        anthropicApi: AnthropicApi,
+        ollamaApi: OllamaApi
+    ): ModelFetchService {
+        return ModelFetchService(openAIApi, anthropicApi, ollamaApi)
     }
 
     // ==================== PubMed API ====================

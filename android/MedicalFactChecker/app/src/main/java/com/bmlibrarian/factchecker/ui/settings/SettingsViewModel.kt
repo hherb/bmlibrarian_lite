@@ -22,11 +22,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bmlibrarian.factchecker.data.local.AppDatabase
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
+import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchService
 import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.ModelInfo
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.util.CostCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -52,7 +55,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val llmService: com.bmlibrarian.factchecker.data.remote.llm.LLMService,
+    private val llmService: LLMService,
+    private val modelFetchService: ModelFetchService,
     private val database: AppDatabase
 ) : ViewModel() {
 
@@ -77,6 +81,14 @@ class SettingsViewModel @Inject constructor(
     private val _isTestingConnection = MutableStateFlow(false)
     val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
 
+    /** Whether model fetching is in progress. */
+    private val _isFetchingModels = MutableStateFlow(false)
+    val isFetchingModels: StateFlow<Boolean> = _isFetchingModels.asStateFlow()
+
+    /** Dynamically fetched models for the current provider. */
+    private val _fetchedModels = MutableStateFlow<List<ModelInfo>>(emptyList())
+    val fetchedModels: StateFlow<List<ModelInfo>> = _fetchedModels.asStateFlow()
+
     /** Available LLM providers. */
     val providers: List<LLMProvider> = LLMProvider.ALL_PROVIDERS
 
@@ -85,9 +97,20 @@ class SettingsViewModel @Inject constructor(
 
     // ==================== Computed Properties ====================
 
-    /** Current provider's available models. */
-    val currentModels: StateFlow<List<ModelInfo>> = settings.map { s ->
-        s.llmProvider?.models ?: emptyList()
+    /** Current provider's available models.
+     *
+     * Uses fetched models if available, otherwise falls back to provider defaults.
+     */
+    val currentModels: StateFlow<List<ModelInfo>> = combine(
+        settings,
+        _fetchedModels
+    ) { s, fetched ->
+        // Prefer fetched models if available for current provider
+        if (fetched.isNotEmpty()) {
+            fetched
+        } else {
+            s.llmProvider?.models ?: emptyList()
+        }
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(FLOW_TIMEOUT_MS),
@@ -170,7 +193,64 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setLlmProvider(providerId)
         // Load existing API key for this provider
         _apiKeyInput.value = settingsRepository.getApiKey(providerId)
+        // Clear fetched models when provider changes
+        _fetchedModels.value = emptyList()
         showStatus("Provider changed to ${LLMProvider.fromId(providerId)?.displayName ?: providerId}")
+        // Try to fetch models for the new provider
+        fetchModels()
+    }
+
+    /**
+     * Fetch available models from the current provider's API.
+     *
+     * Uses the ModelFetchService to dynamically fetch models. Falls back to
+     * hardcoded models if fetching fails or the provider doesn't support it.
+     */
+    fun fetchModels() {
+        if (_isFetchingModels.value) return
+
+        val provider = LLMProvider.fromId(settings.value.llmProviderId) ?: return
+        if (!provider.supportsModelFetching) {
+            showStatus("${provider.displayName} doesn't support dynamic model fetching")
+            return
+        }
+
+        val apiKey = settingsRepository.getApiKey(settings.value.llmProviderId)
+        if (apiKey.isEmpty() && provider.requiresApiKey) {
+            showStatus("Please save an API key first to fetch models")
+            return
+        }
+
+        viewModelScope.launch {
+            _isFetchingModels.value = true
+            try {
+                val models = modelFetchService.fetchModels(
+                    provider = provider,
+                    apiKey = apiKey.ifEmpty { null },
+                    customBaseUrl = null
+                )
+                _fetchedModels.value = models
+                if (models.isNotEmpty()) {
+                    showStatus("Fetched ${models.size} models from ${provider.displayName}")
+                } else {
+                    showStatus("No models found, using defaults")
+                }
+            } catch (e: Exception) {
+                showStatus("Failed to fetch models: ${e.message}")
+                // Keep using fallback models
+            } finally {
+                _isFetchingModels.value = false
+            }
+        }
+    }
+
+    /**
+     * Clear the model cache and force a refresh.
+     */
+    fun refreshModels() {
+        val providerId = settings.value.llmProviderId
+        modelFetchService.clearCache(providerId)
+        fetchModels()
     }
 
     /**
@@ -387,15 +467,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     // ==================== Embedding Scoring Actions ====================
-
-    /**
-     * Enable or disable on-device embedding scoring.
-     *
-     * @param enabled Whether to enable embedding scoring
-     */
-    fun setEmbeddingEnabled(enabled: Boolean) {
-        settingsRepository.setEmbeddingEnabled(enabled)
-    }
 
     /**
      * Enable or disable HyDE generation.
