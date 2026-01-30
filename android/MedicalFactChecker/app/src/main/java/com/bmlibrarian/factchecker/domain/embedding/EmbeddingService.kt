@@ -30,6 +30,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import com.bmlibrarian.factchecker.util.Constants
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -224,11 +225,11 @@ class EmbeddingService @Inject constructor(
      * @return File object for the model location.
      */
     private fun getModelFile(): File {
-        val modelsDir = File(context.filesDir, MODELS_DIR)
+        val modelsDir = File(context.filesDir, Constants.EMBEDDING_MODELS_DIR)
         if (!modelsDir.exists()) {
             modelsDir.mkdirs()
         }
-        return File(modelsDir, MODEL_FILENAME)
+        return File(modelsDir, Constants.EMBEDDING_MODEL_FILENAME)
     }
 
     /**
@@ -238,10 +239,10 @@ class EmbeddingService @Inject constructor(
      * @throws Exception if download fails.
      */
     private suspend fun downloadModel(targetFile: File) = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Downloading embedding model from $MODEL_URL")
+        Log.d(TAG, "Downloading embedding model from ${Constants.EMBEDDING_MODEL_URL}")
 
         val request = Request.Builder()
-            .url(MODEL_URL)
+            .url(Constants.EMBEDDING_MODEL_URL)
             .build()
 
         val response = okHttpClient.newCall(request).execute()
@@ -300,17 +301,6 @@ class EmbeddingService @Inject constructor(
 
     companion object {
         private const val TAG = "EmbeddingService"
-
-        /** Directory for storing downloaded models. */
-        private const val MODELS_DIR = "models"
-
-        /** Filename for the Universal Sentence Encoder model. */
-        private const val MODEL_FILENAME = "universal_sentence_encoder.tflite"
-
-        /** URL to download the Universal Sentence Encoder model. */
-        private const val MODEL_URL =
-            "https://storage.googleapis.com/mediapipe-models/text_embedder/" +
-            "universal_sentence_encoder/float32/latest/universal_sentence_encoder.tflite"
     }
 }
 

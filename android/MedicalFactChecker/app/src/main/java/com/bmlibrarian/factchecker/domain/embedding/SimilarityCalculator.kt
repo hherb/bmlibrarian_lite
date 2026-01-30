@@ -18,55 +18,27 @@
 
 package com.bmlibrarian.factchecker.domain.embedding
 
-import kotlin.math.sqrt
+import com.bmlibrarian.factchecker.util.Constants
 
 /**
- * Utility class for computing vector similarity metrics.
+ * Utility object for similarity score normalization.
  *
- * Provides mathematical functions for comparing embedding vectors,
- * primarily using cosine similarity which measures the angle between
- * two vectors regardless of magnitude.
+ * Provides functions for converting raw cosine similarity scores
+ * to relevance scales. The cosine similarity calculation itself
+ * is handled by MediaPipe's TextEmbedder.cosineSimilarity().
+ *
+ * Mirrors iOS EmbeddingService normalization for cross-platform consistency.
  */
 object SimilarityCalculator {
 
     /**
-     * Compute cosine similarity between two vectors.
-     *
-     * Cosine similarity measures the cosine of the angle between two vectors,
-     * resulting in a value between -1 and 1:
-     * - 1 means the vectors point in the same direction
-     * - 0 means the vectors are orthogonal (perpendicular)
-     * - -1 means the vectors point in opposite directions
-     *
-     * For text embeddings, values are typically between 0 and 1.
-     *
-     * @param vectorA First embedding vector.
-     * @param vectorB Second embedding vector.
-     * @return Cosine similarity (-1.0 to 1.0), or 0.0 if vectors are empty or mismatched.
-     */
-    fun cosineSimilarity(vectorA: FloatArray, vectorB: FloatArray): Double {
-        if (vectorA.size != vectorB.size || vectorA.isEmpty()) {
-            return 0.0
-        }
-
-        var dotProduct = 0.0
-        var normA = 0.0
-        var normB = 0.0
-
-        for (i in vectorA.indices) {
-            dotProduct += vectorA[i] * vectorB[i]
-            normA += vectorA[i] * vectorA[i]
-            normB += vectorB[i] * vectorB[i]
-        }
-
-        val denominator = sqrt(normA) * sqrt(normB)
-        return if (denominator > 0) dotProduct / denominator else 0.0
-    }
-
-    /**
      * Normalize a raw similarity score (0.0-1.0) to a 1-5 relevance scale.
      *
-     * Mapping thresholds are tuned for typical sentence embedding similarity distributions:
+     * Mapping thresholds are tuned for typical sentence embedding similarity distributions
+     * (e.g., Universal Sentence Encoder). These thresholds mirror the iOS implementation
+     * for cross-platform consistency.
+     *
+     * Score mapping:
      * - < 0.3: Score 1 (not relevant)
      * - 0.3-0.45: Score 2 (marginally relevant)
      * - 0.45-0.55: Score 3 (moderately relevant)
@@ -78,16 +50,19 @@ object SimilarityCalculator {
      */
     fun normalizeToRelevanceScale(similarity: Double): Int {
         return when {
-            similarity < 0.3 -> 1
-            similarity < 0.45 -> 2
-            similarity < 0.55 -> 3
-            similarity < 0.7 -> 4
+            similarity < Constants.EMBEDDING_THRESHOLD_SCORE_1 -> 1
+            similarity < Constants.EMBEDDING_THRESHOLD_SCORE_2 -> 2
+            similarity < Constants.EMBEDDING_THRESHOLD_SCORE_3 -> 3
+            similarity < Constants.EMBEDDING_THRESHOLD_SCORE_4 -> 4
             else -> 5
         }
     }
 
     /**
      * Clamp a similarity value to the valid range [0.0, 1.0].
+     *
+     * Ensures similarity scores stay within expected bounds even if
+     * the underlying embedding model produces out-of-range values.
      *
      * @param similarity The raw similarity value.
      * @return Clamped value between 0.0 and 1.0.
