@@ -137,12 +137,16 @@ enum CloudKitConfiguration {
                 migrationPlan: MedicalFactCheckerMigrationPlan.self,
                 configurations: [configuration]
             )
-        } catch let error as NSError where error.code == 134_504 {
-            // Error 134504: "Cannot use staged migration with an unknown model version"
-            print("Staged migration failed, attempting automatic migration...")
         } catch {
-            // Re-throw other errors
-            throw error
+            // SwiftData wraps CoreData errors in SwiftDataError, so we check the description
+            let errorDescription = String(describing: error)
+            if errorDescription.contains("134504") ||
+                errorDescription.contains("unknown model version") {
+                print("Staged migration failed (error 134504), attempting automatic migration...")
+            } else {
+                // Re-throw non-migration errors
+                throw error
+            }
         }
 
         // Strategy 2: Try without migration plan (automatic lightweight migration)
@@ -151,11 +155,13 @@ enum CloudKitConfiguration {
                 for: schema,
                 configurations: [configuration]
             )
-        } catch let error as NSError where isMigrationError(error) {
-            print("Automatic migration failed: \(error.localizedDescription)")
-            print("Attempting store reset...")
         } catch {
-            throw error
+            if isMigrationError(error) {
+                print("Automatic migration failed: \(error.localizedDescription)")
+                print("Attempting store reset...")
+            } else {
+                throw error
+            }
         }
 
         // Strategy 3: Delete corrupt/incompatible store and create fresh
@@ -170,16 +176,22 @@ enum CloudKitConfiguration {
     // MARK: - Private Helpers
 
     /// Check if an error is a migration-related error that warrants store reset.
-    private static func isMigrationError(_ error: NSError) -> Bool {
-        // Common migration error codes in NSCocoaErrorDomain
-        let migrationErrorCodes: Set<Int> = [
-            134_110,  // NSMigrationError
-            134_120,  // NSMigrationManagerSourceStoreError
-            134_130,  // NSMigrationMissingSourceModelError
-            134_140,  // NSMigrationMissingMappingModelError
-            134_504,  // Staged migration unknown version
+    private static func isMigrationError(_ error: Error) -> Bool {
+        let errorDescription = String(describing: error)
+
+        // Check for known migration error codes or messages
+        let migrationIndicators = [
+            "134110",   // NSMigrationError
+            "134120",   // NSMigrationManagerSourceStoreError
+            "134130",   // NSMigrationMissingSourceModelError
+            "134140",   // NSMigrationMissingMappingModelError
+            "134504",   // Staged migration unknown version
+            "unknown model version",
+            "migration",
+            "loadIssueModelContainer",
         ]
-        return error.domain == NSCocoaErrorDomain && migrationErrorCodes.contains(error.code)
+
+        return migrationIndicators.contains { errorDescription.localizedCaseInsensitiveContains($0) }
     }
 
     /// Delete the existing SwiftData store files.

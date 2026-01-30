@@ -83,6 +83,12 @@ enum SchemaV1: VersionedSchema {
 ///
 /// New model added:
 /// - ProcessingCheckpoint: Stores processing state for resumable sessions
+///
+/// ## CloudKit Compatibility
+///
+/// The ProcessingCheckpoint model class has default values for all properties
+/// (required for CloudKit). This is a code-level concern, not a schema change -
+/// the database structure remains the same whether properties have defaults or not.
 enum SchemaV2: VersionedSchema {
     static var versionIdentifier: Schema.Version {
         Schema.Version(2, 0, 0)

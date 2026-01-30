@@ -44,26 +44,31 @@ final class ProcessingCheckpoint {
     /// Unique identifier for the fact-check session.
     ///
     /// Links this checkpoint to a specific FactCheckSession.
-    var sessionId: String
+    /// Default value required for CloudKit compatibility.
+    var sessionId: String = ""
 
     /// PubMed identifier of the processed document.
     ///
     /// Used to match checkpoints back to Document objects.
-    var pmid: String
+    /// Default value required for CloudKit compatibility.
+    var pmid: String = ""
 
     /// Processing step that was completed.
     ///
     /// Valid values: "scoring", "citation"
-    var step: String
+    /// Default value required for CloudKit compatibility.
+    var step: String = ""
 
     /// JSON-encoded result data.
     ///
     /// Contains the serialized processing result (e.g., ScoringCheckpoint).
     /// Using JSON string allows flexible storage of different result types.
-    var resultJSON: String
+    /// Default value required for CloudKit compatibility.
+    var resultJSON: String = "{}"
 
     /// Timestamp when the checkpoint was created or last updated.
-    var createdAt: Date
+    /// Default value required for CloudKit compatibility.
+    var createdAt: Date = Date()
 
     // MARK: - Initialization
 
