@@ -182,6 +182,7 @@ class LocalFolderSyncStorage(
         } catch (e: IOException) {
             throw SyncStorageException.IOError("Failed to write $path", e)
         }
+        Unit
     }
 
     override suspend fun deleteFile(path: String) = withContext(Dispatchers.IO) {

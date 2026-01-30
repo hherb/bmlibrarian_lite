@@ -35,7 +35,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Key
@@ -84,7 +84,7 @@ private val onboardingPages = listOf(
             "Get evidence-based verdicts backed by scientific citations."
     ),
     OnboardingPage(
-        icon = Icons.Default.Article,
+        icon = Icons.AutoMirrored.Filled.Article,
         title = "Enter Your Claim",
         description = "Type any medical or health claim you want to verify. For example:\n\n" +
             "\"Vitamin D supplementation reduces COVID-19 severity\"\n\n" +

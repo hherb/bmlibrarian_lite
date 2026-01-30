@@ -83,6 +83,9 @@ object Constants {
     /** Maximum relevance score. */
     const val SCORING_MAX_SCORE = 5
 
+    /** Default target number of relevant documents to collect. */
+    const val TARGET_RELEVANT_DOCS = 10
+
     /** Minimum relevance score. */
     const val SCORING_MIN_SCORE = 1
 

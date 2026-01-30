@@ -96,7 +96,6 @@ fun SyncSettingsSection(
 
     SettingsSection(
         title = "Cross-Platform Sync",
-        icon = Icons.Default.CloudSync,
         modifier = modifier
     ) {
         when (syncState.status) {
