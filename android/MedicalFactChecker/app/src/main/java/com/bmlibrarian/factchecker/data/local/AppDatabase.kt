@@ -21,14 +21,20 @@ package com.bmlibrarian.factchecker.data.local
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bmlibrarian.factchecker.data.local.converter.Converters
 import com.bmlibrarian.factchecker.data.local.dao.CitationDao
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
+import com.bmlibrarian.factchecker.data.local.dao.ProcessingCheckpointDao
+import com.bmlibrarian.factchecker.data.local.dao.ProcessingErrorDao
 import com.bmlibrarian.factchecker.data.local.dao.ReportDao
 import com.bmlibrarian.factchecker.data.local.dao.SessionDao
 import com.bmlibrarian.factchecker.data.local.dao.UsageRecordDao
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.local.entity.ProcessingCheckpointEntity
+import com.bmlibrarian.factchecker.data.local.entity.ProcessingErrorEntity
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
@@ -42,6 +48,8 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
  * - Citations: Extracted passages from documents
  * - Reports: Generated evidence reports
  * - UsageRecords: API usage and cost tracking
+ * - ProcessingCheckpoints: Checkpoint data for workflow resumption
+ * - ProcessingErrors: Error tracking for retry functionality
  *
  * Schema is exported to $projectDir/schemas for migration tracking.
  */
@@ -51,9 +59,11 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         DocumentEntity::class,
         CitationEntity::class,
         ReportEntity::class,
-        UsageRecordEntity::class
+        UsageRecordEntity::class,
+        ProcessingCheckpointEntity::class,
+        ProcessingErrorEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -94,8 +104,77 @@ abstract class AppDatabase : RoomDatabase() {
      */
     abstract fun usageRecordDao(): UsageRecordDao
 
+    /**
+     * Get the Processing Checkpoint DAO.
+     *
+     * @return ProcessingCheckpointDao for checkpoint operations
+     */
+    abstract fun processingCheckpointDao(): ProcessingCheckpointDao
+
+    /**
+     * Get the Processing Error DAO.
+     *
+     * @return ProcessingErrorDao for error tracking operations
+     */
+    abstract fun processingErrorDao(): ProcessingErrorDao
+
     companion object {
         /** Database file name. */
         const val DATABASE_NAME = "medical_factchecker.db"
+
+        /**
+         * Migration from version 1 to 2.
+         *
+         * Adds processing_checkpoints and processing_errors tables
+         * for workflow resumption and error retry functionality.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Create processing_checkpoints table
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS processing_checkpoints (
+                        session_id TEXT NOT NULL,
+                        document_id TEXT NOT NULL,
+                        step TEXT NOT NULL,
+                        result_json TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        PRIMARY KEY(session_id, document_id, step)
+                    )
+                """)
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_processing_checkpoints_session_id ON processing_checkpoints (session_id)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_processing_checkpoints_session_id_step ON processing_checkpoints (session_id, step)"
+                )
+
+                // Create processing_errors table
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS processing_errors (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        document_id TEXT NOT NULL,
+                        step TEXT NOT NULL,
+                        error_type TEXT NOT NULL,
+                        error_message TEXT NOT NULL,
+                        is_retryable INTEGER NOT NULL DEFAULT 1,
+                        retry_count INTEGER NOT NULL DEFAULT 0,
+                        max_retries INTEGER NOT NULL DEFAULT 3,
+                        created_at INTEGER NOT NULL,
+                        last_retry_at INTEGER,
+                        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                    )
+                """)
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_processing_errors_session_id ON processing_errors (session_id)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_processing_errors_session_id_step ON processing_errors (session_id, step)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_processing_errors_is_retryable ON processing_errors (is_retryable)"
+                )
+            }
+        }
     }
 }
