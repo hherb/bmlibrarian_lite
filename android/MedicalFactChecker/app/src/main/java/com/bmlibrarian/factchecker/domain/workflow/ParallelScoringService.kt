@@ -29,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.pow
@@ -44,6 +45,7 @@ import kotlin.random.Random
  * Thread Safety:
  * - Input uses ScoringInput data classes (not Room entities)
  * - Output uses ScoringResult sealed classes
+ * - Progress counter uses AtomicInteger for thread-safe updates
  * - The calling workflow applies results to DocumentEntities on the main thread
  *
  * Mirrors iOS ParallelScoringService for cross-platform consistency.
@@ -77,11 +79,69 @@ class ParallelScoringService @Inject constructor(
         /** Base delay for parse retry backoff (milliseconds). */
         private const val PARSE_RETRY_BASE_DELAY_MS = 500L
 
+        /** Jitter range for retry backoff (-25% to +25%). */
+        private const val RETRY_JITTER_RANGE = 0.25
+
         /** Default max concurrent requests for cloud providers. */
         const val DEFAULT_CLOUD_CONCURRENCY = 3
 
         /** Max concurrent requests for local providers (Ollama). */
         const val LOCAL_CONCURRENCY = 1
+
+        /**
+         * Check if an error is a parse error (response parsing failed).
+         *
+         * @param error The error to check.
+         * @return true if this is a parse-related error.
+         */
+        fun isParseError(error: Throwable): Boolean {
+            val message = error.message?.lowercase() ?: return false
+            return message.contains("parse") ||
+                    message.contains("json") ||
+                    message.contains("format") ||
+                    message.contains("invalid score")
+        }
+
+        /**
+         * Check if an error is retryable (transient network issues).
+         *
+         * @param error The error to check.
+         * @return true if this error can be retried.
+         */
+        fun isRetryableError(error: Throwable): Boolean {
+            val message = error.message?.lowercase() ?: return true
+            return message.contains("timeout") ||
+                    message.contains("connection") ||
+                    message.contains("network") ||
+                    message.contains("rate limit") ||
+                    message.contains("429") ||
+                    message.contains("503") ||
+                    message.contains("502")
+        }
+
+        /**
+         * Estimate token count for text.
+         *
+         * Uses a rough approximation based on average characters per token.
+         *
+         * @param text The text to estimate tokens for.
+         * @return Estimated token count (minimum 1).
+         */
+        fun estimateTokens(text: String): Int {
+            return (text.length / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN).coerceAtLeast(1)
+        }
+
+        /**
+         * Calculate retry delay with exponential backoff and jitter.
+         *
+         * @param attempt The current attempt number (0-indexed).
+         * @return Delay in milliseconds.
+         */
+        fun calculateRetryDelay(attempt: Int): Long {
+            val baseDelay = PARSE_RETRY_BASE_DELAY_MS * 2.0.pow(attempt.toDouble()).toLong()
+            val jitter = (baseDelay * Random.nextDouble(-RETRY_JITTER_RANGE, RETRY_JITTER_RANGE)).toLong()
+            return baseDelay + jitter
+        }
     }
 
     /**
@@ -112,8 +172,7 @@ class ParallelScoringService @Inject constructor(
 
         val semaphore = Semaphore(maxConcurrent.coerceAtLeast(1))
         val total = documents.size
-        var completed = 0
-
+        val completed = AtomicInteger(0)
         val modelInfo = provider.getModel(model)
 
         // Launch all scoring tasks with semaphore-limited concurrency
@@ -139,11 +198,9 @@ class ParallelScoringService @Inject constructor(
                         modelInfo = modelInfo
                     )
 
-                    // Update progress
-                    synchronized(this@coroutineScope) {
-                        completed++
-                    }
-                    onProgress(input.documentId, completed, total)
+                    // Update progress atomically
+                    val currentCompleted = completed.incrementAndGet()
+                    onProgress(input.documentId, currentCompleted, total)
 
                     result
                 }
@@ -188,11 +245,9 @@ class ParallelScoringService @Inject constructor(
         if (docsToScore.isEmpty()) return@coroutineScope emptyList()
 
         val semaphore = Semaphore(maxConcurrent.coerceAtLeast(1))
-        val totalRemaining = docsToScore.size
         val totalWithCheckpointed = documents.size
         val checkpointedCount = checkpointedIds.size
-        var completed = 0
-
+        val completed = AtomicInteger(0)
         val modelInfo = provider.getModel(model)
 
         val deferredResults = docsToScore.map { input ->
@@ -219,13 +274,11 @@ class ParallelScoringService @Inject constructor(
                     // Callback for checkpointing
                     onResult(result)
 
-                    // Update progress (including checkpointed count)
-                    synchronized(this@coroutineScope) {
-                        completed++
-                    }
+                    // Update progress atomically (including checkpointed count)
+                    val currentCompleted = completed.incrementAndGet()
                     onProgress(
                         input.documentId,
-                        checkpointedCount + completed,
+                        checkpointedCount + currentCompleted,
                         totalWithCheckpointed
                     )
 
@@ -272,7 +325,7 @@ class ParallelScoringService @Inject constructor(
                 abstractText = input.abstract.ifEmpty { null }
             )
 
-            // Estimate tokens and cost
+            // Estimate tokens and cost using companion object function
             val estimatedInput = estimateTokens(claim + input.title + input.abstract)
             val estimatedOutput = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
             val cost = modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
@@ -294,17 +347,14 @@ class ParallelScoringService @Inject constructor(
                     )
                 },
                 onFailure = { error ->
-                    // Check if this is a parse error (retryable) or API error (not retryable here)
                     val errorMessage = error.message ?: "Unknown error"
 
                     if (isParseError(error)) {
                         lastParseError = errorMessage
 
-                        // Retry with exponential backoff
+                        // Retry with exponential backoff and jitter
                         if (attempt < MAX_PARSE_RETRIES - 1) {
-                            val delayMs = PARSE_RETRY_BASE_DELAY_MS * 2.0.pow(attempt.toDouble()).toLong()
-                            val jitter = (delayMs * Random.nextDouble(-0.25, 0.25)).toLong()
-                            delay(delayMs + jitter)
+                            delay(calculateRetryDelay(attempt))
                         }
                     } else {
                         // API/network error - return immediately
@@ -349,42 +399,5 @@ class ParallelScoringService @Inject constructor(
         } else {
             LOCAL_CONCURRENCY
         }
-    }
-
-    /**
-     * Check if an error is a parse error (response parsing failed).
-     */
-    private fun isParseError(error: Throwable): Boolean {
-        val message = error.message?.lowercase() ?: return false
-        return message.contains("parse") ||
-                message.contains("json") ||
-                message.contains("format") ||
-                message.contains("invalid score")
-    }
-
-    /**
-     * Check if an error is retryable (transient network issues).
-     */
-    private fun isRetryableError(error: Throwable): Boolean {
-        val message = error.message?.lowercase() ?: return true
-        return message.contains("timeout") ||
-                message.contains("connection") ||
-                message.contains("network") ||
-                message.contains("rate limit") ||
-                message.contains("429") ||
-                message.contains("503") ||
-                message.contains("502")
-    }
-
-    /**
-     * Estimate token count for text.
-     *
-     * Uses a rough approximation based on average characters per token.
-     *
-     * @param text The text to estimate tokens for.
-     * @return Estimated token count (minimum 1).
-     */
-    private fun estimateTokens(text: String): Int {
-        return (text.length / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN).coerceAtLeast(1)
     }
 }

@@ -345,16 +345,17 @@ class FactCheckWorkflow @Inject constructor(
 
                     scoreDocuments(documents, session.claimText, config)
 
-                    // Count successes
-                    successCount = documents.count { doc ->
-                        documentRepository.getDocumentByIdSync(doc.id)?.relevanceScore != null
+                    // Count successes by checking which documents now have scores
+                    val successfulIds = mutableSetOf<String>()
+                    for (doc in documents) {
+                        val updatedDoc = documentRepository.getDocument(doc.id)
+                        if (updatedDoc?.relevanceScore != null) {
+                            successfulIds.add(doc.id)
+                        }
                     }
+                    successCount = successfulIds.size
 
                     // Remove errors for successfully retried documents
-                    val successfulIds = documents
-                        .filter { doc -> documentRepository.getDocumentByIdSync(doc.id)?.relevanceScore != null }
-                        .map { it.id }
-                        .toSet()
                     errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
                 }
 
@@ -366,15 +367,15 @@ class FactCheckWorkflow @Inject constructor(
                     extractCitations(documents, session.claimText, session.id, config)
 
                     // Count successes by checking citation count
-                    successCount = documents.count { doc ->
-                        documentRepository.getCitationCountForDocument(doc.id) > 0
+                    val successfulIds = mutableSetOf<String>()
+                    for (doc in documents) {
+                        if (documentRepository.getCitationCountForDocument(doc.id) > 0) {
+                            successfulIds.add(doc.id)
+                        }
                     }
+                    successCount = successfulIds.size
 
                     // Remove errors for successfully retried documents
-                    val successfulIds = documents
-                        .filter { doc -> documentRepository.getCitationCountForDocument(doc.id) > 0 }
-                        .map { it.id }
-                        .toSet()
                     errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
                 }
             }
