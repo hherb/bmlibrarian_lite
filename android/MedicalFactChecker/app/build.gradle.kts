@@ -117,6 +117,10 @@ dependencies {
     // Security - Encrypted SharedPreferences
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // MediaPipe - Text Embedding for semantic similarity scoring
+    // Uses Universal Sentence Encoder for on-device embeddings
+    implementation("com.google.mediapipe:tasks-text:0.10.14")
+
     // Markdown rendering
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")

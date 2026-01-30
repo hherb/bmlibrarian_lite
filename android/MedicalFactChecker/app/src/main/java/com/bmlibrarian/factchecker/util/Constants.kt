@@ -86,6 +86,40 @@ object Constants {
     /** Minimum relevance score. */
     const val SCORING_MIN_SCORE = 1
 
+    // ==================== Embedding Scoring Configuration ====================
+
+    /**
+     * Embedding similarity thresholds for 1-5 relevance scale normalization.
+     *
+     * These thresholds are tuned for typical sentence embedding similarity distributions
+     * (e.g., Universal Sentence Encoder, all-MiniLM-L6-V2).
+     *
+     * Mirrors iOS EmbeddingService thresholds for cross-platform consistency.
+     */
+
+    /** Threshold below which similarity maps to score 1 (not relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_1 = 0.3
+
+    /** Threshold below which similarity maps to score 2 (marginally relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_2 = 0.45
+
+    /** Threshold below which similarity maps to score 3 (moderately relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_3 = 0.55
+
+    /** Threshold below which similarity maps to score 4 (highly relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_4 = 0.7
+
+    /** Directory name for storing downloaded ML models. */
+    const val EMBEDDING_MODELS_DIR = "models"
+
+    /** Filename for the Universal Sentence Encoder model. */
+    const val EMBEDDING_MODEL_FILENAME = "universal_sentence_encoder.tflite"
+
+    /** URL to download the Universal Sentence Encoder model from Google Cloud Storage. */
+    const val EMBEDDING_MODEL_URL =
+        "https://storage.googleapis.com/mediapipe-models/text_embedder/" +
+        "universal_sentence_encoder/float32/latest/universal_sentence_encoder.tflite"
+
     // ==================== Budget Defaults ====================
 
     /** Default maximum budget per run in USD. */

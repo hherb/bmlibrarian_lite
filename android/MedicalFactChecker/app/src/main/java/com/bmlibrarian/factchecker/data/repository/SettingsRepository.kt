@@ -127,7 +127,8 @@ class SettingsRepository @Inject constructor(
             hasAcceptedDisclaimer = regularPrefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false),
             hasCompletedOnboarding = regularPrefs.getBoolean(KEY_ONBOARDING_COMPLETE, false),
             ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: "",
-            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: ""
+            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: "",
+            embeddingEnabled = regularPrefs.getBoolean(KEY_EMBEDDING_ENABLED, true)
         )
     }
 
@@ -152,6 +153,7 @@ class SettingsRepository @Inject constructor(
             putBoolean(KEY_ONBOARDING_COMPLETE, settings.hasCompletedOnboarding)
             putString(KEY_NCBI_EMAIL, settings.ncbiEmail)
             putString(KEY_UNPAYWALL_EMAIL, settings.unpaywallEmail)
+            putBoolean(KEY_EMBEDDING_ENABLED, settings.embeddingEnabled)
             apply()
         }
         _settings.value = settings
@@ -479,6 +481,24 @@ class SettingsRepository @Inject constructor(
         updateSettings { it.copy(hasAcceptedDisclaimer = true) }
     }
 
+    // ==================== Embedding Settings ====================
+
+    /**
+     * Check if embedding-based scoring is enabled.
+     *
+     * @return true if embedding scoring is enabled
+     */
+    fun isEmbeddingEnabled(): Boolean = _settings.value.embeddingEnabled
+
+    /**
+     * Set embedding scoring enabled state.
+     *
+     * @param enabled Whether to enable embedding scoring
+     */
+    fun setEmbeddingEnabled(enabled: Boolean) {
+        updateSettings { it.copy(embeddingEnabled = enabled) }
+    }
+
     // ==================== Reset ====================
 
     /**
@@ -532,5 +552,6 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         private const val KEY_NCBI_EMAIL = "ncbi_email"
         private const val KEY_UNPAYWALL_EMAIL = "unpaywall_email"
+        private const val KEY_EMBEDDING_ENABLED = "embedding_enabled"
     }
 }

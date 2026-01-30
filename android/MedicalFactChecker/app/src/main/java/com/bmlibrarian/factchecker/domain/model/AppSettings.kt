@@ -40,6 +40,7 @@ import com.bmlibrarian.factchecker.util.Constants
  * @property hasAcceptedDisclaimer Whether user has accepted the medical disclaimer
  * @property hasCompletedOnboarding Whether user has completed the onboarding flow
  * @property ncbiEmail Email for NCBI API requests (recommended for higher rate limits)
+ * @property embeddingEnabled Whether to compute embedding-based similarity scores
  */
 data class AppSettings(
     val llmProviderId: String = LLMProvider.OPENAI.id,
@@ -55,7 +56,8 @@ data class AppSettings(
     val hasAcceptedDisclaimer: Boolean = false,
     val hasCompletedOnboarding: Boolean = false,
     val ncbiEmail: String = "",
-    val unpaywallEmail: String = ""
+    val unpaywallEmail: String = "",
+    val embeddingEnabled: Boolean = true
 ) {
     /**
      * Get the current LLM provider configuration.

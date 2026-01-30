@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -121,6 +121,30 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         /** Database file name. */
         const val DATABASE_NAME = "medical_factchecker.db"
+
+        /**
+         * Migration from version 2 to 3.
+         *
+         * Adds embedding scoring fields and fullTextHTML to documents table
+         * for Phase 2 iOS parity features.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add embedding scoring columns
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN score_parse_failed INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN embedding_score REAL"
+                )
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN embedding_score_normalized INTEGER"
+                )
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN full_text_html TEXT"
+                )
+            }
+        }
 
         /**
          * Migration from version 1 to 2.

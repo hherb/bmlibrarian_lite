@@ -24,6 +24,7 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
+import com.bmlibrarian.factchecker.domain.model.DocumentSortOrder
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
@@ -75,8 +76,19 @@ data class FactCheckUiState(
     val runBudgetUsd: Double = Constants.DEFAULT_MAX_RUN_BUDGET_USD.toDouble(),
 
     /** Generated PubMed query (displayed once generated). */
-    val generatedQuery: String? = null
-)
+    val generatedQuery: String? = null,
+
+    /** Current document sort order. */
+    val sortOrder: DocumentSortOrder = DocumentSortOrder.DEFAULT
+) {
+    /**
+     * Get documents sorted by the current sort order.
+     *
+     * @return Sorted list of documents
+     */
+    val sortedDocuments: List<DocumentEntity>
+        get() = DocumentSortOrder.sortDocuments(documents, sortOrder)
+}
 
 /**
  * ViewModel for the FactCheck screen.
@@ -274,6 +286,15 @@ class FactCheckViewModel @Inject constructor(
      */
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    /**
+     * Update the document sort order.
+     *
+     * @param sortOrder The new sort order
+     */
+    fun setSortOrder(sortOrder: DocumentSortOrder) {
+        _uiState.update { it.copy(sortOrder = sortOrder) }
     }
 
     /**
