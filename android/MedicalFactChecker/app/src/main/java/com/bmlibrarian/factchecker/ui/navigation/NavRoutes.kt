@@ -104,6 +104,17 @@ sealed class NavRoute(
         unselectedIcon = Icons.Outlined.Settings
     )
 
+    /**
+     * Onboarding screen for new users.
+     * Not shown in bottom navigation.
+     */
+    data object Onboarding : NavRoute(
+        route = "onboarding",
+        title = "Welcome",
+        selectedIcon = Icons.Filled.CheckCircle, // Not used in nav bar
+        unselectedIcon = Icons.Outlined.CheckCircle // Not used in nav bar
+    )
+
     companion object {
         /**
          * Items to display in the bottom navigation bar.

@@ -129,7 +129,8 @@ class SettingsRepository @Inject constructor(
             ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: "",
             unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: "",
             embeddingEnabled = regularPrefs.getBoolean(KEY_EMBEDDING_ENABLED, true),
-            enableHyde = regularPrefs.getBoolean(KEY_ENABLE_HYDE, true)
+            enableHyde = regularPrefs.getBoolean(KEY_ENABLE_HYDE, true),
+            parallelConcurrency = regularPrefs.getInt(KEY_PARALLEL_CONCURRENCY, AppSettings.DEFAULT_PARALLEL_CONCURRENCY)
         )
     }
 
@@ -156,6 +157,7 @@ class SettingsRepository @Inject constructor(
             putString(KEY_UNPAYWALL_EMAIL, settings.unpaywallEmail)
             putBoolean(KEY_EMBEDDING_ENABLED, settings.embeddingEnabled)
             putBoolean(KEY_ENABLE_HYDE, settings.enableHyde)
+            putInt(KEY_PARALLEL_CONCURRENCY, settings.parallelConcurrency)
             apply()
         }
         _settings.value = settings
@@ -517,6 +519,28 @@ class SettingsRepository @Inject constructor(
         updateSettings { it.copy(enableHyde = enabled) }
     }
 
+    // ==================== Parallel Processing Settings ====================
+
+    /**
+     * Get the parallel concurrency setting.
+     *
+     * @return Number of concurrent operations for parallel processing
+     */
+    fun getParallelConcurrency(): Int = _settings.value.parallelConcurrency
+
+    /**
+     * Set the parallel concurrency level.
+     *
+     * @param concurrency Number of concurrent operations (1-10)
+     */
+    fun setParallelConcurrency(concurrency: Int) {
+        val clampedConcurrency = concurrency.coerceIn(
+            AppSettings.MIN_PARALLEL_CONCURRENCY,
+            AppSettings.MAX_PARALLEL_CONCURRENCY
+        )
+        updateSettings { it.copy(parallelConcurrency = clampedConcurrency) }
+    }
+
     // ==================== Reset ====================
 
     /**
@@ -572,5 +596,6 @@ class SettingsRepository @Inject constructor(
         private const val KEY_UNPAYWALL_EMAIL = "unpaywall_email"
         private const val KEY_EMBEDDING_ENABLED = "embedding_enabled"
         private const val KEY_ENABLE_HYDE = "enable_hyde"
+        private const val KEY_PARALLEL_CONCURRENCY = "parallel_concurrency"
     }
 }

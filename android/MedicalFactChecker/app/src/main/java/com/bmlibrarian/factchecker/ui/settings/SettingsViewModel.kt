@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bmlibrarian.factchecker.data.local.AppDatabase
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
@@ -28,6 +29,7 @@ import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.CostCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -49,7 +52,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val llmService: com.bmlibrarian.factchecker.data.remote.llm.LLMService
+    private val llmService: com.bmlibrarian.factchecker.data.remote.llm.LLMService,
+    private val database: AppDatabase
 ) : ViewModel() {
 
     // ==================== Observable State ====================
@@ -402,6 +406,17 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setHydeEnabled(enabled)
     }
 
+    // ==================== Parallel Processing Settings ====================
+
+    /**
+     * Set the parallel concurrency level for document processing.
+     *
+     * @param concurrency Number of concurrent operations (1-10)
+     */
+    fun setParallelConcurrency(concurrency: Int) {
+        settingsRepository.setParallelConcurrency(concurrency)
+    }
+
     // ==================== Onboarding Actions ====================
 
     /**
@@ -429,6 +444,24 @@ class SettingsViewModel @Inject constructor(
         _apiKeyInput.value = ""
         _ncbiApiKeyInput.value = ""
         showStatus("Settings reset to defaults")
+    }
+
+    /**
+     * Clear all session data from the database.
+     * This removes all sessions, documents, citations, and reports,
+     * but keeps user settings and API keys.
+     */
+    fun clearAllData() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    database.clearAllTables()
+                }
+                showStatus("All data cleared successfully")
+            } catch (e: Exception) {
+                showStatus("Error clearing data: ${e.message}")
+            }
+        }
     }
 
     // ==================== Status Message Handling ====================

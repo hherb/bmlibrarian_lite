@@ -59,7 +59,8 @@ data class AppSettings(
     val ncbiEmail: String = "",
     val unpaywallEmail: String = "",
     val embeddingEnabled: Boolean = true,
-    val enableHyde: Boolean = true
+    val enableHyde: Boolean = true,
+    val parallelConcurrency: Int = DEFAULT_PARALLEL_CONCURRENCY
 ) {
     /**
      * Get the current LLM provider configuration.
@@ -183,5 +184,14 @@ data class AppSettings(
 
         /** Maximum target relevant documents. */
         const val MAX_TARGET_RELEVANT_DOCS = 50
+
+        /** Default parallel concurrency for document processing. */
+        const val DEFAULT_PARALLEL_CONCURRENCY = 3
+
+        /** Minimum parallel concurrency. */
+        const val MIN_PARALLEL_CONCURRENCY = 1
+
+        /** Maximum parallel concurrency. */
+        const val MAX_PARALLEL_CONCURRENCY = 10
     }
 }
