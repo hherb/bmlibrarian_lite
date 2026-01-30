@@ -30,6 +30,7 @@ import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
+import com.bmlibrarian.factchecker.domain.embedding.EmbeddingService
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.Verdict
@@ -73,7 +74,8 @@ class FactCheckWorkflow @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val parallelScoringService: ParallelScoringService,
     private val checkpointManager: CheckpointManager,
-    private val errorPersistenceManager: ErrorPersistenceManager
+    private val errorPersistenceManager: ErrorPersistenceManager,
+    private val embeddingService: EmbeddingService
 ) {
 
     // ==================== Observable State ====================
@@ -747,9 +749,49 @@ class FactCheckWorkflow @Inject constructor(
         // Save documents to database
         if (allDocuments.isNotEmpty()) {
             documentRepository.saveDocuments(allDocuments)
+
+            // Compute embedding scores if enabled
+            if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
+                computeEmbeddingScores(allDocuments, session.claimText)
+            }
         }
 
         return allDocuments
+    }
+
+    /**
+     * Compute embedding-based similarity scores for documents.
+     *
+     * Uses on-device ML Kit embeddings to compute semantic similarity
+     * between the claim and document abstracts. This provides a fast,
+     * free alternative to LLM-based scoring.
+     *
+     * @param documents List of documents to score
+     * @param claim The medical claim being fact-checked
+     */
+    private suspend fun computeEmbeddingScores(
+        documents: List<DocumentEntity>,
+        claim: String
+    ) {
+        // Prepare document data for batch processing
+        val documentPairs = documents.map { doc ->
+            doc.title to doc.abstractText
+        }
+
+        // Compute similarity scores in batch
+        val scores = embeddingService.scoreDocuments(claim, documentPairs)
+
+        // Update documents with embedding scores
+        documents.zip(scores).forEach { (doc, score) ->
+            score?.let { rawScore ->
+                val normalizedScore = embeddingService.normalizeToRelevanceScale(rawScore)
+                documentRepository.updateEmbeddingScore(
+                    documentId = doc.id,
+                    embeddingScore = rawScore,
+                    embeddingScoreNormalized = normalizedScore
+                )
+            }
+        }
     }
 
     /**

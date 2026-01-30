@@ -117,6 +117,12 @@ dependencies {
     // Security - Encrypted SharedPreferences
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // Google ML Kit - Text Embedding for semantic similarity scoring
+    implementation("com.google.mlkit:text-embedding:16.0.0-beta1")
+
+    // Play Services Tasks for ML Kit await() extension
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.0")
+
     // Markdown rendering
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")

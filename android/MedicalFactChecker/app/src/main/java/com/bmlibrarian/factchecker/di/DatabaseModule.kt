@@ -67,7 +67,10 @@ object DatabaseModule {
             AppDatabase.DATABASE_NAME
         )
             // Add migrations for schema changes
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3
+            )
             // Fallback for any unexpected version issues during development
             .fallbackToDestructiveMigration()
             .build()

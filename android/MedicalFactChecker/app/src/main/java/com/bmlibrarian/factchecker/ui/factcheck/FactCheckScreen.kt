@@ -64,6 +64,7 @@ import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
+import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
 
 /**
@@ -198,14 +199,20 @@ fun FactCheckScreen(
             // Scored documents section
             if (uiState.documents.isNotEmpty()) {
                 item(key = "documents_header") {
-                    Text(
-                        text = "Scored Documents (${uiState.documents.size})",
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Column {
+                        Text(
+                            text = "Scored Documents (${uiState.documents.size})",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        SortingControls(
+                            selectedSortOrder = uiState.sortOrder,
+                            onSortOrderChange = viewModel::setSortOrder
+                        )
+                    }
                 }
 
                 items(
-                    items = uiState.documents,
+                    items = uiState.sortedDocuments,
                     key = { "doc_${it.id}" }
                 ) { document ->
                     DocumentCard(document = document)

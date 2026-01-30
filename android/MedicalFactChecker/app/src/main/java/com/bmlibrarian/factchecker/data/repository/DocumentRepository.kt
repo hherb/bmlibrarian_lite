@@ -181,6 +181,21 @@ class DocumentRepository @Inject constructor(
         documentDao.markFullTextUnavailable(documentId)
     }
 
+    /**
+     * Update embedding score for a document.
+     *
+     * @param documentId Document ID
+     * @param embeddingScore Raw embedding similarity score (0.0-1.0)
+     * @param embeddingScoreNormalized Normalized score (1-5)
+     */
+    suspend fun updateEmbeddingScore(
+        documentId: String,
+        embeddingScore: Double,
+        embeddingScoreNormalized: Int
+    ) {
+        documentDao.updateEmbeddingScore(documentId, embeddingScore, embeddingScoreNormalized)
+    }
+
     // ==================== Document Existence Checks ====================
 
     /**

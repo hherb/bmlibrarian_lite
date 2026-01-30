@@ -138,6 +138,25 @@ interface DocumentDao {
     @Query("UPDATE documents SET full_text_unavailable = 1 WHERE id = :id")
     suspend fun markFullTextUnavailable(id: String)
 
+    /**
+     * Update embedding score for a document.
+     *
+     * @param id Document ID
+     * @param embeddingScore Raw embedding similarity score (0.0-1.0)
+     * @param embeddingScoreNormalized Normalized score (1-5)
+     */
+    @Query("""
+        UPDATE documents SET
+            embedding_score = :embeddingScore,
+            embedding_score_normalized = :embeddingScoreNormalized
+        WHERE id = :id
+    """)
+    suspend fun updateEmbeddingScore(
+        id: String,
+        embeddingScore: Double,
+        embeddingScoreNormalized: Int
+    )
+
     // ==================== Delete Operations ====================
 
     /**

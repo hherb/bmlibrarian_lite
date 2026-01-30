@@ -80,8 +80,20 @@ data class Document(
     /** When scoring was performed. */
     val scoredAt: Date?,
 
+    /** Whether LLM score parsing failed. */
+    val scoreParseFailed: Boolean,
+
+    /** Raw embedding similarity score (0.0 to 1.0). */
+    val embeddingScore: Double?,
+
+    /** Embedding score normalized to 1-5 scale. */
+    val embeddingScoreNormalized: Int?,
+
     /** Full text as markdown. */
     val fullTextMarkdown: String?,
+
+    /** Full text as HTML. */
+    val fullTextHTML: String?,
 
     /** Source of full text. */
     val fullTextSource: String?,
@@ -109,6 +121,9 @@ data class Document(
 
     /** Whether full text is available. */
     val hasFullText: Boolean,
+
+    /** Whether embedding score is available. */
+    val hasEmbeddingScore: Boolean,
 
     /** Display name for full text source. */
     val fullTextSourceDisplay: String?,
@@ -185,7 +200,11 @@ data class Document(
                 relevanceScore = entity.relevanceScore,
                 scoreRationale = entity.scoreRationale,
                 scoredAt = entity.scoredAt,
+                scoreParseFailed = entity.scoreParseFailed,
+                embeddingScore = entity.embeddingScore,
+                embeddingScoreNormalized = entity.embeddingScoreNormalized,
                 fullTextMarkdown = entity.fullTextMarkdown,
+                fullTextHTML = entity.fullTextHTML,
                 fullTextSource = entity.fullTextSource,
                 pdfPath = entity.pdfPath,
                 fullTextFetchedAt = entity.fullTextFetchedAt,
@@ -195,6 +214,7 @@ data class Document(
                 isScored = entity.isScored,
                 isRelevant = entity.isRelevant,
                 hasFullText = entity.hasFullText,
+                hasEmbeddingScore = entity.hasEmbeddingScore,
                 fullTextSourceDisplay = entity.fullTextSourceDisplay,
                 batchNumber = entity.batchNumber,
                 resultPosition = entity.resultPosition,

@@ -104,12 +104,23 @@ fun DocumentCard(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Score badge
-                document.relevanceScore?.let { score ->
-                    ScoreBadge(
-                        score = score,
-                        modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
-                    )
+                // Score badges column (LLM + Embedding)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING_SMALL.dp),
+                    modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
+                ) {
+                    // LLM Score badge
+                    document.relevanceScore?.let { score ->
+                        ScoreBadge(
+                            score = score,
+                            label = "LLM"
+                        )
+                    }
+                    // Embedding Score badge
+                    document.embeddingScoreNormalized?.let { embScore ->
+                        EmbeddingScoreBadge(score = embScore)
+                    }
                 }
 
                 // Title and metadata
@@ -220,11 +231,13 @@ fun DocumentCard(
  * Badge displaying the relevance score with color coding.
  *
  * @param score The relevance score (1-5)
+ * @param label Optional label to show below the score (e.g., "LLM")
  * @param modifier Modifier for the component
  */
 @Composable
 fun ScoreBadge(
     score: Int,
+    label: String? = null,
     modifier: Modifier = Modifier
 ) {
     val backgroundColor = scoreColor(score)
@@ -234,15 +247,66 @@ fun ScoreBadge(
         shape = MaterialTheme.shapes.small,
         modifier = modifier
     ) {
-        Text(
-            text = score.toString(),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onPrimary,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(
                 horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
                 vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
             )
-        )
+        ) {
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+            label?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Badge displaying the embedding similarity score with distinct styling.
+ *
+ * @param score The normalized embedding score (1-5)
+ * @param modifier Modifier for the component
+ */
+@Composable
+private fun EmbeddingScoreBadge(
+    score: Int,
+    modifier: Modifier = Modifier
+) {
+    val backgroundColor = scoreColor(score)
+
+    Surface(
+        color = backgroundColor.copy(alpha = 0.7f),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, backgroundColor),
+        modifier = modifier
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(
+                horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
+                vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
+            )
+        ) {
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+            Text(
+                text = "Emb",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+        }
     }
 }
 
