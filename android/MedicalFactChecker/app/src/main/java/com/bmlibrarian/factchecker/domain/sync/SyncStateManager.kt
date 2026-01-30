@@ -64,6 +64,34 @@ class SyncStateManager(
     private val mutex = Mutex()
 
     /**
+     * Gets or creates device ID without acquiring mutex.
+     *
+     * Internal helper to avoid deadlock when called from within mutex-holding context.
+     * Must be called from within Dispatchers.IO context.
+     */
+    private fun getOrCreateDeviceIdInternal(): String {
+        return prefs.getString(KEY_DEVICE_ID, null) ?: run {
+            val newId = UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DEVICE_ID, newId).apply()
+            newId
+        }
+    }
+
+    /**
+     * Gets or generates device name without acquiring mutex.
+     *
+     * Internal helper to avoid deadlock when called from within mutex-holding context.
+     * Must be called from within Dispatchers.IO context.
+     */
+    private fun getDeviceNameInternal(): String {
+        return prefs.getString(KEY_DEVICE_NAME, null) ?: run {
+            val name = generateDeviceName()
+            prefs.edit().putString(KEY_DEVICE_NAME, name).apply()
+            name
+        }
+    }
+
+    /**
      * Gets or creates a unique device ID for this installation.
      *
      * The device ID is a UUID that remains constant for the lifetime
@@ -71,11 +99,7 @@ class SyncStateManager(
      */
     suspend fun getOrCreateDeviceId(): String = mutex.withLock {
         withContext(Dispatchers.IO) {
-            prefs.getString(KEY_DEVICE_ID, null) ?: run {
-                val newId = UUID.randomUUID().toString()
-                prefs.edit().putString(KEY_DEVICE_ID, newId).apply()
-                newId
-            }
+            getOrCreateDeviceIdInternal()
         }
     }
 
@@ -86,11 +110,7 @@ class SyncStateManager(
      */
     suspend fun getDeviceName(): String = mutex.withLock {
         withContext(Dispatchers.IO) {
-            prefs.getString(KEY_DEVICE_NAME, null) ?: run {
-                val name = generateDeviceName()
-                prefs.edit().putString(KEY_DEVICE_NAME, name).apply()
-                name
-            }
+            getDeviceNameInternal()
         }
     }
 
@@ -159,11 +179,12 @@ class SyncStateManager(
                 try {
                     json.decodeFromString<SyncState>(stateJson)
                 } catch (e: Exception) {
-                    // Corrupted state, start fresh
-                    SyncState(deviceId = getOrCreateDeviceId())
+                    // Corrupted state, start fresh - use internal helper to avoid deadlock
+                    SyncState(deviceId = getOrCreateDeviceIdInternal())
                 }
             } else {
-                SyncState(deviceId = getOrCreateDeviceId())
+                // No state yet - use internal helper to avoid deadlock
+                SyncState(deviceId = getOrCreateDeviceIdInternal())
             }
         }
     }
@@ -211,13 +232,18 @@ class SyncStateManager(
 
     /**
      * Creates a DeviceConfig for this device.
+     *
+     * @param appVersion Current app version string
+     * @return Device configuration for sync registration
      */
-    suspend fun createDeviceConfig(appVersion: String): DeviceConfig {
-        return DeviceConfig(
-            deviceId = getOrCreateDeviceId(),
-            deviceName = getDeviceName(),
-            platform = SyncPlatform.ANDROID,
-            appVersion = appVersion
-        )
+    suspend fun createDeviceConfig(appVersion: String): DeviceConfig = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            DeviceConfig(
+                deviceId = getOrCreateDeviceIdInternal(),
+                deviceName = getDeviceNameInternal(),
+                platform = SyncPlatform.ANDROID,
+                appVersion = appVersion
+            )
+        }
     }
 }
