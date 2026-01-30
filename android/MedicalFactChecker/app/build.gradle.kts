@@ -117,11 +117,9 @@ dependencies {
     // Security - Encrypted SharedPreferences
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Google ML Kit - Text Embedding for semantic similarity scoring
-    implementation("com.google.mlkit:text-embedding:16.0.0-beta1")
-
-    // Play Services Tasks for ML Kit await() extension
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.0")
+    // MediaPipe - Text Embedding for semantic similarity scoring
+    // Uses Universal Sentence Encoder for on-device embeddings
+    implementation("com.google.mediapipe:tasks-text:0.10.14")
 
     // Markdown rendering
     implementation("io.noties.markwon:core:4.6.2")
