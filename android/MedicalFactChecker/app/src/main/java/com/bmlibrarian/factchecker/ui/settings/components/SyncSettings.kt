@@ -24,7 +24,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,6 +67,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.domain.sync.SyncConstants
 import com.bmlibrarian.factchecker.domain.sync.SyncStatus
 import com.bmlibrarian.factchecker.domain.sync.SyncUiState
 import java.text.SimpleDateFormat
@@ -412,21 +412,28 @@ private fun statusTitle(status: SyncStatus): String = when (status) {
 
 /**
  * Formats a timestamp for display.
+ *
+ * @param timestamp Unix timestamp in milliseconds
+ * @return Human-readable relative time string
  */
 private fun formatTimestamp(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - timestamp
 
     return when {
-        diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${diff / 60_000} min ago"
-        diff < 86400_000 -> "${diff / 3600_000} hr ago"
+        diff < SyncConstants.ONE_MINUTE_MS -> "just now"
+        diff < SyncConstants.ONE_HOUR_MS -> "${diff / SyncConstants.ONE_MINUTE_MS} min ago"
+        diff < SyncConstants.ONE_DAY_MS -> "${diff / SyncConstants.ONE_HOUR_MS} hr ago"
         else -> SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(timestamp))
     }
 }
 
 /**
  * Dialog for selecting/entering a sync folder path.
+ *
+ * @param currentPath Currently configured path (null if not configured)
+ * @param onDismiss Called when dialog is dismissed
+ * @param onConfirm Called with the selected path when user confirms
  */
 @Composable
 fun SyncFolderDialog(
@@ -434,7 +441,7 @@ fun SyncFolderDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var path by remember { mutableStateOf(currentPath ?: "/storage/emulated/0/BMLibrarian") }
+    var path by remember { mutableStateOf(currentPath ?: SyncConstants.DEFAULT_SYNC_FOLDER_PATH) }
 
     AlertDialog(
         onDismissRequest = onDismiss,

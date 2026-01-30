@@ -133,7 +133,7 @@ class SyncEngine(
                     }
 
                     // Update watermark for this device
-                    syncState.watermarks[remoteDeviceId] = record.payload.sequence
+                    syncState = syncState.withWatermark(remoteDeviceId, record.payload.sequence)
                 } catch (e: Exception) {
                     val error = "Failed to apply change ${record.payload.entityId}: ${e.message}"
                     Log.e(TAG, error, e)
@@ -142,7 +142,7 @@ class SyncEngine(
             }
 
             // Save sync state
-            syncState.lastSyncAt = System.currentTimeMillis()
+            syncState = syncState.withLastSyncAt(System.currentTimeMillis())
             saveSyncState()
 
             val duration = System.currentTimeMillis() - startTime

@@ -23,7 +23,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.security.MessageDigest
 
 /**
  * Writes local changes to the sync folder.
@@ -153,7 +152,7 @@ class ChangeLogWriter(
 
         // Serialize and compute checksum
         val payloadJson = json.encodeToString(payload)
-        val checksum = computeChecksum(payloadJson)
+        val checksum = ChecksumUtil.computeChecksum(payloadJson)
 
         // Create envelope
         val envelope = IntegrityEnvelope(checksum = checksum)
@@ -228,19 +227,10 @@ class ChangeLogWriter(
         entityType: SyncEntityType,
         operation: SyncOperation
     ): String {
-        val seqStr = sequence.toString().padStart(6, '0')
+        val seqStr = sequence.toString().padStart(SyncConstants.SEQUENCE_PADDING_WIDTH, '0')
         val entityStr = entityType.name.lowercase()
         val opStr = operation.name.lowercase()
         return "$seqStr-$timestamp-$entityStr-$opStr.json"
-    }
-
-    /**
-     * Computes SHA-256 checksum of data.
-     */
-    private fun computeChecksum(data: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(data.toByteArray(Charsets.UTF_8))
-        return "sha256:" + hash.joinToString("") { "%02x".format(it) }
     }
 
     /**

@@ -56,6 +56,25 @@ object SyncConstants {
 
     /** Integrity envelope version. */
     const val ENVELOPE_VERSION = 1
+
+    /** Sequence number padding width for filenames. */
+    const val SEQUENCE_PADDING_WIDTH = 6
+
+    /** Default chain verification depth. */
+    const val DEFAULT_CHAIN_VERIFICATION_DEPTH = 100
+
+    /** Default sync folder path for Android. */
+    const val DEFAULT_SYNC_FOLDER_PATH = "/storage/emulated/0/BMLibrarian"
+
+    // Time constants for UI formatting
+    /** One minute in milliseconds. */
+    const val ONE_MINUTE_MS = 60_000L
+
+    /** One hour in milliseconds. */
+    const val ONE_HOUR_MS = 3_600_000L
+
+    /** One day in milliseconds. */
+    const val ONE_DAY_MS = 86_400_000L
 }
 
 /**
@@ -283,10 +302,24 @@ data class ChangeRecord(
 @Serializable
 data class SyncState(
     val deviceId: String,
-    val watermarks: MutableMap<String, Long> = mutableMapOf(),
+    val watermarks: Map<String, Long> = emptyMap(),
     val lastSyncAt: Long? = null,
-    val localExclusions: MutableSet<String> = mutableSetOf()
-)
+    val localExclusions: Set<String> = emptySet()
+) {
+    /**
+     * Creates a copy with an updated watermark.
+     */
+    fun withWatermark(remoteDeviceId: String, sequence: Long): SyncState {
+        return copy(watermarks = watermarks + (remoteDeviceId to sequence))
+    }
+
+    /**
+     * Creates a copy with updated last sync timestamp.
+     */
+    fun withLastSyncAt(timestamp: Long): SyncState {
+        return copy(lastSyncAt = timestamp)
+    }
+}
 
 /**
  * Result of a sync operation.
@@ -341,3 +374,23 @@ data class SyncUiState(
     val errorMessage: String? = null,
     val connectedDevices: Int = 0
 )
+
+/**
+ * Utility object for computing checksums.
+ *
+ * Provides SHA-256 checksum computation used for integrity verification
+ * throughout the sync protocol.
+ */
+object ChecksumUtil {
+    /**
+     * Computes SHA-256 checksum of data.
+     *
+     * @param data The string data to checksum
+     * @return Checksum string prefixed with algorithm (e.g., "sha256:abc123...")
+     */
+    fun computeChecksum(data: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(data.toByteArray(Charsets.UTF_8))
+        return "${SyncConstants.CHECKSUM_ALGORITHM}:" + hash.joinToString("") { "%02x".format(it) }
+    }
+}

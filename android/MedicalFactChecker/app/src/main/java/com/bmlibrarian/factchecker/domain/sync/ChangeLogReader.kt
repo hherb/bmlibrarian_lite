@@ -20,7 +20,6 @@ package com.bmlibrarian.factchecker.domain.sync
 
 import android.util.Log
 import kotlinx.serialization.json.Json
-import java.security.MessageDigest
 
 /**
  * Reads and verifies changes from remote devices.
@@ -151,7 +150,7 @@ class ChangeLogReader(
 
             // Verify checksum
             val payloadJson = json.encodeToString(ChangePayload.serializer(), record.payload)
-            val computedChecksum = computeChecksum(payloadJson)
+            val computedChecksum = ChecksumUtil.computeChecksum(payloadJson)
 
             if (computedChecksum != record.envelope.checksum) {
                 Log.e(TAG, "Checksum mismatch for $path")
@@ -222,10 +221,13 @@ class ChangeLogReader(
      * Checks that the hash chain is unbroken for the last N changes.
      *
      * @param deviceId The device to verify
-     * @param depth Number of changes to verify (default 100)
+     * @param depth Number of changes to verify (default [SyncConstants.DEFAULT_CHAIN_VERIFICATION_DEPTH])
      * @return True if chain is valid
      */
-    suspend fun verifyChain(deviceId: String, depth: Int = 100): Boolean {
+    suspend fun verifyChain(
+        deviceId: String,
+        depth: Int = SyncConstants.DEFAULT_CHAIN_VERIFICATION_DEPTH
+    ): Boolean {
         val manifest = readManifest(deviceId) ?: return true // No manifest = nothing to verify
 
         val entries = manifest.files
@@ -248,14 +250,5 @@ class ChangeLogReader(
 
         Log.d(TAG, "Chain verified for $deviceId (depth=$depth)")
         return true
-    }
-
-    /**
-     * Computes SHA-256 checksum of data.
-     */
-    private fun computeChecksum(data: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(data.toByteArray(Charsets.UTF_8))
-        return "sha256:" + hash.joinToString("") { "%02x".format(it) }
     }
 }
