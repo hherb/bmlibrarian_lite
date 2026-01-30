@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.domain.workflow
 import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.local.entity.ProcessingCheckpointEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
@@ -30,18 +31,21 @@ import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
+import com.bmlibrarian.factchecker.domain.embedding.EmbeddingService
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
-import com.bmlibrarian.factchecker.ml.EmbeddingService
 import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.coroutineContext
 
 /**
  * Main workflow engine for fact-checking.
@@ -70,6 +74,9 @@ class FactCheckWorkflow @Inject constructor(
     private val reportRepository: ReportRepository,
     private val usageRepository: UsageRepository,
     private val settingsRepository: SettingsRepository,
+    private val parallelScoringService: ParallelScoringService,
+    private val checkpointManager: CheckpointManager,
+    private val errorPersistenceManager: ErrorPersistenceManager,
     private val embeddingService: EmbeddingService,
     private val hydeGenerator: HydeGenerator
 ) {
@@ -98,6 +105,12 @@ class FactCheckWorkflow @Inject constructor(
 
     /** Monthly usage for budget checking. */
     private var monthlyUsageUsd: Double = 0.0
+
+    /** Current workflow job for cancellation support. */
+    private var workflowJob: Job? = null
+
+    /** Whether this is a resumed session (for checkpoint handling). */
+    private var isResumedSession: Boolean = false
 
     // ==================== Main Entry Points ====================
 
@@ -166,7 +179,8 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Resume an existing session.
      *
-     * Continues a workflow from its current step.
+     * Continues a workflow from its current step, utilizing any
+     * checkpointed progress to skip already-processed documents.
      *
      * @param sessionId Session ID to resume
      * @param config Optional configuration override
@@ -181,6 +195,7 @@ class FactCheckWorkflow @Inject constructor(
         currentSession = session
         currentConfig = config
         monthlyUsageUsd = usageRepository.getCurrentMonthSpend()
+        isResumedSession = true  // Enable checkpoint loading
 
         try {
             runWorkflow(session, config)
@@ -188,6 +203,8 @@ class FactCheckWorkflow @Inject constructor(
             handleBudgetError(e, session)
         } catch (e: Exception) {
             handleWorkflowError(e, session)
+        } finally {
+            isResumedSession = false
         }
     }
 
@@ -304,23 +321,150 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Cancel the current workflow.
+     * Retry failed documents from the error queue.
+     *
+     * Attempts to re-process documents that previously failed during scoring
+     * or citation extraction.
+     *
+     * @param step The processing step to retry ("scoring" or "citation")
+     * @return Number of documents successfully retried
      */
-    suspend fun cancel() {
-        currentSession?.let { session ->
-            sessionRepository.setError(session.id, "Cancelled by user")
-            sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FAILED)
+    suspend fun retryFailedDocuments(step: String = ProcessingCheckpointEntity.STEP_SCORING): Int {
+        val session = currentSession
+            ?: throw IllegalStateException("No active session")
+        val config = currentConfig ?: WorkflowConfig.default()
+
+        val retryableErrors = errorPersistenceManager.getRetryableErrorsByStep(session.id, step)
+        if (retryableErrors.isEmpty()) return 0
+
+        val documentIds = retryableErrors.map { it.documentId }.toSet()
+        val documents = documentRepository.getDocumentsBySessionSync(session.id)
+            .filter { it.id in documentIds }
+
+        if (documents.isEmpty()) return 0
+
+        var successCount = 0
+
+        try {
+            when (step) {
+                ProcessingCheckpointEntity.STEP_SCORING -> {
+                    _state.value = WorkflowState.Scoring(0, documents.size)
+                    updateProgress("Retrying ${documents.size} failed documents...",
+                        WorkflowProgress.PROGRESS_SCORING_START)
+
+                    scoreDocuments(documents, session.claimText, config)
+
+                    // Count successes by checking which documents now have scores
+                    val successfulIds = mutableSetOf<String>()
+                    for (doc in documents) {
+                        val updatedDoc = documentRepository.getDocument(doc.id)
+                        if (updatedDoc?.relevanceScore != null) {
+                            successfulIds.add(doc.id)
+                        }
+                    }
+                    successCount = successfulIds.size
+
+                    // Remove errors for successfully retried documents
+                    errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
+                }
+
+                ProcessingCheckpointEntity.STEP_CITATION -> {
+                    _state.value = WorkflowState.ExtractingCitations(0, documents.size)
+                    updateProgress("Retrying ${documents.size} failed extractions...",
+                        WorkflowProgress.PROGRESS_EXTRACTION_START)
+
+                    extractCitations(documents, session.claimText, session.id, config)
+
+                    // Count successes by checking citation count
+                    val successfulIds = mutableSetOf<String>()
+                    for (doc in documents) {
+                        if (documentRepository.getCitationCountForDocument(doc.id) > 0) {
+                            successfulIds.add(doc.id)
+                        }
+                    }
+                    successCount = successfulIds.size
+
+                    // Remove errors for successfully retried documents
+                    errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
+                }
+            }
+
+            // Update retry counts for remaining errors
+            retryableErrors.forEach { error ->
+                if (error.documentId !in documentIds) {
+                    errorPersistenceManager.markRetried(error.id)
+                }
+            }
+
+        } catch (e: BudgetError) {
+            handleBudgetError(e, session)
+        } catch (e: Exception) {
+            // Don't fail completely, just return what we succeeded with
         }
-        _state.value = WorkflowState.Failed("Cancelled by user")
-        reset()
+
+        return successCount
+    }
+
+    /**
+     * Get the count of retryable errors for the current session.
+     *
+     * @return Number of errors that can be retried
+     */
+    suspend fun getRetryableErrorCount(): Int {
+        val session = currentSession ?: return 0
+        return errorPersistenceManager.getRetryableCount(session.id)
+    }
+
+    /**
+     * Cancel the current workflow.
+     *
+     * Gracefully cancels the workflow while preserving checkpointed work.
+     * The workflow can be resumed later from the last checkpoint.
+     *
+     * @param preserveProgress If true, keeps the workflow in AWAITING_USER_DECISION
+     *                         state so it can be resumed. If false, marks as failed.
+     */
+    suspend fun cancel(preserveProgress: Boolean = true) {
+        // Cancel any running workflow job
+        workflowJob?.cancel()
+        workflowJob = null
+
+        currentSession?.let { session ->
+            if (preserveProgress) {
+                // Keep checkpoints and set state to allow resumption
+                sessionRepository.updateWorkflowStep(session.id, WorkflowStep.AWAITING_USER_DECISION)
+                _state.value = WorkflowState.AwaitingUserDecision(
+                    relevantCount = documentRepository.getRelevantCount(
+                        session.id,
+                        currentConfig?.relevanceThreshold ?: Constants.SCORING_MIN_RELEVANT_SCORE
+                    ),
+                    targetCount = currentConfig?.targetRelevantDocuments ?: Constants.TARGET_RELEVANT_DOCS,
+                    availableCount = 0
+                )
+            } else {
+                // Clear checkpoints and mark as failed
+                checkpointManager.deleteCheckpoints(session.id)
+                errorPersistenceManager.deleteErrors(session.id)
+                sessionRepository.setError(session.id, "Cancelled by user")
+                sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FAILED)
+                _state.value = WorkflowState.Failed("Cancelled by user")
+            }
+        }
+
+        if (!preserveProgress) {
+            reset()
+        }
     }
 
     /**
      * Reset the workflow to idle state.
      */
     fun reset() {
+        workflowJob?.cancel()
+        workflowJob = null
         currentSession = null
         currentConfig = null
+        isResumedSession = false
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
     }
@@ -612,20 +756,94 @@ class FactCheckWorkflow @Inject constructor(
         // Save documents to database
         if (allDocuments.isNotEmpty()) {
             documentRepository.saveDocuments(allDocuments)
+
+            // Compute embedding scores if enabled
+            if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
+                computeEmbeddingScores(allDocuments, session.claimText)
+            }
         }
 
         return allDocuments
     }
 
     /**
-     * Score documents for relevance to the claim.
+     * Compute embedding-based similarity scores for documents.
      *
-     * Uses a two-phase approach when embedding scoring is enabled:
-     * 1. On-device embedding scoring (free, instant) to compute initial scores
-     * 2. LLM scoring for final relevance assessment and rationale
+     * Uses on-device ML Kit embeddings to compute semantic similarity
+     * between the claim and document abstracts. This provides a fast,
+     * free alternative to LLM-based scoring.
      *
      * If HyDE is enabled, generates a hypothetical abstract first for
      * better embedding matching.
+     *
+     * @param documents List of documents to score
+     * @param claim The medical claim being fact-checked
+     */
+    private suspend fun computeEmbeddingScores(
+        documents: List<DocumentEntity>,
+        claim: String
+    ) {
+        val provider = getLLMProvider()
+        val apiKey = settingsRepository.getLlmApiKey()
+        val model = settingsRepository.getLlmModel()
+        val session = currentSession ?: return
+
+        // Generate HyDE abstract if enabled for better semantic matching
+        val embeddingQuery = if (settingsRepository.isHydeEnabled()) {
+            val hydeAbstract = hydeGenerator.generateHypotheticalAbstract(
+                claim = claim,
+                provider = provider,
+                apiKey = apiKey,
+                model = model
+            )
+
+            if (hydeAbstract != null) {
+                // Save HyDE abstract to session
+                sessionRepository.updateHydeAbstract(session.id, hydeAbstract)
+                Log.i(TAG, "Generated HyDE abstract: ${hydeAbstract.take(100)}...")
+
+                // Record HyDE generation usage
+                recordUsage(
+                    operation = "hyde_generation",
+                    inputTokens = estimateTokens(claim),
+                    outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                )
+
+                hydeAbstract
+            } else {
+                Log.w(TAG, "HyDE generation failed, using original claim")
+                claim
+            }
+        } else {
+            claim
+        }
+
+        // Prepare document data for batch processing
+        val documentPairs = documents.map { doc ->
+            doc.title to doc.abstractText
+        }
+
+        // Compute similarity scores in batch using the query (HyDE or original claim)
+        val scores = embeddingService.scoreDocuments(embeddingQuery, documentPairs)
+
+        // Update documents with embedding scores
+        documents.zip(scores).forEach { (doc, score) ->
+            score?.let { rawScore ->
+                val normalizedScore = embeddingService.normalizeToRelevanceScale(rawScore)
+                documentRepository.updateEmbeddingScore(
+                    documentId = doc.id,
+                    embeddingScore = rawScore,
+                    embeddingScoreNormalized = normalizedScore
+                )
+            }
+        }
+    }
+
+    /**
+     * Score documents for relevance to the claim using parallel processing.
+     *
+     * Uses ParallelScoringService for concurrent scoring with configurable
+     * concurrency limits. Supports checkpointing for workflow resumption.
      */
     private suspend fun scoreDocuments(
         documents: List<DocumentEntity>,
@@ -637,94 +855,91 @@ class FactCheckWorkflow @Inject constructor(
         val model = settingsRepository.getLlmModel()
         val session = currentSession ?: return
 
-        // Phase 1: On-device embedding scoring (if enabled)
-        if (settingsRepository.isEmbeddingScoringEnabled() && embeddingService.isAvailable) {
-            updateProgress("Initializing embedding service...", WorkflowProgress.PROGRESS_SCORING_START)
+        // Check budget before starting
+        checkBudget(session, config)
 
-            val initialized = embeddingService.initialize()
-            if (initialized) {
-                // Generate HyDE abstract if enabled
-                val embeddingQuery = if (settingsRepository.isHydeEnabled()) {
-                    updateProgress("Generating hypothetical abstract...", WorkflowProgress.PROGRESS_SCORING_START + 2)
+        // Convert documents to scoring inputs
+        val inputs = documents.map { ScoringInput.fromDocument(it) }
 
-                    val hydeAbstract = hydeGenerator.generateHypotheticalAbstract(
-                        claim = claim,
-                        provider = provider,
-                        apiKey = apiKey,
-                        model = model
-                    )
+        // Get checkpointed document IDs if resuming
+        val checkpointedIds = if (isResumedSession) {
+            checkpointManager.getCheckpointedDocumentIds(
+                sessionId = session.id,
+                step = ProcessingCheckpointEntity.STEP_SCORING
+            )
+        } else {
+            emptySet()
+        }
 
-                    if (hydeAbstract != null) {
-                        // Save HyDE abstract to session
-                        sessionRepository.updateHydeAbstract(session.id, hydeAbstract)
-                        Log.i(TAG, "Generated HyDE abstract: ${hydeAbstract.take(100)}...")
-
-                        // Record HyDE generation usage
-                        recordUsage(
-                            operation = "hyde_generation",
-                            inputTokens = estimateTokens(claim),
-                            outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
-                        )
-
-                        hydeAbstract
-                    } else {
-                        Log.w(TAG, "HyDE generation failed, using original claim")
-                        claim
-                    }
-                } else {
-                    claim
-                }
-
-                // Score documents with embeddings
-                updateProgress("Embedding scoring...", WorkflowProgress.PROGRESS_SCORING_START + 5)
-
-                val embeddingScores = embeddingService.scoreDocuments(embeddingQuery, documents)
-                Log.i(TAG, "Embedding scored ${embeddingScores.size}/${documents.size} documents")
-
-                // Save embedding scores to database
-                embeddingScores.forEach { score ->
-                    documentRepository.updateDocumentEmbeddingScore(
-                        documentId = score.documentId,
-                        rawScore = score.rawScore,
-                        normalizedScore = score.normalizedScore
+        // Load and apply any checkpointed results
+        if (checkpointedIds.isNotEmpty()) {
+            val checkpointedResults = checkpointManager.loadScoringCheckpoints(session.id)
+            for (result in checkpointedResults) {
+                if (result.isSuccess) {
+                    documentRepository.updateDocumentScore(
+                        documentId = result.documentId,
+                        score = result.scoreOrNull ?: 0,
+                        rationale = result.rationaleOrNull ?: ""
                     )
                 }
-            } else {
-                Log.w(TAG, "Embedding service initialization failed")
             }
         }
 
-        // Phase 2: LLM scoring for final assessment and rationale
-        documents.forEachIndexed { index, doc ->
-            checkBudget(session, config)
+        // Score remaining documents with parallel processing
+        val results = parallelScoringService.scoreDocumentsWithCheckpoints(
+            documents = inputs,
+            claim = claim,
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            checkpointedIds = checkpointedIds,
+            maxConcurrent = parallelScoringService.detectConcurrency(provider),
+            onProgress = { documentId, completed, total ->
+                // Check for cancellation
+                if (!coroutineContext.isActive) return@scoreDocumentsWithCheckpoints
 
-            _state.value = WorkflowState.Scoring(index + 1, documents.size)
-            updateProgress(
-                "Scoring document ${index + 1} of ${documents.size}",
-                WorkflowProgress.PROGRESS_SCORING_START + 10 + (WorkflowProgress.PROGRESS_SCORING_RANGE * (index + 1) / documents.size)
-            )
+                _state.value = WorkflowState.Scoring(completed, total)
+                updateProgress(
+                    "Scoring document $completed of $total",
+                    WorkflowProgress.PROGRESS_SCORING_START +
+                            (WorkflowProgress.PROGRESS_SCORING_RANGE * completed / total)
+                )
+            },
+            onResult = { result ->
+                // Checkpoint the result
+                checkpointManager.saveScoringCheckpoint(session.id, result)
 
-            val result = llmService.scoreDocument(
-                provider = provider,
-                apiKey = apiKey,
-                model = model,
-                claim = claim,
-                title = doc.title,
-                abstractText = doc.abstractText
-            )
-
-            if (result.isSuccess) {
-                val (score, rationale) = result.getOrThrow()
-                documentRepository.updateDocumentScore(doc.id, score, rationale)
+                // Apply result to database
+                if (result.isSuccess) {
+                    documentRepository.updateDocumentScore(
+                        documentId = result.documentId,
+                        score = result.scoreOrNull ?: 0,
+                        rationale = result.rationaleOrNull ?: ""
+                    )
+                } else {
+                    // Record error for retry functionality
+                    errorPersistenceManager.recordScoringError(session.id, result)
+                }
 
                 // Record usage
                 recordUsage(
                     operation = "scoring",
-                    inputTokens = estimateTokens(claim + doc.title + (doc.abstractText ?: "")),
-                    outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                    inputTokens = result.inputTokens,
+                    outputTokens = result.outputTokens
                 )
             }
-            // If scoring fails for a document, continue with others
+        )
+
+        // Clean up checkpoints on successful completion
+        val successCount = results.count { it.isSuccess }
+        val errorCount = results.count { it.isError }
+
+        if (errorCount == 0) {
+            // All successful - clear checkpoints
+            checkpointManager.deleteCheckpointsByStep(
+                sessionId = session.id,
+                step = ProcessingCheckpointEntity.STEP_SCORING
+            )
         }
     }
 

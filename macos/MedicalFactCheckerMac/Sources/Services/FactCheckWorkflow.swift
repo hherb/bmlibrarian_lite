@@ -17,6 +17,7 @@
 import Foundation
 import SwiftData
 import BioMedLit
+import os.log
 
 /// Orchestrates the fact-checking workflow from claim input to report generation.
 ///
@@ -33,7 +34,17 @@ final class FactCheckWorkflow {
     private var llmService: LLMService?
     private var pubmedService: BioMedLit.PubMedService?
     private let modelContext: ModelContext
+    private let modelContainer: ModelContainer
     private let settings: AppSettings
+
+    /// Error persistence manager for Phase 4 error queue.
+    private let errorPersistenceManager: ErrorPersistenceManager
+
+    /// Logger for workflow operations.
+    private let logger = Logger(
+        subsystem: "com.bmlibrarian.factchecker",
+        category: "FactCheckWorkflow"
+    )
 
     /// Search options for the current workflow run.
     ///
@@ -46,6 +57,19 @@ final class FactCheckWorkflow {
     private(set) var session: FactCheckSession?
     private(set) var isRunning = false
     private(set) var progressMessage = ""
+
+    /// Whether a cancellation has been requested.
+    ///
+    /// Set to true when `cancelFactCheck()` is called. Cleared when a new
+    /// workflow starts or when the workflow completes/fails.
+    private(set) var isCancelling = false
+
+    /// Current workflow task that can be cancelled.
+    ///
+    /// Stores the active workflow task so it can be cancelled by the user.
+    /// When cancelled, in-flight scoring requests complete but no new
+    /// documents are started.
+    private var workflowTask: Task<Void, Never>?
 
     /// Set to true when waiting for user decision on fetching more docs.
     private(set) var awaitingUserDecision = false
@@ -63,6 +87,19 @@ final class FactCheckWorkflow {
     /// may have been published since the original search.
     private(set) var isResumedSession = false
 
+    /// Processing errors for Phase 4 error queue UI (transient, not persisted).
+    private(set) var processingErrors: [TransientErrorEntry] = []
+
+    // MARK: - Cancellation Support
+
+    /// Whether the current workflow can be cancelled.
+    ///
+    /// Returns true when the workflow is actively running and not already
+    /// in the process of being cancelled.
+    var canCancel: Bool {
+        isRunning && !isCancelling
+    }
+
     // MARK: - Callbacks
 
     var onProgress: ((WorkflowStep, String) -> Void)?
@@ -72,6 +109,8 @@ final class FactCheckWorkflow {
     var onError: ((Error) -> Void)?
     var onBudgetExceeded: ((String) -> Void)?
     var onSmartSearchActivated: ((String) -> Void)?  // Alternative query message
+    var onCancelled: ((Int, Int) -> Void)?  // (scored, remaining) - Cancellation support
+    var onScoringError: ((String, String, String) -> Void)?  // (pmid, step, message) - Phase 4
 
     // MARK: - Monthly Usage Tracking
 
@@ -79,9 +118,11 @@ final class FactCheckWorkflow {
 
     // MARK: - Initialization
 
-    init(modelContext: ModelContext, settings: AppSettings = .shared) {
+    init(modelContext: ModelContext, modelContainer: ModelContainer, settings: AppSettings = .shared) {
         self.modelContext = modelContext
+        self.modelContainer = modelContainer
         self.settings = settings
+        self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
     }
 
     // MARK: - Main Entry Points
@@ -123,7 +164,13 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         self.session = newSession
-        await runWorkflow()
+        isCancelling = false
+
+        // Store task for cancellation support
+        workflowTask = Task {
+            await runWorkflow()
+        }
+        await workflowTask?.value
     }
 
     /// Resume an existing session.
@@ -152,7 +199,13 @@ final class FactCheckWorkflow {
 
         await loadMonthlyUsage()
         self.session = session
-        await runWorkflow()
+        isCancelling = false
+
+        // Store task for cancellation support
+        workflowTask = Task {
+            await runWorkflow()
+        }
+        await workflowTask?.value
     }
 
     /// Restore a session for viewing without running the workflow.
@@ -166,14 +219,15 @@ final class FactCheckWorkflow {
     /// re-running the workflow. The user can then click "Add More Results"
     /// to fetch additional documents if more are available.
     ///
+    /// If the session was in the `awaitingUserDecision` state when the app was
+    /// terminated, this state is restored so the user sees the decision prompt
+    /// and can continue the workflow.
+    ///
     /// - Parameter session: The fact-check session to restore for viewing.
     func restoreForViewing(_ session: FactCheckSession) {
         self.session = session
         // Initialize services lazily - only if user triggers new actions
         isRunning = false
-        awaitingUserDecision = false
-        awaitingSmartSearchDecision = false
-        userDecisionPrompt = ""
         progressMessage = ""
 
         // Mark as resumed so fetchMoreEvidence will refresh pagination state
@@ -196,6 +250,33 @@ final class FactCheckWorkflow {
                 maxResults: settings.batchSize,
                 offset: session.pubmedOffset
             )
+        }
+
+        // Restore awaitingUserDecision state if the session was paused waiting for input
+        if session.currentStep == .awaitingUserDecision {
+            awaitingUserDecision = true
+            // Rebuild the decision prompt based on current session state
+            let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
+            let needed = settings.minRelevantDocuments
+            let available = session.estimatedRemainingResults
+
+            // Check if smart search is available but hasn't been tried
+            if !session.smartSearchEnabled && relevant < smartSearchThreshold {
+                awaitingSmartSearchDecision = true
+                userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Would you like to try smart search with alternative queries?"
+            } else if available > 0 {
+                awaitingSmartSearchDecision = false
+                userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
+            } else {
+                // No more options available - proceed with current
+                awaitingUserDecision = false
+                awaitingSmartSearchDecision = false
+                userDecisionPrompt = ""
+            }
+        } else {
+            awaitingUserDecision = false
+            awaitingSmartSearchDecision = false
+            userDecisionPrompt = ""
         }
     }
 
@@ -404,17 +485,166 @@ final class FactCheckWorkflow {
         }
     }
 
-    /// Cancel the current workflow.
+    /// Cancel the current workflow (legacy method, use cancelFactCheck() instead).
+    ///
+    /// This method is kept for backward compatibility but delegates to
+    /// `cancelFactCheck()` which provides cancellation support.
     func cancel() {
-        guard let session = session else { return }
+        cancelFactCheck()
+    }
 
-        session.currentStep = .failed
+    /// Cancel the current fact-check operation.
+    ///
+    /// Stops scoring at the next document boundary. Already-scored documents
+    /// are preserved via checkpointing. The session moves to a special
+    /// cancelled state that allows:
+    /// - Viewing already-scored documents
+    /// - Resuming with the remaining documents
+    /// - Generating a partial report with available evidence
+    ///
+    /// ## Example Usage
+    ///
+    /// ```swift
+    /// // In a SwiftUI view
+    /// Button("Cancel") {
+    ///     workflow.cancelFactCheck()
+    /// }
+    /// .disabled(!workflow.canCancel)
+    /// ```
+    ///
+    /// ## Thread Safety
+    ///
+    /// This method can be called from any context (e.g., button tap).
+    /// The actual cancellation is coordinated through Swift's structured
+    /// concurrency using `Task.cancel()`.
+    func cancelFactCheck() {
+        guard isRunning else { return }
+
+        isCancelling = true
+        progressMessage = "Cancelling..."
+
+        // Cancel the workflow task (cooperative cancellation)
+        workflowTask?.cancel()
+        workflowTask = nil
+
+        guard let session = session else {
+            isCancelling = false
+            isRunning = false
+            return
+        }
+
+        // Count documents for callback
+        let docs = session.documents ?? []
+        let scoredCount = docs.filter { $0.relevanceScore != nil }.count
+        let remaining = docs.count - scoredCount
+
+        // Update session state
+        session.currentStep = .awaitingUserDecision
         session.errorMessage = "Cancelled by user"
         session.stopReason = .userCancelled
         try? modelContext.save()
 
         isRunning = false
         awaitingUserDecision = false
+
+        // Notify callback
+        onCancelled?(scoredCount, remaining)
+
+        // Note: isCancelling is cleared by the CancellationError handlers in the
+        // workflow methods, not here. This prevents a race condition where we clear
+        // the flag before the catch block has a chance to check it.
+    }
+
+    // MARK: - Retry Report Generation
+
+    /// Whether the workflow can retry report generation.
+    ///
+    /// Returns true when:
+    /// - A session exists
+    /// - The session failed (has errorMessage set)
+    /// - The session has relevant documents with citations extracted
+    /// - The workflow is not currently running
+    var canRetryReportGeneration: Bool {
+        guard let session = session,
+              !isRunning,
+              session.errorMessage != nil else {
+            return false
+        }
+
+        // Check if we have documents with citations (report generation prerequisites)
+        let citationCount = (session.documents ?? [])
+            .filter { $0.meetsThreshold(settings.minScoreThreshold) }
+            .flatMap { $0.citations ?? [] }
+            .count
+
+        return citationCount > 0
+    }
+
+    /// Retry report generation after a failure.
+    ///
+    /// This method allows users to retry just the report generation step when it
+    /// fails (e.g., due to timeout, network issues, or LLM errors). It skips
+    /// all previous workflow steps and directly attempts to regenerate the report.
+    ///
+    /// Prerequisites:
+    /// - Session must have relevant documents with citations already extracted
+    /// - Previous report generation must have failed
+    func retryReportGeneration() async {
+        guard let session = session else { return }
+
+        // Initialize services if needed
+        if llmService == nil {
+            do {
+                llmService = try LLMService.create(from: settings)
+            } catch {
+                onError?(error)
+                return
+            }
+        }
+
+        // Load monthly usage
+        await loadMonthlyUsage()
+
+        // Check monthly budget
+        if monthlyUsedUSD >= settings.monthlyBudgetUSD {
+            onBudgetExceeded?("Monthly budget of \(CostCalculator.formatCost(settings.monthlyBudgetUSD)) exceeded")
+            return
+        }
+
+        isRunning = true
+        session.currentStep = .generatingReport
+        session.errorMessage = nil  // Clear previous error
+        try? modelContext.save()
+
+        do {
+            updateProgress(.generatingReport, "Retrying report generation...")
+            try await generateReport()
+
+            // Complete
+            session.currentStep = .completed
+            session.stopReason = .completed
+            session.updatedAt = Date()
+            try? modelContext.save()
+
+            if let report = session.report {
+                onComplete?(report)
+            }
+
+        } catch let error as BudgetError {
+            session.currentStep = .budgetExceeded
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .budgetExceeded
+            try? modelContext.save()
+            onBudgetExceeded?(error.localizedDescription)
+        } catch {
+            session.currentStep = .failed
+            session.errorMessage = error.localizedDescription
+            session.stopReason = .apiError
+            try? modelContext.save()
+            onError?(error)
+        }
+
+        isRunning = false
     }
 
     // MARK: - Fetch More Evidence
@@ -583,8 +813,12 @@ final class FactCheckWorkflow {
     private func runWorkflow() async {
         guard let session = session else { return }
         isRunning = true
+        isCancelling = false
 
         do {
+            // Check for cancellation before starting
+            try Task.checkCancellation()
+
             // Step 1: Convert claim to PubMed query
             if session.currentStep == .idle {
                 session.currentStep = .convertingQuery
@@ -594,6 +828,9 @@ final class FactCheckWorkflow {
                 try await convertClaimToQuery()
             }
 
+            // Check for cancellation after each step
+            try Task.checkCancellation()
+
             // Step 2: Search PubMed (may loop for batch pagination)
             if session.currentStep == .convertingQuery || session.currentStep == .searchingPubMed {
                 session.currentStep = .searchingPubMed
@@ -602,12 +839,18 @@ final class FactCheckWorkflow {
                 try await searchPubMed()
             }
 
+            // Check for cancellation after search
+            try Task.checkCancellation()
+
             // Step 3: Score documents (LLM + optional embedding)
             if session.currentStep == .searchingPubMed {
                 session.currentStep = .scoringDocuments
                 try? modelContext.save()
 
                 try await scoreDocuments()
+
+                // Check for cancellation after scoring
+                try Task.checkCancellation()
 
                 // Compute embedding scores if enabled
                 if settings.embeddingScoringEnabled {
@@ -690,6 +933,17 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
+        } catch is CancellationError {
+            // Handle graceful cancellation
+            // Checkpoints are preserved, so no cleanup needed here.
+            // Session state is already set by cancelFactCheck(), just stop processing.
+            // Don't overwrite the state if cancellation was requested externally.
+            if !isCancelling {
+                session.currentStep = .awaitingUserDecision
+                session.errorMessage = "Cancelled"
+                session.stopReason = .userCancelled
+                try? modelContext.save()
+            }
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -705,6 +959,8 @@ final class FactCheckWorkflow {
         }
 
         isRunning = false
+        isCancelling = false
+        workflowTask = nil
     }
 
     // MARK: - Step Implementations
@@ -976,6 +1232,16 @@ final class FactCheckWorkflow {
             session.documentsScored += 1
             if let score = result.score, score >= settings.minScoreThreshold {
                 session.relevantDocumentsFound += 1
+            } else if result.score == nil {
+                // Phase 4: Track scoring failure in error queue
+                document.scoreParseFailed = true
+                let errorMessage = result.explanation.isEmpty ? "Scoring failed" : result.explanation
+                handleScoringError(
+                    pmid: document.pmid,
+                    step: "scoring",
+                    message: errorMessage,
+                    sessionId: session.id.uuidString
+                )
             }
 
             try? modelContext.save()
@@ -1176,6 +1442,12 @@ final class FactCheckWorkflow {
         return response.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Extract citations from relevant documents using parallel processing.
+    ///
+    /// Uses `ParallelCitationService` to extract citations from multiple documents
+    /// concurrently. Concurrency level is auto-detected based on provider:
+    /// - Cloud APIs (Anthropic, OpenAI, etc.): 3 concurrent requests
+    /// - Local inference (Ollama): 1 (sequential)
     private func extractCitations() async throws {
         guard let session = session, let llmService = llmService else { return }
 
@@ -1191,67 +1463,95 @@ final class FactCheckWorkflow {
         let relevantDocs = (session.documents ?? []).filter {
             $0.meetsThreshold(settings.minScoreThreshold) && ($0.citations ?? []).isEmpty
         }
+
+        guard !relevantDocs.isEmpty else {
+            print("[Citation] No documents for citation extraction")
+            return
+        }
+
         let total = relevantDocs.count
         print("[Citation] Documents for citation extraction: \(total)")
 
-        for (index, document) in relevantDocs.enumerated() {
-            try checkBudget()
+        // Check budget before starting
+        try checkBudget()
 
-            updateProgress(.extractingCitations, "Extracting citations \(index + 1)/\(total)...")
+        // Auto-detect concurrency based on provider
+        let providerURL = URL(string: settings.llmBaseURL) ?? URL(string: "http://localhost")!
+        let concurrency = ConcurrencyDetector.detectConcurrency(
+            providerURL: providerURL,
+            userOverride: nil
+        )
+        print("[Citation] Using concurrency level: \(concurrency)")
 
-            let prompt = """
-            Extract 1-2 key passages from this abstract that are most relevant to the claim.
-
-            Claim: \(session.claim)
-
-            Document: \(document.title) (\(document.formattedAuthors), \(document.year ?? 0))
-
-            Abstract:
-            \(document.abstract)
-
-            Extract exact or close quotes that:
-            1. Directly address the claim (whether supporting OR refuting it)
-            2. Contain specific findings, data, or conclusions
-            3. Could be quoted in an evidence summary
-
-            For each passage, also identify:
-            - Whether the finding SUPPORTS or REFUTES the claim (or is NEUTRAL/UNCLEAR)
-            - The study type if identifiable (e.g., systematic review, meta-analysis, RCT, cohort study, case-control, case report, narrative review)
-            - Sample size if mentioned (e.g., "n=500", "1,234 participants")
-
-            Respond in JSON format only:
-            {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
-            """
-
-            let messages = [LLMService.userMessage(prompt)]
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
-                temperature: 0.1,
-                maxTokens: 4096,
-                jsonMode: true
-            )
-
-            recordUsage(usage, operationType: "citation")
-
-            // Parse passages using ResponseParser
-            let passages = ResponseParser.parsePassagesResponse(response)
-
-            if passages.isEmpty {
-                print("[Citation] Warning: No passages extracted from document \(document.pmid)")
-                print("[Citation] Response (first 500 chars): \(String(response.prefix(500)))")
-            } else {
-                print("[Citation] Extracted \(passages.count) passage(s) from document \(document.pmid)")
-            }
-
-            for passage in passages {
-                let citation = Citation(passage: passage.text, context: passage.relevance)
-                citation.document = document
-                modelContext.insert(citation)
-                session.citationsExtracted += 1
-            }
-
-            try? modelContext.save()
+        // Build document lookup for applying results
+        var documentsByPMID: [String: Document] = [:]
+        for doc in relevantDocs {
+            documentsByPMID[doc.pmid] = doc
         }
+
+        // Create citation inputs (thread-safe structs)
+        let inputs = relevantDocs.map { doc in
+            CitationInput(
+                pmid: doc.pmid,
+                title: doc.title,
+                abstract: doc.abstract,
+                authors: doc.formattedAuthors,
+                year: doc.year ?? 0
+            )
+        }
+
+        // Create parallel citation service
+        let citationService = ParallelCitationService(
+            llmService: llmService,
+            maxConcurrent: concurrency
+        )
+
+        updateProgress(.extractingCitations, "Extracting citations 0/\(total)...")
+
+        // Extract citations in parallel with progress reporting
+        let results = await citationService.extractCitations(
+            inputs,
+            claim: session.claim,
+            onProgress: { [weak self] (pmid: String, completed: Int, total: Int) in
+                Task { @MainActor in
+                    self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
+                }
+            }
+        )
+
+        // Apply results to documents (on main actor)
+        var successCount = 0
+        var errorCount = 0
+        for result in results {
+            guard let document = documentsByPMID[result.pmid] else { continue }
+
+            if result.isSuccess {
+                if result.passages.isEmpty {
+                    print("[Citation] Warning: No passages extracted from document \(result.pmid)")
+                } else {
+                    print("[Citation] Extracted \(result.passages.count) passage(s) from document \(result.pmid)")
+                    successCount += 1
+                }
+
+                for passage in result.passages {
+                    let citation = Citation(passage: passage.text, context: passage.relevance)
+                    citation.document = document
+                    modelContext.insert(citation)
+                    session.citationsExtracted += 1
+                }
+            } else {
+                print("[Citation] Error extracting from \(result.pmid): \(result.errorMessage ?? "unknown")")
+                errorCount += 1
+            }
+
+            // Record usage if available
+            if let usage = result.usage {
+                recordUsage(usage, operationType: "citation")
+            }
+        }
+
+        print("[Citation] Completed: \(successCount) successful, \(errorCount) errors")
+        try? modelContext.save()
     }
 
     private func generateReport() async throws {
@@ -1532,6 +1832,142 @@ final class FactCheckWorkflow {
             """
             return (summary, fullReport)
         }
+    }
+
+    // MARK: - Phase 4 Error Handling
+
+    /// Handle a scoring or citation error from document processing.
+    ///
+    /// Persists the error and notifies listeners via the `onScoringError` callback.
+    /// Errors are categorized automatically based on the error message.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID of the failed document.
+    ///   - step: Processing step ("scoring" or "citation").
+    ///   - message: Error message.
+    ///   - sessionId: Session identifier for persistence.
+    private func handleScoringError(
+        pmid: String,
+        step: String,
+        message: String,
+        sessionId: String
+    ) {
+        let category = categorizeErrorMessage(message)
+
+        // Add to in-memory errors for UI
+        let transientError = TransientErrorEntry(
+            pmid: pmid,
+            step: step,
+            message: message,
+            category: category
+        )
+        processingErrors.append(transientError)
+
+        // Persist error
+        Task {
+            do {
+                try await errorPersistenceManager.saveError(
+                    pmid: pmid,
+                    step: step,
+                    message: message,
+                    sessionId: sessionId
+                )
+            } catch {
+                logger.error("Failed to persist error for PMID \(pmid): \(error.localizedDescription)")
+            }
+        }
+
+        // Notify callback
+        onScoringError?(pmid, step, message)
+    }
+
+    /// Retry failed documents from the error queue.
+    ///
+    /// Re-queues documents that previously failed for another scoring attempt.
+    /// Clears the documents from the error queue and resets their failed status.
+    ///
+    /// - Parameter pmids: List of PMIDs to retry.
+    func retryFailedDocuments(pmids: [String]) async {
+        guard let session = session else { return }
+        let sessionId = session.id.uuidString
+
+        // Remove from in-memory errors
+        processingErrors.removeAll { pmids.contains($0.pmid) }
+
+        // Increment retry counts in persistence
+        do {
+            try await errorPersistenceManager.incrementRetryCount(
+                pmids: pmids,
+                sessionId: sessionId
+            )
+        } catch {
+            logger.error("Failed to increment retry count: \(error.localizedDescription)")
+        }
+
+        // Reset the documents' failed status so they can be re-scored
+        let documents = session.documents ?? []
+        for doc in documents where pmids.contains(doc.pmid) {
+            doc.scoreParseFailed = false
+            doc.relevanceScore = nil
+            doc.scoreExplanation = nil
+            doc.scoredAt = nil
+        }
+        try? modelContext.save()
+
+        // Re-run scoring for these documents
+        do {
+            try await scoreDocuments()
+
+            // On success, remove the errors from persistence
+            let successfulPmids = documents
+                .filter { pmids.contains($0.pmid) && $0.relevanceScore != nil }
+                .map { $0.pmid }
+
+            if !successfulPmids.isEmpty {
+                try await errorPersistenceManager.removeErrors(
+                    pmids: successfulPmids,
+                    sessionId: sessionId
+                )
+            }
+        } catch {
+            onError?(error)
+        }
+    }
+
+    /// Load persisted errors for the current session.
+    ///
+    /// Populates `processingErrors` with errors saved from previous runs.
+    func loadPersistedErrors() async {
+        guard let session = session else { return }
+
+        do {
+            let errors = try await errorPersistenceManager.loadTransientErrors(
+                sessionId: session.id.uuidString
+            )
+            processingErrors = errors
+        } catch {
+            processingErrors = []
+        }
+    }
+
+    /// Clear all errors for the current session.
+    func clearErrors() async {
+        guard let session = session else { return }
+
+        processingErrors = []
+
+        do {
+            try await errorPersistenceManager.clearErrors(
+                sessionId: session.id.uuidString
+            )
+        } catch {
+            logger.error("Failed to clear errors: \(error.localizedDescription)")
+        }
+    }
+
+    /// Get the count of processing errors.
+    var errorCount: Int {
+        processingErrors.count
     }
 
     // MARK: - Smart Search

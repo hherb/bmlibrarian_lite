@@ -104,26 +104,22 @@ fun DocumentCard(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Score badges (LLM and embedding if available)
+                // Score badges column (LLM + Embedding)
                 Column(
-                    modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING_SMALL.dp),
+                    modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
                 ) {
-                    // LLM score badge (primary)
+                    // LLM Score badge
                     document.relevanceScore?.let { score ->
                         ScoreBadge(
                             score = score,
-                            label = null
+                            label = "LLM"
                         )
                     }
-
-                    // Embedding score badge (secondary, smaller)
-                    document.embeddingRelevance?.let { embeddingScore ->
-                        EmbeddingScoreBadge(
-                            score = embeddingScore,
-                            rawScore = document.embeddingScore
-                        )
+                    // Embedding Score badge
+                    document.embeddingScoreNormalized?.let { embScore ->
+                        EmbeddingScoreBadge(score = embScore)
                     }
                 }
 
@@ -235,7 +231,7 @@ fun DocumentCard(
  * Badge displaying the relevance score with color coding.
  *
  * @param score The relevance score (1-5)
- * @param label Optional label to display below the score
+ * @param label Optional label to show below the score (e.g., "LLM")
  * @param modifier Modifier for the component
  */
 @Composable
@@ -263,11 +259,11 @@ fun ScoreBadge(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onPrimary
             )
-            if (label != null) {
+            label?.let {
                 Text(
-                    text = label,
+                    text = it,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
             }
         }
@@ -275,43 +271,39 @@ fun ScoreBadge(
 }
 
 /**
- * Badge displaying the embedding-based score.
+ * Badge displaying the embedding similarity score with distinct styling.
  *
- * Shows the normalized score (1-5) with an "E" label to indicate
- * it's an embedding score. Smaller than the primary LLM score badge.
- *
- * @param score The normalized relevance score (1-5)
- * @param rawScore The raw cosine similarity (0.0-1.0), shown in tooltip
+ * @param score The normalized embedding score (1-5)
  * @param modifier Modifier for the component
  */
 @Composable
 private fun EmbeddingScoreBadge(
     score: Int,
-    rawScore: Float?,
     modifier: Modifier = Modifier
 ) {
-    val backgroundColor = scoreColor(score).copy(alpha = 0.7f)
+    val backgroundColor = scoreColor(score)
 
     Surface(
-        color = backgroundColor,
-        shape = MaterialTheme.shapes.extraSmall,
+        color = backgroundColor.copy(alpha = 0.7f),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, backgroundColor),
         modifier = modifier
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(
-                horizontal = 4.dp,
-                vertical = 1.dp
+                horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
+                vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
             )
         ) {
             Text(
-                text = "E:",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                text = score.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimary
             )
             Text(
-                text = score.toString(),
-                style = MaterialTheme.typography.labelMedium,
+                text = "Emb",
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimary
             )
         }

@@ -38,19 +38,10 @@ struct MedicalFactCheckerMacApp: App {
         // Register custom transformer before creating the container
         StringArrayTransformer.register()
 
-        let schema = Schema([
-            FactCheckSession.self,
-            Document.self,
-            Citation.self,
-            EvidenceReport.self,
-            UsageRecord.self,
-        ])
-
-        // Use CloudKitConfiguration to determine sync settings
-        let modelConfiguration = CloudKitConfiguration.makeModelConfiguration(schema: schema)
-
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            // Use migration-aware container creation to preserve user data
+            // when upgrading from previous schema versions
+            return try CloudKitConfiguration.makeModelContainerWithMigration()
         } catch {
             print("ModelContainer creation failed:")
             print("Error: \(error)")

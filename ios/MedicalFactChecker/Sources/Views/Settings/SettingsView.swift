@@ -1,3 +1,4 @@
+#if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //
@@ -854,3 +855,5 @@ struct CostEstimateRow: View {
         .modelContainer(for: [UsageRecord.self], inMemory: true)
         .environment(AppSettings.shared)
 }
+
+#endif // os(iOS)

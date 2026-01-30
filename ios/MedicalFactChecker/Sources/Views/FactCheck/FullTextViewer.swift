@@ -1,3 +1,4 @@
+#if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //
@@ -720,3 +721,5 @@ struct PDFKitRepresentableMac: NSViewRepresentable {
         result: AppFullTextResult(content: .html(sampleHTML), source: .europePMC)
     )
 }
+
+#endif // os(iOS)

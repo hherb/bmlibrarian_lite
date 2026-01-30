@@ -89,31 +89,36 @@ object Constants {
     // ==================== Embedding Scoring Configuration ====================
 
     /**
-     * Similarity threshold: below this → score 1 (not relevant).
-     * Thresholds match iOS implementation exactly.
+     * Embedding similarity thresholds for 1-5 relevance scale normalization.
+     *
+     * These thresholds are tuned for typical sentence embedding similarity distributions
+     * (e.g., Universal Sentence Encoder, all-MiniLM-L6-V2).
+     *
+     * Mirrors iOS EmbeddingService thresholds for cross-platform consistency.
      */
-    const val EMBEDDING_THRESHOLD_NOT_RELEVANT = 0.3f
 
-    /** Similarity threshold: 0.3-0.45 → score 2 (marginally relevant). */
-    const val EMBEDDING_THRESHOLD_MARGINAL = 0.45f
+    /** Threshold below which similarity maps to score 1 (not relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_1 = 0.3
 
-    /** Similarity threshold: 0.45-0.55 → score 3 (moderately relevant). */
-    const val EMBEDDING_THRESHOLD_MODERATE = 0.55f
+    /** Threshold below which similarity maps to score 2 (marginally relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_2 = 0.45
 
-    /** Similarity threshold: 0.55-0.7 → score 4 (highly relevant), >= 0.7 → score 5. */
-    const val EMBEDDING_THRESHOLD_HIGHLY_RELEVANT = 0.7f
+    /** Threshold below which similarity maps to score 3 (moderately relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_3 = 0.55
 
-    /** TFLite model filename for Universal Sentence Encoder. */
+    /** Threshold below which similarity maps to score 4 (highly relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_4 = 0.7
+
+    /** Directory name for storing downloaded ML models. */
+    const val EMBEDDING_MODELS_DIR = "models"
+
+    /** Filename for the Universal Sentence Encoder model. */
     const val EMBEDDING_MODEL_FILENAME = "universal_sentence_encoder.tflite"
 
-    /** Output dimension for Universal Sentence Encoder embeddings. */
-    const val EMBEDDING_DIMENSION = 512
-
-    /** Maximum sequence length for embedding input. */
-    const val EMBEDDING_MAX_SEQUENCE_LENGTH = 128
-
-    /** Number of threads for TFLite interpreter. */
-    const val EMBEDDING_NUM_THREADS = 4
+    /** URL to download the Universal Sentence Encoder model from Google Cloud Storage. */
+    const val EMBEDDING_MODEL_URL =
+        "https://storage.googleapis.com/mediapipe-models/text_embedder/" +
+        "universal_sentence_encoder/float32/latest/universal_sentence_encoder.tflite"
 
     // ==================== HyDE Configuration ====================
 

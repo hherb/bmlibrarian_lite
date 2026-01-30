@@ -1,3 +1,4 @@
+#if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //
@@ -44,6 +45,26 @@ struct FactCheckView: View {
                         ConfigurationWarningView()
                     }
 
+                    // Background Status Banner
+                    if let workflow = workflow, workflow.wasPausedByBackground {
+                        BackgroundStatusBanner(
+                            message: workflow.userDecisionPrompt.isEmpty
+                                ? "Processing was interrupted. Tap Resume to continue."
+                                : workflow.userDecisionPrompt,
+                            onResume: {
+                                Task {
+                                    await workflow.continueWithMoreDocuments()
+                                }
+                            },
+                            onDismiss: {
+                                // Clear the paused state without resuming
+                                Task { @MainActor in
+                                    workflow.clearBackgroundPausedState()
+                                }
+                            }
+                        )
+                    }
+
                     // Input Section
                     ClaimInputSection(
                         claimText: $claimText,
@@ -87,6 +108,19 @@ struct FactCheckView: View {
                                 onContinue: { Task { await workflow.continueWithMoreDocuments() } },
                                 onSmartSearch: { Task { await workflow.continueWithSmartSearch() } },
                                 onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
+                            )
+                        }
+
+                        // Retry Report Generation Section (shown when report generation fails)
+                        if workflow.canRetryReportGeneration {
+                            RetryReportSection(
+                                errorMessage: workflow.session?.errorMessage,
+                                isRetrying: workflow.isRunning,
+                                onRetry: {
+                                    Task {
+                                        await workflow.retryReportGeneration()
+                                    }
+                                }
                             )
                         }
 
@@ -629,6 +663,63 @@ struct UserDecisionSection: View {
     }
 }
 
+/// View displayed when report generation fails and can be retried.
+///
+/// Shows the error message and provides a button to retry report generation.
+/// The retry will skip all earlier workflow steps and directly attempt to
+/// regenerate the report using existing scored documents and citations.
+struct RetryReportSection: View {
+    /// The error message from the failed report generation.
+    let errorMessage: String?
+
+    /// Whether report generation is currently being retried.
+    let isRetrying: Bool
+
+    /// Called when user taps the retry button.
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Report Generation Failed")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    if let error = errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Button {
+                onRetry()
+            } label: {
+                HStack {
+                    if isRetrying {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Text(isRetrying ? "Retrying..." : "Retry Report Generation")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRetrying)
+            .accessibilityLabel("Retry Report Generation")
+            .accessibilityHint("Attempts to regenerate the report using existing documents and citations")
+        }
+        .padding()
+        .background(Color.red.opacity(0.1))
+        .cornerRadius(10)
+    }
+}
+
 #Preview {
     @Previewable @State var claimText = ""
     @Previewable @State var workflow: FactCheckWorkflow? = nil
@@ -647,3 +738,5 @@ struct UserDecisionSection: View {
     ], inMemory: true)
     .environment(AppSettings.shared)
 }
+
+#endif // os(iOS)

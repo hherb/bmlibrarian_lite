@@ -128,7 +128,7 @@ class SettingsRepository @Inject constructor(
             hasCompletedOnboarding = regularPrefs.getBoolean(KEY_ONBOARDING_COMPLETE, false),
             ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: "",
             unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: "",
-            enableEmbeddingScoring = regularPrefs.getBoolean(KEY_ENABLE_EMBEDDING_SCORING, true),
+            embeddingEnabled = regularPrefs.getBoolean(KEY_EMBEDDING_ENABLED, true),
             enableHyde = regularPrefs.getBoolean(KEY_ENABLE_HYDE, true)
         )
     }
@@ -154,7 +154,7 @@ class SettingsRepository @Inject constructor(
             putBoolean(KEY_ONBOARDING_COMPLETE, settings.hasCompletedOnboarding)
             putString(KEY_NCBI_EMAIL, settings.ncbiEmail)
             putString(KEY_UNPAYWALL_EMAIL, settings.unpaywallEmail)
-            putBoolean(KEY_ENABLE_EMBEDDING_SCORING, settings.enableEmbeddingScoring)
+            putBoolean(KEY_EMBEDDING_ENABLED, settings.embeddingEnabled)
             putBoolean(KEY_ENABLE_HYDE, settings.enableHyde)
             apply()
         }
@@ -483,22 +483,22 @@ class SettingsRepository @Inject constructor(
         updateSettings { it.copy(hasAcceptedDisclaimer = true) }
     }
 
-    // ==================== Embedding Scoring ====================
+    // ==================== Embedding Settings ====================
 
     /**
      * Check if embedding-based scoring is enabled.
      *
-     * @return true if on-device embedding scoring is enabled
+     * @return true if embedding scoring is enabled
      */
-    fun isEmbeddingScoringEnabled(): Boolean = _settings.value.enableEmbeddingScoring
+    fun isEmbeddingEnabled(): Boolean = _settings.value.embeddingEnabled
 
     /**
-     * Enable or disable embedding-based scoring.
+     * Set embedding scoring enabled state.
      *
      * @param enabled Whether to enable embedding scoring
      */
-    fun setEmbeddingScoringEnabled(enabled: Boolean) {
-        updateSettings { it.copy(enableEmbeddingScoring = enabled) }
+    fun setEmbeddingEnabled(enabled: Boolean) {
+        updateSettings { it.copy(embeddingEnabled = enabled) }
     }
 
     /**
@@ -570,7 +570,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         private const val KEY_NCBI_EMAIL = "ncbi_email"
         private const val KEY_UNPAYWALL_EMAIL = "unpaywall_email"
-        private const val KEY_ENABLE_EMBEDDING_SCORING = "enable_embedding_scoring"
+        private const val KEY_EMBEDDING_ENABLED = "embedding_enabled"
         private const val KEY_ENABLE_HYDE = "enable_hyde"
     }
 }

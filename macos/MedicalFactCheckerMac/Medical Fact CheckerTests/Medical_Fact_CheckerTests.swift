@@ -15,7 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Testing
-@testable import Medical_Fact_Checker
+@testable import MedicalFactChecker
 
 struct Medical_Fact_CheckerTests {
 

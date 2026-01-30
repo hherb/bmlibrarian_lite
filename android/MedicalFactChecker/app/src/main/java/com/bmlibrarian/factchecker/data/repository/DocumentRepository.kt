@@ -185,15 +185,15 @@ class DocumentRepository @Inject constructor(
      * Update embedding score for a document.
      *
      * @param documentId Document ID
-     * @param rawScore Raw cosine similarity (0.0-1.0)
-     * @param normalizedScore Normalized relevance score (1-5)
+     * @param embeddingScore Raw embedding similarity score (0.0-1.0)
+     * @param embeddingScoreNormalized Normalized score (1-5)
      */
-    suspend fun updateDocumentEmbeddingScore(
+    suspend fun updateEmbeddingScore(
         documentId: String,
-        rawScore: Float,
-        normalizedScore: Int
+        embeddingScore: Double,
+        embeddingScoreNormalized: Int
     ) {
-        documentDao.updateEmbeddingScore(documentId, rawScore, normalizedScore)
+        documentDao.updateEmbeddingScore(documentId, embeddingScore, embeddingScoreNormalized)
     }
 
     // ==================== Document Existence Checks ====================

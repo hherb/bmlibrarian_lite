@@ -40,7 +40,7 @@ import com.bmlibrarian.factchecker.util.Constants
  * @property hasAcceptedDisclaimer Whether user has accepted the medical disclaimer
  * @property hasCompletedOnboarding Whether user has completed the onboarding flow
  * @property ncbiEmail Email for NCBI API requests (recommended for higher rate limits)
- * @property enableEmbeddingScoring Whether to use on-device embedding for pre-scoring
+ * @property embeddingEnabled Whether to compute embedding-based similarity scores
  * @property enableHyde Whether to generate HyDE abstracts for better embedding matching
  */
 data class AppSettings(
@@ -58,7 +58,7 @@ data class AppSettings(
     val hasCompletedOnboarding: Boolean = false,
     val ncbiEmail: String = "",
     val unpaywallEmail: String = "",
-    val enableEmbeddingScoring: Boolean = true,
+    val embeddingEnabled: Boolean = true,
     val enableHyde: Boolean = true
 ) {
     /**

@@ -74,6 +74,7 @@ enum SearchProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    #if os(iOS)
     /// Theme color for the provider.
     var themeColor: Color {
         switch self {
@@ -82,6 +83,7 @@ enum SearchProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         case .both: return .purple
         }
     }
+    #endif
 
     /// Whether this provider supports preprint filtering.
     var supportsPreprints: Bool {

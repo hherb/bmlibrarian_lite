@@ -342,6 +342,15 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setTargetRelevantDocuments(clampedTarget)
     }
 
+    /**
+     * Set embedding scoring enabled/disabled.
+     *
+     * @param enabled Whether to enable embedding-based similarity scoring
+     */
+    fun setEmbeddingEnabled(enabled: Boolean) {
+        settingsRepository.setEmbeddingEnabled(enabled)
+    }
+
     // ==================== Budget Settings Actions ====================
 
     /**
@@ -380,8 +389,8 @@ class SettingsViewModel @Inject constructor(
      *
      * @param enabled Whether to enable embedding scoring
      */
-    fun setEmbeddingScoringEnabled(enabled: Boolean) {
-        settingsRepository.setEmbeddingScoringEnabled(enabled)
+    fun setEmbeddingEnabled(enabled: Boolean) {
+        settingsRepository.setEmbeddingEnabled(enabled)
     }
 
     /**

@@ -172,6 +172,19 @@ struct MacFactCheckView: View {
                     )
                 }
 
+                // Retry Report Generation Section (shown when report generation fails)
+                if let workflow = workflow, workflow.canRetryReportGeneration {
+                    MacRetryReportSection(
+                        errorMessage: workflow.session?.errorMessage,
+                        isRetrying: workflow.isRunning,
+                        onRetry: {
+                            Task {
+                                await workflow.retryReportGeneration()
+                            }
+                        }
+                    )
+                }
+
                 // Get More Evidence Section (for completed sessions that weren't resumed)
                 // For resumed sessions, the top "Add More Results" button handles this
                 if let workflow = workflow,
@@ -721,6 +734,63 @@ struct MacUserDecisionSection: View {
         }
         .padding(MacSpacing.large)
         .background(Color.orange.opacity(MacOpacity.subtle))
+        .cornerRadius(MacCornerRadius.large)
+    }
+}
+
+// MARK: - Retry Report Section
+
+/// Section displayed when report generation fails and can be retried.
+///
+/// Shows the error message and provides a button to retry report generation.
+/// The retry will skip all earlier workflow steps and directly attempt to
+/// regenerate the report using existing scored documents and citations.
+struct MacRetryReportSection: View {
+    /// The error message from the failed report generation.
+    let errorMessage: String?
+
+    /// Whether report generation is currently being retried.
+    let isRetrying: Bool
+
+    /// Called when user clicks the retry button.
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: MacSpacing.large) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title2)
+                .foregroundColor(.red)
+
+            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
+                Text("Report Generation Failed")
+                    .font(.headline)
+                if let error = errorMessage {
+                    Text(error)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Button(action: onRetry) {
+                HStack(spacing: MacSpacing.medium) {
+                    if isRetrying {
+                        ProgressView()
+                            .scaleEffect(MacScale.progressViewMedium)
+                            .progressViewStyle(CircularProgressViewStyle())
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Text(isRetrying ? "Retrying..." : "Retry Report")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(isRetrying)
+        }
+        .padding(MacSpacing.large)
+        .background(Color.red.opacity(MacOpacity.light))
         .cornerRadius(MacCornerRadius.large)
     }
 }

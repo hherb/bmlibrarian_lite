@@ -128,25 +128,29 @@ data class DocumentEntity(
     @ColumnInfo(name = "scored_at")
     val scoredAt: Date? = null,
 
+    /** Whether LLM score parsing failed (got response but couldn't extract score). */
+    @ColumnInfo(name = "score_parse_failed")
+    val scoreParseFailed: Boolean = false,
+
     // ==================== Embedding Scoring ====================
 
-    /** Raw cosine similarity from on-device embedding (0.0-1.0). */
+    /** Raw embedding similarity score (0.0 to 1.0). */
     @ColumnInfo(name = "embedding_score")
-    val embeddingScore: Float? = null,
+    val embeddingScore: Double? = null,
 
-    /** Normalized embedding score on 1-5 scale (matches LLM scoring). */
-    @ColumnInfo(name = "embedding_relevance")
-    val embeddingRelevance: Int? = null,
-
-    /** When embedding scoring was performed. */
-    @ColumnInfo(name = "embedding_scored_at")
-    val embeddingScoredAt: Date? = null,
+    /** Embedding score normalized to 1-5 relevance scale. */
+    @ColumnInfo(name = "embedding_score_normalized")
+    val embeddingScoreNormalized: Int? = null,
 
     // ==================== Full Text ====================
 
     /** Full text content as markdown (from Europe PMC XML). */
     @ColumnInfo(name = "full_text_markdown")
     val fullTextMarkdown: String? = null,
+
+    /** Full text content as HTML (alternative format). */
+    @ColumnInfo(name = "full_text_html")
+    val fullTextHTML: String? = null,
 
     /** Source of full text: FULLTEXT_SOURCE_EUROPE_PMC, FULLTEXT_SOURCE_UNPAYWALL, etc. */
     @ColumnInfo(name = "full_text_source")
@@ -215,10 +219,18 @@ data class DocumentEntity(
     /**
      * Check if this document has full text available.
      *
-     * @return true if full text markdown or PDF is available
+     * @return true if full text markdown, HTML, or PDF is available
      */
     val hasFullText: Boolean
-        get() = fullTextMarkdown != null || pdfPath != null
+        get() = fullTextMarkdown != null || fullTextHTML != null || pdfPath != null
+
+    /**
+     * Check if this document has an embedding score.
+     *
+     * @return true if embedding score has been computed
+     */
+    val hasEmbeddingScore: Boolean
+        get() = embeddingScore != null
 
     /**
      * Get display name for full text source.

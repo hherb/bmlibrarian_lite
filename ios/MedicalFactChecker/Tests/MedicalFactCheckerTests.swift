@@ -1342,3 +1342,1046 @@ final class QuerySyntaxDetectionTests: XCTestCase {
         XCTAssertFalse(QueryTranslator.isEuropePMCSyntax("aspirin[tiab]"))
     }
 }
+
+// MARK: - CheckpointManager Tests (Phase 2)
+
+final class CheckpointManagerTests: XCTestCase {
+    var modelContainer: ModelContainer!
+    var checkpointManager: CheckpointManager!
+
+    override func setUp() async throws {
+        // Create in-memory model container for testing
+        let schema = Schema([ProcessingCheckpoint.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        modelContainer = try ModelContainer(for: schema, configurations: [config])
+        checkpointManager = CheckpointManager(modelContainer: modelContainer)
+    }
+
+    override func tearDown() async throws {
+        modelContainer = nil
+        checkpointManager = nil
+    }
+
+    func testSaveAndLoadCheckpoint() async throws {
+        // Create a checkpoint using ScoringCheckpoint (Codable)
+        let checkpoint = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Relevant study")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint
+        )
+
+        // Load the checkpoint
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.score, 4)
+        XCTAssertEqual(loaded?.rationale, "Relevant study")
+        XCTAssertEqual(loaded?.pmid, "12345")
+        XCTAssertFalse(loaded?.isError ?? true)
+    }
+
+    func testGetCheckpointedPMIDs() async throws {
+        // Save multiple checkpoints
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Relevant")
+        let checkpoint2 = ScoringCheckpoint(pmid: "67890", score: 2, rationale: "Not relevant")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "67890",
+            step: "scoring",
+            result: checkpoint2
+        )
+
+        // Get checkpointed PMIDs
+        let pmids = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
+
+        XCTAssertTrue(pmids.contains("12345"))
+        XCTAssertTrue(pmids.contains("67890"))
+        XCTAssertEqual(pmids.count, 2)
+    }
+
+    func testCheckpointOverwrite() async throws {
+        // Save initial checkpoint
+        let initial = ScoringCheckpoint(pmid: "12345", score: 3, rationale: "Initial")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: initial
+        )
+
+        // Overwrite with updated checkpoint
+        let updated = ScoringCheckpoint(pmid: "12345", score: 5, rationale: "Updated")
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: updated
+        )
+
+        // Load and verify it was updated
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertEqual(loaded?.score, 5)
+        XCTAssertEqual(loaded?.rationale, "Updated")
+    }
+
+    func testLoadCheckpointNotFound() async throws {
+        // Try to load a checkpoint that doesn't exist
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "nonexistent",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertNil(loaded)
+    }
+
+    func testGetCheckpointedPMIDsEmpty() async throws {
+        // Get PMIDs for a session with no checkpoints
+        let pmids = await checkpointManager.getCheckpointedPMIDs(sessionId: "empty_session", step: "scoring")
+
+        XCTAssertTrue(pmids.isEmpty)
+    }
+
+    func testCheckpointIsolationBySession() async throws {
+        // Save checkpoints for different sessions
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Session 1")
+        let checkpoint2 = ScoringCheckpoint(pmid: "12345", score: 2, rationale: "Session 2")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session2",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint2
+        )
+
+        // Verify isolation
+        let loaded1: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+        let loaded2: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session2",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertEqual(loaded1?.score, 4)
+        XCTAssertEqual(loaded2?.score, 2)
+    }
+
+    func testCheckpointIsolationByStep() async throws {
+        // Save checkpoints for different steps
+        let scoringCheckpoint = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Scoring")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: scoringCheckpoint
+        )
+
+        // Citation step should have no checkpoints
+        let citationPmids = await checkpointManager.getCheckpointedPMIDs(
+            sessionId: "session1",
+            step: "citation"
+        )
+
+        XCTAssertTrue(citationPmids.isEmpty)
+    }
+
+    func testDeleteCheckpoints() async throws {
+        // Save checkpoints
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Test 1")
+        let checkpoint2 = ScoringCheckpoint(pmid: "67890", score: 3, rationale: "Test 2")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "67890",
+            step: "scoring",
+            result: checkpoint2
+        )
+
+        // Verify they exist
+        let pmidsBefore = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
+        XCTAssertEqual(pmidsBefore.count, 2)
+
+        // Delete checkpoints
+        try await checkpointManager.deleteCheckpoints(sessionId: "session1")
+
+        // Verify they're gone
+        let pmidsAfter = await checkpointManager.getCheckpointedPMIDs(sessionId: "session1", step: "scoring")
+        XCTAssertTrue(pmidsAfter.isEmpty)
+    }
+
+    func testGetCheckpointCount() async throws {
+        // Save checkpoints
+        let checkpoint1 = ScoringCheckpoint(pmid: "12345", score: 4, rationale: "Test 1")
+        let checkpoint2 = ScoringCheckpoint(pmid: "67890", score: 3, rationale: "Test 2")
+        let checkpoint3 = ScoringCheckpoint(pmid: "11111", score: 5, rationale: "Test 3")
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: checkpoint1
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "67890",
+            step: "scoring",
+            result: checkpoint2
+        )
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "11111",
+            step: "scoring",
+            result: checkpoint3
+        )
+
+        let count = await checkpointManager.getCheckpointCount(sessionId: "session1", step: "scoring")
+        XCTAssertEqual(count, 3)
+    }
+
+    func testErrorCheckpointPersistence() async throws {
+        // Save an error checkpoint
+        let errorCheckpoint = ScoringCheckpoint(
+            pmid: "12345",
+            score: 0,
+            rationale: "Parse error",
+            isError: true,
+            errorMessage: "Failed to parse LLM response"
+        )
+
+        try await checkpointManager.saveCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring",
+            result: errorCheckpoint
+        )
+
+        // Load and verify error data
+        let loaded: ScoringCheckpoint? = await checkpointManager.loadCheckpoint(
+            sessionId: "session1",
+            pmid: "12345",
+            step: "scoring"
+        )
+
+        XCTAssertNotNil(loaded)
+        XCTAssertTrue(loaded?.isError ?? false)
+        XCTAssertEqual(loaded?.errorMessage, "Failed to parse LLM response")
+    }
+}
+
+// MARK: - ScoringCheckpoint Tests (Phase 2)
+
+final class ScoringCheckpointTests: XCTestCase {
+
+    func testCreateFromScoringResultSuccess() {
+        // Create a successful ScoringResult
+        let result = ScoringResult.success(
+            pmid: "12345",
+            score: 4,
+            rationale: "Highly relevant study",
+            usage: nil
+        )
+
+        // Convert to checkpoint
+        let checkpoint = ScoringCheckpoint(from: result)
+
+        XCTAssertEqual(checkpoint.pmid, "12345")
+        XCTAssertEqual(checkpoint.score, 4)
+        XCTAssertEqual(checkpoint.rationale, "Highly relevant study")
+        XCTAssertFalse(checkpoint.isError)
+        XCTAssertNil(checkpoint.errorMessage)
+    }
+
+    func testCreateFromScoringResultFailure() {
+        // Create a failed ScoringResult
+        let result = ScoringResult.failure(
+            pmid: "12345",
+            error: NSError(domain: "test", code: 500, userInfo: [NSLocalizedDescriptionKey: "API timeout"]),
+            usage: nil
+        )
+
+        // Convert to checkpoint
+        let checkpoint = ScoringCheckpoint(from: result)
+
+        XCTAssertEqual(checkpoint.pmid, "12345")
+        XCTAssertEqual(checkpoint.score, 0)  // Default for errors
+        XCTAssertTrue(checkpoint.isError)
+        XCTAssertNotNil(checkpoint.errorMessage)
+    }
+
+    func testCreateFromScoringResultParseFailure() {
+        // Create a parse failure ScoringResult
+        let result = ScoringResult.parseFailure(
+            pmid: "12345",
+            message: "Could not extract score from response",
+            usage: nil
+        )
+
+        // Convert to checkpoint
+        let checkpoint = ScoringCheckpoint(from: result)
+
+        XCTAssertEqual(checkpoint.pmid, "12345")
+        XCTAssertTrue(checkpoint.isError)
+        XCTAssertEqual(checkpoint.rationale, "Could not extract score from response")
+    }
+
+    func testCodableRoundTrip() throws {
+        // Create a checkpoint
+        let original = ScoringCheckpoint(
+            pmid: "12345",
+            score: 4,
+            rationale: "Test rationale",
+            isError: false,
+            errorMessage: nil
+        )
+
+        // Encode to JSON
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(original)
+
+        // Decode from JSON
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(ScoringCheckpoint.self, from: data)
+
+        // Verify
+        XCTAssertEqual(decoded.pmid, original.pmid)
+        XCTAssertEqual(decoded.score, original.score)
+        XCTAssertEqual(decoded.rationale, original.rationale)
+        XCTAssertEqual(decoded.isError, original.isError)
+        XCTAssertEqual(decoded.errorMessage, original.errorMessage)
+    }
+}
+
+// MARK: - ProgressMessage Tests (Phase 2)
+
+final class ProgressMessageTests: XCTestCase {
+
+    func testProgressFraction() {
+        let message = ProgressMessage(
+            type: .documentCompleted,
+            pmid: "12345",
+            step: "scoring",
+            current: 5,
+            total: 20
+        )
+
+        XCTAssertEqual(message.progressFraction, 0.25, accuracy: 0.001)
+    }
+
+    func testProgressFractionZeroTotal() {
+        let message = ProgressMessage(
+            type: .documentCompleted,
+            pmid: "12345",
+            step: "scoring",
+            current: 0,
+            total: 0
+        )
+
+        XCTAssertEqual(message.progressFraction, 0)
+    }
+
+    func testIsError() {
+        let errorMessage = ProgressMessage(
+            type: .documentFailed,
+            pmid: "12345",
+            step: "scoring",
+            current: 5,
+            total: 20,
+            error: "API timeout"
+        )
+
+        XCTAssertTrue(errorMessage.isError)
+
+        let successMessage = ProgressMessage(
+            type: .documentCompleted,
+            pmid: "12345",
+            step: "scoring",
+            current: 5,
+            total: 20
+        )
+
+        XCTAssertFalse(successMessage.isError)
+    }
+}
+
+// MARK: - PhaseProgress Tests (Phase 2)
+
+final class PhaseProgressTests: XCTestCase {
+
+    func testProgressFraction() {
+        var progress = PhaseProgress(step: "scoring")
+        progress.total = 20
+        progress.completed = 10
+
+        XCTAssertEqual(progress.progressFraction, 0.5, accuracy: 0.001)
+    }
+
+    func testIsComplete() {
+        var progress = PhaseProgress(step: "scoring")
+        progress.total = 10
+        progress.completed = 10
+
+        XCTAssertTrue(progress.isComplete)
+
+        progress.completed = 5
+        XCTAssertFalse(progress.isComplete)
+    }
+
+    func testSuccessfulCount() {
+        var progress = PhaseProgress(step: "scoring")
+        progress.total = 20
+        progress.completed = 15
+        progress.skipped = 5
+        progress.failed = 2
+
+        // Successful = completed - skipped - failed = 15 - 5 - 2 = 8
+        XCTAssertEqual(progress.successful, 8)
+    }
+}
+
+// MARK: - ProcessingProgress Tests (Phase 2)
+
+final class ProcessingProgressTests: XCTestCase {
+
+    func testOverallProgress() {
+        var progress = ProcessingProgress()
+
+        progress.scoring.total = 20
+        progress.scoring.completed = 10
+        progress.citation.total = 10
+        progress.citation.completed = 5
+
+        // Total work: 30, completed: 15 = 50%
+        XCTAssertEqual(progress.overallProgress, 0.5, accuracy: 0.001)
+    }
+
+    func testIsComplete() {
+        var progress = ProcessingProgress()
+
+        progress.scoring.total = 10
+        progress.scoring.completed = 10
+        progress.citation.total = 5
+        progress.citation.completed = 5
+
+        XCTAssertTrue(progress.isComplete)
+
+        progress.citation.completed = 3
+        XCTAssertFalse(progress.isComplete)
+    }
+}
+
+// MARK: - Error Categorization Tests (Phase 4)
+
+final class ErrorCategorizationTests: XCTestCase {
+
+    // MARK: - categorizeErrorMessage Tests
+
+    func testCategorizeNetworkErrors() {
+        XCTAssertEqual(categorizeErrorMessage("Network connection failed"), .network)
+        XCTAssertEqual(categorizeErrorMessage("No internet connection available"), .network)
+        XCTAssertEqual(categorizeErrorMessage("Host unreachable"), .network)
+        XCTAssertEqual(categorizeErrorMessage("Connection was lost"), .network)
+        XCTAssertEqual(categorizeErrorMessage("Server went offline"), .network)
+        XCTAssertEqual(categorizeErrorMessage("DNS lookup failed"), .network)
+        XCTAssertEqual(categorizeErrorMessage("SSL certificate error"), .network)
+    }
+
+    func testCategorizeTimeoutErrors() {
+        XCTAssertEqual(categorizeErrorMessage("Request timed out"), .timeout)
+        XCTAssertEqual(categorizeErrorMessage("Operation timeout after 30 seconds"), .timeout)
+        XCTAssertEqual(categorizeErrorMessage("The operation timed out"), .timeout)
+        XCTAssertEqual(categorizeErrorMessage("Deadline exceeded"), .timeout)
+    }
+
+    func testCategorizeParsingErrors() {
+        XCTAssertEqual(categorizeErrorMessage("JSON parsing error"), .parsing)
+        XCTAssertEqual(categorizeErrorMessage("Failed to decode response"), .parsing)
+        XCTAssertEqual(categorizeErrorMessage("XML parse error at line 5"), .parsing)
+        XCTAssertEqual(categorizeErrorMessage("Invalid format: expected number"), .parsing)
+        XCTAssertEqual(categorizeErrorMessage("Malformed response received"), .parsing)
+        XCTAssertEqual(categorizeErrorMessage("Unexpected token in JSON"), .parsing)
+    }
+
+    func testCategorizeLLMErrors() {
+        XCTAssertEqual(categorizeErrorMessage("LLM rate limit exceeded"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("Invalid API key"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("Model not found"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("Token limit exceeded"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("OpenAI service unavailable"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("Anthropic API error"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("Claude context length exceeded"), .llm)
+        XCTAssertEqual(categorizeErrorMessage("Quota exceeded for this billing period"), .llm)
+    }
+
+    func testCategorizeUnknownErrors() {
+        XCTAssertEqual(categorizeErrorMessage("Something went wrong"), .unknown)
+        XCTAssertEqual(categorizeErrorMessage("An error occurred"), .unknown)
+        XCTAssertEqual(categorizeErrorMessage("Unexpected error"), .unknown)
+    }
+
+    func testCategorizeCaseInsensitive() {
+        XCTAssertEqual(categorizeErrorMessage("NETWORK ERROR"), .network)
+        XCTAssertEqual(categorizeErrorMessage("Timeout Occurred"), .timeout)
+        XCTAssertEqual(categorizeErrorMessage("JSON Parse Failed"), .parsing)
+        XCTAssertEqual(categorizeErrorMessage("LLM SERVICE ERROR"), .llm)
+    }
+
+    // MARK: - categorizeError Tests
+
+    func testCategorizeURLError() {
+        let urlError = URLError(.notConnectedToInternet)
+        XCTAssertEqual(categorizeError(urlError), .network)
+
+        let timeoutError = URLError(.timedOut)
+        XCTAssertEqual(categorizeError(timeoutError), .network)  // URLError is always network
+    }
+
+    func testCategorizeGenericError() {
+        let error = NSError(
+            domain: "test",
+            code: 500,
+            userInfo: [NSLocalizedDescriptionKey: "Rate limit exceeded"]
+        )
+        XCTAssertEqual(categorizeError(error), .llm)
+    }
+}
+
+// MARK: - Error Category Tests (Phase 4)
+
+final class ErrorCategoryTests: XCTestCase {
+
+    func testAllCasesExist() {
+        let allCases = ErrorCategory.allCases
+        XCTAssertTrue(allCases.contains(.network))
+        XCTAssertTrue(allCases.contains(.llm))
+        XCTAssertTrue(allCases.contains(.parsing))
+        XCTAssertTrue(allCases.contains(.timeout))
+        XCTAssertTrue(allCases.contains(.unknown))
+    }
+
+    func testRawValues() {
+        XCTAssertEqual(ErrorCategory.network.rawValue, "Network")
+        XCTAssertEqual(ErrorCategory.llm.rawValue, "LLM")
+        XCTAssertEqual(ErrorCategory.parsing.rawValue, "Parsing")
+        XCTAssertEqual(ErrorCategory.timeout.rawValue, "Timeout")
+        XCTAssertEqual(ErrorCategory.unknown.rawValue, "Unknown")
+    }
+
+    func testIconsNotEmpty() {
+        for category in ErrorCategory.allCases {
+            XCTAssertFalse(category.icon.isEmpty, "Icon for \(category) should not be empty")
+        }
+    }
+
+    func testCodable() throws {
+        let original = ErrorCategory.network
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(original)
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(ErrorCategory.self, from: data)
+
+        XCTAssertEqual(decoded, original)
+    }
+}
+
+// MARK: - Transient Error Entry Tests (Phase 4)
+
+final class TransientErrorEntryTests: XCTestCase {
+
+    func testAutomaticCategorization() {
+        let networkError = TransientErrorEntry(
+            pmid: "12345",
+            step: "scoring",
+            message: "Network connection lost"
+        )
+        XCTAssertEqual(networkError.category, .network)
+
+        let llmError = TransientErrorEntry(
+            pmid: "67890",
+            step: "scoring",
+            message: "LLM rate limit exceeded"
+        )
+        XCTAssertEqual(llmError.category, .llm)
+    }
+
+    func testExplicitCategoryInitializer() {
+        let error = TransientErrorEntry(
+            pmid: "12345",
+            step: "citation",
+            message: "Custom error message",
+            category: .timeout
+        )
+
+        XCTAssertEqual(error.category, .timeout)
+        XCTAssertEqual(error.message, "Custom error message")
+    }
+
+    func testIdentifiable() {
+        let error1 = TransientErrorEntry(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error 1"
+        )
+        let error2 = TransientErrorEntry(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error 1"
+        )
+
+        // Each instance should have a unique ID
+        XCTAssertNotEqual(error1.id, error2.id)
+    }
+
+    func testTimestampDefault() {
+        let beforeCreation = Date()
+        let error = TransientErrorEntry(
+            pmid: "12345",
+            step: "scoring",
+            message: "Test"
+        )
+        let afterCreation = Date()
+
+        XCTAssertGreaterThanOrEqual(error.timestamp, beforeCreation)
+        XCTAssertLessThanOrEqual(error.timestamp, afterCreation)
+    }
+}
+
+// MARK: - Sort Option Tests (Phase 4)
+
+final class SortOptionTests: XCTestCase {
+
+    func testAllCasesExist() {
+        let allCases = SortOption.allCases
+        XCTAssertTrue(allCases.contains(.scoreHighToLow))
+        XCTAssertTrue(allCases.contains(.scoreLowToHigh))
+        XCTAssertTrue(allCases.contains(.titleAZ))
+        XCTAssertTrue(allCases.contains(.titleZA))
+        XCTAssertTrue(allCases.contains(.yearNewest))
+        XCTAssertTrue(allCases.contains(.yearOldest))
+    }
+
+    func testRawValues() {
+        XCTAssertEqual(SortOption.scoreHighToLow.rawValue, "Score (High to Low)")
+        XCTAssertEqual(SortOption.scoreLowToHigh.rawValue, "Score (Low to High)")
+        XCTAssertEqual(SortOption.titleAZ.rawValue, "Title (A-Z)")
+        XCTAssertEqual(SortOption.titleZA.rawValue, "Title (Z-A)")
+        XCTAssertEqual(SortOption.yearNewest.rawValue, "Year (Newest First)")
+        XCTAssertEqual(SortOption.yearOldest.rawValue, "Year (Oldest First)")
+    }
+
+    func testAccessibilityDescriptions() {
+        for option in SortOption.allCases {
+            XCTAssertFalse(
+                option.accessibilityDescription.isEmpty,
+                "Accessibility description for \(option) should not be empty"
+            )
+        }
+    }
+
+    func testCodable() throws {
+        let original = SortOption.yearNewest
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(original)
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(SortOption.self, from: data)
+
+        XCTAssertEqual(decoded, original)
+    }
+}
+
+// MARK: - Document Sorting Tests (Phase 4)
+
+final class DocumentSortingTests: XCTestCase {
+
+    // Helper to create mock sortable documents
+    struct MockDocument: SortableDocument {
+        let score: Int?
+        let title: String?
+        let year: Int?
+        let pmid: String  // For identification in tests
+
+        init(pmid: String, score: Int? = nil, title: String? = nil, year: Int? = nil) {
+            self.pmid = pmid
+            self.score = score
+            self.title = title
+            self.year = year
+        }
+    }
+
+    func testSortByScoreHighToLow() {
+        let documents = [
+            MockDocument(pmid: "1", score: 3),
+            MockDocument(pmid: "2", score: 5),
+            MockDocument(pmid: "3", score: 1),
+            MockDocument(pmid: "4", score: 4),
+        ]
+
+        let sorted = documents.sorted(by: .scoreHighToLow)
+
+        XCTAssertEqual(sorted[0].pmid, "2")  // Score 5
+        XCTAssertEqual(sorted[1].pmid, "4")  // Score 4
+        XCTAssertEqual(sorted[2].pmid, "1")  // Score 3
+        XCTAssertEqual(sorted[3].pmid, "3")  // Score 1
+    }
+
+    func testSortByScoreLowToHigh() {
+        let documents = [
+            MockDocument(pmid: "1", score: 3),
+            MockDocument(pmid: "2", score: 5),
+            MockDocument(pmid: "3", score: 1),
+        ]
+
+        let sorted = documents.sorted(by: .scoreLowToHigh)
+
+        XCTAssertEqual(sorted[0].pmid, "3")  // Score 1
+        XCTAssertEqual(sorted[1].pmid, "1")  // Score 3
+        XCTAssertEqual(sorted[2].pmid, "2")  // Score 5
+    }
+
+    func testSortByTitleAZ() {
+        let documents = [
+            MockDocument(pmid: "1", title: "Zebra study"),
+            MockDocument(pmid: "2", title: "Apple research"),
+            MockDocument(pmid: "3", title: "Medical review"),
+        ]
+
+        let sorted = documents.sorted(by: .titleAZ)
+
+        XCTAssertEqual(sorted[0].pmid, "2")  // Apple
+        XCTAssertEqual(sorted[1].pmid, "3")  // Medical
+        XCTAssertEqual(sorted[2].pmid, "1")  // Zebra
+    }
+
+    func testSortByTitleZA() {
+        let documents = [
+            MockDocument(pmid: "1", title: "Zebra study"),
+            MockDocument(pmid: "2", title: "Apple research"),
+            MockDocument(pmid: "3", title: "Medical review"),
+        ]
+
+        let sorted = documents.sorted(by: .titleZA)
+
+        XCTAssertEqual(sorted[0].pmid, "1")  // Zebra
+        XCTAssertEqual(sorted[1].pmid, "3")  // Medical
+        XCTAssertEqual(sorted[2].pmid, "2")  // Apple
+    }
+
+    func testSortByYearNewest() {
+        let documents = [
+            MockDocument(pmid: "1", year: 2020),
+            MockDocument(pmid: "2", year: 2024),
+            MockDocument(pmid: "3", year: 2018),
+        ]
+
+        let sorted = documents.sorted(by: .yearNewest)
+
+        XCTAssertEqual(sorted[0].pmid, "2")  // 2024
+        XCTAssertEqual(sorted[1].pmid, "1")  // 2020
+        XCTAssertEqual(sorted[2].pmid, "3")  // 2018
+    }
+
+    func testSortByYearOldest() {
+        let documents = [
+            MockDocument(pmid: "1", year: 2020),
+            MockDocument(pmid: "2", year: 2024),
+            MockDocument(pmid: "3", year: 2018),
+        ]
+
+        let sorted = documents.sorted(by: .yearOldest)
+
+        XCTAssertEqual(sorted[0].pmid, "3")  // 2018
+        XCTAssertEqual(sorted[1].pmid, "1")  // 2020
+        XCTAssertEqual(sorted[2].pmid, "2")  // 2024
+    }
+
+    func testSortHandlesNilScores() {
+        let documents = [
+            MockDocument(pmid: "1", score: nil),
+            MockDocument(pmid: "2", score: 5),
+            MockDocument(pmid: "3", score: nil),
+            MockDocument(pmid: "4", score: 3),
+        ]
+
+        let sorted = documents.sorted(by: .scoreHighToLow)
+
+        // Documents with scores should come first
+        XCTAssertEqual(sorted[0].pmid, "2")  // Score 5
+        XCTAssertEqual(sorted[1].pmid, "4")  // Score 3
+        // Nil scores treated as 0, so they come last
+    }
+
+    func testSortHandlesNilTitles() {
+        let documents = [
+            MockDocument(pmid: "1", title: nil),
+            MockDocument(pmid: "2", title: "Beta"),
+            MockDocument(pmid: "3", title: "Alpha"),
+        ]
+
+        let sorted = documents.sorted(by: .titleAZ)
+
+        // Nil titles treated as empty string, so they sort first
+        XCTAssertEqual(sorted[0].pmid, "1")  // nil (empty)
+        XCTAssertEqual(sorted[1].pmid, "3")  // Alpha
+        XCTAssertEqual(sorted[2].pmid, "2")  // Beta
+    }
+
+    func testSortTitleCaseInsensitive() {
+        let documents = [
+            MockDocument(pmid: "1", title: "zebra"),
+            MockDocument(pmid: "2", title: "APPLE"),
+            MockDocument(pmid: "3", title: "Banana"),
+        ]
+
+        let sorted = documents.sorted(by: .titleAZ)
+
+        XCTAssertEqual(sorted[0].pmid, "2")  // APPLE
+        XCTAssertEqual(sorted[1].pmid, "3")  // Banana
+        XCTAssertEqual(sorted[2].pmid, "1")  // zebra
+    }
+}
+
+// MARK: - Error Persistence Manager Tests (Phase 4)
+
+final class ErrorPersistenceManagerTests: XCTestCase {
+    var modelContainer: ModelContainer!
+    var errorManager: ErrorPersistenceManager!
+
+    override func setUp() async throws {
+        // Create in-memory model container for testing
+        let schema = Schema([ErrorEntry.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        modelContainer = try ModelContainer(for: schema, configurations: [config])
+        errorManager = ErrorPersistenceManager(modelContainer: modelContainer)
+    }
+
+    override func tearDown() async throws {
+        modelContainer = nil
+        errorManager = nil
+    }
+
+    func testSaveAndLoadError() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Network connection failed",
+            sessionId: "session1"
+        )
+
+        let errors = try await errorManager.loadErrors(sessionId: "session1")
+
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertEqual(errors[0].pmid, "12345")
+        XCTAssertEqual(errors[0].step, "scoring")
+        XCTAssertEqual(errors[0].message, "Network connection failed")
+        XCTAssertEqual(errors[0].errorCategory, .network)
+    }
+
+    func testLoadTransientErrors() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Test error",
+            sessionId: "session1"
+        )
+
+        let transientErrors = try await errorManager.loadTransientErrors(sessionId: "session1")
+
+        XCTAssertEqual(transientErrors.count, 1)
+        XCTAssertEqual(transientErrors[0].pmid, "12345")
+    }
+
+    func testClearErrors() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error 1",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "67890",
+            step: "scoring",
+            message: "Error 2",
+            sessionId: "session1"
+        )
+
+        try await errorManager.clearErrors(sessionId: "session1")
+
+        let errors = try await errorManager.loadErrors(sessionId: "session1")
+        XCTAssertTrue(errors.isEmpty)
+    }
+
+    func testRemoveErrors() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error 1",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "67890",
+            step: "scoring",
+            message: "Error 2",
+            sessionId: "session1"
+        )
+
+        try await errorManager.removeErrors(pmids: ["12345"], sessionId: "session1")
+
+        let errors = try await errorManager.loadErrors(sessionId: "session1")
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertEqual(errors[0].pmid, "67890")
+    }
+
+    func testIncrementRetryCount() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Test error",
+            sessionId: "session1"
+        )
+
+        try await errorManager.incrementRetryCount(pmids: ["12345"], sessionId: "session1")
+
+        let errors = try await errorManager.loadErrors(sessionId: "session1")
+        XCTAssertEqual(errors[0].retryCount, 1)
+
+        try await errorManager.incrementRetryCount(pmids: ["12345"], sessionId: "session1")
+
+        let errorsAfter = try await errorManager.loadErrors(sessionId: "session1")
+        XCTAssertEqual(errorsAfter[0].retryCount, 2)
+    }
+
+    func testErrorCount() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error 1",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "67890",
+            step: "scoring",
+            message: "Error 2",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "11111",
+            step: "citation",
+            message: "Error 3",
+            sessionId: "session1"
+        )
+
+        let count = try await errorManager.errorCount(sessionId: "session1")
+        XCTAssertEqual(count, 3)
+    }
+
+    func testErrorCountsByCategory() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Network connection failed",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "67890",
+            step: "scoring",
+            message: "Request timed out",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "11111",
+            step: "scoring",
+            message: "Server offline",
+            sessionId: "session1"
+        )
+
+        let counts = try await errorManager.errorCountsByCategory(sessionId: "session1")
+
+        XCTAssertEqual(counts[.network], 2)
+        XCTAssertEqual(counts[.timeout], 1)
+    }
+
+    func testSessionIsolation() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error for session 1",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "67890",
+            step: "scoring",
+            message: "Error for session 2",
+            sessionId: "session2"
+        )
+
+        let session1Errors = try await errorManager.loadErrors(sessionId: "session1")
+        let session2Errors = try await errorManager.loadErrors(sessionId: "session2")
+
+        XCTAssertEqual(session1Errors.count, 1)
+        XCTAssertEqual(session1Errors[0].pmid, "12345")
+        XCTAssertEqual(session2Errors.count, 1)
+        XCTAssertEqual(session2Errors[0].pmid, "67890")
+    }
+
+    func testGetExhaustedRetries() async throws {
+        try await errorManager.saveError(
+            pmid: "12345",
+            step: "scoring",
+            message: "Error 1",
+            sessionId: "session1"
+        )
+        try await errorManager.saveError(
+            pmid: "67890",
+            step: "scoring",
+            message: "Error 2",
+            sessionId: "session1"
+        )
+
+        // Increment retry count for first error 3 times
+        try await errorManager.incrementRetryCount(pmids: ["12345"], sessionId: "session1")
+        try await errorManager.incrementRetryCount(pmids: ["12345"], sessionId: "session1")
+        try await errorManager.incrementRetryCount(pmids: ["12345"], sessionId: "session1")
+
+        let exhausted = try await errorManager.getExhaustedRetries(sessionId: "session1", maxRetries: 3)
+
+        XCTAssertEqual(exhausted.count, 1)
+        XCTAssertTrue(exhausted.contains("12345"))
+        XCTAssertFalse(exhausted.contains("67890"))
+    }
+}

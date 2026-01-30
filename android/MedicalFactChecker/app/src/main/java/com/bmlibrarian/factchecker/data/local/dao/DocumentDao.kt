@@ -142,22 +142,19 @@ interface DocumentDao {
      * Update embedding score for a document.
      *
      * @param id Document ID
-     * @param rawScore Raw cosine similarity (0.0-1.0)
-     * @param normalizedScore Normalized relevance score (1-5)
-     * @param scoredAt Timestamp when embedding scoring was performed
+     * @param embeddingScore Raw embedding similarity score (0.0-1.0)
+     * @param embeddingScoreNormalized Normalized score (1-5)
      */
     @Query("""
         UPDATE documents SET
-            embedding_score = :rawScore,
-            embedding_relevance = :normalizedScore,
-            embedding_scored_at = :scoredAt
+            embedding_score = :embeddingScore,
+            embedding_score_normalized = :embeddingScoreNormalized
         WHERE id = :id
     """)
     suspend fun updateEmbeddingScore(
         id: String,
-        rawScore: Float,
-        normalizedScore: Int,
-        scoredAt: Long = System.currentTimeMillis()
+        embeddingScore: Double,
+        embeddingScoreNormalized: Int
     )
 
     // ==================== Delete Operations ====================

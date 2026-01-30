@@ -95,6 +95,41 @@ enum CloudKitConfiguration {
         }
     }
 
+    /// Create a ModelContainer with migration support.
+    ///
+    /// - Returns: Configured ModelContainer with schema migration enabled.
+    /// - Throws: SwiftData errors if container creation fails.
+    ///
+    /// Uses the `MedicalFactCheckerMigrationPlan` to handle schema upgrades
+    /// from previous versions, preserving user data during updates.
+    static func makeModelContainerWithMigration() throws -> ModelContainer {
+        let useCloudKit = isSyncEnabled && isCloudAvailable
+
+        // Create schema from the current version's models
+        let schema = Schema(versionedSchema: SchemaV2.self)
+
+        let configuration: ModelConfiguration
+        if useCloudKit {
+            configuration = ModelConfiguration(
+                schema: schema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: .automatic
+            )
+        } else {
+            configuration = ModelConfiguration(
+                schema: schema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: .none
+            )
+        }
+
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: MedicalFactCheckerMigrationPlan.self,
+            configurations: [configuration]
+        )
+    }
+
     // MARK: - Sync Control
 
     /// Request sync setting change (requires app restart to take effect).

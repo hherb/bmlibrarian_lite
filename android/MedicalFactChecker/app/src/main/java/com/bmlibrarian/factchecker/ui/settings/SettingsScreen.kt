@@ -148,6 +148,7 @@ fun SettingsScreen(
                 settings = settings,
                 onSearchProviderSelected = viewModel::setSearchProvider,
                 onIncludePreprintsChange = viewModel::setIncludePreprints,
+                onEmbeddingEnabledChange = viewModel::setEmbeddingEnabled,
                 onBatchSizeChange = viewModel::setBatchSize,
                 onRelevanceThresholdChange = viewModel::setRelevanceThreshold,
                 onTargetRelevantDocsChange = viewModel::setTargetRelevantDocuments
@@ -158,7 +159,7 @@ fun SettingsScreen(
             // Advanced Scoring Section
             AdvancedScoringSection(
                 settings = settings,
-                onEmbeddingScoringChange = viewModel::setEmbeddingScoringEnabled,
+                onEmbeddingScoringChange = viewModel::setEmbeddingEnabled,
                 onHydeChange = viewModel::setHydeEnabled
             )
 
@@ -336,13 +337,14 @@ private fun LLMProviderSection(
 /**
  * Search settings section.
  *
- * Contains search provider selection, preprint toggle, and batch settings.
+ * Contains search provider selection, preprint toggle, embedding toggle, and batch settings.
  */
 @Composable
 private fun SearchSettingsSection(
     settings: com.bmlibrarian.factchecker.domain.model.AppSettings,
     onSearchProviderSelected: (com.bmlibrarian.factchecker.domain.model.SearchProvider) -> Unit,
     onIncludePreprintsChange: (Boolean) -> Unit,
+    onEmbeddingEnabledChange: (Boolean) -> Unit,
     onBatchSizeChange: (Int) -> Unit,
     onRelevanceThresholdChange: (Int) -> Unit,
     onTargetRelevantDocsChange: (Int) -> Unit
@@ -381,6 +383,30 @@ private fun SearchSettingsSection(
             Switch(
                 checked = settings.includePreprints,
                 onCheckedChange = onIncludePreprintsChange
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+
+        // Embedding scoring toggle
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Embedding Scoring",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Compute semantic similarity scores on-device",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.embeddingEnabled,
+                onCheckedChange = onEmbeddingEnabledChange
             )
         }
 
@@ -508,7 +534,7 @@ private fun AdvancedScoringSection(
                 )
             }
             Switch(
-                checked = settings.enableEmbeddingScoring,
+                checked = settings.embeddingEnabled,
                 onCheckedChange = onEmbeddingScoringChange
             )
         }
@@ -524,7 +550,7 @@ private fun AdvancedScoringSection(
                 Text(
                     text = "HyDE Generation",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (settings.enableEmbeddingScoring) {
+                    color = if (settings.embeddingEnabled) {
                         MaterialTheme.colorScheme.onSurface
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -537,9 +563,9 @@ private fun AdvancedScoringSection(
                 )
             }
             Switch(
-                checked = settings.enableHyde && settings.enableEmbeddingScoring,
+                checked = settings.enableHyde && settings.embeddingEnabled,
                 onCheckedChange = onHydeChange,
-                enabled = settings.enableEmbeddingScoring
+                enabled = settings.embeddingEnabled
             )
         }
     }
