@@ -441,22 +441,26 @@ private fun KeyPassageBox(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
+            .clip(RoundedCornerShape(Constants.KEY_PASSAGE_CORNER_RADIUS.dp))
+            .background(
+                MaterialTheme.colorScheme.primaryContainer.copy(
+                    alpha = Constants.KEY_PASSAGE_BACKGROUND_ALPHA
+                )
+            )
             .padding(Constants.UI_CARD_PADDING_SMALL.dp),
         horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
     ) {
         Icon(
             imageVector = Icons.Default.FormatQuote,
             contentDescription = "Quote",
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-            modifier = Modifier.size(16.dp)
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = Constants.KEY_PASSAGE_ICON_ALPHA),
+            modifier = Modifier.size(Constants.KEY_PASSAGE_ICON_SIZE.dp)
         )
         Text(
             text = passage,
             style = MaterialTheme.typography.bodySmall,
             fontStyle = FontStyle.Italic,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = Constants.KEY_PASSAGE_TEXT_ALPHA)
         )
     }
 }

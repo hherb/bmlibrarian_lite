@@ -331,7 +331,6 @@ private fun PdfViewer(
 ) {
     var pdfRenderer by remember { mutableStateOf<PdfRenderer?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
-    var currentPage by remember { mutableIntStateOf(0) }
     var pageBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var scale by remember { mutableFloatStateOf(1f) }
@@ -353,8 +352,8 @@ private fun PdfViewer(
                     val page = renderer.openPage(i)
                     // Scale up for better quality
                     val bitmap = Bitmap.createBitmap(
-                        page.width * 2,
-                        page.height * 2,
+                        page.width * Constants.PDF_RENDER_SCALE_FACTOR,
+                        page.height * Constants.PDF_RENDER_SCALE_FACTOR,
                         Bitmap.Config.ARGB_8888
                     )
                     bitmap.eraseColor(android.graphics.Color.WHITE)
@@ -444,13 +443,16 @@ private fun PdfViewer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = Constants.UI_CARD_PADDING_SMALL.dp, vertical = 4.dp),
+                    .padding(
+                        horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
+                        vertical = Constants.PDF_CONTROLS_VERTICAL_PADDING.dp
+                    ),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Page info
                 Text(
-                    text = "${pageCount} page${if (pageCount != 1) "s" else ""}",
+                    text = "$pageCount page${if (pageCount != 1) "s" else ""}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -461,13 +463,15 @@ private fun PdfViewer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FilledTonalIconButton(
-                        onClick = { scale = (scale - 0.25f).coerceAtLeast(0.5f) },
-                        modifier = Modifier.size(32.dp)
+                        onClick = {
+                            scale = (scale - Constants.PDF_ZOOM_STEP).coerceAtLeast(Constants.PDF_ZOOM_MIN)
+                        },
+                        modifier = Modifier.size(Constants.PDF_ZOOM_BUTTON_SIZE.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ZoomOut,
                             contentDescription = "Zoom out",
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(Constants.PDF_ZOOM_ICON_SIZE.dp)
                         )
                     }
                     Text(
@@ -476,13 +480,15 @@ private fun PdfViewer(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     FilledTonalIconButton(
-                        onClick = { scale = (scale + 0.25f).coerceAtMost(3f) },
-                        modifier = Modifier.size(32.dp)
+                        onClick = {
+                            scale = (scale + Constants.PDF_ZOOM_STEP).coerceAtMost(Constants.PDF_ZOOM_MAX)
+                        },
+                        modifier = Modifier.size(Constants.PDF_ZOOM_BUTTON_SIZE.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ZoomIn,
                             contentDescription = "Zoom in",
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(Constants.PDF_ZOOM_ICON_SIZE.dp)
                         )
                     }
                 }

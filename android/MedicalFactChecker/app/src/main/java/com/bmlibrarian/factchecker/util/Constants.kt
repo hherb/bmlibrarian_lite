@@ -363,6 +363,72 @@ object Constants {
     /** Alpha for divider lines. */
     const val DIVIDER_ALPHA = 0.5f
 
+    // ==================== Onboarding Screen Configuration ====================
+
+    /** Size of onboarding icon container in dp. */
+    const val ONBOARDING_ICON_CONTAINER_SIZE = 120
+
+    /** Size of onboarding icon in dp. */
+    const val ONBOARDING_ICON_SIZE = 64
+
+    /** Height of skip button placeholder for alignment in dp. */
+    const val ONBOARDING_SKIP_BUTTON_HEIGHT = 48
+
+    /** Page indicator dot selected size in dp. */
+    const val ONBOARDING_DOT_SIZE_SELECTED = 10
+
+    /** Page indicator dot unselected size in dp. */
+    const val ONBOARDING_DOT_SIZE_UNSELECTED = 8
+
+    /** Page indicator horizontal spacing in dp. */
+    const val ONBOARDING_DOT_SPACING = 4
+
+    /** Alpha for gradient colors in onboarding icon. */
+    const val ONBOARDING_GRADIENT_ALPHA = 0.7f
+
+    /** Alpha for unselected page indicator dots. */
+    const val ONBOARDING_DOT_UNSELECTED_ALPHA = 0.3f
+
+    // ==================== PDF Viewer Configuration ====================
+
+    /** Scale factor for PDF rendering quality (multiply page dimensions). */
+    const val PDF_RENDER_SCALE_FACTOR = 2
+
+    /** Minimum zoom scale for PDF viewer. */
+    const val PDF_ZOOM_MIN = 0.5f
+
+    /** Maximum zoom scale for PDF viewer. */
+    const val PDF_ZOOM_MAX = 3.0f
+
+    /** Zoom step increment for PDF viewer. */
+    const val PDF_ZOOM_STEP = 0.25f
+
+    /** Size of zoom control buttons in dp. */
+    const val PDF_ZOOM_BUTTON_SIZE = 32
+
+    /** Size of zoom control icons in dp. */
+    const val PDF_ZOOM_ICON_SIZE = 16
+
+    /** Vertical padding for PDF controls toolbar in dp. */
+    const val PDF_CONTROLS_VERTICAL_PADDING = 4
+
+    // ==================== Key Passage Display ====================
+
+    /** Corner radius for key passage box in dp. */
+    const val KEY_PASSAGE_CORNER_RADIUS = 8
+
+    /** Alpha for key passage background color. */
+    const val KEY_PASSAGE_BACKGROUND_ALPHA = 0.15f
+
+    /** Alpha for key passage icon tint. */
+    const val KEY_PASSAGE_ICON_ALPHA = 0.6f
+
+    /** Alpha for key passage text color. */
+    const val KEY_PASSAGE_TEXT_ALPHA = 0.85f
+
+    /** Icon size for key passage quote icon in dp. */
+    const val KEY_PASSAGE_ICON_SIZE = 16
+
     // ==================== History Screen Configuration ====================
 
     /** Date format pattern for session list display. */

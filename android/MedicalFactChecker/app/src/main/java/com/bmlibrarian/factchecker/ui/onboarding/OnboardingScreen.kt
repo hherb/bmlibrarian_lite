@@ -169,7 +169,7 @@ fun OnboardingScreen(
                 }
             } else {
                 // Placeholder for alignment
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(Constants.ONBOARDING_SKIP_BUTTON_HEIGHT.dp))
             }
         }
 
@@ -192,14 +192,22 @@ fun OnboardingScreen(
                 val isSelected = pagerState.currentPage == index
                 Box(
                     modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .size(if (isSelected) 10.dp else 8.dp)
+                        .padding(horizontal = Constants.ONBOARDING_DOT_SPACING.dp)
+                        .size(
+                            if (isSelected) {
+                                Constants.ONBOARDING_DOT_SIZE_SELECTED.dp
+                            } else {
+                                Constants.ONBOARDING_DOT_SIZE_UNSELECTED.dp
+                            }
+                        )
                         .clip(CircleShape)
                         .background(
                             if (isSelected) {
                                 MaterialTheme.colorScheme.primary
                             } else {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                                MaterialTheme.colorScheme.onSurface.copy(
+                                    alpha = Constants.ONBOARDING_DOT_UNSELECTED_ALPHA
+                                )
                             }
                         )
                 )
@@ -269,13 +277,17 @@ private fun OnboardingPageContent(page: OnboardingPage) {
         // Icon with gradient background
         Box(
             modifier = Modifier
-                .size(120.dp)
+                .size(Constants.ONBOARDING_ICON_CONTAINER_SIZE.dp)
                 .clip(CircleShape)
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                            MaterialTheme.colorScheme.primary.copy(
+                                alpha = Constants.ONBOARDING_GRADIENT_ALPHA
+                            ),
+                            MaterialTheme.colorScheme.tertiary.copy(
+                                alpha = Constants.ONBOARDING_GRADIENT_ALPHA
+                            )
                         )
                     )
                 ),
@@ -284,7 +296,7 @@ private fun OnboardingPageContent(page: OnboardingPage) {
             Icon(
                 imageVector = page.icon,
                 contentDescription = null,
-                modifier = Modifier.size(64.dp),
+                modifier = Modifier.size(Constants.ONBOARDING_ICON_SIZE.dp),
                 tint = MaterialTheme.colorScheme.onPrimary
             )
         }
