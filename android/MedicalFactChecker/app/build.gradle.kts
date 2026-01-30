@@ -131,6 +131,12 @@ dependencies {
     // Note: XML parsing uses built-in Android XmlPullParser - no external dependency needed
     // This is more efficient for large PubMed XML documents
 
+    // TensorFlow Lite for on-device embeddings
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    // Optional: NNAPI delegate for hardware acceleration on supported devices
+    implementation("org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")

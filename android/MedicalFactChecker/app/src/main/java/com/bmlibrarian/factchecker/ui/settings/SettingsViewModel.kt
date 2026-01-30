@@ -382,6 +382,26 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setNcbiEmail(email)
     }
 
+    // ==================== Embedding Scoring Actions ====================
+
+    /**
+     * Enable or disable on-device embedding scoring.
+     *
+     * @param enabled Whether to enable embedding scoring
+     */
+    fun setEmbeddingEnabled(enabled: Boolean) {
+        settingsRepository.setEmbeddingEnabled(enabled)
+    }
+
+    /**
+     * Enable or disable HyDE generation.
+     *
+     * @param enabled Whether to enable HyDE
+     */
+    fun setHydeEnabled(enabled: Boolean) {
+        settingsRepository.setHydeEnabled(enabled)
+    }
+
     // ==================== Onboarding Actions ====================
 
     /**

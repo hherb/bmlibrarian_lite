@@ -95,6 +95,16 @@ data class SessionEntity(
     @ColumnInfo(name = "documents_in_batch")
     val documentsInBatch: Int = 0,
 
+    // ==================== HyDE (Hypothetical Document Embedding) ====================
+
+    /** Generated hypothetical abstract for better embedding matching. */
+    @ColumnInfo(name = "hyde_abstract")
+    val hydeAbstract: String? = null,
+
+    /** When the HyDE abstract was generated. */
+    @ColumnInfo(name = "hyde_generated_at")
+    val hydeGeneratedAt: Date? = null,
+
     // ==================== Cost Tracking ====================
 
     /** Total input tokens used across all LLM calls. */

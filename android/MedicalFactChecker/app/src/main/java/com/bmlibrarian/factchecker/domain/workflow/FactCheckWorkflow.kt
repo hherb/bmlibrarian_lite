@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.domain.workflow
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ProcessingCheckpointEntity
@@ -35,6 +36,7 @@ import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
+import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,8 +77,13 @@ class FactCheckWorkflow @Inject constructor(
     private val parallelScoringService: ParallelScoringService,
     private val checkpointManager: CheckpointManager,
     private val errorPersistenceManager: ErrorPersistenceManager,
-    private val embeddingService: EmbeddingService
+    private val embeddingService: EmbeddingService,
+    private val hydeGenerator: HydeGenerator
 ) {
+
+    companion object {
+        private const val TAG = "FactCheckWorkflow"
+    }
 
     // ==================== Observable State ====================
 
@@ -766,6 +773,9 @@ class FactCheckWorkflow @Inject constructor(
      * between the claim and document abstracts. This provides a fast,
      * free alternative to LLM-based scoring.
      *
+     * If HyDE is enabled, generates a hypothetical abstract first for
+     * better embedding matching.
+     *
      * @param documents List of documents to score
      * @param claim The medical claim being fact-checked
      */
@@ -773,13 +783,48 @@ class FactCheckWorkflow @Inject constructor(
         documents: List<DocumentEntity>,
         claim: String
     ) {
+        val provider = getLLMProvider()
+        val apiKey = settingsRepository.getLlmApiKey()
+        val model = settingsRepository.getLlmModel()
+        val session = currentSession ?: return
+
+        // Generate HyDE abstract if enabled for better semantic matching
+        val embeddingQuery = if (settingsRepository.isHydeEnabled()) {
+            val hydeAbstract = hydeGenerator.generateHypotheticalAbstract(
+                claim = claim,
+                provider = provider,
+                apiKey = apiKey,
+                model = model
+            )
+
+            if (hydeAbstract != null) {
+                // Save HyDE abstract to session
+                sessionRepository.updateHydeAbstract(session.id, hydeAbstract)
+                Log.i(TAG, "Generated HyDE abstract: ${hydeAbstract.take(100)}...")
+
+                // Record HyDE generation usage
+                recordUsage(
+                    operation = "hyde_generation",
+                    inputTokens = estimateTokens(claim),
+                    outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                )
+
+                hydeAbstract
+            } else {
+                Log.w(TAG, "HyDE generation failed, using original claim")
+                claim
+            }
+        } else {
+            claim
+        }
+
         // Prepare document data for batch processing
         val documentPairs = documents.map { doc ->
             doc.title to doc.abstractText
         }
 
-        // Compute similarity scores in batch
-        val scores = embeddingService.scoreDocuments(claim, documentPairs)
+        // Compute similarity scores in batch using the query (HyDE or original claim)
+        val scores = embeddingService.scoreDocuments(embeddingQuery, documentPairs)
 
         // Update documents with embedding scores
         documents.zip(scores).forEach { (doc, score) ->

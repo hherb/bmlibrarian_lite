@@ -120,6 +120,14 @@ object Constants {
         "https://storage.googleapis.com/mediapipe-models/text_embedder/" +
         "universal_sentence_encoder/float32/latest/universal_sentence_encoder.tflite"
 
+    // ==================== HyDE Configuration ====================
+
+    /** Minimum word count for HyDE abstract. */
+    const val HYDE_TARGET_WORD_COUNT_MIN = 150
+
+    /** Maximum word count for HyDE abstract. */
+    const val HYDE_TARGET_WORD_COUNT_MAX = 200
+
     // ==================== Budget Defaults ====================
 
     /** Default maximum budget per run in USD. */

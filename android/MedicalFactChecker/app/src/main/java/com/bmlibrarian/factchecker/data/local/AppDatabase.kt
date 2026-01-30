@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -123,30 +123,6 @@ abstract class AppDatabase : RoomDatabase() {
         const val DATABASE_NAME = "medical_factchecker.db"
 
         /**
-         * Migration from version 2 to 3.
-         *
-         * Adds embedding scoring fields and fullTextHTML to documents table
-         * for Phase 2 iOS parity features.
-         */
-        val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                // Add embedding scoring columns
-                database.execSQL(
-                    "ALTER TABLE documents ADD COLUMN score_parse_failed INTEGER NOT NULL DEFAULT 0"
-                )
-                database.execSQL(
-                    "ALTER TABLE documents ADD COLUMN embedding_score REAL"
-                )
-                database.execSQL(
-                    "ALTER TABLE documents ADD COLUMN embedding_score_normalized INTEGER"
-                )
-                database.execSQL(
-                    "ALTER TABLE documents ADD COLUMN full_text_html TEXT"
-                )
-            }
-        }
-
-        /**
          * Migration from version 1 to 2.
          *
          * Adds processing_checkpoints and processing_errors tables
@@ -198,6 +174,44 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_processing_errors_is_retryable ON processing_errors (is_retryable)"
                 )
+            }
+        }
+
+        /**
+         * Migration from version 2 to 3.
+         *
+         * Adds embedding scoring fields and fullTextHTML to documents table
+         * for Phase 2 iOS parity features.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add embedding scoring columns
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN score_parse_failed INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN embedding_score REAL"
+                )
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN embedding_score_normalized INTEGER"
+                )
+                database.execSQL(
+                    "ALTER TABLE documents ADD COLUMN full_text_html TEXT"
+                )
+            }
+        }
+
+        /**
+         * Migration from version 3 to 4.
+         *
+         * Adds HyDE (Hypothetical Document Embedding) fields to sessions table
+         * for Phase 3 advanced scoring features.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add HyDE fields to sessions table
+                database.execSQL("ALTER TABLE sessions ADD COLUMN hyde_abstract TEXT")
+                database.execSQL("ALTER TABLE sessions ADD COLUMN hyde_generated_at INTEGER")
             }
         }
     }
