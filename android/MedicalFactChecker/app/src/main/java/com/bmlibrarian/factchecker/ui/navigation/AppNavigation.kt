@@ -25,8 +25,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -37,8 +39,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.bmlibrarian.factchecker.ui.factcheck.FactCheckScreen
 import com.bmlibrarian.factchecker.ui.history.HistoryScreen
+import com.bmlibrarian.factchecker.ui.onboarding.OnboardingScreen
 import com.bmlibrarian.factchecker.ui.report.ReportScreen
 import com.bmlibrarian.factchecker.ui.settings.SettingsScreen
+import com.bmlibrarian.factchecker.ui.settings.SettingsViewModel
 
 /**
  * Main navigation component for MedicalFactChecker.
@@ -49,6 +53,8 @@ import com.bmlibrarian.factchecker.ui.settings.SettingsScreen
  * - History: Browse past sessions
  * - Settings: App configuration
  *
+ * Shows onboarding screen on first launch before the main app.
+ *
  * Uses Jetpack Compose Navigation for screen management.
  */
 @Composable
@@ -57,47 +63,71 @@ fun AppNavigation() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
+    // Get settings to check onboarding state
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val settings by settingsViewModel.settings.collectAsState()
+    val isOnboardingComplete = settings.hasCompletedOnboarding
+
+    // Determine if we should show bottom navigation
+    val showBottomNav = currentDestination?.route != NavRoute.Onboarding.route
+
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                NavRoute.bottomNavItems.forEach { navItem ->
-                    val selected = currentDestination?.hierarchy?.any {
-                        // Match on base route for Report to handle parameterized routes
-                        it.route?.startsWith(navItem.route) == true
-                    } == true
+            // Only show bottom nav when not in onboarding
+            if (showBottomNav) {
+                NavigationBar {
+                    NavRoute.bottomNavItems.forEach { navItem ->
+                        val selected = currentDestination?.hierarchy?.any {
+                            // Match on base route for Report to handle parameterized routes
+                            it.route?.startsWith(navItem.route) == true
+                        } == true
 
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(navItem.route) {
-                                // Pop up to the start destination to avoid building
-                                // up a large back stack
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                navController.navigate(navItem.route) {
+                                    // Pop up to the start destination to avoid building
+                                    // up a large back stack
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    // Avoid multiple copies of the same destination
+                                    launchSingleTop = true
+                                    // Restore state when reselecting a previously selected item
+                                    restoreState = true
                                 }
-                                // Avoid multiple copies of the same destination
-                                launchSingleTop = true
-                                // Restore state when reselecting a previously selected item
-                                restoreState = true
-                            }
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = if (selected) navItem.selectedIcon else navItem.unselectedIcon,
-                                contentDescription = navItem.title
-                            )
-                        },
-                        label = { Text(navItem.title) }
-                    )
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) navItem.selectedIcon else navItem.unselectedIcon,
+                                    contentDescription = navItem.title
+                                )
+                            },
+                            label = { Text(navItem.title) }
+                        )
+                    }
                 }
             }
         }
     ) { paddingValues ->
         NavHost(
             navController = navController,
-            startDestination = NavRoute.FactCheck.route,
+            startDestination = if (isOnboardingComplete) NavRoute.FactCheck.route else NavRoute.Onboarding.route,
             modifier = Modifier.padding(paddingValues)
         ) {
+            // Onboarding screen (shown on first launch)
+            composable(NavRoute.Onboarding.route) {
+                OnboardingScreen(
+                    onComplete = {
+                        settingsViewModel.completeOnboarding()
+                        navController.navigate(NavRoute.FactCheck.route) {
+                            // Remove onboarding from back stack
+                            popUpTo(NavRoute.Onboarding.route) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
             composable(NavRoute.FactCheck.route) {
                 FactCheckScreen(
                     onNavigateToReport = {

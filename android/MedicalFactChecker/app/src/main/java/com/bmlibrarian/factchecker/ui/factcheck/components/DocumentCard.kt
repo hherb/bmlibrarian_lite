@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.ui.factcheck.components
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,9 +30,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -46,10 +49,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.ui.common.MarkdownText
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
@@ -79,14 +84,16 @@ private object ReasoningColors {
  * Card displaying a scored document.
  *
  * Shows document title, authors, journal, and relevance score.
- * Expands to show abstract, source badges, and score rationale.
+ * Expands to show abstract, key passages, source badges, and score rationale.
  *
  * @param document The document to display
+ * @param citations Optional list of extracted citations/key passages for this document
  * @param modifier Modifier for the component
  */
 @Composable
 fun DocumentCard(
     document: DocumentEntity,
+    citations: List<CitationEntity> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -189,6 +196,21 @@ fun DocumentCard(
                     Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                     LLMReasoningBox(rationale = rationale)
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+                }
+
+                // Key Passages (citations extracted from this document)
+                if (citations.isNotEmpty()) {
+                    Text(
+                        text = "Key Passages",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    citations.forEach { citation ->
+                        KeyPassageBox(passage = citation.passage)
+                        Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    }
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                 }
 
                 // Abstract (rendered as markdown for structured abstracts)
@@ -399,5 +421,42 @@ private fun LLMReasoningBox(
                 color = ReasoningColors.text
             )
         }
+    }
+}
+
+/**
+ * Styled box displaying a key passage (citation) from the document.
+ *
+ * Renders the extracted passage with a quote icon and accent-colored
+ * background to visually indicate quoted text from the source.
+ *
+ * @param passage The extracted passage text
+ * @param modifier Modifier for the component
+ */
+@Composable
+private fun KeyPassageBox(
+    passage: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
+            .padding(Constants.UI_CARD_PADDING_SMALL.dp),
+        horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.FormatQuote,
+            contentDescription = "Quote",
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = passage,
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+        )
     }
 }
