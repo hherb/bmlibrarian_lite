@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.llm
 
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Url
@@ -46,6 +47,19 @@ interface OpenAIApi {
         @Header("Authorization") authorization: String,
         @Body request: OpenAIChatRequest
     ): Response<OpenAIChatResponse>
+
+    /**
+     * List available models.
+     *
+     * @param url Full URL for models endpoint (e.g., https://api.openai.com/v1/models)
+     * @param authorization Bearer token authorization header
+     * @return List of available models
+     */
+    @GET
+    suspend fun listModels(
+        @Url url: String,
+        @Header("Authorization") authorization: String
+    ): Response<OpenAIModelsResponse>
 }
 
 /**
@@ -73,8 +87,42 @@ interface AnthropicApi {
         @Body request: AnthropicMessagesRequest
     ): Response<AnthropicMessagesResponse>
 
+    /**
+     * List available models.
+     *
+     * @param url Full URL for models endpoint (e.g., https://api.anthropic.com/v1/models)
+     * @param apiKey API key via x-api-key header
+     * @param anthropicVersion API version header (required by Anthropic)
+     * @return List of available models
+     */
+    @GET
+    suspend fun listModels(
+        @Url url: String,
+        @Header("x-api-key") apiKey: String,
+        @Header("anthropic-version") anthropicVersion: String
+    ): Response<AnthropicModelsResponse>
+
     companion object {
         /** Current Anthropic API version. */
         const val API_VERSION = "2023-06-01"
     }
+}
+
+/**
+ * Retrofit interface for Ollama local API.
+ *
+ * Ollama uses a different endpoint structure than OpenAI-compatible APIs.
+ */
+interface OllamaApi {
+
+    /**
+     * List locally installed models.
+     *
+     * @param url Full URL for tags endpoint (e.g., http://localhost:11434/api/tags)
+     * @return List of local models
+     */
+    @GET
+    suspend fun listModels(
+        @Url url: String
+    ): Response<OllamaModelsResponse>
 }

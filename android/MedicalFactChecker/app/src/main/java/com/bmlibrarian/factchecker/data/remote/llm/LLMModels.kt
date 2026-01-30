@@ -220,6 +220,119 @@ data class AnthropicError(
     val message: String? = null
 )
 
+// ==================== Model Listing API Models ====================
+
+/**
+ * Response from OpenAI-compatible models list endpoint.
+ *
+ * Used by OpenAI, Groq, Mistral, and DeepSeek APIs.
+ * All return the same response format.
+ */
+@Serializable
+data class OpenAIModelsResponse(
+    /** Object type (always "list"). */
+    val `object`: String? = null,
+    /** List of available models. */
+    val data: List<OpenAIModelInfo> = emptyList()
+)
+
+/**
+ * Model information from OpenAI-compatible APIs.
+ */
+@Serializable
+data class OpenAIModelInfo(
+    /** Model identifier (e.g., "gpt-4o"). */
+    val id: String,
+    /** Object type (always "model"). */
+    val `object`: String? = null,
+    /** Unix timestamp when model was created. */
+    val created: Long? = null,
+    /** Organization that owns the model. */
+    @SerialName("owned_by")
+    val ownedBy: String? = null
+)
+
+/**
+ * Response from Anthropic models list endpoint.
+ */
+@Serializable
+data class AnthropicModelsResponse(
+    /** List of available models. */
+    val data: List<AnthropicModelInfo> = emptyList(),
+    /** Whether there are more models. */
+    @SerialName("has_more")
+    val hasMore: Boolean = false,
+    /** First model ID for pagination. */
+    @SerialName("first_id")
+    val firstId: String? = null,
+    /** Last model ID for pagination. */
+    @SerialName("last_id")
+    val lastId: String? = null
+)
+
+/**
+ * Model information from Anthropic API.
+ */
+@Serializable
+data class AnthropicModelInfo(
+    /** Model identifier (e.g., "claude-sonnet-4-5-20250929"). */
+    val id: String,
+    /** Object type (always "model"). */
+    val type: String? = null,
+    /** Human-readable display name. */
+    @SerialName("display_name")
+    val displayName: String? = null,
+    /** Creation timestamp. */
+    @SerialName("created_at")
+    val createdAt: String? = null
+)
+
+/**
+ * Response from Ollama /api/tags endpoint.
+ */
+@Serializable
+data class OllamaModelsResponse(
+    /** List of local models. */
+    val models: List<OllamaModelInfo> = emptyList()
+)
+
+/**
+ * Model information from Ollama API.
+ */
+@Serializable
+data class OllamaModelInfo(
+    /** Model name (e.g., "llama3.2:latest"). */
+    val name: String,
+    /** Last modified timestamp. */
+    @SerialName("modified_at")
+    val modifiedAt: String? = null,
+    /** Model size in bytes. */
+    val size: Long? = null,
+    /** SHA256 digest of the model. */
+    val digest: String? = null,
+    /** Model details (family, parameters, quantization). */
+    val details: OllamaModelDetails? = null
+)
+
+/**
+ * Model details from Ollama API.
+ */
+@Serializable
+data class OllamaModelDetails(
+    /** File format (e.g., "gguf"). */
+    val format: String? = null,
+    /** Model family (e.g., "llama"). */
+    val family: String? = null,
+    /** List of model families. */
+    val families: List<String>? = null,
+    /** Parameter size (e.g., "8B"). */
+    @SerialName("parameter_size")
+    val parameterSize: String? = null,
+    /** Quantization level (e.g., "Q4_K_M"). */
+    @SerialName("quantization_level")
+    val quantizationLevel: String? = null
+)
+
 // ==================== Unified Result ====================
 
 /**
