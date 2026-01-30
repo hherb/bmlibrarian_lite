@@ -86,6 +86,43 @@ object Constants {
     /** Minimum relevance score. */
     const val SCORING_MIN_SCORE = 1
 
+    // ==================== Embedding Scoring Configuration ====================
+
+    /**
+     * Similarity threshold: below this → score 1 (not relevant).
+     * Thresholds match iOS implementation exactly.
+     */
+    const val EMBEDDING_THRESHOLD_NOT_RELEVANT = 0.3f
+
+    /** Similarity threshold: 0.3-0.45 → score 2 (marginally relevant). */
+    const val EMBEDDING_THRESHOLD_MARGINAL = 0.45f
+
+    /** Similarity threshold: 0.45-0.55 → score 3 (moderately relevant). */
+    const val EMBEDDING_THRESHOLD_MODERATE = 0.55f
+
+    /** Similarity threshold: 0.55-0.7 → score 4 (highly relevant), >= 0.7 → score 5. */
+    const val EMBEDDING_THRESHOLD_HIGHLY_RELEVANT = 0.7f
+
+    /** TFLite model filename for Universal Sentence Encoder. */
+    const val EMBEDDING_MODEL_FILENAME = "universal_sentence_encoder.tflite"
+
+    /** Output dimension for Universal Sentence Encoder embeddings. */
+    const val EMBEDDING_DIMENSION = 512
+
+    /** Maximum sequence length for embedding input. */
+    const val EMBEDDING_MAX_SEQUENCE_LENGTH = 128
+
+    /** Number of threads for TFLite interpreter. */
+    const val EMBEDDING_NUM_THREADS = 4
+
+    // ==================== HyDE Configuration ====================
+
+    /** Minimum word count for HyDE abstract. */
+    const val HYDE_TARGET_WORD_COUNT_MIN = 150
+
+    /** Maximum word count for HyDE abstract. */
+    const val HYDE_TARGET_WORD_COUNT_MAX = 200
+
     // ==================== Budget Defaults ====================
 
     /** Default maximum budget per run in USD. */

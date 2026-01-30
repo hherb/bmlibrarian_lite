@@ -127,7 +127,9 @@ class SettingsRepository @Inject constructor(
             hasAcceptedDisclaimer = regularPrefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false),
             hasCompletedOnboarding = regularPrefs.getBoolean(KEY_ONBOARDING_COMPLETE, false),
             ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: "",
-            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: ""
+            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: "",
+            enableEmbeddingScoring = regularPrefs.getBoolean(KEY_ENABLE_EMBEDDING_SCORING, true),
+            enableHyde = regularPrefs.getBoolean(KEY_ENABLE_HYDE, true)
         )
     }
 
@@ -152,6 +154,8 @@ class SettingsRepository @Inject constructor(
             putBoolean(KEY_ONBOARDING_COMPLETE, settings.hasCompletedOnboarding)
             putString(KEY_NCBI_EMAIL, settings.ncbiEmail)
             putString(KEY_UNPAYWALL_EMAIL, settings.unpaywallEmail)
+            putBoolean(KEY_ENABLE_EMBEDDING_SCORING, settings.enableEmbeddingScoring)
+            putBoolean(KEY_ENABLE_HYDE, settings.enableHyde)
             apply()
         }
         _settings.value = settings
@@ -479,6 +483,40 @@ class SettingsRepository @Inject constructor(
         updateSettings { it.copy(hasAcceptedDisclaimer = true) }
     }
 
+    // ==================== Embedding Scoring ====================
+
+    /**
+     * Check if embedding-based scoring is enabled.
+     *
+     * @return true if on-device embedding scoring is enabled
+     */
+    fun isEmbeddingScoringEnabled(): Boolean = _settings.value.enableEmbeddingScoring
+
+    /**
+     * Enable or disable embedding-based scoring.
+     *
+     * @param enabled Whether to enable embedding scoring
+     */
+    fun setEmbeddingScoringEnabled(enabled: Boolean) {
+        updateSettings { it.copy(enableEmbeddingScoring = enabled) }
+    }
+
+    /**
+     * Check if HyDE (Hypothetical Document Embedding) is enabled.
+     *
+     * @return true if HyDE generation is enabled
+     */
+    fun isHydeEnabled(): Boolean = _settings.value.enableHyde
+
+    /**
+     * Enable or disable HyDE generation.
+     *
+     * @param enabled Whether to enable HyDE
+     */
+    fun setHydeEnabled(enabled: Boolean) {
+        updateSettings { it.copy(enableHyde = enabled) }
+    }
+
     // ==================== Reset ====================
 
     /**
@@ -532,5 +570,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         private const val KEY_NCBI_EMAIL = "ncbi_email"
         private const val KEY_UNPAYWALL_EMAIL = "unpaywall_email"
+        private const val KEY_ENABLE_EMBEDDING_SCORING = "enable_embedding_scoring"
+        private const val KEY_ENABLE_HYDE = "enable_hyde"
     }
 }

@@ -64,8 +64,9 @@ object DatabaseModule {
             AppDatabase::class.java,
             AppDatabase.DATABASE_NAME
         )
-            // For development: recreate database on schema changes
-            // TODO: Replace with proper migrations for production
+            // Add migrations for version upgrades
+            .addMigrations(AppDatabase.MIGRATION_1_2)
+            // For development: recreate database on schema changes if migration fails
             .fallbackToDestructiveMigration()
             .build()
     }

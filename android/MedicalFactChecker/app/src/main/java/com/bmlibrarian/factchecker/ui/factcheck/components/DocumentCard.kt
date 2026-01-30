@@ -104,12 +104,27 @@ fun DocumentCard(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Score badge
-                document.relevanceScore?.let { score ->
-                    ScoreBadge(
-                        score = score,
-                        modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
-                    )
+                // Score badges (LLM and embedding if available)
+                Column(
+                    modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    // LLM score badge (primary)
+                    document.relevanceScore?.let { score ->
+                        ScoreBadge(
+                            score = score,
+                            label = null
+                        )
+                    }
+
+                    // Embedding score badge (secondary, smaller)
+                    document.embeddingRelevance?.let { embeddingScore ->
+                        EmbeddingScoreBadge(
+                            score = embeddingScore,
+                            rawScore = document.embeddingScore
+                        )
+                    }
                 }
 
                 // Title and metadata
@@ -220,11 +235,13 @@ fun DocumentCard(
  * Badge displaying the relevance score with color coding.
  *
  * @param score The relevance score (1-5)
+ * @param label Optional label to display below the score
  * @param modifier Modifier for the component
  */
 @Composable
 fun ScoreBadge(
     score: Int,
+    label: String? = null,
     modifier: Modifier = Modifier
 ) {
     val backgroundColor = scoreColor(score)
@@ -234,15 +251,70 @@ fun ScoreBadge(
         shape = MaterialTheme.shapes.small,
         modifier = modifier
     ) {
-        Text(
-            text = score.toString(),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onPrimary,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(
                 horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
                 vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
             )
-        )
+        ) {
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+            if (label != null) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Badge displaying the embedding-based score.
+ *
+ * Shows the normalized score (1-5) with an "E" label to indicate
+ * it's an embedding score. Smaller than the primary LLM score badge.
+ *
+ * @param score The normalized relevance score (1-5)
+ * @param rawScore The raw cosine similarity (0.0-1.0), shown in tooltip
+ * @param modifier Modifier for the component
+ */
+@Composable
+private fun EmbeddingScoreBadge(
+    score: Int,
+    rawScore: Float?,
+    modifier: Modifier = Modifier
+) {
+    val backgroundColor = scoreColor(score).copy(alpha = 0.7f)
+
+    Surface(
+        color = backgroundColor,
+        shape = MaterialTheme.shapes.extraSmall,
+        modifier = modifier
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(
+                horizontal = 4.dp,
+                vertical = 1.dp
+            )
+        ) {
+            Text(
+                text = "E:",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+            )
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+        }
     }
 }
 

@@ -185,6 +185,16 @@ class SessionRepository @Inject constructor(
         sessionDao.setError(sessionId, errorMessage)
     }
 
+    /**
+     * Update HyDE (Hypothetical Document Embedding) abstract for a session.
+     *
+     * @param sessionId Session ID
+     * @param hydeAbstract The generated hypothetical abstract
+     */
+    suspend fun updateHydeAbstract(sessionId: String, hydeAbstract: String) {
+        sessionDao.updateHydeAbstract(sessionId, hydeAbstract)
+    }
+
     // ==================== Delete Operations ====================
 
     /**

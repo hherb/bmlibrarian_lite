@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.domain.workflow
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
@@ -33,6 +34,8 @@ import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
+import com.bmlibrarian.factchecker.ml.EmbeddingService
+import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,8 +69,14 @@ class FactCheckWorkflow @Inject constructor(
     private val documentRepository: DocumentRepository,
     private val reportRepository: ReportRepository,
     private val usageRepository: UsageRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val embeddingService: EmbeddingService,
+    private val hydeGenerator: HydeGenerator
 ) {
+
+    companion object {
+        private const val TAG = "FactCheckWorkflow"
+    }
 
     // ==================== Observable State ====================
 
@@ -610,6 +619,13 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Score documents for relevance to the claim.
+     *
+     * Uses a two-phase approach when embedding scoring is enabled:
+     * 1. On-device embedding scoring (free, instant) to compute initial scores
+     * 2. LLM scoring for final relevance assessment and rationale
+     *
+     * If HyDE is enabled, generates a hypothetical abstract first for
+     * better embedding matching.
      */
     private suspend fun scoreDocuments(
         documents: List<DocumentEntity>,
@@ -621,13 +637,71 @@ class FactCheckWorkflow @Inject constructor(
         val model = settingsRepository.getLlmModel()
         val session = currentSession ?: return
 
+        // Phase 1: On-device embedding scoring (if enabled)
+        if (settingsRepository.isEmbeddingScoringEnabled() && embeddingService.isAvailable) {
+            updateProgress("Initializing embedding service...", WorkflowProgress.PROGRESS_SCORING_START)
+
+            val initialized = embeddingService.initialize()
+            if (initialized) {
+                // Generate HyDE abstract if enabled
+                val embeddingQuery = if (settingsRepository.isHydeEnabled()) {
+                    updateProgress("Generating hypothetical abstract...", WorkflowProgress.PROGRESS_SCORING_START + 2)
+
+                    val hydeAbstract = hydeGenerator.generateHypotheticalAbstract(
+                        claim = claim,
+                        provider = provider,
+                        apiKey = apiKey,
+                        model = model
+                    )
+
+                    if (hydeAbstract != null) {
+                        // Save HyDE abstract to session
+                        sessionRepository.updateHydeAbstract(session.id, hydeAbstract)
+                        Log.i(TAG, "Generated HyDE abstract: ${hydeAbstract.take(100)}...")
+
+                        // Record HyDE generation usage
+                        recordUsage(
+                            operation = "hyde_generation",
+                            inputTokens = estimateTokens(claim),
+                            outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                        )
+
+                        hydeAbstract
+                    } else {
+                        Log.w(TAG, "HyDE generation failed, using original claim")
+                        claim
+                    }
+                } else {
+                    claim
+                }
+
+                // Score documents with embeddings
+                updateProgress("Embedding scoring...", WorkflowProgress.PROGRESS_SCORING_START + 5)
+
+                val embeddingScores = embeddingService.scoreDocuments(embeddingQuery, documents)
+                Log.i(TAG, "Embedding scored ${embeddingScores.size}/${documents.size} documents")
+
+                // Save embedding scores to database
+                embeddingScores.forEach { score ->
+                    documentRepository.updateDocumentEmbeddingScore(
+                        documentId = score.documentId,
+                        rawScore = score.rawScore,
+                        normalizedScore = score.normalizedScore
+                    )
+                }
+            } else {
+                Log.w(TAG, "Embedding service initialization failed")
+            }
+        }
+
+        // Phase 2: LLM scoring for final assessment and rationale
         documents.forEachIndexed { index, doc ->
             checkBudget(session, config)
 
             _state.value = WorkflowState.Scoring(index + 1, documents.size)
             updateProgress(
                 "Scoring document ${index + 1} of ${documents.size}",
-                WorkflowProgress.PROGRESS_SCORING_START + (WorkflowProgress.PROGRESS_SCORING_RANGE * (index + 1) / documents.size)
+                WorkflowProgress.PROGRESS_SCORING_START + 10 + (WorkflowProgress.PROGRESS_SCORING_RANGE * (index + 1) / documents.size)
             )
 
             val result = llmService.scoreDocument(

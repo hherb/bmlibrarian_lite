@@ -128,6 +128,20 @@ data class DocumentEntity(
     @ColumnInfo(name = "scored_at")
     val scoredAt: Date? = null,
 
+    // ==================== Embedding Scoring ====================
+
+    /** Raw cosine similarity from on-device embedding (0.0-1.0). */
+    @ColumnInfo(name = "embedding_score")
+    val embeddingScore: Float? = null,
+
+    /** Normalized embedding score on 1-5 scale (matches LLM scoring). */
+    @ColumnInfo(name = "embedding_relevance")
+    val embeddingRelevance: Int? = null,
+
+    /** When embedding scoring was performed. */
+    @ColumnInfo(name = "embedding_scored_at")
+    val embeddingScoredAt: Date? = null,
+
     // ==================== Full Text ====================
 
     /** Full text content as markdown (from Europe PMC XML). */

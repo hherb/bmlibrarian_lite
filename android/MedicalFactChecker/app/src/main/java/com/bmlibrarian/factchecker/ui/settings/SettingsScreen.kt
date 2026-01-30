@@ -155,6 +155,15 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
+            // Advanced Scoring Section
+            AdvancedScoringSection(
+                settings = settings,
+                onEmbeddingScoringChange = viewModel::setEmbeddingScoringEnabled,
+                onHydeChange = viewModel::setHydeEnabled
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
             // Budget Settings Section
             BudgetSettingsSection(
                 settings = settings,
@@ -466,6 +475,73 @@ private fun BudgetSettingsSection(
             steps = Constants.SETTINGS_MONTHLY_BUDGET_STEPS,
             valueDisplay = formatBudget(settings.monthlyBudgetUsd)
         )
+    }
+}
+
+/**
+ * Advanced scoring settings section.
+ *
+ * Contains on-device embedding scoring and HyDE generation toggles.
+ * These features provide free relevance scoring without LLM API calls.
+ */
+@Composable
+private fun AdvancedScoringSection(
+    settings: com.bmlibrarian.factchecker.domain.model.AppSettings,
+    onEmbeddingScoringChange: (Boolean) -> Unit,
+    onHydeChange: (Boolean) -> Unit
+) {
+    SettingsSection(title = "Advanced Scoring") {
+        // On-device scoring toggle
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "On-Device Scoring",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Use embeddings for free relevance pre-scoring",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.enableEmbeddingScoring,
+                onCheckedChange = onEmbeddingScoringChange
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // HyDE toggle (only enabled if embedding scoring is on)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "HyDE Generation",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (settings.enableEmbeddingScoring) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                Text(
+                    text = "Generate hypothetical abstracts for better matching",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.enableHyde && settings.enableEmbeddingScoring,
+                onCheckedChange = onHydeChange,
+                enabled = settings.enableEmbeddingScoring
+            )
+        }
     }
 }
 

@@ -21,6 +21,8 @@ package com.bmlibrarian.factchecker.data.local
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bmlibrarian.factchecker.data.local.converter.Converters
 import com.bmlibrarian.factchecker.data.local.dao.CitationDao
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
@@ -53,7 +55,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ReportEntity::class,
         UsageRecordEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -97,5 +99,23 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         /** Database file name. */
         const val DATABASE_NAME = "medical_factchecker.db"
+
+        /**
+         * Migration from version 1 to 2.
+         *
+         * Adds embedding scoring fields to documents and HyDE fields to sessions.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add embedding fields to documents table
+                db.execSQL("ALTER TABLE documents ADD COLUMN embedding_score REAL")
+                db.execSQL("ALTER TABLE documents ADD COLUMN embedding_relevance INTEGER")
+                db.execSQL("ALTER TABLE documents ADD COLUMN embedding_scored_at INTEGER")
+
+                // Add HyDE fields to sessions table
+                db.execSQL("ALTER TABLE sessions ADD COLUMN hyde_abstract TEXT")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN hyde_generated_at INTEGER")
+            }
+        }
     }
 }

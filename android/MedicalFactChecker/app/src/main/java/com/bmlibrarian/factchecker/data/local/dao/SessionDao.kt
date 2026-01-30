@@ -186,6 +186,28 @@ interface SessionDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    /**
+     * Update HyDE (Hypothetical Document Embedding) abstract.
+     *
+     * @param id Session ID
+     * @param hydeAbstract The generated hypothetical abstract
+     * @param generatedAt Timestamp when HyDE was generated
+     * @param updatedAt Timestamp for the update
+     */
+    @Query("""
+        UPDATE sessions SET
+            hyde_abstract = :hydeAbstract,
+            hyde_generated_at = :generatedAt,
+            updated_at = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateHydeAbstract(
+        id: String,
+        hydeAbstract: String,
+        generatedAt: Long = System.currentTimeMillis(),
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
     // ==================== Delete Operations ====================
 
     /**
