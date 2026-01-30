@@ -208,8 +208,8 @@ final class FactCheckWorkflow {
         awaitingSmartSearchDecision = false
 
         // Build resumption prompt based on progress
-        let scoredCount = session.documentsScored ?? 0
-        let totalDocs = session.documentsFound ?? 0
+        let scoredCount = session.documentsScored
+        let totalDocs = session.documentsFound
         let remaining = totalDocs - scoredCount
 
         if remaining > 0 {
