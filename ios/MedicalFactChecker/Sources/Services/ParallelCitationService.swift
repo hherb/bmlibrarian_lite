@@ -247,8 +247,9 @@ actor ParallelCitationService {
             for await result in group {
                 results.append(result)
                 completed += 1
+                let currentCompleted = completed  // Capture value for closure
                 await MainActor.run {
-                    onProgress(result.pmid, completed, total)
+                    onProgress(result.pmid, currentCompleted, total)
                 }
 
                 // Call result handler for incremental updates
