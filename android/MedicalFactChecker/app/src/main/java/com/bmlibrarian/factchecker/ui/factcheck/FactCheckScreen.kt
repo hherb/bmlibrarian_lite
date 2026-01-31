@@ -59,8 +59,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,15 +87,18 @@ import com.bmlibrarian.factchecker.util.CostCalculator
  * @param viewModel The ViewModel managing screen state
  * @param sessionIdToRestore Optional session ID to restore from history
  * @param onNavigateToReport Callback when workflow completes to navigate to report
+ * @param onNavigateToFullText Callback to navigate to full-text viewer for a document
  */
 @Composable
 fun FactCheckScreen(
     viewModel: FactCheckViewModel = hiltViewModel(),
     sessionIdToRestore: String? = null,
-    onNavigateToReport: () -> Unit = {}
+    onNavigateToReport: () -> Unit = {},
+    onNavigateToFullText: (documentId: String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     // Restore session if ID provided (from History navigation)
     LaunchedEffect(sessionIdToRestore) {
@@ -246,7 +252,26 @@ fun FactCheckScreen(
                     items = uiState.sortedDocuments,
                     key = { "doc_${it.id}" }
                 ) { document ->
-                    DocumentCard(document = document)
+                    DocumentCard(
+                        document = document,
+                        isLoadingFullText = uiState.loadingFullTextDocumentId == document.id,
+                        onGetFullText = { doc ->
+                            viewModel.fetchFullText(doc) { success ->
+                                if (success) {
+                                    // Navigate to full-text viewer on success
+                                    onNavigateToFullText(doc.id)
+                                }
+                            }
+                        },
+                        onViewFullText = { doc ->
+                            onNavigateToFullText(doc.id)
+                        },
+                        onOpenPublisher = { doi ->
+                            val url = "${Constants.DOI_URL_PREFIX}$doi"
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            context.startActivity(intent)
+                        }
+                    )
                 }
             }
         }

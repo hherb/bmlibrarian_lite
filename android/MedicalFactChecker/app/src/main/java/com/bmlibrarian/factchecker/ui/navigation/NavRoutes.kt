@@ -138,10 +138,40 @@ sealed class NavRoute(
         unselectedIcon = Icons.Outlined.CheckCircle // Not used in nav bar
     )
 
+    /**
+     * Full-text viewer screen.
+     * Not shown in bottom navigation.
+     */
+    data object FullText : NavRoute(
+        route = "fulltext",
+        title = "Full Text",
+        selectedIcon = Icons.Filled.Description, // Not used in nav bar
+        unselectedIcon = Icons.Outlined.Description // Not used in nav bar
+    ) {
+        /** Route pattern with required documentId argument. */
+        const val routeWithArgs = "fulltext/{documentId}"
+
+        /** Argument key for document ID. */
+        const val ARG_DOCUMENT_ID = "documentId"
+
+        /**
+         * Creates a route with the specified document ID.
+         *
+         * @param documentId The document ID to view
+         * @return The navigation route string
+         */
+        fun createRoute(documentId: String): String {
+            return "fulltext/$documentId"
+        }
+    }
+
     companion object {
         /**
          * Items to display in the bottom navigation bar.
+         * Uses lazy initialization to avoid Kotlin data object initialization order issues.
          */
-        val bottomNavItems = listOf(FactCheck, Report, History, Settings)
+        val bottomNavItems: List<NavRoute> by lazy {
+            listOf(FactCheck, Report, History, Settings)
+        }
     }
 }

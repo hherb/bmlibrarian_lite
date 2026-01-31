@@ -20,7 +20,9 @@ package com.bmlibrarian.factchecker.ui.factcheck
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
@@ -86,7 +88,10 @@ data class FactCheckUiState(
     val isResumedSession: Boolean = false,
 
     /** Whether more documents can be fetched for this session. */
-    val canFetchMoreDocuments: Boolean = false
+    val canFetchMoreDocuments: Boolean = false,
+
+    /** ID of document currently loading full text, or null if none. */
+    val loadingFullTextDocumentId: String? = null
 ) {
     /**
      * Get documents sorted by the current sort order.
@@ -115,8 +120,13 @@ class FactCheckViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val documentRepository: DocumentRepository,
     private val usageRepository: UsageRepository,
-    private val sessionRepository: SessionRepository
+    private val sessionRepository: SessionRepository,
+    private val fullTextService: FullTextService
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "FactCheckViewModel"
+    }
 
     private val _uiState = MutableStateFlow(FactCheckUiState())
     val uiState: StateFlow<FactCheckUiState> = _uiState.asStateFlow()
@@ -435,6 +445,97 @@ class FactCheckViewModel @Inject constructor(
                 monthlyBudgetUsd = it.monthlyBudgetUsd,
                 runBudgetUsd = it.runBudgetUsd
             )
+        }
+    }
+
+    // ==================== Full Text ====================
+
+    /**
+     * Fetch full text for a document.
+     *
+     * Attempts to retrieve full text from Europe PMC, Unpaywall, or DOI.
+     * Updates the document in the database with the result.
+     *
+     * @param document The document to fetch full text for
+     * @param onComplete Callback when full text is fetched (with success/failure)
+     */
+    fun fetchFullText(document: DocumentEntity, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(loadingFullTextDocumentId = document.id) }
+
+            try {
+                val settings = settingsRepository.settings.value
+                val email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+
+                val result = fullTextService.fetchFullText(
+                    pmcId = document.pmcId,
+                    doi = document.doi,
+                    pmid = document.pmid,
+                    email = email
+                )
+
+                result.fold(
+                    onSuccess = { fullTextResult ->
+                        // Update document based on result type
+                        val updatedDoc = when (fullTextResult) {
+                            is FullTextService.FullTextResult.EuropePmcXml -> {
+                                document.copy(
+                                    fullTextMarkdown = fullTextResult.markdown,
+                                    fullTextHTML = fullTextResult.html,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.UnpaywallPdf -> {
+                                // Download PDF
+                                val localPath = fullTextService.downloadPdf(
+                                    fullTextResult.pdfUrl,
+                                    document.id
+                                )
+                                document.copy(
+                                    pdfPath = localPath,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.DoiUrl -> {
+                                document.copy(
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.Unavailable -> {
+                                document.copy(
+                                    fullTextUnavailable = true,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                        }
+
+                        documentRepository.updateDocument(updatedDoc)
+
+                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable
+                        Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
+                        onComplete(success)
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Full text fetch failed: ${error.message}")
+                        // Mark as unavailable on failure
+                        documentRepository.updateDocument(
+                            document.copy(
+                                fullTextUnavailable = true,
+                                fullTextFetchedAt = java.util.Date()
+                            )
+                        )
+                        onComplete(false)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Full text fetch error: ${e.message}")
+                onComplete(false)
+            } finally {
+                _uiState.update { it.copy(loadingFullTextDocumentId = null) }
+            }
         }
     }
 }

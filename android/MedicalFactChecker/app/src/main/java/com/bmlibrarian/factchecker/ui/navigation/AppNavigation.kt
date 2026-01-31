@@ -34,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,6 +41,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.bmlibrarian.factchecker.ui.factcheck.FactCheckScreen
+import com.bmlibrarian.factchecker.ui.fulltext.FullTextScreen
 import com.bmlibrarian.factchecker.ui.history.HistoryScreen
 import com.bmlibrarian.factchecker.ui.onboarding.OnboardingScreen
 import com.bmlibrarian.factchecker.ui.report.ReportScreen
@@ -86,7 +86,9 @@ fun AppNavigation() {
     val isOnboardingComplete = settings.hasCompletedOnboarding
 
     // Determine if we should show bottom navigation
-    val showBottomNav = currentDestination?.route != NavRoute.Onboarding.route
+    // Only show when we have a valid destination AND it's not onboarding
+    val showBottomNav = currentDestination != null &&
+        currentDestination.route != NavRoute.Onboarding.route
 
     Scaffold(
         bottomBar = {
@@ -94,18 +96,19 @@ fun AppNavigation() {
             if (showBottomNav) {
                 NavigationBar {
                     NavRoute.bottomNavItems.forEach { navItem ->
+                        val itemRoute = navItem.route
                         val selected = currentDestination?.hierarchy?.any {
                             // Match on base route for Report to handle parameterized routes
-                            it.route?.startsWith(navItem.route) == true
+                            it.route?.startsWith(itemRoute) == true
                         } == true
 
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
-                                navController.navigate(navItem.route) {
+                                navController.navigate(itemRoute) {
                                     // Pop up to the start destination to avoid building
                                     // up a large back stack
-                                    popUpTo(navController.graph.findStartDestination().id) {
+                                    popUpTo(NavRoute.FactCheck.route) {
                                         saveState = true
                                     }
                                     // Avoid multiple copies of the same destination
@@ -161,12 +164,15 @@ fun AppNavigation() {
                     sessionIdToRestore = sessionId,
                     onNavigateToReport = {
                         navController.navigate(NavRoute.Report.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
+                            popUpTo(NavRoute.FactCheck.route) {
                                 saveState = true
                             }
                             launchSingleTop = true
                             restoreState = true
                         }
+                    },
+                    onNavigateToFullText = { documentId ->
+                        navController.navigate(NavRoute.FullText.createRoute(documentId))
                     }
                 )
             }
@@ -192,7 +198,7 @@ fun AppNavigation() {
                         // Navigate to FactCheck to restore session (like iOS behavior)
                         // This displays the scored documents and allows resuming search
                         navController.navigate(NavRoute.FactCheck.createRoute(sessionId)) {
-                            popUpTo(navController.graph.findStartDestination().id) {
+                            popUpTo(NavRoute.FactCheck.route) {
                                 saveState = false
                             }
                             launchSingleTop = true
@@ -204,6 +210,22 @@ fun AppNavigation() {
 
             composable(NavRoute.Settings.route) {
                 SettingsScreen()
+            }
+
+            // Full-text viewer screen
+            composable(
+                route = NavRoute.FullText.routeWithArgs,
+                arguments = listOf(
+                    navArgument(NavRoute.FullText.ARG_DOCUMENT_ID) {
+                        type = NavType.StringType
+                    }
+                )
+            ) { backStackEntry ->
+                val documentId = backStackEntry.arguments?.getString(NavRoute.FullText.ARG_DOCUMENT_ID) ?: ""
+                FullTextScreen(
+                    documentId = documentId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
         }
     }
