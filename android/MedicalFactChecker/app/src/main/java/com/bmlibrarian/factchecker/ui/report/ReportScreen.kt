@@ -68,6 +68,7 @@ import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.ui.report.components.DocumentDetailSheet
 import com.bmlibrarian.factchecker.ui.report.components.MarkdownReport
+import com.bmlibrarian.factchecker.ui.report.components.ReportDisclaimer
 import com.bmlibrarian.factchecker.ui.report.components.ReportStatistics
 import com.bmlibrarian.factchecker.ui.report.components.VerdictHeader
 import com.bmlibrarian.factchecker.util.Constants
@@ -184,6 +185,11 @@ fun ReportScreen(
                     model = report.modelUsed,
                     generatedAt = report.createdAt
                 )
+
+                Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+                // Disclaimer
+                ReportDisclaimer()
             }
 
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
