@@ -168,6 +168,21 @@ protocol ProgressDelegate: AnyObject, Sendable {
     ///   - step: Processing step where the error occurred.
     ///   - error: Error description.
     func didEncounterError(_ pmid: String, step: String, error: String) async
+
+    /// Called when a document has been scored, allowing immediate UI updates.
+    ///
+    /// This callback provides the full scoring result as each document completes,
+    /// enabling the workflow to apply scores incrementally rather than in a batch.
+    /// This ensures document cards appear in the UI immediately after scoring.
+    ///
+    /// - Parameter result: The scoring result for the completed document.
+    func didScoreDocument(_ result: ScoringResult) async
+}
+
+extension ProgressDelegate {
+    func didScoreDocument(_ result: ScoringResult) async {
+        // Default implementation does nothing
+    }
 }
 
 /// Aggregate progress state for tracking multiple processing phases.

@@ -1669,62 +1669,81 @@ final class FactCheckWorkflow {
             updateProgress(.scoringDocuments, "Scoring \(total) documents (concurrency: \(concurrency))...")
         }
 
-        // Create progress tracker for UI updates
-        let progressTracker = WorkflowProgressTracker { [weak self] message in
-            Task { @MainActor in
-                self?.updateProgress(.scoringDocuments, "Scoring document \(message.current)/\(message.total)...")
+        // Create progress tracker for UI updates with incremental result handling
+        let progressTracker = WorkflowProgressTracker(
+            onProgress: { [weak self] message in
+                Task { @MainActor in
+                    self?.updateProgress(.scoringDocuments, "Scoring document \(message.current)/\(message.total)...")
+                }
+            },
+            onScoringResult: { [weak self] result in
+                // Apply result immediately on main actor for UI update
+                await MainActor.run {
+                    self?.applyScoringResult(result)
+                }
             }
-        }
+        )
 
-        // Score documents with checkpointing
-        let results = try await scoringService.scoreDocuments(
+        // Score documents with checkpointing - results are applied incrementally via callback
+        _ = try await scoringService.scoreDocuments(
             inputs: inputs,
             claim: session.claim,
             sessionId: session.id.uuidString,
             progressDelegate: progressTracker
         )
+    }
 
-        // Apply results to documents (on main actor)
-        for result in results {
-            guard let document = documentsByPMID[result.pmid] else {
-                continue
-            }
+    /// Apply a scoring result to the corresponding document.
+    ///
+    /// Called incrementally as each document completes scoring to update the UI immediately.
+    /// Must be called on the main actor.
+    ///
+    /// - Parameter result: The scoring result to apply.
+    private func applyScoringResult(_ result: ScoringResult) {
+        guard let session = session else { return }
 
-            // Record usage for this document (if available - checkpointed results won't have usage)
-            if let usage = result.usage {
-                recordUsage(usage, operationType: "scoring")
-            }
-
-            if result.isSuccess, let score = result.score {
-                document.relevanceScore = score
-                document.scoreExplanation = result.rationale
-                document.scoredAt = Date()
-
-                session.documentsScored += 1
-                if score >= settings.minScoreThreshold {
-                    session.relevantDocumentsFound += 1
-                }
-            } else {
-                // Scoring failed (network error or parse failure)
-                document.scoreParseFailed = true
-                document.scoreExplanation = result.rationale ?? result.errorMessage
-                document.scoredAt = Date()
-
-                session.documentsScored += 1  // Count as scored (attempted)
-
-                // Phase 4: Track error in error queue
-                if let errorMessage = result.errorMessage {
-                    await handleScoringErrorMessage(
-                        pmid: result.pmid,
-                        step: "scoring",
-                        message: errorMessage,
-                        sessionId: session.id.uuidString
-                    )
-                }
-            }
+        // Find document by PMID
+        guard let document = (session.documents ?? []).first(where: { $0.pmid == result.pmid }) else {
+            return
         }
 
+        // Record usage for this document (if available - checkpointed results won't have usage)
+        if let usage = result.usage {
+            recordUsage(usage, operationType: "scoring")
+        }
+
+        if result.isSuccess, let score = result.score {
+            document.relevanceScore = score
+            document.scoreExplanation = result.rationale
+            document.scoredAt = Date()
+
+            session.documentsScored += 1
+            if score >= settings.minScoreThreshold {
+                session.relevantDocumentsFound += 1
+            }
+        } else {
+            // Scoring failed (network error or parse failure)
+            document.scoreParseFailed = true
+            document.scoreExplanation = result.rationale ?? result.errorMessage
+            document.scoredAt = Date()
+
+            session.documentsScored += 1  // Count as scored (attempted)
+        }
+
+        // Save immediately so UI updates
         try? modelContext.save()
+
+        // Handle errors asynchronously
+        if result.isError, let errorMessage = result.errorMessage {
+            Task {
+                await handleScoringErrorMessage(
+                    pmid: result.pmid,
+                    step: "scoring",
+                    message: errorMessage,
+                    sessionId: session.id.uuidString
+                )
+            }
+        }
     }
 
     /// Compute embedding-based similarity scores for all documents using HyDE.
@@ -1868,36 +1887,53 @@ final class FactCheckWorkflow {
         let total = inputs.count
         updateProgress(.extractingCitations, "Extracting citations 0/\(total)...")
 
-        // Extract citations in parallel with progress reporting
-        let results = await citationService.extractCitations(
+        // Extract citations in parallel with incremental result handling
+        _ = await citationService.extractCitations(
             inputs,
             claim: session.claim,
             onProgress: { [weak self] (pmid: String, completed: Int, total: Int) in
                 Task { @MainActor in
                     self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
                 }
-            }
-        )
-
-        // Apply results to documents (on main actor)
-        for result in results {
-            guard let document = documentsByPMID[result.pmid] else { continue }
-
-            if result.isSuccess {
-                for passage in result.passages {
-                    let citation = Citation(passage: passage.text, context: passage.relevance)
-                    citation.document = document
-                    modelContext.insert(citation)
-                    session.citationsExtracted += 1
+            },
+            onResult: { [weak self] result in
+                // Apply result immediately on main actor for UI update
+                await MainActor.run {
+                    self?.applyCitationResult(result)
                 }
             }
+        )
+    }
 
-            // Record usage if available
-            if let usage = result.usage {
-                recordUsage(usage, operationType: "citation")
+    /// Apply a citation result to the corresponding document.
+    ///
+    /// Called incrementally as each document completes citation extraction to update the UI immediately.
+    /// Must be called on the main actor.
+    ///
+    /// - Parameter result: The citation result to apply.
+    private func applyCitationResult(_ result: CitationResult) {
+        guard let session = session else { return }
+
+        // Find document by PMID
+        guard let document = (session.documents ?? []).first(where: { $0.pmid == result.pmid }) else {
+            return
+        }
+
+        if result.isSuccess {
+            for passage in result.passages {
+                let citation = Citation(passage: passage.text, context: passage.relevance)
+                citation.document = document
+                modelContext.insert(citation)
+                session.citationsExtracted += 1
             }
         }
 
+        // Record usage if available
+        if let usage = result.usage {
+            recordUsage(usage, operationType: "citation")
+        }
+
+        // Save immediately so UI updates
         try? modelContext.save()
     }
 
@@ -2507,11 +2543,20 @@ final class WorkflowProgressTracker: ProgressDelegate, @unchecked Sendable {
     /// Callback for progress updates (called on arbitrary queue).
     private let onProgress: @Sendable (ProgressMessage) -> Void
 
+    /// Callback for scoring result updates (called on arbitrary queue).
+    private let onScoringResult: (@Sendable (ScoringResult) async -> Void)?
+
     /// Create a workflow progress tracker.
     ///
-    /// - Parameter onProgress: Callback invoked on each progress update.
-    init(onProgress: @escaping @Sendable (ProgressMessage) -> Void) {
+    /// - Parameters:
+    ///   - onProgress: Callback invoked on each progress update.
+    ///   - onScoringResult: Callback invoked when a document is scored.
+    init(
+        onProgress: @escaping @Sendable (ProgressMessage) -> Void,
+        onScoringResult: (@Sendable (ScoringResult) async -> Void)? = nil
+    ) {
         self.onProgress = onProgress
+        self.onScoringResult = onScoringResult
     }
 
     func didReceiveProgress(_ message: ProgressMessage) async {
@@ -2524,5 +2569,9 @@ final class WorkflowProgressTracker: ProgressDelegate, @unchecked Sendable {
 
     func didEncounterError(_ pmid: String, step: String, error: String) async {
         // Errors are captured in results, no separate handling needed
+    }
+
+    func didScoreDocument(_ result: ScoringResult) async {
+        await onScoringResult?(result)
     }
 }

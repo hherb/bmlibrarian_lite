@@ -241,6 +241,29 @@ actor ParallelScoringService {
         claim: String,
         onProgress: @escaping @Sendable (String, Int, Int) -> Void
     ) async -> [ScoringResult] {
+        await scoreDocuments(documents, claim: claim, onProgress: onProgress, onResult: nil)
+    }
+
+    /// Score multiple documents in parallel with per-result callback.
+    ///
+    /// Uses a sliding window approach to maintain exactly `maxConcurrent`
+    /// requests in flight at any time. Results are returned in completion
+    /// order (not input order) for responsive progress updates.
+    ///
+    /// - Parameters:
+    ///   - documents: Documents to score (as ScoringInput structs).
+    ///   - claim: The medical claim to evaluate documents against.
+    ///   - onProgress: Callback for progress updates.
+    ///   - onResult: Optional callback for each result as it completes.
+    ///     Called immediately when a document finishes scoring, enabling
+    ///     incremental UI updates.
+    /// - Returns: Array of scoring results in completion order.
+    func scoreDocuments(
+        _ documents: [ScoringInput],
+        claim: String,
+        onProgress: @escaping @Sendable (String, Int, Int) -> Void,
+        onResult: (@Sendable (ScoringResult) async -> Void)?
+    ) async -> [ScoringResult] {
         guard !documents.isEmpty else { return [] }
 
         var results: [ScoringResult] = []
@@ -265,6 +288,9 @@ actor ParallelScoringService {
                 results.append(result)
                 completed += 1
                 onProgress(result.pmid, completed, total)
+
+                // Call result handler for incremental updates
+                await onResult?(result)
 
                 // Add next document to maintain concurrency level
                 if let doc = pending.popFirst() {

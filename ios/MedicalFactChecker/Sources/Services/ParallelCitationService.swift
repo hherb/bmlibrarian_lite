@@ -199,6 +199,29 @@ actor ParallelCitationService {
         claim: String,
         onProgress: @escaping @Sendable (String, Int, Int) -> Void
     ) async -> [CitationResult] {
+        await extractCitations(documents, claim: claim, onProgress: onProgress, onResult: nil)
+    }
+
+    /// Extract citations from multiple documents in parallel with per-result callback.
+    ///
+    /// Uses a sliding window approach to maintain exactly `maxConcurrent`
+    /// requests in flight at any time. Results are returned in completion
+    /// order (not input order) for responsive progress updates.
+    ///
+    /// - Parameters:
+    ///   - documents: Documents to extract citations from (as CitationInput structs).
+    ///   - claim: The medical claim to evaluate documents against.
+    ///   - onProgress: Callback for progress updates.
+    ///   - onResult: Optional callback for each result as it completes.
+    ///     Called immediately when a document finishes extraction, enabling
+    ///     incremental UI updates.
+    /// - Returns: Array of citation results in completion order.
+    func extractCitations(
+        _ documents: [CitationInput],
+        claim: String,
+        onProgress: @escaping @Sendable (String, Int, Int) -> Void,
+        onResult: (@Sendable (CitationResult) async -> Void)?
+    ) async -> [CitationResult] {
         guard !documents.isEmpty else { return [] }
 
         var results: [CitationResult] = []
@@ -223,6 +246,9 @@ actor ParallelCitationService {
                 results.append(result)
                 completed += 1
                 onProgress(result.pmid, completed, total)
+
+                // Call result handler for incremental updates
+                await onResult?(result)
 
                 // Add next document to maintain concurrency level
                 if let doc = pending.popFirst() {

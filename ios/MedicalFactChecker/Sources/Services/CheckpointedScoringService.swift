@@ -215,6 +215,9 @@ actor CheckpointedScoringService {
                 }
                 results.append(result)
 
+                // Report result to delegate for immediate UI update (restored from checkpoint)
+                await progressDelegate?.didScoreDocument(result)
+
                 // Report skipped document
                 await progressDelegate?.didReceiveProgress(ProgressMessage(
                     type: .documentSkipped,
@@ -229,8 +232,10 @@ actor CheckpointedScoringService {
         // Process remaining documents if any
         if !toProcess.isEmpty {
             let startCount = results.count
+            let checkpointMgr = checkpointManager
+            let sessId = sessionId
 
-            // Score using Phase 1 parallel service with progress callback
+            // Score using Phase 1 parallel service with progress and result callbacks
             let newResults = await scoringService.scoreDocuments(
                 toProcess,
                 claim: claim,
@@ -245,28 +250,30 @@ actor CheckpointedScoringService {
                             total: total
                         ))
                     }
+                },
+                onResult: { [weak progressDelegate] result in
+                    // Save checkpoint immediately
+                    let checkpoint = ScoringCheckpoint(from: result)
+                    try? await checkpointMgr.saveCheckpoint(
+                        sessionId: sessId,
+                        pmid: result.pmid,
+                        step: "scoring",
+                        result: checkpoint
+                    )
+
+                    // Report result to delegate for immediate UI update
+                    await progressDelegate?.didScoreDocument(result)
+
+                    // Report errors via delegate
+                    if result.isError {
+                        await progressDelegate?.didEncounterError(
+                            result.pmid,
+                            step: "scoring",
+                            error: result.errorMessage ?? "Unknown error"
+                        )
+                    }
                 }
             )
-
-            // Save checkpoints for all new results
-            for result in newResults {
-                let checkpoint = ScoringCheckpoint(from: result)
-                try? await checkpointManager.saveCheckpoint(
-                    sessionId: sessionId,
-                    pmid: result.pmid,
-                    step: "scoring",
-                    result: checkpoint
-                )
-
-                // Report errors via delegate
-                if result.isError {
-                    await progressDelegate?.didEncounterError(
-                        result.pmid,
-                        step: "scoring",
-                        error: result.errorMessage ?? "Unknown error"
-                    )
-                }
-            }
 
             results.append(contentsOf: newResults)
         }
