@@ -32,8 +32,12 @@ import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
 import com.bmlibrarian.factchecker.domain.embedding.EmbeddingService
+import com.bmlibrarian.factchecker.domain.model.EuropePMCQueryBuilder
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.domain.model.PubMedQueryBuilder
+import com.bmlibrarian.factchecker.domain.model.QueryBuilderFactory
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.ml.HydeGenerator
@@ -111,6 +115,15 @@ class FactCheckWorkflow @Inject constructor(
 
     /** Whether this is a resumed session (for checkpoint handling). */
     private var isResumedSession: Boolean = false
+
+    /**
+     * Stored structured query for provider-specific translation.
+     *
+     * The LLM generates a provider-agnostic StructuredQuery which is then
+     * translated to provider-specific syntax (PubMed, Europe PMC) as needed.
+     * This mirrors the iOS approach for cross-platform consistency.
+     */
+    private var structuredQuery: StructuredQuery? = null
 
     // ==================== Main Entry Points ====================
 
@@ -465,6 +478,7 @@ class FactCheckWorkflow @Inject constructor(
         currentSession = null
         currentConfig = null
         isResumedSession = false
+        structuredQuery = null
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
     }
@@ -629,13 +643,16 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Convert a medical claim to a PubMed query using the LLM.
+     *
+     * Stores the structured query for provider-specific translation, mirroring
+     * the iOS approach for cross-platform consistency.
      */
     private suspend fun convertClaimToQuery(claim: String, config: WorkflowConfig): String {
         val provider = getLLMProvider()
         val apiKey = settingsRepository.getLlmApiKey()
         val model = settingsRepository.getLlmModel()
 
-        val result = llmService.convertToPubMedQuery(
+        val result = llmService.convertToStructuredQuery(
             provider = provider,
             apiKey = apiKey,
             model = model,
@@ -654,23 +671,46 @@ class FactCheckWorkflow @Inject constructor(
             outputTokens = Constants.LLM_QUERY_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
         )
 
-        return result.getOrThrow()
+        // Store structured query for provider-specific translation
+        var parsed = result.getOrThrow()
+
+        // Apply user's preprint preference before building query
+        parsed = parsed.copy(excludePreprints = !config.includePreprints)
+        structuredQuery = parsed
+
+        // Build provider-specific query string
+        return QueryBuilderFactory.build(parsed, config.searchProvider)
     }
 
     /**
      * Search for documents from the configured provider(s).
+     *
+     * Uses the stored structured query to build provider-specific query strings,
+     * ensuring optimal query syntax for each provider. This mirrors the iOS
+     * approach for cross-platform consistency.
      */
     private suspend fun searchForDocuments(
         session: SessionEntity,
         config: WorkflowConfig,
         isNextBatch: Boolean = false
     ): List<DocumentEntity> {
-        val query = session.pubmedQuery ?: return emptyList()
         val allDocuments = mutableListOf<DocumentEntity>()
         val batchNumber = if (isNextBatch) session.currentBatch + 1 else session.currentBatch
 
+        // Build provider-specific query from stored structured query, or fall back to session query
+        fun getQueryForProvider(provider: SearchProvider): String {
+            return structuredQuery?.let { sq ->
+                // Apply preprint preference and build provider-specific query
+                val withPreprints = sq.copy(excludePreprints = !config.includePreprints)
+                QueryBuilderFactory.build(withPreprints, provider)
+            } ?: session.pubmedQuery ?: ""
+        }
+
         when (config.searchProvider) {
             SearchProvider.PUBMED -> {
+                val query = getQueryForProvider(SearchProvider.PUBMED)
+                if (query.isEmpty()) return emptyList()
+
                 val offset = if (isNextBatch) session.pubmedOffset else 0
                 val result = pubMedService.search(
                     query = query,
@@ -699,6 +739,10 @@ class FactCheckWorkflow @Inject constructor(
             }
 
             SearchProvider.EUROPE_PMC -> {
+                // Build Europe PMC-specific query using the correct syntax
+                val query = getQueryForProvider(SearchProvider.EUROPE_PMC)
+                if (query.isEmpty()) return emptyList()
+
                 val cursor = if (isNextBatch) session.epmcCursor else null
                 val result = europePMCService.search(
                     query = query,
@@ -730,49 +774,55 @@ class FactCheckWorkflow @Inject constructor(
                 // Search both providers with half batch size each
                 val halfBatch = config.batchSize / 2
 
-                // PubMed
-                val pubmedOffset = if (isNextBatch) session.pubmedOffset else 0
-                val pubmedResult = pubMedService.search(
-                    query = query,
-                    offset = pubmedOffset,
-                    batchSize = halfBatch,
-                    email = settingsRepository.getNcbiEmail().ifEmpty { null }
-                )
+                // PubMed - use PubMed-specific query
+                val pubmedQuery = getQueryForProvider(SearchProvider.PUBMED)
+                if (pubmedQuery.isNotEmpty()) {
+                    val pubmedOffset = if (isNextBatch) session.pubmedOffset else 0
+                    val pubmedResult = pubMedService.search(
+                        query = pubmedQuery,
+                        offset = pubmedOffset,
+                        batchSize = halfBatch,
+                        email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                    )
 
-                if (pubmedResult.isSuccess) {
-                    val sr = pubmedResult.getOrThrow()
-                    allDocuments.addAll(
-                        pubMedService.toDocumentEntities(
+                    if (pubmedResult.isSuccess) {
+                        val sr = pubmedResult.getOrThrow()
+                        allDocuments.addAll(
+                            pubMedService.toDocumentEntities(
+                                articles = sr.articles,
+                                sessionId = session.id,
+                                batchNumber = batchNumber,
+                                startPosition = pubmedOffset
+                            )
+                        )
+                        sessionRepository.updatePubMedPagination(session.id, sr.nextOffset, sr.totalResults)
+                    }
+                }
+
+                // Europe PMC - use Europe PMC-specific query
+                val epmcQuery = getQueryForProvider(SearchProvider.EUROPE_PMC)
+                if (epmcQuery.isNotEmpty()) {
+                    val epmcCursor = if (isNextBatch) session.epmcCursor else null
+                    val epmcResult = europePMCService.search(
+                        query = epmcQuery,
+                        cursor = epmcCursor,
+                        batchSize = halfBatch,
+                        includePreprints = config.includePreprints
+                    )
+
+                    if (epmcResult.isSuccess) {
+                        val sr = epmcResult.getOrThrow()
+                        // Deduplicate by PMID
+                        val existingPmids = allDocuments.mapNotNull { it.pmid }.toSet()
+                        val newEntities = europePMCService.toDocumentEntities(
                             articles = sr.articles,
                             sessionId = session.id,
                             batchNumber = batchNumber,
-                            startPosition = pubmedOffset
-                        )
-                    )
-                    sessionRepository.updatePubMedPagination(session.id, sr.nextOffset, sr.totalResults)
-                }
-
-                // Europe PMC
-                val epmcCursor = if (isNextBatch) session.epmcCursor else null
-                val epmcResult = europePMCService.search(
-                    query = query,
-                    cursor = epmcCursor,
-                    batchSize = halfBatch,
-                    includePreprints = config.includePreprints
-                )
-
-                if (epmcResult.isSuccess) {
-                    val sr = epmcResult.getOrThrow()
-                    // Deduplicate by PMID
-                    val existingPmids = allDocuments.mapNotNull { it.pmid }.toSet()
-                    val newEntities = europePMCService.toDocumentEntities(
-                        articles = sr.articles,
-                        sessionId = session.id,
-                        batchNumber = batchNumber,
-                        startPosition = documentRepository.getDocumentCount(session.id)
-                    ).filter { it.pmid !in existingPmids }
-                    allDocuments.addAll(newEntities)
-                    sessionRepository.updateEpmcPagination(session.id, sr.nextCursor, sr.totalResults)
+                            startPosition = documentRepository.getDocumentCount(session.id)
+                        ).filter { it.pmid !in existingPmids }
+                        allDocuments.addAll(newEntities)
+                        sessionRepository.updateEpmcPagination(session.id, sr.nextCursor, sr.totalResults)
+                    }
                 }
             }
         }

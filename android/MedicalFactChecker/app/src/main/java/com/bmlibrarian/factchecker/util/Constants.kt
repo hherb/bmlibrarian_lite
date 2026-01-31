@@ -205,8 +205,8 @@ object Constants {
     /** Maximum tokens for report generation responses. */
     const val LLM_REPORT_MAX_TOKENS = 2000
 
-    /** Maximum tokens for query conversion responses. */
-    const val LLM_QUERY_MAX_TOKENS = 200
+    /** Maximum tokens for query conversion responses. Matches iOS value for cross-platform consistency. */
+    const val LLM_QUERY_MAX_TOKENS = 512
 
     /** Estimated characters per token for token count estimation. */
     const val TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4

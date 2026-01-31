@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.llm
 
 import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import com.bmlibrarian.factchecker.util.ResponseParser
@@ -93,23 +94,26 @@ class LLMService @Inject constructor(
      *
      * Uses a structured JSON approach for better cross-platform consistency
      * and more reliable query generation. The structured query is then
-     * translated to provider-specific syntax.
+     * translated to provider-specific syntax by the caller.
+     *
+     * Mirrors the iOS FactCheckWorkflow.convertClaimToQuery() for cross-platform
+     * consistency, including matching maxTokens (512) and temperature (0.1).
      *
      * @param provider The LLM provider configuration
      * @param apiKey The API key for authentication
      * @param model The model ID to use
      * @param claim The medical claim to convert
-     * @return Result containing the PubMed query string
+     * @return Result containing the StructuredQuery for provider-specific translation
      */
-    suspend fun convertToPubMedQuery(
+    suspend fun convertToStructuredQuery(
         provider: LLMProvider,
         apiKey: String,
         model: String,
         claim: String
-    ): Result<String> {
+    ): Result<StructuredQuery> {
         // Use structured JSON prompt for better local model compatibility
         // Mirrors the iOS approach for cross-platform consistency
-        val systemPrompt = """
+        val userPrompt = """
             Convert this research question into a concise PubMed search query.
 
             Research Question: $claim
@@ -144,11 +148,35 @@ class LLMService @Inject constructor(
             apiKey = apiKey,
             model = model,
             systemPrompt = "You are a medical librarian expert at converting natural language medical claims into effective PubMed search queries.",
-            userPrompt = systemPrompt,
+            userPrompt = userPrompt,
             maxTokens = Constants.LLM_QUERY_MAX_TOKENS,
             temperature = 0.1
-        ).map { result ->
-            ResponseParser.parseStructuredQueryResponse(result.content, claim)
+        ).mapCatching { result ->
+            StructuredQuery.parse(result.content)
+                ?: throw IllegalStateException("Failed to parse structured query from LLM response")
+        }
+    }
+
+    /**
+     * Convert a medical claim to a PubMed query string.
+     *
+     * @deprecated Use convertToStructuredQuery and QueryBuilderFactory for provider-specific queries.
+     *
+     * @param provider The LLM provider configuration
+     * @param apiKey The API key for authentication
+     * @param model The model ID to use
+     * @param claim The medical claim to convert
+     * @return Result containing the PubMed query string
+     */
+    @Deprecated("Use convertToStructuredQuery for provider-specific queries")
+    suspend fun convertToPubMedQuery(
+        provider: LLMProvider,
+        apiKey: String,
+        model: String,
+        claim: String
+    ): Result<String> {
+        return convertToStructuredQuery(provider, apiKey, model, claim).map { structuredQuery ->
+            com.bmlibrarian.factchecker.domain.model.PubMedQueryBuilder.build(structuredQuery)
         }
     }
 
