@@ -124,6 +124,7 @@ dependencies {
     // Markdown rendering
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
+    implementation("io.noties.markwon:html:4.6.2")
 
     // PDF generation (AGPL license - compatible with open source projects)
     implementation("com.itextpdf:itext7-core:7.2.5")

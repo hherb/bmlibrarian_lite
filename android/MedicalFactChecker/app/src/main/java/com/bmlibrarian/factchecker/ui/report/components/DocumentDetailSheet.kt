@@ -31,12 +31,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -50,10 +59,14 @@ import com.bmlibrarian.factchecker.util.Constants
  * Bottom sheet showing detailed document information.
  *
  * Displays full document metadata including title, authors, journal,
- * identifiers, relevance score, and abstract. Provides actions to
- * view the document on PubMed or dismiss the sheet.
+ * identifiers, relevance score, abstract, and full text actions.
+ * Provides actions to view full text, open in PubMed, or dismiss.
  *
  * @param document The document to display details for
+ * @param isLoadingFullText Whether full text is currently being fetched
+ * @param onGetFullText Callback to fetch full text for this document
+ * @param onViewFullText Callback to navigate to full text viewer
+ * @param onOpenPublisher Callback to open publisher website (DOI link)
  * @param onOpenInPubMed Callback when "Open in PubMed" is clicked
  * @param onDismiss Callback when the sheet should be dismissed
  * @param modifier Modifier for customizing the component
@@ -61,6 +74,10 @@ import com.bmlibrarian.factchecker.util.Constants
 @Composable
 fun DocumentDetailSheet(
     document: DocumentEntity,
+    isLoadingFullText: Boolean = false,
+    onGetFullText: (() -> Unit)? = null,
+    onViewFullText: (() -> Unit)? = null,
+    onOpenPublisher: ((String) -> Unit)? = null,
     onOpenInPubMed: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -173,6 +190,29 @@ fun DocumentDetailSheet(
             )
         }
 
+        // Full Text Section
+        if (onGetFullText != null || onViewFullText != null) {
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            Text(
+                text = "Full Text",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+
+            FullTextSection(
+                document = document,
+                isLoading = isLoadingFullText,
+                onGetFullText = onGetFullText,
+                onViewFullText = onViewFullText,
+                onOpenPublisher = onOpenPublisher
+            )
+        }
+
         Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 
         // Action buttons
@@ -205,6 +245,140 @@ fun DocumentDetailSheet(
 
         // Bottom padding for navigation bar
         Spacer(modifier = Modifier.height(Constants.UI_NAVIGATION_BAR_PADDING.dp))
+    }
+}
+
+/**
+ * Section for full-text retrieval button and status.
+ *
+ * Displays different states:
+ * - View Full Text button when full text is already available
+ * - Get Full Text button when not yet attempted
+ * - Unavailable message with fallback to publisher when retrieval failed
+ *
+ * @param document The document to display full-text actions for
+ * @param isLoading Whether full text is currently being fetched
+ * @param onGetFullText Callback to fetch full text
+ * @param onViewFullText Callback to navigate to full text viewer
+ * @param onOpenPublisher Callback to open publisher website
+ */
+@Composable
+private fun FullTextSection(
+    document: DocumentEntity,
+    isLoading: Boolean,
+    onGetFullText: (() -> Unit)?,
+    onViewFullText: (() -> Unit)?,
+    onOpenPublisher: ((String) -> Unit)?
+) {
+    when {
+        // Already have full text - show view button
+        document.hasFullText -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+            ) {
+                Button(
+                    onClick = { onViewFullText?.invoke() },
+                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Article,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text("View Full Text")
+                }
+
+                // Show source badge
+                document.fullTextSourceDisplay?.let { source ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            text = source,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(
+                                horizontal = Constants.UI_BADGE_PADDING_HORIZONTAL.dp,
+                                vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Already tried but unavailable
+        document.fullTextUnavailable -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Full text not available",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+
+                // Offer to open publisher website
+                document.doi?.let { doi ->
+                    OutlinedButton(
+                        onClick = { onOpenPublisher?.invoke(doi) },
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInBrowser,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                        Text(
+                            text = "Publisher",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+        }
+
+        // Not yet attempted - show fetch button
+        else -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onGetFullText?.invoke() },
+                    enabled = !isLoading,
+                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text(if (isLoading) "Fetching..." else "Get Full Text")
+                }
+            }
+        }
     }
 }
 

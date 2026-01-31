@@ -189,7 +189,12 @@ fun AppNavigation() {
                 )
             ) { backStackEntry ->
                 val sessionId = backStackEntry.arguments?.getString(NavRoute.Report.ARG_SESSION_ID)
-                ReportScreen(sessionId = sessionId)
+                ReportScreen(
+                    sessionId = sessionId,
+                    onNavigateToFullText = { documentId ->
+                        navController.navigate(NavRoute.FullText.createRoute(documentId))
+                    }
+                )
             }
 
             composable(NavRoute.History.route) {

@@ -80,12 +80,14 @@ import com.bmlibrarian.factchecker.util.Constants
  * references, statistics, and export/share functionality.
  *
  * @param sessionId Optional session ID to load. If null, loads the latest report.
+ * @param onNavigateToFullText Callback to navigate to full text viewer for a document
  * @param viewModel The ViewModel for managing report state
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportScreen(
     sessionId: String? = null,
+    onNavigateToFullText: ((String) -> Unit)? = null,
     viewModel: ReportViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -116,7 +118,7 @@ fun ReportScreen(
     // Handle one-shot events
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
-            handleEvent(event, context, snackbarHostState)
+            handleEvent(event, context, snackbarHostState, onNavigateToFullText)
         }
     }
 
@@ -264,6 +266,10 @@ fun ReportScreen(
             ) {
                 DocumentDetailSheet(
                     document = uiState.selectedDocument!!,
+                    isLoadingFullText = uiState.isLoadingFullText,
+                    onGetFullText = viewModel::fetchFullText,
+                    onViewFullText = viewModel::viewFullText,
+                    onOpenPublisher = { doi -> viewModel.openDoi(doi) },
                     onOpenInPubMed = { pmid ->
                         viewModel.openInPubMed(pmid)
                     },
@@ -280,11 +286,13 @@ fun ReportScreen(
  * @param event The event to handle
  * @param context Android context for launching intents
  * @param snackbarHostState State for showing snackbars
+ * @param onNavigateToFullText Navigation callback for full text viewer
  */
 private suspend fun handleEvent(
     event: ReportUiEvent,
     context: Context,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    onNavigateToFullText: ((String) -> Unit)?
 ) {
     when (event) {
         is ReportUiEvent.OpenUrl -> {
@@ -318,6 +326,10 @@ private suspend fun handleEvent(
 
         is ReportUiEvent.ShowSnackbar -> {
             snackbarHostState.showSnackbar(event.message)
+        }
+
+        is ReportUiEvent.NavigateToFullText -> {
+            onNavigateToFullText?.invoke(event.documentId)
         }
     }
 }
