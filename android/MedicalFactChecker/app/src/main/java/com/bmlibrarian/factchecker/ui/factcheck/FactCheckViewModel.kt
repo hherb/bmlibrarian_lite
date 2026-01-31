@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.ui.factcheck
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.util.Log
+import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
@@ -60,8 +61,11 @@ data class FactCheckUiState(
     /** Detailed progress information for progress indicators. */
     val progress: WorkflowProgress = WorkflowProgress.idle(),
 
-    /** List of scored documents to display. */
+    /** List of documents to display (includes in-progress scoring). */
     val documents: List<DocumentEntity> = emptyList(),
+
+    /** Map of document ID to citations for that document. */
+    val citationsByDocument: Map<String, List<CitationEntity>> = emptyMap(),
 
     /** Whether to show the configuration warning. */
     val showConfigWarning: Boolean = false,
@@ -94,12 +98,29 @@ data class FactCheckUiState(
     val loadingFullTextDocumentId: String? = null
 ) {
     /**
-     * Get documents sorted by the current sort order.
+     * Get only scored documents from the full list.
      *
-     * @return Sorted list of documents
+     * @return List of documents that have been scored
+     */
+    val scoredDocuments: List<DocumentEntity>
+        get() = documents.filter { it.relevanceScore != null }
+
+    /**
+     * Get scored documents sorted by the current sort order.
+     *
+     * @return Sorted list of scored documents
      */
     val sortedDocuments: List<DocumentEntity>
-        get() = DocumentSortOrder.sortDocuments(documents, sortOrder)
+        get() = DocumentSortOrder.sortDocuments(scoredDocuments, sortOrder)
+
+    /**
+     * Get citations for a specific document.
+     *
+     * @param documentId The document ID
+     * @return List of citations for the document
+     */
+    fun getCitationsForDocument(documentId: String): List<CitationEntity> =
+        citationsByDocument[documentId] ?: emptyList()
 }
 
 /**
@@ -318,13 +339,28 @@ class FactCheckViewModel @Inject constructor(
     /**
      * Observe documents for the current session.
      *
+     * Observes all documents (not just scored) to enable incremental display
+     * as documents are scored. Documents appear immediately and update when
+     * their scores are populated.
+     *
      * @param sessionId The session ID to observe
      */
     private fun observeDocuments(sessionId: String) {
+        // Observe all documents (not just scored) for incremental updates
         viewModelScope.launch {
-            documentRepository.getScoredDocumentsBySession(sessionId)
+            documentRepository.getDocumentsBySession(sessionId)
                 .collect { docs ->
                     _uiState.update { it.copy(documents = docs) }
+                }
+        }
+
+        // Observe citations for document display
+        viewModelScope.launch {
+            documentRepository.getCitationsBySession(sessionId)
+                .collect { citations ->
+                    // Group citations by document ID
+                    val citationsMap = citations.groupBy { it.documentId }
+                    _uiState.update { it.copy(citationsByDocument = citationsMap) }
                 }
         }
     }

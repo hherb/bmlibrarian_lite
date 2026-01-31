@@ -164,7 +164,7 @@ fun FactCheckScreen(
                 item(key = "resumed_banner") {
                     ResumedSessionBanner(
                         documentCount = uiState.documents.size,
-                        scoredCount = uiState.documents.count { it.relevanceScore != null },
+                        scoredCount = uiState.scoredDocuments.size,
                         canAddMore = uiState.canFetchMoreDocuments,
                         isLoading = uiState.isRunning,
                         onAddMore = viewModel::addMoreResults,
@@ -234,11 +234,11 @@ fun FactCheckScreen(
             }
 
             // Scored documents section
-            if (uiState.documents.isNotEmpty()) {
+            if (uiState.scoredDocuments.isNotEmpty()) {
                 item(key = "documents_header") {
                     Column {
                         Text(
-                            text = "Scored Documents (${uiState.documents.size})",
+                            text = "Scored Documents (${uiState.scoredDocuments.size})",
                             style = MaterialTheme.typography.titleMedium
                         )
                         SortingControls(
@@ -254,6 +254,7 @@ fun FactCheckScreen(
                 ) { document ->
                     DocumentCard(
                         document = document,
+                        citations = uiState.getCitationsForDocument(document.id),
                         isLoadingFullText = uiState.loadingFullTextDocumentId == document.id,
                         onGetFullText = { doc ->
                             viewModel.fetchFullText(doc) { success ->
@@ -286,7 +287,7 @@ fun FactCheckScreen(
             CompactContextHeader(
                 claimText = uiState.claimText,
                 generatedQuery = uiState.generatedQuery,
-                documentCount = uiState.documents.size
+                documentCount = uiState.scoredDocuments.size
             )
         }
     }
