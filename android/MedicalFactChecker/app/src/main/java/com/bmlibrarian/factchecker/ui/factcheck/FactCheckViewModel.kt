@@ -158,6 +158,7 @@ class FactCheckViewModel @Inject constructor(
     init {
         observeWorkflowState()
         observeWorkflowProgress()
+        observeWorkflowSessionId()
         observeConfiguration()
         loadBudgetInfo()
     }
@@ -195,6 +196,27 @@ class FactCheckViewModel @Inject constructor(
         viewModelScope.launch {
             workflow.progress.collect { progress ->
                 _uiState.update { it.copy(progress = progress) }
+            }
+        }
+    }
+
+    /**
+     * Observe workflow session ID changes to start document observation immediately.
+     *
+     * This allows documents to appear in the UI as soon as they're saved to the database,
+     * rather than waiting for the entire workflow to complete.
+     */
+    private fun observeWorkflowSessionId() {
+        viewModelScope.launch {
+            workflow.currentSessionId.collect { sessionId ->
+                if (sessionId != null && sessionId != currentSessionId) {
+                    currentSessionId = sessionId
+                    observeDocuments(sessionId)
+                } else if (sessionId == null) {
+                    currentSessionId = null
+                    // Clear documents when session is reset
+                    _uiState.update { it.copy(documents = emptyList(), citationsByDocument = emptyMap()) }
+                }
             }
         }
     }
@@ -250,23 +272,21 @@ class FactCheckViewModel @Inject constructor(
      * Start the fact-check process.
      *
      * Creates a new session and runs the workflow with current settings.
+     * Document observation starts automatically via observeWorkflowSessionId()
+     * as soon as the workflow creates the session.
      */
     fun startFactCheck() {
         val claim = _uiState.value.claimText.trim()
         if (claim.isEmpty()) return
 
         // Clear previous query and documents when starting a new fact check
-        _uiState.update { it.copy(generatedQuery = null, documents = emptyList()) }
+        _uiState.update { it.copy(generatedQuery = null, documents = emptyList(), citationsByDocument = emptyMap()) }
 
         viewModelScope.launch {
             try {
                 val config = buildWorkflowConfig()
-                currentSessionId = workflow.startFactCheck(claim, config)
-
-                // Start observing documents for this session
-                currentSessionId?.let { sessionId ->
-                    observeDocuments(sessionId)
-                }
+                // Document observation starts automatically via observeWorkflowSessionId()
+                workflow.startFactCheck(claim, config)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to start fact check")
@@ -406,6 +426,7 @@ class FactCheckViewModel @Inject constructor(
      * Loads the session data and documents without running the workflow.
      * This mirrors iOS's restoreForViewing() method, allowing users to
      * view past fact-check results and optionally fetch more evidence.
+     * Document observation starts automatically via observeWorkflowSessionId().
      *
      * @param sessionId The ID of the session to restore
      */
@@ -414,11 +435,6 @@ class FactCheckViewModel @Inject constructor(
             try {
                 val session = sessionRepository.getSession(sessionId)
                     ?: throw IllegalArgumentException("Session not found: $sessionId")
-
-                currentSessionId = sessionId
-
-                // Start observing documents for this session
-                observeDocuments(sessionId)
 
                 // Update UI state with restored session data
                 _uiState.update {
@@ -434,6 +450,7 @@ class FactCheckViewModel @Inject constructor(
                 }
 
                 // Initialize workflow with session for potential resume
+                // This also emits the session ID for document observation
                 workflow.restoreForViewing(session)
 
             } catch (e: Exception) {

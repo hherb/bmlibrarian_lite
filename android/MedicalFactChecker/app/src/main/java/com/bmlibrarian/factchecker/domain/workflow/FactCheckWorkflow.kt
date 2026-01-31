@@ -99,6 +99,10 @@ class FactCheckWorkflow @Inject constructor(
     private val _progress = MutableStateFlow(WorkflowProgress.idle())
     val progress: StateFlow<WorkflowProgress> = _progress.asStateFlow()
 
+    /** Current session ID for document observation. Emits immediately when session is created. */
+    private val _currentSessionId = MutableStateFlow<String?>(null)
+    val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
+
     // ==================== Current Session ====================
 
     /** Current active session. */
@@ -172,6 +176,9 @@ class FactCheckWorkflow @Inject constructor(
             includePreprints = config.includePreprints
         )
         currentSession = session
+
+        // Emit session ID immediately so UI can start observing documents
+        _currentSessionId.value = session.id
 
         // Update state
         _state.value = WorkflowState.ConvertingQuery(claim)
@@ -479,6 +486,7 @@ class FactCheckWorkflow @Inject constructor(
         currentConfig = null
         isResumedSession = false
         structuredQuery = null
+        _currentSessionId.value = null
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
     }
@@ -502,6 +510,9 @@ class FactCheckWorkflow @Inject constructor(
             includePreprints = session.includePreprints
         )
         isResumedSession = true
+
+        // Emit session ID so UI can observe documents
+        _currentSessionId.value = session.id
 
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
