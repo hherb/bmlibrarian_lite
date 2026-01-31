@@ -1887,16 +1887,12 @@ final class FactCheckWorkflow {
         _ = await citationService.extractCitations(
             inputs,
             claim: session.claim,
-            onProgress: { [weak self] (pmid: String, completed: Int, total: Int) in
-                Task { @MainActor in
-                    self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
-                }
+            onProgress: { @MainActor [weak self] (pmid: String, completed: Int, total: Int) in
+                self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
             },
-            onResult: { [weak self] result in
+            onResult: { @MainActor [weak self] result in
                 // Apply result immediately on main actor for UI update
-                await MainActor.run {
-                    self?.applyCitationResult(result)
-                }
+                self?.applyCitationResult(result)
             }
         )
     }

@@ -197,7 +197,7 @@ actor ParallelCitationService {
     func extractCitations(
         _ documents: [CitationInput],
         claim: String,
-        onProgress: @escaping @Sendable (String, Int, Int) -> Void
+        onProgress: @escaping @MainActor (String, Int, Int) -> Void
     ) async -> [CitationResult] {
         await extractCitations(documents, claim: claim, onProgress: onProgress, onResult: nil)
     }
@@ -208,19 +208,21 @@ actor ParallelCitationService {
     /// requests in flight at any time. Results are returned in completion
     /// order (not input order) for responsive progress updates.
     ///
+    /// The callbacks are `@MainActor` closures to ensure UI updates happen on the main thread.
+    ///
     /// - Parameters:
     ///   - documents: Documents to extract citations from (as CitationInput structs).
     ///   - claim: The medical claim to evaluate documents against.
-    ///   - onProgress: Callback for progress updates.
-    ///   - onResult: Optional callback for each result as it completes.
+    ///   - onProgress: Callback for progress updates (runs on main actor).
+    ///   - onResult: Optional callback for each result as it completes (runs on main actor).
     ///     Called immediately when a document finishes extraction, enabling
     ///     incremental UI updates.
     /// - Returns: Array of citation results in completion order.
     func extractCitations(
         _ documents: [CitationInput],
         claim: String,
-        onProgress: @escaping @Sendable (String, Int, Int) -> Void,
-        onResult: (@Sendable (CitationResult) async -> Void)?
+        onProgress: @escaping @MainActor (String, Int, Int) -> Void,
+        onResult: (@MainActor (CitationResult) -> Void)?
     ) async -> [CitationResult] {
         guard !documents.isEmpty else { return [] }
 
@@ -245,10 +247,16 @@ actor ParallelCitationService {
             for await result in group {
                 results.append(result)
                 completed += 1
-                onProgress(result.pmid, completed, total)
+                await MainActor.run {
+                    onProgress(result.pmid, completed, total)
+                }
 
                 // Call result handler for incremental updates
-                await onResult?(result)
+                if let callback = onResult {
+                    await MainActor.run {
+                        callback(result)
+                    }
+                }
 
                 // Add next document to maintain concurrency level
                 if let doc = pending.popFirst() {
