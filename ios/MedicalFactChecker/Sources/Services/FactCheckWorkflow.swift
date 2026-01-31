@@ -1671,16 +1671,12 @@ final class FactCheckWorkflow {
 
         // Create progress tracker for UI updates with incremental result handling
         let progressTracker = WorkflowProgressTracker(
-            onProgress: { [weak self] message in
-                Task { @MainActor in
-                    self?.updateProgress(.scoringDocuments, "Scoring document \(message.current)/\(message.total)...")
-                }
+            onProgress: { @MainActor [weak self] message in
+                self?.updateProgress(.scoringDocuments, "Scoring document \(message.current)/\(message.total)...")
             },
-            onScoringResult: { [weak self] result in
+            onScoringResult: { @MainActor [weak self] result in
                 // Apply result immediately on main actor for UI update
-                await MainActor.run {
-                    self?.applyScoringResult(result)
-                }
+                self?.applyScoringResult(result)
             }
         )
 
@@ -2463,13 +2459,11 @@ final class FactCheckWorkflow {
         )
 
         // Create progress tracker for UI updates
-        let progressTracker = WorkflowProgressTracker { [weak self] message in
-            Task { @MainActor in
-                self?.updateProgress(
-                    .scoringDocuments,
-                    "Scoring new document \(message.current)/\(message.total)..."
-                )
-            }
+        let progressTracker = WorkflowProgressTracker { @MainActor [weak self] message in
+            self?.updateProgress(
+                .scoringDocuments,
+                "Scoring new document \(message.current)/\(message.total)..."
+            )
         }
 
         // Score documents with checkpointing
@@ -2539,28 +2533,32 @@ enum BudgetError: LocalizedError {
 ///
 /// This class implements `ProgressDelegate` to receive updates from the checkpointed
 /// scoring service and forwards them to the workflow's progress callback.
+///
+/// The callbacks are `@MainActor` closures to ensure UI updates happen on the main thread.
 final class WorkflowProgressTracker: ProgressDelegate, @unchecked Sendable {
-    /// Callback for progress updates (called on arbitrary queue).
-    private let onProgress: @Sendable (ProgressMessage) -> Void
+    /// Callback for progress updates (called on main actor).
+    private let onProgress: @MainActor (ProgressMessage) -> Void
 
-    /// Callback for scoring result updates (called on arbitrary queue).
-    private let onScoringResult: (@Sendable (ScoringResult) async -> Void)?
+    /// Callback for scoring result updates (called on main actor).
+    private let onScoringResult: (@MainActor (ScoringResult) -> Void)?
 
     /// Create a workflow progress tracker.
     ///
     /// - Parameters:
-    ///   - onProgress: Callback invoked on each progress update.
-    ///   - onScoringResult: Callback invoked when a document is scored.
+    ///   - onProgress: Callback invoked on each progress update (runs on main actor).
+    ///   - onScoringResult: Callback invoked when a document is scored (runs on main actor).
     init(
-        onProgress: @escaping @Sendable (ProgressMessage) -> Void,
-        onScoringResult: (@Sendable (ScoringResult) async -> Void)? = nil
+        onProgress: @escaping @MainActor (ProgressMessage) -> Void,
+        onScoringResult: (@MainActor (ScoringResult) -> Void)? = nil
     ) {
         self.onProgress = onProgress
         self.onScoringResult = onScoringResult
     }
 
     func didReceiveProgress(_ message: ProgressMessage) async {
-        onProgress(message)
+        await MainActor.run {
+            onProgress(message)
+        }
     }
 
     func didCompletePhase(_ step: String, count: Int) async {
@@ -2572,6 +2570,10 @@ final class WorkflowProgressTracker: ProgressDelegate, @unchecked Sendable {
     }
 
     func didScoreDocument(_ result: ScoringResult) async {
-        await onScoringResult?(result)
+        if let callback = onScoringResult {
+            await MainActor.run {
+                callback(result)
+            }
+        }
     }
 }

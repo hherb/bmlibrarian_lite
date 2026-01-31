@@ -303,10 +303,8 @@ actor BackgroundTaskManager {
         logger.info("Recovery task started")
 
         // Set up expiration handler
-        task.expirationHandler = { [weak self] in
-            Task {
-                await self?.logger.warning("Recovery task expired by system")
-            }
+        task.expirationHandler = { [logger] in
+            logger.warning("Recovery task expired by system")
         }
 
         // Post notification for any listeners
