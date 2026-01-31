@@ -698,8 +698,14 @@ private fun markdownToBasicHtml(markdown: String): String {
     // Links
     html = html.replace(Regex("\\[([^]]+)]\\(([^)]+)\\)"), "<a href=\"$2\">$1</a>")
 
-    // Images
-    html = html.replace(Regex("!\\[([^]]*)]\\(([^)]+)\\)"), "<img src=\"$2\" alt=\"$1\" style=\"max-width: 100%;\">")
+    // Images with onerror handler for fallback
+    html = html.replace(
+        Regex("!\\[([^]]*)]\\(([^)]+)\\)"),
+        "<figure><img src=\"$2\" alt=\"$1\" onerror=\"this.onerror=null; tryAlternativeExtensions(this);\" loading=\"lazy\"></figure>"
+    )
+
+    // Markdown tables
+    html = convertMarkdownTables(html)
 
     // Paragraphs (double newlines)
     html = html.replace(Regex("\n\n+"), "</p><p>")
@@ -713,31 +719,233 @@ private fun markdownToBasicHtml(markdown: String): String {
         <!DOCTYPE html>
         <html>
         <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
             <style>
+                :root {
+                    color-scheme: light dark;
+                }
+
                 body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
                     font-size: 16px;
                     line-height: 1.6;
                     padding: 16px;
-                    color: #212121;
-                    background: #ffffff;
+                    max-width: 100%;
+                    margin: 0 auto;
+                    color: var(--text-color);
+                    background-color: var(--bg-color);
                 }
-                h1 { font-size: 1.5em; margin-bottom: 0.5em; }
-                h2 { font-size: 1.3em; margin-top: 1.5em; margin-bottom: 0.5em; }
-                h3 { font-size: 1.1em; margin-top: 1.2em; margin-bottom: 0.4em; }
-                p { margin-bottom: 1em; }
-                a { color: #1976D2; }
-                img { max-width: 100%; height: auto; }
+
                 @media (prefers-color-scheme: dark) {
-                    body { background: #121212; color: #e0e0e0; }
-                    a { color: #64B5F6; }
+                    :root {
+                        --text-color: #e0e0e0;
+                        --bg-color: #1c1c1e;
+                        --heading-color: #ffffff;
+                        --link-color: #64B5F6;
+                        --border-color: #444;
+                        --table-header-bg: #2c2c2e;
+                        --table-alt-bg: #252527;
+                    }
+                }
+
+                @media (prefers-color-scheme: light) {
+                    :root {
+                        --text-color: #333;
+                        --bg-color: #ffffff;
+                        --heading-color: #1a1a1a;
+                        --link-color: #1976D2;
+                        --border-color: #ddd;
+                        --table-header-bg: #f0f4f8;
+                        --table-alt-bg: #fafafa;
+                    }
+                }
+
+                h1 {
+                    font-size: 1.6em;
+                    color: var(--heading-color);
+                    border-bottom: 2px solid var(--border-color);
+                    padding-bottom: 8px;
+                    margin-top: 0;
+                }
+
+                h2 {
+                    font-size: 1.3em;
+                    color: var(--heading-color);
+                    margin-top: 1.5em;
+                    border-bottom: 1px solid var(--border-color);
+                    padding-bottom: 4px;
+                }
+
+                h3 { font-size: 1.15em; color: var(--heading-color); margin-top: 1.2em; }
+                h4, h5, h6 { font-size: 1.05em; color: var(--heading-color); margin-top: 1em; }
+                p { margin: 0.8em 0; }
+                a { color: var(--link-color); text-decoration: none; }
+
+                /* Table styling with horizontal scroll */
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 1em 0;
+                    font-size: 0.9em;
+                    display: block;
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                th, td {
+                    border: 1px solid var(--border-color);
+                    padding: 8px 12px;
+                    text-align: left;
+                    vertical-align: top;
+                    min-width: 80px;
+                }
+
+                th { background-color: var(--table-header-bg); font-weight: 600; }
+                tr:nth-child(even) { background-color: var(--table-alt-bg); }
+
+                /* Figure styling */
+                figure {
+                    margin: 1.5em 0;
+                    padding: 1em;
+                    background-color: var(--table-alt-bg);
+                    border-radius: 8px;
+                    text-align: center;
+                }
+
+                figure img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                    margin: 0 auto;
+                }
+
+                figcaption {
+                    margin-top: 0.5em;
+                    font-size: 0.9em;
                 }
             </style>
+            <script>
+                // Try alternative image extensions when loading fails
+                function tryAlternativeExtensions(img) {
+                    var src = img.src;
+                    var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+                    var currentExt = src.match(/\.[^.]+$/);
+
+                    if (!currentExt) return;
+
+                    var base = src.slice(0, -currentExt[0].length);
+                    var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
+
+                    for (var i = 0; i < extensions.length; i++) {
+                        if (i !== currentIndex) {
+                            img.src = base + extensions[i];
+                            return;
+                        }
+                    }
+                }
+            </script>
         </head>
         <body>
             $html
         </body>
         </html>
     """.trimIndent()
+}
+
+/**
+ * Convert markdown tables to HTML tables.
+ */
+private fun convertMarkdownTables(markdown: String): String {
+    val lines = markdown.lines()
+    val result = StringBuilder()
+    var i = 0
+
+    while (i < lines.size) {
+        val line = lines[i]
+
+        // Check if this is a table row (starts with |)
+        if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+            // Start of a potential table
+            val tableLines = mutableListOf<String>()
+            tableLines.add(line)
+            i++
+
+            // Collect all table lines
+            while (i < lines.size) {
+                val nextLine = lines[i].trim()
+                if (nextLine.startsWith("|") && nextLine.endsWith("|")) {
+                    tableLines.add(nextLine)
+                    i++
+                } else {
+                    break
+                }
+            }
+
+            // Convert table if we have at least a header and separator
+            if (tableLines.size >= 2) {
+                result.append(convertTableLinesToHtml(tableLines))
+            } else {
+                tableLines.forEach { result.appendLine(it) }
+            }
+        } else {
+            result.appendLine(line)
+            i++
+        }
+    }
+
+    return result.toString()
+}
+
+/**
+ * Convert markdown table lines to HTML table.
+ */
+private fun convertTableLinesToHtml(lines: List<String>): String {
+    if (lines.size < 2) return lines.joinToString("\n")
+
+    val html = StringBuilder()
+    html.append("<table>")
+
+    // Check if second line is separator
+    val hasSeparator = lines.size > 1 && lines[1].contains("---")
+    val headerRow = parseTableRow(lines[0])
+    val dataRows = if (hasSeparator) lines.drop(2) else lines.drop(1)
+
+    // Header
+    if (headerRow.isNotEmpty()) {
+        html.append("<thead><tr>")
+        headerRow.forEach { cell ->
+            html.append("<th>${cell.trim()}</th>")
+        }
+        html.append("</tr></thead>")
+    }
+
+    // Body
+    if (dataRows.isNotEmpty()) {
+        html.append("<tbody>")
+        dataRows.forEach { line ->
+            if (!line.contains("---")) { // Skip separator lines
+                val cells = parseTableRow(line)
+                html.append("<tr>")
+                cells.forEach { cell ->
+                    html.append("<td>${cell.trim()}</td>")
+                }
+                html.append("</tr>")
+            }
+        }
+        html.append("</tbody>")
+    }
+
+    html.append("</table>")
+    return html.toString()
+}
+
+/**
+ * Parse a markdown table row into cells.
+ */
+private fun parseTableRow(line: String): List<String> {
+    var content = line.trim()
+    if (content.startsWith("|")) content = content.drop(1)
+    if (content.endsWith("|")) content = content.dropLast(1)
+    return content.split("|").map { it.trim().replace("\\|", "|") }
 }

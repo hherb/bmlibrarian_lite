@@ -375,73 +375,249 @@ class FullTextViewModel @Inject constructor(
     }
 
     /**
-     * Wrap HTML content with basic styling for WebView display.
+     * Wrap HTML content with styling matching iOS for WebView display.
+     *
+     * Includes:
+     * - Comprehensive CSS with dark mode support using CSS variables
+     * - Horizontal scrolling for tables
+     * - Figure fallback JavaScript for alternative image extensions
+     * - Anchor navigation with smooth scrolling
      */
     private fun wrapHtmlContent(html: String): String {
         return """
             <!DOCTYPE html>
             <html>
             <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
                 <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        font-size: 16px;
-                        line-height: 1.6;
-                        padding: 16px;
-                        color: #212121;
-                        background: #ffffff;
-                    }
-                    h1 { font-size: 1.5em; margin-bottom: 0.5em; }
-                    h2 { font-size: 1.3em; margin-top: 1.5em; margin-bottom: 0.5em; }
-                    h3 { font-size: 1.1em; margin-top: 1.2em; margin-bottom: 0.4em; }
-                    p { margin-bottom: 1em; }
-                    a { color: #1976D2; }
-                    table {
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin: 1em 0;
-                        font-size: 14px;
-                    }
-                    th, td {
-                        border: 1px solid #ddd;
-                        padding: 8px;
-                        text-align: left;
-                    }
-                    th { background-color: #f5f5f5; font-weight: bold; }
-                    tr:nth-child(even) { background-color: #fafafa; }
-                    figure {
-                        margin: 1em 0;
-                        text-align: center;
-                    }
-                    figure img {
-                        max-width: 100%;
-                        height: auto;
-                    }
-                    figcaption {
-                        font-size: 14px;
-                        color: #666;
-                        margin-top: 8px;
-                    }
-                    .authors { color: #666; font-style: italic; }
-                    .journal-info { color: #666; }
-                    .identifiers { font-size: 14px; color: #888; }
-                    .table-caption { font-size: 14px; color: #666; margin-bottom: 8px; }
-                    .references { font-size: 14px; }
-                    .references li { margin-bottom: 0.5em; }
-                    @media (prefers-color-scheme: dark) {
-                        body { background: #121212; color: #e0e0e0; }
-                        a { color: #64B5F6; }
-                        th { background-color: #333; }
-                        th, td { border-color: #444; }
-                        tr:nth-child(even) { background-color: #1e1e1e; }
-                    }
+                    ${getHtmlCss()}
                 </style>
+                <script>
+                    ${getHtmlJavaScript()}
+                </script>
             </head>
             <body>
                 $html
             </body>
             </html>
+        """.trimIndent()
+    }
+
+    /**
+     * CSS styles for the HTML content, matching iOS implementation.
+     */
+    private fun getHtmlCss(): String {
+        return """
+            :root {
+                color-scheme: light dark;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                font-size: 16px;
+                line-height: 1.6;
+                padding: 16px;
+                max-width: 100%;
+                margin: 0 auto;
+                color: var(--text-color);
+                background-color: var(--bg-color);
+            }
+
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --text-color: #e0e0e0;
+                    --bg-color: #1c1c1e;
+                    --heading-color: #ffffff;
+                    --link-color: #64B5F6;
+                    --border-color: #444;
+                    --table-header-bg: #2c2c2e;
+                    --table-alt-bg: #252527;
+                    --highlight-bg: #665500;
+                }
+            }
+
+            @media (prefers-color-scheme: light) {
+                :root {
+                    --text-color: #333;
+                    --bg-color: #ffffff;
+                    --heading-color: #1a1a1a;
+                    --link-color: #1976D2;
+                    --border-color: #ddd;
+                    --table-header-bg: #f0f4f8;
+                    --table-alt-bg: #fafafa;
+                    --highlight-bg: #ffff00;
+                }
+            }
+
+            h1 {
+                font-size: 1.6em;
+                color: var(--heading-color);
+                border-bottom: 2px solid var(--border-color);
+                padding-bottom: 8px;
+                margin-top: 0;
+            }
+
+            h2 {
+                font-size: 1.3em;
+                color: var(--heading-color);
+                margin-top: 1.5em;
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 4px;
+            }
+
+            h3 {
+                font-size: 1.15em;
+                color: var(--heading-color);
+                margin-top: 1.2em;
+            }
+
+            h4, h5, h6 {
+                font-size: 1.05em;
+                color: var(--heading-color);
+                margin-top: 1em;
+            }
+
+            p {
+                margin: 0.8em 0;
+            }
+
+            a {
+                color: var(--link-color);
+                text-decoration: none;
+            }
+
+            a:hover, a:active {
+                text-decoration: underline;
+            }
+
+            /* Metadata styling */
+            .authors, .journal-info, .identifiers {
+                font-size: 0.95em;
+                margin: 0.5em 0;
+            }
+
+            /* Table styling with horizontal scroll */
+            .table-container {
+                overflow-x: auto;
+                margin: 1.5em 0;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                margin: 1em 0;
+                font-size: 0.9em;
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            th, td {
+                border: 1px solid var(--border-color);
+                padding: 8px 12px;
+                text-align: left;
+                vertical-align: top;
+                min-width: 80px;
+            }
+
+            th {
+                background-color: var(--table-header-bg);
+                font-weight: 600;
+            }
+
+            tr:nth-child(even) {
+                background-color: var(--table-alt-bg);
+            }
+
+            .table-caption {
+                font-style: italic;
+                margin-bottom: 0.5em;
+                color: var(--text-color);
+                opacity: 0.8;
+            }
+
+            /* Figure styling */
+            figure {
+                margin: 1.5em 0;
+                padding: 1em;
+                background-color: var(--table-alt-bg);
+                border-radius: 8px;
+            }
+
+            figure img {
+                max-width: 100%;
+                height: auto;
+                display: block;
+                margin: 0 auto;
+            }
+
+            figcaption {
+                margin-top: 0.5em;
+                font-size: 0.9em;
+                text-align: center;
+            }
+
+            figcaption strong {
+                display: block;
+                margin-bottom: 0.3em;
+            }
+
+            /* References styling */
+            .references {
+                font-size: 0.9em;
+            }
+
+            .references li {
+                margin-bottom: 0.8em;
+                padding-left: 0.5em;
+            }
+
+            /* User selection support */
+            * {
+                -webkit-touch-callout: default;
+                -webkit-user-select: text;
+            }
+        """.trimIndent()
+    }
+
+    /**
+     * JavaScript for figure fallback and anchor navigation, matching iOS.
+     */
+    private fun getHtmlJavaScript(): String {
+        return """
+            // Try alternative image extensions when loading fails
+            function tryAlternativeExtensions(img) {
+                var src = img.src;
+                var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+                var currentExt = src.match(/\.[^.]+$/);
+
+                if (!currentExt) return;
+
+                var base = src.slice(0, -currentExt[0].length);
+                var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
+
+                for (var i = 0; i < extensions.length; i++) {
+                    if (i !== currentIndex) {
+                        img.src = base + extensions[i];
+                        return;
+                    }
+                }
+            }
+
+            // Smooth scroll to anchor
+            document.addEventListener('click', function(e) {
+                var target = e.target.closest('a[href^="#"]');
+                if (target) {
+                    e.preventDefault();
+                    var id = target.getAttribute('href').substring(1);
+                    var element = document.getElementById(id);
+                    if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }
+            });
         """.trimIndent()
     }
 }
