@@ -529,6 +529,8 @@ struct MacBudgetDisplayView: View {
 struct MacProgressSection: View {
     /// The workflow being monitored.
     let workflow: FactCheckWorkflow
+    /// Controls whether the query disclosure group is expanded.
+    @State private var isQueryExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.large) {
@@ -578,13 +580,9 @@ struct MacProgressSection: View {
                 }
             }
 
-            // Generated PubMed query (show once generated)
+            // Generated PubMed query (show once generated, collapsed by default)
             if let query = workflow.session?.pubmedQuery, !query.isEmpty {
-                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
-                    Text("PubMed Query:")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                DisclosureGroup("PubMed Query:", isExpanded: $isQueryExpanded) {
                     Text(query)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.primary)
@@ -594,6 +592,9 @@ struct MacProgressSection: View {
                         .background(Color.secondary.opacity(MacOpacity.subtle))
                         .cornerRadius(MacCornerRadius.small)
                 }
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
             }
         }
         .padding(MacSpacing.large)

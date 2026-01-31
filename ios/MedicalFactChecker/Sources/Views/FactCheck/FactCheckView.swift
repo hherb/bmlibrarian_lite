@@ -420,6 +420,7 @@ struct BudgetDisplayView: View {
 
 struct ProgressSection: View {
     let workflow: FactCheckWorkflow
+    @State private var isQueryExpanded = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -442,13 +443,9 @@ struct ProgressSection: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Generated query (show once generated)
+            // Generated query (show once generated, collapsed by default)
             if let query = workflow.session?.pubmedQuery, !query.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(queryLabel)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                DisclosureGroup(queryLabel, isExpanded: $isQueryExpanded) {
                     Text(query)
                         .font(.caption)
                         .foregroundColor(.primary)
@@ -458,6 +455,9 @@ struct ProgressSection: View {
                         .background(Color.secondary.opacity(0.1))
                         .cornerRadius(6)
                 }
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
             }
 
             // Cost so far (only show if non-zero)
