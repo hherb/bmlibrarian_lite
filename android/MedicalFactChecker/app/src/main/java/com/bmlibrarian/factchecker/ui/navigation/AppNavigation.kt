@@ -128,8 +128,20 @@ fun AppNavigation() {
                 )
             }
 
-            composable(NavRoute.FactCheck.route) {
+            // FactCheck screen with optional sessionId argument for restoring from history
+            composable(
+                route = NavRoute.FactCheck.routeWithArgs,
+                arguments = listOf(
+                    navArgument(NavRoute.FactCheck.ARG_SESSION_ID) {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val sessionId = backStackEntry.arguments?.getString(NavRoute.FactCheck.ARG_SESSION_ID)
                 FactCheckScreen(
+                    sessionIdToRestore = sessionId,
                     onNavigateToReport = {
                         navController.navigate(NavRoute.Report.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
@@ -160,13 +172,13 @@ fun AppNavigation() {
             composable(NavRoute.History.route) {
                 HistoryScreen(
                     onSessionClick = { sessionId ->
-                        // Navigate to report for this specific session
-                        // Do NOT restore state - we want to load the selected session's report
-                        navController.navigate(NavRoute.Report.createRoute(sessionId)) {
+                        // Navigate to FactCheck to restore session (like iOS behavior)
+                        // This displays the scored documents and allows resuming search
+                        navController.navigate(NavRoute.FactCheck.createRoute(sessionId)) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = false
                             }
-                            launchSingleTop = false
+                            launchSingleTop = true
                             restoreState = false
                         }
                     }

@@ -48,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -63,6 +64,7 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
+import com.bmlibrarian.factchecker.ui.factcheck.components.ResumedSessionBanner
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
 import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
@@ -74,15 +76,24 @@ import com.bmlibrarian.factchecker.util.CostCalculator
  * observing the fact-checking workflow progress.
  *
  * @param viewModel The ViewModel managing screen state
+ * @param sessionIdToRestore Optional session ID to restore from history
  * @param onNavigateToReport Callback when workflow completes to navigate to report
  */
 @Composable
 fun FactCheckScreen(
     viewModel: FactCheckViewModel = hiltViewModel(),
+    sessionIdToRestore: String? = null,
     onNavigateToReport: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+
+    // Restore session if ID provided (from History navigation)
+    LaunchedEffect(sessionIdToRestore) {
+        if (sessionIdToRestore != null) {
+            viewModel.restoreSession(sessionIdToRestore)
+        }
+    }
 
     // Show compact header when scrolled past the claim input section
     // The header becomes visible when user scrolls down past approximately the first 2 items
@@ -130,10 +141,24 @@ fun FactCheckScreen(
                 ClaimInput(
                     claimText = uiState.claimText,
                     onClaimTextChange = viewModel::updateClaimText,
-                    onSubmit = viewModel::startFactCheck,
+                    onSubmit = if (uiState.isResumedSession) viewModel::addMoreResults else viewModel::startFactCheck,
                     isEnabled = !uiState.isRunning && !uiState.showConfigWarning,
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            // Resumed session banner (shown when restoring from history)
+            if (uiState.isResumedSession) {
+                item(key = "resumed_banner") {
+                    ResumedSessionBanner(
+                        documentCount = uiState.documents.size,
+                        scoredCount = uiState.documents.count { it.relevanceScore != null },
+                        canAddMore = uiState.canFetchMoreDocuments,
+                        isLoading = uiState.isRunning,
+                        onAddMore = viewModel::addMoreResults,
+                        onNewQuestion = viewModel::startNewQuestion
+                    )
+                }
             }
 
             // Generated query display (show once generated)

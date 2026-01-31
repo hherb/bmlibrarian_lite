@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
+import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
 import com.bmlibrarian.factchecker.domain.model.DocumentSortOrder
@@ -79,7 +80,13 @@ data class FactCheckUiState(
     val generatedQuery: String? = null,
 
     /** Current document sort order. */
-    val sortOrder: DocumentSortOrder = DocumentSortOrder.DEFAULT
+    val sortOrder: DocumentSortOrder = DocumentSortOrder.DEFAULT,
+
+    /** Whether this is a restored session from history. */
+    val isResumedSession: Boolean = false,
+
+    /** Whether more documents can be fetched for this session. */
+    val canFetchMoreDocuments: Boolean = false
 ) {
     /**
      * Get documents sorted by the current sort order.
@@ -107,7 +114,8 @@ class FactCheckViewModel @Inject constructor(
     private val workflow: FactCheckWorkflow,
     private val settingsRepository: SettingsRepository,
     private val documentRepository: DocumentRepository,
-    private val usageRepository: UsageRepository
+    private val usageRepository: UsageRepository,
+    private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FactCheckUiState())
@@ -342,5 +350,91 @@ class FactCheckViewModel @Inject constructor(
                 this !is WorkflowState.Failed &&
                 this !is WorkflowState.BudgetExceeded &&
                 this !is WorkflowState.AwaitingUserDecision
+    }
+
+    // ==================== Session Restoration ====================
+
+    /**
+     * Restore a session from history for viewing.
+     *
+     * Loads the session data and documents without running the workflow.
+     * This mirrors iOS's restoreForViewing() method, allowing users to
+     * view past fact-check results and optionally fetch more evidence.
+     *
+     * @param sessionId The ID of the session to restore
+     */
+    fun restoreSession(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                val session = sessionRepository.getSession(sessionId)
+                    ?: throw IllegalArgumentException("Session not found: $sessionId")
+
+                currentSessionId = sessionId
+
+                // Start observing documents for this session
+                observeDocuments(sessionId)
+
+                // Update UI state with restored session data
+                _uiState.update {
+                    it.copy(
+                        claimText = session.claimText,
+                        generatedQuery = session.pubmedQuery,
+                        isResumedSession = true,
+                        canFetchMoreDocuments = session.hasMoreDocuments,
+                        workflowState = WorkflowState.Idle,
+                        isRunning = false,
+                        errorMessage = null
+                    )
+                }
+
+                // Initialize workflow with session for potential resume
+                workflow.restoreForViewing(session)
+
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(errorMessage = e.message ?: "Failed to restore session")
+                }
+            }
+        }
+    }
+
+    /**
+     * Add more results to the restored session.
+     *
+     * Fetches additional documents from the search, scores them,
+     * and regenerates the report with all evidence.
+     */
+    fun addMoreResults() {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isRunning = true) }
+                workflow.fetchMoreEvidence()
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = e.message ?: "Failed to fetch more documents",
+                        isRunning = false
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Clear restored session state and start a new question.
+     *
+     * Resets the workflow and UI to allow entering a fresh claim.
+     */
+    fun startNewQuestion() {
+        workflow.reset()
+        currentSessionId = null
+        _uiState.update {
+            FactCheckUiState(
+                showConfigWarning = it.showConfigWarning,
+                monthlyUsedUsd = it.monthlyUsedUsd,
+                monthlyBudgetUsd = it.monthlyBudgetUsd,
+                runBudgetUsd = it.runBudgetUsd
+            )
+        }
     }
 }

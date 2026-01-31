@@ -469,6 +469,30 @@ class FactCheckWorkflow @Inject constructor(
         _progress.value = WorkflowProgress.idle()
     }
 
+    /**
+     * Restore a session for viewing without running the workflow.
+     *
+     * Loads an existing session so its data (claim, documents, report)
+     * can be displayed in the UI, without triggering any new processing.
+     * Use this when the user taps a history item to review past results.
+     *
+     * This mirrors iOS's restoreForViewing() method for cross-platform
+     * consistency.
+     *
+     * @param session The fact-check session to restore for viewing.
+     */
+    fun restoreForViewing(session: SessionEntity) {
+        currentSession = session
+        currentConfig = WorkflowConfig(
+            searchProvider = session.searchProvider,
+            includePreprints = session.includePreprints
+        )
+        isResumedSession = true
+
+        _state.value = WorkflowState.Idle
+        _progress.value = WorkflowProgress.idle()
+    }
+
     // ==================== Workflow Execution ====================
 
     /**

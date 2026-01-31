@@ -43,13 +43,36 @@ sealed class NavRoute(
 ) {
     /**
      * Main fact-checking screen.
+     *
+     * Supports an optional sessionId argument for restoring sessions from history.
+     * When sessionId is null, displays the normal fact-check input screen.
      */
     data object FactCheck : NavRoute(
         route = "factcheck",
         title = "Check",
         selectedIcon = Icons.Filled.CheckCircle,
         unselectedIcon = Icons.Outlined.CheckCircle
-    )
+    ) {
+        /** Route pattern with optional sessionId argument for session restoration. */
+        const val routeWithArgs = "factcheck?sessionId={sessionId}"
+
+        /** Argument key for session ID to restore. */
+        const val ARG_SESSION_ID = "sessionId"
+
+        /**
+         * Creates a route with the specified session ID for restoration.
+         *
+         * @param sessionId The session ID to restore, or null for normal fact-check
+         * @return The navigation route string
+         */
+        fun createRoute(sessionId: String? = null): String {
+            return if (sessionId != null) {
+                "factcheck?sessionId=$sessionId"
+            } else {
+                route
+            }
+        }
+    }
 
     /**
      * Evidence report display screen.
