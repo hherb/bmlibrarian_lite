@@ -27,9 +27,13 @@ import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,8 +80,26 @@ class SettingsRepository @Inject constructor(
     // In-memory cache for API keys to avoid decryption on every access
     private val apiKeyCache = mutableMapOf<String, String>()
 
-    // Observable settings state for UI binding
-    private val _settings = MutableStateFlow(loadSettings())
+    // Coroutine scope for background initialization
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Observable settings state for UI binding - start with defaults, load async
+    private val _settings = MutableStateFlow(AppSettings.DEFAULT)
+
+    // Track whether settings have been loaded from disk
+    private val _isLoaded = MutableStateFlow(false)
+
+    /** Observable flow indicating whether settings have been loaded from storage. */
+    val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
+
+    init {
+        // Load settings asynchronously to avoid blocking the main thread
+        repositoryScope.launch {
+            val loaded = loadSettings()
+            _settings.value = loaded
+            _isLoaded.value = true
+        }
+    }
 
     /** Observable state flow of current settings. */
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()

@@ -18,7 +18,10 @@
 
 package com.bmlibrarian.factchecker.ui.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -27,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -65,7 +69,20 @@ fun AppNavigation() {
 
     // Get settings to check onboarding state
     val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val isSettingsLoaded by settingsViewModel.isSettingsLoaded.collectAsState()
     val settings by settingsViewModel.settings.collectAsState()
+
+    // Show loading indicator while settings are being loaded from disk
+    if (!isSettingsLoaded) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
     val isOnboardingComplete = settings.hasCompletedOnboarding
 
     // Determine if we should show bottom navigation

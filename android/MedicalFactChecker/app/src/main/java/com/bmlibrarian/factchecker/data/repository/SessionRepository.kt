@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.data.repository
 
 import com.bmlibrarian.factchecker.data.local.dao.SessionDao
+import com.bmlibrarian.factchecker.data.local.dao.SessionWithReportResult
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
@@ -56,6 +57,17 @@ class SessionRepository @Inject constructor(
      * @return Flow emitting list of completed sessions
      */
     fun getCompletedSessions(): Flow<List<SessionEntity>> = sessionDao.getCompletedSessions()
+
+    /**
+     * Get completed sessions with their reports in a single efficient query.
+     *
+     * Uses a JOIN to avoid N+1 query problems when fetching sessions
+     * along with their associated reports for the history screen.
+     *
+     * @return Flow emitting list of sessions with their reports
+     */
+    fun getCompletedSessionsWithReports(): Flow<List<SessionWithReportResult>> =
+        sessionDao.getCompletedSessionsWithReports()
 
     /**
      * Get in-progress sessions as a Flow.

@@ -20,13 +20,31 @@ package com.bmlibrarian.factchecker.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Delete
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.Update
+import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import kotlinx.coroutines.flow.Flow
+
+/**
+ * Data class for session with embedded report from JOIN query.
+ *
+ * Used to efficiently fetch sessions with their reports in a single query,
+ * avoiding N+1 query problems.
+ */
+data class SessionWithReportResult(
+    @Embedded val session: SessionEntity,
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "session_id"
+    )
+    val report: ReportEntity?
+)
 
 /**
  * Data Access Object for session operations.
@@ -304,4 +322,18 @@ interface SessionDao {
      */
     @Query("SELECT COUNT(*) FROM sessions WHERE workflow_step = 'COMPLETED'")
     suspend fun countCompleted(): Int
+
+    // ==================== Relation Queries ====================
+
+    /**
+     * Get completed sessions with their reports in a single query.
+     *
+     * Uses Room's @Relation to efficiently fetch sessions with their
+     * associated reports, avoiding N+1 query problems.
+     *
+     * @return Flow emitting sessions with their reports
+     */
+    @androidx.room.Transaction
+    @Query("SELECT * FROM sessions WHERE workflow_step = 'COMPLETED' ORDER BY created_at DESC")
+    fun getCompletedSessionsWithReports(): Flow<List<SessionWithReportResult>>
 }

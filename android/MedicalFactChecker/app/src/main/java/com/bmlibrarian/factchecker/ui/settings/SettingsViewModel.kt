@@ -67,6 +67,9 @@ class SettingsViewModel @Inject constructor(
     /** Current application settings. */
     val settings: StateFlow<AppSettings> = settingsRepository.settings
 
+    /** Whether settings have been loaded from storage. */
+    val isSettingsLoaded: StateFlow<Boolean> = settingsRepository.isLoaded
+
     /** Current API key input field value. */
     private val _apiKeyInput = MutableStateFlow("")
     val apiKeyInput: StateFlow<String> = _apiKeyInput.asStateFlow()

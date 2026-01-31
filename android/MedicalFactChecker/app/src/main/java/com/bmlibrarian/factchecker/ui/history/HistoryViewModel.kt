@@ -20,7 +20,6 @@ package com.bmlibrarian.factchecker.ui.history
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bmlibrarian.factchecker.data.local.dao.ReportDao
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
@@ -74,12 +73,10 @@ data class HistoryUiState(
  * changes (e.g., new sessions added or deleted).
  *
  * @property sessionRepository Repository for session operations
- * @property reportDao DAO for fetching session reports
  */
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    private val sessionRepository: SessionRepository,
-    private val reportDao: ReportDao
+    private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
@@ -94,16 +91,16 @@ class HistoryViewModel @Inject constructor(
     /**
      * Load all completed sessions with their reports.
      *
-     * Uses Flow collection to reactively update when sessions change.
+     * Uses an efficient JOIN query to fetch sessions with their reports
+     * in a single database operation, avoiding N+1 query problems.
      * Sessions are sorted by creation date (newest first).
      */
     private fun loadSessions() {
         viewModelScope.launch {
-            sessionRepository.getCompletedSessions()
-                .collect { sessions ->
-                    val sessionsWithReports = sessions.map { session ->
-                        val report = reportDao.getBySessionId(session.id)
-                        SessionWithReport(session, report)
+            sessionRepository.getCompletedSessionsWithReports()
+                .collect { results ->
+                    val sessionsWithReports = results.map { result ->
+                        SessionWithReport(result.session, result.report)
                     }
                     _uiState.update {
                         it.copy(
