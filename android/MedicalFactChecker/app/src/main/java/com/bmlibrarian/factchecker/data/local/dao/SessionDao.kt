@@ -36,6 +36,9 @@ import kotlinx.coroutines.flow.Flow
  *
  * Used to efficiently fetch sessions with their reports in a single query,
  * avoiding N+1 query problems.
+ *
+ * Note: Room @Relation requires a List for proper handling of missing relations.
+ * Use [report] property to get the single report or null.
  */
 data class SessionWithReportResult(
     @Embedded val session: SessionEntity,
@@ -43,8 +46,12 @@ data class SessionWithReportResult(
         parentColumn = "id",
         entityColumn = "session_id"
     )
+    val reports: List<ReportEntity>
+) {
+    /** The report for this session, or null if not yet generated. */
     val report: ReportEntity?
-)
+        get() = reports.firstOrNull()
+}
 
 /**
  * Data Access Object for session operations.
