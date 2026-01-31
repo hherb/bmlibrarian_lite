@@ -378,10 +378,8 @@ final class FactCheckWorkflow {
             userDecisionPrompt = ""
         }
 
-        // Phase 4: Load persisted errors asynchronously
-        Task { [weak self] in
-            await self?.loadPersistedErrors()
-        }
+        // Phase 4: Load persisted errors
+        loadPersistedErrors()
     }
 
     /// Refreshes pagination state by re-executing the search from the beginning.
@@ -731,7 +729,7 @@ final class FactCheckWorkflow {
 
         // Persist error (Phase 4)
         do {
-            try await errorPersistenceManager.saveError(
+            try errorPersistenceManager.saveError(
                 pmid: pmid,
                 step: step,
                 message: message,
@@ -771,7 +769,7 @@ final class FactCheckWorkflow {
 
         // Persist error
         do {
-            try await errorPersistenceManager.saveError(
+            try errorPersistenceManager.saveError(
                 pmid: pmid,
                 step: step,
                 message: message,
@@ -800,7 +798,7 @@ final class FactCheckWorkflow {
 
         // Increment retry counts in persistence
         do {
-            try await errorPersistenceManager.incrementRetryCount(
+            try errorPersistenceManager.incrementRetryCount(
                 pmids: pmids,
                 sessionId: sessionId
             )
@@ -828,7 +826,7 @@ final class FactCheckWorkflow {
                 .map { $0.pmid }
 
             if !successfulPmids.isEmpty {
-                try await errorPersistenceManager.removeErrors(
+                try errorPersistenceManager.removeErrors(
                     pmids: successfulPmids,
                     sessionId: sessionId
                 )
@@ -842,11 +840,11 @@ final class FactCheckWorkflow {
     ///
     /// Populates `processingErrors` with errors saved from previous runs.
     /// Call this when restoring a session to display the error queue.
-    func loadPersistedErrors() async {
+    func loadPersistedErrors() {
         guard let session = session else { return }
 
         do {
-            let errors = try await errorPersistenceManager.loadTransientErrors(
+            let errors = try errorPersistenceManager.loadTransientErrors(
                 sessionId: session.id.uuidString
             )
             processingErrors = errors
@@ -859,13 +857,13 @@ final class FactCheckWorkflow {
     /// Clear all errors for the current session.
     ///
     /// Removes errors from both in-memory storage and persistence.
-    func clearErrors() async {
+    func clearErrors() {
         guard let session = session else { return }
 
         processingErrors = []
 
         do {
-            try await errorPersistenceManager.clearErrors(
+            try errorPersistenceManager.clearErrors(
                 sessionId: session.id.uuidString
             )
         } catch {
