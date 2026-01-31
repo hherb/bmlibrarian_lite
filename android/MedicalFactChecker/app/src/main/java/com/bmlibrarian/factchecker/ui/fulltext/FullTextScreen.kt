@@ -683,7 +683,19 @@ private fun UnavailableContent(
 private fun markdownToBasicHtml(markdown: String): String {
     var html = markdown
 
-    // Headers
+    // Convert anchor comments to HTML anchor elements
+    // Pattern: <!-- anchor:id --> followed by heading
+    html = html.replace(
+        Regex("<!-- anchor:([^>]+) -->\\s*\\n\\s*### (.+)"),
+        "<h3 id=\"$1\">$2</h3>"
+    )
+    // Standalone anchor comments (without following heading)
+    html = html.replace(
+        Regex("<!-- anchor:([^>]+) -->"),
+        "<span id=\"$1\"></span>"
+    )
+
+    // Headers (process remaining ones not already converted from anchors)
     html = html.replace(Regex("^###### (.+)$", RegexOption.MULTILINE), "<h6>$1</h6>")
     html = html.replace(Regex("^##### (.+)$", RegexOption.MULTILINE), "<h5>$1</h5>")
     html = html.replace(Regex("^#### (.+)$", RegexOption.MULTILINE), "<h4>$1</h4>")
@@ -844,6 +856,22 @@ private fun markdownToBasicHtml(markdown: String): String {
                         }
                     }
                 }
+
+                // Handle anchor link clicks for internal navigation
+                document.addEventListener('click', function(e) {
+                    var target = e.target;
+                    while (target && target.tagName !== 'A') {
+                        target = target.parentElement;
+                    }
+                    if (target && target.getAttribute('href') && target.getAttribute('href').startsWith('#')) {
+                        e.preventDefault();
+                        var anchorId = target.getAttribute('href').substring(1);
+                        var element = document.getElementById(anchorId);
+                        if (element) {
+                            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }
+                });
             </script>
         </head>
         <body>

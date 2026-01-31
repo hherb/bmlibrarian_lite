@@ -716,8 +716,8 @@ class JATSXMLParser(
             for ((index, ref) in references.withIndex()) {
                 val refNum = ref.label.ifEmpty { (index + 1).toString() }
                 lines.add("$refNum. ${ref.formattedCitation}")
+                lines.add("")  // Add blank line after each reference for proper separation
             }
-            lines.add("")
         }
 
         return lines.joinToString("\n")
