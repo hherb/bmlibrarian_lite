@@ -1,3 +1,4 @@
+#if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb
 //
@@ -550,3 +551,5 @@ struct PrintableMarkdownView: View {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
+#endif // os(iOS)

@@ -20,10 +20,15 @@ package com.bmlibrarian.factchecker.ui.factcheck
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
+import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
+import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
+import com.bmlibrarian.factchecker.domain.model.DocumentSortOrder
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
@@ -56,8 +61,11 @@ data class FactCheckUiState(
     /** Detailed progress information for progress indicators. */
     val progress: WorkflowProgress = WorkflowProgress.idle(),
 
-    /** List of scored documents to display. */
+    /** List of documents to display (includes in-progress scoring). */
     val documents: List<DocumentEntity> = emptyList(),
+
+    /** Map of document ID to citations for that document. */
+    val citationsByDocument: Map<String, List<CitationEntity>> = emptyMap(),
 
     /** Whether to show the configuration warning. */
     val showConfigWarning: Boolean = false,
@@ -75,8 +83,45 @@ data class FactCheckUiState(
     val runBudgetUsd: Double = Constants.DEFAULT_MAX_RUN_BUDGET_USD.toDouble(),
 
     /** Generated PubMed query (displayed once generated). */
-    val generatedQuery: String? = null
-)
+    val generatedQuery: String? = null,
+
+    /** Current document sort order. */
+    val sortOrder: DocumentSortOrder = DocumentSortOrder.DEFAULT,
+
+    /** Whether this is a restored session from history. */
+    val isResumedSession: Boolean = false,
+
+    /** Whether more documents can be fetched for this session. */
+    val canFetchMoreDocuments: Boolean = false,
+
+    /** ID of document currently loading full text, or null if none. */
+    val loadingFullTextDocumentId: String? = null
+) {
+    /**
+     * Get only scored documents from the full list.
+     *
+     * @return List of documents that have been scored
+     */
+    val scoredDocuments: List<DocumentEntity>
+        get() = documents.filter { it.relevanceScore != null }
+
+    /**
+     * Get scored documents sorted by the current sort order.
+     *
+     * @return Sorted list of scored documents
+     */
+    val sortedDocuments: List<DocumentEntity>
+        get() = DocumentSortOrder.sortDocuments(scoredDocuments, sortOrder)
+
+    /**
+     * Get citations for a specific document.
+     *
+     * @param documentId The document ID
+     * @return List of citations for the document
+     */
+    fun getCitationsForDocument(documentId: String): List<CitationEntity> =
+        citationsByDocument[documentId] ?: emptyList()
+}
 
 /**
  * ViewModel for the FactCheck screen.
@@ -95,8 +140,14 @@ class FactCheckViewModel @Inject constructor(
     private val workflow: FactCheckWorkflow,
     private val settingsRepository: SettingsRepository,
     private val documentRepository: DocumentRepository,
-    private val usageRepository: UsageRepository
+    private val usageRepository: UsageRepository,
+    private val sessionRepository: SessionRepository,
+    private val fullTextService: FullTextService
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "FactCheckViewModel"
+    }
 
     private val _uiState = MutableStateFlow(FactCheckUiState())
     val uiState: StateFlow<FactCheckUiState> = _uiState.asStateFlow()
@@ -107,6 +158,7 @@ class FactCheckViewModel @Inject constructor(
     init {
         observeWorkflowState()
         observeWorkflowProgress()
+        observeWorkflowSessionId()
         observeConfiguration()
         loadBudgetInfo()
     }
@@ -144,6 +196,27 @@ class FactCheckViewModel @Inject constructor(
         viewModelScope.launch {
             workflow.progress.collect { progress ->
                 _uiState.update { it.copy(progress = progress) }
+            }
+        }
+    }
+
+    /**
+     * Observe workflow session ID changes to start document observation immediately.
+     *
+     * This allows documents to appear in the UI as soon as they're saved to the database,
+     * rather than waiting for the entire workflow to complete.
+     */
+    private fun observeWorkflowSessionId() {
+        viewModelScope.launch {
+            workflow.currentSessionId.collect { sessionId ->
+                if (sessionId != null && sessionId != currentSessionId) {
+                    currentSessionId = sessionId
+                    observeDocuments(sessionId)
+                } else if (sessionId == null) {
+                    currentSessionId = null
+                    // Clear documents when session is reset
+                    _uiState.update { it.copy(documents = emptyList(), citationsByDocument = emptyMap()) }
+                }
             }
         }
     }
@@ -199,23 +272,21 @@ class FactCheckViewModel @Inject constructor(
      * Start the fact-check process.
      *
      * Creates a new session and runs the workflow with current settings.
+     * Document observation starts automatically via observeWorkflowSessionId()
+     * as soon as the workflow creates the session.
      */
     fun startFactCheck() {
         val claim = _uiState.value.claimText.trim()
         if (claim.isEmpty()) return
 
         // Clear previous query and documents when starting a new fact check
-        _uiState.update { it.copy(generatedQuery = null, documents = emptyList()) }
+        _uiState.update { it.copy(generatedQuery = null, documents = emptyList(), citationsByDocument = emptyMap()) }
 
         viewModelScope.launch {
             try {
                 val config = buildWorkflowConfig()
-                currentSessionId = workflow.startFactCheck(claim, config)
-
-                // Start observing documents for this session
-                currentSessionId?.let { sessionId ->
-                    observeDocuments(sessionId)
-                }
+                // Document observation starts automatically via observeWorkflowSessionId()
+                workflow.startFactCheck(claim, config)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to start fact check")
@@ -277,15 +348,39 @@ class FactCheckViewModel @Inject constructor(
     }
 
     /**
+     * Update the document sort order.
+     *
+     * @param sortOrder The new sort order
+     */
+    fun setSortOrder(sortOrder: DocumentSortOrder) {
+        _uiState.update { it.copy(sortOrder = sortOrder) }
+    }
+
+    /**
      * Observe documents for the current session.
+     *
+     * Observes all documents (not just scored) to enable incremental display
+     * as documents are scored. Documents appear immediately and update when
+     * their scores are populated.
      *
      * @param sessionId The session ID to observe
      */
     private fun observeDocuments(sessionId: String) {
+        // Observe all documents (not just scored) for incremental updates
         viewModelScope.launch {
-            documentRepository.getScoredDocumentsBySession(sessionId)
+            documentRepository.getDocumentsBySession(sessionId)
                 .collect { docs ->
                     _uiState.update { it.copy(documents = docs) }
+                }
+        }
+
+        // Observe citations for document display
+        viewModelScope.launch {
+            documentRepository.getCitationsBySession(sessionId)
+                .collect { citations ->
+                    // Group citations by document ID
+                    val citationsMap = citations.groupBy { it.documentId }
+                    _uiState.update { it.copy(citationsByDocument = citationsMap) }
                 }
         }
     }
@@ -321,5 +416,179 @@ class FactCheckViewModel @Inject constructor(
                 this !is WorkflowState.Failed &&
                 this !is WorkflowState.BudgetExceeded &&
                 this !is WorkflowState.AwaitingUserDecision
+    }
+
+    // ==================== Session Restoration ====================
+
+    /**
+     * Restore a session from history for viewing.
+     *
+     * Loads the session data and documents without running the workflow.
+     * This mirrors iOS's restoreForViewing() method, allowing users to
+     * view past fact-check results and optionally fetch more evidence.
+     * Document observation starts automatically via observeWorkflowSessionId().
+     *
+     * @param sessionId The ID of the session to restore
+     */
+    fun restoreSession(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                val session = sessionRepository.getSession(sessionId)
+                    ?: throw IllegalArgumentException("Session not found: $sessionId")
+
+                // Update UI state with restored session data
+                _uiState.update {
+                    it.copy(
+                        claimText = session.claimText,
+                        generatedQuery = session.pubmedQuery,
+                        isResumedSession = true,
+                        canFetchMoreDocuments = session.hasMoreDocuments,
+                        workflowState = WorkflowState.Idle,
+                        isRunning = false,
+                        errorMessage = null
+                    )
+                }
+
+                // Initialize workflow with session for potential resume
+                // This also emits the session ID for document observation
+                workflow.restoreForViewing(session)
+
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(errorMessage = e.message ?: "Failed to restore session")
+                }
+            }
+        }
+    }
+
+    /**
+     * Add more results to the restored session.
+     *
+     * Fetches additional documents from the search, scores them,
+     * and regenerates the report with all evidence.
+     */
+    fun addMoreResults() {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isRunning = true) }
+                workflow.fetchMoreEvidence()
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = e.message ?: "Failed to fetch more documents",
+                        isRunning = false
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Clear restored session state and start a new question.
+     *
+     * Resets the workflow and UI to allow entering a fresh claim.
+     */
+    fun startNewQuestion() {
+        workflow.reset()
+        currentSessionId = null
+        _uiState.update {
+            FactCheckUiState(
+                showConfigWarning = it.showConfigWarning,
+                monthlyUsedUsd = it.monthlyUsedUsd,
+                monthlyBudgetUsd = it.monthlyBudgetUsd,
+                runBudgetUsd = it.runBudgetUsd
+            )
+        }
+    }
+
+    // ==================== Full Text ====================
+
+    /**
+     * Fetch full text for a document.
+     *
+     * Attempts to retrieve full text from Europe PMC, Unpaywall, or DOI.
+     * Updates the document in the database with the result.
+     *
+     * @param document The document to fetch full text for
+     * @param onComplete Callback when full text is fetched (with success/failure)
+     */
+    fun fetchFullText(document: DocumentEntity, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(loadingFullTextDocumentId = document.id) }
+
+            try {
+                val settings = settingsRepository.settings.value
+                val email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+
+                val result = fullTextService.fetchFullText(
+                    pmcId = document.pmcId,
+                    doi = document.doi,
+                    pmid = document.pmid,
+                    email = email
+                )
+
+                result.fold(
+                    onSuccess = { fullTextResult ->
+                        // Update document based on result type
+                        val updatedDoc = when (fullTextResult) {
+                            is FullTextService.FullTextResult.EuropePmcXml -> {
+                                document.copy(
+                                    fullTextMarkdown = fullTextResult.markdown,
+                                    fullTextHTML = fullTextResult.html,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.UnpaywallPdf -> {
+                                // Download PDF
+                                val localPath = fullTextService.downloadPdf(
+                                    fullTextResult.pdfUrl,
+                                    document.id
+                                )
+                                document.copy(
+                                    pdfPath = localPath,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.DoiUrl -> {
+                                document.copy(
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.Unavailable -> {
+                                document.copy(
+                                    fullTextUnavailable = true,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
+                        }
+
+                        documentRepository.updateDocument(updatedDoc)
+
+                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable
+                        Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
+                        onComplete(success)
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Full text fetch failed: ${error.message}")
+                        // Mark as unavailable on failure
+                        documentRepository.updateDocument(
+                            document.copy(
+                                fullTextUnavailable = true,
+                                fullTextFetchedAt = java.util.Date()
+                            )
+                        )
+                        onComplete(false)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Full text fetch error: ${e.message}")
+                onComplete(false)
+            } finally {
+                _uiState.update { it.copy(loadingFullTextDocumentId = null) }
+            }
+        }
     }
 }

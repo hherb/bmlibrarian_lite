@@ -16,7 +16,7 @@
 
 import Testing
 import Foundation
-@testable import Medical_Fact_Checker
+@testable import MedicalFactChecker
 
 struct DocumentFullTextTests {
     // MARK: - Test Helpers

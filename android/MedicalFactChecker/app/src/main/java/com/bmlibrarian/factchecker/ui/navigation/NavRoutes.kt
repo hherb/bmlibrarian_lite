@@ -43,13 +43,36 @@ sealed class NavRoute(
 ) {
     /**
      * Main fact-checking screen.
+     *
+     * Supports an optional sessionId argument for restoring sessions from history.
+     * When sessionId is null, displays the normal fact-check input screen.
      */
     data object FactCheck : NavRoute(
         route = "factcheck",
         title = "Check",
         selectedIcon = Icons.Filled.CheckCircle,
         unselectedIcon = Icons.Outlined.CheckCircle
-    )
+    ) {
+        /** Route pattern with optional sessionId argument for session restoration. */
+        const val routeWithArgs = "factcheck?sessionId={sessionId}"
+
+        /** Argument key for session ID to restore. */
+        const val ARG_SESSION_ID = "sessionId"
+
+        /**
+         * Creates a route with the specified session ID for restoration.
+         *
+         * @param sessionId The session ID to restore, or null for normal fact-check
+         * @return The navigation route string
+         */
+        fun createRoute(sessionId: String? = null): String {
+            return if (sessionId != null) {
+                "factcheck?sessionId=$sessionId"
+            } else {
+                route
+            }
+        }
+    }
 
     /**
      * Evidence report display screen.
@@ -104,10 +127,51 @@ sealed class NavRoute(
         unselectedIcon = Icons.Outlined.Settings
     )
 
+    /**
+     * Onboarding screen for new users.
+     * Not shown in bottom navigation.
+     */
+    data object Onboarding : NavRoute(
+        route = "onboarding",
+        title = "Welcome",
+        selectedIcon = Icons.Filled.CheckCircle, // Not used in nav bar
+        unselectedIcon = Icons.Outlined.CheckCircle // Not used in nav bar
+    )
+
+    /**
+     * Full-text viewer screen.
+     * Not shown in bottom navigation.
+     */
+    data object FullText : NavRoute(
+        route = "fulltext",
+        title = "Full Text",
+        selectedIcon = Icons.Filled.Description, // Not used in nav bar
+        unselectedIcon = Icons.Outlined.Description // Not used in nav bar
+    ) {
+        /** Route pattern with required documentId argument. */
+        const val routeWithArgs = "fulltext/{documentId}"
+
+        /** Argument key for document ID. */
+        const val ARG_DOCUMENT_ID = "documentId"
+
+        /**
+         * Creates a route with the specified document ID.
+         *
+         * @param documentId The document ID to view
+         * @return The navigation route string
+         */
+        fun createRoute(documentId: String): String {
+            return "fulltext/$documentId"
+        }
+    }
+
     companion object {
         /**
          * Items to display in the bottom navigation bar.
+         * Uses lazy initialization to avoid Kotlin data object initialization order issues.
          */
-        val bottomNavItems = listOf(FactCheck, Report, History, Settings)
+        val bottomNavItems: List<NavRoute> by lazy {
+            listOf(FactCheck, Report, History, Settings)
+        }
     }
 }

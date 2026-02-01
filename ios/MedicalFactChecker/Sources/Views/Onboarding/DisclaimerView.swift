@@ -15,7 +15,11 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Full-screen disclaimer shown on first app launch.
 ///
@@ -80,7 +84,11 @@ struct DisclaimerView: View {
             .padding(.horizontal)
             .padding(.bottom, 20)
         }
+        #if os(iOS)
         .background(Color(uiColor: .systemBackground))
+        #else
+        .background(Color(nsColor: .windowBackgroundColor))
+        #endif
     }
 
     // MARK: - Disclaimer Components

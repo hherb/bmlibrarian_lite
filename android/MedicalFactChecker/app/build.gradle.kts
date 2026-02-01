@@ -117,15 +117,26 @@ dependencies {
     // Security - Encrypted SharedPreferences
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // MediaPipe - Text Embedding for semantic similarity scoring
+    // Uses Universal Sentence Encoder for on-device embeddings
+    implementation("com.google.mediapipe:tasks-text:0.10.14")
+
     // Markdown rendering
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
+    implementation("io.noties.markwon:html:4.6.2")
 
     // PDF generation (AGPL license - compatible with open source projects)
     implementation("com.itextpdf:itext7-core:7.2.5")
 
     // Note: XML parsing uses built-in Android XmlPullParser - no external dependency needed
     // This is more efficient for large PubMed XML documents
+
+    // TensorFlow Lite for on-device embeddings
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    // Optional: NNAPI delegate for hardware acceleration on supported devices
+    implementation("org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

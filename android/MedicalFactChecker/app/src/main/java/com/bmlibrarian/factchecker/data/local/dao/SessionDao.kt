@@ -20,13 +20,38 @@ package com.bmlibrarian.factchecker.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Delete
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.Update
+import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import kotlinx.coroutines.flow.Flow
+
+/**
+ * Data class for session with embedded report from JOIN query.
+ *
+ * Used to efficiently fetch sessions with their reports in a single query,
+ * avoiding N+1 query problems.
+ *
+ * Note: Room @Relation requires a List for proper handling of missing relations.
+ * Use [report] property to get the single report or null.
+ */
+data class SessionWithReportResult(
+    @Embedded val session: SessionEntity,
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "session_id"
+    )
+    val reports: List<ReportEntity>
+) {
+    /** The report for this session, or null if not yet generated. */
+    val report: ReportEntity?
+        get() = reports.firstOrNull()
+}
 
 /**
  * Data Access Object for session operations.
@@ -186,6 +211,28 @@ interface SessionDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    /**
+     * Update HyDE (Hypothetical Document Embedding) abstract.
+     *
+     * @param id Session ID
+     * @param hydeAbstract The generated hypothetical abstract
+     * @param generatedAt Timestamp when HyDE was generated
+     * @param updatedAt Timestamp for the update
+     */
+    @Query("""
+        UPDATE sessions SET
+            hyde_abstract = :hydeAbstract,
+            hyde_generated_at = :generatedAt,
+            updated_at = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateHydeAbstract(
+        id: String,
+        hydeAbstract: String,
+        generatedAt: Long = System.currentTimeMillis(),
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
     // ==================== Delete Operations ====================
 
     /**
@@ -282,4 +329,18 @@ interface SessionDao {
      */
     @Query("SELECT COUNT(*) FROM sessions WHERE workflow_step = 'COMPLETED'")
     suspend fun countCompleted(): Int
+
+    // ==================== Relation Queries ====================
+
+    /**
+     * Get completed sessions with their reports in a single query.
+     *
+     * Uses Room's @Relation to efficiently fetch sessions with their
+     * associated reports, avoiding N+1 query problems.
+     *
+     * @return Flow emitting sessions with their reports
+     */
+    @androidx.room.Transaction
+    @Query("SELECT * FROM sessions WHERE workflow_step = 'COMPLETED' ORDER BY created_at DESC")
+    fun getCompletedSessionsWithReports(): Flow<List<SessionWithReportResult>>
 }

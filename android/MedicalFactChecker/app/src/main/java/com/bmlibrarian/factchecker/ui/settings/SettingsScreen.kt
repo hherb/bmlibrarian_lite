@@ -59,12 +59,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.domain.sync.SyncUiState
 import com.bmlibrarian.factchecker.ui.settings.components.ModelPricingTable
 import com.bmlibrarian.factchecker.ui.settings.components.ModelSelector
 import com.bmlibrarian.factchecker.ui.settings.components.ProviderSelector
 import com.bmlibrarian.factchecker.ui.settings.components.SearchProviderSelector
 import com.bmlibrarian.factchecker.ui.settings.components.SettingsSection
 import com.bmlibrarian.factchecker.ui.settings.components.SliderSetting
+import com.bmlibrarian.factchecker.ui.settings.components.SyncFolderDialog
+import com.bmlibrarian.factchecker.ui.settings.components.SyncSettingsSection
 import com.bmlibrarian.factchecker.util.Constants
 import java.util.Locale
 
@@ -89,9 +92,12 @@ fun SettingsScreen(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val estimatedCostPerRun by viewModel.estimatedCostPerRun.collectAsState()
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
+    val syncState by viewModel.syncState.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
+    var showClearDataDialog by remember { mutableStateOf(false) }
     var showApiKey by remember { mutableStateOf(false) }
+    var showSyncFolderDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Show status message in snackbar
@@ -148,9 +154,19 @@ fun SettingsScreen(
                 settings = settings,
                 onSearchProviderSelected = viewModel::setSearchProvider,
                 onIncludePreprintsChange = viewModel::setIncludePreprints,
+                onEmbeddingEnabledChange = viewModel::setEmbeddingEnabled,
                 onBatchSizeChange = viewModel::setBatchSize,
                 onRelevanceThresholdChange = viewModel::setRelevanceThreshold,
                 onTargetRelevantDocsChange = viewModel::setTargetRelevantDocuments
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Advanced Scoring Section
+            AdvancedScoringSection(
+                settings = settings,
+                onEmbeddingScoringChange = viewModel::setEmbeddingEnabled,
+                onHydeChange = viewModel::setHydeEnabled
             )
 
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
@@ -168,8 +184,21 @@ fun SettingsScreen(
             // Advanced Section
             AdvancedSection(
                 ncbiEmail = settings.ncbiEmail,
+                parallelConcurrency = settings.parallelConcurrency,
                 onNcbiEmailChange = viewModel::setNcbiEmail,
+                onParallelConcurrencyChange = viewModel::setParallelConcurrency,
+                onClearDataClick = { showClearDataDialog = true },
                 onResetClick = { showResetDialog = true }
+            )
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Sync Settings Section
+            SyncSettingsSection(
+                syncState = syncState,
+                onSelectFolder = { showSyncFolderDialog = true },
+                onSyncNow = viewModel::triggerSync,
+                onDisableSync = viewModel::disableSync
             )
 
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
@@ -193,6 +222,29 @@ fun SettingsScreen(
                 showResetDialog = false
             },
             onDismiss = { showResetDialog = false }
+        )
+    }
+
+    // Clear all data confirmation dialog
+    if (showClearDataDialog) {
+        ClearDataConfirmationDialog(
+            onConfirm = {
+                viewModel.clearAllData()
+                showClearDataDialog = false
+            },
+            onDismiss = { showClearDataDialog = false }
+        )
+    }
+
+    // Sync folder selection dialog
+    if (showSyncFolderDialog) {
+        SyncFolderDialog(
+            currentPath = syncState.syncFolderPath,
+            onDismiss = { showSyncFolderDialog = false },
+            onConfirm = { path ->
+                viewModel.configureSyncFolder(path)
+                showSyncFolderDialog = false
+            }
         )
     }
 }
@@ -327,13 +379,14 @@ private fun LLMProviderSection(
 /**
  * Search settings section.
  *
- * Contains search provider selection, preprint toggle, and batch settings.
+ * Contains search provider selection, preprint toggle, embedding toggle, and batch settings.
  */
 @Composable
 private fun SearchSettingsSection(
     settings: com.bmlibrarian.factchecker.domain.model.AppSettings,
     onSearchProviderSelected: (com.bmlibrarian.factchecker.domain.model.SearchProvider) -> Unit,
     onIncludePreprintsChange: (Boolean) -> Unit,
+    onEmbeddingEnabledChange: (Boolean) -> Unit,
     onBatchSizeChange: (Int) -> Unit,
     onRelevanceThresholdChange: (Int) -> Unit,
     onTargetRelevantDocsChange: (Int) -> Unit
@@ -372,6 +425,30 @@ private fun SearchSettingsSection(
             Switch(
                 checked = settings.includePreprints,
                 onCheckedChange = onIncludePreprintsChange
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+
+        // Embedding scoring toggle
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Embedding Scoring",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Compute semantic similarity scores on-device",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.embeddingEnabled,
+                onCheckedChange = onEmbeddingEnabledChange
             )
         }
 
@@ -470,14 +547,84 @@ private fun BudgetSettingsSection(
 }
 
 /**
+ * Advanced scoring settings section.
+ *
+ * Contains on-device embedding scoring and HyDE generation toggles.
+ * These features provide free relevance scoring without LLM API calls.
+ */
+@Composable
+private fun AdvancedScoringSection(
+    settings: com.bmlibrarian.factchecker.domain.model.AppSettings,
+    onEmbeddingScoringChange: (Boolean) -> Unit,
+    onHydeChange: (Boolean) -> Unit
+) {
+    SettingsSection(title = "Advanced Scoring") {
+        // On-device scoring toggle
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "On-Device Scoring",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Use embeddings for free relevance pre-scoring",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.embeddingEnabled,
+                onCheckedChange = onEmbeddingScoringChange
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // HyDE toggle (only enabled if embedding scoring is on)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "HyDE Generation",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (settings.embeddingEnabled) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                Text(
+                    text = "Generate hypothetical abstracts for better matching",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.enableHyde && settings.embeddingEnabled,
+                onCheckedChange = onHydeChange,
+                enabled = settings.embeddingEnabled
+            )
+        }
+    }
+}
+
+/**
  * Advanced settings section.
  *
- * Contains NCBI configuration and reset options.
+ * Contains NCBI configuration, parallel processing settings, and reset options.
  */
 @Composable
 private fun AdvancedSection(
     ncbiEmail: String,
+    parallelConcurrency: Int,
     onNcbiEmailChange: (String) -> Unit,
+    onParallelConcurrencyChange: (Int) -> Unit,
+    onClearDataClick: () -> Unit,
     onResetClick: () -> Unit
 ) {
     SettingsSection(title = "Advanced") {
@@ -492,7 +639,46 @@ private fun AdvancedSection(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height((Constants.UI_SECTION_SPACING + Constants.UI_ELEMENT_SPACING).dp))
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // Parallel concurrency slider
+        SliderSetting(
+            label = "Parallel Concurrency",
+            value = parallelConcurrency.toFloat(),
+            onValueChange = { onParallelConcurrencyChange(it.toInt()) },
+            valueRange = com.bmlibrarian.factchecker.domain.model.AppSettings.MIN_PARALLEL_CONCURRENCY.toFloat()..
+                com.bmlibrarian.factchecker.domain.model.AppSettings.MAX_PARALLEL_CONCURRENCY.toFloat(),
+            steps = com.bmlibrarian.factchecker.domain.model.AppSettings.MAX_PARALLEL_CONCURRENCY -
+                com.bmlibrarian.factchecker.domain.model.AppSettings.MIN_PARALLEL_CONCURRENCY - 1,
+            valueDisplay = "$parallelConcurrency concurrent requests"
+        )
+
+        Text(
+            text = "Number of parallel LLM requests. Lower for local models (Ollama), higher for cloud APIs.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // Clear all data button
+        OutlinedButton(
+            onClick = onClearDataClick,
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.error
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Clear All Session Data")
+        }
+
+        Text(
+            text = "Removes all sessions, documents, and reports. Settings and API keys are preserved.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
         // Reset button
         OutlinedButton(
@@ -534,6 +720,44 @@ private fun ResetConfirmationDialog(
                 )
             ) {
                 Text("Reset")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+/**
+ * Clear all data confirmation dialog.
+ *
+ * Warns user that clearing data will remove all sessions and documents.
+ */
+@Composable
+private fun ClearDataConfirmationDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Clear All Data?") },
+        text = {
+            Text(
+                "This will permanently delete all fact-check sessions, documents, citations, " +
+                    "and reports. Your settings and API keys will be preserved. " +
+                    "This action cannot be undone."
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("Clear Data")
             }
         },
         dismissButton = {

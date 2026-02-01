@@ -42,9 +42,10 @@ class ReportUiEventTest {
 
     @Test
     fun `OpenUrl event is ReportUiEvent subclass`() {
-        val event = ReportUiEvent.OpenUrl("https://example.com")
+        val event: ReportUiEvent = ReportUiEvent.OpenUrl("https://example.com")
 
-        assertTrue(event is ReportUiEvent)
+        // Verify event is properly typed as ReportUiEvent
+        assertEquals("https://example.com", (event as ReportUiEvent.OpenUrl).url)
     }
 
     // ==================== ShareText Event Tests ====================
@@ -61,9 +62,10 @@ class ReportUiEventTest {
 
     @Test
     fun `ShareText event is ReportUiEvent subclass`() {
-        val event = ReportUiEvent.ShareText("Subject", "Text")
+        val event: ReportUiEvent = ReportUiEvent.ShareText("Subject", "Text")
 
-        assertTrue(event is ReportUiEvent)
+        // Verify event is properly typed as ReportUiEvent
+        assertEquals("Subject", (event as ReportUiEvent.ShareText).subject)
     }
 
     @Test
@@ -95,9 +97,10 @@ class ReportUiEventTest {
 
     @Test
     fun `ShareFile event is ReportUiEvent subclass`() {
-        val event = ReportUiEvent.ShareFile(File("test.pdf"), "application/pdf")
+        val event: ReportUiEvent = ReportUiEvent.ShareFile(File("test.pdf"), "application/pdf")
 
-        assertTrue(event is ReportUiEvent)
+        // Verify event is properly typed as ReportUiEvent
+        assertEquals("application/pdf", (event as ReportUiEvent.ShareFile).mimeType)
     }
 
     // ==================== ShowSnackbar Event Tests ====================
@@ -112,9 +115,10 @@ class ReportUiEventTest {
 
     @Test
     fun `ShowSnackbar event is ReportUiEvent subclass`() {
-        val event = ReportUiEvent.ShowSnackbar("Error message")
+        val event: ReportUiEvent = ReportUiEvent.ShowSnackbar("Error message")
 
-        assertTrue(event is ReportUiEvent)
+        // Verify event is properly typed as ReportUiEvent
+        assertEquals("Error message", (event as ReportUiEvent.ShowSnackbar).message)
     }
 
     // ==================== When Expression Exhaustiveness Tests ====================

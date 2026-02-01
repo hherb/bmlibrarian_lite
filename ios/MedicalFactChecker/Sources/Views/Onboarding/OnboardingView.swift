@@ -15,7 +15,11 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// A single onboarding page with icon, title, and description.
 struct OnboardingPage: Identifiable {
@@ -109,7 +113,9 @@ struct OnboardingView: View {
                         .tag(index)
                 }
             }
+            #if os(iOS)
             .tabViewStyle(.page(indexDisplayMode: .never))
+            #endif
             .animation(.easeInOut, value: currentPage)
 
             // Custom page indicator
@@ -174,7 +180,11 @@ struct OnboardingView: View {
                     .frame(height: 38)
             }
         }
+        #if os(iOS)
         .background(Color(uiColor: .systemBackground))
+        #else
+        .background(Color(nsColor: .windowBackgroundColor))
+        #endif
     }
 }
 

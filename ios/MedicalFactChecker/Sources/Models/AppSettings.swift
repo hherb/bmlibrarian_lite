@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -180,6 +180,30 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(monthlyBudgetUSD, forKey: Keys.monthlyBudgetUSD) }
     }
 
+    // MARK: - Parallel Processing Settings
+
+    /// User override for maximum concurrent LLM requests.
+    ///
+    /// When nil (default), concurrency is auto-detected based on the provider:
+    /// - Cloud APIs (Anthropic, OpenAI, etc.): 3 concurrent requests
+    /// - Local inference (Ollama): 1 (sequential)
+    ///
+    /// Set to a specific value to override auto-detection. Values less than 1
+    /// are treated as nil (auto-detect).
+    var maxConcurrentRequests: Int? {
+        get {
+            let stored = UserDefaults.standard.integer(forKey: Keys.maxConcurrentRequests)
+            return stored > 0 ? stored : nil
+        }
+        set {
+            if let value = newValue, value > 0 {
+                UserDefaults.standard.set(value, forKey: Keys.maxConcurrentRequests)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.maxConcurrentRequests)
+            }
+        }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -271,6 +295,7 @@ final class AppSettings {
         static let embeddingScoringEnabled = "embedding_scoring_enabled"
         static let maxRunBudgetUSD = "max_run_budget_usd"
         static let monthlyBudgetUSD = "monthly_budget_usd"
+        static let maxConcurrentRequests = "max_concurrent_requests"
     }
 
     // MARK: - Search Options Builder
@@ -324,6 +349,7 @@ final class AppSettings {
         embeddingScoringEnabled = false
         maxRunBudgetUSD = 1.0
         monthlyBudgetUSD = 10.0
+        maxConcurrentRequests = nil
     }
 
     // MARK: - Provider Detection

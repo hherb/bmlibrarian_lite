@@ -19,25 +19,41 @@
 package com.bmlibrarian.factchecker.ui.fulltext
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,11 +63,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +86,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.ui.fulltext.FullTextViewModel.FullTextState
 import com.bmlibrarian.factchecker.ui.fulltext.components.FullTextSourceBadge
 import com.bmlibrarian.factchecker.util.Constants
+import java.io.File
 
 /**
  * Full-text viewer screen.
@@ -171,17 +197,31 @@ fun FullTextScreen(
                 }
 
                 is FullTextState.PdfContent -> {
-                    // TODO: Implement PDF viewer
-                    PdfPlaceholder(
+                    PdfViewer(
                         pdfPath = currentState.pdfPath,
                         onOpenExternal = {
                             // Open PDF with external viewer
-                            val uri = Uri.parse("file://${currentState.pdfPath}")
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(uri, "application/pdf")
-                                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            try {
+                                val file = File(currentState.pdfPath)
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file
+                                )
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "application/pdf")
+                                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                // Fallback: try with file:// URI
+                                val uri = Uri.parse("file://${currentState.pdfPath}")
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "application/pdf")
+                                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                }
+                                context.startActivity(intent)
                             }
-                            context.startActivity(intent)
                         }
                     )
                 }
@@ -276,36 +316,219 @@ private fun HtmlViewer(html: String) {
 }
 
 /**
- * PDF placeholder (until PDF viewer is implemented).
+ * In-app PDF viewer using Android's PdfRenderer.
+ *
+ * Displays PDF pages in a scrollable list with zoom controls.
+ * Falls back to external viewer button if rendering fails.
+ *
+ * @param pdfPath Path to the PDF file
+ * @param onOpenExternal Callback to open PDF in external viewer
  */
 @Composable
-private fun PdfPlaceholder(
+private fun PdfViewer(
     pdfPath: String,
     onOpenExternal: () -> Unit
 ) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(Constants.UI_SCREEN_PADDING.dp)
+    var pdfRenderer by remember { mutableStateOf<PdfRenderer?>(null) }
+    var pageCount by remember { mutableIntStateOf(0) }
+    var pageBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var scale by remember { mutableFloatStateOf(1f) }
+    val listState = rememberLazyListState()
+
+    // Load PDF
+    DisposableEffect(pdfPath) {
+        try {
+            val file = File(pdfPath)
+            if (file.exists()) {
+                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = PdfRenderer(pfd)
+                pdfRenderer = renderer
+                pageCount = renderer.pageCount
+
+                // Render all pages to bitmaps
+                val bitmaps = mutableListOf<Bitmap>()
+                for (i in 0 until renderer.pageCount) {
+                    val page = renderer.openPage(i)
+                    // Scale up for better quality
+                    val bitmap = Bitmap.createBitmap(
+                        page.width * Constants.PDF_RENDER_SCALE_FACTOR,
+                        page.height * Constants.PDF_RENDER_SCALE_FACTOR,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    bitmap.eraseColor(android.graphics.Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+                    bitmaps.add(bitmap)
+                }
+                pageBitmaps = bitmaps
+            } else {
+                loadError = "PDF file not found"
+            }
+        } catch (e: Exception) {
+            loadError = "Error loading PDF: ${e.message}"
+        }
+
+        onDispose {
+            pdfRenderer?.close()
+            pageBitmaps.forEach { it.recycle() }
+        }
+    }
+
+    // Show error state or PDF content
+    if (loadError != null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "PDF Available",
-                style = MaterialTheme.typography.titleLarge
-            )
-            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
-            Text(
-                text = "The full text is available as a PDF.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
-            Button(onClick = onOpenExternal) {
-                Text("Open PDF")
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(Constants.UI_SCREEN_PADDING.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(Constants.UI_ICON_SIZE_LARGE.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+                Text(
+                    text = "PDF Preview Unavailable",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+                Text(
+                    text = loadError ?: "Unknown error",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+                Button(onClick = onOpenExternal) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = null,
+                        modifier = Modifier.size(Constants.UI_ICON_SIZE.dp)
+                    )
+                    Spacer(modifier = Modifier.padding(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text("Open in External Viewer")
+                }
+            }
+        }
+    } else if (pageBitmaps.isEmpty()) {
+        // Loading state
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+                Text(
+                    text = "Loading PDF...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    } else {
+        // PDF content
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Zoom controls and page info
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(
+                        horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
+                        vertical = Constants.PDF_CONTROLS_VERTICAL_PADDING.dp
+                    ),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Page info
+                Text(
+                    text = "$pageCount page${if (pageCount != 1) "s" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Zoom controls
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING_SMALL.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilledTonalIconButton(
+                        onClick = {
+                            scale = (scale - Constants.PDF_ZOOM_STEP).coerceAtLeast(Constants.PDF_ZOOM_MIN)
+                        },
+                        modifier = Modifier.size(Constants.PDF_ZOOM_BUTTON_SIZE.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ZoomOut,
+                            contentDescription = "Zoom out",
+                            modifier = Modifier.size(Constants.PDF_ZOOM_ICON_SIZE.dp)
+                        )
+                    }
+                    Text(
+                        text = "${(scale * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    FilledTonalIconButton(
+                        onClick = {
+                            scale = (scale + Constants.PDF_ZOOM_STEP).coerceAtMost(Constants.PDF_ZOOM_MAX)
+                        },
+                        modifier = Modifier.size(Constants.PDF_ZOOM_BUTTON_SIZE.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ZoomIn,
+                            contentDescription = "Zoom in",
+                            modifier = Modifier.size(Constants.PDF_ZOOM_ICON_SIZE.dp)
+                        )
+                    }
+                }
+
+                // Open external button
+                OutlinedButton(
+                    onClick = onOpenExternal
+                ) {
+                    Text("Open External", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            // PDF pages
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+            ) {
+                items(pageBitmaps.size) { index ->
+                    val bitmap = pageBitmaps[index]
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Constants.UI_ELEMENT_SPACING.dp)
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Page ${index + 1}",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
         }
     }
@@ -460,7 +683,19 @@ private fun UnavailableContent(
 private fun markdownToBasicHtml(markdown: String): String {
     var html = markdown
 
-    // Headers
+    // Convert anchor comments to HTML anchor elements
+    // Pattern: <!-- anchor:id --> followed by heading
+    html = html.replace(
+        Regex("<!-- anchor:([^>]+) -->\\s*\\n\\s*### (.+)"),
+        "<h3 id=\"$1\">$2</h3>"
+    )
+    // Standalone anchor comments (without following heading)
+    html = html.replace(
+        Regex("<!-- anchor:([^>]+) -->"),
+        "<span id=\"$1\"></span>"
+    )
+
+    // Headers (process remaining ones not already converted from anchors)
     html = html.replace(Regex("^###### (.+)$", RegexOption.MULTILINE), "<h6>$1</h6>")
     html = html.replace(Regex("^##### (.+)$", RegexOption.MULTILINE), "<h5>$1</h5>")
     html = html.replace(Regex("^#### (.+)$", RegexOption.MULTILINE), "<h4>$1</h4>")
@@ -475,8 +710,14 @@ private fun markdownToBasicHtml(markdown: String): String {
     // Links
     html = html.replace(Regex("\\[([^]]+)]\\(([^)]+)\\)"), "<a href=\"$2\">$1</a>")
 
-    // Images
-    html = html.replace(Regex("!\\[([^]]*)]\\(([^)]+)\\)"), "<img src=\"$2\" alt=\"$1\" style=\"max-width: 100%;\">")
+    // Images with onerror handler for fallback
+    html = html.replace(
+        Regex("!\\[([^]]*)]\\(([^)]+)\\)"),
+        "<figure><img src=\"$2\" alt=\"$1\" onerror=\"this.onerror=null; tryAlternativeExtensions(this);\" loading=\"lazy\"></figure>"
+    )
+
+    // Markdown tables
+    html = convertMarkdownTables(html)
 
     // Paragraphs (double newlines)
     html = html.replace(Regex("\n\n+"), "</p><p>")
@@ -490,31 +731,249 @@ private fun markdownToBasicHtml(markdown: String): String {
         <!DOCTYPE html>
         <html>
         <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
             <style>
+                :root {
+                    color-scheme: light dark;
+                }
+
                 body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
                     font-size: 16px;
                     line-height: 1.6;
                     padding: 16px;
-                    color: #212121;
-                    background: #ffffff;
+                    max-width: 100%;
+                    margin: 0 auto;
+                    color: var(--text-color);
+                    background-color: var(--bg-color);
                 }
-                h1 { font-size: 1.5em; margin-bottom: 0.5em; }
-                h2 { font-size: 1.3em; margin-top: 1.5em; margin-bottom: 0.5em; }
-                h3 { font-size: 1.1em; margin-top: 1.2em; margin-bottom: 0.4em; }
-                p { margin-bottom: 1em; }
-                a { color: #1976D2; }
-                img { max-width: 100%; height: auto; }
+
                 @media (prefers-color-scheme: dark) {
-                    body { background: #121212; color: #e0e0e0; }
-                    a { color: #64B5F6; }
+                    :root {
+                        --text-color: #e0e0e0;
+                        --bg-color: #1c1c1e;
+                        --heading-color: #ffffff;
+                        --link-color: #64B5F6;
+                        --border-color: #444;
+                        --table-header-bg: #2c2c2e;
+                        --table-alt-bg: #252527;
+                    }
+                }
+
+                @media (prefers-color-scheme: light) {
+                    :root {
+                        --text-color: #333;
+                        --bg-color: #ffffff;
+                        --heading-color: #1a1a1a;
+                        --link-color: #1976D2;
+                        --border-color: #ddd;
+                        --table-header-bg: #f0f4f8;
+                        --table-alt-bg: #fafafa;
+                    }
+                }
+
+                h1 {
+                    font-size: 1.6em;
+                    color: var(--heading-color);
+                    border-bottom: 2px solid var(--border-color);
+                    padding-bottom: 8px;
+                    margin-top: 0;
+                }
+
+                h2 {
+                    font-size: 1.3em;
+                    color: var(--heading-color);
+                    margin-top: 1.5em;
+                    border-bottom: 1px solid var(--border-color);
+                    padding-bottom: 4px;
+                }
+
+                h3 { font-size: 1.15em; color: var(--heading-color); margin-top: 1.2em; }
+                h4, h5, h6 { font-size: 1.05em; color: var(--heading-color); margin-top: 1em; }
+                p { margin: 0.8em 0; }
+                a { color: var(--link-color); text-decoration: none; }
+
+                /* Table styling with horizontal scroll */
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 1em 0;
+                    font-size: 0.9em;
+                    display: block;
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                th, td {
+                    border: 1px solid var(--border-color);
+                    padding: 8px 12px;
+                    text-align: left;
+                    vertical-align: top;
+                    min-width: 80px;
+                }
+
+                th { background-color: var(--table-header-bg); font-weight: 600; }
+                tr:nth-child(even) { background-color: var(--table-alt-bg); }
+
+                /* Figure styling */
+                figure {
+                    margin: 1.5em 0;
+                    padding: 1em;
+                    background-color: var(--table-alt-bg);
+                    border-radius: 8px;
+                    text-align: center;
+                }
+
+                figure img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                    margin: 0 auto;
+                }
+
+                figcaption {
+                    margin-top: 0.5em;
+                    font-size: 0.9em;
                 }
             </style>
+            <script>
+                // Try alternative image extensions when loading fails
+                function tryAlternativeExtensions(img) {
+                    var src = img.src;
+                    var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+                    var currentExt = src.match(/\.[^.]+$/);
+
+                    if (!currentExt) return;
+
+                    var base = src.slice(0, -currentExt[0].length);
+                    var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
+
+                    for (var i = 0; i < extensions.length; i++) {
+                        if (i !== currentIndex) {
+                            img.src = base + extensions[i];
+                            return;
+                        }
+                    }
+                }
+
+                // Handle anchor link clicks for internal navigation
+                document.addEventListener('click', function(e) {
+                    var target = e.target;
+                    while (target && target.tagName !== 'A') {
+                        target = target.parentElement;
+                    }
+                    if (target && target.getAttribute('href') && target.getAttribute('href').startsWith('#')) {
+                        e.preventDefault();
+                        var anchorId = target.getAttribute('href').substring(1);
+                        var element = document.getElementById(anchorId);
+                        if (element) {
+                            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }
+                });
+            </script>
         </head>
         <body>
             $html
         </body>
         </html>
     """.trimIndent()
+}
+
+/**
+ * Convert markdown tables to HTML tables.
+ */
+private fun convertMarkdownTables(markdown: String): String {
+    val lines = markdown.lines()
+    val result = StringBuilder()
+    var i = 0
+
+    while (i < lines.size) {
+        val line = lines[i]
+
+        // Check if this is a table row (starts with |)
+        if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+            // Start of a potential table
+            val tableLines = mutableListOf<String>()
+            tableLines.add(line)
+            i++
+
+            // Collect all table lines
+            while (i < lines.size) {
+                val nextLine = lines[i].trim()
+                if (nextLine.startsWith("|") && nextLine.endsWith("|")) {
+                    tableLines.add(nextLine)
+                    i++
+                } else {
+                    break
+                }
+            }
+
+            // Convert table if we have at least a header and separator
+            if (tableLines.size >= 2) {
+                result.append(convertTableLinesToHtml(tableLines))
+            } else {
+                tableLines.forEach { result.appendLine(it) }
+            }
+        } else {
+            result.appendLine(line)
+            i++
+        }
+    }
+
+    return result.toString()
+}
+
+/**
+ * Convert markdown table lines to HTML table.
+ */
+private fun convertTableLinesToHtml(lines: List<String>): String {
+    if (lines.size < 2) return lines.joinToString("\n")
+
+    val html = StringBuilder()
+    html.append("<table>")
+
+    // Check if second line is separator
+    val hasSeparator = lines.size > 1 && lines[1].contains("---")
+    val headerRow = parseTableRow(lines[0])
+    val dataRows = if (hasSeparator) lines.drop(2) else lines.drop(1)
+
+    // Header
+    if (headerRow.isNotEmpty()) {
+        html.append("<thead><tr>")
+        headerRow.forEach { cell ->
+            html.append("<th>${cell.trim()}</th>")
+        }
+        html.append("</tr></thead>")
+    }
+
+    // Body
+    if (dataRows.isNotEmpty()) {
+        html.append("<tbody>")
+        dataRows.forEach { line ->
+            if (!line.contains("---")) { // Skip separator lines
+                val cells = parseTableRow(line)
+                html.append("<tr>")
+                cells.forEach { cell ->
+                    html.append("<td>${cell.trim()}</td>")
+                }
+                html.append("</tr>")
+            }
+        }
+        html.append("</tbody>")
+    }
+
+    html.append("</table>")
+    return html.toString()
+}
+
+/**
+ * Parse a markdown table row into cells.
+ */
+private fun parseTableRow(line: String): List<String> {
+    var content = line.trim()
+    if (content.startsWith("|")) content = content.drop(1)
+    if (content.endsWith("|")) content = content.dropLast(1)
+    return content.split("|").map { it.trim().replace("\\|", "|") }
 }

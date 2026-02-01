@@ -18,13 +18,16 @@
 
 package com.bmlibrarian.factchecker.ui.report
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
+import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
+import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.ui.report.components.ReferenceInfo
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.PdfExporter
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Date
 import javax.inject.Inject
 
 /**
@@ -50,6 +54,7 @@ import javax.inject.Inject
  * @property documents List of documents referenced in the report
  * @property selectedDocument Document selected for detail view
  * @property showDocumentSheet Whether to show the document detail bottom sheet
+ * @property isLoadingFullText Whether full text is being fetched for selected document
  * @property isExporting Whether a PDF export is in progress
  * @property exportError Error message if export failed, or null
  */
@@ -58,6 +63,7 @@ data class ReportUiState(
     val documents: List<DocumentEntity> = emptyList(),
     val selectedDocument: DocumentEntity? = null,
     val showDocumentSheet: Boolean = false,
+    val isLoadingFullText: Boolean = false,
     val isExporting: Boolean = false,
     val exportError: String? = null,
     val isLoading: Boolean = true
@@ -99,6 +105,13 @@ sealed class ReportUiEvent {
      * @property message The message to display
      */
     data class ShowSnackbar(val message: String) : ReportUiEvent()
+
+    /**
+     * Navigate to full text viewer.
+     *
+     * @property documentId The document ID to view full text for
+     */
+    data class NavigateToFullText(val documentId: String) : ReportUiEvent()
 }
 
 /**
@@ -122,6 +135,8 @@ enum class PaperSize {
  * @property sessionRepository Repository for session operations
  * @property reportRepository Repository for report operations
  * @property documentRepository Repository for document operations
+ * @property fullTextService Service for fetching full text
+ * @property settingsRepository Repository for app settings
  * @property pdfExporter Utility for PDF generation
  */
 @HiltViewModel
@@ -129,8 +144,14 @@ class ReportViewModel @Inject constructor(
     private val sessionRepository: SessionRepository,
     private val reportRepository: ReportRepository,
     private val documentRepository: DocumentRepository,
+    private val fullTextService: FullTextService,
+    private val settingsRepository: SettingsRepository,
     private val pdfExporter: PdfExporter
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "ReportViewModel"
+    }
 
     private val _uiState = MutableStateFlow(ReportUiState())
     /** Observable UI state for the report screen. */
@@ -399,5 +420,135 @@ class ReportViewModel @Inject constructor(
      */
     fun clearExportError() {
         _uiState.update { it.copy(exportError = null) }
+    }
+
+    /**
+     * Fetch full text for the selected document.
+     *
+     * Attempts to retrieve full text from Europe PMC, Unpaywall, or DOI.
+     * Updates the document in the database and UI state with the result.
+     */
+    fun fetchFullText() {
+        val document = _uiState.value.selectedDocument ?: return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingFullText = true) }
+
+            try {
+                val settings = settingsRepository.settings.value
+                val email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+
+                val result = fullTextService.fetchFullText(
+                    pmcId = document.pmcId,
+                    doi = document.doi,
+                    pmid = document.pmid,
+                    email = email
+                )
+
+                result.fold(
+                    onSuccess = { fullTextResult ->
+                        val updatedDoc = when (fullTextResult) {
+                            is FullTextService.FullTextResult.EuropePmcXml -> {
+                                document.copy(
+                                    fullTextMarkdown = fullTextResult.markdown,
+                                    fullTextHTML = fullTextResult.html,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+                                    fullTextFetchedAt = Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.UnpaywallPdf -> {
+                                val localPath = fullTextService.downloadPdf(
+                                    fullTextResult.pdfUrl,
+                                    document.id
+                                )
+                                document.copy(
+                                    pdfPath = localPath,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
+                                    fullTextFetchedAt = Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.DoiUrl -> {
+                                document.copy(
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
+                                    fullTextFetchedAt = Date()
+                                )
+                            }
+                            is FullTextService.FullTextResult.Unavailable -> {
+                                document.copy(
+                                    fullTextUnavailable = true,
+                                    fullTextFetchedAt = Date()
+                                )
+                            }
+                        }
+
+                        documentRepository.updateDocument(updatedDoc)
+
+                        // Update UI state with the updated document
+                        _uiState.update { state ->
+                            state.copy(
+                                selectedDocument = updatedDoc,
+                                documents = state.documents.map {
+                                    if (it.id == updatedDoc.id) updatedDoc else it
+                                },
+                                isLoadingFullText = false
+                            )
+                        }
+
+                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable
+                        if (!success) {
+                            _events.send(ReportUiEvent.ShowSnackbar("Full text not available"))
+                        }
+                        Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Full text fetch failed: ${error.message}")
+                        val updatedDoc = document.copy(
+                            fullTextUnavailable = true,
+                            fullTextFetchedAt = Date()
+                        )
+                        documentRepository.updateDocument(updatedDoc)
+
+                        _uiState.update { state ->
+                            state.copy(
+                                selectedDocument = updatedDoc,
+                                documents = state.documents.map {
+                                    if (it.id == updatedDoc.id) updatedDoc else it
+                                },
+                                isLoadingFullText = false
+                            )
+                        }
+                        _events.send(ReportUiEvent.ShowSnackbar("Failed to fetch full text"))
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Full text fetch error: ${e.message}")
+                _uiState.update { it.copy(isLoadingFullText = false) }
+                _events.send(ReportUiEvent.ShowSnackbar("Error fetching full text"))
+            }
+        }
+    }
+
+    /**
+     * Navigate to full text viewer for the selected document.
+     *
+     * Emits an event to trigger navigation.
+     */
+    fun viewFullText() {
+        val document = _uiState.value.selectedDocument ?: return
+        viewModelScope.launch {
+            _events.send(ReportUiEvent.NavigateToFullText(document.id))
+        }
+    }
+
+    /**
+     * Open DOI in browser.
+     *
+     * @param doi The DOI to open
+     */
+    fun openDoi(doi: String) {
+        viewModelScope.launch {
+            val url = "${Constants.DOI_URL_PREFIX}$doi"
+            _events.send(ReportUiEvent.OpenUrl(url))
+        }
     }
 }

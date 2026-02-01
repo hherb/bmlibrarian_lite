@@ -23,6 +23,8 @@ import androidx.room.Room
 import com.bmlibrarian.factchecker.data.local.AppDatabase
 import com.bmlibrarian.factchecker.data.local.dao.CitationDao
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
+import com.bmlibrarian.factchecker.data.local.dao.ProcessingCheckpointDao
+import com.bmlibrarian.factchecker.data.local.dao.ProcessingErrorDao
 import com.bmlibrarian.factchecker.data.local.dao.ReportDao
 import com.bmlibrarian.factchecker.data.local.dao.SessionDao
 import com.bmlibrarian.factchecker.data.local.dao.UsageRecordDao
@@ -64,8 +66,13 @@ object DatabaseModule {
             AppDatabase::class.java,
             AppDatabase.DATABASE_NAME
         )
-            // For development: recreate database on schema changes
-            // TODO: Replace with proper migrations for production
+            // Add migrations for schema changes
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4
+            )
+            // Fallback for any unexpected version issues during development
             .fallbackToDestructiveMigration()
             .build()
     }
@@ -123,5 +130,27 @@ object DatabaseModule {
     @Provides
     fun provideUsageRecordDao(database: AppDatabase): UsageRecordDao {
         return database.usageRecordDao()
+    }
+
+    /**
+     * Provides the Processing Checkpoint DAO.
+     *
+     * @param database The AppDatabase instance
+     * @return ProcessingCheckpointDao for checkpoint operations
+     */
+    @Provides
+    fun provideProcessingCheckpointDao(database: AppDatabase): ProcessingCheckpointDao {
+        return database.processingCheckpointDao()
+    }
+
+    /**
+     * Provides the Processing Error DAO.
+     *
+     * @param database The AppDatabase instance
+     * @return ProcessingErrorDao for error tracking operations
+     */
+    @Provides
+    fun provideProcessingErrorDao(database: AppDatabase): ProcessingErrorDao {
+        return database.processingErrorDao()
     }
 }

@@ -194,50 +194,50 @@ class ResponseParserTest {
     // ==================== PubMed Query Response Tests ====================
 
     @Test
-    fun `parsePubMedQueryResponse extracts plain query`() {
+    fun `parseStructuredQueryResponse extracts plain query`() {
         val response = "(COVID-19[MeSH]) AND (vaccine efficacy[Title/Abstract])"
 
-        val result = ResponseParser.parsePubMedQueryResponse(response)
+        val result = ResponseParser.parseStructuredQueryResponse(response, "test claim")
 
         assertEquals("(COVID-19[MeSH]) AND (vaccine efficacy[Title/Abstract])", result)
     }
 
     @Test
-    fun `parsePubMedQueryResponse extracts query from JSON`() {
+    fun `parseStructuredQueryResponse extracts query from JSON`() {
         val response = """{"query": "diabetes AND treatment[Title]"}"""
 
-        val result = ResponseParser.parsePubMedQueryResponse(response)
+        val result = ResponseParser.parseStructuredQueryResponse(response, "test claim")
 
         assertEquals("diabetes AND treatment[Title]", result)
     }
 
     @Test
-    fun `parsePubMedQueryResponse removes markdown code blocks`() {
+    fun `parseStructuredQueryResponse removes markdown code blocks`() {
         val response = """```
         hypertension AND management
         ```"""
 
-        val result = ResponseParser.parsePubMedQueryResponse(response)
+        val result = ResponseParser.parseStructuredQueryResponse(response, "test claim")
 
         assertEquals("hypertension AND management", result)
     }
 
     @Test
-    fun `parsePubMedQueryResponse extracts quoted query`() {
+    fun `parseStructuredQueryResponse extracts quoted query`() {
         val response = """"aspirin AND cardiovascular disease""""
 
-        val result = ResponseParser.parsePubMedQueryResponse(response)
+        val result = ResponseParser.parseStructuredQueryResponse(response, "test claim")
 
         assertEquals("aspirin AND cardiovascular disease", result)
     }
 
     @Test
-    fun `parsePubMedQueryResponse takes first line of multiline response`() {
+    fun `parseStructuredQueryResponse takes first line of multiline response`() {
         val response = """cancer AND immunotherapy
 
         This query will search for relevant articles..."""
 
-        val result = ResponseParser.parsePubMedQueryResponse(response)
+        val result = ResponseParser.parseStructuredQueryResponse(response, "test claim")
 
         assertEquals("cancer AND immunotherapy", result)
     }

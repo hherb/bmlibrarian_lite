@@ -40,6 +40,8 @@ import com.bmlibrarian.factchecker.util.Constants
  * @property hasAcceptedDisclaimer Whether user has accepted the medical disclaimer
  * @property hasCompletedOnboarding Whether user has completed the onboarding flow
  * @property ncbiEmail Email for NCBI API requests (recommended for higher rate limits)
+ * @property embeddingEnabled Whether to compute embedding-based similarity scores
+ * @property enableHyde Whether to generate HyDE abstracts for better embedding matching
  */
 data class AppSettings(
     val llmProviderId: String = LLMProvider.OPENAI.id,
@@ -55,7 +57,10 @@ data class AppSettings(
     val hasAcceptedDisclaimer: Boolean = false,
     val hasCompletedOnboarding: Boolean = false,
     val ncbiEmail: String = "",
-    val unpaywallEmail: String = ""
+    val unpaywallEmail: String = "",
+    val embeddingEnabled: Boolean = true,
+    val enableHyde: Boolean = true,
+    val parallelConcurrency: Int = DEFAULT_PARALLEL_CONCURRENCY
 ) {
     /**
      * Get the current LLM provider configuration.
@@ -179,5 +184,14 @@ data class AppSettings(
 
         /** Maximum target relevant documents. */
         const val MAX_TARGET_RELEVANT_DOCS = 50
+
+        /** Default parallel concurrency for document processing. */
+        const val DEFAULT_PARALLEL_CONCURRENCY = 3
+
+        /** Minimum parallel concurrency. */
+        const val MIN_PARALLEL_CONCURRENCY = 1
+
+        /** Maximum parallel concurrency. */
+        const val MAX_PARALLEL_CONCURRENCY = 10
     }
 }

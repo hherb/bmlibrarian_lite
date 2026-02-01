@@ -1136,7 +1136,7 @@ final class SelectiveSyncTests: XCTestCase {
 
     func testEvictionCandidateLRU() async {
         let manager = SessionEvictionManager(
-            storageMonitor: createcreateMockStorageMonitor(),
+            storageMonitor: createMockStorageMonitor(),
             delegate: MockEvictionDelegate()
         )
 
@@ -1308,7 +1308,7 @@ final class SelectiveSyncTests: XCTestCase {
 
 /// Creates a mock storage monitor for testing.
 /// Note: Since StorageMonitor is an actor, we create a real instance with a mock delegate.
-func createcreateMockStorageMonitor() -> StorageMonitor {
+func createMockStorageMonitor() -> StorageMonitor {
     StorageMonitor(delegate: MockStorageDelegate())
 }
 

@@ -591,7 +591,7 @@ actor ModelFetchService {
         let url = URL(string: ollamaBaseURL)!
             .appendingPathComponent("api/tags")
 
-        var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
+        let request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 

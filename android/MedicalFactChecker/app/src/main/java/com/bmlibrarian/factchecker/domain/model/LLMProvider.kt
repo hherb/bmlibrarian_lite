@@ -48,33 +48,43 @@ data class LLMProvider(
         /**
          * Anthropic Claude API provider.
          * Uses native Anthropic API format with x-api-key authentication.
+         * Updated: January 2026 - Claude 4.5 series
          */
         val ANTHROPIC = LLMProvider(
             id = "anthropic",
-            displayName = "Anthropic",
+            displayName = "Anthropic (Claude)",
             baseUrl = "https://api.anthropic.com/v1",
-            defaultModel = "claude-sonnet-4-20250514",
+            defaultModel = "claude-sonnet-4-5-20250929",
             models = listOf(
+                // Claude 4.5 Series (Latest - January 2026)
+                ModelInfo("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5", 3.00, 15.00),
+                ModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 1.00, 5.00),
+                ModelInfo("claude-opus-4-5-20251101", "Claude Opus 4.5", 5.00, 25.00),
+                // Legacy models still available
                 ModelInfo("claude-sonnet-4-20250514", "Claude Sonnet 4", 3.00, 15.00),
-                ModelInfo("claude-opus-4-20250514", "Claude Opus 4", 15.00, 75.00),
-                ModelInfo("claude-haiku-3-5-20250514", "Claude 3.5 Haiku", 0.80, 4.00)
+                ModelInfo("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet", 3.00, 15.00)
             ),
+            supportsModelFetching = true,
             usesAnthropicFormat = true
         )
 
         /**
          * OpenAI API provider.
          * Standard OpenAI-compatible API format.
+         * Updated: January 2026 - GPT-5 series
          */
         val OPENAI = LLMProvider(
             id = "openai",
             displayName = "OpenAI",
             baseUrl = "https://api.openai.com/v1",
-            defaultModel = "gpt-4o",
+            defaultModel = "gpt-5.2",
             models = listOf(
+                // GPT-5 Series (Latest - January 2026)
+                ModelInfo("gpt-5.2", "GPT-5.2", 2.00, 8.00),
+                ModelInfo("o4-mini", "o4-mini", 1.10, 4.40),
+                ModelInfo("o3", "o3", 2.00, 8.00),
                 ModelInfo("gpt-4o", "GPT-4o", 2.50, 10.00),
-                ModelInfo("gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60),
-                ModelInfo("gpt-4-turbo", "GPT-4 Turbo", 10.00, 30.00)
+                ModelInfo("gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60)
             ),
             supportsModelFetching = true
         )
@@ -82,6 +92,7 @@ data class LLMProvider(
         /**
          * DeepSeek API provider.
          * OpenAI-compatible API with competitive pricing.
+         * Updated: January 2026 - DeepSeek V3.2
          */
         val DEEPSEEK = LLMProvider(
             id = "deepseek",
@@ -89,24 +100,29 @@ data class LLMProvider(
             baseUrl = "https://api.deepseek.com/v1",
             defaultModel = "deepseek-chat",
             models = listOf(
-                ModelInfo("deepseek-chat", "DeepSeek Chat", 0.14, 0.28),
-                ModelInfo("deepseek-reasoner", "DeepSeek Reasoner", 0.55, 2.19)
-            )
+                // DeepSeek V3.2 (Latest - January 2026)
+                ModelInfo("deepseek-chat", "DeepSeek V3.2 (Chat)", 0.28, 0.42),
+                ModelInfo("deepseek-reasoner", "DeepSeek V3.2 (Reasoner)", 0.28, 0.42)
+            ),
+            supportsModelFetching = true
         )
 
         /**
          * Groq API provider.
          * Fast inference with OpenAI-compatible API.
+         * Updated: January 2026 - Llama 4 series
          */
         val GROQ = LLMProvider(
             id = "groq",
             displayName = "Groq",
             baseUrl = "https://api.groq.com/openai/v1",
-            defaultModel = "llama-3.3-70b-versatile",
+            defaultModel = "llama-4-maverick-17b-128e-instruct",
             models = listOf(
+                // Llama 4 Series (Latest - January 2026)
+                ModelInfo("llama-4-maverick-17b-128e-instruct", "Llama 4 Maverick", 0.50, 0.77),
+                ModelInfo("llama-4-scout-17b-16e-instruct", "Llama 4 Scout", 0.11, 0.34),
                 ModelInfo("llama-3.3-70b-versatile", "Llama 3.3 70B", 0.59, 0.79),
-                ModelInfo("llama-3.1-8b-instant", "Llama 3.1 8B", 0.05, 0.08),
-                ModelInfo("mixtral-8x7b-32768", "Mixtral 8x7B", 0.24, 0.24)
+                ModelInfo("llama-3.1-8b-instant", "Llama 3.1 8B", 0.05, 0.08)
             ),
             supportsModelFetching = true
         )
@@ -114,16 +130,19 @@ data class LLMProvider(
         /**
          * Mistral API provider.
          * OpenAI-compatible API from Mistral AI.
+         * Updated: January 2026
          */
         val MISTRAL = LLMProvider(
             id = "mistral",
-            displayName = "Mistral",
+            displayName = "Mistral AI",
             baseUrl = "https://api.mistral.ai/v1",
             defaultModel = "mistral-large-latest",
             models = listOf(
                 ModelInfo("mistral-large-latest", "Mistral Large", 2.00, 6.00),
+                ModelInfo("mistral-medium-latest", "Mistral Medium", 2.70, 8.10),
                 ModelInfo("mistral-small-latest", "Mistral Small", 0.20, 0.60),
-                ModelInfo("codestral-latest", "Codestral", 0.20, 0.60)
+                ModelInfo("codestral-latest", "Codestral", 0.30, 0.90),
+                ModelInfo("open-mistral-nemo", "Mistral Nemo", 0.15, 0.15)
             ),
             supportsModelFetching = true
         )
@@ -139,8 +158,10 @@ data class LLMProvider(
             defaultModel = "llama3.2",
             models = listOf(
                 ModelInfo("llama3.2", "Llama 3.2", 0.0, 0.0),
+                ModelInfo("llama3.1", "Llama 3.1", 0.0, 0.0),
                 ModelInfo("mistral", "Mistral 7B", 0.0, 0.0),
-                ModelInfo("gemma2", "Gemma 2", 0.0, 0.0)
+                ModelInfo("mixtral", "Mixtral 8x7B", 0.0, 0.0),
+                ModelInfo("phi3", "Phi-3", 0.0, 0.0)
             ),
             supportsModelFetching = true,
             requiresApiKey = false

@@ -83,8 +83,53 @@ object Constants {
     /** Maximum relevance score. */
     const val SCORING_MAX_SCORE = 5
 
+    /** Default target number of relevant documents to collect. */
+    const val TARGET_RELEVANT_DOCS = 10
+
     /** Minimum relevance score. */
     const val SCORING_MIN_SCORE = 1
+
+    // ==================== Embedding Scoring Configuration ====================
+
+    /**
+     * Embedding similarity thresholds for 1-5 relevance scale normalization.
+     *
+     * These thresholds are tuned for typical sentence embedding similarity distributions
+     * (e.g., Universal Sentence Encoder, all-MiniLM-L6-V2).
+     *
+     * Mirrors iOS EmbeddingService thresholds for cross-platform consistency.
+     */
+
+    /** Threshold below which similarity maps to score 1 (not relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_1 = 0.3
+
+    /** Threshold below which similarity maps to score 2 (marginally relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_2 = 0.45
+
+    /** Threshold below which similarity maps to score 3 (moderately relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_3 = 0.55
+
+    /** Threshold below which similarity maps to score 4 (highly relevant). */
+    const val EMBEDDING_THRESHOLD_SCORE_4 = 0.7
+
+    /** Directory name for storing downloaded ML models. */
+    const val EMBEDDING_MODELS_DIR = "models"
+
+    /** Filename for the Universal Sentence Encoder model. */
+    const val EMBEDDING_MODEL_FILENAME = "universal_sentence_encoder.tflite"
+
+    /** URL to download the Universal Sentence Encoder model from Google Cloud Storage. */
+    const val EMBEDDING_MODEL_URL =
+        "https://storage.googleapis.com/mediapipe-models/text_embedder/" +
+        "universal_sentence_encoder/float32/latest/universal_sentence_encoder.tflite"
+
+    // ==================== HyDE Configuration ====================
+
+    /** Minimum word count for HyDE abstract. */
+    const val HYDE_TARGET_WORD_COUNT_MIN = 150
+
+    /** Maximum word count for HyDE abstract. */
+    const val HYDE_TARGET_WORD_COUNT_MAX = 200
 
     // ==================== Budget Defaults ====================
 
@@ -160,8 +205,8 @@ object Constants {
     /** Maximum tokens for report generation responses. */
     const val LLM_REPORT_MAX_TOKENS = 2000
 
-    /** Maximum tokens for query conversion responses. */
-    const val LLM_QUERY_MAX_TOKENS = 200
+    /** Maximum tokens for query conversion responses. Matches iOS value for cross-platform consistency. */
+    const val LLM_QUERY_MAX_TOKENS = 512
 
     /** Estimated characters per token for token count estimation. */
     const val TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4
@@ -320,6 +365,72 @@ object Constants {
 
     /** Alpha for divider lines. */
     const val DIVIDER_ALPHA = 0.5f
+
+    // ==================== Onboarding Screen Configuration ====================
+
+    /** Size of onboarding icon container in dp. */
+    const val ONBOARDING_ICON_CONTAINER_SIZE = 120
+
+    /** Size of onboarding icon in dp. */
+    const val ONBOARDING_ICON_SIZE = 64
+
+    /** Height of skip button placeholder for alignment in dp. */
+    const val ONBOARDING_SKIP_BUTTON_HEIGHT = 48
+
+    /** Page indicator dot selected size in dp. */
+    const val ONBOARDING_DOT_SIZE_SELECTED = 10
+
+    /** Page indicator dot unselected size in dp. */
+    const val ONBOARDING_DOT_SIZE_UNSELECTED = 8
+
+    /** Page indicator horizontal spacing in dp. */
+    const val ONBOARDING_DOT_SPACING = 4
+
+    /** Alpha for gradient colors in onboarding icon. */
+    const val ONBOARDING_GRADIENT_ALPHA = 0.7f
+
+    /** Alpha for unselected page indicator dots. */
+    const val ONBOARDING_DOT_UNSELECTED_ALPHA = 0.3f
+
+    // ==================== PDF Viewer Configuration ====================
+
+    /** Scale factor for PDF rendering quality (multiply page dimensions). */
+    const val PDF_RENDER_SCALE_FACTOR = 2
+
+    /** Minimum zoom scale for PDF viewer. */
+    const val PDF_ZOOM_MIN = 0.5f
+
+    /** Maximum zoom scale for PDF viewer. */
+    const val PDF_ZOOM_MAX = 3.0f
+
+    /** Zoom step increment for PDF viewer. */
+    const val PDF_ZOOM_STEP = 0.25f
+
+    /** Size of zoom control buttons in dp. */
+    const val PDF_ZOOM_BUTTON_SIZE = 32
+
+    /** Size of zoom control icons in dp. */
+    const val PDF_ZOOM_ICON_SIZE = 16
+
+    /** Vertical padding for PDF controls toolbar in dp. */
+    const val PDF_CONTROLS_VERTICAL_PADDING = 4
+
+    // ==================== Key Passage Display ====================
+
+    /** Corner radius for key passage box in dp. */
+    const val KEY_PASSAGE_CORNER_RADIUS = 8
+
+    /** Alpha for key passage background color. */
+    const val KEY_PASSAGE_BACKGROUND_ALPHA = 0.15f
+
+    /** Alpha for key passage icon tint. */
+    const val KEY_PASSAGE_ICON_ALPHA = 0.6f
+
+    /** Alpha for key passage text color. */
+    const val KEY_PASSAGE_TEXT_ALPHA = 0.85f
+
+    /** Icon size for key passage quote icon in dp. */
+    const val KEY_PASSAGE_ICON_SIZE = 16
 
     // ==================== History Screen Configuration ====================
 

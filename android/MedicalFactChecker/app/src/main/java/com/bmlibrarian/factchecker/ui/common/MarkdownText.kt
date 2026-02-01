@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import io.noties.markwon.Markwon
+import io.noties.markwon.html.HtmlPlugin
 
 /**
  * Composable that renders markdown text with basic formatting.
@@ -35,9 +36,10 @@ import io.noties.markwon.Markwon
  * - Bold text: **text** or __text__
  * - Italic text: *text* or _text_
  * - Line breaks via double newlines
+ * - HTML tags like <h4>, <strong>, <em>, etc.
  *
  * Used for rendering structured abstracts with section labels
- * like "**Background:** text".
+ * like "**Background:** text" or "<h4>Background:</h4> text".
  *
  * @param text The markdown text to render
  * @param modifier Modifier for the component
@@ -53,7 +55,9 @@ fun MarkdownText(
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
 
     val markwon = remember {
-        Markwon.create(context)
+        Markwon.builder(context)
+            .usePlugin(HtmlPlugin.create())
+            .build()
     }
 
     AndroidView(

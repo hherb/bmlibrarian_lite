@@ -62,7 +62,7 @@ class EuropePMCServiceTest {
     fun `search returns articles on successful response`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.success(
             EuropePMCSearchResponse(
                 hitCount = 100,
@@ -92,7 +92,7 @@ class EuropePMCServiceTest {
     fun `search returns empty result when no articles found`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.success(
             EuropePMCSearchResponse(
                 hitCount = 0,
@@ -121,8 +121,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = any(),
                 cursorMark = EuropePMCApi.INITIAL_CURSOR,
-                format = any(),
-                sort = any()
+                format = any()
             )
         } returns Response.success(
             EuropePMCSearchResponse(
@@ -138,7 +137,7 @@ class EuropePMCServiceTest {
 
         // Assert
         coVerify {
-            api.search(any(), any(), any(), cursorMark = "*", any(), any())
+            api.search(any(), any(), any(), cursorMark = "*", any())
         }
     }
 
@@ -152,8 +151,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = any(),
                 cursorMark = cursor,
-                format = any(),
-                sort = any()
+                format = any()
             )
         } returns Response.success(
             EuropePMCSearchResponse(
@@ -170,7 +168,7 @@ class EuropePMCServiceTest {
 
         // Assert
         coVerify {
-            api.search(any(), any(), any(), cursorMark = cursor, any(), any())
+            api.search(any(), any(), any(), cursorMark = cursor, any())
         }
     }
 
@@ -184,8 +182,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = batchSize,
                 cursorMark = any(),
-                format = any(),
-                sort = any()
+                format = any()
             )
         } returns Response.success(
             EuropePMCSearchResponse(
@@ -201,7 +198,7 @@ class EuropePMCServiceTest {
 
         // Assert
         coVerify {
-            api.search(any(), any(), pageSize = batchSize, any(), any(), any())
+            api.search(any(), any(), pageSize = batchSize, any(), any())
         }
     }
 
@@ -216,8 +213,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = any(),
                 cursorMark = any(),
-                format = any(),
-                sort = any()
+                format = any()
             )
         } returns Response.success(
             EuropePMCSearchResponse(
@@ -238,8 +234,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = any(),
                 cursorMark = any(),
-                format = any(),
-                sort = any()
+                format = any()
             )
         }
     }
@@ -253,8 +248,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = any(),
                 cursorMark = any(),
-                format = any(),
-                sort = any()
+                format = any()
             )
         } returns Response.success(
             EuropePMCSearchResponse(
@@ -275,8 +269,7 @@ class EuropePMCServiceTest {
                 resultType = any(),
                 pageSize = any(),
                 cursorMark = any(),
-                format = any(),
-                sort = any()
+                format = any()
             )
         }
     }
@@ -288,7 +281,7 @@ class EuropePMCServiceTest {
         // Arrange
         val currentCursor = "sameCursor"
         coEvery {
-            api.search(any(), any(), any(), cursorMark = currentCursor, any(), any())
+            api.search(any(), any(), any(), cursorMark = currentCursor, any())
         } returns Response.success(
             EuropePMCSearchResponse(
                 hitCount = 100,
@@ -312,7 +305,7 @@ class EuropePMCServiceTest {
     fun `search sets hasMore false when nextCursor is initial cursor`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.success(
             EuropePMCSearchResponse(
                 hitCount = 1,
@@ -335,7 +328,7 @@ class EuropePMCServiceTest {
     fun `search sets hasMore false when result list is empty`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.success(
             EuropePMCSearchResponse(
                 hitCount = 100,
@@ -358,7 +351,7 @@ class EuropePMCServiceTest {
     fun `search returns error on HTTP failure`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.error(500, "Server error".toResponseBody(null))
 
         // Act
@@ -374,7 +367,7 @@ class EuropePMCServiceTest {
     fun `search returns error on invalid request`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.error(400, "Bad request".toResponseBody(null))
 
         // Act
@@ -390,7 +383,7 @@ class EuropePMCServiceTest {
     fun `search returns error when response body is null`() = runTest {
         // Arrange
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } returns Response.success(null)
 
         // Act
@@ -409,7 +402,7 @@ class EuropePMCServiceTest {
         // Arrange
         var callCount = 0
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } answers {
             callCount++
             if (callCount < 3) {
@@ -438,7 +431,7 @@ class EuropePMCServiceTest {
         // Arrange
         var callCount = 0
         coEvery {
-            api.search(any(), any(), any(), any(), any(), any())
+            api.search(any(), any(), any(), any(), any())
         } answers {
             callCount++
             if (callCount < 2) {

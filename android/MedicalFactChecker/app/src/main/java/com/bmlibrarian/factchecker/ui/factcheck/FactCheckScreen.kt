@@ -19,11 +19,13 @@
 package com.bmlibrarian.factchecker.ui.factcheck
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -48,12 +52,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +73,9 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
+import com.bmlibrarian.factchecker.ui.factcheck.components.ResumedSessionBanner
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
+import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
 
 /**
@@ -73,15 +85,27 @@ import com.bmlibrarian.factchecker.util.CostCalculator
  * observing the fact-checking workflow progress.
  *
  * @param viewModel The ViewModel managing screen state
+ * @param sessionIdToRestore Optional session ID to restore from history
  * @param onNavigateToReport Callback when workflow completes to navigate to report
+ * @param onNavigateToFullText Callback to navigate to full-text viewer for a document
  */
 @Composable
 fun FactCheckScreen(
     viewModel: FactCheckViewModel = hiltViewModel(),
-    onNavigateToReport: () -> Unit = {}
+    sessionIdToRestore: String? = null,
+    onNavigateToReport: () -> Unit = {},
+    onNavigateToFullText: (documentId: String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+
+    // Restore session if ID provided (from History navigation)
+    LaunchedEffect(sessionIdToRestore) {
+        if (sessionIdToRestore != null) {
+            viewModel.restoreSession(sessionIdToRestore)
+        }
+    }
 
     // Show compact header when scrolled past the claim input section
     // The header becomes visible when user scrolls down past approximately the first 2 items
@@ -129,10 +153,24 @@ fun FactCheckScreen(
                 ClaimInput(
                     claimText = uiState.claimText,
                     onClaimTextChange = viewModel::updateClaimText,
-                    onSubmit = viewModel::startFactCheck,
+                    onSubmit = if (uiState.isResumedSession) viewModel::addMoreResults else viewModel::startFactCheck,
                     isEnabled = !uiState.isRunning && !uiState.showConfigWarning,
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            // Resumed session banner (shown when restoring from history)
+            if (uiState.isResumedSession) {
+                item(key = "resumed_banner") {
+                    ResumedSessionBanner(
+                        documentCount = uiState.documents.size,
+                        scoredCount = uiState.scoredDocuments.size,
+                        canAddMore = uiState.canFetchMoreDocuments,
+                        isLoading = uiState.isRunning,
+                        onAddMore = viewModel::addMoreResults,
+                        onNewQuestion = viewModel::startNewQuestion
+                    )
+                }
             }
 
             // Generated query display (show once generated)
@@ -196,19 +234,45 @@ fun FactCheckScreen(
             }
 
             // Scored documents section
-            if (uiState.documents.isNotEmpty()) {
+            if (uiState.scoredDocuments.isNotEmpty()) {
                 item(key = "documents_header") {
-                    Text(
-                        text = "Scored Documents (${uiState.documents.size})",
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Column {
+                        Text(
+                            text = "Scored Documents (${uiState.scoredDocuments.size})",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        SortingControls(
+                            selectedSortOrder = uiState.sortOrder,
+                            onSortOrderChange = viewModel::setSortOrder
+                        )
+                    }
                 }
 
                 items(
-                    items = uiState.documents,
+                    items = uiState.sortedDocuments,
                     key = { "doc_${it.id}" }
                 ) { document ->
-                    DocumentCard(document = document)
+                    DocumentCard(
+                        document = document,
+                        citations = uiState.getCitationsForDocument(document.id),
+                        isLoadingFullText = uiState.loadingFullTextDocumentId == document.id,
+                        onGetFullText = { doc ->
+                            viewModel.fetchFullText(doc) { success ->
+                                if (success) {
+                                    // Navigate to full-text viewer on success
+                                    onNavigateToFullText(doc.id)
+                                }
+                            }
+                        },
+                        onViewFullText = { doc ->
+                            onNavigateToFullText(doc.id)
+                        },
+                        onOpenPublisher = { doi ->
+                            val url = "${Constants.DOI_URL_PREFIX}$doi"
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            context.startActivity(intent)
+                        }
+                    )
                 }
             }
         }
@@ -223,7 +287,7 @@ fun FactCheckScreen(
             CompactContextHeader(
                 claimText = uiState.claimText,
                 generatedQuery = uiState.generatedQuery,
-                documentCount = uiState.documents.size
+                documentCount = uiState.scoredDocuments.size
             )
         }
     }
@@ -232,31 +296,51 @@ fun FactCheckScreen(
 /**
  * Display for the generated PubMed query.
  *
- * Shows the query in a collapsible card for transparency and debugging.
+ * Shows the query in a collapsible card (collapsed by default).
+ * Tap to expand and see the full query without truncation.
  */
 @Composable
 private fun GeneratedQueryDisplay(query: String) {
+    var expanded by remember { mutableStateOf(false) }
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .clickable { expanded = !expanded }
     ) {
         Column(
             modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
         ) {
-            Text(
-                text = "PubMed Query:",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = query,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 4
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "PubMed Query:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = query,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

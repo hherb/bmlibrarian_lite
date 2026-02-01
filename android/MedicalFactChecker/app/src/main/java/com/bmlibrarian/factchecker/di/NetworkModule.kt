@@ -25,7 +25,10 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.UnpaywallApi
 import com.bmlibrarian.factchecker.data.remote.llm.AnthropicApi
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchService
+import com.bmlibrarian.factchecker.data.remote.llm.OllamaApi
 import com.bmlibrarian.factchecker.data.remote.llm.OpenAIApi
+import com.bmlibrarian.factchecker.BuildConfig
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -72,17 +75,22 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        }
-
-        return OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
+        val builder = OkHttpClient.Builder()
             .connectTimeout(Constants.NETWORK_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(LLM_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(Constants.NETWORK_WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
-            .build()
+
+        // Only add logging interceptor in debug builds, and use BASIC level
+        // to avoid the performance overhead of logging full request/response bodies
+        if (BuildConfig.DEBUG) {
+            val loggingInterceptor = HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BASIC
+            }
+            builder.addInterceptor(loggingInterceptor)
+        }
+
+        return builder.build()
     }
 
     // ==================== Retrofit Builders ====================
@@ -170,6 +178,23 @@ object NetworkModule {
     }
 
     /**
+     * Provides the Ollama API interface.
+     *
+     * Uses a placeholder base URL since actual URLs are provided dynamically.
+     *
+     * @param retrofitBuilder The Retrofit builder to use
+     * @return Ollama API interface
+     */
+    @Provides
+    @Singleton
+    fun provideOllamaApi(retrofitBuilder: Retrofit.Builder): OllamaApi {
+        return retrofitBuilder
+            .baseUrl(PLACEHOLDER_BASE_URL)
+            .build()
+            .create(OllamaApi::class.java)
+    }
+
+    /**
      * Provides the LLM service.
      *
      * @param openAIApi OpenAI-compatible API interface
@@ -183,6 +208,26 @@ object NetworkModule {
         anthropicApi: AnthropicApi
     ): LLMService {
         return LLMService(openAIApi, anthropicApi)
+    }
+
+    /**
+     * Provides the Model Fetch service.
+     *
+     * Used for dynamically fetching available models from LLM providers.
+     *
+     * @param openAIApi OpenAI-compatible API interface
+     * @param anthropicApi Anthropic API interface
+     * @param ollamaApi Ollama API interface
+     * @return Model fetch service instance
+     */
+    @Provides
+    @Singleton
+    fun provideModelFetchService(
+        openAIApi: OpenAIApi,
+        anthropicApi: AnthropicApi,
+        ollamaApi: OllamaApi
+    ): ModelFetchService {
+        return ModelFetchService(openAIApi, anthropicApi, ollamaApi)
     }
 
     // ==================== PubMed API ====================

@@ -27,9 +27,13 @@ import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,8 +80,26 @@ class SettingsRepository @Inject constructor(
     // In-memory cache for API keys to avoid decryption on every access
     private val apiKeyCache = mutableMapOf<String, String>()
 
-    // Observable settings state for UI binding
-    private val _settings = MutableStateFlow(loadSettings())
+    // Coroutine scope for background initialization
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Observable settings state for UI binding - start with defaults, load async
+    private val _settings = MutableStateFlow(AppSettings.DEFAULT)
+
+    // Track whether settings have been loaded from disk
+    private val _isLoaded = MutableStateFlow(false)
+
+    /** Observable flow indicating whether settings have been loaded from storage. */
+    val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
+
+    init {
+        // Load settings asynchronously to avoid blocking the main thread
+        repositoryScope.launch {
+            val loaded = loadSettings()
+            _settings.value = loaded
+            _isLoaded.value = true
+        }
+    }
 
     /** Observable state flow of current settings. */
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
@@ -127,7 +149,10 @@ class SettingsRepository @Inject constructor(
             hasAcceptedDisclaimer = regularPrefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false),
             hasCompletedOnboarding = regularPrefs.getBoolean(KEY_ONBOARDING_COMPLETE, false),
             ncbiEmail = regularPrefs.getString(KEY_NCBI_EMAIL, "") ?: "",
-            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: ""
+            unpaywallEmail = regularPrefs.getString(KEY_UNPAYWALL_EMAIL, "") ?: "",
+            embeddingEnabled = regularPrefs.getBoolean(KEY_EMBEDDING_ENABLED, true),
+            enableHyde = regularPrefs.getBoolean(KEY_ENABLE_HYDE, true),
+            parallelConcurrency = regularPrefs.getInt(KEY_PARALLEL_CONCURRENCY, AppSettings.DEFAULT_PARALLEL_CONCURRENCY)
         )
     }
 
@@ -152,6 +177,9 @@ class SettingsRepository @Inject constructor(
             putBoolean(KEY_ONBOARDING_COMPLETE, settings.hasCompletedOnboarding)
             putString(KEY_NCBI_EMAIL, settings.ncbiEmail)
             putString(KEY_UNPAYWALL_EMAIL, settings.unpaywallEmail)
+            putBoolean(KEY_EMBEDDING_ENABLED, settings.embeddingEnabled)
+            putBoolean(KEY_ENABLE_HYDE, settings.enableHyde)
+            putInt(KEY_PARALLEL_CONCURRENCY, settings.parallelConcurrency)
             apply()
         }
         _settings.value = settings
@@ -479,6 +507,62 @@ class SettingsRepository @Inject constructor(
         updateSettings { it.copy(hasAcceptedDisclaimer = true) }
     }
 
+    // ==================== Embedding Settings ====================
+
+    /**
+     * Check if embedding-based scoring is enabled.
+     *
+     * @return true if embedding scoring is enabled
+     */
+    fun isEmbeddingEnabled(): Boolean = _settings.value.embeddingEnabled
+
+    /**
+     * Set embedding scoring enabled state.
+     *
+     * @param enabled Whether to enable embedding scoring
+     */
+    fun setEmbeddingEnabled(enabled: Boolean) {
+        updateSettings { it.copy(embeddingEnabled = enabled) }
+    }
+
+    /**
+     * Check if HyDE (Hypothetical Document Embedding) is enabled.
+     *
+     * @return true if HyDE generation is enabled
+     */
+    fun isHydeEnabled(): Boolean = _settings.value.enableHyde
+
+    /**
+     * Enable or disable HyDE generation.
+     *
+     * @param enabled Whether to enable HyDE
+     */
+    fun setHydeEnabled(enabled: Boolean) {
+        updateSettings { it.copy(enableHyde = enabled) }
+    }
+
+    // ==================== Parallel Processing Settings ====================
+
+    /**
+     * Get the parallel concurrency setting.
+     *
+     * @return Number of concurrent operations for parallel processing
+     */
+    fun getParallelConcurrency(): Int = _settings.value.parallelConcurrency
+
+    /**
+     * Set the parallel concurrency level.
+     *
+     * @param concurrency Number of concurrent operations (1-10)
+     */
+    fun setParallelConcurrency(concurrency: Int) {
+        val clampedConcurrency = concurrency.coerceIn(
+            AppSettings.MIN_PARALLEL_CONCURRENCY,
+            AppSettings.MAX_PARALLEL_CONCURRENCY
+        )
+        updateSettings { it.copy(parallelConcurrency = clampedConcurrency) }
+    }
+
     // ==================== Reset ====================
 
     /**
@@ -532,5 +616,8 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         private const val KEY_NCBI_EMAIL = "ncbi_email"
         private const val KEY_UNPAYWALL_EMAIL = "unpaywall_email"
+        private const val KEY_EMBEDDING_ENABLED = "embedding_enabled"
+        private const val KEY_ENABLE_HYDE = "enable_hyde"
+        private const val KEY_PARALLEL_CONCURRENCY = "parallel_concurrency"
     }
 }

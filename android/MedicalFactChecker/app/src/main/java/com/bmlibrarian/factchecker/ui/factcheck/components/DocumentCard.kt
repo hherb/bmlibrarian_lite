@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.ui.factcheck.components
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,14 +30,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,10 +58,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.ui.common.MarkdownText
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
@@ -79,14 +93,24 @@ private object ReasoningColors {
  * Card displaying a scored document.
  *
  * Shows document title, authors, journal, and relevance score.
- * Expands to show abstract, source badges, and score rationale.
+ * Expands to show abstract, key passages, source badges, and score rationale.
  *
  * @param document The document to display
+ * @param citations Optional list of extracted citations/key passages for this document
+ * @param isLoadingFullText Whether full text is currently being fetched
+ * @param onGetFullText Callback to fetch full text for this document
+ * @param onViewFullText Callback to navigate to full text viewer
+ * @param onOpenPublisher Callback to open publisher website (DOI link)
  * @param modifier Modifier for the component
  */
 @Composable
 fun DocumentCard(
     document: DocumentEntity,
+    citations: List<CitationEntity> = emptyList(),
+    isLoadingFullText: Boolean = false,
+    onGetFullText: ((DocumentEntity) -> Unit)? = null,
+    onViewFullText: ((DocumentEntity) -> Unit)? = null,
+    onOpenPublisher: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -104,12 +128,23 @@ fun DocumentCard(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Score badge
-                document.relevanceScore?.let { score ->
-                    ScoreBadge(
-                        score = score,
-                        modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
-                    )
+                // Score badges column (LLM + Embedding)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING_SMALL.dp),
+                    modifier = Modifier.padding(end = Constants.UI_ICON_TEXT_SPACING.dp)
+                ) {
+                    // LLM Score badge
+                    document.relevanceScore?.let { score ->
+                        ScoreBadge(
+                            score = score,
+                            label = "LLM"
+                        )
+                    }
+                    // Embedding Score badge
+                    document.embeddingScoreNormalized?.let { embScore ->
+                        EmbeddingScoreBadge(score = embScore)
+                    }
                 }
 
                 // Title and metadata
@@ -180,6 +215,21 @@ fun DocumentCard(
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 }
 
+                // Key Passages (citations extracted from this document)
+                if (citations.isNotEmpty()) {
+                    Text(
+                        text = "Key Passages",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    citations.forEach { citation ->
+                        KeyPassageBox(passage = citation.passage)
+                        Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    }
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                }
+
                 // Abstract (rendered as markdown for structured abstracts)
                 document.abstractText?.let { abstract ->
                     Text(
@@ -191,6 +241,20 @@ fun DocumentCard(
                     MarkdownText(
                         text = abstract,
                         textSizeSp = Constants.ABSTRACT_TEXT_SIZE_SP
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+                }
+
+                // Full Text Section
+                if (onGetFullText != null || onViewFullText != null) {
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+                    FullTextSection(
+                        document = document,
+                        isLoading = isLoadingFullText,
+                        onGetFullText = onGetFullText,
+                        onViewFullText = onViewFullText,
+                        onOpenPublisher = onOpenPublisher
                     )
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 }
@@ -220,11 +284,13 @@ fun DocumentCard(
  * Badge displaying the relevance score with color coding.
  *
  * @param score The relevance score (1-5)
+ * @param label Optional label to show below the score (e.g., "LLM")
  * @param modifier Modifier for the component
  */
 @Composable
 fun ScoreBadge(
     score: Int,
+    label: String? = null,
     modifier: Modifier = Modifier
 ) {
     val backgroundColor = scoreColor(score)
@@ -234,15 +300,66 @@ fun ScoreBadge(
         shape = MaterialTheme.shapes.small,
         modifier = modifier
     ) {
-        Text(
-            text = score.toString(),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onPrimary,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(
                 horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
                 vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
             )
-        )
+        ) {
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+            label?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Badge displaying the embedding similarity score with distinct styling.
+ *
+ * @param score The normalized embedding score (1-5)
+ * @param modifier Modifier for the component
+ */
+@Composable
+private fun EmbeddingScoreBadge(
+    score: Int,
+    modifier: Modifier = Modifier
+) {
+    val backgroundColor = scoreColor(score)
+
+    Surface(
+        color = backgroundColor.copy(alpha = 0.7f),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, backgroundColor),
+        modifier = modifier
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(
+                horizontal = Constants.UI_CARD_PADDING_SMALL.dp,
+                vertical = Constants.UI_ELEMENT_SPACING_SMALL.dp
+            )
+        ) {
+            Text(
+                text = score.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+            Text(
+                text = "Emb",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+        }
     }
 }
 
@@ -334,6 +451,181 @@ private fun LLMReasoningBox(
                 fontStyle = FontStyle.Italic,
                 color = ReasoningColors.text
             )
+        }
+    }
+}
+
+/**
+ * Styled box displaying a key passage (citation) from the document.
+ *
+ * Renders the extracted passage with a quote icon and accent-colored
+ * background to visually indicate quoted text from the source.
+ *
+ * @param passage The extracted passage text
+ * @param modifier Modifier for the component
+ */
+@Composable
+private fun KeyPassageBox(
+    passage: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Constants.KEY_PASSAGE_CORNER_RADIUS.dp))
+            .background(
+                MaterialTheme.colorScheme.primaryContainer.copy(
+                    alpha = Constants.KEY_PASSAGE_BACKGROUND_ALPHA
+                )
+            )
+            .padding(Constants.UI_CARD_PADDING_SMALL.dp),
+        horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.FormatQuote,
+            contentDescription = "Quote",
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = Constants.KEY_PASSAGE_ICON_ALPHA),
+            modifier = Modifier.size(Constants.KEY_PASSAGE_ICON_SIZE.dp)
+        )
+        Text(
+            text = passage,
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = Constants.KEY_PASSAGE_TEXT_ALPHA)
+        )
+    }
+}
+
+/**
+ * Section for full-text retrieval button and status.
+ *
+ * Displays different states:
+ * - View Full Text button when full text is already available
+ * - Get Full Text button when not yet attempted
+ * - Unavailable message with fallback to publisher when retrieval failed
+ *
+ * @param document The document to display full-text actions for
+ * @param isLoading Whether full text is currently being fetched
+ * @param onGetFullText Callback to fetch full text
+ * @param onViewFullText Callback to navigate to full text viewer
+ * @param onOpenPublisher Callback to open publisher website
+ */
+@Composable
+private fun FullTextSection(
+    document: DocumentEntity,
+    isLoading: Boolean,
+    onGetFullText: ((DocumentEntity) -> Unit)?,
+    onViewFullText: ((DocumentEntity) -> Unit)?,
+    onOpenPublisher: ((String) -> Unit)?
+) {
+    when {
+        // Already have full text - show view button
+        document.hasFullText -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+            ) {
+                Button(
+                    onClick = { onViewFullText?.invoke(document) },
+                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Article,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text("View Full Text")
+                }
+
+                // Show source badge
+                document.fullTextSourceDisplay?.let { source ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            text = source,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(
+                                horizontal = Constants.UI_BADGE_PADDING_HORIZONTAL.dp,
+                                vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Already tried but unavailable
+        document.fullTextUnavailable -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Full text not available",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+
+                // Offer to open publisher website
+                document.doi?.let { doi ->
+                    OutlinedButton(
+                        onClick = { onOpenPublisher?.invoke(doi) },
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInBrowser,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                        Text(
+                            text = "Publisher",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+        }
+
+        // Not yet attempted - show fetch button
+        else -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onGetFullText?.invoke(document) },
+                    enabled = !isLoading,
+                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text(if (isLoading) "Fetching..." else "Get Full Text")
+                }
+            }
         }
     }
 }
