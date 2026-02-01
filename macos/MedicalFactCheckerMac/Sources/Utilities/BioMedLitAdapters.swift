@@ -17,6 +17,35 @@
 import Foundation
 import BioMedLit
 
+// MARK: - Shared Utility Type Aliases
+
+/// Type alias for BioMedLit QueryTranslator (now shared in BioMedLit package).
+typealias BMLQueryTranslator = QueryTranslator
+
+/// Type alias for BioMedLit ResponseParser (now shared in BioMedLit package).
+typealias BMLResponseParser = ResponseParser
+
+/// Type alias for BioMedLit QueryConstants (now shared in BioMedLit package).
+typealias BMLQueryConstants = QueryConstants
+
+/// Type alias for BioMedLit StructuredQuery (now shared in BioMedLit package).
+typealias BMLStructuredQuery = StructuredQuery
+
+/// Type alias for BioMedLit SearchConcept (now shared in BioMedLit package).
+typealias BMLSearchConcept = SearchConcept
+
+/// Type alias for BioMedLit DateRange (now shared in BioMedLit package).
+typealias BMLDateRange = DateRange
+
+/// Type alias for BioMedLit Verdict (now shared in BioMedLit package).
+typealias BMLVerdict = Verdict
+
+/// Type alias for BioMedLit QueryBuilderFactory (now shared in BioMedLit package).
+typealias BMLQueryBuilderFactory = QueryBuilderFactory
+
+/// Type alias for BioMedLit SearchResultMerger (now shared in BioMedLit package).
+typealias BMLSearchResultMerger = BioMedLit.SearchResultMerger
+
 // MARK: - BioMedLit Adapters
 
 /// Adapters to convert between BioMedLit types and app-local types.
