@@ -14,12 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// NOTE: This app-specific SearchResultMerger works with app-local types (UnifiedSearchResult, ArticleMetadata).
-// A generic SearchResultMerger for BioMedLit types is available in the BioMedLit package at:
-// Packages/BioMedLit/Sources/BioMedLit/Utilities/SearchResultMerger.swift
-
 import Foundation
-import BioMedLit
 
 // MARK: - Constants
 
@@ -35,24 +30,21 @@ private enum MergerConstants {
 ///
 /// This utility combines results from PubMed and Europe PMC, removing
 /// duplicate articles based on PMID, DOI, or title similarity.
-enum SearchResultMerger {
+public enum SearchResultMerger {
     /// Merge results from PubMed and Europe PMC, removing duplicates.
     ///
     /// Deduplication priority: PMID > DOI > Title similarity
     ///
-    /// Note: For subsequent pages, callers need to track pagination separately
-    /// since PubMed uses offset and Europe PMC uses cursor marks.
-    ///
     /// - Parameters:
     ///   - pubmedResult: Results from PubMed.
     ///   - europePMCResult: Results from Europe PMC.
-    /// - Returns: Merged, deduplicated result with combined pagination state.
-    static func merge(
-        pubmedResult: UnifiedSearchResult,
-        europePMCResult: UnifiedSearchResult
-    ) -> UnifiedSearchResult {
+    /// - Returns: Merged, deduplicated result.
+    public static func merge(
+        pubmedResult: SearchResult,
+        europePMCResult: SearchResult
+    ) -> SearchResult {
         var seen = Set<String>()  // Track seen identifiers
-        var merged: [ArticleMetadata] = []
+        var merged: [SearchArticle] = []
 
         // Add PubMed results first (primary source)
         for article in pubmedResult.articles {
@@ -72,32 +64,60 @@ enum SearchResultMerger {
             }
         }
 
-        // Sort by relevance (original position is a proxy)
-        let sorted = merged.sorted { $0.resultPosition < $1.resultPosition }
-
         // Estimate total (may have duplicates we removed)
         let estimatedTotal = pubmedResult.totalCount + europePMCResult.totalCount
 
-        // Create combined pagination state
-        // We track both offset (for PubMed) and cursor (for Europe PMC)
-        let combinedPagination = CombinedPaginationState(
-            pubmedPagination: pubmedResult.pagination,
-            europePMCPagination: europePMCResult.pagination
-        )
-
-        return UnifiedSearchResult(
-            articles: sorted,
+        return SearchResult(
+            articles: merged,
             totalCount: estimatedTotal,
-            pagination: combinedPagination,
+            nextCursor: europePMCResult.nextCursor,
+            nextOffset: pubmedResult.nextOffset,
+            query: pubmedResult.query,
             provider: .both
         )
+    }
+
+    /// Merge arrays of articles, removing duplicates.
+    ///
+    /// Deduplication priority: PMID > DOI > Title similarity
+    ///
+    /// - Parameters:
+    ///   - primary: Primary articles (will be preserved in case of duplicates).
+    ///   - secondary: Secondary articles (duplicates will be removed).
+    /// - Returns: Merged, deduplicated array of articles.
+    public static func mergeArticles(
+        primary: [SearchArticle],
+        secondary: [SearchArticle]
+    ) -> [SearchArticle] {
+        var seen = Set<String>()
+        var merged: [SearchArticle] = []
+
+        // Add primary results first
+        for article in primary {
+            let key = deduplicationKey(for: article)
+            if !seen.contains(key) {
+                seen.insert(key)
+                merged.append(article)
+            }
+        }
+
+        // Add unique secondary results
+        for article in secondary {
+            let key = deduplicationKey(for: article)
+            if !seen.contains(key) {
+                seen.insert(key)
+                merged.append(article)
+            }
+        }
+
+        return merged
     }
 
     /// Generate a unique key for deduplication.
     ///
     /// - Parameter article: The article to generate a key for.
     /// - Returns: A string key for deduplication.
-    private static func deduplicationKey(for article: ArticleMetadata) -> String {
+    private static func deduplicationKey(for article: SearchArticle) -> String {
         // Prefer PMID (most reliable)
         if !article.pmid.isEmpty {
             return "pmid:\(article.pmid)"
@@ -130,7 +150,7 @@ enum SearchResultMerger {
     ///   - articleA: First article.
     ///   - articleB: Second article.
     /// - Returns: True if the articles are likely duplicates.
-    static func areDuplicates(_ articleA: ArticleMetadata, _ articleB: ArticleMetadata) -> Bool {
+    public static func areDuplicates(_ articleA: SearchArticle, _ articleB: SearchArticle) -> Bool {
         // Same PMID
         if !articleA.pmid.isEmpty && articleA.pmid == articleB.pmid {
             return true
@@ -156,7 +176,7 @@ enum SearchResultMerger {
     ///   - titleA: First title.
     ///   - titleB: Second title.
     /// - Returns: Similarity score between 0.0 and 1.0.
-    static func titleSimilarity(_ titleA: String, _ titleB: String) -> Double {
+    public static func titleSimilarity(_ titleA: String, _ titleB: String) -> Double {
         let wordsA = extractWords(from: titleA)
         let wordsB = extractWords(from: titleB)
 

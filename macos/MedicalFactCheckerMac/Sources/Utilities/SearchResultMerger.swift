@@ -14,7 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+// NOTE: This app-specific SearchResultMerger works with app-local types
+// (UnifiedSearchResult, UnifiedArticleMetadata).
+// A generic SearchResultMerger for BioMedLit types is available in the BioMedLit package at:
+// Packages/BioMedLit/Sources/BioMedLit/Utilities/SearchResultMerger.swift
+
 import Foundation
+import BioMedLit
 
 /// Merges and deduplicates search results from multiple literature search providers.
 ///

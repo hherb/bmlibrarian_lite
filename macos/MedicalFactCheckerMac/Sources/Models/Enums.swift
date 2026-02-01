@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import BioMedLit
 
 /// Current step in the fact-checking workflow.
 enum WorkflowStep: String, Codable, CaseIterable {
@@ -72,22 +73,17 @@ enum WorkflowStep: String, Codable, CaseIterable {
     }
 }
 
-/// Evidence verdict for the fact-check report.
-enum Verdict: String, Codable {
-    case supported = "Supported"
-    case partiallySupported = "Partially Supported"
-    case notSupported = "Not Supported"
-    case insufficientEvidence = "Insufficient Evidence"
-    case conflicting = "Conflicting Evidence"
+// Verdict is now imported from BioMedLit package.
+// Re-export for backward compatibility.
+@_exported import enum BioMedLit.Verdict
 
+// MARK: - Verdict Extension for App Compatibility
+
+extension Verdict {
+    /// Legacy color property for backward compatibility.
+    /// Maps to the `colorName` property in BioMedLit.
     var color: String {
-        switch self {
-        case .supported: return "green"
-        case .partiallySupported: return "orange"
-        case .notSupported: return "red"
-        case .insufficientEvidence: return "gray"
-        case .conflicting: return "purple"
-        }
+        colorName
     }
 }
 
