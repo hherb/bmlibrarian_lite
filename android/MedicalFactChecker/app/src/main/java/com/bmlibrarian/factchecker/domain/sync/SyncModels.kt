@@ -386,11 +386,12 @@ object ChecksumUtil {
      * Computes SHA-256 checksum of data.
      *
      * @param data The string data to checksum
-     * @return Checksum string prefixed with algorithm (e.g., "sha256:abc123...")
+     * @return Lowercase hex-encoded checksum string (64 characters)
      */
     fun computeChecksum(data: String): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val hash = digest.digest(data.toByteArray(Charsets.UTF_8))
-        return "${SyncConstants.CHECKSUM_ALGORITHM}:" + hash.joinToString("") { "%02x".format(it) }
+        // Return hex-only format for cross-platform compatibility with iOS/macOS
+        return hash.joinToString("") { "%02x".format(it) }
     }
 }

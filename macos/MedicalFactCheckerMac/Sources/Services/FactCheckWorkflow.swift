@@ -1292,7 +1292,7 @@ final class FactCheckWorkflow {
 
                 if attempt < maxScoringRetries {
                     // Brief delay before retry
-                    try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+                    try await Task.sleep(nanoseconds: BioMedLitConstants.retryDelayShortNanoseconds)
                 }
 
             } catch {
@@ -1301,7 +1301,7 @@ final class FactCheckWorkflow {
 
                 if attempt < maxScoringRetries {
                     // Brief delay before retry
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1 second
+                    try? await Task.sleep(nanoseconds: BioMedLitConstants.retryDelayStandardNanoseconds)
                 }
             }
         }

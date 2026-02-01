@@ -366,6 +366,18 @@ object Constants {
     /** Alpha for divider lines. */
     const val DIVIDER_ALPHA = 0.5f
 
+    /** Alpha for primary/secondary container colors in light theme. */
+    const val THEME_CONTAINER_ALPHA_LIGHT = 0.1f
+
+    /** Alpha for primary/secondary container colors in dark theme. */
+    const val THEME_CONTAINER_ALPHA_DARK = 0.2f
+
+    /** Alpha for surface variant text colors. */
+    const val THEME_SURFACE_VARIANT_ALPHA = 0.7f
+
+    /** Alpha for outline color in dark theme. */
+    const val THEME_OUTLINE_ALPHA = 0.5f
+
     // ==================== Onboarding Screen Configuration ====================
 
     /** Size of onboarding icon container in dp. */
