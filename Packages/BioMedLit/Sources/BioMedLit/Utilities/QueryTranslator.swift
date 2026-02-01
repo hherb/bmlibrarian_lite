@@ -518,6 +518,7 @@ public enum QueryTranslator {
         let options: NSRegularExpression.Options = caseInsensitive ? [.caseInsensitive] : []
 
         guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            print("[QueryTranslator] Failed to compile regex pattern: \(pattern)")
             return string
         }
 
