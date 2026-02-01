@@ -364,6 +364,7 @@ class FactCheckWorkflow @Inject constructor(
         if (documents.isEmpty()) return 0
 
         var successCount = 0
+        var successfulIds = emptySet<String>()
 
         try {
             when (step) {
@@ -375,17 +376,18 @@ class FactCheckWorkflow @Inject constructor(
                     scoreDocuments(documents, session.claimText, config)
 
                     // Count successes by checking which documents now have scores
-                    val successfulIds = mutableSetOf<String>()
+                    val scoringSuccessIds = mutableSetOf<String>()
                     for (doc in documents) {
                         val updatedDoc = documentRepository.getDocument(doc.id)
                         if (updatedDoc?.relevanceScore != null) {
-                            successfulIds.add(doc.id)
+                            scoringSuccessIds.add(doc.id)
                         }
                     }
-                    successCount = successfulIds.size
+                    successCount = scoringSuccessIds.size
+                    successfulIds = scoringSuccessIds
 
                     // Remove errors for successfully retried documents
-                    errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
+                    errorPersistenceManager.removeErrorsForDocuments(session.id, scoringSuccessIds)
                 }
 
                 ProcessingCheckpointEntity.STEP_CITATION -> {
@@ -396,22 +398,23 @@ class FactCheckWorkflow @Inject constructor(
                     extractCitations(documents, session.claimText, session.id, config)
 
                     // Count successes by checking citation count
-                    val successfulIds = mutableSetOf<String>()
+                    val citationSuccessIds = mutableSetOf<String>()
                     for (doc in documents) {
                         if (documentRepository.getCitationCountForDocument(doc.id) > 0) {
-                            successfulIds.add(doc.id)
+                            citationSuccessIds.add(doc.id)
                         }
                     }
-                    successCount = successfulIds.size
+                    successCount = citationSuccessIds.size
+                    successfulIds = citationSuccessIds
 
                     // Remove errors for successfully retried documents
-                    errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
+                    errorPersistenceManager.removeErrorsForDocuments(session.id, citationSuccessIds)
                 }
             }
 
-            // Update retry counts for remaining errors
+            // Update retry counts for errors that still failed
             retryableErrors.forEach { error ->
-                if (error.documentId !in documentIds) {
+                if (error.documentId !in successfulIds) {
                     errorPersistenceManager.markRetried(error.id)
                 }
             }

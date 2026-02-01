@@ -97,7 +97,7 @@ data class ProcessingErrorEntity(
 
     /** Maximum retry attempts allowed. */
     @ColumnInfo(name = "max_retries")
-    val maxRetries: Int = 3,
+    val maxRetries: Int = DEFAULT_MAX_RETRIES,
 
     /** When this error was recorded. */
     @ColumnInfo(name = "created_at")
@@ -112,6 +112,9 @@ data class ProcessingErrorEntity(
         get() = isRetryable && retryCount < maxRetries
 
     companion object {
+        /** Default maximum retry attempts for processing errors. */
+        const val DEFAULT_MAX_RETRIES = 3
+
         /** Error type for network errors. */
         const val TYPE_NETWORK = "network"
 
