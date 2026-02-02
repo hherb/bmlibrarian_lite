@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import BioMedLit
 
 /// Service for interacting with OpenAI-compatible LLM APIs.
 ///
@@ -147,7 +148,7 @@ actor LLMService {
                 if attempt < Self.maxRetries - 1 {
                     let delay = calculateBackoffDelay(attempt: attempt)
                     print("[LLMService] Attempt \(attempt + 1) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", delay))s...")
-                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    try await Task.sleep(nanoseconds: UInt64(delay * Double(BioMedLitConstants.nanosecondsPerSecond)))
                 }
             }
         }

@@ -414,8 +414,8 @@ public actor iCloudSyncStorage: SyncStorageProtocol {
                 }
             }
 
-            // Wait 1 second before checking again
-            try await Task.sleep(nanoseconds: 1_000_000_000)
+            // Wait before checking again
+            try await Task.sleep(nanoseconds: BioMedLitConstants.iCloudPollingIntervalNanoseconds)
         }
 
         // Timeout - check if file exists anyway

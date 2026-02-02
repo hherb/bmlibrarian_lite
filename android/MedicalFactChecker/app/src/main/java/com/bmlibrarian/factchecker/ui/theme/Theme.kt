@@ -28,6 +28,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.bmlibrarian.factchecker.util.Constants
 
 /**
  * Light color scheme for MedicalFactChecker.
@@ -37,18 +38,18 @@ import androidx.core.view.WindowCompat
 private val LightColorScheme = lightColorScheme(
     primary = Primary,
     onPrimary = OnPrimary,
-    primaryContainer = Primary.copy(alpha = 0.1f),
+    primaryContainer = Primary.copy(alpha = Constants.THEME_CONTAINER_ALPHA_LIGHT),
     onPrimaryContainer = Primary,
     secondary = Secondary,
     onSecondary = OnSecondary,
-    secondaryContainer = Secondary.copy(alpha = 0.1f),
+    secondaryContainer = Secondary.copy(alpha = Constants.THEME_CONTAINER_ALPHA_LIGHT),
     onSecondaryContainer = Secondary,
     background = Background,
     onBackground = OnBackground,
     surface = Surface,
     onSurface = OnSurface,
     surfaceVariant = Background,
-    onSurfaceVariant = OnSurface.copy(alpha = 0.7f),
+    onSurfaceVariant = OnSurface.copy(alpha = Constants.THEME_SURFACE_VARIANT_ALPHA),
     error = Error,
     onError = OnError,
     outline = Outline
@@ -62,21 +63,21 @@ private val LightColorScheme = lightColorScheme(
 private val DarkColorScheme = darkColorScheme(
     primary = Primary,
     onPrimary = OnPrimary,
-    primaryContainer = Primary.copy(alpha = 0.2f),
+    primaryContainer = Primary.copy(alpha = Constants.THEME_CONTAINER_ALPHA_DARK),
     onPrimaryContainer = Primary,
     secondary = Secondary,
     onSecondary = OnSecondary,
-    secondaryContainer = Secondary.copy(alpha = 0.2f),
+    secondaryContainer = Secondary.copy(alpha = Constants.THEME_CONTAINER_ALPHA_DARK),
     onSecondaryContainer = Secondary,
     background = DarkBackground,
     onBackground = DarkOnBackground,
     surface = DarkSurface,
     onSurface = DarkOnSurface,
     surfaceVariant = DarkSurface,
-    onSurfaceVariant = DarkOnSurface.copy(alpha = 0.7f),
+    onSurfaceVariant = DarkOnSurface.copy(alpha = Constants.THEME_SURFACE_VARIANT_ALPHA),
     error = Error,
     onError = OnError,
-    outline = Outline.copy(alpha = 0.5f)
+    outline = Outline.copy(alpha = Constants.THEME_OUTLINE_ALPHA)
 )
 
 /**

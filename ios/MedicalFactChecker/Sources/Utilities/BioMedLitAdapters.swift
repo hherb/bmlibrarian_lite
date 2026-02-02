@@ -48,6 +48,39 @@ typealias BMLEuropePMCService = EuropePMCService
 /// Type alias for BioMedLit FullTextService.
 typealias BMLFullTextService = FullTextService
 
+// MARK: - Shared Utility Type Aliases
+
+/// Type alias for BioMedLit QueryTranslator (now shared in BioMedLit package).
+typealias BMLQueryTranslator = QueryTranslator
+
+/// Type alias for BioMedLit ResponseParser (now shared in BioMedLit package).
+typealias BMLResponseParser = ResponseParser
+
+/// Type alias for BioMedLit QueryConstants (now shared in BioMedLit package).
+typealias BMLQueryConstants = QueryConstants
+
+/// Type alias for BioMedLit StructuredQuery (now shared in BioMedLit package).
+typealias BMLStructuredQuery = StructuredQuery
+
+/// Type alias for BioMedLit SearchConcept (now shared in BioMedLit package).
+typealias BMLSearchConcept = SearchConcept
+
+/// Type alias for BioMedLit DateRange (now shared in BioMedLit package).
+typealias BMLDateRange = DateRange
+
+/// Type alias for BioMedLit Verdict (now shared in BioMedLit package).
+typealias BMLVerdict = Verdict
+
+/// Type alias for BioMedLit QueryBuilderFactory (now shared in BioMedLit package).
+typealias BMLQueryBuilderFactory = QueryBuilderFactory
+
+/// Type alias for BioMedLit SearchResultMerger (now shared in BioMedLit package).
+///
+/// Note: Due to Swift module name collision (both MedicalFactChecker and BioMedLit
+/// define SearchProvider), use `BioMedLitAdapters.buildQuery` wrapper instead of
+/// calling `BMLQueryBuilderFactory.build` directly from other files.
+typealias BMLSearchResultMerger = SearchResultMerger
+
 // MARK: - Article Metadata
 
 /// Intermediate article metadata for search results.
@@ -82,6 +115,33 @@ struct ArticleMetadata: Sendable, Identifiable, Equatable {
 /// This allows the app to use BioMedLit services internally while maintaining
 /// backwards compatibility with existing app data models.
 enum BioMedLitAdapters {
+    // MARK: - Query Building (Type-Safe Wrapper)
+
+    /// Build a query string from a StructuredQuery using the appropriate provider syntax.
+    ///
+    /// This wrapper function resolves the SearchProvider type collision between
+    /// MedicalFactChecker and BioMedLit modules. Call this instead of
+    /// `BMLQueryBuilderFactory.build` directly.
+    ///
+    /// - Parameters:
+    ///   - query: The structured query to translate.
+    ///   - provider: The app's SearchProvider enum (from MedicalFactChecker).
+    /// - Returns: Provider-specific query string.
+    static func buildQuery(from query: BMLStructuredQuery, for provider: MedicalFactChecker.SearchProvider) -> String {
+        // Convert app SearchProvider to BioMedLit SearchProvider and build query.
+        // We use the PubMedQueryBuilder and EuropePMCQueryBuilder directly to avoid
+        // the type collision with QueryBuilderFactory.build(from:for:).
+        switch provider {
+        case .pubmed:
+            return PubMedQueryBuilder.build(from: query)
+        case .europePMC:
+            return EuropePMCQueryBuilder.build(from: query)
+        case .both:
+            // Default to PubMed syntax for "both" mode
+            return PubMedQueryBuilder.build(from: query)
+        }
+    }
+
     // MARK: - Search Result Conversion
 
     /// Convert BioMedLit SearchArticle to app ArticleMetadata.

@@ -53,15 +53,6 @@ class ChangeLogReader(
     suspend fun discoverDevices(): List<String> {
         return try {
             val devicesDir = SyncConstants.DEVICES_DIR
-            if (!storage.fileExists("$devicesDir/.")) {
-                // Check if directory exists by listing files
-                try {
-                    storage.listFiles(devicesDir)
-                } catch (e: SyncStorageException.DirectoryNotFound) {
-                    return emptyList()
-                }
-            }
-
             storage.listFiles(devicesDir)
                 .filter { it.name.endsWith(".json") }
                 .map { it.name.removeSuffix(".json") }

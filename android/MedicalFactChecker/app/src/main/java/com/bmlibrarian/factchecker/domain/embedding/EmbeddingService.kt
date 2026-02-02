@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.NetworkRetry
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -245,19 +246,30 @@ class EmbeddingService @Inject constructor(
             .url(Constants.EMBEDDING_MODEL_URL)
             .build()
 
-        val response = okHttpClient.newCall(request).execute()
-
-        if (!response.isSuccessful) {
-            throw Exception("Failed to download model: ${response.code}")
-        }
-
-        response.body?.let { body ->
-            FileOutputStream(targetFile).use { output ->
-                body.byteStream().use { input ->
-                    input.copyTo(output)
-                }
+        NetworkRetry.withExponentialBackoff(
+            maxRetries = Constants.NETWORK_MAX_RETRIES,
+            shouldRetry = { NetworkRetry.isRetryableException(it) },
+            onRetry = { attempt, delayMs, error ->
+                Log.w(TAG, "Model download attempt $attempt failed: ${error.message}, retrying in ${delayMs}ms")
             }
-        } ?: throw Exception("Empty response body")
+        ) {
+            val response = okHttpClient.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                if (NetworkRetry.isRetryableStatusCode(response.code)) {
+                    throw java.io.IOException("Failed to download model: ${response.code}")
+                }
+                throw Exception("Failed to download model: ${response.code}")
+            }
+
+            response.body?.let { body ->
+                FileOutputStream(targetFile).use { output ->
+                    body.byteStream().use { input ->
+                        input.copyTo(output)
+                    }
+                }
+            } ?: throw Exception("Empty response body")
+        }
 
         Log.d(TAG, "Model downloaded successfully: ${targetFile.length()} bytes")
     }

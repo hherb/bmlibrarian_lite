@@ -117,6 +117,22 @@ public enum BioMedLitConstants {
     /// PDF filename prefix.
     public static let pdfFilenamePrefix = "article_"
 
+    // MARK: - iCloud Sync
+
+    /// Polling interval for iCloud download status checks (in nanoseconds).
+    public static let iCloudPollingIntervalNanoseconds: UInt64 = 1_000_000_000
+
+    // MARK: - Retry Configuration
+
+    /// Short retry delay (0.5 seconds) in nanoseconds for first retry attempt.
+    public static let retryDelayShortNanoseconds: UInt64 = 500_000_000
+
+    /// Standard retry delay (1 second) in nanoseconds for subsequent retry attempts.
+    public static let retryDelayStandardNanoseconds: UInt64 = 1_000_000_000
+
+    /// Nanoseconds per second, for converting delay calculations.
+    public static let nanosecondsPerSecond: UInt64 = 1_000_000_000
+
     // MARK: - Formatting Constants
 
     /// Maximum authors to display before using "et al."
@@ -130,6 +146,14 @@ public enum BioMedLitConstants {
 
     /// PDF magic bytes ("%PDF").
     public static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
+
+    // MARK: - Scoring Constants
+
+    /// Minimum valid relevance score.
+    public static let minRelevanceScore = 1
+
+    /// Maximum valid relevance score.
+    public static let maxRelevanceScore = 5
 }
 
 // MARK: - PubMed Filters

@@ -977,36 +977,8 @@ final class FactCheckWorkflow {
 
         try checkBudget()
 
-        // Use structured JSON prompt - LLM outputs provider-agnostic format
-        let prompt = """
-        Convert this research question into search concepts.
-
-        Research Question: \(session.claim)
-
-        Instructions:
-        1. Identify 2-3 key concepts from the question
-        2. For each concept, provide 1-2 MeSH terms and 1-2 keywords
-        3. Keep it CONCISE - fewer specific terms work better than many broad terms
-        4. DO NOT add filters like hasabstract or publication type filters - those will be added automatically
-
-        Output ONLY valid JSON in this exact format:
-        {
-          "concepts": [
-            {"name": "concept1", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]},
-            {"name": "concept2", "mesh_terms": ["MeSH Term"], "keywords": ["keyword"]}
-          ]
-        }
-
-        Example for "amlodipine improves arterial stiffness":
-        {
-          "concepts": [
-            {"name": "amlodipine", "mesh_terms": ["Amlodipine"], "keywords": ["amlodipine"]},
-            {"name": "arterial stiffness", "mesh_terms": ["Vascular Stiffness"], "keywords": ["arterial stiffness", "pulse wave velocity"]}
-          ]
-        }
-
-        Generate JSON for the research question:
-        """
+        // Use centralized prompt template for consistency
+        let prompt = PromptTemplates.queryConversion(claim: session.claim)
 
         let messages = [LLMService.userMessage(prompt)]
         let (response, usage) = try await llmService.chat(
@@ -1320,7 +1292,7 @@ final class FactCheckWorkflow {
 
                 if attempt < maxScoringRetries {
                     // Brief delay before retry
-                    try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+                    try await Task.sleep(nanoseconds: BioMedLitConstants.retryDelayShortNanoseconds)
                 }
 
             } catch {
@@ -1329,7 +1301,7 @@ final class FactCheckWorkflow {
 
                 if attempt < maxScoringRetries {
                     // Brief delay before retry
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1 second
+                    try? await Task.sleep(nanoseconds: BioMedLitConstants.retryDelayStandardNanoseconds)
                 }
             }
         }
@@ -1562,17 +1534,17 @@ final class FactCheckWorkflow {
         let allCitations = (session.documents ?? []).flatMap { $0.citations ?? [] }
         let relevantDocCount = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
 
-        // Handle no evidence case - distinguish between no relevant docs vs extraction failure
+        // Handle no evidence case using ReportFormatter
         guard !allCitations.isEmpty else {
-            let (summary, fullReport) = generateNoEvidenceContent(
+            let noEvidenceContent = ReportFormatter.generateNoEvidenceContent(
                 claim: session.claim,
                 hadRelevantDocuments: relevantDocCount > 0,
                 relevantDocCount: relevantDocCount
             )
             let report = EvidenceReport(
                 verdict: .insufficientEvidence,
-                summary: summary,
-                fullReport: fullReport,
+                summary: noEvidenceContent.summary,
+                fullReport: noEvidenceContent.fullReport,
                 citationCount: 0,
                 uniqueSourceCount: 0,
                 documentsReviewed: session.documentsScored
@@ -1584,59 +1556,27 @@ final class FactCheckWorkflow {
             return
         }
 
-        // Format citations for the prompt
-        let citationsText = formatCitationsForPrompt(allCitations)
-
-        let prompt = """
-        You are a medical evidence synthesizer. Analyze the following evidence to evaluate a medical claim.
-
-        Claim: \(session.claim)
-
-        Evidence from \(allCitations.count) citation(s) across \((session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count) document(s):
-
-        \(citationsText)
-
-        EVIDENCE WEIGHING PRINCIPLES:
-        When synthesizing evidence, consider both supporting AND refuting findings. Evidence quality hierarchy (highest to lowest):
-        1. Systematic reviews and meta-analyses (strongest - synthesize multiple studies)
-        2. Randomized controlled trials (RCTs) - especially large, well-designed ones
-        3. Cohort studies (prospective stronger than retrospective)
-        4. Case-control studies
-        5. Case series and case reports (weakest)
-        6. Narrative reviews and expert opinion
-
-        Also consider:
-        - Sample size: Larger studies (thousands) carry more weight than small ones (dozens)
-        - A single high-quality RCT can outweigh multiple observational studies
-        - If high-quality evidence conflicts with lower-quality evidence, prioritize the higher-quality
-        - Report the balance of evidence fairly - if most evidence refutes the claim, the verdict should reflect that
-
-        Write an evidence report that:
-        1. States a verdict: Supported, Partially Supported, Not Supported, Insufficient Evidence, or Conflicting Evidence
-        2. Provides a 2-3 sentence summary of the key findings
-        3. Discusses the evidence briefly with inline citations, noting study quality where relevant
-        4. Notes any important limitations
-        5. If evidence conflicts, explain which findings carry more weight and why
-
-        CRITICAL - Citation format:
-        Use this EXACT format for all inline citations: [Author, Year](doc:ID)
-        Example: [Smith et al., 2021](doc:pmid-12345678)
-        The ID must be copied EXACTLY from the "ID:" field provided for each citation above.
-        Do NOT invent or modify IDs - use only the IDs provided.
-
-        IMPORTANT: Use proper markdown with:
-        - ## Headers for sections
-        - **Bold** for emphasis
-        - Bullet points with -
-        - Blank lines between paragraphs (use \\n\\n in JSON)
-
-        Respond in JSON format only:
-        {
-            "verdict": "<one of: Supported, Partially Supported, Not Supported, Insufficient Evidence, Conflicting Evidence>",
-            "summary": "<2-3 sentence summary>",
-            "full_report": "<markdown report with proper line breaks using \\n\\n between sections>"
+        // Format citations using ReportFormatter
+        let citationData = allCitations.compactMap { citation -> ReportFormatter.CitationData? in
+            guard let doc = citation.document else { return nil }
+            return ReportFormatter.CitationData(
+                documentId: doc.id,
+                authors: doc.formattedAuthors,
+                year: doc.year ?? 0,
+                title: doc.title,
+                passage: citation.passage
+            )
         }
-        """
+        let citationsText = ReportFormatter.formatCitationsForPrompt(citationData)
+
+        // Use centralized prompt template for report generation
+        let promptContext = PromptTemplates.ReportContext(
+            claim: session.claim,
+            citationsText: citationsText,
+            citationCount: allCitations.count,
+            documentCount: relevantDocCount
+        )
+        let prompt = PromptTemplates.reportGeneration(context: promptContext)
 
         let messages = [LLMService.userMessage(prompt)]
         let (response, usage) = try await llmService.chat(
@@ -1652,9 +1592,18 @@ final class FactCheckWorkflow {
         let parsedReport = ResponseParser.parseReportResponse(response)
         let uniqueSources = Set(allCitations.compactMap { $0.document?.pmid }).count
 
-        // Add references section
+        // Format references using ReportFormatter
         let relevantDocsForRefs = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }
-        let references = formatReferences(relevantDocsForRefs)
+        let referenceData = relevantDocsForRefs.map { doc in
+            ReportFormatter.ReferenceData(
+                authors: doc.formattedAuthors,
+                year: doc.year,
+                title: doc.title,
+                journal: doc.journal,
+                pmid: doc.pmid
+            )
+        }
+        let references = ReportFormatter.formatReferences(referenceData)
         let completeReport = parsedReport.fullReport + "\n\n## References\n\n" + references
 
         let report = EvidenceReport(
@@ -1676,22 +1625,16 @@ final class FactCheckWorkflow {
     private func checkBudget() throws {
         guard let session = session else { return }
 
-        // Check per-run budget
-        if session.estimatedCostUSD >= settings.maxRunBudgetUSD {
-            throw BudgetError.runBudgetExceeded(
-                used: session.estimatedCostUSD,
-                limit: settings.maxRunBudgetUSD
-            )
-        }
-
-        // Check monthly budget
-        let totalMonthly = monthlyUsedUSD + session.estimatedCostUSD
-        if totalMonthly >= settings.monthlyBudgetUSD {
-            throw BudgetError.monthlyBudgetExceeded(
-                used: totalMonthly,
-                limit: settings.monthlyBudgetUSD
-            )
-        }
+        // Use centralized BudgetChecker for validation
+        let usage = BudgetChecker.Usage(
+            currentRun: session.estimatedCostUSD,
+            monthlyTotal: monthlyUsedUSD
+        )
+        let limits = BudgetChecker.Limits(
+            perRun: settings.maxRunBudgetUSD,
+            monthly: settings.monthlyBudgetUSD
+        )
+        try BudgetChecker.validate(usage: usage, limits: limits)
     }
 
     private func recordUsage(_ usage: LLMUsage, operationType: String) {
@@ -1734,106 +1677,6 @@ final class FactCheckWorkflow {
     }
 
     // MARK: - Formatting Helpers
-
-    private func formatCitationsForPrompt(_ citations: [Citation]) -> String {
-        var result = ""
-        for (index, citation) in citations.enumerated() {
-            guard let doc = citation.document else { continue }
-            result += """
-            [\(index + 1)] ID: \(doc.id)
-            Authors: \(doc.formattedAuthors) (\(doc.year ?? 0))
-            Title: \(doc.title)
-            Passage: "\(citation.passage)"
-
-            """
-        }
-        return result
-    }
-
-    private func formatReferences(_ documents: [Document]) -> String {
-        documents.enumerated().map { index, doc in
-            var ref = "**\(index + 1).** "
-            ref += "**\(doc.formattedAuthors)"
-            if let year = doc.year { ref += " (\(year))" }
-            ref += ".** "
-            ref += "\(doc.title)"
-            if let journal = doc.journal { ref += ". *\(journal)*" }
-            ref += ". PMID: \(doc.pmid)"
-            return ref
-        }.joined(separator: "\n\n")
-    }
-
-    /// Generate content for the no-evidence report, distinguishing between
-    /// no relevant documents found vs citation extraction failure.
-    ///
-    /// - Parameters:
-    ///   - claim: The medical claim being evaluated.
-    ///   - hadRelevantDocuments: True if relevant documents were found but citation extraction failed.
-    ///   - relevantDocCount: Number of documents that met the relevance threshold.
-    /// - Returns: Tuple of (summary, fullReport) strings.
-    private func generateNoEvidenceContent(
-        claim: String,
-        hadRelevantDocuments: Bool,
-        relevantDocCount: Int
-    ) -> (summary: String, fullReport: String) {
-        if hadRelevantDocuments {
-            // Relevant documents were found but citation extraction failed
-            let summary = "Citation extraction failed for \(relevantDocCount) relevant document(s). Please review the scored documents manually or try again."
-            let fullReport = """
-            ## Evidence Report
-
-            **Claim:** \(claim)
-
-            **Verdict:** Insufficient Evidence
-
-            \(relevantDocCount) relevant document(s) were found during the search, but citation extraction was unable to identify specific passages from them. This may be due to:
-
-            1. API or network errors during citation extraction
-            2. Documents having abstracts that are difficult to parse
-            3. Temporary service issues
-            4. The LLM returning responses in an unexpected format
-
-            ### Recommendations
-
-            - Review the scored documents shown above - they contain relevant information
-            - Try running the search again
-            - If the problem persists, check for network connectivity issues
-
-            ---
-            *No citations extracted*
-            """
-            return (summary, fullReport)
-        } else {
-            // No relevant documents were found
-            let summary = "No relevant evidence was found in the medical literature for this claim."
-            let fullReport = """
-            ## Evidence Report
-
-            **Claim:** \(claim)
-
-            **Verdict:** Insufficient Evidence
-
-            No relevant evidence was found in the searched medical literature for this claim.
-
-            ### Possible Reasons
-
-            1. The topic may have limited published research
-            2. The search terms may need refinement
-            3. The claim may be too specific or novel
-
-            ### Recommendations
-
-            - Try rephrasing the claim with different medical terms
-            - Consider searching for related topics
-            - Consult specialized medical databases
-
-            ---
-            *No citations available*
-            """
-            return (summary, fullReport)
-        }
-    }
-
     // MARK: - Phase 4 Error Handling
 
     /// Handle a scoring or citation error from document processing.
@@ -2208,21 +2051,5 @@ final class FactCheckWorkflow {
     private func updateProgress(_ step: WorkflowStep, _ message: String) {
         progressMessage = message
         onProgress?(step, message)
-    }
-}
-
-// MARK: - Budget Errors
-
-enum BudgetError: LocalizedError {
-    case runBudgetExceeded(used: Double, limit: Double)
-    case monthlyBudgetExceeded(used: Double, limit: Double)
-
-    var errorDescription: String? {
-        switch self {
-        case .runBudgetExceeded(let used, let limit):
-            return "Run budget exceeded: \(CostCalculator.formatCost(used)) used of \(CostCalculator.formatCost(limit)) limit"
-        case .monthlyBudgetExceeded(let used, let limit):
-            return "Monthly budget exceeded: \(CostCalculator.formatCost(used)) used of \(CostCalculator.formatCost(limit)) limit"
-        }
     }
 }
