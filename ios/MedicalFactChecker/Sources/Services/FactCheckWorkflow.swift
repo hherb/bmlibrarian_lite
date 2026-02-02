@@ -1372,9 +1372,9 @@ final class FactCheckWorkflow {
             // Store structured query for provider-specific translation
             self.structuredQuery = parsed
 
-            // Build provider-specific query string
-            let provider = currentSearchOptions?.provider ?? .pubmed
-            let query = QueryBuilderFactory.build(from: parsed, for: provider)
+            // Build provider-specific query string using type-safe wrapper
+            let appProvider = currentSearchOptions?.provider ?? .pubmed
+            let query = BioMedLitAdapters.buildQuery(from: parsed, for: appProvider)
             session.pubmedQuery = query
         } else {
             // Fallback to legacy parsing for backwards compatibility
@@ -1485,8 +1485,8 @@ final class FactCheckWorkflow {
         if var structuredQuery = self.structuredQuery {
             // Apply user's preprint preference from search options
             structuredQuery.excludePreprints = !options.includePreprints
-            // Build provider-specific query from structured query
-            queryString = QueryBuilderFactory.build(from: structuredQuery, for: options.provider)
+            // Build provider-specific query from structured query using type-safe wrapper
+            queryString = BioMedLitAdapters.buildQuery(from: structuredQuery, for: options.provider)
         } else if let storedQuery = session.pubmedQuery {
             // Fallback for resumed sessions without structured query
             queryString = storedQuery
@@ -2142,14 +2142,15 @@ final class FactCheckWorkflow {
         let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
 
         // Build provider-specific query string with user's preprint preference
-        let provider = currentSearchOptions?.provider ?? .pubmed
+        let appProvider = currentSearchOptions?.provider ?? .pubmed
         var queryWithPrefs = query
         queryWithPrefs.excludePreprints = !(currentSearchOptions?.includePreprints ?? false)
-        let queryString = QueryBuilderFactory.build(from: queryWithPrefs, for: provider)
+        // Build query string using type-safe wrapper
+        let queryString = BioMedLitAdapters.buildQuery(from: queryWithPrefs, for: appProvider)
 
         // Build search options
         let options = SearchOptions(
-            provider: provider,
+            provider: appProvider,
             includePreprints: currentSearchOptions?.includePreprints ?? false,
             maxResults: settings.batchSize,
             offset: 0
