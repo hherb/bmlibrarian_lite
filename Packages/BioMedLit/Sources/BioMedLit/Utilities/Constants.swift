@@ -146,6 +146,14 @@ public enum BioMedLitConstants {
 
     /// PDF magic bytes ("%PDF").
     public static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
+
+    // MARK: - Scoring Constants
+
+    /// Minimum valid relevance score.
+    public static let minRelevanceScore = 1
+
+    /// Maximum valid relevance score.
+    public static let maxRelevanceScore = 5
 }
 
 // MARK: - PubMed Filters

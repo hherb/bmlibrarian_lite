@@ -148,7 +148,7 @@ actor LLMService {
                 if attempt < Self.maxRetries - 1 {
                     let delay = calculateBackoffDelay(attempt: attempt)
                     print("[LLMService] Attempt \(attempt + 1) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", delay))s...")
-                    try await Task.sleep(nanoseconds: UInt64(delay) * BioMedLitConstants.nanosecondsPerSecond)
+                    try await Task.sleep(nanoseconds: UInt64(delay * Double(BioMedLitConstants.nanosecondsPerSecond)))
                 }
             }
         }

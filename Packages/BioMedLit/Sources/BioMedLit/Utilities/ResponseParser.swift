@@ -86,9 +86,9 @@ public enum ResponseParser {
         }
 
         // Validate score is in expected range
-        guard score >= 1 && score <= 5 else {
+        guard score >= BioMedLitConstants.minRelevanceScore && score <= BioMedLitConstants.maxRelevanceScore else {
             print("[ResponseParser] Score out of range: \(score)")
-            return .failure("Score \(score) out of valid range (1-5)")
+            return .failure("Score \(score) out of valid range (\(BioMedLitConstants.minRelevanceScore)-\(BioMedLitConstants.maxRelevanceScore))")
         }
 
         // Parse explanation - be lenient
@@ -459,12 +459,12 @@ public enum ResponseParser {
 
     // MARK: - Helpers
 
-    /// Clamp a score to the valid range of 1-5.
+    /// Clamp a score to the valid relevance score range.
     ///
     /// - Parameter score: Raw score value.
-    /// - Returns: Score clamped to 1-5.
+    /// - Returns: Score clamped to valid range.
     public static func clampScore(_ score: Int) -> Int {
-        min(5, max(1, score))
+        min(BioMedLitConstants.maxRelevanceScore, max(BioMedLitConstants.minRelevanceScore, score))
     }
 
     /// Extract JSON from an LLM response that may contain extra text.
