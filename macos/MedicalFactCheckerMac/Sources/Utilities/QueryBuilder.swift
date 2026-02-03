@@ -14,17 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// NOTE: This file re-exports types from the BioMedLit package for backward compatibility.
+// NOTE: QueryBuilderFactory, PubMedQueryBuilder, and EuropePMCQueryBuilder are re-exported
+// from the StructuredQuery.swift file in the Models directory.
 // The actual implementation is in Packages/BioMedLit/Sources/BioMedLit/Models/StructuredQuery.swift
 //
-// The package QueryBuilderFactory, PubMedQueryBuilder, and EuropePMCQueryBuilder now incorporate
-// the improvements that were previously only in this local file:
+// The package now incorporates the improvements that were previously only in this local file:
 // - Exclude-list approach for publication types (more robust than include-list)
 // - Date range support in generated queries
 // - buildAll() method for multi-provider queries
 // - Conditional keyword quoting (only multi-word keywords are quoted)
 
 import Foundation
-@_exported import enum BioMedLit.QueryBuilderFactory
-@_exported import enum BioMedLit.PubMedQueryBuilder
-@_exported import enum BioMedLit.EuropePMCQueryBuilder

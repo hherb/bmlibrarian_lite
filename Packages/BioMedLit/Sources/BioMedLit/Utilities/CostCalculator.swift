@@ -19,28 +19,28 @@ import Foundation
 /// Calculator for estimating LLM API costs.
 ///
 /// Prices are per 1 million tokens. Update these values as pricing changes.
-/// Last updated: January 2026
+/// Last updated: February 2026
 public enum CostCalculator {
     // MARK: - Pricing (per 1M tokens, USD)
 
     /// Known model pricing configurations.
     /// Prices are per 1 million tokens (input, output) in USD.
     private static let modelPricing: [String: (input: Double, output: Double)] = [
-        // OpenAI models (January 2026)
-        "gpt-5.2": (2.00, 8.00),
-        "gpt-5.2-pro": (24.00, 96.00),
-        "gpt-5.1": (2.00, 8.00),
-        "gpt-5": (2.00, 8.00),
+        // OpenAI models (updated February 2026)
+        "gpt-5.2": (1.75, 14.00),
+        "gpt-5.2-pro": (21.00, 168.00),
+        "gpt-5.1": (1.25, 10.00),
+        "gpt-5": (1.25, 10.00),
         "o4-mini": (1.10, 4.40),
         "o3": (2.00, 8.00),
-        "o3-pro": (24.00, 96.00),
+        "o3-pro": (20.00, 80.00),
         "gpt-4o": (2.50, 10.00),
         "gpt-4o-mini": (0.15, 0.60),
         "gpt-4.1": (2.00, 8.00),
         "gpt-4.1-mini": (0.40, 1.60),
         "gpt-4-turbo": (10.00, 30.00),
 
-        // Anthropic models (January 2026)
+        // Anthropic models (February 2026)
         "claude-opus-4-5": (5.00, 25.00),
         "claude-sonnet-4-5": (3.00, 15.00),
         "claude-haiku-4-5": (1.00, 5.00),
@@ -50,18 +50,19 @@ public enum CostCalculator {
         "claude-3-7-sonnet": (3.00, 15.00),
         "claude-3-haiku": (0.25, 1.25),
 
-        // DeepSeek models (January 2026)
+        // DeepSeek models (February 2026)
         "deepseek-chat": (0.28, 0.42),
         "deepseek-reasoner": (0.28, 0.42),
 
-        // Mistral models (January 2026)
+        // Mistral models (February 2026)
         "mistral-large-3": (0.50, 1.50),
         "mistral-medium-3": (0.40, 2.00),
         "mistral-small": (0.10, 0.30),
-        "codestral": (0.20, 0.60),
-        "pixtral": (0.40, 1.20),
+        "codestral": (0.30, 0.90),
+        "pixtral-large": (2.00, 6.00),
+        "pixtral-12b": (0.15, 0.15),
 
-        // Groq models (January 2026)
+        // Groq models (February 2026)
         "llama-4-maverick": (0.50, 0.77),
         "llama-4-scout": (0.11, 0.34),
         "llama-3.3-70b": (0.59, 0.79),
@@ -74,6 +75,48 @@ public enum CostCalculator {
 
     /// Provider name constant for Ollama (local inference).
     public static let ollamaProviderName = "ollama"
+
+    // MARK: - Cost Estimation Constants
+
+    /// Token estimates for typical workflow steps.
+    private enum EstimatedTokens {
+        /// Query conversion step: input tokens.
+        static let queryInput = 500
+        /// Query conversion step: output tokens.
+        static let queryOutput = 100
+        /// Per-document scoring: input tokens.
+        static let scoringInputPerDoc = 800
+        /// Per-document scoring: output tokens.
+        static let scoringOutputPerDoc = 100
+        /// Per-relevant-document citation extraction: input tokens.
+        static let citationInputPerDoc = 1000
+        /// Per-relevant-document citation extraction: output tokens.
+        static let citationOutputPerDoc = 200
+        /// Report generation: input tokens.
+        static let reportInput = 2000
+        /// Report generation: output tokens.
+        static let reportOutput = 1500
+        /// Assumed fraction of documents that are relevant (1/N).
+        static let relevantFractionDivisor = 3
+    }
+
+    /// Multipliers for cost estimate range.
+    private enum EstimateRange {
+        /// Lower bound multiplier (80% of estimate).
+        static let lowerBound = 0.8
+        /// Upper bound multiplier (150% of estimate).
+        static let upperBound = 1.5
+    }
+
+    /// Formatting thresholds for cost display.
+    private enum FormatThresholds {
+        /// Below this, show "< $0.001".
+        static let subMillicent = 0.001
+        /// Below this, show 4 decimal places.
+        static let subCent = 0.01
+        /// Below this, show 3 decimal places.
+        static let subDollar = 1.0
+    }
 
     // MARK: - Public Methods
 
@@ -107,24 +150,32 @@ public enum CostCalculator {
             return (0, 0)
         }
 
-        // Normalize model name (remove provider prefix, lowercase)
+        // Normalize model name: remove org prefix (before slash), lowercase
         var normalizedModel = model.lowercased()
         if let lastSlashComponent = normalizedModel.components(separatedBy: "/").last, !lastSlashComponent.isEmpty {
             normalizedModel = lastSlashComponent
         }
-        if let lastColonComponent = normalizedModel.components(separatedBy: ":").last, !lastColonComponent.isEmpty {
-            normalizedModel = lastColonComponent
-        }
 
-        // Check for exact match in known pricing
+        // Try exact match with full normalized name (may include colon tag)
         if let pricing = modelPricing[normalizedModel] {
             return pricing
         }
 
-        // Check for partial match (e.g., "gpt-4o-mini-2024-07-18" -> "gpt-4o-mini")
-        for (key, pricing) in modelPricing {
-            if normalizedModel.hasPrefix(key) || normalizedModel.contains(key) {
-                return pricing
+        // Try without version/tag suffix (e.g., "codestral:latest" → "codestral")
+        let colonComponents = normalizedModel.components(separatedBy: ":")
+        let withoutTag = colonComponents.first ?? normalizedModel
+        if colonComponents.count > 1, !withoutTag.isEmpty, let pricing = modelPricing[withoutTag] {
+            return pricing
+        }
+
+        // Check for partial match (e.g., "gpt-4o-mini-2024-07-18" → "gpt-4o-mini")
+        // Try both the full name and the name without tag
+        let candidates = colonComponents.count > 1 ? [normalizedModel, withoutTag] : [normalizedModel]
+        for candidate in candidates {
+            for (key, pricing) in modelPricing {
+                if candidate.hasPrefix(key) || candidate.contains(key) {
+                    return pricing
+                }
             }
         }
 
@@ -149,12 +200,14 @@ public enum CostCalculator {
         let pricing = getPricing(for: model)
 
         // Conservative estimates
-        let relevantDocs = max(1, documentCount / 3)  // Assume 1/3 are relevant
+        let relevantDocs = max(1, documentCount / EstimatedTokens.relevantFractionDivisor)
 
-        let queryTokens = (input: 500, output: 100)
-        let scoringTokens = (input: 800 * documentCount, output: 100 * documentCount)
-        let citationTokens = (input: 1000 * relevantDocs, output: 200 * relevantDocs)
-        let reportTokens = (input: 2000, output: 1500)
+        let queryTokens = (input: EstimatedTokens.queryInput, output: EstimatedTokens.queryOutput)
+        let scoringTokens = (input: EstimatedTokens.scoringInputPerDoc * documentCount,
+                             output: EstimatedTokens.scoringOutputPerDoc * documentCount)
+        let citationTokens = (input: EstimatedTokens.citationInputPerDoc * relevantDocs,
+                              output: EstimatedTokens.citationOutputPerDoc * relevantDocs)
+        let reportTokens = (input: EstimatedTokens.reportInput, output: EstimatedTokens.reportOutput)
 
         let totalInput = queryTokens.input + scoringTokens.input + citationTokens.input + reportTokens.input
         let totalOutput = queryTokens.output + scoringTokens.output + citationTokens.output + reportTokens.output
@@ -162,8 +215,7 @@ public enum CostCalculator {
         let estimatedCost = Double(totalInput) * pricing.input / 1_000_000
             + Double(totalOutput) * pricing.output / 1_000_000
 
-        // Return range: 80% to 150% of estimate
-        return (min: estimatedCost * 0.8, max: estimatedCost * 1.5)
+        return (min: estimatedCost * EstimateRange.lowerBound, max: estimatedCost * EstimateRange.upperBound)
     }
 
     /// Format a cost value for display.
@@ -171,11 +223,11 @@ public enum CostCalculator {
     /// - Parameter cost: Cost in USD.
     /// - Returns: Formatted string (e.g., "$0.0023" or "< $0.01").
     public static func formatCost(_ cost: Double) -> String {
-        if cost < 0.001 {
+        if cost < FormatThresholds.subMillicent {
             return "< $0.001"
-        } else if cost < 0.01 {
+        } else if cost < FormatThresholds.subCent {
             return String(format: "$%.4f", cost)
-        } else if cost < 1.0 {
+        } else if cost < FormatThresholds.subDollar {
             return String(format: "$%.3f", cost)
         } else {
             return String(format: "$%.2f", cost)
