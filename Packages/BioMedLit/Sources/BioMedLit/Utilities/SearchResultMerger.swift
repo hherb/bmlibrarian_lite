@@ -22,6 +22,11 @@ import Foundation
 private enum MergerConstants {
     /// Minimum Jaccard similarity to consider titles as duplicates.
     static let titleSimilarityThreshold: Double = 0.8
+
+    /// Minimum word length to include in similarity calculation.
+    /// Filters out very short words (articles, prepositions) that
+    /// add noise to Jaccard similarity.
+    static let minWordLength = 2
 }
 
 // MARK: - Search Result Merger
@@ -29,11 +34,15 @@ private enum MergerConstants {
 /// Merges and deduplicates search results from multiple providers.
 ///
 /// This utility combines results from PubMed and Europe PMC, removing
-/// duplicate articles based on PMID, DOI, or title similarity.
+/// duplicate articles based on PMID, DOI, PMC ID, or title similarity.
+///
+/// Uses multi-key deduplication: when a PubMed article is inserted, all
+/// its identifiers (PMID, DOI, PMC ID) are registered so Europe PMC
+/// articles can be matched on any identifier.
 public enum SearchResultMerger {
     /// Merge results from PubMed and Europe PMC, removing duplicates.
     ///
-    /// Deduplication priority: PMID > DOI > Title similarity
+    /// Deduplication priority: PMID > DOI > PMC ID > Title similarity
     ///
     /// - Parameters:
     ///   - pubmedResult: Results from PubMed.
@@ -43,14 +52,16 @@ public enum SearchResultMerger {
         pubmedResult: SearchResult,
         europePMCResult: SearchResult
     ) -> SearchResult {
-        var seen = Set<String>()  // Track seen identifiers
+        var seen = Set<String>()
         var merged: [SearchArticle] = []
 
-        // Add PubMed results first (primary source)
+        // Add PubMed results first (primary source, higher priority)
         for article in pubmedResult.articles {
             let key = deduplicationKey(for: article)
             if !seen.contains(key) {
                 seen.insert(key)
+                // Also add alternative keys for more robust deduplication
+                addAlternativeKeys(for: article, to: &seen)
                 merged.append(article)
             }
         }
@@ -58,8 +69,15 @@ public enum SearchResultMerger {
         // Add unique Europe PMC results
         for article in europePMCResult.articles {
             let key = deduplicationKey(for: article)
-            if !seen.contains(key) {
+
+            // Check all possible keys for this article
+            let isDuplicate = seen.contains(key) ||
+                alternativeKeysContained(for: article, in: seen) ||
+                titleMatchesExisting(article, in: merged)
+
+            if !isDuplicate {
                 seen.insert(key)
+                addAlternativeKeys(for: article, to: &seen)
                 merged.append(article)
             }
         }
@@ -79,7 +97,7 @@ public enum SearchResultMerger {
 
     /// Merge arrays of articles, removing duplicates.
     ///
-    /// Deduplication priority: PMID > DOI > Title similarity
+    /// Deduplication priority: PMID > DOI > PMC ID > Title similarity
     ///
     /// - Parameters:
     ///   - primary: Primary articles (will be preserved in case of duplicates).
@@ -97,6 +115,7 @@ public enum SearchResultMerger {
             let key = deduplicationKey(for: article)
             if !seen.contains(key) {
                 seen.insert(key)
+                addAlternativeKeys(for: article, to: &seen)
                 merged.append(article)
             }
         }
@@ -104,8 +123,13 @@ public enum SearchResultMerger {
         // Add unique secondary results
         for article in secondary {
             let key = deduplicationKey(for: article)
-            if !seen.contains(key) {
+            let isDuplicate = seen.contains(key) ||
+                alternativeKeysContained(for: article, in: seen) ||
+                titleMatchesExisting(article, in: merged)
+
+            if !isDuplicate {
                 seen.insert(key)
+                addAlternativeKeys(for: article, to: &seen)
                 merged.append(article)
             }
         }
@@ -113,7 +137,11 @@ public enum SearchResultMerger {
         return merged
     }
 
+    // MARK: - Deduplication Keys
+
     /// Generate a unique key for deduplication.
+    ///
+    /// Priority: PMID > DOI > normalized title
     ///
     /// - Parameter article: The article to generate a key for.
     /// - Returns: A string key for deduplication.
@@ -129,8 +157,70 @@ public enum SearchResultMerger {
         }
 
         // Last resort: normalized title
-        let normalizedTitle = normalizeTitle(article.title)
-        return "title:\(normalizedTitle)"
+        return "title:\(normalizeTitle(article.title))"
+    }
+
+    /// Add alternative deduplication keys for an article.
+    ///
+    /// This ensures that articles can be matched by any of their identifiers,
+    /// not just the primary key.
+    ///
+    /// - Parameters:
+    ///   - article: Article to add keys for.
+    ///   - seen: Set to add keys to.
+    private static func addAlternativeKeys(
+        for article: SearchArticle,
+        to seen: inout Set<String>
+    ) {
+        if !article.pmid.isEmpty {
+            seen.insert("pmid:\(article.pmid)")
+        }
+        if let doi = article.doi, !doi.isEmpty {
+            seen.insert("doi:\(doi.lowercased())")
+        }
+        if let pmcId = article.pmcId, !pmcId.isEmpty {
+            seen.insert("pmc:\(pmcId.lowercased())")
+        }
+    }
+
+    /// Check if any alternative key for an article is in the seen set.
+    ///
+    /// - Parameters:
+    ///   - article: Article to check.
+    ///   - seen: Set of seen keys.
+    /// - Returns: True if any key matches.
+    private static func alternativeKeysContained(
+        for article: SearchArticle,
+        in seen: Set<String>
+    ) -> Bool {
+        if !article.pmid.isEmpty && seen.contains("pmid:\(article.pmid)") {
+            return true
+        }
+        if let doi = article.doi, !doi.isEmpty, seen.contains("doi:\(doi.lowercased())") {
+            return true
+        }
+        if let pmcId = article.pmcId, !pmcId.isEmpty, seen.contains("pmc:\(pmcId.lowercased())") {
+            return true
+        }
+        return false
+    }
+
+    /// Check if article title matches any existing article using similarity.
+    ///
+    /// - Parameters:
+    ///   - article: New article to check.
+    ///   - existing: Existing articles to compare against.
+    /// - Returns: True if a title match is found.
+    private static func titleMatchesExisting(
+        _ article: SearchArticle,
+        in existing: [SearchArticle]
+    ) -> Bool {
+        for existingArticle in existing {
+            if titleSimilarity(article.title, existingArticle.title) > MergerConstants.titleSimilarityThreshold {
+                return true
+            }
+        }
+        return false
     }
 
     /// Normalize a title for comparison.
@@ -143,6 +233,8 @@ public enum SearchResultMerger {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .joined()
     }
+
+    // MARK: - Public Duplicate Check
 
     /// Check if two articles are likely duplicates.
     ///
@@ -162,10 +254,17 @@ public enum SearchResultMerger {
             return true
         }
 
+        // Same PMC ID
+        if let pmcA = articleA.pmcId, let pmcB = articleB.pmcId,
+           !pmcA.isEmpty && pmcA.lowercased() == pmcB.lowercased() {
+            return true
+        }
+
         // Similar title (Jaccard similarity > threshold)
-        let similarity = titleSimilarity(articleA.title, articleB.title)
-        return similarity > MergerConstants.titleSimilarityThreshold
+        return titleSimilarity(articleA.title, articleB.title) > MergerConstants.titleSimilarityThreshold
     }
+
+    // MARK: - Similarity Calculation
 
     /// Calculate Jaccard similarity between two titles.
     ///
@@ -180,15 +279,19 @@ public enum SearchResultMerger {
         let wordsA = extractWords(from: titleA)
         let wordsB = extractWords(from: titleB)
 
-        guard !wordsA.isEmpty && !wordsB.isEmpty else { return 0 }
+        guard !wordsA.isEmpty && !wordsB.isEmpty else { return 0.0 }
 
         let intersection = wordsA.intersection(wordsB).count
         let union = wordsA.union(wordsB).count
 
+        guard union > 0 else { return 0.0 }
+
         return Double(intersection) / Double(union)
     }
 
-    /// Extract words from a title for comparison.
+    /// Extract meaningful words from a title for comparison.
+    ///
+    /// Filters out very short words to reduce noise in similarity calculation.
     ///
     /// - Parameter title: The title to extract words from.
     /// - Returns: Set of lowercase words.
@@ -197,7 +300,7 @@ public enum SearchResultMerger {
             title
                 .lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                .filter { !$0.isEmpty }
+                .filter { $0.count >= MergerConstants.minWordLength }
         )
     }
 }
