@@ -289,9 +289,9 @@ enum BioMedLitAdapters {
     /// - Returns: App-compatible AppFullTextResult.
     static func toAppFullTextResult(_ result: BMLFullTextResult) -> AppFullTextResult {
         switch result {
-        case .europePMC(let html, _):
-            // Use HTML for proper table and figure rendering
-            return AppFullTextResult(content: .html(html), source: .europePMC)
+        case .europePMC(let html, let markdown):
+            // Store both HTML (for rendering) and markdown (for search/export fallback)
+            return AppFullTextResult(content: .html(content: html, markdown: markdown ?? ""), source: .europePMC)
         case .unpaywall(let pdfURL):
             return AppFullTextResult(content: .pdfURL(pdfURL), source: .unpaywall)
         case .doi(let webURL):

@@ -20,7 +20,7 @@ import Foundation
 ///
 /// Represents the origin of a full-text article, used for display,
 /// attribution, and debugging purposes.
-enum FullTextSource: String, Codable, CaseIterable {
+enum FullTextSource: String, Codable, CaseIterable, Sendable {
     /// Europe PMC XML full text (highest quality, machine-readable).
     case europePMC = "europepmc"
 
@@ -68,7 +68,7 @@ enum FullTextSource: String, Codable, CaseIterable {
 }
 
 /// The type of content retrieved from a full-text source.
-enum FullTextContentType: Equatable {
+enum FullTextContentType: Equatable, Sendable {
     /// Markdown-formatted text (from Europe PMC XML conversion).
     /// Deprecated: prefer `.html` for better table and figure rendering.
     case markdown(String)
@@ -133,7 +133,7 @@ enum FullTextContentType: Equatable {
 /// Result of a full-text retrieval attempt.
 ///
 /// Contains the retrieved content and metadata about its source.
-struct FullTextResult: Equatable {
+struct FullTextResult: Equatable, Sendable {
     /// The type of content retrieved.
     let content: FullTextContentType
 
@@ -146,6 +146,26 @@ struct FullTextResult: Equatable {
     /// web URLs require opening in an external browser.
     var canDisplayInApp: Bool {
         content.canDisplayInApp
+    }
+
+    /// Get the HTML content if available.
+    var htmlContent: String? {
+        content.htmlContent
+    }
+
+    /// Get the markdown content if available.
+    var markdownContent: String? {
+        content.markdownContent
+    }
+
+    /// Get the PDF URL if available.
+    var pdfURL: URL? {
+        content.pdfURL
+    }
+
+    /// Get the web URL if this is a fallback result.
+    var webURL: URL? {
+        content.webURL
     }
 
     /// Create a markdown result from Europe PMC.

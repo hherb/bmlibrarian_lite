@@ -111,9 +111,30 @@ struct SearchOptions: Sendable {
     /// For cursor-based APIs (Europe PMC), this represents the logical position.
     var offset: Int = 0
 
+    /// Cursor mark for Europe PMC pagination (nil for first page).
+    ///
+    /// Europe PMC uses cursor-based pagination. For the first page, pass nil
+    /// (which will use "*"). For subsequent pages, pass the nextCursorMark
+    /// from the previous response.
+    var cursorMark: String?
+
     /// Default values for search options.
     enum SearchOptionsDefaults {
         /// Default maximum results per search.
         static let defaultMaxResults = 20
+    }
+
+    /// Create default options for a provider.
+    ///
+    /// - Parameter provider: The search provider.
+    /// - Returns: Default search options for the provider.
+    static func defaults(for provider: SearchProvider) -> SearchOptions {
+        SearchOptions(
+            provider: provider,
+            includePreprints: false,
+            maxResults: SearchOptionsDefaults.defaultMaxResults,
+            offset: 0,
+            cursorMark: nil
+        )
     }
 }

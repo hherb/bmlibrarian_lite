@@ -100,14 +100,20 @@ final class EvidenceReport {
 
         // Model and provider info
         if let model = session?.modelName, let provider = session?.providerName {
-            parts.append("Generated using \(model) by \(provider)")
+            let providerDisplay = provider == "ollama" ? "\(provider.capitalized) (Local)" : provider.capitalized
+            parts.append("Generated using \(model) by \(providerDisplay)")
         } else if let model = session?.modelName {
             parts.append("Generated using \(model)")
         }
 
-        // Search statistics
-        parts.append("Search limited to \(documentsReviewed) documents")
-        parts.append("\(uniqueSourceCount) scored as relevant")
+        // Search statistics - use actual values from session if available
+        if let session = session {
+            parts.append("\(session.documentsFound) documents found")
+            parts.append("\(session.relevantDocumentsFound) scored as relevant")
+        } else {
+            parts.append("\(documentsReviewed) documents reviewed")
+            parts.append("\(uniqueSourceCount) cited")
+        }
 
         return parts.joined(separator: ", ") + "."
     }

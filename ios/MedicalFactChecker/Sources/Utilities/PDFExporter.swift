@@ -53,6 +53,50 @@ enum PaperSize: String, CaseIterable, Identifiable {
     }
 }
 
+/// Layout constants for PDF report generation.
+private enum PDFLayout {
+    /// Page margin in points.
+    static let pageMargin: CGFloat = 50
+    /// Badge font size in points.
+    static let badgeFontSize: CGFloat = 14
+    /// Badge text padding.
+    static let badgePadding: CGFloat = 12
+    /// Badge bottom spacing.
+    static let badgeBottomSpacing: CGFloat = 10
+    /// Divider height including spacing.
+    static let dividerHeight: CGFloat = 10
+    /// Divider vertical offset within its space.
+    static let dividerOffset: CGFloat = 5
+    /// Divider stroke width.
+    static let dividerStrokeWidth: CGFloat = 0.5
+    /// Heading 1 font size.
+    static let heading1FontSize: CGFloat = 16
+    /// Heading 2 font size.
+    static let heading2FontSize: CGFloat = 14
+    /// Heading 3+ font size.
+    static let heading3FontSize: CGFloat = 12
+    /// Body text font size.
+    static let bodyFontSize: CGFloat = 11
+    /// Footnote font size.
+    static let footnoteFontSize: CGFloat = 9
+    /// Title font size.
+    static let titleFontSize: CGFloat = 18
+    /// Subtitle font size.
+    static let subtitleFontSize: CGFloat = 12
+    /// Spacing before heading 1.
+    static let heading1TopSpacing: CGFloat = 12
+    /// Spacing before heading 2+.
+    static let heading2TopSpacing: CGFloat = 8
+    /// Spacing after headings.
+    static let headingBottomSpacing: CGFloat = 4
+    /// Spacing after paragraphs.
+    static let paragraphSpacing: CGFloat = 6
+    /// Spacing after list items.
+    static let listItemSpacing: CGFloat = 3
+    /// Spacing after title.
+    static let titleSpacing: CGFloat = 8
+}
+
 /// Utility for exporting evidence reports as text-based PDF documents.
 ///
 /// Uses UIKit's text rendering for searchable, lightweight PDFs.
@@ -183,23 +227,23 @@ struct PDFExporter {
 
             func drawDivider() {
                 startNewPageIfNeeded()
-                ensureSpace(for: 10)
+                ensureSpace(for: PDFLayout.dividerHeight)
 
                 let path = UIBezierPath()
-                path.move(to: CGPoint(x: contentRect.minX, y: currentY + 5))
-                path.addLine(to: CGPoint(x: contentRect.maxX, y: currentY + 5))
+                path.move(to: CGPoint(x: contentRect.minX, y: currentY + PDFLayout.dividerOffset))
+                path.addLine(to: CGPoint(x: contentRect.maxX, y: currentY + PDFLayout.dividerOffset))
                 UIColor.lightGray.setStroke()
-                path.lineWidth = 0.5
+                path.lineWidth = PDFLayout.dividerStrokeWidth
                 path.stroke()
 
-                currentY += 10
+                currentY += PDFLayout.dividerHeight
             }
 
             func drawBadge(_ text: String, color: UIColor) {
                 startNewPageIfNeeded()
 
-                let font = UIFont.boldSystemFont(ofSize: 14)
-                let padding: CGFloat = 12
+                let font = UIFont.boldSystemFont(ofSize: PDFLayout.badgeFontSize)
+                let padding: CGFloat = PDFLayout.badgePadding
                 let attributes: [NSAttributedString.Key: Any] = [
                     .font: font,
                     .foregroundColor: UIColor.white
@@ -209,7 +253,7 @@ struct PDFExporter {
                 let badgeWidth = textSize.width + padding * 2
                 let badgeHeight = textSize.height + padding
 
-                ensureSpace(for: badgeHeight + 10)
+                ensureSpace(for: badgeHeight + PDFLayout.badgeBottomSpacing)
 
                 let badgeX = contentRect.midX - badgeWidth / 2
                 let badgeRect = CGRect(x: badgeX, y: currentY, width: badgeWidth, height: badgeHeight)
@@ -226,7 +270,7 @@ struct PDFExporter {
                 )
                 text.draw(in: textRect, withAttributes: attributes)
 
-                currentY += badgeHeight + 10
+                currentY += badgeHeight + PDFLayout.badgeBottomSpacing
             }
 
             // MARK: - Markdown Rendering Helpers
@@ -239,25 +283,25 @@ struct PDFExporter {
                 for block in blocks {
                     switch block {
                     case .heading(let level, let text):
-                        addSpacing(level == 1 ? 12 : 8)
+                        addSpacing(level == 1 ? PDFLayout.heading1TopSpacing : PDFLayout.heading2TopSpacing)
                         let font: UIFont = switch level {
-                        case 1: .boldSystemFont(ofSize: 16)
-                        case 2: .boldSystemFont(ofSize: 14)
-                        default: .boldSystemFont(ofSize: 12)
+                        case 1: .boldSystemFont(ofSize: PDFLayout.heading1FontSize)
+                        case 2: .boldSystemFont(ofSize: PDFLayout.heading2FontSize)
+                        default: .boldSystemFont(ofSize: PDFLayout.heading3FontSize)
                         }
                         _ = drawText(text, font: font)
-                        addSpacing(4)
+                        addSpacing(PDFLayout.headingBottomSpacing)
 
                     case .paragraph(let text):
                         let cleanedText = convertReferencesToPlainText(text)
-                        _ = drawFormattedText(cleanedText, baseFont: .systemFont(ofSize: 11))
-                        addSpacing(6)
+                        _ = drawFormattedText(cleanedText, baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
+                        addSpacing(PDFLayout.paragraphSpacing)
 
                     case .listItem(let text, let ordered, let number):
                         let cleanedText = convertReferencesToPlainText(text)
                         let bullet = ordered ? "\(number ?? 1)." : "•"
-                        _ = drawFormattedText("\(bullet) \(cleanedText)", baseFont: .systemFont(ofSize: 11))
-                        addSpacing(3)
+                        _ = drawFormattedText("\(bullet) \(cleanedText)", baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
+                        addSpacing(PDFLayout.listItemSpacing)
                     }
                 }
             }

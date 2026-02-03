@@ -1449,8 +1449,9 @@ struct DocumentDetailSheet: View {
                 await MainActor.run {
                     // Update document model
                     switch result.content {
-                    case .html(let htmlContent):
+                    case .html(let htmlContent, let markdownContent):
                         document.fullTextHTML = htmlContent
+                        document.fullTextContent = markdownContent
                     case .markdown(let content):
                         document.fullTextContent = content
                     case .pdfURL(let url):
