@@ -437,7 +437,7 @@ struct MacReportView: View {
 
     private func printReport(_ report: EvidenceReport) {
         // Generate PDF and print
-        if let pdfData = PDFExporter.generatePDFWithPagination(for: report, paperSize: .a4) {
+        if let pdfData = PDFExporter.generatePDFWithPagination(for: report, paperSize: PDFExporter.preferredPaperSize) {
             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("report.pdf")
             try? pdfData.write(to: tempURL)
 

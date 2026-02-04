@@ -140,13 +140,13 @@ struct HistoryView: View {
 
     // MARK: - Private Methods
 
-    /// Deletes multiple sessions at the given offsets.
+    /// Deletes sessions at the given offsets within `filteredSessions`.
     ///
     /// Used by the swipe-to-delete gesture on the list.
-    /// - Parameter offsets: The index set of sessions to delete.
+    /// - Parameter offsets: Index set within `filteredSessions`.
     private func deleteSessions(at offsets: IndexSet) {
         for index in offsets {
-            modelContext.delete(sessions[index])
+            modelContext.delete(filteredSessions[index])
         }
         try? modelContext.save()
     }
