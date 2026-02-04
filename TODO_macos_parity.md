@@ -20,22 +20,22 @@ Comprehensive parity review comparing `macos/MedicalFactCheckerMac/` and `ios/Me
 ## Medium-Priority: macOS has, iOS lacks
 
 - [ ] **10. Dedicated Full Text tab** — Standalone document browser with filtering (With Full Text / Pending / All Scored). iOS only accesses full text via document detail sheets.
-- [ ] **11. History search/filter** — Text field to search past sessions by claim text. iOS has no filtering.
+- [x] **11. History search/filter** — Text field to search past sessions by claim text. iOS now has `.searchable()` with filtering.
 - [ ] **12. History detail pane** — Split-view with comprehensive session stats (scored count, relevant, tokens, duration). iOS shows basic inline info only.
-- [ ] **13. Copy to Clipboard for reports** — Direct clipboard action for report text.
+- [x] **13. Copy to Clipboard for reports** — Direct clipboard action for report text. Added to iOS share menus.
 - [ ] **14. Print reports** — `NSPrintOperation` support (macOS-only, platform-appropriate).
-- [ ] **15. Show/Hide API Key toggle** — Eye button to reveal/hide key in settings.
-- [ ] **16. Structured OSLog logging** — `Logger.swift` with category-specific loggers. iOS likely uses `print()`.
+- [x] **15. Show/Hide API Key toggle** — Eye button to reveal/hide key in settings. Added to iOS.
+- [x] **16. Structured OSLog logging** — `Logger.swift` with category-specific loggers. Added to iOS matching macOS AppLogger.
 - [x] **17. `fullTextSourceDisplay` handles `"cached"` case** — iOS switch is missing this case.
 - [ ] **18. `SchemaV0` migration** — macOS can handle pre-versioning databases. iOS cannot.
 - [ ] **19. `onAskSmartSearch` callback** — macOS always prompts user after scoring. iOS auto-activates smart search without prompting.
 
 ## Medium-Priority: iOS has, macOS lacks
 
-- [ ] **20. `maxConcurrentRequests` setting** — User-configurable concurrency for parallel LLM requests. macOS has no such setting.
+- [x] **20. `maxConcurrentRequests` setting** — User-configurable concurrency for parallel LLM requests. Added to macOS AppSettings and Settings UI.
 - [ ] **21. Detailed Model Pricing table** — `ModelPricingView` with per-model input/output costs. macOS has brief pricing summary only.
-- [ ] **22. PDF paper size selection** — A4 vs Letter picker for report export. macOS exports fixed format.
-- [ ] **23. Error badge on tab** — Check tab shows badge count for errors. macOS sidebar has no badge.
+- [x] **22. PDF paper size selection** — A4 vs Letter picker for report export. Added to macOS export menu, uses `PDFExporter.preferredPaperSize`.
+- [x] **23. Error badge on tab** — Configuration warning in macOS sidebar when API key is missing.
 - [ ] **24. Manual JSON fallback in query building** — iOS has `buildQueryFromJSON`, `extractJSONFromResponse`, `buildQueryFromConcepts` fallbacks. macOS relies solely on `QueryBuilderFactory`.
 
 ## Architectural Divergence (Consolidation into BioMedLit Package)
@@ -53,9 +53,9 @@ Comprehensive parity review comparing `macos/MedicalFactCheckerMac/` and `ios/Me
 ## Low-Priority / Cosmetic
 
 - [x] **34. iOS PDFExporter uses magic numbers** — macOS uses `MacPDFLayout` constants. iOS hardcodes page dimensions. Added `PDFLayout` constants enum.
-- [ ] **35. Disclaimer content differs** — iOS has "No Self-Treatment". macOS has "Your Privacy". Both should have both.
+- [x] **35. Disclaimer content differs** — Both platforms now have "No Self-Treatment" and "Your Privacy" points.
 - [ ] **36. `[weak self]` in Task closures** — iOS uses `[weak self]`; macOS does not. Potential memory leak on macOS.
-- [ ] **37. Copyright years inconsistent** — iOS has `2024-2025`; macOS has `2024-2026`.
+- [x] **37. Copyright years inconsistent** — All files updated to `2024-2026`.
 - [ ] **38. Property naming inconsistency** — iOS: `currentSearchOptions` / macOS: `searchOptions`. iOS: `searchOptions:` param / macOS: `overrideSearchOptions:`.
 - [x] **39. `EvidenceReport.generationFootnote` logic differs** — iOS uses live session data with Ollama "(Local)" suffix. macOS uses stored report statistics. Now aligned.
 - [ ] **40. Documentation density differs** — iOS has thorough doc comments on `ErrorPersistenceManager`; macOS has minimal.

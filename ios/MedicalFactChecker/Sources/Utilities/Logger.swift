@@ -1,3 +1,4 @@
+#if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2026 Dr Horst Herb
 //
@@ -111,23 +112,4 @@ extension Logger {
     }
 }
 
-// MARK: - Bundle Extension
-
-extension Bundle {
-    /// The app's marketing version (CFBundleShortVersionString).
-    var marketingVersion: String {
-        infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
-    }
-
-    /// The app's build number (CFBundleVersion).
-    var buildNumber: String {
-        infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
-    }
-
-    /// A formatted version string combining marketing version and build number.
-    ///
-    /// Format: "X.Y.Z (Build N)" e.g., "1.3.0 (Build 3)"
-    var appVersionString: String {
-        "\(marketingVersion) (Build \(buildNumber))"
-    }
-}
+#endif // os(iOS)

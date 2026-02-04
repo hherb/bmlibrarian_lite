@@ -1,6 +1,6 @@
 #if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -202,6 +202,13 @@ struct ReportContentView: View {
 
     private var shareMenu: some View {
         Menu {
+            // Copy to clipboard
+            Button {
+                UIPasteboard.general.string = report.plainTextReport
+            } label: {
+                Label("Copy to Clipboard", systemImage: "doc.on.doc")
+            }
+
             // Plain text share
             ShareLink(
                 item: report.plainTextReport,
@@ -382,6 +389,13 @@ struct ReportView: View {
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
+                        // Copy to clipboard
+                        Button {
+                            UIPasteboard.general.string = report.plainTextReport
+                        } label: {
+                            Label("Copy to Clipboard", systemImage: "doc.on.doc")
+                        }
+
                         // Plain text share
                         ShareLink(
                             item: report.plainTextReport,

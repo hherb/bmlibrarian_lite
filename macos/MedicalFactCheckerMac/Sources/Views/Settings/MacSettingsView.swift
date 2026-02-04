@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -252,6 +252,27 @@ struct LLMSettingsTab: View {
                     TextField("Model Name", text: $settings.llmModel)
                         .textFieldStyle(.roundedBorder)
                 }
+            }
+
+            // Parallel processing
+            Section("Parallel Processing") {
+                let concurrencyBinding = Binding<Int>(
+                    get: { settings.maxConcurrentRequests ?? 0 },
+                    set: { settings.maxConcurrentRequests = $0 > 0 ? $0 : nil }
+                )
+
+                Stepper(value: concurrencyBinding, in: 0...10) {
+                    HStack {
+                        Text("Max Concurrent Requests")
+                        Spacer()
+                        Text(settings.maxConcurrentRequests.map { "\($0)" } ?? "Auto")
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Text("Auto-detects based on provider: cloud APIs use 3, local (Ollama) uses 1. Set to 0 for auto-detect.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             // Embedding scoring

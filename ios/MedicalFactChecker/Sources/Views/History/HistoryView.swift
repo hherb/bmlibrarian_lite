@@ -1,6 +1,6 @@
 #if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -39,6 +39,18 @@ struct HistoryView: View {
 
     @State private var selectedReport: EvidenceReport?
     @State private var sessionToDelete: FactCheckSession?
+    @State private var searchText = ""
+
+    /// Sessions filtered by search text.
+    private var filteredSessions: [FactCheckSession] {
+        if searchText.isEmpty {
+            return sessions
+        }
+        return sessions.filter { session in
+            session.claim.localizedCaseInsensitiveContains(searchText) ||
+            (session.pubmedQuery?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -47,7 +59,7 @@ struct HistoryView: View {
                     EmptyHistoryView()
                 } else {
                     List {
-                        ForEach(sessions) { session in
+                        ForEach(filteredSessions) { session in
                             SessionRow(
                                 session: session,
                                 onContinueSearch: onContinueSession != nil ? {
@@ -96,6 +108,7 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("History")
+            .searchable(text: $searchText, prompt: "Search claims...")
             .toolbar {
                 if !sessions.isEmpty {
                     EditButton()
@@ -127,13 +140,13 @@ struct HistoryView: View {
 
     // MARK: - Private Methods
 
-    /// Deletes multiple sessions at the given offsets.
+    /// Deletes sessions at the given offsets within `filteredSessions`.
     ///
     /// Used by the swipe-to-delete gesture on the list.
-    /// - Parameter offsets: The index set of sessions to delete.
+    /// - Parameter offsets: Index set within `filteredSessions`.
     private func deleteSessions(at offsets: IndexSet) {
         for index in offsets {
-            modelContext.delete(sessions[index])
+            modelContext.delete(filteredSessions[index])
         }
         try? modelContext.save()
     }

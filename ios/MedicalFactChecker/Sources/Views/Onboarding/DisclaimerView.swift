@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -127,6 +127,12 @@ struct DisclaimerView: View {
                 icon: "exclamationmark.circle.fill",
                 title: "No Self-Treatment",
                 text: "Never use this app for self-diagnosis or to replace professional medical consultation."
+            )
+
+            disclaimerPoint(
+                icon: "lock.shield",
+                title: "Your Privacy",
+                text: "Your queries are sent to LLM providers for processing. No personal health data is stored externally."
             )
         }
     }
