@@ -291,7 +291,7 @@ enum BioMedLitAdapters {
         switch result {
         case .europePMC(let html, let markdown):
             // Store both HTML (for rendering) and markdown (for search/export fallback)
-            return AppFullTextResult(content: .html(content: html, markdown: markdown ?? ""), source: .europePMC)
+            return AppFullTextResult(content: .html(content: html, markdown: markdown), source: .europePMC)
         case .unpaywall(let pdfURL):
             return AppFullTextResult(content: .pdfURL(pdfURL), source: .unpaywall)
         case .doi(let webURL):
