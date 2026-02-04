@@ -1,6 +1,6 @@
 #if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -25,6 +25,7 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var apiKey = ""
+    @State private var showingAPIKey = false
     @State private var ncbiAPIKey = ""
     @State private var showingSaveConfirmation = false
     @State private var monthlyUsage: Double = 0
@@ -178,8 +179,20 @@ struct SettingsView: View {
                 // API Key Section
                 Section {
                     if settings.selectedProvider.requiresAPIKey {
-                        SecureField("API Key", text: $apiKey)
-                            .textContentType(.password)
+                        HStack {
+                            if showingAPIKey {
+                                TextField("API Key", text: $apiKey)
+                                    .textContentType(.password)
+                            } else {
+                                SecureField("API Key", text: $apiKey)
+                                    .textContentType(.password)
+                            }
+
+                            Button(action: { showingAPIKey.toggle() }) {
+                                Image(systemName: showingAPIKey ? "eye.slash" : "eye")
+                            }
+                            .buttonStyle(.borderless)
+                        }
 
                         HStack {
                             Button("Save API Key") {

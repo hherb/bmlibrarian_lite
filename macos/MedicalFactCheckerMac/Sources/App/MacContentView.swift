@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -114,6 +114,24 @@ struct MacContentView: View {
                 ForEach(MacNavigationItem.allCases) { item in
                     NavigationLink(value: item) {
                         Label(item.rawValue, systemImage: item.icon)
+                    }
+                }
+            }
+
+            // Configuration warning in sidebar
+            if !AppSettings.shared.isLLMConfigured {
+                Section {
+                    Label {
+                        Text("API Key Required")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                    }
+                    .onTapGesture {
+                        // Open settings window
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                     }
                 }
             }
@@ -297,6 +315,13 @@ struct MacDisclaimerView: View {
                     color: .purple,
                     title: "AI Limitations",
                     description: "AI may misinterpret evidence or miss important context. Use critical thinking when reviewing results."
+                )
+
+                DisclaimerPoint(
+                    icon: "exclamationmark.circle.fill",
+                    color: .red,
+                    title: "No Self-Treatment",
+                    description: "Never use this app for self-diagnosis or to replace professional medical consultation."
                 )
 
                 DisclaimerPoint(
