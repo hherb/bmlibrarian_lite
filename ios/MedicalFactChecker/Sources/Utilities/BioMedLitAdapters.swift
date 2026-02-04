@@ -81,30 +81,125 @@ typealias BMLQueryBuilderFactory = QueryBuilderFactory
 /// calling `BMLQueryBuilderFactory.build` directly from other files.
 typealias BMLSearchResultMerger = SearchResultMerger
 
-// MARK: - Article Metadata
+// MARK: - Unified Article Metadata
 
-/// Intermediate article metadata for search results.
+/// Unified article metadata that normalizes data from different search providers.
 ///
-/// This lightweight struct is used to pass article data between services
-/// before creating SwiftData Document objects.
-struct ArticleMetadata: Sendable, Identifiable, Equatable {
-    var id: String { pmid }
+/// This struct provides a common interface for article data regardless of source,
+/// enabling consistent handling throughout the app. Each provider's response
+/// format is converted to this unified representation.
+struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
+    // MARK: - Identification
+
+    /// Unique identifier combining source and ID (e.g., "pubmed-12345678").
+    var id: String { "\(source.rawValue)-\(pmid.isEmpty ? (doi ?? title.hashValue.description) : pmid)" }
+
+    /// PubMed ID (may be empty for preprints or non-PubMed sources).
     let pmid: String
-    let title: String
-    let abstract: String
-    let authors: [String]
-    let journal: String
-    let publicationDate: String?
-    let year: Int?
-    let doi: String?
+
+    /// PubMed Central ID (e.g., "PMC1234567").
     let pmcId: String?
+
+    /// Digital Object Identifier.
+    let doi: String?
+
+    // MARK: - Bibliographic Data
+
+    /// Article title.
+    let title: String
+
+    /// Article abstract text.
+    let abstract: String
+
+    /// List of author names in display format.
+    let authors: [String]
+
+    /// Journal or source name.
+    let journal: String
+
+    /// Publication date as string (format varies by source).
+    let publicationDate: String?
+
+    /// Publication year as integer for sorting/filtering.
+    let year: Int?
+
+    // MARK: - Indexing & Classification
+
+    /// MeSH terms (Medical Subject Headings) for the article.
     let meshTerms: [String]
+
+    // MARK: - Source Tracking
+
+    /// Which provider this article came from.
+    let source: SearchProvider
+
+    /// Whether this is a preprint (Europe PMC only).
+    let isPreprint: Bool
+
+    /// Whether full text is available in PubMed Central.
+    ///
+    /// True if the article has a PMC ID or the `inPMC` flag is set.
+    /// Used to show availability badge before user attempts to fetch full text.
+    let hasFullTextInPMC: Bool
+
+    /// Batch number for pagination tracking.
     let batchNumber: Int
+
+    /// Position within search results (0-indexed).
     let resultPosition: Int
 
-    /// Whether this article likely has full text in PMC.
-    var hasFullText: Bool {
-        pmcId != nil
+    // MARK: - Initialization
+
+    /// Initialize unified metadata with all fields.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID.
+    ///   - pmcId: PubMed Central ID.
+    ///   - doi: Digital Object Identifier.
+    ///   - title: Article title.
+    ///   - abstract: Abstract text.
+    ///   - authors: List of author names.
+    ///   - journal: Journal name.
+    ///   - publicationDate: Publication date string.
+    ///   - year: Publication year.
+    ///   - meshTerms: MeSH indexing terms.
+    ///   - source: Provider that returned this article.
+    ///   - isPreprint: Whether this is a preprint.
+    ///   - hasFullTextInPMC: Whether full text is available in PMC.
+    ///   - batchNumber: Batch number for tracking.
+    ///   - resultPosition: Position in search results.
+    init(
+        pmid: String = "",
+        pmcId: String? = nil,
+        doi: String? = nil,
+        title: String,
+        abstract: String,
+        authors: [String] = [],
+        journal: String = "",
+        publicationDate: String? = nil,
+        year: Int? = nil,
+        meshTerms: [String] = [],
+        source: SearchProvider,
+        isPreprint: Bool = false,
+        hasFullTextInPMC: Bool = false,
+        batchNumber: Int = 1,
+        resultPosition: Int = 0
+    ) {
+        self.pmid = pmid
+        self.pmcId = pmcId
+        self.doi = doi
+        self.title = title
+        self.abstract = abstract
+        self.authors = authors
+        self.journal = journal
+        self.publicationDate = publicationDate
+        self.year = year
+        self.meshTerms = meshTerms
+        self.source = source
+        self.isPreprint = isPreprint
+        self.hasFullTextInPMC = hasFullTextInPMC
+        self.batchNumber = batchNumber
+        self.resultPosition = resultPosition
     }
 }
 
@@ -144,32 +239,37 @@ enum BioMedLitAdapters {
 
     // MARK: - Search Result Conversion
 
-    /// Convert BioMedLit SearchArticle to app ArticleMetadata.
+    /// Convert BioMedLit SearchArticle to app UnifiedArticleMetadata.
     ///
     /// - Parameters:
     ///   - article: The BioMedLit SearchArticle.
+    ///   - appProvider: App search provider to record as source.
     ///   - batchNumber: Which batch this article came from.
     ///   - resultPosition: Position in overall search results.
-    /// - Returns: App-compatible ArticleMetadata.
-    static func toArticleMetadata(
+    /// - Returns: App-compatible UnifiedArticleMetadata.
+    static func toUnifiedArticleMetadata(
         _ article: BMLSearchArticle,
+        appProvider: SearchProvider,
         batchNumber: Int,
         resultPosition: Int
-    ) -> ArticleMetadata {
+    ) -> UnifiedArticleMetadata {
         // Parse authors string back into array
         let authorsArray = parseAuthors(article.authors)
 
-        return ArticleMetadata(
+        return UnifiedArticleMetadata(
             pmid: article.pmid,
+            pmcId: article.pmcId,
+            doi: article.doi,
             title: article.title,
             abstract: article.abstract,
             authors: authorsArray,
             journal: article.journal,
             publicationDate: article.publicationDate,
-            year: Int(article.year) ?? nil,
-            doi: article.doi,
-            pmcId: article.pmcId,
+            year: Int(article.year),
             meshTerms: [],  // BioMedLit doesn't parse MeSH terms yet
+            source: appProvider,
+            isPreprint: false,  // BioMedLit SearchArticle doesn't track preprint status
+            hasFullTextInPMC: article.hasFullText,
             batchNumber: batchNumber,
             resultPosition: resultPosition
         )
@@ -179,17 +279,20 @@ enum BioMedLitAdapters {
     ///
     /// - Parameters:
     ///   - result: The BioMedLit SearchResult.
+    ///   - appProvider: App search provider to record as source.
     ///   - batchNumber: Which batch this result represents.
     ///   - basePosition: Starting position for result numbering.
-    /// - Returns: Array of app-compatible ArticleMetadata.
-    static func toArticleMetadataArray(
+    /// - Returns: Array of app-compatible UnifiedArticleMetadata.
+    static func toUnifiedArticleMetadataArray(
         _ result: BMLSearchResult,
+        appProvider: SearchProvider,
         batchNumber: Int,
         basePosition: Int
-    ) -> [ArticleMetadata] {
+    ) -> [UnifiedArticleMetadata] {
         result.articles.enumerated().map { index, article in
-            toArticleMetadata(
+            toUnifiedArticleMetadata(
                 article,
+                appProvider: appProvider,
                 batchNumber: batchNumber,
                 resultPosition: basePosition + index
             )
@@ -221,8 +324,9 @@ enum BioMedLitAdapters {
         nextCursor: String? = nil
     ) -> UnifiedSearchResult {
         // Convert articles
-        let articles = toArticleMetadataArray(
+        let articles = toUnifiedArticleMetadataArray(
             result,
+            appProvider: appProvider,
             batchNumber: batchNumber,
             basePosition: basePosition
         )
@@ -391,30 +495,6 @@ enum FullTextContent: Sendable {
             return nil
         }
     }
-}
-
-// MARK: - Unified Article Metadata Extension
-
-extension ArticleMetadata {
-    /// The source of this article (for unified search results).
-    var source: ArticleSource {
-        // Determine source based on available identifiers
-        if pmcId != nil {
-            return .europePMC
-        }
-        return .pubmed
-    }
-
-    /// Whether this article has full text available in PMC.
-    var hasFullTextInPMC: Bool {
-        pmcId != nil
-    }
-}
-
-/// Source of an article in search results.
-enum ArticleSource: String, Sendable {
-    case pubmed
-    case europePMC
 }
 
 // MARK: - BioMedLit Service Extensions

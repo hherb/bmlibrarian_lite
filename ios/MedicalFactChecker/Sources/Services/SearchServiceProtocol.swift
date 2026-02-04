@@ -212,7 +212,7 @@ struct CombinedPaginationState: PaginationState, Sendable {
 /// about the search provider used.
 struct UnifiedSearchResult: Sendable {
     /// Articles returned by the search.
-    let articles: [ArticleMetadata]
+    let articles: [UnifiedArticleMetadata]
 
     /// Total number of results available (may exceed articles.count).
     let totalCount: Int
@@ -259,7 +259,7 @@ struct UnifiedSearchResult: Sendable {
     ///   - pagination: Pagination state.
     ///   - provider: Source provider.
     init(
-        articles: [ArticleMetadata],
+        articles: [UnifiedArticleMetadata],
         totalCount: Int,
         pagination: any PaginationState,
         provider: SearchProvider

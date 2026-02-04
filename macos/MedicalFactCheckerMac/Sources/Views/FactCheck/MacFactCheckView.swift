@@ -339,7 +339,7 @@ struct MacFactCheckView: View {
         self.workflow = newWorkflow
 
         Task {
-            await newWorkflow.startFactCheck(claim: claimText, overrideSearchOptions: buildSearchOptions())
+            await newWorkflow.startFactCheck(claim: claimText, searchOptions: buildSearchOptions())
         }
     }
 }
