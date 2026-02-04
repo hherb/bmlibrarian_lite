@@ -37,6 +37,9 @@ final class FactCheckWorkflow {
     private let modelContainer: ModelContainer
     private let settings: AppSettings
 
+    /// Checkpoint manager for resumable processing.
+    private let checkpointManager: CheckpointManager
+
     /// Error persistence manager for Phase 4 error queue.
     private let errorPersistenceManager: ErrorPersistenceManager
 
@@ -122,6 +125,7 @@ final class FactCheckWorkflow {
         self.modelContext = modelContext
         self.modelContainer = modelContainer
         self.settings = settings
+        self.checkpointManager = CheckpointManager(modelContainer: modelContainer)
         self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
     }
 
@@ -277,6 +281,11 @@ final class FactCheckWorkflow {
             awaitingUserDecision = false
             awaitingSmartSearchDecision = false
             userDecisionPrompt = ""
+        }
+
+        // Load persisted errors from previous runs
+        Task {
+            await loadPersistedErrors()
         }
     }
 
@@ -545,7 +554,14 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         isRunning = false
-        awaitingUserDecision = false
+        awaitingUserDecision = true
+
+        // Build resumption prompt based on progress
+        if remaining > 0 {
+            userDecisionPrompt = "Processing cancelled. \(scoredCount) document(s) scored, \(remaining) remaining. Resume to continue from where you left off."
+        } else {
+            userDecisionPrompt = "Processing cancelled. Resume to continue from where you left off."
+        }
 
         // Notify callback
         onCancelled?(scoredCount, remaining)
