@@ -24,11 +24,13 @@ import SwiftData
 /// to view reports, continue searching, or delete sessions. Sessions with more
 /// available evidence display a "Continue Search" button.
 ///
+/// On iPad, displays a split-view with session details on the right.
 /// Tapping a session row restores the full session state in the Check tab,
 /// including the claim text, scored documents, and report. Use the context menu
 /// "View Report" option to view just the report as a popup.
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query(sort: \FactCheckSession.createdAt, order: .reverse) private var sessions: [FactCheckSession]
 
     /// Callback when user wants to continue searching from an existing session.
@@ -40,6 +42,8 @@ struct HistoryView: View {
     @State private var selectedReport: EvidenceReport?
     @State private var sessionToDelete: FactCheckSession?
     @State private var searchText = ""
+    @State private var selectedSession: FactCheckSession?
+    @State private var showingDetailSheet = false
 
     /// Sessions filtered by search text.
     private var filteredSessions: [FactCheckSession] {
@@ -53,88 +57,166 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if sessions.isEmpty {
-                    EmptyHistoryView()
-                } else {
-                    List {
-                        ForEach(filteredSessions) { session in
-                            SessionRow(
-                                session: session,
-                                onContinueSearch: onContinueSession != nil ? {
-                                    onContinueSession?(session)
-                                } : nil
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                // Restore full session state in Check tab
-                                if onContinueSession != nil {
-                                    onContinueSession?(session)
-                                } else if let report = session.report {
-                                    // Fallback: show report popup if no restore handler
-                                    selectedReport = report
-                                }
-                            }
-                            .contextMenu {
-                                if session.report != nil {
-                                    Button {
-                                        selectedReport = session.report
-                                    } label: {
-                                        Label("View Report", systemImage: "doc.text")
-                                    }
-                                }
-
-                                if session.canGetMoreEvidence {
-                                    Button {
-                                        onContinueSession?(session)
-                                    } label: {
-                                        Label("Continue Search", systemImage: "magnifyingglass.circle")
-                                    }
-                                }
-
-                                Divider()
-
-                                Button(role: .destructive) {
-                                    sessionToDelete = session
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+        NavigationSplitView {
+            sessionListView
+                .navigationTitle("History")
+        } detail: {
+            sessionDetailView
+        }
+        .searchable(text: $searchText, prompt: "Search claims...")
+        .sheet(item: $selectedReport) { report in
+            ReportView(report: report)
+        }
+        .sheet(isPresented: $showingDetailSheet) {
+            if let session = selectedSession {
+                NavigationStack {
+                    SessionDetailView(
+                        session: session,
+                        onViewReport: { selectedReport = session.report },
+                        onContinueSession: {
+                            showingDetailSheet = false
+                            onContinueSession?(session)
+                        }
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") {
+                                showingDetailSheet = false
                             }
                         }
-                        .onDelete(perform: deleteSessions)
                     }
-                    .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("History")
-            .searchable(text: $searchText, prompt: "Search claims...")
-            .toolbar {
-                if !sessions.isEmpty {
-                    EditButton()
-                }
+        }
+        .alert(
+            "Delete Session?",
+            isPresented: Binding(
+                get: { sessionToDelete != nil },
+                set: { if !$0 { sessionToDelete = nil } }
+            ),
+            presenting: sessionToDelete
+        ) { session in
+            Button("Cancel", role: .cancel) {
+                sessionToDelete = nil
             }
-            .sheet(item: $selectedReport) { report in
-                ReportView(report: report)
+            Button("Delete", role: .destructive) {
+                deleteSession(session)
+                sessionToDelete = nil
             }
-            .alert(
-                "Delete Session?",
-                isPresented: Binding(
-                    get: { sessionToDelete != nil },
-                    set: { if !$0 { sessionToDelete = nil } }
-                ),
-                presenting: sessionToDelete
-            ) { session in
-                Button("Cancel", role: .cancel) {
-                    sessionToDelete = nil
+        } message: { session in
+            Text("This will permanently delete the fact-check for \"\(session.claim.prefix(HistoryConstants.maxClaimPreviewLength))\(session.claim.count > HistoryConstants.maxClaimPreviewLength ? "..." : "")\" and all associated data.")
+        }
+    }
+
+    // MARK: - Session List View
+
+    private var sessionListView: some View {
+        Group {
+            if sessions.isEmpty {
+                EmptyHistoryView()
+            } else {
+                List(selection: $selectedSession) {
+                    ForEach(filteredSessions) { session in
+                        SessionRow(
+                            session: session,
+                            isSelected: selectedSession?.id == session.id,
+                            onContinueSearch: onContinueSession != nil ? {
+                                onContinueSession?(session)
+                            } : nil
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            handleSessionTap(session)
+                        }
+                        .tag(session)
+                        .contextMenu {
+                            Button {
+                                selectedSession = session
+                                if horizontalSizeClass == .compact {
+                                    showingDetailSheet = true
+                                }
+                            } label: {
+                                Label("View Details", systemImage: "info.circle")
+                            }
+
+                            if session.report != nil {
+                                Button {
+                                    selectedReport = session.report
+                                } label: {
+                                    Label("View Report", systemImage: "doc.text")
+                                }
+                            }
+
+                            if session.canGetMoreEvidence {
+                                Button {
+                                    onContinueSession?(session)
+                                } label: {
+                                    Label("Continue Search", systemImage: "magnifyingglass.circle")
+                                }
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                sessionToDelete = session
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                    .onDelete(perform: deleteSessions)
                 }
-                Button("Delete", role: .destructive) {
-                    deleteSession(session)
-                    sessionToDelete = nil
-                }
-            } message: { session in
-                Text("This will permanently delete the fact-check for \"\(session.claim.prefix(HistoryConstants.maxClaimPreviewLength))\(session.claim.count > HistoryConstants.maxClaimPreviewLength ? "..." : "")\" and all associated data.")
+                .listStyle(.insetGrouped)
             }
+        }
+        .toolbar {
+            if !sessions.isEmpty {
+                EditButton()
+            }
+        }
+    }
+
+    // MARK: - Session Detail View (Split View)
+
+    @ViewBuilder
+    private var sessionDetailView: some View {
+        if let session = selectedSession {
+            SessionDetailView(
+                session: session,
+                onViewReport: { selectedReport = session.report },
+                onContinueSession: { onContinueSession?(session) }
+            )
+        } else {
+            emptyDetailView
+        }
+    }
+
+    private var emptyDetailView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: HistoryConstants.emptyStateIconSize))
+                .foregroundColor(.secondary.opacity(0.5))
+
+            Text("Select a Session")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Choose a session from the list to view its details.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+
+    // MARK: - Actions
+
+    /// Handle tap on a session row.
+    private func handleSessionTap(_ session: FactCheckSession) {
+        selectedSession = session
+        if horizontalSizeClass == .compact {
+            // On iPhone, show detail sheet
+            showingDetailSheet = true
         }
     }
 
@@ -146,7 +228,11 @@ struct HistoryView: View {
     /// - Parameter offsets: Index set within `filteredSessions`.
     private func deleteSessions(at offsets: IndexSet) {
         for index in offsets {
-            modelContext.delete(filteredSessions[index])
+            let sessionToRemove = filteredSessions[index]
+            if selectedSession?.id == sessionToRemove.id {
+                selectedSession = nil
+            }
+            modelContext.delete(sessionToRemove)
         }
         try? modelContext.save()
     }
@@ -156,6 +242,9 @@ struct HistoryView: View {
     /// Used by the context menu delete action.
     /// - Parameter session: The session to delete.
     private func deleteSession(_ session: FactCheckSession) {
+        if selectedSession?.id == session.id {
+            selectedSession = nil
+        }
         modelContext.delete(session)
         try? modelContext.save()
     }
@@ -190,6 +279,9 @@ struct EmptyHistoryView: View {
 struct SessionRow: View {
     /// The fact-check session to display.
     let session: FactCheckSession
+
+    /// Whether this row is selected (for split-view highlighting).
+    var isSelected: Bool = false
 
     /// Optional callback when the user taps the "Continue Search" button.
     ///
@@ -328,6 +420,221 @@ struct StatusBadge: View {
         .padding(.vertical, 4)
         .background(Color.secondary.opacity(0.1))
         .cornerRadius(6)
+    }
+}
+
+// MARK: - Session Detail View
+
+/// Detailed view displaying comprehensive session statistics.
+///
+/// Shows:
+/// - Claim text and PubMed query
+/// - Verdict badge (if completed)
+/// - Statistics (documents, scored, relevant, cost, tokens)
+/// - Action buttons (View Report, Continue Search)
+struct SessionDetailView: View {
+    /// The session to display.
+    let session: FactCheckSession
+
+    /// Called when user taps View Report.
+    var onViewReport: (() -> Void)?
+
+    /// Called when user taps Continue Session.
+    var onContinueSession: (() -> Void)?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Header
+                headerSection
+
+                Divider()
+
+                // Session Info
+                sessionInfoSection
+
+                Divider()
+
+                // Statistics
+                statisticsSection
+
+                Divider()
+
+                // Actions
+                actionsSection
+            }
+            .padding()
+        }
+        .navigationTitle("Session Details")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Header Section
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Date
+            Text(session.createdAt, format: .dateTime.month(.wide).day().year().hour().minute())
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            // Verdict or Status
+            if let report = session.report {
+                SmallVerdictBadge(verdict: report.verdict)
+            } else {
+                StatusBadge(step: session.currentStep)
+            }
+        }
+    }
+
+    // MARK: - Session Info Section
+
+    private var sessionInfoSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Claim
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Claim")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+
+                Text(session.claim)
+                    .font(.body)
+                    .textSelection(.enabled)
+            }
+
+            // PubMed Query
+            if let query = session.pubmedQuery, !query.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Search Query")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+
+                    Text(query)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.accentColor)
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+        }
+    }
+
+    // MARK: - Statistics Section
+
+    private var statisticsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Statistics")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+
+            // First row: Documents, Scored, Relevant
+            HStack(spacing: 20) {
+                StatItem(
+                    value: "\((session.documents ?? []).count)",
+                    label: "Documents",
+                    icon: "doc.text"
+                )
+
+                StatItem(
+                    value: "\((session.documents ?? []).filter { $0.isScored }.count)",
+                    label: "Scored",
+                    icon: "checkmark.circle"
+                )
+
+                StatItem(
+                    value: "\(session.relevantDocuments.count)",
+                    label: "Relevant",
+                    icon: "star"
+                )
+            }
+
+            // Second row: Cost, Tokens, Duration
+            HStack(spacing: 20) {
+                StatItem(
+                    value: CostCalculator.formatCost(session.estimatedCostUSD),
+                    label: "Cost",
+                    icon: "dollarsign.circle"
+                )
+
+                StatItem(
+                    value: formatTokens(session.totalInputTokens + session.totalOutputTokens),
+                    label: "Tokens",
+                    icon: "number"
+                )
+
+                if let report = session.report {
+                    StatItem(
+                        value: "\(report.citationCount)",
+                        label: "Citations",
+                        icon: "quote.bubble"
+                    )
+                }
+            }
+        }
+    }
+
+    /// Format token count for display.
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1_000 {
+            return String(format: "%.1fK", Double(count) / 1_000)
+        }
+        return "\(count)"
+    }
+
+    // MARK: - Actions Section
+
+    private var actionsSection: some View {
+        VStack(spacing: 12) {
+            // View Report button
+            if session.report != nil {
+                Button(action: { onViewReport?() }) {
+                    Label("View Report", systemImage: "doc.text")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            // Continue Search button
+            if session.canGetMoreEvidence {
+                Button(action: { onContinueSession?() }) {
+                    Label("Continue Search", systemImage: "magnifyingglass.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+}
+
+/// A single statistic item with icon, value, and label.
+struct StatItem: View {
+    let value: String
+    let label: String
+    let icon: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(.accentColor)
+
+            Text(value)
+                .font(.headline)
+                .fontWeight(.semibold)
+
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

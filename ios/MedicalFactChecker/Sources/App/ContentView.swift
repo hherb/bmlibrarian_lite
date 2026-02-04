@@ -21,9 +21,10 @@ import SwiftData
 /// Tab identifiers for the main navigation.
 enum AppTab: Int {
     case check = 0
-    case report = 1
-    case history = 2
-    case settings = 3
+    case fullText = 1
+    case report = 2
+    case history = 3
+    case settings = 4
 }
 
 struct ContentView: View {
@@ -43,6 +44,9 @@ struct ContentView: View {
 
     /// Controls showing onboarding from settings.
     @State private var showingOnboardingFromSettings = false
+
+    /// Currently selected document for full-text viewing.
+    @State private var selectedFullTextDocument: Document?
 
     var body: some View {
         if !hasAcceptedDisclaimer {
@@ -77,6 +81,17 @@ struct ContentView: View {
                 Label("Check", systemImage: "checkmark.shield")
             }
             .tag(AppTab.check)
+
+            LazyTabContent(tab: .fullText, visitedTabs: $visitedTabs) {
+                FullTextTab(
+                    workflow: factCheckWorkflow,
+                    selectedDocument: $selectedFullTextDocument
+                )
+            }
+            .tabItem {
+                Label("Full Text", systemImage: "doc.text")
+            }
+            .tag(AppTab.fullText)
 
             LazyTabContent(tab: .report, visitedTabs: $visitedTabs) {
                 ReportTabView(report: currentReport, workflow: factCheckWorkflow)
