@@ -23,11 +23,11 @@ Comprehensive parity review comparing `macos/MedicalFactCheckerMac/` and `ios/Me
 - [x] **11. History search/filter** — Text field to search past sessions by claim text. iOS now has `.searchable()` with filtering.
 - [x] **12. History detail pane** — Split-view with comprehensive session stats (scored count, relevant, tokens, duration). Added to iOS with NavigationSplitView.
 - [x] **13. Copy to Clipboard for reports** — Direct clipboard action for report text. Added to iOS share menus.
-- [ ] **14. Print reports** — `NSPrintOperation` support (macOS-only, platform-appropriate).
+- [x] **14. Print reports** — `NSPrintOperation` support (macOS-only, platform-appropriate). Already implemented in MacReportView.swift.
 - [x] **15. Show/Hide API Key toggle** — Eye button to reveal/hide key in settings. Added to iOS.
 - [x] **16. Structured OSLog logging** — `Logger.swift` with category-specific loggers. Added to iOS matching macOS AppLogger.
 - [x] **17. `fullTextSourceDisplay` handles `"cached"` case** — iOS switch is missing this case.
-- [ ] **18. `SchemaV0` migration** — macOS can handle pre-versioning databases. iOS cannot.
+- [x] **18. `SchemaV0` migration** — macOS can handle pre-versioning databases. Added SchemaV0 and V0→V1 migration to iOS.
 - [x] **19. `onAskSmartSearch` callback** — Both platforms use shared FactCheckWorkflow which prompts user with smart search option.
 
 ## Medium-Priority: iOS has, macOS lacks
@@ -48,7 +48,7 @@ Comprehensive parity review comparing `macos/MedicalFactCheckerMac/` and `ios/Me
 - [x] **30. Unify SearchOptions struct** — macOS is missing `cursorMark` and `defaults(for:)`. iOS is missing `maxResults`/`offset` in restore.
 - [x] **31. Unify FullTextSource enum** — Align cases, add `canDisplayInApp`, factory methods, `Equatable`, `Sendable`.
 - [x] **32. Remove iOS local JATSXMLParser.swift** — Duplicates BioMedLit package JATS parsing. Replaced with re-export.
-- [ ] **33. Unify BioMedLitAdapters** — iOS and macOS use different adapter types (`ArticleMetadata` vs `UnifiedArticleMetadata`).
+- [x] **33. Unify BioMedLitAdapters** — Renamed iOS `ArticleMetadata` to `UnifiedArticleMetadata` with matching fields (source, isPreprint, hasFullTextInPMC).
 
 ## Low-Priority / Cosmetic
 
@@ -56,6 +56,6 @@ Comprehensive parity review comparing `macos/MedicalFactCheckerMac/` and `ios/Me
 - [x] **35. Disclaimer content differs** — Both platforms now have "No Self-Treatment" and "Your Privacy" points.
 - [x] **36. `[weak self]` in Task closures** — Fixed in shared FactCheckWorkflow. All Task closures now use [weak self].
 - [x] **37. Copyright years inconsistent** — All files updated to `2024-2026`.
-- [ ] **38. Property naming inconsistency** — iOS: `currentSearchOptions` / macOS: `searchOptions`. iOS: `searchOptions:` param / macOS: `overrideSearchOptions:`.
+- [x] **38. Property naming inconsistency** — Standardized macOS to use `currentSearchOptions` property and `searchOptions:` parameter, matching iOS.
 - [x] **39. `EvidenceReport.generationFootnote` logic differs** — iOS uses live session data with Ollama "(Local)" suffix. macOS uses stored report statistics. Now aligned.
-- [ ] **40. Documentation density differs** — iOS has thorough doc comments on `ErrorPersistenceManager`; macOS has minimal.
+- [x] **40. Documentation density differs** — Added comprehensive docstrings to macOS `ErrorPersistenceManager` matching iOS style (usage examples, parameters, returns, throws).

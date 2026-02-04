@@ -2173,7 +2173,7 @@ final class FactCheckWorkflow {
 
         let batchNumber = session.batchesFetched + 1
 
-        // Create Document objects from ArticleMetadata
+        // Create Document objects from UnifiedArticleMetadata
         for (index, article) in newArticles.enumerated() {
             let document = Document(
                 pmid: article.pmid,

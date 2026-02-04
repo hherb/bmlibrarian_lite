@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// NOTE: This app-specific SearchResultMerger works with app-local types (UnifiedSearchResult, ArticleMetadata).
+// NOTE: This app-specific SearchResultMerger works with app-local types (UnifiedSearchResult, UnifiedArticleMetadata).
 // A generic SearchResultMerger for BioMedLit types is available in the BioMedLit package at:
 // Packages/BioMedLit/Sources/BioMedLit/Utilities/SearchResultMerger.swift
 
@@ -61,7 +61,7 @@ enum SearchResultMerger {
         europePMCResult: UnifiedSearchResult
     ) -> UnifiedSearchResult {
         var seen = Set<String>()
-        var merged: [ArticleMetadata] = []
+        var merged: [UnifiedArticleMetadata] = []
 
         // Add PubMed results first (primary source, higher priority)
         for article in pubmedResult.articles {
@@ -119,7 +119,7 @@ enum SearchResultMerger {
     ///
     /// - Parameter article: The article to generate a key for.
     /// - Returns: A string key for deduplication.
-    private static func deduplicationKey(for article: ArticleMetadata) -> String {
+    private static func deduplicationKey(for article: UnifiedArticleMetadata) -> String {
         // Prefer PMID (most reliable)
         if !article.pmid.isEmpty {
             return "pmid:\(article.pmid)"
@@ -143,7 +143,7 @@ enum SearchResultMerger {
     ///   - article: Article to add keys for.
     ///   - seen: Set to add keys to.
     private static func addAlternativeKeys(
-        for article: ArticleMetadata,
+        for article: UnifiedArticleMetadata,
         to seen: inout Set<String>
     ) {
         // Add PMID key
@@ -169,7 +169,7 @@ enum SearchResultMerger {
     ///   - seen: Set of seen keys.
     /// - Returns: True if any key matches.
     private static func alternativeKeysContained(
-        for article: ArticleMetadata,
+        for article: UnifiedArticleMetadata,
         in seen: Set<String>
     ) -> Bool {
         if !article.pmid.isEmpty && seen.contains("pmid:\(article.pmid)") {
@@ -191,8 +191,8 @@ enum SearchResultMerger {
     ///   - existing: Existing articles to compare against.
     /// - Returns: True if a title match is found.
     private static func titleMatchesExisting(
-        _ article: ArticleMetadata,
-        in existing: [ArticleMetadata]
+        _ article: UnifiedArticleMetadata,
+        in existing: [UnifiedArticleMetadata]
     ) -> Bool {
         for existingArticle in existing {
             if titleSimilarity(article.title, existingArticle.title) > MergerConstants.titleSimilarityThreshold {
@@ -221,7 +221,7 @@ enum SearchResultMerger {
     ///   - articleA: First article.
     ///   - articleB: Second article.
     /// - Returns: True if the articles are likely duplicates.
-    static func areDuplicates(_ articleA: ArticleMetadata, _ articleB: ArticleMetadata) -> Bool {
+    static func areDuplicates(_ articleA: UnifiedArticleMetadata, _ articleB: UnifiedArticleMetadata) -> Bool {
         // Same PMID
         if !articleA.pmid.isEmpty && articleA.pmid == articleB.pmid {
             return true
