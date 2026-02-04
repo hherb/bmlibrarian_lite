@@ -306,6 +306,7 @@ struct FullTextTab: View {
                     }
                     document.fullTextSource = result.source.rawValue
                     document.fullTextFetchedAt = Date()
+                    try? modelContext.save()
 
                     fullTextResult = result
                     isLoadingFullText = false
@@ -315,6 +316,7 @@ struct FullTextTab: View {
                 await MainActor.run {
                     if case FullTextError.noFullTextAvailable = error {
                         document.fullTextUnavailable = true
+                        try? modelContext.save()
                     }
                     isLoadingFullText = false
                 }

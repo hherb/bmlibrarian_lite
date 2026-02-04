@@ -119,7 +119,6 @@ struct HistoryView: View {
                     ForEach(filteredSessions) { session in
                         SessionRow(
                             session: session,
-                            isSelected: selectedSession?.id == session.id,
                             onContinueSearch: onContinueSession != nil ? {
                                 onContinueSession?(session)
                             } : nil
@@ -279,9 +278,6 @@ struct EmptyHistoryView: View {
 struct SessionRow: View {
     /// The fact-check session to display.
     let session: FactCheckSession
-
-    /// Whether this row is selected (for split-view highlighting).
-    var isSelected: Bool = false
 
     /// Optional callback when the user taps the "Continue Search" button.
     ///

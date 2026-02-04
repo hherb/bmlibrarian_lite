@@ -89,7 +89,7 @@ struct ContentView: View {
                 )
             }
             .tabItem {
-                Label("Full Text", systemImage: "doc.text")
+                Label("Full Text", systemImage: "doc.richtext")
             }
             .tag(AppTab.fullText)
 
@@ -97,7 +97,7 @@ struct ContentView: View {
                 ReportTabView(report: currentReport, workflow: factCheckWorkflow)
             }
             .tabItem {
-                Label("Report", systemImage: "doc.text")
+                Label("Report", systemImage: "chart.bar.doc.horizontal")
             }
             .tag(AppTab.report)
 
