@@ -645,12 +645,33 @@ public struct TransparencyResultBuilder: Sendable {
     ///
     /// - Returns: An immutable TransparencyResult with all fields populated.
     public func build() -> TransparencyResult {
-        // Calculate score and risk level using TransparencyScorer
-        // Note: TransparencyScorer is implemented in Step 07. Until then,
-        // we use placeholder calculations here.
-        let score = calculateScorePlaceholder()
-        let riskLevel = calculateRiskLevelPlaceholder(score: score)
-        let riskIndicators = identifyRiskIndicatorsPlaceholder()
+        // Calculate score using TransparencyScorer
+        let score = TransparencyScorer.calculateScore(
+            dataAvailability: dataAvailability,
+            coiAnalysis: coiAnalysis,
+            trialRegistrations: trialRegistrations,
+            resultsCompliance: resultsCompliance,
+            industryFundingDetected: industryFundingDetected,
+            outcomeSwitchingDetected: outcomeSwitchingDetected
+        )
+
+        // Calculate risk level using TransparencyScorer
+        let riskLevel = TransparencyScorer.calculateRiskLevel(
+            score: score,
+            industryFunding: industryFundingDetected,
+            dataAvailability: dataAvailability.disclosureLevel,
+            coiDisclosed: coiAnalysis.statement != nil
+        )
+
+        // Identify risk indicators using TransparencyScorer
+        let riskIndicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: industryFundingDetected,
+            dataAvailability: dataAvailability,
+            resultsCompliance: resultsCompliance,
+            coiAnalysis: coiAnalysis,
+            trialRegistrations: trialRegistrations,
+            title: title
+        )
 
         return TransparencyResult(
             doi: doi,
@@ -721,117 +742,4 @@ public struct TransparencyResultBuilder: Sendable {
         )
     }
 
-    // MARK: - Placeholder Scoring (to be replaced by TransparencyScorer in Step 07)
-
-    /// Placeholder score calculation.
-    /// Will be replaced by TransparencyScorer.calculateScore() in Step 07.
-    private func calculateScorePlaceholder() -> Int {
-        var score = TransparencyConstants.baseTransparencyScore
-
-        // Data availability adjustments
-        switch dataAvailability.disclosureLevel {
-        case .fullOpen:
-            score += TransparencyConstants.fullOpenDataPoints
-        case .availableOnRequest:
-            score += TransparencyConstants.onRequestDataPoints
-        case .notAvailable:
-            score += TransparencyConstants.noDataPenalty
-        case .notStated:
-            score += TransparencyConstants.noStatementPenalty
-        case .restricted, .unknown:
-            break
-        }
-
-        // COI statement presence
-        if coiAnalysis.statement != nil {
-            score += TransparencyConstants.coiStatementPoints
-        } else {
-            score += TransparencyConstants.missingCoiPenalty
-        }
-
-        // Trial registration
-        if !trialRegistrations.isEmpty {
-            score += TransparencyConstants.trialRegistrationPoints
-        }
-
-        // Results compliance
-        switch resultsCompliance {
-        case .compliant:
-            score += TransparencyConstants.compliantResultsPoints
-        case .missing:
-            score += TransparencyConstants.missingResultsPenalty
-        case .late, .notRequired, .unknown:
-            break
-        }
-
-        // Outcome switching penalty
-        if outcomeSwitchingDetected {
-            score += TransparencyConstants.outcomeSwitchingPenalty
-        }
-
-        // Industry funding with no data sharing penalty
-        if industryFundingDetected && dataAvailability.disclosureLevel == .notAvailable {
-            score += TransparencyConstants.industryNoDataPenalty
-        }
-
-        // Clamp to valid score range
-        return max(
-            TransparencyConstants.minTransparencyScore,
-            min(TransparencyConstants.maxTransparencyScore, score)
-        )
-    }
-
-    /// Placeholder risk level calculation.
-    /// Will be replaced by TransparencyScorer.calculateRiskLevel() in Step 07.
-    private func calculateRiskLevelPlaceholder(score: Int) -> TransparencyRiskLevel {
-        if score < TransparencyConstants.highRiskScoreThreshold {
-            return .high
-        } else if score < TransparencyConstants.mediumRiskScoreThreshold {
-            return .medium
-        } else {
-            return .low
-        }
-    }
-
-    /// Placeholder risk indicator identification.
-    /// Will be replaced by TransparencyScorer.identifyRiskIndicators() in Step 07.
-    private func identifyRiskIndicatorsPlaceholder() -> [String] {
-        var indicators: [String] = []
-
-        if industryFundingDetected {
-            indicators.append("Industry-funded study")
-        }
-
-        if dataAvailability.disclosureLevel == .notAvailable {
-            indicators.append("Data not available")
-        } else if dataAvailability.disclosureLevel == .notStated {
-            indicators.append("No data availability statement")
-        }
-
-        if resultsCompliance == .missing {
-            indicators.append("Trial results not posted")
-        } else if resultsCompliance == .late {
-            indicators.append("Trial results posted late")
-        }
-
-        if coiAnalysis.statement == nil {
-            indicators.append("No COI statement found")
-        } else if coiAnalysis.hasIndustryTies {
-            indicators.append("Industry ties disclosed in COI")
-        }
-
-        if trialRegistrations.isEmpty {
-            // Only flag if title suggests it might be a clinical trial
-            if let title = title?.lowercased(),
-               title.contains("trial") || title.contains("randomized") || title.contains("rct") {
-                indicators.append("Clinical trial not registered")
-            }
-        }
-
-        if outcomeSwitchingDetected {
-            indicators.append("Outcome switching detected")
-        }
-
-        return indicators
-    }
 }
