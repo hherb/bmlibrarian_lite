@@ -608,17 +608,17 @@ struct StatisticsSection: View {
                 .font(.headline)
 
             HStack(spacing: 20) {
-                StatItem(
+                ReportStatItem(
                     icon: "doc.text",
                     value: "\(report.documentsReviewed)",
                     label: "Reviewed"
                 )
-                StatItem(
+                ReportStatItem(
                     icon: "checkmark.circle",
                     value: "\(report.uniqueSourceCount)",
                     label: "Relevant"
                 )
-                StatItem(
+                ReportStatItem(
                     icon: "quote.bubble",
                     value: "\(report.citationCount)",
                     label: "Citations"
@@ -631,7 +631,7 @@ struct StatisticsSection: View {
     }
 }
 
-struct StatItem: View {
+private struct ReportStatItem: View {
     let icon: String
     let value: String
     let label: String

@@ -17,6 +17,7 @@
 
 import SwiftUI
 import SwiftData
+import BioMedLit
 
 // MARK: - Constants
 
