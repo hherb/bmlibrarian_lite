@@ -30,12 +30,20 @@ class ReportRiskThreshold(Enum):
 
 
 DEFAULT_INLINE_WARNING_TEMPLATES: dict[str, str] = {
-    "industry_funding": "Warning: funding concerns",
-    "missing_coi": "Warning: COI not disclosed",
-    "missing_results": "Warning: results not posted",
-    "data_not_available": "Warning: data not shared",
-    "multiple_risks": "Warning: transparency concerns",
+    "industry_funding": "⚠️ funding concerns",
+    "missing_coi": "⚠️ COI not disclosed",
+    "missing_results": "⚠️ results not posted",
+    "data_not_available": "⚠️ data not shared",
+    "multiple_risks": "⚠️ transparency concerns",
 }
+
+
+def _parse_risk_threshold(value: str) -> ReportRiskThreshold:
+    """Parse risk threshold string, defaulting to HIGH on invalid values."""
+    try:
+        return ReportRiskThreshold(value)
+    except ValueError:
+        return ReportRiskThreshold.HIGH
 
 
 @dataclass
@@ -138,7 +146,7 @@ class TransparencySettings:
             cache_results=data.get("cache_results", True),
             show_badge_on_cards=data.get("show_badge_on_cards", True),
             show_detailed_tooltip=data.get("show_detailed_tooltip", True),
-            report_risk_threshold=ReportRiskThreshold(
+            report_risk_threshold=_parse_risk_threshold(
                 data.get("report_risk_threshold", "high")
             ),
             inline_warning_templates=data.get(

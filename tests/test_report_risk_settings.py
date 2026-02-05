@@ -45,3 +45,17 @@ def test_transparency_settings_serialization_with_report_risk() -> None:
 
     restored = TransparencySettings.from_dict(data)
     assert restored.report_risk_threshold == ReportRiskThreshold.MEDIUM
+
+
+def test_from_dict_handles_invalid_threshold() -> None:
+    """Invalid threshold values default to HIGH."""
+    data = {"report_risk_threshold": "invalid_value"}
+    settings = TransparencySettings.from_dict(data)
+    assert settings.report_risk_threshold == ReportRiskThreshold.HIGH
+
+
+def test_from_dict_handles_missing_report_risk_fields() -> None:
+    """Missing report risk fields get proper defaults."""
+    settings = TransparencySettings.from_dict({})
+    assert settings.report_risk_threshold == ReportRiskThreshold.HIGH
+    assert settings.inline_warning_templates == DEFAULT_INLINE_WARNING_TEMPLATES
