@@ -191,7 +191,9 @@ public actor TransparencyAnalysisService {
                    let registration = clinicalTrials.extractTrialInfo(from: study) {
 
                     builder.trialRegistrations.append(registration)
-                    builder.dataSourcesUsed.append("ClinicalTrials.gov")
+                    if !builder.dataSourcesUsed.contains("ClinicalTrials.gov") {
+                        builder.dataSourcesUsed.append("ClinicalTrials.gov")
+                    }
 
                     // Update sponsor type based on trial sponsor
                     if TrialComplianceAnalyzer.isIndustrySponsor(registration.sponsorClass) {
@@ -242,14 +244,10 @@ public actor TransparencyAnalysisService {
 
         // Try Europe PMC if we have PMC ID
         if dataStatement == nil, let pmcId = builder.pmcid {
-            do {
-                let europePMC = getEuropePMCService()
-                // Note: Would need to add full text XML fetch to Europe PMC service
-                // and extract data availability section
-                _ = europePMC
-            } catch {
-                // Ignore - data availability will be marked as not stated
-            }
+            // Note: Would need to add full text XML fetch to Europe PMC service
+            // and extract data availability section
+            // Future enhancement: fetch PMC XML and extract data availability
+            _ = pmcId  // Suppress unused warning until implemented
         }
 
         builder.dataAvailability = DataAvailabilityAnalyzer.analyze(statement: dataStatement)

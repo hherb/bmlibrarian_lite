@@ -88,6 +88,22 @@ public enum TransparencyConstants {
 
     /// Penalty for industry funding without data sharing.
     public static let industryNoDataPenalty: Int = -10
+
+    // MARK: - Score Category Thresholds
+
+    /// Score threshold for "good transparency" category (score >= this).
+    public static let goodTransparencyThreshold: Int = 76
+
+    /// Score threshold for "average transparency" category (score >= this).
+    public static let averageTransparencyThreshold: Int = 51
+
+    /// Score threshold for "below average transparency" category (score >= this).
+    public static let belowAverageTransparencyThreshold: Int = 26
+
+    // MARK: - UI Limits
+
+    /// Maximum risk indicators to show in tooltip before truncating.
+    public static let maxRiskIndicatorsInTooltip: Int = 5
 }
 
 // MARK: - Known Industry Funders

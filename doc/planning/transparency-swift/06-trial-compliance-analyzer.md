@@ -75,7 +75,7 @@ public enum TrialComplianceAnalyzer {
     ///
     /// - Parameter title: Study title
     /// - Returns: True if clinical trial indicators found
-    public static func appearsToBeClinicialTrial(title: String?) -> Bool {
+    public static func appearsToBeClinicalTrial(title: String?) -> Bool {
         guard let title = title else { return false }
 
         let titleLower = title.lowercased()
@@ -216,7 +216,7 @@ public enum TrialComplianceAnalyzer {
         registrations: [TrialRegistration]
     ) -> String? {
         guard registrations.isEmpty,
-              appearsToBeClinicialTrial(title: title) else {
+              appearsToBeClinicalTrial(title: title) else {
             return nil
         }
 
@@ -287,23 +287,23 @@ final class TrialComplianceAnalyzerTests: XCTestCase {
 
     // MARK: - Trial Detection Tests
 
-    func testAppearsToBeClinicialTrialTrue() {
-        XCTAssertTrue(TrialComplianceAnalyzer.appearsToBeClinicialTrial(
+    func testAppearsToBeClinicalTrialTrue() {
+        XCTAssertTrue(TrialComplianceAnalyzer.appearsToBeClinicalTrial(
             title: "A Randomized Controlled Trial of Drug X"
         ))
-        XCTAssertTrue(TrialComplianceAnalyzer.appearsToBeClinicialTrial(
+        XCTAssertTrue(TrialComplianceAnalyzer.appearsToBeClinicalTrial(
             title: "Phase III Study of Treatment Y"
         ))
-        XCTAssertTrue(TrialComplianceAnalyzer.appearsToBeClinicialTrial(
+        XCTAssertTrue(TrialComplianceAnalyzer.appearsToBeClinicalTrial(
             title: "An RCT comparing interventions"
         ))
     }
 
-    func testAppearsToBeClinicialTrialFalse() {
-        XCTAssertFalse(TrialComplianceAnalyzer.appearsToBeClinicialTrial(
+    func testAppearsToBeClinicalTrialFalse() {
+        XCTAssertFalse(TrialComplianceAnalyzer.appearsToBeClinicalTrial(
             title: "A Systematic Review of Treatment Outcomes"
         ))
-        XCTAssertFalse(TrialComplianceAnalyzer.appearsToBeClinicialTrial(
+        XCTAssertFalse(TrialComplianceAnalyzer.appearsToBeClinicalTrial(
             title: nil
         ))
     }

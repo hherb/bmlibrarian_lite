@@ -263,13 +263,14 @@ public enum TransparencyScorer {
 
         // Risk indicators
         if !result.riskIndicators.isEmpty {
+            let maxIndicators = TransparencyConstants.maxRiskIndicatorsInTooltip
             lines.append("")
             lines.append("Risk Indicators:")
-            for indicator in result.riskIndicators.prefix(5) {
+            for indicator in result.riskIndicators.prefix(maxIndicators) {
                 lines.append("  • \(indicator)")
             }
-            if result.riskIndicators.count > 5 {
-                lines.append("  ... and \(result.riskIndicators.count - 5) more")
+            if result.riskIndicators.count > maxIndicators {
+                lines.append("  ... and \(result.riskIndicators.count - maxIndicators) more")
             }
         }
 
@@ -284,11 +285,11 @@ public enum TransparencyScorer {
     /// - Returns: Category description
     public static func scoreCategory(_ score: Int) -> String {
         switch score {
-        case 76...100:
+        case TransparencyConstants.goodTransparencyThreshold...100:
             return "Good transparency"
-        case 51...75:
+        case TransparencyConstants.averageTransparencyThreshold..<TransparencyConstants.goodTransparencyThreshold:
             return "Average transparency"
-        case 26...50:
+        case TransparencyConstants.belowAverageTransparencyThreshold..<TransparencyConstants.averageTransparencyThreshold:
             return "Below average transparency"
         default:
             return "Poor transparency"
@@ -309,8 +310,8 @@ final class TransparencyScorerTests: XCTestCase {
 
     func testCalculateScoreBaseCase() {
         let score = TransparencyScorer.calculateScore(
-            dataAvailability: .notStated,
-            coiAnalysis: .notAvailable,
+            dataAvailability: DataAvailabilityResult.notStated,
+            coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
             resultsCompliance: .unknown,
             industryFundingDetected: false,
@@ -338,7 +339,7 @@ final class TransparencyScorerTests: XCTestCase {
     func testCalculateScorePoorTransparency() {
         let score = TransparencyScorer.calculateScore(
             dataAvailability: DataAvailabilityResult(disclosureLevel: .notAvailable),
-            coiAnalysis: .notAvailable,
+            coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
             resultsCompliance: .missing,
             industryFundingDetected: true,
@@ -353,7 +354,7 @@ final class TransparencyScorerTests: XCTestCase {
         // Extreme penalties should not go below 0
         let score = TransparencyScorer.calculateScore(
             dataAvailability: DataAvailabilityResult(disclosureLevel: .notAvailable),
-            coiAnalysis: .notAvailable,
+            coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [TrialRegistration(registry: "CT.gov", registrationId: "NCT123")],
             resultsCompliance: .missing,
             industryFundingDetected: true,
@@ -432,7 +433,7 @@ final class TransparencyScorerTests: XCTestCase {
             industryFundingDetected: true,
             dataAvailability: DataAvailabilityResult(disclosureLevel: .notAvailable),
             resultsCompliance: .unknown,
-            coiAnalysis: .notAvailable,
+            coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
             title: nil
         )
@@ -444,9 +445,9 @@ final class TransparencyScorerTests: XCTestCase {
     func testIdentifyRiskIndicatorsMissingResults() {
         let indicators = TransparencyScorer.identifyRiskIndicators(
             industryFundingDetected: false,
-            dataAvailability: .notStated,
+            dataAvailability: DataAvailabilityResult.notStated,
             resultsCompliance: .missing,
-            coiAnalysis: .notAvailable,
+            coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
             title: nil
         )
