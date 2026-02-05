@@ -59,6 +59,9 @@ public enum TransparencyConstants {
     /// FDAAA compliance deadline in days (12 months after primary completion).
     public static let resultsComplianceDeadlineDays: Int = 365
 
+    /// Seconds per day (24 * 60 * 60) for time interval calculations.
+    public static let secondsPerDay: TimeInterval = 86_400
+
     // MARK: - Score Adjustments
 
     /// Points awarded for full open data access.
@@ -120,6 +123,19 @@ public enum TransparencyConstants {
 
     /// Maximum characters for outcome description display before truncating.
     public static let maxOutcomeDescriptionLength: Int = 50
+
+    // MARK: - Registry Names
+
+    /// ClinicalTrials.gov registry display name.
+    public static let clinicalTrialsRegistryName = "ClinicalTrials.gov"
+
+    // MARK: - Date Parsing Defaults
+
+    /// Default month value when parsing dates with only year.
+    public static let defaultMonth: Int = 1
+
+    /// Default day value when parsing dates without day.
+    public static let defaultDay: Int = 1
 }
 
 // MARK: - Known Industry Funders
