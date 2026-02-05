@@ -117,6 +117,9 @@ public enum TransparencyConstants {
 
     /// Maximum risk indicators to show in tooltip before truncating.
     public static let maxRiskIndicatorsInTooltip: Int = 5
+
+    /// Maximum characters for outcome description display before truncating.
+    public static let maxOutcomeDescriptionLength: Int = 50
 }
 
 // MARK: - Known Industry Funders
