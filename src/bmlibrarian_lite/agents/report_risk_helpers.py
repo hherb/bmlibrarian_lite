@@ -22,6 +22,9 @@ from ..transparency.transparency_settings import (
     TransparencySettings,
 )
 
+# Data availability levels that indicate risk
+RISKY_DATA_AVAILABILITY_LEVELS = ("not_available", "restricted", "not_stated")
+
 
 def select_inline_warning(
     result: TransparencyResult,
@@ -47,7 +50,7 @@ def select_inline_warning(
         risk_factors.append("missing_coi")
     if result.trial_registered and not result.trial_results_compliant:
         risk_factors.append("missing_results")
-    if result.data_availability_level in ("not_available", "restricted", "not_stated"):
+    if result.data_availability_level in RISKY_DATA_AVAILABILITY_LEVELS:
         risk_factors.append("data_not_available")
 
     if len(risk_factors) > 1:
@@ -118,11 +121,7 @@ def build_risk_context_for_prompt(
             concerns.append("Conflicts of interest not disclosed")
         if result.trial_registered and not result.trial_results_compliant:
             concerns.append("Trial results not posted to registry")
-        if result.data_availability_level in (
-            "not_available",
-            "restricted",
-            "not_stated",
-        ):
+        if result.data_availability_level in RISKY_DATA_AVAILABILITY_LEVELS:
             concerns.append(f"Data availability: {result.data_availability_level}")
 
         concerns_str = ", ".join(concerns) if concerns else "Low transparency score"
@@ -200,7 +199,7 @@ def format_reference_risk_annotation(
     if result.trial_registered and not result.trial_results_compliant:
         lines.append("    - Trial results: Not posted to registry")
 
-    if result.data_availability_level in ("not_available", "restricted", "not_stated"):
+    if result.data_availability_level in RISKY_DATA_AVAILABILITY_LEVELS:
         level_display = result.data_availability_level.replace("_", " ").title()
         lines.append(f"    - Data availability: {level_display}")
 
