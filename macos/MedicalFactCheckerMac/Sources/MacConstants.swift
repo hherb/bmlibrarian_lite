@@ -328,6 +328,9 @@ enum MacFullTextColors {
     /// Tint color for cached content badge.
     static let cachedTint = Color.gray
 
+    /// Tint color for user-uploaded content badge.
+    static let uploadedTint = Color.purple
+
     /// Returns the appropriate color for a full-text source.
     ///
     /// - Parameter source: The full-text source.
@@ -338,6 +341,7 @@ enum MacFullTextColors {
         case .unpaywall: return unpaywallTint
         case .doi: return doiTint
         case .cached: return cachedTint
+        case .uploaded: return uploadedTint
         }
     }
 }

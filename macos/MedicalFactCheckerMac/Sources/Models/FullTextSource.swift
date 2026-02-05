@@ -33,6 +33,9 @@ enum FullTextSource: String, Codable, CaseIterable, Sendable {
     /// Previously cached content.
     case cached = "cached"
 
+    /// User-uploaded content (PDF, HTML, or Markdown).
+    case uploaded = "uploaded"
+
     /// Human-readable display name for the source.
     var displayName: String {
         switch self {
@@ -40,6 +43,7 @@ enum FullTextSource: String, Codable, CaseIterable, Sendable {
         case .unpaywall: return "Unpaywall"
         case .doi: return "Publisher"
         case .cached: return "Cached"
+        case .uploaded: return "Uploaded"
         }
     }
 
@@ -50,6 +54,7 @@ enum FullTextSource: String, Codable, CaseIterable, Sendable {
         case .unpaywall: return "lock.open"
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
+        case .uploaded: return "square.and.arrow.up"
         }
     }
 
@@ -59,7 +64,7 @@ enum FullTextSource: String, Codable, CaseIterable, Sendable {
     /// within the app. DOI sources require opening in an external browser.
     var canDisplayInApp: Bool {
         switch self {
-        case .europePMC, .unpaywall, .cached:
+        case .europePMC, .unpaywall, .cached, .uploaded:
             return true
         case .doi:
             return false
@@ -211,5 +216,13 @@ struct FullTextResult: Equatable, Sendable {
     /// - Returns: A full-text result with cached source.
     static func cached(content: FullTextContentType) -> FullTextResult {
         FullTextResult(content: content, source: .cached)
+    }
+
+    /// Create an uploaded result from user-provided content.
+    ///
+    /// - Parameter content: The uploaded content type (markdown, HTML, or PDF).
+    /// - Returns: A full-text result with uploaded source.
+    static func uploaded(content: FullTextContentType) -> FullTextResult {
+        FullTextResult(content: content, source: .uploaded)
     }
 }

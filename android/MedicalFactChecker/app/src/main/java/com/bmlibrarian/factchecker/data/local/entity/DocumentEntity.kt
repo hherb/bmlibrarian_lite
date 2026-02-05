@@ -243,6 +243,7 @@ data class DocumentEntity(
             Constants.FULLTEXT_SOURCE_UNPAYWALL -> "Unpaywall"
             Constants.FULLTEXT_SOURCE_DOI -> "Publisher"
             Constants.FULLTEXT_SOURCE_CACHED -> "Cached"
+            Constants.FULLTEXT_SOURCE_UPLOADED -> "Uploaded"
             else -> fullTextSource
         }
 

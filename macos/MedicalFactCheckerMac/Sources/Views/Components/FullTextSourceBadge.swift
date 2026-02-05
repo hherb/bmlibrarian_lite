@@ -93,6 +93,7 @@ struct FullTextSourceBadge: View {
         FullTextSourceBadge(sourceString: "unpaywall")
         FullTextSourceBadge(sourceString: "doi")
         FullTextSourceBadge(sourceString: "cached")
+        FullTextSourceBadge(sourceString: "uploaded")
         FullTextSourceBadge(sourceString: "unknown")
     }
     .padding()
@@ -104,6 +105,7 @@ struct FullTextSourceBadge: View {
         FullTextSourceBadge(source: .unpaywall)
         FullTextSourceBadge(source: .doi)
         FullTextSourceBadge(source: .cached)
+        FullTextSourceBadge(source: .uploaded)
     }
     .padding()
 }

@@ -94,6 +94,7 @@ struct MacFullTextSourceBadge: View {
         MacFullTextSourceBadge(sourceString: "unpaywall")
         MacFullTextSourceBadge(sourceString: "doi")
         MacFullTextSourceBadge(sourceString: "cached")
+        MacFullTextSourceBadge(sourceString: "uploaded")
         MacFullTextSourceBadge(sourceString: "unknown")
     }
     .padding()
@@ -105,6 +106,7 @@ struct MacFullTextSourceBadge: View {
         MacFullTextSourceBadge(source: .unpaywall)
         MacFullTextSourceBadge(source: .doi)
         MacFullTextSourceBadge(source: .cached)
+        MacFullTextSourceBadge(source: .uploaded)
     }
     .padding()
 }

@@ -242,6 +242,9 @@ object Constants {
     /** Full-text source: Cached from previous fetch. */
     const val FULLTEXT_SOURCE_CACHED = "cached"
 
+    /** Full-text source: User-uploaded content (PDF, HTML, or Markdown). */
+    const val FULLTEXT_SOURCE_UPLOADED = "uploaded"
+
     // ==================== JATS Parsing Constants ====================
 
     /** Maximum heading level in markdown output. */

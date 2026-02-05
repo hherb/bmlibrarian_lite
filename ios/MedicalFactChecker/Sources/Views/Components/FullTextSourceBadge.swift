@@ -66,6 +66,7 @@ struct FullTextSourceBadge: View {
         case .unpaywall: return .green
         case .doi: return .orange
         case .cached: return .gray
+        case .uploaded: return .purple
         }
     }
 }
@@ -78,6 +79,7 @@ struct FullTextSourceBadge: View {
         FullTextSourceBadge(source: .unpaywall)
         FullTextSourceBadge(source: .doi)
         FullTextSourceBadge(source: .cached)
+        FullTextSourceBadge(source: .uploaded)
     }
     .padding()
 }

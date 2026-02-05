@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -98,9 +99,11 @@ private object ReasoningColors {
  * @param document The document to display
  * @param citations Optional list of extracted citations/key passages for this document
  * @param isLoadingFullText Whether full text is currently being fetched
+ * @param isUploadingFullText Whether full text is currently being uploaded
  * @param onGetFullText Callback to fetch full text for this document
  * @param onViewFullText Callback to navigate to full text viewer
  * @param onOpenPublisher Callback to open publisher website (DOI link)
+ * @param onUploadFullText Callback to upload full text for this document
  * @param modifier Modifier for the component
  */
 @Composable
@@ -108,9 +111,11 @@ fun DocumentCard(
     document: DocumentEntity,
     citations: List<CitationEntity> = emptyList(),
     isLoadingFullText: Boolean = false,
+    isUploadingFullText: Boolean = false,
     onGetFullText: ((DocumentEntity) -> Unit)? = null,
     onViewFullText: ((DocumentEntity) -> Unit)? = null,
     onOpenPublisher: ((String) -> Unit)? = null,
+    onUploadFullText: ((DocumentEntity) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -246,15 +251,17 @@ fun DocumentCard(
                 }
 
                 // Full Text Section
-                if (onGetFullText != null || onViewFullText != null) {
+                if (onGetFullText != null || onViewFullText != null || onUploadFullText != null) {
                     HorizontalDivider()
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                     FullTextSection(
                         document = document,
                         isLoading = isLoadingFullText,
+                        isUploading = isUploadingFullText,
                         onGetFullText = onGetFullText,
                         onViewFullText = onViewFullText,
-                        onOpenPublisher = onOpenPublisher
+                        onOpenPublisher = onOpenPublisher,
+                        onUploadFullText = onUploadFullText
                     )
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 }
@@ -503,129 +510,194 @@ private fun KeyPassageBox(
  * - View Full Text button when full text is already available
  * - Get Full Text button when not yet attempted
  * - Unavailable message with fallback to publisher when retrieval failed
+ * - Upload Full Text button in all states where full text is not available
  *
  * @param document The document to display full-text actions for
  * @param isLoading Whether full text is currently being fetched
+ * @param isUploading Whether full text is currently being uploaded
  * @param onGetFullText Callback to fetch full text
  * @param onViewFullText Callback to navigate to full text viewer
  * @param onOpenPublisher Callback to open publisher website
+ * @param onUploadFullText Callback to upload full text manually
  */
 @Composable
 private fun FullTextSection(
     document: DocumentEntity,
     isLoading: Boolean,
+    isUploading: Boolean,
     onGetFullText: ((DocumentEntity) -> Unit)?,
     onViewFullText: ((DocumentEntity) -> Unit)?,
-    onOpenPublisher: ((String) -> Unit)?
+    onOpenPublisher: ((String) -> Unit)?,
+    onUploadFullText: ((DocumentEntity) -> Unit)?
 ) {
-    when {
-        // Already have full text - show view button
-        document.hasFullText -> {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
-            ) {
-                Button(
-                    onClick = { onViewFullText?.invoke(document) },
-                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+    Column(
+        verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+    ) {
+        when {
+            // Already have full text - show view button
+            document.hasFullText -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Article,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
-                    Text("View Full Text")
-                }
-
-                // Show source badge
-                document.fullTextSourceDisplay?.let { source ->
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = MaterialTheme.shapes.small
-                    ) {
-                        Text(
-                            text = source,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(
-                                horizontal = Constants.UI_BADGE_PADDING_HORIZONTAL.dp,
-                                vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
-                            )
-                        )
-                    }
-                }
-            }
-        }
-
-        // Already tried but unavailable
-        document.fullTextUnavailable -> {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "Full text not available",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-
-                // Offer to open publisher website
-                document.doi?.let { doi ->
-                    OutlinedButton(
-                        onClick = { onOpenPublisher?.invoke(doi) },
+                    Button(
+                        onClick = { onViewFullText?.invoke(document) },
                         contentPadding = ButtonDefaults.ButtonWithIconContentPadding
                     ) {
                         Icon(
-                            imageVector = Icons.Default.OpenInBrowser,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
-                        Text(
-                            text = "Publisher",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                }
-            }
-        }
-
-        // Not yet attempted - show fetch button
-        else -> {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { onGetFullText?.invoke(document) },
-                    enabled = !isLoading,
-                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Download,
+                            imageVector = Icons.Default.Article,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
+                        Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                        Text("View Full Text")
                     }
-                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
-                    Text(if (isLoading) "Fetching..." else "Get Full Text")
+
+                    // Show source badge
+                    document.fullTextSourceDisplay?.let { source ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                text = source,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(
+                                    horizontal = Constants.UI_BADGE_PADDING_HORIZONTAL.dp,
+                                    vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
+                                )
+                            )
+                        }
+                    }
                 }
             }
+
+            // Already tried but unavailable
+            document.fullTextUnavailable -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Full text not available",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Offer to open publisher website
+                    document.doi?.let { doi ->
+                        OutlinedButton(
+                            onClick = { onOpenPublisher?.invoke(doi) },
+                            contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInBrowser,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                            Text(
+                                text = "Publisher",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
+
+                // Upload button when full text is unavailable
+                UploadFullTextButton(
+                    isUploading = isUploading,
+                    isLoading = isLoading,
+                    onUpload = { onUploadFullText?.invoke(document) }
+                )
+            }
+
+            // Not yet attempted - show fetch button
+            else -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onGetFullText?.invoke(document) },
+                        enabled = !isLoading && !isUploading,
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                        Text(if (isLoading) "Fetching..." else "Get Full Text")
+                    }
+                }
+
+                // Upload button when full text not yet fetched
+                UploadFullTextButton(
+                    isUploading = isUploading,
+                    isLoading = isLoading,
+                    onUpload = { onUploadFullText?.invoke(document) }
+                )
+            }
         }
+    }
+}
+
+/**
+ * Button for uploading full text manually.
+ *
+ * Allows users to upload a PDF, HTML, or Markdown file containing
+ * the full text when automatic retrieval is not available.
+ *
+ * @param isUploading Whether an upload is currently in progress
+ * @param isLoading Whether a fetch is currently in progress
+ * @param onUpload Callback when upload button is clicked
+ */
+@Composable
+private fun UploadFullTextButton(
+    isUploading: Boolean,
+    isLoading: Boolean,
+    onUpload: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onUpload,
+        enabled = !isUploading && !isLoading,
+        contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.tertiary
+        )
+    ) {
+        if (isUploading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.tertiary
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.Upload,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+        Text(if (isUploading) "Uploading..." else "Upload Full Text")
     }
 }
