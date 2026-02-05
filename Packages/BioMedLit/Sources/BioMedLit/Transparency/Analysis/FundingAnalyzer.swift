@@ -252,9 +252,15 @@ public enum FundingAnalyzer {
         guard let grants = grants else { return [] }
 
         return grants.compactMap { grant -> FunderInfo? in
-            guard let agency = grant["agency"] as? String, !agency.isEmpty else { return nil }
+            // Unwrap the double optional: grant["agency"] returns String??
+            guard let agencyOpt = grant["agency"],
+                  let agency = agencyOpt,
+                  !agency.isEmpty else {
+                return nil
+            }
 
-            let grantId = grant["grant_id"] as? String
+            // Similarly unwrap grant_id (optional value from optional key)
+            let grantId: String? = grant["grant_id"].flatMap { $0 }
             let awardNumbers = grantId.map { [$0] } ?? []
 
             return createFunderInfo(name: agency, awardNumbers: awardNumbers)
