@@ -385,8 +385,20 @@ class WorkflowWorker(QThread):
 
             # Step 5: Generate report with metadata
             self.progress.emit("report", 0, 1)
+
+            # Gather transparency results for cited documents
+            cited_doc_ids = list({c.document.id for c in citations})
+            transparency_results = self.storage.get_transparency_results_batch(
+                cited_doc_ids
+            )
+
             reporting_agent = LiteReportingAgent(config=self.config)
-            report = reporting_agent.generate_report(self.question, citations, metadata)
+            report = reporting_agent.generate_report(
+                self.question,
+                citations,
+                metadata,
+                transparency_results=transparency_results,
+            )
             self.step_complete.emit("report", report)
 
             # Save report to checkpoint for later retrieval
