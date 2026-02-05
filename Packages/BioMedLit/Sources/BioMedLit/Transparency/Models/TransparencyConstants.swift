@@ -105,6 +105,14 @@ public enum TransparencyConstants {
     /// Score threshold for "below average transparency" category (score >= this).
     public static let belowAverageTransparencyThreshold: Int = 26
 
+    // MARK: - Score Range
+
+    /// Minimum valid transparency score.
+    public static let minTransparencyScore: Int = 0
+
+    /// Maximum valid transparency score.
+    public static let maxTransparencyScore: Int = 100
+
     // MARK: - UI Limits
 
     /// Maximum risk indicators to show in tooltip before truncating.
@@ -335,7 +343,8 @@ public enum DataRepositoryPatterns {
     public static let urlPattern = #"https?://[^\s<>\"']+"#
 
     /// Pattern for extracting accession numbers (e.g., "accession: GSE12345").
-    public static let accessionPattern = #"(?:accession|identifier)[:\s]+([A-Z0-9]+)"#
+    /// Uses case-insensitive character class since extraction functions lowercase input.
+    public static let accessionPattern = #"(?:accession|identifier)[:\s]+([a-zA-Z0-9]+)"#
 }
 
 // MARK: - Clinical Trial Patterns
@@ -480,10 +489,14 @@ public enum RegexHelper {
 
     /// Extract all matches of a pattern (full match, no capture groups).
     ///
+    /// Unlike `extractFirst` and `extractAll`, this method preserves the original
+    /// case of matched text. This is intentional for extracting URLs, NCT IDs,
+    /// and other identifiers where case matters.
+    ///
     /// - Parameters:
-    ///   - pattern: Regex pattern to match.
+    ///   - pattern: Regex pattern to match (case-insensitive).
     ///   - text: The text to search in.
-    /// - Returns: Array of matched strings.
+    /// - Returns: Array of matched strings with original case preserved.
     public static func findAll(pattern: String, in text: String) -> [String] {
         let range = NSRange(text.startIndex..., in: text)
 

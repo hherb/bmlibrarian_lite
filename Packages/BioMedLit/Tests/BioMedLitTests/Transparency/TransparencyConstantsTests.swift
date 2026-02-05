@@ -52,9 +52,24 @@ final class TransparencyConstantsTests: XCTestCase {
     }
 
     func testBaseScoreIsReasonable() {
-        // Base score should be between thresholds
-        XCTAssertGreaterThan(TransparencyConstants.baseTransparencyScore, 0)
-        XCTAssertLessThanOrEqual(TransparencyConstants.baseTransparencyScore, 100)
+        // Base score should be within valid range
+        XCTAssertGreaterThanOrEqual(
+            TransparencyConstants.baseTransparencyScore,
+            TransparencyConstants.minTransparencyScore
+        )
+        XCTAssertLessThanOrEqual(
+            TransparencyConstants.baseTransparencyScore,
+            TransparencyConstants.maxTransparencyScore
+        )
+    }
+
+    func testScoreRangeIsValid() {
+        XCTAssertEqual(TransparencyConstants.minTransparencyScore, 0)
+        XCTAssertEqual(TransparencyConstants.maxTransparencyScore, 100)
+        XCTAssertLessThan(
+            TransparencyConstants.minTransparencyScore,
+            TransparencyConstants.maxTransparencyScore
+        )
     }
 
     // MARK: - KnownIndustryFunders Tests

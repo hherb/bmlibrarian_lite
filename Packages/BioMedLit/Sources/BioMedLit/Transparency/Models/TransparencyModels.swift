@@ -726,65 +726,67 @@ public struct TransparencyResultBuilder: Sendable {
     /// Placeholder score calculation.
     /// Will be replaced by TransparencyScorer.calculateScore() in Step 07.
     private func calculateScorePlaceholder() -> Int {
-        // Base score of 50
-        var score = 50
+        var score = TransparencyConstants.baseTransparencyScore
 
         // Data availability adjustments
         switch dataAvailability.disclosureLevel {
         case .fullOpen:
-            score += 20
+            score += TransparencyConstants.fullOpenDataPoints
         case .availableOnRequest:
-            score += 10
+            score += TransparencyConstants.onRequestDataPoints
         case .notAvailable:
-            score -= 10
+            score += TransparencyConstants.noDataPenalty
         case .notStated:
-            score -= 5
+            score += TransparencyConstants.noStatementPenalty
         case .restricted, .unknown:
             break
         }
 
         // COI statement presence
         if coiAnalysis.statement != nil {
-            score += 10
+            score += TransparencyConstants.coiStatementPoints
         } else {
-            score -= 5
+            score += TransparencyConstants.missingCoiPenalty
         }
 
         // Trial registration
         if !trialRegistrations.isEmpty {
-            score += 10
+            score += TransparencyConstants.trialRegistrationPoints
         }
 
         // Results compliance
         switch resultsCompliance {
         case .compliant:
-            score += 5
+            score += TransparencyConstants.compliantResultsPoints
         case .missing:
-            score -= 10
+            score += TransparencyConstants.missingResultsPenalty
         case .late, .notRequired, .unknown:
             break
         }
 
         // Outcome switching penalty
         if outcomeSwitchingDetected {
-            score -= 15
+            score += TransparencyConstants.outcomeSwitchingPenalty
         }
 
         // Industry funding with no data sharing penalty
         if industryFundingDetected && dataAvailability.disclosureLevel == .notAvailable {
-            score -= 10
+            score += TransparencyConstants.industryNoDataPenalty
         }
 
-        // Clamp to 0-100 range
-        return max(0, min(100, score))
+        // Clamp to valid score range
+        return max(
+            TransparencyConstants.minTransparencyScore,
+            min(TransparencyConstants.maxTransparencyScore, score)
+        )
     }
 
     /// Placeholder risk level calculation.
     /// Will be replaced by TransparencyScorer.calculateRiskLevel() in Step 07.
     private func calculateRiskLevelPlaceholder(score: Int) -> TransparencyRiskLevel {
-        if score < 40 {
+        if score < TransparencyConstants.highRiskScoreThreshold {
             return .high
-        } else if score < 70 {
+        } else if score < TransparencyConstants.mediumRiskScoreThreshold {
             return .medium
         } else {
             return .low
