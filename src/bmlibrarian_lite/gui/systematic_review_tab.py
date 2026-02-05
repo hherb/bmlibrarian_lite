@@ -56,6 +56,7 @@ from ..agents import (
     LiteReportingAgent,
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
+from ..transparency import TransparencyManager, TransparencyResult
 from datetime import datetime
 
 from .quality_filter_panel import QualityFilterPanel
@@ -427,6 +428,9 @@ class SystematicReviewTab(QWidget):
     benchmark_completed = Signal(object)  # BenchmarkResult
     quality_benchmark_completed = Signal(object)  # QualityBenchmarkResult
 
+    # Transparency signal - emitted when analysis completes for a document
+    transparency_result_ready = Signal(str, object)  # (doc_id, TransparencyResult)
+
     def __init__(
         self,
         config: LiteConfig,
@@ -454,6 +458,15 @@ class SystematicReviewTab(QWidget):
 
         # Quality manager for document assessment
         self.quality_manager = QualityManager(config)
+
+        # Transparency manager for risk analysis
+        self._transparency_manager = TransparencyManager(
+            settings=config.transparency,
+            storage=storage,
+        )
+        self._transparency_manager.analysis_complete.connect(
+            self._on_transparency_result
+        )
 
         # Audit trail data - stored during workflow execution
         self._documents_found: List[LiteDocument] = []
@@ -540,8 +553,11 @@ class SystematicReviewTab(QWidget):
         layout.addWidget(question_group)
 
         # Quality filter panel (collapsible)
-        self.quality_filter_panel = QualityFilterPanel()
+        self.quality_filter_panel = QualityFilterPanel(config=self.config)
         self.quality_filter_panel.filterChanged.connect(self._on_quality_filter_changed)
+        self.quality_filter_panel.transparency_filter_changed.connect(
+            self._on_transparency_filter_changed
+        )
         layout.addWidget(self.quality_filter_panel)
 
         # Quality summary widget (shows tier distribution after filtering)
@@ -1114,3 +1130,80 @@ class SystematicReviewTab(QWidget):
                 self._quality_benchmark_worker.wait(2000)
             self._quality_benchmark_worker = None
         self._quality_benchmark_progress_dialog = None
+
+    # === Transparency Integration Methods ===
+
+    def _on_transparency_filter_changed(self, enabled: bool) -> None:
+        """
+        Handle transparency filter toggle from quality filter panel.
+
+        Args:
+            enabled: Whether transparency filtering is enabled
+        """
+        # Update quality manager settings
+        settings = self.quality_filter_panel.get_transparency_settings()
+        self.quality_manager.update_transparency_settings(settings)
+        self._transparency_manager.update_settings(settings)
+        logger.debug(f"Transparency filtering {'enabled' if enabled else 'disabled'}")
+
+    def _on_transparency_result(
+        self,
+        doc_id: str,
+        result: TransparencyResult,
+    ) -> None:
+        """
+        Handle transparency analysis result from background thread.
+
+        Args:
+            doc_id: Document ID that was analyzed
+            result: Transparency analysis result
+        """
+        # Forward to audit trail via signal
+        self.transparency_result_ready.emit(doc_id, result)
+
+        # If we have quality assessment for this doc, apply tier adjustment
+        if doc_id in self._quality_assessments:
+            assessment = self._quality_assessments[doc_id]
+            adjusted = self.quality_manager.get_adjusted_quality(
+                assessment, result
+            )
+            self._quality_assessments[doc_id] = adjusted
+
+        logger.debug(
+            f"Transparency result for {doc_id}: {result.risk_level.value}"
+        )
+
+    def start_transparency_analysis(
+        self,
+        documents: List[LiteDocument],
+    ) -> None:
+        """
+        Start background transparency analysis for documents.
+
+        Call this after documents are retrieved to begin analysis
+        in background. Results are emitted via transparency_result_ready.
+
+        Args:
+            documents: Documents to analyze
+        """
+        if not self.config.transparency.enabled:
+            logger.debug("Transparency analysis disabled, skipping")
+            return
+
+        for doc in documents:
+            self._transparency_manager.analyze_document_async(doc)
+
+    def get_transparency_result(
+        self,
+        doc_id: str,
+    ) -> Optional[TransparencyResult]:
+        """
+        Get cached transparency result for a document.
+
+        Args:
+            doc_id: Document ID
+
+        Returns:
+            TransparencyResult if available, None otherwise
+        """
+        return self._transparency_manager.get_cached_result(doc_id)
