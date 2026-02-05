@@ -244,17 +244,20 @@ Extract the most relevant passages that help answer the research question."""
         Returns:
             List of passage dictionaries
         """
+        # Strip markdown code fences if present
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            # Remove opening fence (```json or ```)
+            cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+            # Remove closing fence
+            cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+
         try:
-            # Try to find JSON with passages array
-            # Handle various JSON formats
-            json_match = re.search(
-                r'\{\s*"passages"\s*:\s*\[.*?\]\s*\}',
-                response,
-                re.DOTALL
-            )
-            if json_match:
-                data = json.loads(json_match.group())
-                passages = data.get("passages", [])
+            # Try parsing the entire cleaned response as JSON first
+            # This is the most reliable method
+            data = json.loads(cleaned)
+            if isinstance(data, dict) and "passages" in data:
+                passages = data["passages"]
                 # Validate passages
                 valid_passages = []
                 for p in passages:
@@ -262,16 +265,41 @@ Extract the most relevant passages that help answer the research question."""
                         valid_passages.append(p)
                 return valid_passages
 
-            # Try parsing the entire response as JSON
-            data = json.loads(response)
-            if "passages" in data:
-                return data["passages"]
-
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.debug(f"JSON parsing failed: {e}")
+            logger.debug(f"Direct JSON parsing failed: {e}")
+
+        try:
+            # Fallback: Find JSON object in response by matching braces
+            # Find the first '{' and try to parse from there
+            start_idx = response.find("{")
+            if start_idx != -1:
+                # Try progressively longer substrings to find valid JSON
+                brace_count = 0
+                for i, char in enumerate(response[start_idx:], start=start_idx):
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            # Found matching closing brace
+                            json_str = response[start_idx:i + 1]
+                            try:
+                                data = json.loads(json_str)
+                                if isinstance(data, dict) and "passages" in data:
+                                    valid_passages = []
+                                    for p in data["passages"]:
+                                        if isinstance(p, dict) and "text" in p:
+                                            valid_passages.append(p)
+                                    return valid_passages
+                            except json.JSONDecodeError:
+                                pass
+                            break
+
+        except Exception as e:
+            logger.debug(f"Brace-matching JSON parsing failed: {e}")
 
         # Fallback: return empty list
-        logger.warning(f"Could not parse citations from: {response[:100]}...")
+        logger.warning(f"Could not parse citations from: {response}")
         return []
 
     def group_citations_by_document(

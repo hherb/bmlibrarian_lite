@@ -16,8 +16,34 @@
 
 """User-configurable transparency analysis settings."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
+
+
+class ReportRiskThreshold(Enum):
+    """Threshold for which risk levels trigger warnings in reports."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+DEFAULT_INLINE_WARNING_TEMPLATES: dict[str, str] = {
+    "industry_funding": "⚠️ funding concerns",
+    "missing_coi": "⚠️ COI not disclosed",
+    "missing_results": "⚠️ results not posted",
+    "data_not_available": "⚠️ data not shared",
+    "multiple_risks": "⚠️ transparency concerns",
+}
+
+
+def _parse_risk_threshold(value: str) -> ReportRiskThreshold:
+    """Parse risk threshold string, defaulting to HIGH on invalid values."""
+    try:
+        return ReportRiskThreshold(value)
+    except ValueError:
+        return ReportRiskThreshold.HIGH
 
 
 @dataclass
@@ -62,6 +88,12 @@ class TransparencySettings:
     show_badge_on_cards: bool = True
     show_detailed_tooltip: bool = True
 
+    # Report risk warning settings
+    report_risk_threshold: ReportRiskThreshold = ReportRiskThreshold.HIGH
+    inline_warning_templates: dict[str, str] = field(
+        default_factory=lambda: DEFAULT_INLINE_WARNING_TEMPLATES.copy()
+    )
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize to dictionary for storage.
@@ -82,6 +114,8 @@ class TransparencySettings:
             "cache_results": self.cache_results,
             "show_badge_on_cards": self.show_badge_on_cards,
             "show_detailed_tooltip": self.show_detailed_tooltip,
+            "report_risk_threshold": self.report_risk_threshold.value,
+            "inline_warning_templates": self.inline_warning_templates,
         }
 
     @classmethod
@@ -112,6 +146,12 @@ class TransparencySettings:
             cache_results=data.get("cache_results", True),
             show_badge_on_cards=data.get("show_badge_on_cards", True),
             show_detailed_tooltip=data.get("show_detailed_tooltip", True),
+            report_risk_threshold=_parse_risk_threshold(
+                data.get("report_risk_threshold", "high")
+            ),
+            inline_warning_templates=data.get(
+                "inline_warning_templates", DEFAULT_INLINE_WARNING_TEMPLATES.copy()
+            ),
         )
 
     def validate(self) -> list[str]:

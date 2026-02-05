@@ -574,7 +574,7 @@ Evaluate the relevance of this document to the research question."""
             return {"score": score, "explanation": response}
 
         # Default
-        logger.warning(f"Could not parse score from: {response[:100]}")
+        logger.warning(f"Could not parse score from: {response}")
         return {"score": 1, "explanation": "Could not parse response"}
 
     def _compute_results(

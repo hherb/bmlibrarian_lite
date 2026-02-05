@@ -209,6 +209,9 @@ class LiteMainWindow(QMainWindow):
         self.systematic_review_tab.quality_assessed.connect(
             self.audit_trail_tab.on_quality_assessed
         )
+        self.systematic_review_tab.transparency_result_ready.connect(
+            self.audit_trail_tab.on_transparency_assessed
+        )
 
         # Connect Audit Trail document request to load document
         self.audit_trail_tab.document_requested.connect(

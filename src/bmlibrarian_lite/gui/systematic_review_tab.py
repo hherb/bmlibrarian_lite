@@ -362,14 +362,43 @@ class WorkflowWorker(QThread):
             unique_docs = set(c.document.id for c in citations)
             metadata.unique_sources_cited = len(unique_docs)
 
+            # Collect transparency stats from available results
+            if self.config.transparency.enabled:
+                all_doc_ids = [doc.id for doc in documents]
+                transparency_results = self.storage.get_transparency_results_batch(
+                    all_doc_ids
+                )
+                if transparency_results:
+                    metadata.transparency_analysis_applied = True
+                    from ..transparency import TransparencyRisk
+                    for result in transparency_results.values():
+                        if result.risk_level == TransparencyRisk.LOW:
+                            metadata.transparency_low_risk_count += 1
+                        elif result.risk_level == TransparencyRisk.MEDIUM:
+                            metadata.transparency_medium_risk_count += 1
+                        elif result.risk_level == TransparencyRisk.HIGH:
+                            metadata.transparency_high_risk_count += 1
+
             if self._cancelled:
                 self.finished.emit("Workflow cancelled.", metadata)
                 return
 
             # Step 5: Generate report with metadata
             self.progress.emit("report", 0, 1)
+
+            # Gather transparency results for cited documents
+            cited_doc_ids = list({c.document.id for c in citations})
+            transparency_results = self.storage.get_transparency_results_batch(
+                cited_doc_ids
+            )
+
             reporting_agent = LiteReportingAgent(config=self.config)
-            report = reporting_agent.generate_report(self.question, citations, metadata)
+            report = reporting_agent.generate_report(
+                self.question,
+                citations,
+                metadata,
+                transparency_results=transparency_results,
+            )
             self.step_complete.emit("report", report)
 
             # Save report to checkpoint for later retrieval
@@ -685,6 +714,9 @@ class SystematicReviewTab(QWidget):
             self.progress_label.setText(f"Found {len(docs)} documents")
             # Quality filtering happens after search in the workflow worker
             # Results are stored for later display
+
+            # Start transparency analysis in background (before filtering/scoring)
+            self.start_transparency_analysis(docs)
 
             # Emit documents found signal for audit trail
             self.documents_found.emit(docs)

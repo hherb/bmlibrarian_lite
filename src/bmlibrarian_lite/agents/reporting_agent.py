@@ -14,19 +14,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Lite report generation agent.
+"""Lite report generation agent.
 
 This agent synthesizes evidence from multiple citations into a coherent,
 professional research summary with proper attribution.
 """
 
 import logging
-from datetime import datetime
-from typing import Optional
 
 from ..data_models import Citation, ReportMetadata
+from ..transparency.transparency_models import TransparencyResult
 from .base import LiteBaseAgent
+from .report_risk_helpers import (
+    build_risk_context_for_prompt,
+    format_reference_risk_annotation,
+    should_warn_for_citation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +60,7 @@ IMPORTANT: Every citation MUST use the markdown link format [Author, Year](docid
 
 
 class LiteReportingAgent(LiteBaseAgent):
-    """
-    Stateless report generation agent.
+    """Stateless report generation agent.
 
     Synthesizes citations into a coherent research report with proper
     attribution and a references section.
@@ -75,15 +77,16 @@ class LiteReportingAgent(LiteBaseAgent):
         self,
         question: str,
         citations: list[Citation],
-        metadata: Optional[ReportMetadata] = None,
+        metadata: ReportMetadata | None = None,
+        transparency_results: dict[str, TransparencyResult] | None = None,
     ) -> str:
-        """
-        Generate a research report from citations.
+        """Generate a research report from citations.
 
         Args:
             question: Research question
             citations: List of citations to synthesize
             metadata: Optional report metadata for methodology section
+            transparency_results: Optional dict mapping document_id to TransparencyResult
 
         Returns:
             Formatted research report as markdown
@@ -105,14 +108,46 @@ class LiteReportingAgent(LiteBaseAgent):
         # Format citations for the prompt
         formatted_citations = self._format_citations_for_prompt(citations)
 
+        # Build doc_order and doc_to_ref mapping for risk context
+        doc_order: list[str] = []
+        doc_to_ref: dict[str, str] = {}
+        for citation in citations:
+            doc_id = citation.document.id
+            if doc_id not in doc_to_ref:
+                doc_order.append(doc_id)
+                doc_to_ref[doc_id] = citation.formatted_reference
+
+        # Identify risky citations based on threshold
+        risky_doc_results: dict[str, TransparencyResult] = {}
+        if transparency_results and hasattr(self.config, "transparency"):
+            settings = self.config.transparency
+            for doc_id in doc_order:
+                if doc_id in transparency_results:
+                    result = transparency_results[doc_id]
+                    if should_warn_for_citation(result, settings):
+                        risky_doc_results[doc_id] = result
+
+        # Build risk context for LLM prompt
+        risk_context = ""
+        if risky_doc_results:
+            # Build mapping of citation number to (author_ref, result)
+            risky_citations_for_prompt: dict[int, tuple[str, TransparencyResult]] = {}
+            for i, doc_id in enumerate(doc_order, 1):
+                if doc_id in risky_doc_results:
+                    risky_citations_for_prompt[i] = (
+                        doc_to_ref[doc_id],
+                        risky_doc_results[doc_id],
+                    )
+            risk_context = build_risk_context_for_prompt(risky_citations_for_prompt)
+
         # Count unique documents
-        unique_doc_ids = set(c.document.id for c in citations)
+        unique_doc_ids = {c.document.id for c in citations}
         user_prompt = f"""Research Question: {question}
 
 Evidence from {len(unique_doc_ids)} source(s) ({len(citations)} passages total):
 
 {formatted_citations}
-
+{risk_context}
 Write a comprehensive research summary that synthesizes this evidence to answer the research question.
 
 CITATION FORMAT - MANDATORY:
@@ -131,8 +166,8 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
         try:
             report = self._chat(messages, temperature=0.3, max_tokens=4096)
 
-            # Add references section
-            references = self._format_references(citations)
+            # Add references section with risk annotations
+            references = self._format_references_with_risk(citations, risky_doc_results)
             full_report = f"{report}\n\n## References\n\n{references}"
 
             # Add methodology section if metadata provided
@@ -151,8 +186,7 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
         citations: list[Citation],
         max_length: int = 500,
     ) -> str:
-        """
-        Generate a brief summary of findings.
+        """Generate a brief summary of findings.
 
         Args:
             question: Research question
@@ -197,8 +231,7 @@ CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above.""
         question: str,
         citation_extraction_failed: bool = False,
     ) -> str:
-        """
-        Generate a report when no citations are available.
+        """Generate a report when no citations are available.
 
         Args:
             question: Research question
@@ -252,8 +285,7 @@ No relevant evidence was found in the searched literature. This may indicate:
 """
 
     def _format_citations_for_prompt(self, citations: list[Citation]) -> str:
-        """
-        Format citations for the LLM prompt.
+        """Format citations for the LLM prompt.
 
         Groups passages by document so that multiple passages from the same
         source are presented together. Uses the document's short reference
@@ -297,8 +329,7 @@ Key passages:
         return "\n".join(formatted)
 
     def _format_references(self, citations: list[Citation]) -> str:
-        """
-        Format reference list for the report.
+        """Format reference list for the report.
 
         Args:
             citations: List of citations
@@ -331,9 +362,53 @@ Key passages:
 
         return "\n".join(references)
 
-    def get_citation_count(self, citations: list[Citation]) -> int:
+    def _format_references_with_risk(
+        self,
+        citations: list[Citation],
+        risky_doc_results: dict[str, TransparencyResult],
+    ) -> str:
+        """Format reference list with risk annotations for risky citations.
+
+        Args:
+            citations: List of citations
+            risky_doc_results: Dict mapping document_id to TransparencyResult for risky docs
+
+        Returns:
+            Formatted reference list with risk annotations
         """
-        Get unique document count from citations.
+        # Deduplicate by document ID
+        seen: set[str] = set()
+        unique_citations = []
+        for citation in citations:
+            if citation.document.id not in seen:
+                seen.add(citation.document.id)
+                unique_citations.append(citation)
+
+        references = []
+        for i, citation in enumerate(unique_citations, 1):
+            doc = citation.document
+            ref = f"{i}. {doc.formatted_authors}"
+            if doc.year:
+                ref += f" ({doc.year})"
+            ref += f". {doc.title}"
+            if doc.journal:
+                ref += f". *{doc.journal}*"
+            if doc.doi:
+                ref += f". DOI: {doc.doi}"
+            if doc.pmid:
+                ref += f". PMID: {doc.pmid}"
+            references.append(ref)
+
+            # Add risk annotation if this document is risky
+            if doc.id in risky_doc_results:
+                annotation = format_reference_risk_annotation(risky_doc_results[doc.id])
+                if annotation:
+                    references.append(annotation)
+
+        return "\n".join(references)
+
+    def get_citation_count(self, citations: list[Citation]) -> int:
+        """Get unique document count from citations.
 
         Args:
             citations: List of citations
@@ -341,7 +416,7 @@ Key passages:
         Returns:
             Number of unique source documents
         """
-        return len(set(c.document.id for c in citations))
+        return len({c.document.id for c in citations})
 
     def export_report_with_metadata(
         self,
@@ -349,8 +424,7 @@ Key passages:
         report: str,
         citations: list[Citation],
     ) -> dict:
-        """
-        Export report with metadata for saving.
+        """Export report with metadata for saving.
 
         Args:
             question: Research question
@@ -383,8 +457,7 @@ Key passages:
         }
 
     def format_methodology_section(self, metadata: ReportMetadata) -> str:
-        """
-        Format the methodology section for the report.
+        """Format the methodology section for the report.
 
         Creates a structured markdown section containing all workflow
         parameters and statistics for reproducibility.
@@ -438,7 +511,7 @@ Key passages:
         # Quality assessment section
         lines.append("### Quality Assessment")
         if metadata.quality_filter_applied:
-            lines.append(f"- **Filter Applied:** Yes")
+            lines.append("- **Filter Applied:** Yes")
             if metadata.quality_filter_settings:
                 min_tier = metadata.quality_filter_settings.get("minimum_tier", "Unknown")
                 lines.append(f"- **Minimum Tier:** {min_tier}")
@@ -447,6 +520,30 @@ Key passages:
             )
         else:
             lines.append("Quality filtering was not applied.")
+        lines.append("")
+
+        # Transparency analysis section
+        lines.append("### Transparency Analysis")
+        if metadata.transparency_analysis_applied:
+            lines.append("- **Analysis Applied:** Yes")
+            total_analyzed = (
+                metadata.transparency_low_risk_count
+                + metadata.transparency_medium_risk_count
+                + metadata.transparency_high_risk_count
+            )
+            lines.append(f"- **Documents Analyzed:** {total_analyzed:,}")
+            lines.append("")
+            lines.append("**Risk Distribution:**")
+            lines.append("")
+            lines.append("| Risk Level | Count |")
+            lines.append("|------------|-------|")
+            lines.append(f"| Low        | {metadata.transparency_low_risk_count}     |")
+            lines.append(
+                f"| Medium     | {metadata.transparency_medium_risk_count}     |"
+            )
+            lines.append(f"| High       | {metadata.transparency_high_risk_count}     |")
+        else:
+            lines.append("Transparency analysis was not applied.")
         lines.append("")
 
         # AI models section
@@ -480,7 +577,7 @@ Key passages:
             f"- **Unique Sources:** {metadata.unique_sources_cited:,}",
             "",
             "---",
-            f"*Report generated by BMLibrarian Lite*",
+            "*Report generated by BMLibrarian Lite*",
         ])
 
         # Add version and timestamp
