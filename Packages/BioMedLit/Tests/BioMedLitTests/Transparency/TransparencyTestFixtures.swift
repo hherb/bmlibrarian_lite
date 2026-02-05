@@ -308,37 +308,53 @@ enum TransparencyTestFixtures {
 
     // MARK: - TrialRegistration Fixtures
 
+    /// Number of days for "six months ago" completion date in test fixtures.
+    private static let sixMonthsInDays = 180
+
     /// Create a sample industry trial registration.
+    ///
+    /// - Parameters:
+    ///   - nctId: NCT identifier for the trial.
+    ///   - resultsPosted: Whether results have been posted.
+    /// - Returns: A configured TrialRegistration instance.
     static func makeIndustryTrialRegistration(
         nctId: String = "NCT01234567",
         resultsPosted: Bool = true
     ) -> TrialRegistration {
-        TrialRegistration(
-            registry: "ClinicalTrials.gov",
+        let oneYearAgo = -Double(TransparencyConstants.resultsComplianceDeadlineDays)
+            * TransparencyConstants.secondsPerDay
+        return TrialRegistration(
+            registry: TransparencyConstants.clinicalTrialsRegistryName,
             registrationId: nctId,
             title: "Industry-Sponsored Trial",
             sponsorClass: "INDUSTRY",
             leadSponsor: "Pfizer Inc.",
             resultsPosted: resultsPosted,
-            completionDate: Date().addingTimeInterval(-365 * 24 * 60 * 60),
+            completionDate: Date().addingTimeInterval(oneYearAgo),
             primaryOutcomesRegistered: ["Primary Outcome 1"],
             secondaryOutcomesRegistered: ["Secondary Outcome 1"]
         )
     }
 
     /// Create a sample NIH trial registration.
+    ///
+    /// - Parameters:
+    ///   - nctId: NCT identifier for the trial.
+    ///   - resultsPosted: Whether results have been posted.
+    /// - Returns: A configured TrialRegistration instance.
     static func makeNIHTrialRegistration(
         nctId: String = "NCT87654321",
         resultsPosted: Bool = false
     ) -> TrialRegistration {
-        TrialRegistration(
-            registry: "ClinicalTrials.gov",
+        let sixMonthsAgo = -Double(sixMonthsInDays) * TransparencyConstants.secondsPerDay
+        return TrialRegistration(
+            registry: TransparencyConstants.clinicalTrialsRegistryName,
             registrationId: nctId,
             title: "NIH-Sponsored Trial",
             sponsorClass: "NIH",
             leadSponsor: "National Heart, Lung, and Blood Institute",
             resultsPosted: resultsPosted,
-            completionDate: Date().addingTimeInterval(-180 * 24 * 60 * 60),
+            completionDate: Date().addingTimeInterval(sixMonthsAgo),
             primaryOutcomesRegistered: ["Exercise capacity"],
             secondaryOutcomesRegistered: []
         )

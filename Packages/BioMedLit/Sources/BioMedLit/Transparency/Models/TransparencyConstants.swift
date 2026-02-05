@@ -59,6 +59,9 @@ public enum TransparencyConstants {
     /// FDAAA compliance deadline in days (12 months after primary completion).
     public static let resultsComplianceDeadlineDays: Int = 365
 
+    /// Seconds per day (24 * 60 * 60) for time interval calculations.
+    public static let secondsPerDay: TimeInterval = 86_400
+
     // MARK: - Score Adjustments
 
     /// Points awarded for full open data access.
