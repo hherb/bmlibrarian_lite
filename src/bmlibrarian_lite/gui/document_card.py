@@ -57,8 +57,10 @@ from ..constants import (
 )
 from ..data_models import LiteDocument, DocumentSource
 from ..quality.data_models import QualityAssessment
+from ..transparency import TransparencyResult
 from .card_utils import format_authors, format_metadata, get_score_color
 from .quality_badge import QualityBadge
+from .transparency_badge import TransparencyBadge
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +278,7 @@ class DocumentCard(QFrame):
         score: Optional[int] = None,
         score_rationale: Optional[str] = None,
         quality_assessment: Optional[QualityAssessment] = None,
+        transparency_result: Optional[TransparencyResult] = None,
         citation_rationale: Optional[str] = None,
         show_abstract: bool = False,
         parent: Optional[QWidget] = None,
@@ -288,6 +291,7 @@ class DocumentCard(QFrame):
             score: Optional relevance score (1-5)
             score_rationale: LLM explanation for the score
             quality_assessment: Optional quality assessment
+            transparency_result: Optional transparency analysis result
             citation_rationale: Why this passage was selected as citation
             show_abstract: Whether to initially show abstract (expanded state)
             parent: Parent widget
@@ -297,12 +301,14 @@ class DocumentCard(QFrame):
         self._score = score
         self._score_rationale = score_rationale
         self._quality_assessment = quality_assessment
+        self._transparency_result = transparency_result
         self._citation_rationale = citation_rationale
         self._expanded = show_abstract
 
         # Track child widgets for updates
         self._score_badge: Optional[ScoreBadge] = None
         self._quality_badge: Optional[QualityBadge] = None
+        self._transparency_badge: Optional[TransparencyBadge] = None
         self._source_badge: Optional[SourceBadge] = None
         self._abstract_widget: Optional[QTextEdit] = None
         self._rationale_widget: Optional[QLabel] = None
@@ -353,6 +359,14 @@ class DocumentCard(QFrame):
                 show_design=True,
             )
             title_row.addWidget(self._quality_badge)
+
+        # Transparency badge (if available) - after quality, before score
+        if self._transparency_result:
+            self._transparency_badge = TransparencyBadge(
+                self._transparency_result,
+                compact=True,  # Use compact mode in card header
+            )
+            title_row.addWidget(self._transparency_badge)
 
         # Score badge (if available)
         if self._score is not None:
@@ -715,3 +729,58 @@ class DocumentCard(QFrame):
     def doc_id(self) -> str:
         """Get document ID."""
         return self.document.id
+
+    def set_transparency_result(self, result: TransparencyResult) -> None:
+        """
+        Update the transparency result and badge.
+
+        Called when background analysis completes. Creates the badge
+        if not present, otherwise updates existing badge.
+
+        Args:
+            result: Transparency analysis result
+        """
+        self._transparency_result = result
+
+        if self._transparency_badge:
+            # Update existing badge
+            self._transparency_badge.update_result(result)
+        else:
+            # Create new badge and insert into title row
+            self._transparency_badge = TransparencyBadge(result, compact=True)
+
+            # Find title row in header and insert after quality badge
+            if self._header_widget:
+                header_layout = self._header_widget.layout()
+                if header_layout and header_layout.count() > 0:
+                    title_row_item = header_layout.itemAt(0)
+                    if title_row_item and title_row_item.layout():
+                        title_row = title_row_item.layout()
+                        # Insert after quality badge (index 1) if present, else at start
+                        insert_index = 1 if self._quality_badge else 0
+                        title_row.insertWidget(insert_index, self._transparency_badge)
+                        logger.debug(
+                            f"Transparency badge added for {self.document.id}: "
+                            f"{result.risk_level.value}"
+                        )
+
+    def get_transparency_result(self) -> Optional[TransparencyResult]:
+        """
+        Return current transparency result.
+
+        Returns:
+            TransparencyResult if available, None otherwise
+        """
+        return self._transparency_result
+
+    @property
+    def transparency_risk(self) -> Optional[str]:
+        """
+        Return risk level string for filtering.
+
+        Returns:
+            Risk level value string (low, medium, high) or None
+        """
+        if self._transparency_result:
+            return self._transparency_result.risk_level.value
+        return None

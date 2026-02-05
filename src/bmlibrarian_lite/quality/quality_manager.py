@@ -42,6 +42,7 @@ from .data_models import (
 from .metadata_filter import MetadataFilter
 from .study_classifier import LiteStudyClassifier
 from .quality_agent import LiteQualityAgent
+from ..transparency import TransparencyResult, TransparencyRisk, TransparencySettings
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ class QualityManager:
         self.metadata_filter = MetadataFilter()
         self.study_classifier = LiteStudyClassifier(config=self.config)
         self.quality_agent = LiteQualityAgent(config=self.config)
+        self._transparency_settings = self.config.transparency
 
     def assess_document(
         self,
@@ -295,3 +297,130 @@ class QualityManager:
             design = assessment.study_design.value
             distribution[design] = distribution.get(design, 0) + 1
         return distribution
+
+    # === Transparency Integration Methods ===
+
+    def apply_transparency_adjustment(
+        self,
+        assessment: QualityAssessment,
+        transparency_result: TransparencyResult,
+    ) -> QualityAssessment:
+        """
+        Apply tier downgrade based on transparency analysis.
+
+        If transparency settings are disabled or the risk level is not HIGH,
+        returns the original assessment unchanged. Otherwise, creates a new
+        assessment with the tier downgraded.
+
+        Args:
+            assessment: Original quality assessment
+            transparency_result: Transparency analysis result
+
+        Returns:
+            Modified assessment with tier adjustment (if applicable)
+        """
+        if not self._transparency_settings.enabled:
+            return assessment
+
+        if transparency_result.risk_level != TransparencyRisk.HIGH:
+            return assessment
+
+        # Store original tier for audit trail
+        original_tier = assessment.quality_tier
+        downgrade_amount = self._transparency_settings.tier_downgrade_amount
+
+        # Calculate new tier (minimum is UNCLASSIFIED, value=0)
+        new_tier_value = max(
+            0,  # UNCLASSIFIED
+            original_tier.value - downgrade_amount
+        )
+
+        # Get the new tier enum
+        new_tier = QualityTier(new_tier_value)
+
+        # Create modified assessment with transparency fields
+        adjusted = QualityAssessment(
+            assessment_tier=assessment.assessment_tier,
+            extraction_method=assessment.extraction_method,
+            study_design=assessment.study_design,
+            quality_tier=new_tier,  # Adjusted tier
+            quality_score=assessment.quality_score,
+            evidence_level=assessment.evidence_level,
+            is_randomized=assessment.is_randomized,
+            is_controlled=assessment.is_controlled,
+            is_blinded=assessment.is_blinded,
+            is_prospective=assessment.is_prospective,
+            is_multicenter=assessment.is_multicenter,
+            sample_size=assessment.sample_size,
+            confidence=assessment.confidence,
+            bias_risk=assessment.bias_risk,
+            strengths=assessment.strengths,
+            limitations=assessment.limitations,
+            extraction_details=assessment.extraction_details,
+            # Transparency integration fields
+            transparency_result=transparency_result,
+            original_quality_tier=original_tier,
+            transparency_adjusted=True,
+        )
+
+        logger.info(
+            f"Transparency adjustment applied: {original_tier.name} -> {new_tier.name} "
+            f"(risk: {transparency_result.risk_level.value})"
+        )
+
+        return adjusted
+
+    def get_adjusted_quality(
+        self,
+        assessment: QualityAssessment,
+        transparency_result: Optional[TransparencyResult],
+    ) -> QualityAssessment:
+        """
+        Get quality assessment with transparency adjustment applied.
+
+        If transparency result exists and indicates high risk,
+        returns adjusted assessment with tier downgrade.
+
+        Args:
+            assessment: Quality assessment to potentially adjust
+            transparency_result: Optional transparency result
+
+        Returns:
+            Adjusted quality assessment, or original if no adjustment needed
+        """
+        if transparency_result is None:
+            return assessment
+
+        # Apply adjustment if needed
+        return self.apply_transparency_adjustment(assessment, transparency_result)
+
+    def should_filter_document(
+        self,
+        transparency_result: Optional[TransparencyResult],
+    ) -> bool:
+        """
+        Check if document should be filtered out due to transparency.
+
+        Args:
+            transparency_result: Transparency result for the document
+
+        Returns:
+            True if document should be excluded from results
+        """
+        if not self._transparency_settings.filtering_enabled:
+            return False
+
+        if transparency_result is None:
+            return False  # Don't filter if not yet analyzed
+
+        return transparency_result.risk_level == TransparencyRisk.HIGH
+
+    def update_transparency_settings(self, settings: TransparencySettings) -> None:
+        """
+        Update transparency settings.
+
+        Args:
+            settings: New transparency settings to apply
+        """
+        self._transparency_settings = settings
+        logger.debug("Transparency settings updated")
