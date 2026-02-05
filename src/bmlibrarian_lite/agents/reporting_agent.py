@@ -26,7 +26,13 @@ from datetime import datetime
 from typing import Optional
 
 from ..data_models import Citation, ReportMetadata
+from ..transparency.transparency_models import TransparencyResult
 from .base import LiteBaseAgent
+from .report_risk_helpers import (
+    build_risk_context_for_prompt,
+    format_reference_risk_annotation,
+    should_warn_for_citation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +82,7 @@ class LiteReportingAgent(LiteBaseAgent):
         question: str,
         citations: list[Citation],
         metadata: Optional[ReportMetadata] = None,
+        transparency_results: Optional[dict[str, TransparencyResult]] = None,
     ) -> str:
         """
         Generate a research report from citations.
@@ -84,6 +91,7 @@ class LiteReportingAgent(LiteBaseAgent):
             question: Research question
             citations: List of citations to synthesize
             metadata: Optional report metadata for methodology section
+            transparency_results: Optional dict mapping document_id to TransparencyResult
 
         Returns:
             Formatted research report as markdown
@@ -105,6 +113,38 @@ class LiteReportingAgent(LiteBaseAgent):
         # Format citations for the prompt
         formatted_citations = self._format_citations_for_prompt(citations)
 
+        # Build doc_order and doc_to_ref mapping for risk context
+        doc_order: list[str] = []
+        doc_to_ref: dict[str, str] = {}
+        for citation in citations:
+            doc_id = citation.document.id
+            if doc_id not in doc_to_ref:
+                doc_order.append(doc_id)
+                doc_to_ref[doc_id] = citation.formatted_reference
+
+        # Identify risky citations based on threshold
+        risky_doc_results: dict[str, TransparencyResult] = {}
+        if transparency_results and hasattr(self.config, "transparency"):
+            settings = self.config.transparency
+            for doc_id in doc_order:
+                if doc_id in transparency_results:
+                    result = transparency_results[doc_id]
+                    if should_warn_for_citation(result, settings):
+                        risky_doc_results[doc_id] = result
+
+        # Build risk context for LLM prompt
+        risk_context = ""
+        if risky_doc_results:
+            # Build mapping of citation number to (author_ref, result)
+            risky_citations_for_prompt: dict[int, tuple[str, TransparencyResult]] = {}
+            for i, doc_id in enumerate(doc_order, 1):
+                if doc_id in risky_doc_results:
+                    risky_citations_for_prompt[i] = (
+                        doc_to_ref[doc_id],
+                        risky_doc_results[doc_id],
+                    )
+            risk_context = build_risk_context_for_prompt(risky_citations_for_prompt)
+
         # Count unique documents
         unique_doc_ids = set(c.document.id for c in citations)
         user_prompt = f"""Research Question: {question}
@@ -112,7 +152,7 @@ class LiteReportingAgent(LiteBaseAgent):
 Evidence from {len(unique_doc_ids)} source(s) ({len(citations)} passages total):
 
 {formatted_citations}
-
+{risk_context}
 Write a comprehensive research summary that synthesizes this evidence to answer the research question.
 
 CITATION FORMAT - MANDATORY:
@@ -131,8 +171,8 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
         try:
             report = self._chat(messages, temperature=0.3, max_tokens=4096)
 
-            # Add references section
-            references = self._format_references(citations)
+            # Add references section with risk annotations
+            references = self._format_references_with_risk(citations, risky_doc_results)
             full_report = f"{report}\n\n## References\n\n{references}"
 
             # Add methodology section if metadata provided
@@ -328,6 +368,52 @@ Key passages:
             if doc.pmid:
                 ref += f". PMID: {doc.pmid}"
             references.append(ref)
+
+        return "\n".join(references)
+
+    def _format_references_with_risk(
+        self,
+        citations: list[Citation],
+        risky_doc_results: dict[str, TransparencyResult],
+    ) -> str:
+        """
+        Format reference list with risk annotations for risky citations.
+
+        Args:
+            citations: List of citations
+            risky_doc_results: Dict mapping document_id to TransparencyResult for risky docs
+
+        Returns:
+            Formatted reference list with risk annotations
+        """
+        # Deduplicate by document ID
+        seen: set[str] = set()
+        unique_citations = []
+        for citation in citations:
+            if citation.document.id not in seen:
+                seen.add(citation.document.id)
+                unique_citations.append(citation)
+
+        references = []
+        for i, citation in enumerate(unique_citations, 1):
+            doc = citation.document
+            ref = f"{i}. {doc.formatted_authors}"
+            if doc.year:
+                ref += f" ({doc.year})"
+            ref += f". {doc.title}"
+            if doc.journal:
+                ref += f". *{doc.journal}*"
+            if doc.doi:
+                ref += f". DOI: {doc.doi}"
+            if doc.pmid:
+                ref += f". PMID: {doc.pmid}"
+            references.append(ref)
+
+            # Add risk annotation if this document is risky
+            if doc.id in risky_doc_results:
+                annotation = format_reference_risk_annotation(risky_doc_results[doc.id])
+                if annotation:
+                    references.append(annotation)
 
         return "\n".join(references)
 
