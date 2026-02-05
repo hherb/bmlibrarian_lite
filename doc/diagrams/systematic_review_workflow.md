@@ -18,71 +18,71 @@ This chain is preserved in the database and exposed through real-time signals fo
 flowchart TD
     subgraph UserInput["User Input"]
         Q[/"Research Question"/]
-        Settings["Settings<br/>• Max results<br/>• Min score threshold<br/>• Quality filters<br/>• Transparency analysis"]
+        Settings["Settings"]
     end
 
     subgraph QueryGeneration["Step 1: Query Generation"]
-        QC["LiteQueryConverter<br/>(LLM)"]
-        QC -->|"Extract concepts"| Concepts["2-4 Key Concepts<br/>• MeSH terms<br/>• Keywords"]
+        QC["LiteQueryConverter - LLM"]
+        QC -->|Extract concepts| Concepts["Key Concepts"]
         Concepts --> PubMedQ["PubMed Query String"]
         PubMedQ --> Fallback{Query valid?}
-        Fallback -->|No| FallbackQ["Fallback Query<br/>(keyword extraction)"]
+        Fallback -->|No| FallbackQ["Fallback Query"]
         Fallback -->|Yes| ValidQ["Valid Query"]
     end
 
     subgraph Search["Step 2: Literature Search"]
         SearchService["SearchService"]
-        SearchService --> PubMed["PubMed API<br/>(E-utilities)"]
-        SearchService --> EPMC["Europe PMC API<br/>(REST)"]
+        SearchService --> PubMed["PubMed API"]
+        SearchService --> EPMC["Europe PMC API"]
         PubMed --> Results1["Results Set 1"]
         EPMC --> Results2["Results Set 2"]
-        Results1 --> Dedup["Deduplication<br/>(PMID/DOI/PMC/Title)"]
+        Results1 --> Dedup["Deduplication"]
         Results2 --> Dedup
-        Dedup --> Documents["LiteDocument[]<br/>+ Embeddings"]
+        Dedup --> Documents["LiteDocuments + Embeddings"]
     end
 
-    subgraph OptionalIncremental["Optional: Iterative Result Fetching"]
+    subgraph OptionalIncremental["Optional: Iterative Fetching"]
         IncrSearch["IncrementalSearchWorker"]
-        IncrSearch -->|"Batch fetch"| MoreResults["Fetch More Results<br/>(offset pagination)"]
+        IncrSearch -->|Batch fetch| MoreResults["Fetch More Results"]
         MoreResults --> FilterScored["Filter Already Scored"]
-        FilterScored -->|"Target not met"| IncrSearch
-        FilterScored -->|"Target met or exhausted"| NewDocs["New Documents"]
+        FilterScored -->|Target not met| IncrSearch
+        FilterScored -->|Done| NewDocs["New Documents"]
     end
 
-    subgraph QualityFilter["Step 3: Quality Filtering (Optional)"]
+    subgraph QualityFilter["Step 3: Quality Filtering"]
         QM["QualityManager"]
-        QM --> Tier1["Tier 1: Metadata Filter<br/>(free, instant)"]
-        Tier1 -->|"Inconclusive"| Tier2["Tier 2: LLM Classification<br/>(Haiku - fast)"]
-        Tier2 -->|"Need detail"| Tier3["Tier 3: Detailed Assessment<br/>(Sonnet)"]
+        QM --> Tier1["Tier 1: Metadata"]
+        Tier1 -->|Inconclusive| Tier2["Tier 2: LLM Haiku"]
+        Tier2 -->|Need detail| Tier3["Tier 3: LLM Sonnet"]
         Tier1 --> Filtered["Filtered Documents"]
         Tier2 --> Filtered
         Tier3 --> Filtered
     end
 
     subgraph Scoring["Step 4: Document Scoring"]
-        SA["LiteScoringAgent<br/>(LLM)"]
-        SA -->|"Per document"| Score["Score 1-5<br/>+ Explanation"]
-        Score --> Persist1[("Save to DB<br/>(crash-safe)")]
-        Score --> FilterMin{"Score ≥<br/>threshold?"}
+        SA["LiteScoringAgent - LLM"]
+        SA -->|Per document| Score["Score 1-5 + Explanation"]
+        Score --> Persist1[("Save to DB")]
+        Score --> FilterMin{Score >= threshold?}
         FilterMin -->|Yes| Relevant["Relevant Documents"]
         FilterMin -->|No| Rejected["Rejected"]
     end
 
     subgraph Citation["Step 5: Citation Extraction"]
-        CA["LiteCitationAgent<br/>(LLM)"]
-        CA -->|"Per document"| Extract["Extract 1-3<br/>Key Passages"]
-        Extract --> Citations["Citations[]<br/>• passage text<br/>• relevance score<br/>• context"]
+        CA["LiteCitationAgent - LLM"]
+        CA -->|Per document| Extract["Extract Key Passages"]
+        Extract --> Citations["Citations with context"]
         Citations --> Persist2[("Save to DB")]
     end
 
-    subgraph Transparency["Step 6: Transparency Analysis (Background)"]
+    subgraph Transparency["Step 6: Transparency Analysis"]
         TM["TransparencyManager"]
-        TM --> Industry["Industry Sponsorship<br/>(CrossRef, ClinicalTrials.gov)"]
-        TM --> DataDisc["Data Disclosure<br/>(availability statements)"]
-        TM --> TrialReg["Trial Registration<br/>(FDAAA compliance)"]
-        TM --> Outcome["Outcome Reporting<br/>(switching detection)"]
-        TM --> COI["COI Analysis<br/>(financial ties)"]
-        Industry --> Risk["Risk Assessment<br/>LOW/MODERATE/HIGH"]
+        TM --> Industry["Industry Sponsorship"]
+        TM --> DataDisc["Data Disclosure"]
+        TM --> TrialReg["Trial Registration"]
+        TM --> Outcome["Outcome Reporting"]
+        TM --> COI["COI Analysis"]
+        Industry --> Risk["Risk Assessment"]
         DataDisc --> Risk
         TrialReg --> Risk
         Outcome --> Risk
@@ -90,20 +90,19 @@ flowchart TD
     end
 
     subgraph Report["Step 7: Report Generation"]
-        RA["LiteReportingAgent<br/>(LLM)"]
-        RA --> Narrative["Synthesized Narrative<br/>• Thematic organization<br/>• Inline citations<br/>• Conflicting evidence"]
-        Narrative --> Refs["References Section<br/>(numbered bibliography)"]
-        Refs --> Method["Methodology Section<br/>• Search parameters<br/>• Score distribution<br/>• Models used<br/>• Timestamps"]
+        RA["LiteReportingAgent - LLM"]
+        RA --> Narrative["Synthesized Narrative"]
+        Narrative --> Refs["References Section"]
+        Refs --> Method["Methodology Section"]
         Method --> FinalReport["Final Markdown Report"]
     end
 
     subgraph Output["Output"]
         Display["Report Tab Display"]
-        Checkpoint[("Checkpoint<br/>+ Reproducibility<br/>Metadata")]
-        AuditTrail["Audit Trail<br/>(real-time signals)"]
+        Checkpoint[("Checkpoint + Metadata")]
+        AuditTrail["Audit Trail"]
     end
 
-    %% Main flow connections
     Q --> QC
     Settings --> SearchService
     ValidQ --> SearchService
@@ -114,18 +113,16 @@ flowchart TD
     Filtered --> SA
     Relevant --> CA
     Citations --> RA
-    Risk -.->|"Enriches"| FinalReport
+    Risk -.->|Enriches| FinalReport
     FinalReport --> Display
     FinalReport --> Checkpoint
 
-    %% Signal flow (dashed)
-    QC -.->|"query_generated"| AuditTrail
-    Documents -.->|"documents_found"| AuditTrail
-    Score -.->|"document_scored"| AuditTrail
-    Citations -.->|"citation_extracted"| AuditTrail
-    Risk -.->|"analysis_complete"| AuditTrail
+    QC -.->|query_generated| AuditTrail
+    Documents -.->|documents_found| AuditTrail
+    Score -.->|document_scored| AuditTrail
+    Citations -.->|citation_extracted| AuditTrail
+    Risk -.->|analysis_complete| AuditTrail
 
-    %% Styling
     classDef llm fill:#e1f5fe,stroke:#01579b
     classDef storage fill:#fff3e0,stroke:#e65100
     classDef optional fill:#f3e5f5,stroke:#7b1fa2
@@ -233,24 +230,24 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     subgraph Trigger["Trigger: Re-run Search"]
-        SelectQ["Select Past Question<br/>(ResearchQuestionsTab)"]
-        Target["Set Target:<br/>New Documents to Find"]
+        SelectQ["Select Past Question"]
+        Target["Set Target New Docs"]
     end
 
     subgraph IncrementalSearch["IncrementalSearchWorker"]
-        Init["Initialize<br/>• Existing PubMed query<br/>• Already scored IDs<br/>• Target count"]
+        Init["Initialize with query and scored IDs"]
 
-        Loop{"New docs < target<br/>AND offset < max?"}
+        Loop{New docs < target AND offset < max?}
 
-        Fetch["Fetch Batch<br/>(INCREMENTAL_SEARCH_BATCH_SIZE)"]
+        Fetch["Fetch Batch"]
 
-        Filter["Filter Out<br/>Already Scored"]
+        Filter["Filter Already Scored"]
 
-        Emit["Emit batch_complete<br/>signal"]
+        Emit["Emit batch_complete signal"]
 
         Offset["Increment offset"]
 
-        Done["Emit finished<br/>with all new docs"]
+        Done["Emit finished with new docs"]
     end
 
     subgraph Processing["Continue Workflow"]
@@ -326,36 +323,36 @@ flowchart LR
     subgraph Analysis["StudyTransparencyAnalyzer"]
         subgraph Funding["Industry Sponsorship"]
             CrossRef["CrossRef Funder API"]
-            CTGov["ClinicalTrials.gov<br/>Sponsor Class"]
-            FunderMatch["Match against<br/>pharma database"]
+            CTGov["ClinicalTrials.gov Sponsor"]
+            FunderMatch["Pharma Database Match"]
         end
 
         subgraph Data["Data Disclosure"]
-            DAS["Data Availability<br/>Statement Parser"]
-            Categories["Categories:<br/>• full_open<br/>• on_request<br/>• restricted<br/>• not_available<br/>• not_stated"]
+            DAS["Availability Statement Parser"]
+            Categories["Categories"]
         end
 
         subgraph Trial["Trial Registration"]
             NCT["NCT ID Extraction"]
-            Results["Results Posted<br/>Check"]
-            FDAAA["FDAAA 2007<br/>Compliance"]
+            Results["Results Posted Check"]
+            FDAAA["FDAAA 2007 Compliance"]
         end
 
         subgraph Outcomes["Outcome Analysis"]
-            RegOutcomes["Registered<br/>Outcomes"]
-            PubOutcomes["Published<br/>Outcomes"]
-            Compare["Compare for<br/>Switching"]
+            RegOutcomes["Registered Outcomes"]
+            PubOutcomes["Published Outcomes"]
+            Compare["Compare for Switching"]
         end
 
         subgraph COI["COI Detection"]
-            Statement["COI Statement<br/>Parser"]
-            Industry["Industry<br/>Relationships"]
-            Financial["Financial<br/>Ties"]
+            Statement["COI Statement Parser"]
+            Industry["Industry Relationships"]
+            Financial["Financial Ties"]
         end
     end
 
     subgraph Output["TransparencyResult"]
-        Risk["Overall Risk<br/>LOW/MODERATE/HIGH"]
+        Risk["Risk: LOW/MODERATE/HIGH"]
         Details["Detailed Findings"]
         Confidence["Confidence Score"]
     end
@@ -382,40 +379,40 @@ The system maintains complete traceability from every claim in the final report 
 ```mermaid
 flowchart TB
     subgraph Sources["1. Source Identification"]
-        Query["PubMed Query<br/><i>Stored with timestamp</i>"]
-        Session["SearchSession<br/>• query_string<br/>• search_date<br/>• provider<br/>• total_available<br/>• duplicates_removed"]
+        Query["PubMed Query with timestamp"]
+        Session["SearchSession"]
     end
 
     subgraph Documents["2. Document Registry"]
         Doc["LiteDocument"]
-        DocID["Unique ID<br/><code>pmid-12345678</code>"]
-        DocMeta["Immutable Metadata<br/>• PMID<br/>• DOI<br/>• PMC ID<br/>• Title<br/>• Authors<br/>• Year<br/>• Journal"]
+        DocID["Unique ID: pmid-12345678"]
+        DocMeta["Immutable Metadata"]
         Doc --> DocID
         Doc --> DocMeta
     end
 
     subgraph Scoring["3. Relevance Assessment"]
         ScoredDoc["ScoredDocument"]
-        ScoreData["Score Record<br/>• document_id → Doc<br/>• score (1-5)<br/>• explanation<br/>• checkpoint_id<br/>• timestamp"]
+        ScoreData["Score Record"]
         ScoredDoc --> ScoreData
     end
 
     subgraph Citations["4. Evidence Extraction"]
         Citation["Citation"]
-        CitationData["Citation Record<br/>• document_id → Doc<br/>• passage_text<br/>• relevance_score<br/>• context<br/>• checkpoint_id"]
+        CitationData["Citation Record"]
         Citation --> CitationData
     end
 
     subgraph Report["5. Final Report"]
         Narrative["Report Narrative"]
-        InlineCite["Inline Citation<br/><code>[Author, Year](docid:pmid-12345678)</code>"]
-        RefSection["References Section<br/>1. Author et al. (Year). Title.<br/>   Journal. DOI: xxx PMID: yyy"]
-        MethodSection["Methodology Section<br/>• Original question<br/>• Exact PubMed query<br/>• Search date<br/>• Scoring parameters<br/>• Model versions"]
+        InlineCite["Inline Citation Links"]
+        RefSection["References Section"]
+        MethodSection["Methodology Section"]
     end
 
-    subgraph Checkpoint["6. Checkpoint (Reproducibility)"]
+    subgraph Checkpoint["6. Checkpoint"]
         CP["Checkpoint Record"]
-        CPData["• research_question<br/>• pubmed_query<br/>• created_at<br/>• completed_at<br/>• step (complete)<br/>• report_text<br/>• metadata JSON"]
+        CPData["Full Metadata JSON"]
     end
 
     Query --> Session
@@ -429,15 +426,24 @@ flowchart TB
     MethodSection --> CP
     CP --> CPData
 
-    %% Bidirectional trace
-    InlineCite -.->|"Click to trace"| DocMeta
-    RefSection -.->|"Links to"| DocID
+    InlineCite -.->|Click to trace| DocMeta
+    RefSection -.->|Links to| DocID
 
     classDef trace fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
     classDef storage fill:#fff8e1,stroke:#f57f17
     class DocID,InlineCite,RefSection trace
     class Session,ScoreData,CitationData,CPData storage
 ```
+
+**Provenance Data at Each Stage:**
+
+| Stage | Key Fields |
+|-------|------------|
+| **SearchSession** | query_string, search_date, provider, total_available, duplicates_removed |
+| **Document** | PMID, DOI, PMC ID, Title, Authors, Year, Journal |
+| **ScoreData** | document_id, score (1-5), explanation, checkpoint_id, timestamp |
+| **CitationData** | document_id, passage_text, relevance_score, context, checkpoint_id |
+| **Checkpoint** | research_question, pubmed_query, created_at, completed_at, report_text, metadata |
 
 ### Citation Format in Reports
 
@@ -516,10 +522,10 @@ erDiagram
         json metadata
     }
 
-    DOCUMENT ||--o{ SCORED_DOCUMENT : "scored as"
-    DOCUMENT ||--o{ CITATION : "cited in"
+    DOCUMENT ||--o{ SCORED_DOCUMENT : scores
+    DOCUMENT ||--o{ CITATION : cites
     DOCUMENT {
-        string id PK "pmid-xxxxx"
+        string id PK
         string pmid UK
         string doi UK
         string pmc_id UK
@@ -528,7 +534,7 @@ erDiagram
         json authors
         int year
         string journal
-        string source "PUBMED|EUROPEPMC"
+        string source
         datetime added_at
     }
 
@@ -536,7 +542,7 @@ erDiagram
         string id PK
         string document_id FK
         string checkpoint_id FK
-        int score "1-5"
+        int score
         text explanation
         datetime scored_at
     }
