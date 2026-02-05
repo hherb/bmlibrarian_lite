@@ -131,6 +131,12 @@ private enum PDFLayout {
     static let heading2TopSpacing: CGFloat = 8
     /// Spacing after any markdown heading.
     static let headingBottomSpacing: CGFloat = 4
+    /// Heading-1 font size in markdown.
+    static let heading1FontSize: CGFloat = 16
+    /// Heading-2 font size in markdown.
+    static let heading2FontSize: CGFloat = 14
+    /// Heading-3 font size in markdown.
+    static let heading3FontSize: CGFloat = 12
 }
 
 /// Utility for exporting evidence reports as text-based PDF documents.
