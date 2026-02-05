@@ -14,16 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Lite report generation agent.
+"""Lite report generation agent.
 
 This agent synthesizes evidence from multiple citations into a coherent,
 professional research summary with proper attribution.
 """
 
 import logging
-from datetime import datetime
-from typing import Optional
 
 from ..data_models import Citation, ReportMetadata
 from ..transparency.transparency_models import TransparencyResult
@@ -63,8 +60,7 @@ IMPORTANT: Every citation MUST use the markdown link format [Author, Year](docid
 
 
 class LiteReportingAgent(LiteBaseAgent):
-    """
-    Stateless report generation agent.
+    """Stateless report generation agent.
 
     Synthesizes citations into a coherent research report with proper
     attribution and a references section.
@@ -81,11 +77,10 @@ class LiteReportingAgent(LiteBaseAgent):
         self,
         question: str,
         citations: list[Citation],
-        metadata: Optional[ReportMetadata] = None,
-        transparency_results: Optional[dict[str, TransparencyResult]] = None,
+        metadata: ReportMetadata | None = None,
+        transparency_results: dict[str, TransparencyResult] | None = None,
     ) -> str:
-        """
-        Generate a research report from citations.
+        """Generate a research report from citations.
 
         Args:
             question: Research question
@@ -146,7 +141,7 @@ class LiteReportingAgent(LiteBaseAgent):
             risk_context = build_risk_context_for_prompt(risky_citations_for_prompt)
 
         # Count unique documents
-        unique_doc_ids = set(c.document.id for c in citations)
+        unique_doc_ids = {c.document.id for c in citations}
         user_prompt = f"""Research Question: {question}
 
 Evidence from {len(unique_doc_ids)} source(s) ({len(citations)} passages total):
@@ -191,8 +186,7 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
         citations: list[Citation],
         max_length: int = 500,
     ) -> str:
-        """
-        Generate a brief summary of findings.
+        """Generate a brief summary of findings.
 
         Args:
             question: Research question
@@ -237,8 +231,7 @@ CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above.""
         question: str,
         citation_extraction_failed: bool = False,
     ) -> str:
-        """
-        Generate a report when no citations are available.
+        """Generate a report when no citations are available.
 
         Args:
             question: Research question
@@ -292,8 +285,7 @@ No relevant evidence was found in the searched literature. This may indicate:
 """
 
     def _format_citations_for_prompt(self, citations: list[Citation]) -> str:
-        """
-        Format citations for the LLM prompt.
+        """Format citations for the LLM prompt.
 
         Groups passages by document so that multiple passages from the same
         source are presented together. Uses the document's short reference
@@ -337,8 +329,7 @@ Key passages:
         return "\n".join(formatted)
 
     def _format_references(self, citations: list[Citation]) -> str:
-        """
-        Format reference list for the report.
+        """Format reference list for the report.
 
         Args:
             citations: List of citations
@@ -376,8 +367,7 @@ Key passages:
         citations: list[Citation],
         risky_doc_results: dict[str, TransparencyResult],
     ) -> str:
-        """
-        Format reference list with risk annotations for risky citations.
+        """Format reference list with risk annotations for risky citations.
 
         Args:
             citations: List of citations
@@ -418,8 +408,7 @@ Key passages:
         return "\n".join(references)
 
     def get_citation_count(self, citations: list[Citation]) -> int:
-        """
-        Get unique document count from citations.
+        """Get unique document count from citations.
 
         Args:
             citations: List of citations
@@ -427,7 +416,7 @@ Key passages:
         Returns:
             Number of unique source documents
         """
-        return len(set(c.document.id for c in citations))
+        return len({c.document.id for c in citations})
 
     def export_report_with_metadata(
         self,
@@ -435,8 +424,7 @@ Key passages:
         report: str,
         citations: list[Citation],
     ) -> dict:
-        """
-        Export report with metadata for saving.
+        """Export report with metadata for saving.
 
         Args:
             question: Research question
@@ -469,8 +457,7 @@ Key passages:
         }
 
     def format_methodology_section(self, metadata: ReportMetadata) -> str:
-        """
-        Format the methodology section for the report.
+        """Format the methodology section for the report.
 
         Creates a structured markdown section containing all workflow
         parameters and statistics for reproducibility.
@@ -590,7 +577,7 @@ Key passages:
             f"- **Unique Sources:** {metadata.unique_sources_cited:,}",
             "",
             "---",
-            f"*Report generated by BMLibrarian Lite*",
+            "*Report generated by BMLibrarian Lite*",
         ])
 
         # Add version and timestamp
