@@ -41,6 +41,7 @@ from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import LiteDocument, ScoredDocument, Citation
 from ..quality.data_models import QualityAssessment
+from ..transparency import TransparencyResult
 
 from .audit_queries_tab import AuditQueriesTab
 from .audit_literature_tab import AuditLiteratureTab
@@ -278,6 +279,26 @@ class AuditTrailTab(QWidget):
         """
         logger.debug(f"Audit trail: quality assessed - {doc_id}")
         self.literature_tab.update_quality(doc_id, assessment)
+
+    def on_transparency_assessed(
+        self,
+        doc_id: str,
+        result: TransparencyResult,
+    ) -> None:
+        """
+        Handle transparency assessment result.
+
+        Updates transparency badge in the Literature sub-tab.
+
+        Args:
+            doc_id: Document ID
+            result: Transparency analysis result
+        """
+        logger.debug(
+            f"Audit trail: transparency assessed - {doc_id} "
+            f"(risk: {result.risk_level.value})"
+        )
+        self.literature_tab.update_transparency(doc_id, result)
 
     # =========================================================================
     # Data Access

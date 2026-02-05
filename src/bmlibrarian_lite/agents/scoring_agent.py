@@ -295,7 +295,7 @@ Evaluate the relevance of this document to the research question."""
             return {"score": score, "explanation": response}
 
         # Parse failed - signal this to caller
-        logger.warning(f"Could not parse score from: {response[:100]}")
+        logger.warning(f"Could not parse score from: {response}")
         return {
             "score": EvaluationErrorCode.JSON_PARSE_ERROR.value,
             "explanation": "Could not parse response",

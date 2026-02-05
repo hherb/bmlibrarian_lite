@@ -27,7 +27,7 @@ Usage:
     converter = LiteQueryConverter(llm_client=client, model="anthropic:claude-sonnet-4")
     query = converter.convert("What is the normal optic nerve sheath diameter?")
     print(query.query_string)
-    # Output: optic nerve sheath diameter[tiab] AND normal[tiab] OR reference[tiab]
+    # Output: ("Optic Nerve"[mh] OR "optic nerve sheath"[tiab]) AND humans[mh] AND hasabstract
 """
 
 import json
@@ -296,16 +296,16 @@ class LiteQueryConverter:
             # Add MeSH terms (limited)
             mesh_terms = concept.get("mesh_terms", [])[:MAX_MESH_TERMS_PER_CONCEPT]
             for term in mesh_terms:
-                terms.append(f'"{term}"[MeSH Terms]')
+                terms.append(f'"{term}"[mh]')
 
             # Add keywords (limited)
             keywords = concept.get("keywords", [])[:MAX_KEYWORDS_PER_CONCEPT]
             for kw in keywords:
                 # Quote multi-word phrases
                 if " " in kw:
-                    terms.append(f'"{kw}"[Title/Abstract]')
+                    terms.append(f'"{kw}"[tiab]')
                 else:
-                    terms.append(f"{kw}[Title/Abstract]")
+                    terms.append(f"{kw}[tiab]")
 
             if terms:
                 # OR within concept
@@ -319,7 +319,7 @@ class LiteQueryConverter:
 
         # Add filters
         if filters.get("humans_only", True):
-            query_parts.append("humans[MeSH Terms]")
+            query_parts.append("humans[mh]")
 
         if filters.get("has_abstract", True):
             query_parts.append("hasabstract")
@@ -351,10 +351,10 @@ class LiteQueryConverter:
 
         if not keywords:
             # Last resort: use cleaned question
-            query_string = f'"{question}"[Title/Abstract]'
+            query_string = f'"{question}"[tiab]'
         else:
             # Simple keyword search
-            keyword_clauses = [f"{kw}[Title/Abstract]" for kw in keywords]
+            keyword_clauses = [f"{kw}[tiab]" for kw in keywords]
             query_string = " AND ".join(keyword_clauses) + " AND hasabstract"
 
         logger.info(f"Using fallback query: {query_string}")

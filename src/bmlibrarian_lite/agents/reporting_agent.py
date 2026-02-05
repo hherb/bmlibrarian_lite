@@ -438,7 +438,7 @@ Key passages:
         # Quality assessment section
         lines.append("### Quality Assessment")
         if metadata.quality_filter_applied:
-            lines.append(f"- **Filter Applied:** Yes")
+            lines.append("- **Filter Applied:** Yes")
             if metadata.quality_filter_settings:
                 min_tier = metadata.quality_filter_settings.get("minimum_tier", "Unknown")
                 lines.append(f"- **Minimum Tier:** {min_tier}")
@@ -447,6 +447,30 @@ Key passages:
             )
         else:
             lines.append("Quality filtering was not applied.")
+        lines.append("")
+
+        # Transparency analysis section
+        lines.append("### Transparency Analysis")
+        if metadata.transparency_analysis_applied:
+            lines.append("- **Analysis Applied:** Yes")
+            total_analyzed = (
+                metadata.transparency_low_risk_count
+                + metadata.transparency_medium_risk_count
+                + metadata.transparency_high_risk_count
+            )
+            lines.append(f"- **Documents Analyzed:** {total_analyzed:,}")
+            lines.append("")
+            lines.append("**Risk Distribution:**")
+            lines.append("")
+            lines.append("| Risk Level | Count |")
+            lines.append("|------------|-------|")
+            lines.append(f"| Low        | {metadata.transparency_low_risk_count}     |")
+            lines.append(
+                f"| Medium     | {metadata.transparency_medium_risk_count}     |"
+            )
+            lines.append(f"| High       | {metadata.transparency_high_risk_count}     |")
+        else:
+            lines.append("Transparency analysis was not applied.")
         lines.append("")
 
         # AI models section

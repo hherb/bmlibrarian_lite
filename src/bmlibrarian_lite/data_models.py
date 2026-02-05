@@ -993,6 +993,11 @@ class ReportMetadata:
         quality_filter_settings: Quality filter configuration
         documents_filtered_by_quality: Documents removed by quality filter
 
+        transparency_analysis_applied: Whether transparency analysis was run
+        transparency_low_risk_count: Documents with low transparency risk
+        transparency_medium_risk_count: Documents with medium transparency risk
+        transparency_high_risk_count: Documents with high transparency risk
+
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
         unique_sources_cited: Number of unique documents cited
@@ -1020,6 +1025,12 @@ class ReportMetadata:
     quality_filter_applied: bool = False
     quality_filter_settings: Optional[dict[str, Any]] = None
     documents_filtered_by_quality: int = 0
+
+    # Transparency analysis info
+    transparency_analysis_applied: bool = False
+    transparency_low_risk_count: int = 0
+    transparency_medium_risk_count: int = 0
+    transparency_high_risk_count: int = 0
 
     # LLM configuration by task
     model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -1050,6 +1061,10 @@ class ReportMetadata:
             "quality_filter_applied": self.quality_filter_applied,
             "quality_filter_settings": self.quality_filter_settings,
             "documents_filtered_by_quality": self.documents_filtered_by_quality,
+            "transparency_analysis_applied": self.transparency_analysis_applied,
+            "transparency_low_risk_count": self.transparency_low_risk_count,
+            "transparency_medium_risk_count": self.transparency_medium_risk_count,
+            "transparency_high_risk_count": self.transparency_high_risk_count,
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
             "unique_sources_cited": self.unique_sources_cited,
@@ -1084,6 +1099,14 @@ class ReportMetadata:
             quality_filter_applied=data.get("quality_filter_applied", False),
             quality_filter_settings=data.get("quality_filter_settings"),
             documents_filtered_by_quality=data.get("documents_filtered_by_quality", 0),
+            transparency_analysis_applied=data.get(
+                "transparency_analysis_applied", False
+            ),
+            transparency_low_risk_count=data.get("transparency_low_risk_count", 0),
+            transparency_medium_risk_count=data.get(
+                "transparency_medium_risk_count", 0
+            ),
+            transparency_high_risk_count=data.get("transparency_high_risk_count", 0),
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),
             unique_sources_cited=data.get("unique_sources_cited", 0),
