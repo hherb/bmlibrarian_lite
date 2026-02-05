@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from .transparency_settings import TransparencySettings
 
 
+# Threshold for medium vs low risk (score above this = low risk potential)
+MEDIUM_RISK_SCORE_THRESHOLD = 70
+
+
 class TransparencyRisk(Enum):
     """Risk level based on transparency analysis."""
 
@@ -184,7 +188,7 @@ def calculate_risk_level(
         return TransparencyRisk.HIGH
 
     # Medium risk conditions
-    if score <= 70:
+    if score <= MEDIUM_RISK_SCORE_THRESHOLD:
         return TransparencyRisk.MEDIUM
 
     if industry_funding:

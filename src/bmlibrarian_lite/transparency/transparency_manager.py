@@ -28,6 +28,9 @@ from ..study_transparency_analyzer.study_transparency_analyzer import StudyTrans
 from .transparency_models import TransparencyResult, TransparencyRisk, calculate_risk_level
 from .transparency_settings import TransparencySettings
 
+# Rate limiting: minimum seconds between API requests
+MIN_REQUEST_INTERVAL_SECONDS = 0.5
+
 if TYPE_CHECKING:
     from ..config import LiteConfig
     from ..storage import LiteStorage
@@ -89,7 +92,7 @@ class TransparencyManager(QObject):
 
         # Rate limiting
         self._last_request_time = 0.0
-        self._min_request_interval = 0.5  # 500ms between requests
+        self._min_request_interval = MIN_REQUEST_INTERVAL_SECONDS
 
     def start(self) -> None:
         """Start the background executor."""
