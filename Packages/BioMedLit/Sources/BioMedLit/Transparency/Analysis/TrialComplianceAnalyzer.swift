@@ -184,8 +184,9 @@ public enum TrialComplianceAnalyzer {
 
             if !found {
                 // Truncate long outcome descriptions for display
-                let truncatedOutcome = outcome.prefix(50)
-                let suffix = outcome.count > 50 ? "..." : ""
+                let maxLength = TransparencyConstants.maxOutcomeDescriptionLength
+                let truncatedOutcome = outcome.prefix(maxLength)
+                let suffix = outcome.count > maxLength ? "..." : ""
                 details.append("Registered outcome may not be reported: \(truncatedOutcome)\(suffix)")
             }
         }
