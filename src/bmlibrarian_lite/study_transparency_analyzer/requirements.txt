@@ -1,0 +1,21 @@
+# Study Transparency Analyzer - Dependencies
+# Install with: pip install -r requirements.txt
+
+# HTTP requests
+requests>=2.28.0
+
+# Optional but recommended for better XML parsing
+lxml>=4.9.0
+
+# For progress bars in CLI (optional)
+tqdm>=4.65.0
+
+# For data analysis and visualization (optional)
+pandas>=1.5.0
+matplotlib>=3.6.0
+
+# For async operations (optional, for future async version)
+aiohttp>=3.8.0
+
+# Biopython for PubMed access (alternative to direct API)
+# biopython>=1.80
