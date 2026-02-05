@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
 
-from study_transparency_analyzer import (
+from .study_transparency_analyzer import (
     StudyTransparencyAnalyzer,
     TransparencyReport,
     SponsorType,
