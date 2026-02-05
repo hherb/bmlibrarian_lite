@@ -461,8 +461,10 @@ class SystematicReviewTab(QWidget):
 
         # Transparency manager for risk analysis
         self._transparency_manager = TransparencyManager(
-            settings=config.transparency,
             storage=storage,
+            config=config,
+            email=config.pubmed.email or "bmlibrarian@example.com",
+            pubmed_api_key=config.pubmed.api_key,
         )
         self._transparency_manager.analysis_complete.connect(
             self._on_transparency_result
@@ -1191,7 +1193,11 @@ class SystematicReviewTab(QWidget):
             return
 
         for doc in documents:
-            self._transparency_manager.analyze_document_async(doc)
+            self._transparency_manager.analyze_document(
+                document_id=doc.id,
+                pmid=doc.pmid,
+                doi=doc.doi,
+            )
 
     def get_transparency_result(
         self,
@@ -1206,4 +1212,4 @@ class SystematicReviewTab(QWidget):
         Returns:
             TransparencyResult if available, None otherwise
         """
-        return self._transparency_manager.get_cached_result(doc_id)
+        return self.storage.get_transparency_result(doc_id)
