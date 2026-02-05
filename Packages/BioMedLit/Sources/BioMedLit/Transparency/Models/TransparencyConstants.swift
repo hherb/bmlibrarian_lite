@@ -120,6 +120,19 @@ public enum TransparencyConstants {
 
     /// Maximum characters for outcome description display before truncating.
     public static let maxOutcomeDescriptionLength: Int = 50
+
+    // MARK: - Registry Names
+
+    /// ClinicalTrials.gov registry display name.
+    public static let clinicalTrialsRegistryName = "ClinicalTrials.gov"
+
+    // MARK: - Date Parsing Defaults
+
+    /// Default month value when parsing dates with only year.
+    public static let defaultMonth: Int = 1
+
+    /// Default day value when parsing dates without day.
+    public static let defaultDay: Int = 1
 }
 
 // MARK: - Known Industry Funders

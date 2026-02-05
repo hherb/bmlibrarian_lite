@@ -151,9 +151,11 @@ public actor ClinicalTrialsService {
     /// Parses the ClinicalTrials.gov API v2 JSON structure to extract
     /// registration details, sponsor information, outcomes, and results status.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter study: Study dictionary from API response.
     /// - Returns: TrialRegistration with extracted information, or nil if parsing fails.
-    public func extractTrialInfo(from study: [String: Any]?) -> TrialRegistration? {
+    public nonisolated func extractTrialInfo(from study: [String: Any]?) -> TrialRegistration? {
         guard let study = study,
               let protocolSection = study["protocolSection"] as? [String: Any] else {
             return nil
@@ -183,7 +185,7 @@ public actor ClinicalTrialsService {
         let hasResults = study["hasResults"] as? Bool ?? false
 
         return TrialRegistration(
-            registry: "ClinicalTrials.gov",
+            registry: TransparencyConstants.clinicalTrialsRegistryName,
             registrationId: nctId,
             title: title,
             sponsorClass: sponsorClass,
@@ -197,9 +199,11 @@ public actor ClinicalTrialsService {
 
     /// Extract multiple trial registrations from study responses.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter studies: Dictionary mapping NCT IDs to study data.
     /// - Returns: Array of successfully parsed TrialRegistration objects.
-    public func extractTrialInfos(from studies: [String: [String: Any]?]) -> [TrialRegistration] {
+    public nonisolated func extractTrialInfos(from studies: [String: [String: Any]?]) -> [TrialRegistration] {
         return studies.values.compactMap { study in
             extractTrialInfo(from: study)
         }
@@ -233,7 +237,7 @@ public actor ClinicalTrialsService {
 
         if elapsed < minInterval {
             let delay = minInterval - elapsed
-            try? await Task.sleep(nanoseconds: UInt64(delay * Double(BioMedLitConstants.nanosecondsPerSecond)))
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
 
         lastRequestTime = Date()
@@ -243,7 +247,7 @@ public actor ClinicalTrialsService {
     ///
     /// - Parameter outcomes: Outcomes array from API response.
     /// - Returns: Array of outcome measure strings.
-    private func extractOutcomes(from outcomes: Any?) -> [String] {
+    private nonisolated func extractOutcomes(from outcomes: Any?) -> [String] {
         guard let outcomesArray = outcomes as? [[String: Any]] else {
             return []
         }
@@ -262,7 +266,7 @@ public actor ClinicalTrialsService {
     ///
     /// - Parameter dateStruct: Date structure from API response.
     /// - Returns: Date if successfully parsed, nil otherwise.
-    private func extractDate(from dateStruct: Any?) -> Date? {
+    private nonisolated func extractDate(from dateStruct: Any?) -> Date? {
         guard let dateDict = dateStruct as? [String: Any],
               let dateString = dateDict["date"] as? String else {
             return nil

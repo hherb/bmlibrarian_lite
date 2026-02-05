@@ -141,9 +141,11 @@ public actor CrossRefService {
     /// Parses the "funder" array from CrossRef work metadata and creates
     /// classified FunderInfo objects using FundingAnalyzer.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter work: Work dictionary from CrossRef API.
     /// - Returns: List of FunderInfo objects with industry classifications.
-    public func extractFunders(from work: [String: Any]?) -> [FunderInfo] {
+    public nonisolated func extractFunders(from work: [String: Any]?) -> [FunderInfo] {
         guard let work = work,
               let funders = work["funder"] as? [[String: Any]] else {
             return []
@@ -154,9 +156,11 @@ public actor CrossRefService {
 
     /// Extract title from CrossRef work.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter work: Work dictionary from CrossRef API.
     /// - Returns: Title string if available, nil otherwise.
-    public func extractTitle(from work: [String: Any]?) -> String? {
+    public nonisolated func extractTitle(from work: [String: Any]?) -> String? {
         guard let work = work,
               let titles = work["title"] as? [String],
               let title = titles.first else {
@@ -167,9 +171,11 @@ public actor CrossRefService {
 
     /// Extract journal name from CrossRef work.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter work: Work dictionary from CrossRef API.
     /// - Returns: Journal name if available, nil otherwise.
-    public func extractJournal(from work: [String: Any]?) -> String? {
+    public nonisolated func extractJournal(from work: [String: Any]?) -> String? {
         guard let work = work,
               let containers = work["container-title"] as? [String],
               let journal = containers.first else {
@@ -180,9 +186,11 @@ public actor CrossRefService {
 
     /// Extract author names from CrossRef work.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter work: Work dictionary from CrossRef API.
     /// - Returns: List of author names in "Family, Given" format.
-    public func extractAuthors(from work: [String: Any]?) -> [String] {
+    public nonisolated func extractAuthors(from work: [String: Any]?) -> [String] {
         guard let work = work,
               let authors = work["author"] as? [[String: Any]] else {
             return []
@@ -203,9 +211,11 @@ public actor CrossRefService {
 
     /// Extract publication date from CrossRef work.
     ///
+    /// This is a pure function that doesn't access actor state.
+    ///
     /// - Parameter work: Work dictionary from CrossRef API.
     /// - Returns: Publication date if available, nil otherwise.
-    public func extractPublicationDate(from work: [String: Any]?) -> Date? {
+    public nonisolated func extractPublicationDate(from work: [String: Any]?) -> Date? {
         guard let work = work else { return nil }
 
         // Try published-print first, then published-online
@@ -245,7 +255,7 @@ public actor CrossRefService {
 
         if elapsed < minInterval {
             let delay = minInterval - elapsed
-            try? await Task.sleep(nanoseconds: UInt64(delay * Double(BioMedLitConstants.nanosecondsPerSecond)))
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
 
         lastRequestTime = Date()
@@ -255,7 +265,7 @@ public actor CrossRefService {
     ///
     /// - Parameter parts: Array of [year, month, day] integers (month and day optional).
     /// - Returns: Date if valid parts provided, nil otherwise.
-    private func dateFromParts(_ parts: [Int]) -> Date? {
+    private nonisolated func dateFromParts(_ parts: [Int]) -> Date? {
         guard !parts.isEmpty else { return nil }
 
         var components = DateComponents()
@@ -264,13 +274,13 @@ public actor CrossRefService {
         if parts.count > 1 {
             components.month = parts[1]
         } else {
-            components.month = 1
+            components.month = TransparencyConstants.defaultMonth
         }
 
         if parts.count > 2 {
             components.day = parts[2]
         } else {
-            components.day = 1
+            components.day = TransparencyConstants.defaultDay
         }
 
         return Calendar.current.date(from: components)
