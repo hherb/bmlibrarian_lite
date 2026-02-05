@@ -41,6 +41,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from ..constants import AUDIT_CARD_SPACING, AUDIT_UI_UPDATE_DELAY_MS
 from ..data_models import LiteDocument, ScoredDocument
 from ..quality.data_models import QualityAssessment
+from ..transparency import TransparencyResult
 from .document_card import DocumentCard
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ class AuditLiteratureTab(QWidget):
         self._scores: Dict[str, int] = {}
         self._score_rationales: Dict[str, str] = {}
         self._quality_assessments: Dict[str, QualityAssessment] = {}
+        self._transparency_results: Dict[str, TransparencyResult] = {}
 
         # Thread safety
         self._lock = threading.RLock()
@@ -192,10 +194,11 @@ class AuditLiteratureTab(QWidget):
             # Store document
             self._documents[document.id] = document
 
-            # Get any existing score/quality/rationale
+            # Get any existing score/quality/rationale/transparency
             score = self._scores.get(document.id)
             score_rationale = self._score_rationales.get(document.id)
             quality = self._quality_assessments.get(document.id)
+            transparency = self._transparency_results.get(document.id)
 
             # Create card
             card = DocumentCard(
@@ -203,6 +206,7 @@ class AuditLiteratureTab(QWidget):
                 score=score,
                 score_rationale=score_rationale,
                 quality_assessment=quality,
+                transparency_result=transparency,
             )
             card.clicked.connect(self._on_card_clicked)
             card.send_to_interrogator.connect(self._on_send_to_interrogator)
@@ -254,6 +258,47 @@ class AuditLiteratureTab(QWidget):
             card = self._cards_by_doc_id.get(doc_id)
             if card:
                 card.set_quality_assessment(assessment)
+
+    def update_transparency(
+        self,
+        doc_id: str,
+        result: TransparencyResult,
+    ) -> None:
+        """
+        Update transparency result for a document.
+
+        Called when background transparency analysis completes.
+        Updates the document card with the new transparency badge.
+
+        Args:
+            doc_id: Document ID
+            result: Transparency analysis result
+        """
+        with self._lock:
+            self._transparency_results[doc_id] = result
+
+            card = self._cards_by_doc_id.get(doc_id)
+            if card:
+                card.set_transparency_result(result)
+            else:
+                # Document not yet added - store for later
+                logger.debug(f"Transparency received before document: {doc_id}")
+
+    def get_transparency_result(
+        self,
+        doc_id: str,
+    ) -> Optional[TransparencyResult]:
+        """
+        Get transparency result for a document.
+
+        Args:
+            doc_id: Document ID
+
+        Returns:
+            TransparencyResult if found, None otherwise
+        """
+        with self._lock:
+            return self._transparency_results.get(doc_id)
 
     def _on_card_clicked(self, doc_id: str) -> None:
         """Handle document card click."""
@@ -341,6 +386,7 @@ class AuditLiteratureTab(QWidget):
             self._scores.clear()
             self._score_rationales.clear()
             self._quality_assessments.clear()
+            self._transparency_results.clear()
 
             # Show placeholder
             self.placeholder.show()

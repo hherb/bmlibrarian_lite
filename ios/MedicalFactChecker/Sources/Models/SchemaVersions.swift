@@ -17,11 +17,45 @@
 import Foundation
 import SwiftData
 
-// MARK: - Schema Version 1 (Original)
+// MARK: - Schema Version 0 (Pre-versioning)
 
-/// Original schema without ProcessingCheckpoint.
+/// Schema version 0: Represents databases created before versioned schema was introduced.
 ///
-/// This represents the initial release schema with:
+/// This is a compatibility shim for databases created without VersionedSchema.
+/// The models are identical to V1, but this version allows SwiftData to
+/// recognize and migrate unversioned databases.
+///
+/// ## Why This Exists
+///
+/// When SwiftData creates a database without a VersionedSchema, it stores no
+/// version metadata. When later trying to use staged migration, SwiftData
+/// can't determine the starting version and fails with:
+/// "Cannot use staged migration with an unknown model version."
+///
+/// By including V0 with version (0, 0, 0), we provide a fallback that matches
+/// the unversioned schema structure, allowing migration to proceed.
+enum SchemaV0: VersionedSchema {
+    static var versionIdentifier: Schema.Version {
+        Schema.Version(0, 0, 0)
+    }
+
+    static var models: [any PersistentModel.Type] {
+        [
+            FactCheckSession.self,
+            Document.self,
+            Citation.self,
+            EvidenceReport.self,
+            UsageRecord.self,
+        ]
+    }
+}
+
+// MARK: - Schema Version 1 (First versioned release)
+
+/// Schema version 1: First explicitly versioned schema.
+///
+/// Identical to V0 but with explicit versioning. This represents the
+/// baseline for the versioned schema system with:
 /// - FactCheckSession
 /// - Document
 /// - Citation
@@ -77,15 +111,32 @@ enum SchemaV2: VersionedSchema {
 /// Migration plan for upgrading the database schema.
 ///
 /// Handles migrations between schema versions:
+/// - V0 → V1: No-op (schemas are identical, just adds version tracking)
 /// - V1 → V2: Adds ProcessingCheckpoint table (lightweight migration)
+///
+/// ## Handling Unversioned Databases
+///
+/// Databases created before the VersionedSchema system have no version
+/// metadata. SwiftData will attempt to match them against V0 based on
+/// schema structure. The V0 → V1 migration is a no-op that simply
+/// establishes version tracking.
 enum MedicalFactCheckerMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self]
+        [SchemaV0.self, SchemaV1.self, SchemaV2.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2]
+        [migrateV0toV1, migrateV1toV2]
     }
+
+    /// Migration from V0 to V1: Establish version tracking.
+    ///
+    /// This is a lightweight migration with no actual schema changes.
+    /// It exists to transition unversioned databases to the versioned system.
+    static let migrateV0toV1 = MigrationStage.lightweight(
+        fromVersion: SchemaV0.self,
+        toVersion: SchemaV1.self
+    )
 
     /// Migration from V1 to V2: Add ProcessingCheckpoint.
     ///

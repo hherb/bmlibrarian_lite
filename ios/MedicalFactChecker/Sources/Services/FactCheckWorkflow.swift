@@ -1701,12 +1701,13 @@ final class FactCheckWorkflow {
 
         // Handle errors asynchronously
         if result.isError, let errorMessage = result.errorMessage {
-            Task {
-                await handleScoringErrorMessage(
+            let sessionIdString = session.id.uuidString
+            Task { [weak self] in
+                await self?.handleScoringErrorMessage(
                     pmid: result.pmid,
                     step: "scoring",
                     message: errorMessage,
-                    sessionId: session.id.uuidString
+                    sessionId: sessionIdString
                 )
             }
         }
@@ -2172,7 +2173,7 @@ final class FactCheckWorkflow {
 
         let batchNumber = session.batchesFetched + 1
 
-        // Create Document objects from ArticleMetadata
+        // Create Document objects from UnifiedArticleMetadata
         for (index, article) in newArticles.enumerated() {
             let document = Document(
                 pmid: article.pmid,

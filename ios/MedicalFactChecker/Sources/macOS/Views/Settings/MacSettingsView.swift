@@ -1,6 +1,6 @@
 #if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -570,15 +570,7 @@ struct BudgetSettingsTab: View {
             }
 
             Section("Model Pricing") {
-                VStack(alignment: .leading, spacing: MacSpacing.medium) {
-                    Text("Prices are per 1 million tokens.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Text("A typical fact-check uses 5,000-20,000 tokens, costing approximately $0.01-$0.05 with Claude Sonnet.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                MacModelPricingView()
             }
         }
         .formStyle(.grouped)
@@ -609,6 +601,128 @@ struct BudgetSettingsTab: View {
             }
             try? modelContext.save()
             monthlyUsage = 0
+        }
+    }
+}
+
+// MARK: - Model Pricing View
+
+/// View displaying detailed model pricing information.
+///
+/// Shows per-provider pricing tables with input/output costs,
+/// plus estimated costs per fact-check for common models.
+struct MacModelPricingView: View {
+    /// Current model pricing (January 2026).
+    private let modelGroups: [(provider: String, models: [(name: String, input: Double, output: Double)])] = [
+        ("Anthropic (Claude)", [
+            ("Claude Sonnet 4.5", 3.00, 15.00),
+            ("Claude Haiku 4.5", 1.00, 5.00),
+            ("Claude Opus 4.5", 5.00, 25.00),
+        ]),
+        ("OpenAI", [
+            ("GPT-5.2", 2.00, 8.00),
+            ("o4-mini", 1.10, 4.40),
+            ("GPT-4o Mini", 0.15, 0.60),
+        ]),
+        ("DeepSeek", [
+            ("DeepSeek V3.2", 0.28, 0.42),
+        ]),
+        ("Groq", [
+            ("Llama 4 Maverick", 0.50, 0.77),
+            ("Llama 4 Scout", 0.11, 0.34),
+            ("Llama 3.1 8B", 0.05, 0.08),
+        ]),
+        ("Mistral", [
+            ("Mistral Large 3", 0.50, 1.50),
+            ("Mistral Small", 0.10, 0.30),
+        ]),
+    ]
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
+            // Header with toggle
+            Button(action: { withAnimation { isExpanded.toggle() } }) {
+                HStack {
+                    Text("View Detailed Pricing")
+                        .font(.body)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                // Pricing explanation
+                Text("Prices are per 1 million tokens. A typical fact-check uses 5,000-20,000 tokens.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Divider()
+
+                // Provider pricing tables
+                ForEach(modelGroups, id: \.provider) { group in
+                    VStack(alignment: .leading, spacing: MacSpacing.small) {
+                        Text(group.provider)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.accentColor)
+
+                        ForEach(group.models, id: \.name) { model in
+                            HStack {
+                                Text(model.name)
+                                    .font(.caption)
+                                Spacer()
+                                Text("$\(model.input, specifier: "%.2f") / $\(model.output, specifier: "%.2f")")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.bottom, MacSpacing.small)
+                }
+
+                Divider()
+
+                // Cost estimates
+                VStack(alignment: .leading, spacing: MacSpacing.small) {
+                    Text("Estimated Cost Per Fact-Check")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+
+                    MacCostEstimateRow(model: "Claude Sonnet 4.5", cost: "$0.01 - $0.03")
+                    MacCostEstimateRow(model: "GPT-4o Mini", cost: "$0.001 - $0.003")
+                    MacCostEstimateRow(model: "DeepSeek V3.2", cost: "$0.002 - $0.005")
+                    MacCostEstimateRow(model: "Llama 4 Scout (Groq)", cost: "$0.001 - $0.003")
+                }
+
+                Text("Prices last updated January 2026. Check provider websites for current pricing.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            } else {
+                Text("A typical fact-check costs $0.01-$0.05 with Claude Sonnet.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+}
+
+/// Row displaying estimated cost for a model.
+struct MacCostEstimateRow: View {
+    let model: String
+    let cost: String
+
+    var body: some View {
+        HStack {
+            Text(model)
+                .font(.caption)
+            Spacer()
+            Text(cost)
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
     }
 }

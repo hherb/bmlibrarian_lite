@@ -282,8 +282,32 @@ public enum QueryBuilderFactory {
             return EuropePMCQueryBuilder.build(from: query)
         case .both:
             // Default to PubMed syntax for "both" mode
-            // Europe PMC accepts PubMed syntax with automatic translation
             return PubMedQueryBuilder.build(from: query)
+        }
+    }
+
+    /// Build query strings for all needed providers.
+    ///
+    /// When using `.both`, returns separate queries optimized for each provider.
+    ///
+    /// - Parameters:
+    ///   - query: The structured query.
+    ///   - provider: The search provider (determines which queries to build).
+    /// - Returns: Dictionary mapping provider to query string.
+    public static func buildAll(
+        from query: StructuredQuery,
+        for provider: SearchProvider
+    ) -> [SearchProvider: String] {
+        switch provider {
+        case .pubmed:
+            return [.pubmed: PubMedQueryBuilder.build(from: query)]
+        case .europePMC:
+            return [.europePMC: EuropePMCQueryBuilder.build(from: query)]
+        case .both:
+            return [
+                .pubmed: PubMedQueryBuilder.build(from: query),
+                .europePMC: EuropePMCQueryBuilder.build(from: query)
+            ]
         }
     }
 }
@@ -295,12 +319,26 @@ public enum QueryBuilderFactory {
 /// Translates the provider-agnostic StructuredQuery into PubMed's
 /// query syntax, including MeSH terms, field tags, and filters.
 ///
+/// Uses an exclude-list approach for publication types rather than an include-list,
+/// so that new article types are included by default.
+///
 /// ## Query Syntax Examples
 /// - MeSH term: `"Amlodipine"[MeSH]`
 /// - Title/Abstract: `amlodipine[tiab]`
-/// - Publication type: `Clinical Trial[pt]`
+/// - Publication type exclusion: `NOT "News"[pt]`
 /// - Has abstract filter: `hasabstract`
+/// - Date range: `2020:2024[dp]`
 public enum PubMedQueryBuilder {
+    /// Standard publication types to exclude for clinical queries.
+    ///
+    /// An exclude-list is more robust than an include-list because new
+    /// article types are included by default rather than silently dropped.
+    public static let defaultExcludeTypes = [
+        "News", "Newspaper Article", "Editorial", "Letter", "Comment",
+        "Published Erratum", "Biography", "Historical Article",
+        "Personal Narrative", "Directory", "Retracted Publication"
+    ]
+
     /// Build a PubMed query string.
     ///
     /// - Parameter query: The structured query to translate.
@@ -331,8 +369,20 @@ public enum PubMedQueryBuilder {
             queryString += QueryConstants.andOperator + QueryConstants.pubmedHasAbstractFilter
         }
 
-        // Add publication type filter (include high-quality types)
-        queryString += QueryConstants.andOperator + buildPublicationTypeFilter()
+        // Add publication type exclusions
+        let excludeTypes = query.excludePublicationTypes.isEmpty
+            ? defaultExcludeTypes
+            : query.excludePublicationTypes
+
+        if !excludeTypes.isEmpty {
+            let exclusions = excludeTypes.map { formatPublicationType($0) }
+            queryString += " NOT (\(exclusions.joined(separator: QueryConstants.orOperator)))"
+        }
+
+        // Add date range
+        if let dateRange = query.dateRange {
+            queryString += QueryConstants.andOperator + "\(dateRange.startYear):\(dateRange.endYear)[dp]"
+        }
 
         return queryString
     }
@@ -346,14 +396,19 @@ public enum PubMedQueryBuilder {
     private static func buildConceptClause(from concept: SearchConcept) -> String? {
         var terms: [String] = []
 
-        // Add MeSH terms (limited to prevent over-broad queries)
-        for mesh in concept.meshTerms.prefix(QueryConstants.maxMeSHTermsPerConcept) {
+        // Add MeSH terms
+        for mesh in concept.meshTerms {
             terms.append("\"\(mesh)\"\(QueryConstants.pubmedMeSHFieldTag)")
         }
 
         // Add keywords (title/abstract search)
-        for keyword in concept.keywords.prefix(QueryConstants.maxKeywordsPerConcept) {
-            terms.append("\"\(keyword)\"\(QueryConstants.pubmedTitleAbstractFieldTag)")
+        // Multi-word keywords need quotes; single-word keywords don't
+        for keyword in concept.keywords {
+            if keyword.contains(" ") {
+                terms.append("\"\(keyword)\"\(QueryConstants.pubmedTitleAbstractFieldTag)")
+            } else {
+                terms.append("\(keyword)\(QueryConstants.pubmedTitleAbstractFieldTag)")
+            }
         }
 
         guard !terms.isEmpty else {
@@ -363,14 +418,12 @@ public enum PubMedQueryBuilder {
         return "(" + terms.joined(separator: QueryConstants.orOperator) + ")"
     }
 
-    /// Build the publication type filter.
-    ///
-    /// - Returns: Publication type filter clause.
-    private static func buildPublicationTypeFilter() -> String {
-        let typeTerms = QueryConstants.pubmedIncludedPublicationTypes.map {
-            "\($0)\(QueryConstants.pubmedPublicationTypeTag)"
+    /// Format a publication type for exclusion.
+    private static func formatPublicationType(_ type: String) -> String {
+        if type.contains(" ") {
+            return "\"\(type)\"\(QueryConstants.pubmedPublicationTypeTag)"
         }
-        return "(" + typeTerms.joined(separator: QueryConstants.orOperator) + ")"
+        return "\(type)\(QueryConstants.pubmedPublicationTypeTag)"
     }
 }
 
@@ -381,12 +434,26 @@ public enum PubMedQueryBuilder {
 /// Translates the provider-agnostic StructuredQuery into Europe PMC's
 /// query syntax. Europe PMC uses a different field syntax than PubMed.
 ///
+/// ## Note on MeSH Terms
+/// Europe PMC's MeSH indexing has much lower coverage than PubMed's.
+/// Using MeSH_TERM in queries drastically reduces results because most
+/// articles aren't indexed with MeSH in Europe PMC. Instead, MeSH term
+/// text is searched as keywords in title/abstract.
+///
+/// ## Note on Publication Type Exclusions
+/// Europe PMC doesn't have the same volume of non-article content as PubMed,
+/// so we skip publication type exclusions to avoid filtering out valid results.
+///
 /// ## Query Syntax Examples
 /// - Title/Abstract: `TITLE_ABS:"Amlodipine"` or `TITLE_ABS:amlodipine`
 /// - Has abstract filter: `HAS_ABSTRACT:y`
 /// - Exclude preprints: `NOT SRC:PPR`
+/// - Date range: `PUB_YEAR:[2020 TO 2024]`
 public enum EuropePMCQueryBuilder {
     /// Build a Europe PMC query string.
+    ///
+    /// Uses keywords only (not MeSH terms) because Europe PMC's MeSH coverage
+    /// is much lower than PubMed's, which would drastically reduce results.
     ///
     /// - Parameter query: The structured query to translate.
     /// - Returns: Europe PMC-formatted query string.
@@ -418,7 +485,12 @@ public enum EuropePMCQueryBuilder {
 
         // Exclude preprints if requested
         if query.excludePreprints {
-            queryString += QueryConstants.andOperator + QueryConstants.europePMCExcludePreprintsFilter
+            queryString += " NOT SRC:PPR"
+        }
+
+        // Add date range
+        if let dateRange = query.dateRange {
+            queryString += QueryConstants.andOperator + "PUB_YEAR:[\(dateRange.startYear) TO \(dateRange.endYear)]"
         }
 
         return queryString
@@ -426,20 +498,21 @@ public enum EuropePMCQueryBuilder {
 
     /// Build a clause for a single concept.
     ///
-    /// Europe PMC doesn't have a dedicated MeSH field, so all terms
-    /// are searched in title/abstract.
+    /// Uses MeSH term text as free-text keywords because Europe PMC's MeSH
+    /// indexing has much lower coverage than PubMed's.
     ///
     /// - Parameter concept: The concept to build a clause for.
     /// - Returns: Parenthesized clause string, or nil if empty.
     private static func buildConceptClause(from concept: SearchConcept) -> String? {
         var terms: [String] = []
 
-        // Europe PMC uses TITLE_ABS for both MeSH and keywords
-        for mesh in concept.meshTerms.prefix(QueryConstants.maxMeSHTermsPerConcept) {
+        // Add MeSH term text as keywords (search as free text)
+        for mesh in concept.meshTerms {
             terms.append("\(QueryConstants.europePMCTitleAbstractField)\"\(mesh)\"")
         }
 
-        for keyword in concept.keywords.prefix(QueryConstants.maxKeywordsPerConcept) {
+        // Add keywords (search in title/abstract)
+        for keyword in concept.keywords {
             terms.append("\(QueryConstants.europePMCTitleAbstractField)\"\(keyword)\"")
         }
 

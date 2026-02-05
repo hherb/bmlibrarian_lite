@@ -26,9 +26,12 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import total_ordering
-from typing import Optional, Any
+from typing import TYPE_CHECKING, Optional, Any
 
 from ..constants import VALID_BIAS_RISK_VALUES
+
+if TYPE_CHECKING:
+    from ..transparency import TransparencyResult
 
 logger = logging.getLogger(__name__)
 
@@ -433,6 +436,9 @@ class QualityAssessment:
         strengths: Methodological strengths (Tier 3 only)
         limitations: Methodological limitations (Tier 3 only)
         extraction_details: Audit trail of how assessment was made
+        transparency_result: Linked transparency analysis result
+        original_quality_tier: Quality tier before transparency adjustment
+        transparency_adjusted: Whether tier was adjusted for transparency
     """
 
     assessment_tier: int
@@ -452,6 +458,11 @@ class QualityAssessment:
     strengths: Optional[list[str]] = None
     limitations: Optional[list[str]] = None
     extraction_details: list[str] = field(default_factory=list)
+
+    # Transparency integration
+    transparency_result: Optional["TransparencyResult"] = None
+    original_quality_tier: Optional[QualityTier] = None  # Before transparency adjustment
+    transparency_adjusted: bool = False
 
     def passes_filter(self, filter_settings: QualityFilter) -> bool:
         """
@@ -506,6 +517,26 @@ class QualityAssessment:
         """
         return TIER_LABELS.get(self.quality_tier, "Unclassified")
 
+    def get_effective_tier(self) -> QualityTier:
+        """
+        Return the effective quality tier (after any adjustments).
+
+        Returns:
+            Current quality tier (may be adjusted for transparency)
+        """
+        return self.quality_tier
+
+    def get_tier_adjustment(self) -> int:
+        """
+        Return the tier adjustment amount.
+
+        Returns:
+            Number of tiers downgraded (0 if not adjusted)
+        """
+        if self.transparency_adjusted and self.original_quality_tier:
+            return self.original_quality_tier.value - self.quality_tier.value
+        return 0
+
     def to_dict(self) -> dict[str, Any]:
         """
         Convert to dictionary for serialization.
@@ -531,6 +562,13 @@ class QualityAssessment:
             "strengths": self.strengths,
             "limitations": self.limitations,
             "extraction_details": self.extraction_details,
+            "transparency_result": (
+                self.transparency_result.to_dict() if self.transparency_result else None
+            ),
+            "original_quality_tier": (
+                self.original_quality_tier.value if self.original_quality_tier else None
+            ),
+            "transparency_adjusted": self.transparency_adjusted,
         }
 
     @classmethod

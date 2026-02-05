@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -339,7 +339,7 @@ struct MacFactCheckView: View {
         self.workflow = newWorkflow
 
         Task {
-            await newWorkflow.startFactCheck(claim: claimText, overrideSearchOptions: buildSearchOptions())
+            await newWorkflow.startFactCheck(claim: claimText, searchOptions: buildSearchOptions())
         }
     }
 }

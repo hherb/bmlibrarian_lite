@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -17,6 +17,7 @@
 import SwiftUI
 import SwiftData
 import BioMedLit
+import UniformTypeIdentifiers
 
 /// macOS view for displaying scored documents as expandable cards.
 ///
@@ -183,6 +184,8 @@ struct MacDocumentCard: View {
 
     @State private var isLoadingFullText = false
     @State private var fullTextError: String?
+    @State private var showFileImporter = false
+    @State private var isProcessingUpload = false
 
     // MARK: - Body
 
@@ -208,6 +211,13 @@ struct MacDocumentCard: View {
             RoundedRectangle(cornerRadius: MacCornerRadius.standard)
                 .stroke(Color.secondary.opacity(MacOpacity.border))
         )
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.pdf, .html, .plainText, UTType(filenameExtension: "md") ?? .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFileImport(result)
+        }
     }
 
     // MARK: - Card Header
@@ -401,78 +411,104 @@ struct MacDocumentCard: View {
     /// Section for full-text retrieval button and status.
     @ViewBuilder
     private var fullTextSection: some View {
-        HStack(spacing: MacSpacing.medium) {
-            if document.hasFullText {
-                // Already have full text - show view button
-                Button(action: { onShowFullText?(document) }) {
-                    Label("View Full Text", systemImage: "doc.text")
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityLabel("View full text")
-                .accessibilityHint("Opens the full text in a new tab")
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
+            HStack(spacing: MacSpacing.medium) {
+                if document.hasFullText {
+                    // Already have full text - show view button
+                    Button(action: { onShowFullText?(document) }) {
+                        Label("View Full Text", systemImage: "doc.text")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityLabel("View full text")
+                    .accessibilityHint("Opens the full text in a new tab")
 
-                if let sourceString = document.fullTextSource {
-                    FullTextSourceBadge(sourceString: sourceString)
-                }
+                    if let sourceString = document.fullTextSource {
+                        FullTextSourceBadge(sourceString: sourceString)
+                    }
 
-                Spacer()
+                    Spacer()
 
-                // Open in Preview (for PDFs)
-                if document.fullTextPDFPath != nil {
-                    Button(action: openInPreview) {
-                        Label("Open in Preview", systemImage: "eye")
+                    // Open in Preview (for PDFs)
+                    if document.fullTextPDFPath != nil {
+                        Button(action: openInPreview) {
+                            Label("Open in Preview", systemImage: "eye")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Open PDF in Preview.app")
+                    }
+                } else if document.fullTextUnavailable {
+                    // Already tried, not available
+                    HStack(spacing: MacSpacing.small) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundColor(.orange)
+                        Text("Full text not available")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Full text not available")
+
+                    Spacer()
+
+                    // Still offer to open in browser
+                    if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                        Link(destination: url) {
+                            Label("Open Publisher", systemImage: "safari")
+                                .font(.caption)
+                        }
+                    }
+                } else {
+                    // Not yet attempted
+                    Button(action: fetchFullText) {
+                        if isLoadingFullText {
+                            ProgressView()
+                                .scaleEffect(MacScale.progressViewSmall)
+                                .frame(width: MacFullTextLayout.loadingIndicatorSize,
+                                       height: MacFullTextLayout.loadingIndicatorSize)
+                        } else {
+                            Label("Get Full Text", systemImage: "arrow.down.doc")
+                        }
                     }
                     .buttonStyle(.bordered)
-                    .help("Open PDF in Preview.app")
-                }
-            } else if document.fullTextUnavailable {
-                // Already tried, not available
-                HStack(spacing: MacSpacing.small) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                    Text("Full text not available")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Full text not available")
+                    .disabled(isLoadingFullText || isProcessingUpload)
+                    .accessibilityLabel(isLoadingFullText ? "Loading full text" : "Get full text")
+                    .accessibilityHint("Downloads the full text of this article if available")
 
-                Spacer()
-
-                // Still offer to open in browser
-                if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
-                    Link(destination: url) {
-                        Label("Open Publisher", systemImage: "safari")
+                    if let error = fullTextError {
+                        Text(error)
                             .font(.caption)
+                            .foregroundColor(.red)
+                            .lineLimit(1)
                     }
-                }
-            } else {
-                // Not yet attempted
-                Button(action: fetchFullText) {
-                    if isLoadingFullText {
-                        ProgressView()
-                            .scaleEffect(MacScale.progressViewSmall)
-                            .frame(width: MacFullTextLayout.loadingIndicatorSize,
-                                   height: MacFullTextLayout.loadingIndicatorSize)
-                    } else {
-                        Label("Get Full Text", systemImage: "arrow.down.doc")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isLoadingFullText)
-                .accessibilityLabel(isLoadingFullText ? "Loading full text" : "Get full text")
-                .accessibilityHint("Downloads the full text of this article if available")
 
-                if let error = fullTextError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .lineLimit(1)
+                    Spacer()
                 }
+            }
 
-                Spacer()
+            // Upload button (shown when full text is not already available)
+            if !document.hasFullText {
+                uploadFullTextButton
             }
         }
+    }
+
+    /// Button to upload full text manually.
+    private var uploadFullTextButton: some View {
+        Button(action: { showFileImporter = true }) {
+            if isProcessingUpload {
+                ProgressView()
+                    .scaleEffect(MacScale.progressViewSmall)
+                    .frame(width: MacFullTextLayout.loadingIndicatorSize,
+                           height: MacFullTextLayout.loadingIndicatorSize)
+            } else {
+                Label("Upload Full Text", systemImage: "square.and.arrow.up")
+            }
+        }
+        .buttonStyle(.bordered)
+        .tint(.purple)
+        .disabled(isLoadingFullText || isProcessingUpload)
+        .help("Upload a PDF, HTML, or Markdown file containing the full text")
+        .accessibilityHint("Upload a PDF, HTML, or Markdown file containing the full text")
     }
 
     // MARK: - Context Menu
@@ -501,6 +537,16 @@ struct MacDocumentCard: View {
                 Label("Get Full Text", systemImage: "arrow.down.doc")
             }
             .disabled(isLoadingFullText)
+
+            Divider()
+        }
+
+        // Upload option (always available when no full text)
+        if !document.hasFullText {
+            Button(action: { showFileImporter = true }) {
+                Label("Upload Full Text", systemImage: "square.and.arrow.up")
+            }
+            .disabled(isProcessingUpload)
 
             Divider()
         }
@@ -562,6 +608,96 @@ struct MacDocumentCard: View {
             return .pubmed
         }
         return nil
+    }
+
+    // MARK: - File Upload Handling
+
+    /// Handle file import result from the file picker.
+    ///
+    /// - Parameter result: The result from the file importer.
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            processUploadedFile(url)
+        case .failure(let error):
+            fullTextError = error.localizedDescription
+        }
+    }
+
+    /// Process an uploaded file and store its content.
+    ///
+    /// - Parameter url: The URL of the uploaded file.
+    private func processUploadedFile(_ url: URL) {
+        isProcessingUpload = true
+        fullTextError = nil
+
+        Task {
+            do {
+                // Start accessing security-scoped resource
+                guard url.startAccessingSecurityScopedResource() else {
+                    throw MacFullTextUploadError.accessDenied
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+
+                let fileExtension = url.pathExtension.lowercased()
+
+                switch fileExtension {
+                case "pdf":
+                    // Copy PDF to app's cache directory
+                    let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                    let pdfDir = cacheDir.appendingPathComponent("fulltext_pdfs", isDirectory: true)
+                    try FileManager.default.createDirectory(at: pdfDir, withIntermediateDirectories: true)
+                    let destURL = pdfDir.appendingPathComponent("\(document.pmid).pdf")
+
+                    if FileManager.default.fileExists(atPath: destURL.path) {
+                        try FileManager.default.removeItem(at: destURL)
+                    }
+                    try FileManager.default.copyItem(at: url, to: destURL)
+
+                    await MainActor.run {
+                        document.fullTextPDFPath = destURL.path
+                        document.fullTextSource = FullTextSource.uploaded.rawValue
+                        document.fullTextFetchedAt = Date()
+                        document.fullTextUnavailable = false
+                        isProcessingUpload = false
+                        onShowFullText?(document)
+                    }
+
+                case "html", "htm":
+                    let htmlContent = try String(contentsOf: url, encoding: .utf8)
+                    await MainActor.run {
+                        document.fullTextHTML = htmlContent
+                        document.fullTextContent = htmlContent
+                        document.fullTextSource = FullTextSource.uploaded.rawValue
+                        document.fullTextFetchedAt = Date()
+                        document.fullTextUnavailable = false
+                        isProcessingUpload = false
+                        onShowFullText?(document)
+                    }
+
+                case "md", "markdown", "txt":
+                    let markdownContent = try String(contentsOf: url, encoding: .utf8)
+                    await MainActor.run {
+                        document.fullTextContent = markdownContent
+                        document.fullTextSource = FullTextSource.uploaded.rawValue
+                        document.fullTextFetchedAt = Date()
+                        document.fullTextUnavailable = false
+                        isProcessingUpload = false
+                        onShowFullText?(document)
+                    }
+
+                default:
+                    throw MacFullTextUploadError.unsupportedFormat
+                }
+            } catch {
+                await MainActor.run {
+                    fullTextError = error.localizedDescription
+                    isProcessingUpload = false
+                    AppLogger.fullText.error("Failed to process uploaded file: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     // MARK: - Full Text Actions
@@ -781,6 +917,25 @@ struct PMCAvailableBadge: View {
         .foregroundColor(.green)
         .cornerRadius(4)
         .help("Full text available in PubMed Central")
+    }
+}
+
+// MARK: - Full Text Upload Error
+
+/// Errors that can occur during full-text file upload on macOS.
+enum MacFullTextUploadError: LocalizedError {
+    /// Access to the file was denied.
+    case accessDenied
+    /// The file format is not supported.
+    case unsupportedFormat
+
+    var errorDescription: String? {
+        switch self {
+        case .accessDenied:
+            return "Unable to access the selected file"
+        case .unsupportedFormat:
+            return "Unsupported file format. Please use PDF, HTML, or Markdown"
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 #if os(iOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -70,7 +70,7 @@ struct FullTextViewer: View {
     @ViewBuilder
     private var content: some View {
         switch result.content {
-        case .html(let htmlContent):
+        case .html(let htmlContent, _):
             HTMLContentView(htmlContent: htmlContent)
 
         case .markdown(let text):
@@ -106,7 +106,7 @@ struct FullTextViewer: View {
         Menu {
             // Copy text option for HTML or markdown content
             switch result.content {
-            case .html(let html):
+            case .html(let html, _):
                 Button(action: { PlatformHelper.copyToClipboard(html) }) {
                     Label("Copy HTML", systemImage: "doc.on.doc")
                 }
@@ -718,7 +718,7 @@ struct PDFKitRepresentableMac: NSViewRepresentable {
 
     return FullTextViewer(
         document: doc,
-        result: AppFullTextResult(content: .html(sampleHTML), source: .europePMC)
+        result: AppFullTextResult(content: .html(content: sampleHTML, markdown: ""), source: .europePMC)
     )
 }
 

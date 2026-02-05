@@ -1,6 +1,6 @@
 #if os(macOS)
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -94,6 +94,7 @@ struct MacFullTextSourceBadge: View {
         MacFullTextSourceBadge(sourceString: "unpaywall")
         MacFullTextSourceBadge(sourceString: "doi")
         MacFullTextSourceBadge(sourceString: "cached")
+        MacFullTextSourceBadge(sourceString: "uploaded")
         MacFullTextSourceBadge(sourceString: "unknown")
     }
     .padding()
@@ -105,6 +106,7 @@ struct MacFullTextSourceBadge: View {
         MacFullTextSourceBadge(source: .unpaywall)
         MacFullTextSourceBadge(source: .doi)
         MacFullTextSourceBadge(source: .cached)
+        MacFullTextSourceBadge(source: .uploaded)
     }
     .padding()
 }

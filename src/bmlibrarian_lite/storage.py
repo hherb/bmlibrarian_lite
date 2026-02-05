@@ -529,6 +529,31 @@ class LiteStorage:
             ON study_classifications(evaluator_id);
         CREATE INDEX IF NOT EXISTS idx_study_classifications_doc_eval
             ON study_classifications(document_id, evaluator_id);
+
+        -- Transparency analysis results
+        CREATE TABLE IF NOT EXISTS transparency_results (
+            document_id TEXT PRIMARY KEY,
+            transparency_score INTEGER NOT NULL,
+            risk_level TEXT NOT NULL,
+            industry_funding_detected INTEGER NOT NULL DEFAULT 0,
+            industry_funding_confidence REAL DEFAULT 0.0,
+            data_availability_level TEXT DEFAULT 'unknown',
+            coi_disclosed INTEGER DEFAULT 1,
+            trial_registered INTEGER DEFAULT 0,
+            trial_results_compliant INTEGER DEFAULT 0,
+            outcome_switching_detected INTEGER DEFAULT 0,
+            risk_indicators TEXT,  -- JSON array
+            tier_downgrade_applied INTEGER DEFAULT 0,
+            analyzed_at TEXT NOT NULL,
+            analyzer_version TEXT DEFAULT '1.0',
+            full_text_analyzed INTEGER DEFAULT 0,
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_transparency_results_risk_level
+            ON transparency_results(risk_level);
+        CREATE INDEX IF NOT EXISTS idx_transparency_results_score
+            ON transparency_results(transparency_score);
         """
 
     # =========================================================================
@@ -3008,6 +3033,190 @@ class LiteStorage:
                 result[doc_id] = QualityAssessment.from_classification(classification)
 
         return result
+
+    # =========================================================================
+    # Transparency Results Operations
+    # =========================================================================
+
+    def save_transparency_result(self, result: "TransparencyResult") -> None:
+        """
+        Save or update transparency analysis result.
+
+        Uses INSERT OR REPLACE to handle both new and existing results.
+
+        Args:
+            result: TransparencyResult to save
+        """
+        query = """
+            INSERT OR REPLACE INTO transparency_results (
+                document_id, transparency_score, risk_level,
+                industry_funding_detected, industry_funding_confidence,
+                data_availability_level, coi_disclosed, trial_registered,
+                trial_results_compliant, outcome_switching_detected,
+                risk_indicators, tier_downgrade_applied, analyzed_at,
+                analyzer_version, full_text_analyzed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+
+        with self._sqlite_connection() as conn:
+            conn.execute(
+                query,
+                (
+                    result.document_id,
+                    result.transparency_score,
+                    result.risk_level.value,
+                    1 if result.industry_funding_detected else 0,
+                    result.industry_funding_confidence,
+                    result.data_availability_level,
+                    1 if result.coi_disclosed else 0,
+                    1 if result.trial_registered else 0,
+                    1 if result.trial_results_compliant else 0,
+                    1 if result.outcome_switching_detected else 0,
+                    json.dumps(result.risk_indicators),
+                    result.tier_downgrade_applied,
+                    result.analyzed_at.isoformat(),
+                    result.analyzer_version,
+                    1 if result.full_text_analyzed else 0,
+                ),
+            )
+            conn.commit()
+
+    def get_transparency_result(
+        self,
+        document_id: str,
+    ) -> Optional["TransparencyResult"]:
+        """
+        Retrieve transparency result for a document.
+
+        Args:
+            document_id: Document ID to look up
+
+        Returns:
+            TransparencyResult if found, None otherwise
+        """
+        from .transparency import TransparencyResult, TransparencyRisk
+
+        query = "SELECT * FROM transparency_results WHERE document_id = ?"
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, (document_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return TransparencyResult(
+                document_id=row["document_id"],
+                transparency_score=row["transparency_score"],
+                risk_level=TransparencyRisk(row["risk_level"]),
+                industry_funding_detected=bool(row["industry_funding_detected"]),
+                industry_funding_confidence=row["industry_funding_confidence"],
+                data_availability_level=row["data_availability_level"],
+                coi_disclosed=bool(row["coi_disclosed"]),
+                trial_registered=bool(row["trial_registered"]),
+                trial_results_compliant=bool(row["trial_results_compliant"]),
+                outcome_switching_detected=bool(row["outcome_switching_detected"]),
+                risk_indicators=json.loads(row["risk_indicators"] or "[]"),
+                tier_downgrade_applied=row["tier_downgrade_applied"],
+                analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
+                analyzer_version=row["analyzer_version"],
+                full_text_analyzed=bool(row["full_text_analyzed"]),
+            )
+
+    def get_transparency_results_batch(
+        self,
+        document_ids: list[str],
+    ) -> dict[str, "TransparencyResult"]:
+        """
+        Retrieve transparency results for multiple documents.
+
+        Args:
+            document_ids: List of document IDs to look up
+
+        Returns:
+            Dictionary mapping document ID to TransparencyResult
+        """
+        if not document_ids:
+            return {}
+
+        from .transparency import TransparencyResult, TransparencyRisk
+
+        placeholders = ",".join("?" * len(document_ids))
+        query = f"SELECT * FROM transparency_results WHERE document_id IN ({placeholders})"
+
+        results: dict[str, TransparencyResult] = {}
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, document_ids)
+
+            for row in cursor:
+                result = TransparencyResult(
+                    document_id=row["document_id"],
+                    transparency_score=row["transparency_score"],
+                    risk_level=TransparencyRisk(row["risk_level"]),
+                    industry_funding_detected=bool(row["industry_funding_detected"]),
+                    industry_funding_confidence=row["industry_funding_confidence"],
+                    data_availability_level=row["data_availability_level"],
+                    coi_disclosed=bool(row["coi_disclosed"]),
+                    trial_registered=bool(row["trial_registered"]),
+                    trial_results_compliant=bool(row["trial_results_compliant"]),
+                    outcome_switching_detected=bool(row["outcome_switching_detected"]),
+                    risk_indicators=json.loads(row["risk_indicators"] or "[]"),
+                    tier_downgrade_applied=row["tier_downgrade_applied"],
+                    analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
+                    analyzer_version=row["analyzer_version"],
+                    full_text_analyzed=bool(row["full_text_analyzed"]),
+                )
+                results[result.document_id] = result
+
+        return results
+
+    def get_documents_pending_transparency(
+        self,
+        session_id: str,
+    ) -> list[str]:
+        """
+        Get document IDs that haven't been analyzed for transparency.
+
+        Returns documents from a search session that don't have
+        transparency results yet.
+
+        Args:
+            session_id: Search session ID
+
+        Returns:
+            List of document IDs pending transparency analysis
+        """
+        query = """
+            SELECT DISTINCT sd.document_id
+            FROM scored_documents sd
+            JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+            WHERE rc.search_session_id = ?
+              AND sd.document_id NOT IN (
+                  SELECT document_id FROM transparency_results
+              )
+        """
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, (session_id,))
+            return [row["document_id"] for row in cursor]
+
+    def delete_transparency_result(self, document_id: str) -> bool:
+        """
+        Delete transparency result for a document.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            True if a result was deleted, False otherwise
+        """
+        query = "DELETE FROM transparency_results WHERE document_id = ?"
+
+        with self._sqlite_connection() as conn:
+            cursor = conn.execute(query, (document_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     # =========================================================================
     # Benchmark Run Operations

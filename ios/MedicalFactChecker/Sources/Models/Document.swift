@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -241,7 +241,7 @@ final class Document {
 
     /// Whether full text is available for this document.
     var hasFullText: Bool {
-        fullTextContent != nil || fullTextPDFPath != nil
+        fullTextHTML != nil || fullTextContent != nil || fullTextPDFPath != nil
     }
 
     /// Whether we've already tried to fetch full text (success or failure).
@@ -256,6 +256,7 @@ final class Document {
         case "europepmc": return "Europe PMC"
         case "unpaywall": return "Unpaywall"
         case "doi": return "Publisher"
+        case "cached": return "Cached"
         default: return source.capitalized
         }
     }
@@ -305,9 +306,9 @@ final class Document {
             fullTextContent = content
             fullTextHTML = nil
             fullTextPDFPath = nil
-        case .html(let htmlContent):
+        case .html(let htmlContent, let markdownContent):
             fullTextHTML = htmlContent
-            fullTextContent = nil
+            fullTextContent = markdownContent
             fullTextPDFPath = nil
         case .pdfURL:
             // PDF path will be set after download

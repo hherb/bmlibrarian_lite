@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -162,6 +162,24 @@ struct MacReportView: View {
                     exportReport(report)
                 } label: {
                     Label("Export as Text", systemImage: "doc.text")
+                }
+
+                Divider()
+
+                // Paper size selection
+                Menu("Paper Size") {
+                    ForEach(PaperSize.allCases) { size in
+                        Button {
+                            PDFExporter.preferredPaperSize = size
+                        } label: {
+                            HStack {
+                                Text(size.rawValue)
+                                if PDFExporter.preferredPaperSize == size {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Divider()
@@ -404,7 +422,7 @@ struct MacReportView: View {
                 do {
                     switch exportFormat {
                     case .pdf:
-                        if let pdfData = PDFExporter.generatePDFWithPagination(for: report, paperSize: .a4) {
+                        if let pdfData = PDFExporter.generatePDFWithPagination(for: report, paperSize: PDFExporter.preferredPaperSize) {
                             try pdfData.write(to: url)
                         }
                     case .text:
@@ -419,7 +437,7 @@ struct MacReportView: View {
 
     private func printReport(_ report: EvidenceReport) {
         // Generate PDF and print
-        if let pdfData = PDFExporter.generatePDFWithPagination(for: report, paperSize: .a4) {
+        if let pdfData = PDFExporter.generatePDFWithPagination(for: report, paperSize: PDFExporter.preferredPaperSize) {
             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("report.pdf")
             try? pdfData.write(to: tempURL)
 

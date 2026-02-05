@@ -70,6 +70,7 @@
 		A1000049001 /* SearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049000 /* SearchProgressView.swift */; };
 		A1000050001 /* SearchOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000050000 /* SearchOptionsView.swift */; };
 		A1000051001 /* FullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051000 /* FullTextViewer.swift */; };
+		A1000074001 /* FullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000074000 /* FullTextTab.swift */; };
 		A1000052001 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000052000 /* CloudKitConfiguration.swift */; };
 		A1000054001 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000054000 /* BioMedLitAdapters.swift */; };
 		A1000055001 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLit */; };
@@ -171,6 +172,7 @@
 		A1000049000 /* SearchProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProgressView.swift; sourceTree = "<group>"; };
 		A1000050000 /* SearchOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOptionsView.swift; sourceTree = "<group>"; };
 		A1000051000 /* FullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextViewer.swift; sourceTree = "<group>"; };
+		A1000074000 /* FullTextTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextTab.swift; sourceTree = "<group>"; };
 		A1000052000 /* CloudKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitConfiguration.swift; sourceTree = "<group>"; };
 		A1000053000 /* MedicalFactChecker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MedicalFactChecker.entitlements; sourceTree = "<group>"; };
 		A1000054000 /* BioMedLitAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BioMedLitAdapters.swift; sourceTree = "<group>"; };
@@ -368,6 +370,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000016000 /* FactCheckView.swift */,
+				A1000074000 /* FullTextTab.swift */,
 				A1000051000 /* FullTextViewer.swift */,
 				A1000023000 /* ScoredDocumentsView.swift */,
 			);
@@ -644,6 +647,7 @@
 				A1000049001 /* SearchProgressView.swift in Sources */,
 				A1000050001 /* SearchOptionsView.swift in Sources */,
 				A1000051001 /* FullTextViewer.swift in Sources */,
+				A1000074001 /* FullTextTab.swift in Sources */,
 				A1000052001 /* CloudKitConfiguration.swift in Sources */,
 				E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */,
 				63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */,

@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -20,7 +20,7 @@ import Foundation
 ///
 /// Represents the origin of a full-text article, used for display,
 /// attribution, and debugging purposes.
-enum FullTextSource: String, Codable, CaseIterable {
+enum FullTextSource: String, Codable, CaseIterable, Sendable {
     /// Europe PMC XML full text (highest quality, machine-readable).
     case europePMC = "europepmc"
 
@@ -33,6 +33,9 @@ enum FullTextSource: String, Codable, CaseIterable {
     /// Previously cached content.
     case cached = "cached"
 
+    /// User-uploaded content (PDF, HTML, or Markdown).
+    case uploaded = "uploaded"
+
     /// Human-readable display name for the source.
     var displayName: String {
         switch self {
@@ -40,6 +43,7 @@ enum FullTextSource: String, Codable, CaseIterable {
         case .unpaywall: return "Unpaywall"
         case .doi: return "Publisher"
         case .cached: return "Cached"
+        case .uploaded: return "Uploaded"
         }
     }
 
@@ -50,6 +54,7 @@ enum FullTextSource: String, Codable, CaseIterable {
         case .unpaywall: return "lock.open"
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
+        case .uploaded: return "square.and.arrow.up"
         }
     }
 
@@ -59,7 +64,7 @@ enum FullTextSource: String, Codable, CaseIterable {
     /// within the app. DOI sources require opening in an external browser.
     var canDisplayInApp: Bool {
         switch self {
-        case .europePMC, .unpaywall, .cached:
+        case .europePMC, .unpaywall, .cached, .uploaded:
             return true
         case .doi:
             return false
@@ -68,7 +73,7 @@ enum FullTextSource: String, Codable, CaseIterable {
 }
 
 /// The type of content retrieved from a full-text source.
-enum FullTextContentType: Equatable {
+enum FullTextContentType: Equatable, Sendable {
     /// Markdown-formatted text (from Europe PMC XML conversion).
     /// Deprecated: prefer `.html` for better table and figure rendering.
     case markdown(String)
@@ -133,7 +138,7 @@ enum FullTextContentType: Equatable {
 /// Result of a full-text retrieval attempt.
 ///
 /// Contains the retrieved content and metadata about its source.
-struct FullTextResult: Equatable {
+struct FullTextResult: Equatable, Sendable {
     /// The type of content retrieved.
     let content: FullTextContentType
 
@@ -146,6 +151,26 @@ struct FullTextResult: Equatable {
     /// web URLs require opening in an external browser.
     var canDisplayInApp: Bool {
         content.canDisplayInApp
+    }
+
+    /// Get the HTML content if available.
+    var htmlContent: String? {
+        content.htmlContent
+    }
+
+    /// Get the markdown content if available.
+    var markdownContent: String? {
+        content.markdownContent
+    }
+
+    /// Get the PDF URL if available.
+    var pdfURL: URL? {
+        content.pdfURL
+    }
+
+    /// Get the web URL if this is a fallback result.
+    var webURL: URL? {
+        content.webURL
     }
 
     /// Create a markdown result from Europe PMC.
@@ -191,5 +216,13 @@ struct FullTextResult: Equatable {
     /// - Returns: A full-text result with cached source.
     static func cached(content: FullTextContentType) -> FullTextResult {
         FullTextResult(content: content, source: .cached)
+    }
+
+    /// Create an uploaded result from user-provided content.
+    ///
+    /// - Parameter content: The uploaded content type (markdown, HTML, or PDF).
+    /// - Returns: A full-text result with uploaded source.
+    static func uploaded(content: FullTextContentType) -> FullTextResult {
+        FullTextResult(content: content, source: .uploaded)
     }
 }

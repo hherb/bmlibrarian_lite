@@ -46,6 +46,8 @@ from PySide6.QtGui import QPalette
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..quality.data_models import QualityTier, QualityFilter
+from ..transparency import TransparencySettings
+from ..config import LiteConfig
 
 logger = logging.getLogger(__name__)
 
@@ -126,15 +128,25 @@ class QualityFilterPanel(QFrame):
     classificationProgress = Signal(int, int)  # (current, total)
     classificationFinished = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    # Transparency filter signal
+    transparency_filter_changed = Signal(bool)  # enabled state
+
+    def __init__(
+        self,
+        config: Optional[LiteConfig] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         """
         Initialize the quality filter panel.
 
         Args:
+            config: Optional LiteConfig for transparency settings
             parent: Optional parent widget
         """
         super().__init__(parent)
         self._collapsed = True
+        self._config = config or LiteConfig()
+        self._transparency_settings = self._config.transparency
         self._setup_ui()
         self._connect_signals()
 
@@ -272,6 +284,38 @@ class QualityFilterPanel(QFrame):
 
         content_layout.addWidget(depth_group)
 
+        # === Transparency Filtering ===
+        transparency_group = QGroupBox("Transparency Filtering")
+        transparency_layout = QVBoxLayout(transparency_group)
+
+        self._transparency_enabled_cb = QCheckBox("Filter high-risk papers")
+        self._transparency_enabled_cb.setChecked(
+            self._transparency_settings.filtering_enabled
+        )
+        self._transparency_enabled_cb.setToolTip(
+            "Exclude papers with high transparency risk from results.\n"
+            "High risk includes: undisclosed industry funding, missing COI statements, "
+            "restricted data access."
+        )
+        transparency_layout.addWidget(self._transparency_enabled_cb)
+
+        self._show_badge_cb = QCheckBox("Show transparency badges")
+        self._show_badge_cb.setChecked(
+            self._transparency_settings.show_badge_on_cards
+        )
+        self._show_badge_cb.setToolTip(
+            "Display transparency risk badge on document cards"
+        )
+        transparency_layout.addWidget(self._show_badge_cb)
+
+        self._advanced_transparency_btn = QPushButton("Advanced Settings...")
+        self._advanced_transparency_btn.setToolTip(
+            "Configure advanced transparency thresholds and risk indicators"
+        )
+        transparency_layout.addWidget(self._advanced_transparency_btn)
+
+        content_layout.addWidget(transparency_group)
+
         layout.addWidget(self.content)
         self.content.setVisible(False)
 
@@ -286,6 +330,11 @@ class QualityFilterPanel(QFrame):
         self.metadata_only.toggled.connect(self._on_metadata_only_toggled)
         self.use_llm.toggled.connect(self._on_filter_changed)
         self.detailed_assessment.toggled.connect(self._on_filter_changed)
+
+        # Transparency signals
+        self._transparency_enabled_cb.toggled.connect(self._on_transparency_toggle)
+        self._show_badge_cb.toggled.connect(self._on_badge_toggle)
+        self._advanced_transparency_btn.clicked.connect(self._show_advanced_settings)
 
     def _toggle_content(self, checked: bool) -> None:
         """
@@ -500,6 +549,71 @@ class QualityFilterPanel(QFrame):
             True if panel is collapsed
         """
         return self._collapsed
+
+    # === Transparency Methods ===
+
+    def _on_transparency_toggle(self, checked: bool) -> None:
+        """
+        Handle transparency filtering toggle.
+
+        Args:
+            checked: Whether transparency filtering is enabled
+        """
+        self._transparency_settings.filtering_enabled = checked
+        self.transparency_filter_changed.emit(checked)
+        logger.debug(f"Transparency filtering {'enabled' if checked else 'disabled'}")
+
+    def _on_badge_toggle(self, checked: bool) -> None:
+        """
+        Handle show badge toggle.
+
+        Args:
+            checked: Whether badges should be shown
+        """
+        self._transparency_settings.show_badge_on_cards = checked
+        logger.debug(f"Transparency badges {'shown' if checked else 'hidden'}")
+
+    def _show_advanced_settings(self) -> None:
+        """Show advanced transparency settings dialog."""
+        from .transparency_settings_dialog import TransparencySettingsDialog
+
+        dialog = TransparencySettingsDialog(
+            self._transparency_settings,
+            parent=self,
+        )
+        if dialog.exec():
+            self._transparency_settings = dialog.get_settings()
+            # Update checkboxes to reflect any changes
+            self._transparency_enabled_cb.setChecked(
+                self._transparency_settings.filtering_enabled
+            )
+            self._show_badge_cb.setChecked(
+                self._transparency_settings.show_badge_on_cards
+            )
+            self.transparency_filter_changed.emit(
+                self._transparency_settings.filtering_enabled
+            )
+            logger.info("Advanced transparency settings updated")
+
+    def get_transparency_settings(self) -> TransparencySettings:
+        """
+        Get current transparency settings.
+
+        Returns:
+            Current TransparencySettings
+        """
+        return self._transparency_settings
+
+    def set_transparency_settings(self, settings: TransparencySettings) -> None:
+        """
+        Set transparency settings.
+
+        Args:
+            settings: New TransparencySettings to apply
+        """
+        self._transparency_settings = settings
+        self._transparency_enabled_cb.setChecked(settings.filtering_enabled)
+        self._show_badge_cb.setChecked(settings.show_badge_on_cards)
 
     # === Progress Bar Control Methods ===
 

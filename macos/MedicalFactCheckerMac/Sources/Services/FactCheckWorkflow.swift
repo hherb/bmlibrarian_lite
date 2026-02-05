@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -37,6 +37,9 @@ final class FactCheckWorkflow {
     private let modelContainer: ModelContainer
     private let settings: AppSettings
 
+    /// Checkpoint manager for resumable processing.
+    private let checkpointManager: CheckpointManager
+
     /// Error persistence manager for Phase 4 error queue.
     private let errorPersistenceManager: ErrorPersistenceManager
 
@@ -50,7 +53,7 @@ final class FactCheckWorkflow {
     ///
     /// Configures which provider(s) to use, whether to include preprints, etc.
     /// Set during startFactCheck from current settings, can be overridden.
-    private var searchOptions: SearchOptions?
+    private(set) var currentSearchOptions: SearchOptions?
 
     // MARK: - State
 
@@ -122,6 +125,7 @@ final class FactCheckWorkflow {
         self.modelContext = modelContext
         self.modelContainer = modelContainer
         self.settings = settings
+        self.checkpointManager = CheckpointManager(modelContainer: modelContainer)
         self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
     }
 
@@ -131,8 +135,8 @@ final class FactCheckWorkflow {
     ///
     /// - Parameters:
     ///   - claim: The medical claim to fact-check.
-    ///   - overrideSearchOptions: Optional search options to override settings.
-    func startFactCheck(claim: String, overrideSearchOptions: SearchOptions? = nil) async {
+    ///   - searchOptions: Optional search options to override settings.
+    func startFactCheck(claim: String, searchOptions: SearchOptions? = nil) async {
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
@@ -143,7 +147,7 @@ final class FactCheckWorkflow {
         }
 
         // Initialize search options from settings or override
-        searchOptions = overrideSearchOptions ?? settings.buildSearchOptions()
+        self.currentSearchOptions = searchOptions ?? settings.buildSearchOptions()
 
         // Load monthly usage
         await loadMonthlyUsage()
@@ -158,8 +162,8 @@ final class FactCheckWorkflow {
         let newSession = FactCheckSession(claim: claim)
         newSession.modelName = settings.llmModel
         newSession.providerName = settings.selectedProvider.displayName
-        newSession.searchProvider = searchOptions?.provider.rawValue
-        newSession.includePreprints = searchOptions?.includePreprints ?? false
+        newSession.searchProvider = currentSearchOptions?.provider.rawValue
+        newSession.includePreprints = currentSearchOptions?.includePreprints ?? false
         modelContext.insert(newSession)
         try? modelContext.save()
 
@@ -187,14 +191,14 @@ final class FactCheckWorkflow {
         // Restore search options from session or use current settings
         if let providerString = session.searchProvider,
            let provider = SearchProvider(rawValue: providerString) {
-            searchOptions = SearchOptions(
+            currentSearchOptions = SearchOptions(
                 provider: provider,
                 includePreprints: session.includePreprints,
                 maxResults: settings.batchSize,
                 offset: session.pubmedOffset
             )
         } else {
-            searchOptions = settings.buildSearchOptions()
+            currentSearchOptions = settings.buildSearchOptions()
         }
 
         await loadMonthlyUsage()
@@ -236,7 +240,7 @@ final class FactCheckWorkflow {
         // Restore search options from session if available
         if let providerRaw = session.searchProvider,
            let provider = SearchProvider(rawValue: providerRaw) {
-            searchOptions = SearchOptions(
+            currentSearchOptions = SearchOptions(
                 provider: provider,
                 includePreprints: session.includePreprints,
                 maxResults: settings.batchSize,
@@ -244,7 +248,7 @@ final class FactCheckWorkflow {
             )
         } else {
             // Legacy sessions without provider - default to PubMed
-            searchOptions = SearchOptions(
+            currentSearchOptions = SearchOptions(
                 provider: .pubmed,
                 includePreprints: session.includePreprints,
                 maxResults: settings.batchSize,
@@ -278,6 +282,11 @@ final class FactCheckWorkflow {
             awaitingSmartSearchDecision = false
             userDecisionPrompt = ""
         }
+
+        // Load persisted errors from previous runs
+        Task {
+            await loadPersistedErrors()
+        }
     }
 
     // MARK: - Pagination State Refresh
@@ -304,7 +313,7 @@ final class FactCheckWorkflow {
         var currentOffset = 0
         var currentCursor: String? = "*"
         var newDocumentsFound = 0
-        let provider = searchOptions?.provider ?? .pubmed
+        let provider = currentSearchOptions?.provider ?? .pubmed
 
         // Build existing identifier sets for deduplication
         let existingDocuments = session.documents ?? []
@@ -327,7 +336,7 @@ final class FactCheckWorkflow {
             try checkBudget()
 
             // Build options for this batch
-            var options = searchOptions ?? settings.buildSearchOptions()
+            var options = currentSearchOptions ?? settings.buildSearchOptions()
             options.maxResults = settings.batchSize
             options.offset = currentOffset
 
@@ -545,7 +554,14 @@ final class FactCheckWorkflow {
         try? modelContext.save()
 
         isRunning = false
-        awaitingUserDecision = false
+        awaitingUserDecision = true
+
+        // Build resumption prompt based on progress
+        if remaining > 0 {
+            userDecisionPrompt = "Processing cancelled. \(scoredCount) document(s) scored, \(remaining) remaining. Resume to continue from where you left off."
+        } else {
+            userDecisionPrompt = "Processing cancelled. Resume to continue from where you left off."
+        }
 
         // Notify callback
         onCancelled?(scoredCount, remaining)
@@ -669,7 +685,7 @@ final class FactCheckWorkflow {
 
         // Update search options if provided (allows changing provider mid-session)
         if let newOptions = newSearchOptions {
-            searchOptions = newOptions
+            currentSearchOptions = newOptions
             session.searchProvider = newOptions.provider.rawValue
             session.includePreprints = newOptions.includePreprints
 
@@ -736,7 +752,7 @@ final class FactCheckWorkflow {
             // Step 1: Fetch more documents (beyond the original set)
             if session.canFetchMoreDocuments {
                 // More results available from original query
-                let providerName = (searchOptions?.provider ?? .pubmed).displayName
+                let providerName = (currentSearchOptions?.provider ?? .pubmed).displayName
                 updateProgress(.fetchingMoreEvidence, "Fetching more documents from \(providerName)...")
                 try await searchPubMed()
 
@@ -994,14 +1010,14 @@ final class FactCheckWorkflow {
         // Parse JSON response into StructuredQuery
         if var parsed = StructuredQuery.parse(from: response) {
             // Apply user's preprint preference before building query
-            let includePreprints = searchOptions?.includePreprints ?? false
+            let includePreprints = currentSearchOptions?.includePreprints ?? false
             parsed.excludePreprints = !includePreprints
 
             // Store structured query for provider-specific translation
             structuredQuery = parsed
 
             // Build provider-specific query string
-            let provider = searchOptions?.provider ?? .pubmed
+            let provider = currentSearchOptions?.provider ?? .pubmed
             session.pubmedQuery = QueryBuilderFactory.build(from: parsed, for: provider)
         } else {
             // Fallback: create a simple query from the claim
@@ -1010,11 +1026,11 @@ final class FactCheckWorkflow {
                 concepts: [SearchConcept(name: "claim", keywords: session.claim.components(separatedBy: " "))]
             )
             // Apply preprint preference to fallback query too
-            let includePreprints = searchOptions?.includePreprints ?? false
+            let includePreprints = currentSearchOptions?.includePreprints ?? false
             fallbackQuery.excludePreprints = !includePreprints
 
             structuredQuery = fallbackQuery
-            let provider = searchOptions?.provider ?? .pubmed
+            let provider = currentSearchOptions?.provider ?? .pubmed
             session.pubmedQuery = QueryBuilderFactory.build(from: fallbackQuery, for: provider)
         }
 
@@ -1026,11 +1042,11 @@ final class FactCheckWorkflow {
 
         // Get the appropriate query for the provider
         let query: String
-        let provider = searchOptions?.provider ?? .pubmed
+        let provider = currentSearchOptions?.provider ?? .pubmed
 
         if var structured = structuredQuery {
             // Apply user's preprint preference from search options
-            if let options = searchOptions {
+            if let options = currentSearchOptions {
                 structured.excludePreprints = !options.includePreprints
             }
             // Use the new structured query system
@@ -1051,7 +1067,7 @@ final class FactCheckWorkflow {
         let batchNumber = session.batchesFetched + 1
 
         // Build search options from settings
-        var options = searchOptions ?? settings.buildSearchOptions()
+        var options = currentSearchOptions ?? settings.buildSearchOptions()
         options.offset = session.pubmedOffset
         options.maxResults = settings.batchSize
 
@@ -1879,7 +1895,7 @@ final class FactCheckWorkflow {
     private func executeSmartSearch() async throws {
         guard let session = session else { return }
 
-        let provider = searchOptions?.provider ?? .pubmed
+        let provider = currentSearchOptions?.provider ?? .pubmed
 
         // Generate alternative structured queries
         updateProgress(.searchingPubMed, "Generating alternative search strategies...")
@@ -1939,11 +1955,11 @@ final class FactCheckWorkflow {
     ) async throws {
         guard let session = session else { return }
 
-        let provider = searchOptions?.provider ?? .pubmed
+        let provider = currentSearchOptions?.provider ?? .pubmed
 
         // Apply user's preprint preference from search options
         var queryWithPrefs = structuredQuery
-        if let options = searchOptions {
+        if let options = currentSearchOptions {
             queryWithPrefs.excludePreprints = !options.includePreprints
         }
 
@@ -1951,7 +1967,7 @@ final class FactCheckWorkflow {
         let query = QueryBuilderFactory.build(from: queryWithPrefs, for: provider)
 
         // Build search options for this alternative query
-        var options = searchOptions ?? settings.buildSearchOptions()
+        var options = currentSearchOptions ?? settings.buildSearchOptions()
         options.offset = 0  // Start fresh for alternative query
         options.maxResults = settings.batchSize
 

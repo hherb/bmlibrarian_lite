@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -212,7 +212,7 @@ struct CombinedPaginationState: PaginationState, Sendable {
 /// about the search provider used.
 struct UnifiedSearchResult: Sendable {
     /// Articles returned by the search.
-    let articles: [ArticleMetadata]
+    let articles: [UnifiedArticleMetadata]
 
     /// Total number of results available (may exceed articles.count).
     let totalCount: Int
@@ -259,7 +259,7 @@ struct UnifiedSearchResult: Sendable {
     ///   - pagination: Pagination state.
     ///   - provider: Source provider.
     init(
-        articles: [ArticleMetadata],
+        articles: [UnifiedArticleMetadata],
         totalCount: Int,
         pagination: any PaginationState,
         provider: SearchProvider

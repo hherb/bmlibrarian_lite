@@ -57,6 +57,7 @@ from .constants import (
     EUROPEPMC_SEARCH_PAGE_SIZE,
 )
 from .data_models import SearchProvider
+from .transparency import TransparencySettings, get_default_settings
 
 logger = logging.getLogger(__name__)
 
@@ -587,6 +588,7 @@ class LiteConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
+    transparency: TransparencySettings = field(default_factory=get_default_settings)
 
     # Validation cache (not serialized)
     _validation_cache: dict[str, list[str]] = field(
@@ -706,6 +708,9 @@ class LiteConfig:
         if "benchmark" in data:
             config.benchmark = BenchmarkConfig.from_dict(data["benchmark"])
 
+        if "transparency" in data:
+            config.transparency = TransparencySettings.from_dict(data["transparency"])
+
         return config
 
     def to_dict(self) -> dict[str, Any]:
@@ -750,6 +755,7 @@ class LiteConfig:
                 "search_provider": self.search.search_provider.value,
             },
             "benchmark": self.benchmark.to_dict(),
+            "transparency": self.transparency.to_dict(),
         }
 
     def save(self, config_path: Optional[Path] = None) -> None:
@@ -950,6 +956,10 @@ class LiteConfig:
         # Data directory validation
         if not self.storage.data_dir:
             errors.append("Data directory path cannot be empty")
+
+        # Transparency settings validation
+        transparency_errors = self.transparency.validate()
+        errors.extend(transparency_errors)
 
         # Cache the result
         self._validation_cache[config_hash] = errors

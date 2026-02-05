@@ -84,3 +84,6 @@ Shared iOS/macOS components:
 - `doc/llm/general_golden_rules.md` - Swift/Kotlin standards
 - `doc/cross_platform/` - Platform-agnostic algorithms
 - `doc/developer/europepmc_and_pubmed.md` - API guide
+
+Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+

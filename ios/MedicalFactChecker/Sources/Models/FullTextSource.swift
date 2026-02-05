@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2025 Dr Horst Herb
+// Copyright (C) 2024-2026 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -17,87 +17,214 @@
 import Foundation
 
 /// Source from which full text was retrieved.
+///
+/// Represents the origin of a full-text article, used for display,
+/// attribution, and debugging purposes.
 /// Note: Renamed from FullTextSource to avoid collision with BioMedLit.FullTextSource.
-enum AppFullTextSource: String, Codable, Sendable {
+enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
+    /// Europe PMC XML full text (highest quality, machine-readable).
     case europePMC = "europepmc"
+
+    /// Unpaywall open access PDF.
     case unpaywall = "unpaywall"
+
+    /// DOI resolution to publisher website.
     case doi = "doi"
+
+    /// Previously cached content.
     case cached = "cached"
 
-    /// Human-readable display name.
+    /// User-uploaded content (PDF, HTML, or Markdown).
+    case uploaded = "uploaded"
+
+    /// Human-readable display name for the source.
     var displayName: String {
         switch self {
         case .europePMC: return "Europe PMC"
         case .unpaywall: return "Unpaywall"
         case .doi: return "Publisher"
         case .cached: return "Cached"
+        case .uploaded: return "Uploaded"
         }
     }
 
-    /// Icon name for the source.
+    /// SF Symbol icon name for the source.
     var iconName: String {
         switch self {
         case .europePMC: return "building.columns"
         case .unpaywall: return "lock.open"
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
+        case .uploaded: return "square.and.arrow.up"
+        }
+    }
+
+    /// Whether this source provides in-app viewable content.
+    ///
+    /// Europe PMC and Unpaywall provide content that can be displayed
+    /// within the app. DOI sources require opening in an external browser.
+    var canDisplayInApp: Bool {
+        switch self {
+        case .europePMC, .unpaywall, .cached, .uploaded:
+            return true
+        case .doi:
+            return false
         }
     }
 }
 
-/// Result of a full-text retrieval attempt.
-/// Note: Renamed from FullTextResult to avoid collision with BioMedLit.FullTextResult.
-struct AppFullTextResult: Sendable {
-    /// Type of content retrieved from full-text sources.
-    enum ContentType: Sendable {
-        case html(String)        // Europe PMC XML converted to HTML (preferred)
-        case markdown(String)    // Fallback: plain markdown
-        case pdfURL(URL)         // URL to downloadable PDF
-        case webURL(URL)         // Fallback URL to open in browser
-    }
+/// The type of content retrieved from a full-text source.
+/// Note: Renamed from FullTextContentType to avoid collision with BioMedLit types.
+enum AppFullTextContentType: Equatable, Sendable {
+    /// Markdown-formatted text (from Europe PMC XML conversion).
+    /// Deprecated: prefer `.html` for better table and figure rendering.
+    case markdown(String)
 
-    let content: ContentType
-    let source: AppFullTextSource
+    /// HTML-formatted text (from Europe PMC XML conversion).
+    /// Preferred over markdown for proper table and figure rendering.
+    case html(content: String, markdown: String)
 
-    /// Whether this result can be displayed in-app.
+    /// URL to a downloadable PDF file.
+    case pdfURL(URL)
+
+    /// URL to open in an external web browser.
+    case webURL(URL)
+
+    /// Whether this content can be displayed in-app.
     var canDisplayInApp: Bool {
-        switch content {
-        case .html, .markdown, .pdfURL:
+        switch self {
+        case .markdown, .html, .pdfURL:
             return true
         case .webURL:
             return false
         }
     }
 
-    /// Get the HTML content if available.
+    /// Extract the HTML content if this is an HTML type.
     var htmlContent: String? {
-        if case .html(let text) = content {
-            return text
+        if case .html(let content, _) = self {
+            return content
         }
         return nil
+    }
+
+    /// Extract the markdown content if this is a markdown or HTML type.
+    var markdownContent: String? {
+        switch self {
+        case .markdown(let content):
+            return content
+        case .html(_, let markdown):
+            return markdown
+        default:
+            return nil
+        }
+    }
+
+    /// Extract the PDF URL if this is a PDF type.
+    var pdfURL: URL? {
+        if case .pdfURL(let url) = self {
+            return url
+        }
+        return nil
+    }
+
+    /// Extract the web URL if this is a web URL type.
+    var webURL: URL? {
+        if case .webURL(let url) = self {
+            return url
+        }
+        return nil
+    }
+}
+
+/// Result of a full-text retrieval attempt.
+///
+/// Contains the retrieved content and metadata about its source.
+/// Note: Renamed from FullTextResult to avoid collision with BioMedLit.FullTextResult.
+struct AppFullTextResult: Equatable, Sendable {
+    /// The type of content retrieved.
+    let content: AppFullTextContentType
+
+    /// The source from which the content was retrieved.
+    let source: AppFullTextSource
+
+    /// Whether this result can be displayed within the app.
+    var canDisplayInApp: Bool {
+        content.canDisplayInApp
+    }
+
+    /// Get the HTML content if available.
+    var htmlContent: String? {
+        content.htmlContent
     }
 
     /// Get the markdown content if available.
     var markdownContent: String? {
-        if case .markdown(let text) = content {
-            return text
-        }
-        return nil
+        content.markdownContent
     }
 
     /// Get the PDF URL if available.
     var pdfURL: URL? {
-        if case .pdfURL(let url) = content {
-            return url
-        }
-        return nil
+        content.pdfURL
     }
 
     /// Get the web URL if this is a fallback result.
     var webURL: URL? {
-        if case .webURL(let url) = content {
-            return url
-        }
-        return nil
+        content.webURL
+    }
+
+    // MARK: - Factory Methods
+
+    /// Create a markdown result from Europe PMC.
+    ///
+    /// - Parameter markdown: The markdown content.
+    /// - Returns: A full-text result with Europe PMC source.
+    /// - Note: Prefer `europePMC(html:markdown:)` for better table rendering.
+    static func europePMC(markdown: String) -> AppFullTextResult {
+        AppFullTextResult(content: .markdown(markdown), source: .europePMC)
+    }
+
+    /// Create an HTML result from Europe PMC.
+    ///
+    /// HTML provides better table and figure rendering than markdown.
+    ///
+    /// - Parameters:
+    ///   - html: The HTML content (body only, no wrapper).
+    ///   - markdown: The markdown content (fallback and for text search/export).
+    /// - Returns: A full-text result with Europe PMC source.
+    static func europePMC(html: String, markdown: String) -> AppFullTextResult {
+        AppFullTextResult(content: .html(content: html, markdown: markdown), source: .europePMC)
+    }
+
+    /// Create a PDF URL result from Unpaywall.
+    ///
+    /// - Parameter url: The PDF download URL.
+    /// - Returns: A full-text result with Unpaywall source.
+    static func unpaywall(pdfURL url: URL) -> AppFullTextResult {
+        AppFullTextResult(content: .pdfURL(url), source: .unpaywall)
+    }
+
+    /// Create a web URL result for DOI resolution.
+    ///
+    /// - Parameter url: The web URL to open.
+    /// - Returns: A full-text result with DOI source.
+    static func doi(webURL url: URL) -> AppFullTextResult {
+        AppFullTextResult(content: .webURL(url), source: .doi)
+    }
+
+    /// Create a cached result.
+    ///
+    /// - Parameter content: The cached content type.
+    /// - Returns: A full-text result with cached source.
+    static func cached(content: AppFullTextContentType) -> AppFullTextResult {
+        AppFullTextResult(content: content, source: .cached)
+    }
+
+    /// Create an uploaded result from user-provided content.
+    ///
+    /// - Parameter content: The uploaded content type (markdown, HTML, or PDF).
+    /// - Returns: A full-text result with uploaded source.
+    static func uploaded(content: AppFullTextContentType) -> AppFullTextResult {
+        AppFullTextResult(content: content, source: .uploaded)
     }
 }
