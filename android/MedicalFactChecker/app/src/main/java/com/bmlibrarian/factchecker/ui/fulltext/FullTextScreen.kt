@@ -707,14 +707,15 @@ private fun markdownToBasicHtml(markdown: String): String {
     html = html.replace(Regex("\\*\\*(.+?)\\*\\*"), "<strong>$1</strong>")
     html = html.replace(Regex("\\*(.+?)\\*"), "<em>$1</em>")
 
-    // Links
-    html = html.replace(Regex("\\[([^]]+)]\\(([^)]+)\\)"), "<a href=\"$2\">$1</a>")
-
-    // Images with onerror handler for fallback
+    // Images with onerror handler for fallback (must be processed BEFORE links
+    // to prevent the link regex from matching ![alt](url) as [alt](url))
     html = html.replace(
         Regex("!\\[([^]]*)]\\(([^)]+)\\)"),
         "<figure><img src=\"$2\" alt=\"$1\" onerror=\"this.onerror=null; tryAlternativeExtensions(this);\" loading=\"lazy\"></figure>"
     )
+
+    // Links
+    html = html.replace(Regex("\\[([^]]+)]\\(([^)]+)\\)"), "<a href=\"$2\">$1</a>")
 
     // Markdown tables
     html = convertMarkdownTables(html)
@@ -841,20 +842,31 @@ private fun markdownToBasicHtml(markdown: String): String {
                 // Try alternative image extensions when loading fails
                 function tryAlternativeExtensions(img) {
                     var src = img.src;
-                    var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+                    var extensions = ['.jpg', '.jpeg', '.gif', '.png', '.svg'];
                     var currentExt = src.match(/\.[^.]+$/);
-
                     if (!currentExt) return;
 
                     var base = src.slice(0, -currentExt[0].length);
-                    var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
+                    var tryIndex = parseInt(img.getAttribute('data-ext-try') || '0');
+                    var origExt = (img.getAttribute('data-orig-ext') || currentExt[0]).toLowerCase();
+                    if (tryIndex === 0) {
+                        img.setAttribute('data-orig-ext', currentExt[0].toLowerCase());
+                        origExt = currentExt[0].toLowerCase();
+                    }
 
-                    for (var i = 0; i < extensions.length; i++) {
-                        if (i !== currentIndex) {
-                            img.src = base + extensions[i];
+                    while (tryIndex < extensions.length) {
+                        if (extensions[tryIndex].toLowerCase() !== origExt) {
+                            img.setAttribute('data-ext-try', tryIndex + 1);
+                            img.onerror = function() { tryAlternativeExtensions(this); };
+                            img.src = base + extensions[tryIndex];
                             return;
                         }
+                        tryIndex++;
                     }
+
+                    img.onerror = null;
+                    img.alt = 'Figure image unavailable';
+                    img.style.display = 'none';
                 }
 
                 // Handle anchor link clicks for internal navigation

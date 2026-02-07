@@ -258,10 +258,9 @@ fun FactCheckScreen(
                         isLoadingFullText = uiState.loadingFullTextDocumentId == document.id,
                         onGetFullText = { doc ->
                             viewModel.fetchFullText(doc) { success ->
-                                if (success) {
-                                    // Navigate to full-text viewer on success
-                                    onNavigateToFullText(doc.id)
-                                }
+                                // Always navigate to full-text viewer - it handles
+                                // unavailable state with proper UI and fallback options
+                                onNavigateToFullText(doc.id)
                             }
                         },
                         onViewFullText = { doc ->

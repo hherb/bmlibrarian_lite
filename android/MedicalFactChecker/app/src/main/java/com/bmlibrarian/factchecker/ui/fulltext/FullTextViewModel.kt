@@ -170,6 +170,17 @@ class FullTextViewModel @Inject constructor(
                 _document.value = doc
 
                 // Check if we already have cached content
+                // Prefer HTML (from JATS parsing) as it has proper figure/table rendering
+                if (!doc.fullTextHTML.isNullOrEmpty()) {
+                    Log.d(TAG, "Using cached full-text HTML for ${doc.id}")
+                    _state.value = FullTextState.HtmlContent(
+                        html = wrapHtmlContent(doc.fullTextHTML),
+                        title = doc.title,
+                        source = doc.fullTextSourceDisplay ?: Constants.FULLTEXT_SOURCE_CACHED
+                    )
+                    return@launch
+                }
+
                 if (!doc.fullTextMarkdown.isNullOrEmpty()) {
                     Log.d(TAG, "Using cached full-text markdown for ${doc.id}")
                     _state.value = FullTextState.MarkdownContent(
@@ -257,10 +268,11 @@ class FullTextViewModel @Inject constructor(
             is FullTextResult.EuropePmcXml -> {
                 Log.d(TAG, "Got Europe PMC XML content for ${doc.id}")
 
-                // Cache the markdown content
+                // Cache both markdown and HTML content
                 documentDao.update(
                     doc.copy(
                         fullTextMarkdown = result.markdown,
+                        fullTextHTML = result.html,
                         fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
                         fullTextFetchedAt = Date()
                     )
@@ -269,6 +281,7 @@ class FullTextViewModel @Inject constructor(
                 // Update local document state
                 _document.value = doc.copy(
                     fullTextMarkdown = result.markdown,
+                    fullTextHTML = result.html,
                     fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC
                 )
 
@@ -590,20 +603,35 @@ class FullTextViewModel @Inject constructor(
             // Try alternative image extensions when loading fails
             function tryAlternativeExtensions(img) {
                 var src = img.src;
-                var extensions = ['.gif', '.jpg', '.jpeg', '.png', '.svg'];
+                var extensions = ['.jpg', '.jpeg', '.gif', '.png', '.svg'];
                 var currentExt = src.match(/\.[^.]+$/);
-
                 if (!currentExt) return;
 
                 var base = src.slice(0, -currentExt[0].length);
-                var currentIndex = extensions.indexOf(currentExt[0].toLowerCase());
 
-                for (var i = 0; i < extensions.length; i++) {
-                    if (i !== currentIndex) {
-                        img.src = base + extensions[i];
+                // Track which extension index we're trying via data attribute
+                var tryIndex = parseInt(img.getAttribute('data-ext-try') || '0');
+                // Skip extensions matching the original
+                var origExt = (img.getAttribute('data-orig-ext') || currentExt[0]).toLowerCase();
+                if (tryIndex === 0) {
+                    img.setAttribute('data-orig-ext', currentExt[0].toLowerCase());
+                    origExt = currentExt[0].toLowerCase();
+                }
+
+                while (tryIndex < extensions.length) {
+                    if (extensions[tryIndex].toLowerCase() !== origExt) {
+                        img.setAttribute('data-ext-try', tryIndex + 1);
+                        img.onerror = function() { tryAlternativeExtensions(this); };
+                        img.src = base + extensions[tryIndex];
                         return;
                     }
+                    tryIndex++;
                 }
+
+                // All extensions exhausted - show placeholder
+                img.onerror = null;
+                img.alt = 'Figure image unavailable';
+                img.style.display = 'none';
             }
 
             // Smooth scroll to anchor
