@@ -7,13 +7,14 @@
     Matches iOS app icon: white medical cross with green checkmark badge.
 
     iOS icon (1024x1024):
-    - Cross vertical bar: x=412-612, y=180-680 (200w x 500h)
-    - Cross horizontal bar: x=262-762, y=330-530 (500w x 200h)
+    - Cross: equal arms, 200px thick, 500px long
+    - Vertical bar: x=412-612, y=180-680
+    - Horizontal bar: x=262-762, y=330-530
     - Checkmark circle: center (700, 700), radius 180
 
     Android adaptive icon safe zone: center 66dp of 108dp (21-87)
-    Scale factor: 66/1024 ≈ 0.0645
-    Offset to center: 21dp
+    Cross centered at (49, 49), each bar 38dp long x 14dp thick.
+    Equal arm length = (38-14)/2 = 12dp per arm from center.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -28,25 +29,24 @@
         android:pathData="M38,52 L56,52 L56,88 L38,88 Z"/>
 
     <!-- White medical cross - vertical bar with rounded corners -->
-    <!-- iOS: x=412-612 (200w), y=180-680 (500h), scaled and offset -->
+    <!-- 14dp wide (x: 42-56), 38dp tall (y: 28-66), centered at (49, 47) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M45.5,30 L52.5,30 Q54.5,30 54.5,32 L54.5,70 Q54.5,72 52.5,72 L45.5,72 Q43.5,72 43.5,70 L43.5,32 Q43.5,30 45.5,30 Z"/>
+        android:pathData="M44,28 L54,28 Q56,28 56,30 L56,64 Q56,66 54,66 L44,66 Q42,66 42,64 L42,30 Q42,28 44,28 Z"/>
 
     <!-- White medical cross - horizontal bar with rounded corners -->
-    <!-- iOS: x=262-762 (500w), y=330-530 (200h), scaled and offset -->
+    <!-- 38dp wide (x: 30-68), 14dp tall (y: 40-54), centered at (49, 47) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M32,42 L66,42 Q68,42 68,44 L68,51 Q68,53 66,53 L32,53 Q30,53 30,51 L30,44 Q30,42 32,42 Z"/>
+        android:pathData="M32,40 L66,40 Q68,40 68,42 L68,52 Q68,54 66,54 L32,54 Q30,54 30,52 L30,42 Q30,40 32,40 Z"/>
 
     <!-- Subtle gradient overlay on cross (right side) for depth -->
     <path
         android:fillColor="#E8F0FF"
         android:fillAlpha="0.4"
-        android:pathData="M49,30 L52.5,30 Q54.5,30 54.5,32 L54.5,70 Q54.5,72 52.5,72 L49,72 Z"/>
+        android:pathData="M49,28 L54,28 Q56,28 56,30 L56,64 Q56,66 54,66 L49,66 Z"/>
 
     <!-- Green circle badge (bottom-right) -->
-    <!-- iOS: center (700, 700), radius 180, scaled -->
     <path
         android:fillColor="#4CAF50"
         android:pathData="M66,66 m-12,0 a12,12 0,1 1,24 0 a12,12 0,1 1,-24 0"/>
@@ -58,7 +58,6 @@
         android:pathData="M66,66 m-12,0 a12,12 0,0 1,24 0"/>
 
     <!-- White checkmark inside green circle -->
-    <!-- iOS path scaled: M590,700 L660,770 L810,600 with stroke 48 -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="#FFFFFF"
