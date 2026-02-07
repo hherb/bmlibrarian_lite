@@ -1,0 +1,40 @@
+flowchart TD
+    subgraph Trigger["Trigger: Re-run Search"]
+        SelectQ["Select Past Question<br/>(ResearchQuestionsTab)"]
+        Target["Set Target:<br/>New Documents to Find"]
+    end
+
+    subgraph IncrementalSearch["IncrementalSearchWorker"]
+        Init["Initialize<br/>• Existing PubMed query<br/>• Already scored IDs<br/>• Target count"]
+
+        Loop{"New docs < target<br/>AND offset < max?"}
+
+        Fetch["Fetch Batch<br/>(INCREMENTAL_SEARCH_BATCH_SIZE)"]
+
+        Filter["Filter Out<br/>Already Scored"]
+
+        Emit["Emit batch_complete<br/>signal"]
+
+        Offset["Increment offset"]
+
+        Done["Emit finished<br/>with all new docs"]
+    end
+
+    subgraph Processing["Continue Workflow"]
+        Score["Score New Documents"]
+        Extract["Extract Citations"]
+        Update["Update Report"]
+    end
+
+    SelectQ --> Init
+    Target --> Init
+    Init --> Loop
+    Loop -->|Yes| Fetch
+    Fetch --> Filter
+    Filter --> Emit
+    Emit --> Offset
+    Offset --> Loop
+    Loop -->|No| Done
+    Done --> Score
+    Score --> Extract
+    Extract --> Update

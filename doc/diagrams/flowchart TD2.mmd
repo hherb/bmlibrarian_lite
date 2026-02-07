@@ -1,0 +1,35 @@
+flowchart TD
+    Start["Document"] --> Check{"Quality<br/>filter<br/>enabled?"}
+
+    Check -->|No| Pass["Pass to Scoring"]
+    Check -->|Yes| Tier1["Tier 1: Metadata Analysis"]
+
+    Tier1 --> Meta{"Publication type<br/>Journal rank<br/>Study indicators"}
+
+    Meta -->|"Clear result"| T1Decision{"Meets<br/>minimum<br/>tier?"}
+    Meta -->|"Inconclusive"| Tier2["Tier 2: LLM Classification<br/>(Haiku)"]
+
+    Tier2 --> LLM1{"Study design<br/>classification"}
+
+    LLM1 -->|"Clear result"| T2Decision{"Meets<br/>criteria?"}
+    LLM1 -->|"Need detail"| Tier3["Tier 3: Detailed Assessment<br/>(Sonnet)"]
+
+    Tier3 --> LLM2{"Comprehensive<br/>evaluation"}
+
+    LLM2 --> T3Decision{"Meets all<br/>requirements?"}
+
+    T1Decision -->|Yes| Pass
+    T1Decision -->|No| Reject["Reject Document"]
+
+    T2Decision -->|Yes| Pass
+    T2Decision -->|No| Reject
+
+    T3Decision -->|Yes| Pass
+    T3Decision -->|No| Reject
+
+    subgraph Criteria["Filter Criteria"]
+        C1["minimum_tier"]
+        C2["require_randomization"]
+        C3["require_blinding"]
+        C4["minimum_sample_size"]
+    end
