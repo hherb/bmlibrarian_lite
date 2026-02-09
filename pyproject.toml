@@ -3,7 +3,7 @@ name = "bmlibrarian-lite"
 dynamic = ["version"]
 description = "Lightweight biomedical literature research tool - no PostgreSQL required"
 readme = "README.md"
-license = { text = "GPL-3.0-or-later" }
+license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.12"
 authors = [
     { name = "Horst Herb", email = "bmlibrarian@proton.me" }
@@ -21,7 +21,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Healthcare Industry",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
@@ -82,6 +82,26 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "src/bmlibrarian_lite/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "ios/",
+    "macos/",
+    "android/",
+    "Packages/",
+    "Appstore_screenshots/",
+    "dist/",
+    ".venv/",
+    ".mypy_cache/",
+    ".github/",
+    ".claude/",
+    "doc/",
+    "assets/",
+    "uv.lock",
+    "*.mmd",
+    "TODO_*.md",
+    "CLAUDE.md",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bmlibrarian_lite"]
