@@ -94,6 +94,14 @@ struct MacReportView: View {
                     // Statistics
                     statisticsSection(report)
 
+                    // Transparency Summary
+                    if let session = report.session {
+                        let docs = session.documents ?? []
+                        if docs.contains(where: { $0.hasTransparencyAnalysis }) {
+                            MacTransparencySummarySection(documents: docs)
+                        }
+                    }
+
                     // Cost
                     if let session = report.session {
                         costSection(session)
@@ -589,9 +597,14 @@ struct MacReviewedDocumentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: MacSpacing.standard) {
-            // Show score badge (displays "?" for failed scores)
-            MacScoreBadge(score: document.relevanceScore)
-                .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
+            // Show score badge and transparency risk badge
+            VStack(spacing: MacSpacing.xSmall) {
+                MacScoreBadge(score: document.relevanceScore)
+                    .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
+                if let riskLevel = document.transparencyRiskLevel {
+                    MacTransparencyRiskBadge(riskLevel: riskLevel)
+                }
+            }
 
             VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
                 Text(document.title)
@@ -881,6 +894,10 @@ struct MacDocumentDetailSheet: View {
     @State private var isLoadingFullText = false
     @State private var fullTextError: String?
 
+    // Transparency state
+    @State private var isLoadingTransparency = false
+    @State private var transparencyError: String?
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -983,6 +1000,10 @@ struct MacDocumentDetailSheet: View {
                     Divider()
                     fullTextSection
 
+                    // Transparency Analysis
+                    Divider()
+                    transparencyAnalysisSection
+
                     // External Links
                     Divider()
 
@@ -1075,6 +1096,74 @@ struct MacDocumentDetailSheet: View {
                             .foregroundColor(.red)
                             .lineLimit(2)
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Transparency Analysis Section
+
+    @ViewBuilder
+    private var transparencyAnalysisSection: some View {
+        VStack(alignment: .leading, spacing: MacSpacing.medium) {
+            Text("Transparency Analysis")
+                .font(.headline)
+
+            if let result = document.transparencyResult {
+                MacTransparencyDetailView(result: result)
+            } else if document.pmid.isEmpty && document.doi == nil {
+                HStack(spacing: MacSpacing.standard) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                    Text("Transparency analysis requires a PMID or DOI")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                HStack(spacing: MacSpacing.standard) {
+                    Button(action: analyzeTransparency) {
+                        if isLoadingTransparency {
+                            ProgressView()
+                                .scaleEffect(MacScale.progressViewSmall)
+                        } else {
+                            Label("Analyze Transparency", systemImage: "shield.checkered")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLoadingTransparency)
+
+                    if let error = transparencyError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+    }
+
+    private func analyzeTransparency() {
+        isLoadingTransparency = true
+        transparencyError = nil
+
+        Task {
+            do {
+                let service = TransparencyAnalysisService.create(from: AppSettings.shared)
+                let pmid = document.pmid.isEmpty ? nil : document.pmid
+                let result = try await service.analyze(
+                    doi: document.doi,
+                    pmid: pmid,
+                    fullText: document.fullTextContent
+                )
+                await MainActor.run {
+                    document.storeTransparencyResult(result)
+                    isLoadingTransparency = false
+                }
+            } catch {
+                await MainActor.run {
+                    transparencyError = error.localizedDescription
+                    isLoadingTransparency = false
                 }
             }
         }

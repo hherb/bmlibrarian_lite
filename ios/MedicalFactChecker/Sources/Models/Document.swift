@@ -16,6 +16,7 @@
 
 import Foundation
 import SwiftData
+import BioMedLit
 
 /// A PubMed document retrieved for fact-checking.
 ///
@@ -145,6 +146,50 @@ final class Document {
     /// Set from search results metadata (Europe PMC `inPMC` flag or presence of PMC ID).
     /// Used to display availability indicator before user attempts to fetch full text.
     var hasFullTextInPMC: Bool = false
+
+    // MARK: - Transparency Analysis
+
+    /// JSON-encoded transparency analysis result.
+    ///
+    /// Stored as String to avoid SwiftData schema migration for a new model.
+    /// Decode via `transparencyResult` computed property.
+    var transparencyResultJSON: String?
+
+    /// When transparency analysis was last performed.
+    var transparencyAnalyzedAt: Date?
+
+    /// Decoded TransparencyResult from the stored JSON.
+    ///
+    /// Returns nil if no analysis has been performed or if decoding fails.
+    var transparencyResult: TransparencyResult? {
+        guard let json = transparencyResultJSON,
+              let data = json.data(using: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(TransparencyResult.self, from: data)
+    }
+
+    /// Store a TransparencyResult as JSON.
+    ///
+    /// - Parameter result: The transparency analysis result to store.
+    func storeTransparencyResult(_ result: TransparencyResult) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(result) {
+            transparencyResultJSON = String(data: data, encoding: .utf8)
+            transparencyAnalyzedAt = Date()
+        }
+    }
+
+    /// Whether transparency analysis has been performed for this document.
+    var hasTransparencyAnalysis: Bool {
+        transparencyResultJSON != nil
+    }
+
+    /// Shortcut for badge display without full JSON decode.
+    var transparencyRiskLevel: TransparencyRiskLevel? {
+        transparencyResult?.riskLevel
+    }
 
     // MARK: - Relationships
 

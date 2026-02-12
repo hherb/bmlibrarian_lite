@@ -1274,8 +1274,18 @@ final class FactCheckWorkflow {
                 try await extractCitations()
             }
 
-            // Step 5: Generate report
+            // Step 5: Analyze transparency of scored documents
             if session.currentStep == .extractingCitations {
+                try Task.checkCancellation()
+
+                session.currentStep = .analyzingTransparency
+                try? modelContext.save()
+
+                await analyzeTransparency()
+            }
+
+            // Step 6: Generate report
+            if session.currentStep == .analyzingTransparency {
                 try Task.checkCancellation()
 
                 session.currentStep = .generatingReport
@@ -1887,6 +1897,51 @@ final class FactCheckWorkflow {
 
         // Save immediately so UI updates
         try? modelContext.save()
+    }
+
+    // MARK: - Transparency Analysis
+
+    /// Analyze transparency for all documents that meet the score threshold.
+    ///
+    /// Runs sequentially to respect API rate limits. Failures on individual
+    /// documents are logged but do not block the workflow.
+    private func analyzeTransparency() async {
+        guard let session = session else { return }
+
+        let documentsToAnalyze = (session.documents ?? [])
+            .filter { $0.meetsThreshold(settings.minScoreThreshold) }
+            .filter { !$0.hasTransparencyAnalysis }
+
+        guard !documentsToAnalyze.isEmpty else {
+            updateProgress(.analyzingTransparency, "No documents to analyze for transparency")
+            return
+        }
+
+        let service = TransparencyAnalysisService.create(from: settings)
+
+        for (index, document) in documentsToAnalyze.enumerated() {
+            if Task.isCancelled { break }
+
+            updateProgress(
+                .analyzingTransparency,
+                "Analyzing transparency (\(index + 1)/\(documentsToAnalyze.count))..."
+            )
+
+            do {
+                let pmid = document.pmid.isEmpty ? nil : document.pmid
+                let result = try await service.analyze(
+                    doi: document.doi,
+                    pmid: pmid,
+                    fullText: document.fullTextContent
+                )
+                document.storeTransparencyResult(result)
+                try? modelContext.save()
+            } catch {
+                logger.warning(
+                    "Transparency analysis failed for \(document.pmid): \(error.localizedDescription)"
+                )
+            }
+        }
     }
 
     private func generateReport() async throws {

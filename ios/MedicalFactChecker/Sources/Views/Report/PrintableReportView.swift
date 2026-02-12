@@ -16,6 +16,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
+import BioMedLit
 
 // Note: PaperSize enum is defined in PDFExporter.swift
 
@@ -62,6 +63,14 @@ struct PrintableReportView: View {
 
             // Statistics
             statisticsSection
+
+            // Transparency Summary
+            if let session = report.session {
+                let docs = session.documents ?? []
+                if docs.contains(where: { $0.hasTransparencyAnalysis }) {
+                    printableTransparencySection(docs)
+                }
+            }
 
             // Reviewed Documents (if any)
             if let session = report.session, !(session.documents ?? []).isEmpty {
@@ -262,14 +271,22 @@ struct PrintableReportView: View {
 
                 Spacer()
 
-                if let score = document.relevanceScore {
-                    Text("\(score)")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .frame(width: 24, height: 24)
-                        .background(scoreColor(score))
-                        .clipShape(Circle())
+                VStack(spacing: 2) {
+                    if let score = document.relevanceScore {
+                        Text("\(score)")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(scoreColor(score))
+                            .clipShape(Circle())
+                    }
+
+                    if let riskLevel = document.transparencyRiskLevel {
+                        Text(riskLevel.shortLabel)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(transparencyColor(riskLevel))
+                    }
                 }
             }
 
@@ -280,6 +297,49 @@ struct PrintableReportView: View {
         .padding(8)
         .background(Color.gray.opacity(0.05))
         .cornerRadius(4)
+    }
+
+    private func transparencyColor(_ riskLevel: TransparencyRiskLevel) -> Color {
+        switch riskLevel {
+        case .low: return .green
+        case .medium: return .orange
+        case .high: return .red
+        case .unknown: return .gray
+        }
+    }
+
+    private func printableTransparencySection(_ documents: [Document]) -> some View {
+        let results = documents.compactMap { $0.transparencyResult }
+        let avgScore = results.isEmpty ? 0 : results.reduce(0) { $0 + $1.transparencyScore } / results.count
+        let industryCount = results.filter { $0.industryFundingDetected }.count
+        let industryPercent = results.isEmpty ? 0 : (industryCount * 100) / results.count
+        let highRisk = results.filter { $0.riskLevel == .high }.count
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Transparency Analysis")
+                .font(.headline)
+
+            if highRisk > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                    Text("\(highRisk) document(s) flagged as high transparency risk")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+            }
+
+            HStack(spacing: 40) {
+                printableStatItem(label: "Avg Score", value: "\(avgScore)")
+                printableStatItem(label: "Industry Funded", value: "\(industryPercent)%")
+                printableStatItem(label: "Analyzed", value: "\(results.count)")
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
     }
 
     private func scoreColor(_ score: Int) -> Color {

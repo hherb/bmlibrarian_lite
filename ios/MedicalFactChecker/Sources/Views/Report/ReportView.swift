@@ -174,6 +174,11 @@ struct ReportContentView: View {
             // Statistics
             StatisticsSection(report: report)
 
+            // Transparency Summary
+            if let session = report.session {
+                TransparencySummarySection(documents: session.documents ?? [])
+            }
+
             // Cost (if session available)
             if let session = report.session {
                 CostSection(session: session)
@@ -336,6 +341,11 @@ struct ReportView: View {
 
                     // Statistics
                     StatisticsSection(report: report)
+
+                    // Transparency Summary
+                    if let session = report.session {
+                        TransparencySummarySection(documents: session.documents ?? [])
+                    }
 
                     // Cost (if session available)
                     if let session = report.session {
@@ -737,8 +747,13 @@ struct DocumentCard: View {
 
                 Spacer()
 
-                if let score = document.relevanceScore {
-                    ScoreBadge(score: score)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let score = document.relevanceScore {
+                        ScoreBadge(score: score)
+                    }
+                    if let riskLevel = document.transparencyRiskLevel {
+                        TransparencyRiskBadge(riskLevel: riskLevel)
+                    }
                 }
             }
 
@@ -1226,6 +1241,10 @@ struct DocumentDetailSheet: View {
     @State private var showFullTextViewer = false
     @State private var fullTextResult: AppFullTextResult?
 
+    // Transparency analysis state
+    @State private var isLoadingTransparency = false
+    @State private var transparencyError: String?
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1313,6 +1332,10 @@ struct DocumentDetailSheet: View {
                     // Full Text Section
                     Divider()
                     fullTextSection
+
+                    // Transparency Analysis Section
+                    Divider()
+                    transparencyAnalysisSection
 
                     // External Links
                     Divider()
@@ -1494,6 +1517,76 @@ struct DocumentDetailSheet: View {
                     }
                     fullTextError = error.localizedDescription
                     isLoadingFullText = false
+                }
+            }
+        }
+    }
+
+    // MARK: - Transparency Analysis Section
+
+    /// Section displaying transparency analysis results or an analyze button.
+    @ViewBuilder
+    private var transparencyAnalysisSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Transparency Analysis")
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            if let result = document.transparencyResult {
+                TransparencyDetailView(result: result)
+            } else if document.pmid.isEmpty && document.doi == nil {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                    Text("Requires DOI or PMID for analysis")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                HStack(spacing: 12) {
+                    Button(action: analyzeTransparency) {
+                        if isLoadingTransparency {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Label("Analyze Transparency", systemImage: "shield.checkered")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLoadingTransparency)
+
+                    if let error = transparencyError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Run transparency analysis for this document.
+    private func analyzeTransparency() {
+        isLoadingTransparency = true
+        transparencyError = nil
+
+        Task {
+            do {
+                let service = TransparencyAnalysisService.create(from: .shared)
+                let result = try await service.analyze(
+                    doi: document.doi,
+                    pmid: document.pmid.isEmpty ? nil : document.pmid,
+                    fullText: document.fullTextContent
+                )
+                await MainActor.run {
+                    document.storeTransparencyResult(result)
+                    isLoadingTransparency = false
+                }
+            } catch {
+                await MainActor.run {
+                    transparencyError = error.localizedDescription
+                    isLoadingTransparency = false
                 }
             }
         }

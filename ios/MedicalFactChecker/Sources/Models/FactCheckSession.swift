@@ -282,7 +282,9 @@ final class FactCheckSession {
         case .awaitingUserDecision:
             return 60
         case .extractingCitations:
-            return 60 + (citationProgress * 25)
+            return 60 + (citationProgress * 20)
+        case .analyzingTransparency:
+            return 85
         case .generatingReport:
             return 90
         case .fetchingMoreEvidence:

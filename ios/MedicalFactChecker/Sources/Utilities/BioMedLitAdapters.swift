@@ -530,3 +530,18 @@ extension BMLFullTextService {
         return BMLFullTextService(email: email)
     }
 }
+
+/// Type alias for BioMedLit TransparencyAnalysisService.
+typealias BMLTransparencyAnalysisService = TransparencyAnalysisService
+
+extension TransparencyAnalysisService {
+    /// Create a configured transparency analysis service from app settings.
+    ///
+    /// - Parameter settings: App settings containing NCBI credentials.
+    /// - Returns: Configured transparency analysis service.
+    static func create(from settings: AppSettings) -> TransparencyAnalysisService {
+        let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
+        let apiKey = settings.ncbiAPIKey.isEmpty ? nil : settings.ncbiAPIKey
+        return TransparencyAnalysisService(email: email, pubmedApiKey: apiKey)
+    }
+}

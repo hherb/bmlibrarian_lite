@@ -65,6 +65,12 @@
 		A1000044001 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000044000 /* QueryValidator.swift */; };
 		A1000045001 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045000 /* SearchResultMerger.swift */; };
 		A1000046001 /* DocumentSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000046000 /* DocumentSourceBadge.swift */; };
+		3DE1E64C0DB9282C99B7AF46 /* TransparencyRiskBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06271E0299E1A6F384FBEA9 /* TransparencyRiskBadge.swift */; };
+		31E912D85338E1DA549131FB /* TransparencyDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C2073CD8F8C36C012C3855 /* TransparencyDetailView.swift */; };
+		0B646CAD99C485B214CBEDB6 /* TransparencySummarySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7385C28100996EC8F00B8E7 /* TransparencySummarySection.swift */; };
+		F521A57463CD53B66F6F08B5 /* MacTransparencyRiskBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5007C50814C91F478C4A8E1E /* MacTransparencyRiskBadge.swift */; };
+		88733B51F5BCDE5CBD7ACC8D /* MacTransparencyDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5988AA7B6ED8678390E3B363 /* MacTransparencyDetailView.swift */; };
+		80FDDCA282926105A1D3178B /* MacTransparencySummarySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E2876C1A2484B8EF749FFD /* MacTransparencySummarySection.swift */; };
 		A1000047001 /* FetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000047000 /* FetchMoreView.swift */; };
 		A1000048001 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000048000 /* FullTextSourceBadge.swift */; };
 		A1000049001 /* SearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049000 /* SearchProgressView.swift */; };
@@ -167,6 +173,12 @@
 		A1000044000 /* QueryValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValidator.swift; sourceTree = "<group>"; };
 		A1000045000 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
 		A1000046000 /* DocumentSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSourceBadge.swift; sourceTree = "<group>"; };
+		F06271E0299E1A6F384FBEA9 /* TransparencyRiskBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparencyRiskBadge.swift; sourceTree = "<group>"; };
+		A7C2073CD8F8C36C012C3855 /* TransparencyDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparencyDetailView.swift; sourceTree = "<group>"; };
+		A7385C28100996EC8F00B8E7 /* TransparencySummarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparencySummarySection.swift; sourceTree = "<group>"; };
+		5007C50814C91F478C4A8E1E /* MacTransparencyRiskBadge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacTransparencyRiskBadge.swift; sourceTree = "<group>"; };
+		5988AA7B6ED8678390E3B363 /* MacTransparencyDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacTransparencyDetailView.swift; sourceTree = "<group>"; };
+		E8E2876C1A2484B8EF749FFD /* MacTransparencySummarySection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacTransparencySummarySection.swift; sourceTree = "<group>"; };
 		A1000047000 /* FetchMoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FetchMoreView.swift; sourceTree = "<group>"; };
 		A1000048000 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
 		A1000049000 /* SearchProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProgressView.swift; sourceTree = "<group>"; };
@@ -424,6 +436,9 @@
 				A1000050000 /* SearchOptionsView.swift */,
 				A1000049000 /* SearchProgressView.swift */,
 				A1000060000 /* SortingControlsView.swift */,
+				F06271E0299E1A6F384FBEA9 /* TransparencyRiskBadge.swift */,
+				A7C2073CD8F8C36C012C3855 /* TransparencyDetailView.swift */,
+				A7385C28100996EC8F00B8E7 /* TransparencySummarySection.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -488,6 +503,9 @@
 				64577ADB5E841221E87D162B /* MacErrorQueueView.swift */,
 				7DE2D66575DF0967DF2CF9A6 /* MacSortingControlsView.swift */,
 				AD189737C5701726FE9E52B7 /* MacProcessingProgressView.swift */,
+				5007C50814C91F478C4A8E1E /* MacTransparencyRiskBadge.swift */,
+				5988AA7B6ED8678390E3B363 /* MacTransparencyDetailView.swift */,
+				E8E2876C1A2484B8EF749FFD /* MacTransparencySummarySection.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -642,6 +660,9 @@
 				A1000044001 /* QueryValidator.swift in Sources */,
 				A1000045001 /* SearchResultMerger.swift in Sources */,
 				A1000046001 /* DocumentSourceBadge.swift in Sources */,
+				3DE1E64C0DB9282C99B7AF46 /* TransparencyRiskBadge.swift in Sources */,
+				31E912D85338E1DA549131FB /* TransparencyDetailView.swift in Sources */,
+				0B646CAD99C485B214CBEDB6 /* TransparencySummarySection.swift in Sources */,
 				A1000047001 /* FetchMoreView.swift in Sources */,
 				A1000048001 /* FullTextSourceBadge.swift in Sources */,
 				A1000049001 /* SearchProgressView.swift in Sources */,
@@ -685,6 +706,9 @@
 				E3523390EFEB6A4021F73BF3 /* MacErrorQueueView.swift in Sources */,
 				B5E70E87E77A9A178DC702EE /* MacSortingControlsView.swift in Sources */,
 				73BFAB4A43C95C46B19DE635 /* MacProcessingProgressView.swift in Sources */,
+				F521A57463CD53B66F6F08B5 /* MacTransparencyRiskBadge.swift in Sources */,
+				88733B51F5BCDE5CBD7ACC8D /* MacTransparencyDetailView.swift in Sources */,
+				80FDDCA282926105A1D3178B /* MacTransparencySummarySection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
