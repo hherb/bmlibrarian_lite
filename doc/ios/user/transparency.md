@@ -8,8 +8,9 @@ When you run a fact-check, the app follows these steps:
 
 1. **Search** for relevant papers on PubMed and Europe PMC
 2. **Score** each paper for relevance to your claim
-3. **Analyze transparency** of all papers that meet the relevance threshold
-4. **Generate report** incorporating transparency findings
+3. **Extract citations** — key passages from high-scoring papers
+4. **Analyze transparency** of all papers that meet the relevance threshold
+5. **Generate report** incorporating transparency findings
 
 Transparency analysis runs automatically after scoring. Each qualifying document is checked against multiple external data sources including CrossRef (funding metadata), ClinicalTrials.gov (trial registration), and PubMed (publication metadata). No additional configuration is needed beyond having an email address set in Settings.
 
