@@ -110,7 +110,7 @@ public actor CrossRefService {
 
             guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
                 if httpResponse.statusCode == BioMedLitConstants.httpStatusNotFound {
-                    return nil
+                    return nil as Data?
                 }
                 throw CrossRefError.httpError(statusCode: httpResponse.statusCode)
             }

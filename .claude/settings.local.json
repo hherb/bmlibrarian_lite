@@ -36,7 +36,24 @@
       "Bash(bash -x ./gradlew:*)",
       "Bash(~/Library/Android/sdk/emulator/emulator:*)",
       "Bash(./gradlew compileDebugKotlin:*)",
-      "Bash(ruby -e:*)"
+      "Bash(ruby -e:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(git checkout:*)",
+      "Bash(plutil:*)",
+      "Bash(ruby:*)",
+      "Bash(./gradlew:*)",
+      "Bash(git status:*)",
+      "Skill(code-review:code-review)",
+      "Skill(code-review:code-review:*)",
+      "Bash(ruff check:*)",
+      "Bash(mypy:*)",
+      "Skill(commit-commands:commit)",
+      "Skill(commit-commands:commit:*)",
+      "Bash(uv pip install:*)",
+      "Bash(tar tzf:*)",
+      "Bash(twine check:*)",
+      "Bash(twine upload:*)",
+      "Bash(git tag:*)"
     ]
   }
 }

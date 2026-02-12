@@ -7,20 +7,33 @@ This guide covers the architecture, development setup, and contribution guidelin
 ### Prerequisites
 
 - Python 3.12 or higher
-- uv package manager
+- [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
 - Git
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/hherb/bmlibrarian-lite.git
-cd bmlibrarian-lite
+git clone https://github.com/hherb/bmlibrarian_lite.git
+cd bmlibrarian_lite
 
-# Create virtual environment and install with dev dependencies
-uv venv
-source .venv/bin/activate
+# Create virtual environment and install with dev dependencies (recommended)
+uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
+
+# Alternative: using pip
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### Running the Application
+
+```bash
+# CLI
+bmll
+
+# GUI
+bmlibrarian-lite-gui
 ```
 
 ### Running Tests
@@ -58,41 +71,61 @@ mypy src/
 
 ```
 bmlibrarian_lite/
-├── bmlibrarian_lite.py      # CLI entry point
-├── pyproject.toml           # Project configuration
+├── bmll.py                 # CLI entry point (development)
+├── pyproject.toml           # Project configuration (hatchling build)
+├── scripts/
+│   ├── set_version.py       # Version management across all files
+│   ├── run_gui.py           # GUI entry point for PyInstaller
+│   └── run_benchmark.py     # Benchmark scoring script
 ├── src/bmlibrarian_lite/
-│   ├── __init__.py          # Package exports
-│   ├── config.py            # Configuration management
-│   ├── storage.py           # ChromaDB + SQLite storage
+│   ├── __init__.py          # Package exports, __version__
+│   ├── config.py            # LiteConfig (~/.bmlibrarian_lite/)
+│   ├── storage.py           # SQLite + sqlite-vec storage
 │   ├── embeddings.py        # FastEmbed wrapper
 │   ├── constants.py         # Application constants
 │   ├── exceptions.py        # Custom exceptions
 │   ├── data_models.py       # Core data structures
+│   ├── europepmc.py         # Europe PMC client (cursor pagination)
+│   ├── search_merger.py     # Deduplication (PMID/DOI/PMC/title)
+│   ├── search_service.py    # Unified search across providers
+│   ├── query_translator.py  # Natural language → structured query
+│   ├── fulltext_discovery.py # Europe PMC XML → Unpaywall → DOI
+│   ├── pdf_discovery.py     # PDF source discovery
 │   ├── chunking.py          # Text chunking utilities
 │   ├── pdf_utils.py         # PDF text extraction
-│   ├── pdf_discovery.py     # PDF source discovery
-│   ├── query_converter.py   # Natural language to PubMed
 │   ├── utils.py             # Shared utilities
 │   ├── agents/              # LLM-powered agents
+│   │   ├── search_agent.py
+│   │   ├── scoring_agent.py
+│   │   ├── citation_agent.py
+│   │   ├── reporting_agent.py
+│   │   └── interrogation_agent.py
 │   ├── gui/                 # PySide6 interface
 │   │   ├── app.py           # Main window
 │   │   ├── systematic_review_tab.py
+│   │   ├── research_questions_tab.py
 │   │   ├── document_interrogation_tab.py
-│   │   ├── audit_trail_tab.py       # NEW
-│   │   ├── audit_queries_tab.py     # NEW
-│   │   ├── audit_literature_tab.py  # NEW
-│   │   ├── audit_citations_tab.py   # NEW
-│   │   ├── document_card.py         # NEW
-│   │   ├── card_utils.py            # NEW
+│   │   ├── report_tab.py
+│   │   ├── audit_trail_tab.py
+│   │   ├── document_card.py
 │   │   ├── quality_badge.py
 │   │   └── workers.py
 │   ├── llm/                 # LLM client abstraction
+│   │   ├── client.py
+│   │   └── providers/       # Anthropic, Ollama
 │   ├── pubmed/              # PubMed API integration
 │   ├── quality/             # Study quality assessment
+│   ├── benchmarking/        # Multi-model benchmarking
+│   ├── transparency/        # Study transparency analysis
+│   ├── study_transparency_analyzer/  # Transparency scoring
 │   └── resources/           # Styles and assets
 │       └── styles/
 │           └── dpi_scale.py # DPI scaling utilities
-└── tests/                   # Test suite
+├── tests/                   # Test suite
+├── ios/                     # iOS app (Swift/SwiftUI)
+├── macos/                   # macOS app (Swift/SwiftUI)
+├── android/                 # Android app (Kotlin/Compose)
+└── Packages/BioMedLit/      # Shared Swift package (iOS/macOS)
 ```
 
 ### Core Components
@@ -121,7 +154,7 @@ if errors:
 
 #### Storage (`storage.py`)
 
-`LiteStorage` manages ChromaDB collections and SQLite metadata:
+`LiteStorage` manages SQLite with sqlite-vec for vector similarity search:
 
 ```python
 from bmlibrarian_lite import LiteConfig, LiteStorage, LiteDocument
@@ -201,8 +234,33 @@ Available agents:
 - `SearchAgent`: Converts natural language to PubMed queries
 - `ScoringAgent`: Scores document relevance
 - `CitationAgent`: Extracts citations from documents
-- `ReportingAgent`: Generates synthesis reports
+- `ReportingAgent`: Generates synthesis reports with risk warnings
 - `InterrogationAgent`: Handles document Q&A
+
+#### Search Service (`search_service.py`)
+
+Unified search across PubMed and Europe PMC:
+
+```python
+from bmlibrarian_lite.search_service import SearchService
+
+service = SearchService(config)
+results = service.search("cardiovascular risk factors", max_results=50)
+
+# Results are automatically deduplicated across providers
+for result in results:
+    print(f"{result.title} (source: {result.provider})")
+```
+
+#### Study Transparency
+
+Analyzes studies for transparency indicators:
+
+- Funding disclosure analysis
+- Conflict of interest detection
+- Data availability assessment
+- Trial registration verification
+- CrossRef and ClinicalTrials.gov external validation
 
 ### GUI Architecture
 
@@ -255,7 +313,7 @@ class WorkerThread(QThread):
             self.error.emit(str(e))
 ```
 
-#### Audit Trail Components (NEW)
+#### Audit Trail Components
 
 The Audit Trail system provides real-time workflow visibility:
 
@@ -266,7 +324,7 @@ The Audit Trail system provides real-time workflow visibility:
 
 **DocumentCard** (`document_card.py`):
 - Collapsible card widget for document display
-- Supports quality badges and score badges
+- Supports quality badges, score badges, and transparency risk badges
 - Shows LLM rationale for scoring/quality decisions
 - Emits signals: `clicked(doc_id)`, `send_to_interrogator(doc_id)`
 
@@ -292,6 +350,9 @@ Core data structures in `data_models.py`:
 - `ScoredDocument`: Document with relevance score and explanation
 - `Citation`: Extracted citation with passage and context
 - `InterrogationSession`: Q&A session state
+- `SearchProvider`: Enum for PubMed / Europe PMC
+- `CursorPaginationState`: Europe PMC cursor-based pagination
+- `OffsetPaginationState`: PubMed offset-based pagination
 
 Quality assessment models in `quality/data_models.py`:
 - `QualityAssessment`: Study design, quality tier, extraction details
@@ -390,6 +451,51 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 disallow_untyped_defs = true
+```
+
+## Release Process
+
+### Version Management
+
+Use the version script to update all version locations at once:
+
+```bash
+# Show current versions
+python scripts/set_version.py --show
+
+# Preview changes
+python scripts/set_version.py 0.4.0 --dry-run
+
+# Apply version bump
+python scripts/set_version.py 0.4.0
+```
+
+This updates:
+- `src/bmlibrarian_lite/__init__.py` (`__version__`)
+- `bmll.py` (`__version__`)
+- `bmlibrarian_lite.spec` (3 locations: BUNDLE version, CFBundleShortVersionString, CFBundleVersion)
+
+### Publishing to PyPI
+
+```bash
+# Build sdist and wheel
+python -m build
+
+# Validate artifacts
+twine check dist/bmlibrarian_lite-X.Y.Z*
+
+# Upload (uses ~/.pypirc for authentication)
+twine upload dist/bmlibrarian_lite-X.Y.Z*
+
+# Tag and push
+git tag -a X.Y.Z -m "Release vX.Y.Z"
+git push && git push --tags
+```
+
+### Build Dependencies
+
+```bash
+uv pip install build twine
 ```
 
 ## Testing Guidelines

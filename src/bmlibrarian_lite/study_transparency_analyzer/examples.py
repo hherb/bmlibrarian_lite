@@ -276,8 +276,8 @@ if __name__ == "__main__":
 
     # Uncomment the examples you want to run:
 
-    # example_single_study()
-    # example_doi_analysis()
+    example_single_study()
+    example_doi_analysis()
     # example_json_export()
     # example_batch_analysis()
     # example_filtering_results()

@@ -95,7 +95,7 @@ public actor ClinicalTrialsService {
 
             guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
                 if httpResponse.statusCode == BioMedLitConstants.httpStatusNotFound {
-                    return nil
+                    return nil as Data?
                 }
                 throw ClinicalTrialsError.httpError(statusCode: httpResponse.statusCode)
             }

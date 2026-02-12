@@ -4,17 +4,30 @@ A lightweight biomedical literature research tool for systematic reviews and doc
 
 ## Getting Started
 
-### Installation
+### Installation from PyPI
+
+```bash
+# Recommended: install with uv
+uv pip install bmlibrarian-lite
+
+# Alternative: install with pip
+pip install bmlibrarian-lite
+```
+
+### Installation from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/hherb/bmlibrarian-lite.git
-cd bmlibrarian-lite
+git clone https://github.com/hherb/bmlibrarian_lite.git
+cd bmlibrarian_lite
 
-# Create virtual environment and install with uv
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Recommended: using uv
+uv venv && source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -e .
+
+# Alternative: using pip
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
 ```
 
 ### Configuration
@@ -52,7 +65,11 @@ export NCBI_EMAIL="your@email.com"
 ### Launching the Application
 
 ```bash
-python bmlibrarian_lite.py
+# GUI (recommended)
+bmlibrarian-lite-gui
+
+# CLI
+bmll
 ```
 
 ## Features
@@ -62,17 +79,24 @@ python bmlibrarian_lite.py
 The Systematic Review tab provides a complete workflow for conducting literature reviews:
 
 1. **Enter Research Question**: Type your research question in natural language
-2. **Search PubMed**: The system converts your question to a PubMed query and fetches articles
+2. **Search**: The system searches PubMed and/or Europe PMC, deduplicating results across providers
 3. **Review Articles**: Browse the retrieved articles with metadata
-4. **Score Relevance**: Rate articles on a 1-5 scale for relevance to your question
-5. **Extract Citations**: Automatically extract key citations from high-scoring articles
-6. **Generate Report**: Create a synthesized report summarizing the evidence
+4. **Score Relevance**: AI scores articles on a 1-5 scale for relevance to your question
+5. **Transparency Analysis**: Studies are analyzed for funding disclosure, conflict of interest, data availability, and trial registration
+6. **Extract Citations**: Key passages are automatically extracted from high-scoring articles
+7. **Generate Report**: A synthesized report is created summarizing the evidence, including risk warnings based on transparency analysis
+
+#### Search Providers
+
+- **PubMed**: NCBI's biomedical literature database (default)
+- **Europe PMC**: Alternative provider with cursor-based pagination and full-text access
+- Results from multiple providers are automatically deduplicated by PMID, DOI, PMC ID, or title similarity
 
 #### Search Tips
 
 - Be specific in your research question
 - Include key terms, populations, and outcomes of interest
-- The AI converts natural language to optimized PubMed queries
+- The AI converts natural language to optimized search queries
 
 #### Scoring Guidelines
 
@@ -84,14 +108,23 @@ The Systematic Review tab provides a complete workflow for conducting literature
 | 2 | Low relevance, limited applicability |
 | 1 | Not relevant |
 
+### Research Questions
+
+The Research Questions tab lets you manage and revisit past searches:
+
+- View all previous research questions
+- Re-run searches with incremental pagination (fetch more results)
+- Automatic deduplication of already-scored documents
+- Context menu: re-classify, re-score, delete, or run benchmarks
+
 ### Audit Trail
 
 The Audit Trail tab provides real-time visibility into the systematic review workflow. It has three sub-tabs:
 
 #### Queries Tab
 
-Shows all generated PubMed queries during the workflow:
-- The natural language question and resulting PubMed query
+Shows all generated search queries during the workflow:
+- The natural language question and resulting search query
 - Statistics: documents found, scored, citations extracted
 - Query history for the current session
 
@@ -100,7 +133,7 @@ Shows all generated PubMed queries during the workflow:
 Displays document cards for all retrieved articles:
 
 **Document Cards:**
-- **Header**: Shows quality badge (RCT, SR, etc.), relevance score (1-5), and title
+- **Header**: Shows quality badge (RCT, SR, etc.), relevance score (1-5), transparency risk badge, and title
 - **Metadata**: Authors, journal, year, PMID/DOI
 - **Click to expand**: View the full abstract
 - **LLM Rationale**: See why the document received its score
@@ -128,6 +161,31 @@ Shows extracted citation passages:
 - Highlighted passage within the abstract context
 - Relevance explanation from the LLM
 
+### Study Transparency Analysis
+
+Each study is automatically analyzed for transparency indicators:
+
+- **Funding Disclosure**: Whether funding sources are declared
+- **Conflict of Interest**: Whether COI statements are present
+- **Data Availability**: Whether underlying data is shared
+- **Trial Registration**: Whether the study is registered (e.g., ClinicalTrials.gov)
+- **Transparency Score**: Overall transparency rating
+
+Transparency results feed into risk warnings that appear in generated reports, flagging studies with potential concerns.
+
+### Full-Text Discovery
+
+BMLibrarian Lite can automatically find and retrieve full-text content:
+
+- **Europe PMC XML**: Free full-text articles in structured format
+- **Unpaywall**: Open access versions of paywalled articles
+- **DOI Resolution**: Direct publisher links
+- **Manual Upload**: Upload PDFs for documents not found automatically
+
+JATS XML articles are rendered with full support for tables, figures, references, and anchor navigation.
+
+Configure your email in Settings to enable Unpaywall access.
+
 ### Document Interrogation
 
 The Document Interrogation tab allows interactive Q&A with loaded documents:
@@ -142,15 +200,15 @@ The Document Interrogation tab allows interactive Q&A with loaded documents:
 - Plain text files (`.txt`)
 - Markdown files (`.md`)
 
-### PDF Discovery and Download
+### Multi-Model Benchmarking
 
-BMLibrarian Lite can automatically find and download PDFs from multiple sources:
+Compare how different LLM models score document relevance and classify study quality:
 
-- **PubMed Central**: Free full-text articles
-- **Unpaywall**: Open access versions of paywalled articles
-- **DOI Resolution**: Direct publisher links
-
-Configure your email in Settings to enable Unpaywall access.
+- Side-by-side model comparison with agreement matrices
+- Score distribution analysis across models
+- Per-document score comparison with disagreement highlighting
+- Cost and latency tracking per model
+- Export results to CSV/JSON
 
 ### Quality Assessment
 
@@ -174,6 +232,7 @@ Access Settings from the main window to configure:
 - **Email**: Set for PubMed and Unpaywall API access
 - **API Keys**: Configure provider credentials
 - **Quality Filter**: Set minimum quality tier for filtering
+- **Risk Warnings**: Configure transparency thresholds for report warnings
 
 ### Configuration File
 
@@ -208,38 +267,48 @@ BMLibrarian Lite provides command-line utilities:
 
 ```bash
 # Show storage statistics
-python bmlibrarian_lite.py stats
+bmll stats
 
 # Validate configuration
-python bmlibrarian_lite.py validate --verbose
+bmll validate --verbose
 
 # Show current configuration
-python bmlibrarian_lite.py config --json
+bmll config --json
 
 # Clear all stored data
-python bmlibrarian_lite.py clear
+bmll clear
 ```
 
 ## Data Storage
 
 All data is stored locally in `~/.bmlibrarian_lite/`:
 
-- **ChromaDB** (`chroma/`): Vector embeddings for semantic search
-- **SQLite** (`metadata.db`): Document metadata and session data
+- **SQLite** (`metadata.db`): Document metadata, embeddings (via sqlite-vec), and session data
 - **PDFs** (`pdfs/`): Downloaded PDF files
 - **Fulltexts** (`fulltexts/`): Extracted full-text content
 
 No external database server is required.
+
+## Cross-Platform Apps
+
+BMLibrarian Lite is also available as native mobile and desktop apps:
+
+- **iOS**: Available on the App Store as "Medical Fact Checker"
+- **macOS**: Native SwiftUI app with iCloud sync
+- **Android**: Available on Google Play as "Medical Fact Checker"
+
+These apps share the same core algorithms but use platform-native storage and ML capabilities.
 
 ## Workflow Tips
 
 ### Best Practices for Systematic Reviews
 
 1. **Start with a focused question**: Use PICO format (Population, Intervention, Comparison, Outcome)
-2. **Review the generated query**: Check the Audit Trail to see the PubMed query
+2. **Review the generated query**: Check the Audit Trail to see the search query
 3. **Adjust scoring threshold**: Higher threshold = more selective results
 4. **Check quality badges**: Prioritize RCTs and systematic reviews for treatment questions
-5. **Read LLM rationales**: Understand why documents were scored as they were
+5. **Review transparency**: Check risk badges for funding and COI concerns
+6. **Read LLM rationales**: Understand why documents were scored as they were
 
 ### Using the Interrogator
 
@@ -273,5 +342,5 @@ No external database server is required.
 
 ### Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/hherb/bmlibrarian-lite/issues)
+- **Issues**: [GitHub Issues](https://github.com/hherb/bmlibrarian_lite/issues)
 - **Documentation**: See other files in this `doc/` directory
