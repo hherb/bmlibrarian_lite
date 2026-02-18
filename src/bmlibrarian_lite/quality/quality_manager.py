@@ -147,8 +147,13 @@ class QualityManager:
                 logger.debug("Tier 3: Detailed assessment requested")
                 return self.quality_agent.assess_quality(document)
 
-            # Convert classification to assessment
-            return QualityAssessment.from_classification(classification)
+            # Convert classification to assessment with actual model name
+            model_name = self.config.models.get_model_string(
+                self.study_classifier.TASK_ID
+            )
+            return QualityAssessment.from_classification(
+                classification, model_name=model_name
+            )
 
         # Fallback to metadata result (even if low confidence)
         return metadata_result
@@ -215,8 +220,8 @@ class QualityManager:
                 "by_study_design": {},
                 "by_assessment_tier": {
                     "metadata": 0,
-                    "haiku": 0,
-                    "sonnet": 0,
+                    "llm_classifier": 0,
+                    "llm_detailed": 0,
                     "unclassified": 0,
                 },
                 "avg_confidence": 0.0,
@@ -248,8 +253,8 @@ class QualityManager:
             "by_study_design": design_counts,
             "by_assessment_tier": {
                 "metadata": tier_sources[1],
-                "haiku": tier_sources[2],
-                "sonnet": tier_sources[3],
+                "llm_classifier": tier_sources[2],
+                "llm_detailed": tier_sources[3],
                 "unclassified": tier_sources[0],
             },
             "avg_confidence": avg_confidence,

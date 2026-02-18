@@ -135,7 +135,7 @@ class QualitySummaryWidget(QFrame):
             summary: Dictionary containing summary statistics with keys:
                 - total: Total number of assessments
                 - by_quality_tier: Dict mapping tier names to counts
-                - by_assessment_tier: Dict with metadata/haiku/sonnet counts
+                - by_assessment_tier: Dict with metadata/llm_classifier/llm_detailed counts
                 - avg_confidence: Average confidence value (0-1)
         """
         self._clear_tier_layout()
@@ -166,13 +166,13 @@ class QualitySummaryWidget(QFrame):
         if metadata_count > 0:
             stats_parts.append(f"{metadata_count} from PubMed")
 
-        haiku_count = by_source.get("haiku", 0)
-        if haiku_count > 0:
-            stats_parts.append(f"{haiku_count} AI-classified")
+        llm_classifier_count = by_source.get("llm_classifier", 0)
+        if llm_classifier_count > 0:
+            stats_parts.append(f"{llm_classifier_count} AI-classified")
 
-        sonnet_count = by_source.get("sonnet", 0)
-        if sonnet_count > 0:
-            stats_parts.append(f"{sonnet_count} detailed")
+        llm_detailed_count = by_source.get("llm_detailed", 0)
+        if llm_detailed_count > 0:
+            stats_parts.append(f"{llm_detailed_count} detailed")
 
         if avg_conf > 0:
             stats_parts.append(f"Avg confidence: {avg_conf:.0%}")

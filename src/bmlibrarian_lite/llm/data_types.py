@@ -22,9 +22,33 @@ Note: Model pricing has moved to the provider classes in providers/.
 Use provider.get_model_pricing(model) instead of MODEL_COSTS.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Literal, Optional
 import warnings
+
+# Pattern to match <think>...</think> or <thinking>...</thinking> blocks
+_THINKING_TAG_RE = re.compile(
+    r"<think(?:ing)?>\s*.*?\s*</think(?:ing)?>",
+    re.DOTALL,
+)
+
+
+def strip_thinking_tags(text: str) -> str:
+    """Remove thinking/reasoning tags from LLM responses.
+
+    Thinking models (DeepSeek, Qwen QwQ, etc.) often emit their chain-of-thought
+    wrapped in <think>...</think> or <thinking>...</thinking> tags, even when
+    instructed not to. This contaminates structured output (JSON) parsing.
+
+    Args:
+        text: Raw LLM response text.
+
+    Returns:
+        Text with thinking blocks removed and leading whitespace stripped.
+    """
+    cleaned = _THINKING_TAG_RE.sub("", text)
+    return cleaned.strip()
 
 
 @dataclass

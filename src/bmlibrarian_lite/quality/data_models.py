@@ -601,19 +601,31 @@ class QualityAssessment:
         )
 
     @classmethod
-    def from_classification(cls, classification: StudyClassification) -> "QualityAssessment":
+    def from_classification(
+        cls,
+        classification: StudyClassification,
+        model_name: str = "",
+    ) -> "QualityAssessment":
         """
         Create assessment from LLM classification (Tier 2).
 
         Args:
-            classification: StudyClassification from Haiku
+            classification: StudyClassification from LLM
+            model_name: The model that performed the classification
+                (e.g. "ollama:medgemma4B_it_q8" or "anthropic:claude-3-5-haiku-20241022")
 
         Returns:
             QualityAssessment from classification
         """
+        if model_name:
+            extraction_method = f"llm:{model_name}"
+            detail = f"Fast classification via {model_name}"
+        else:
+            extraction_method = "llm"
+            detail = "Fast classification via LLM"
         return cls(
             assessment_tier=2,
-            extraction_method="llm_haiku",
+            extraction_method=extraction_method,
             study_design=classification.study_design,
             quality_tier=DESIGN_TO_TIER.get(
                 classification.study_design, QualityTier.UNCLASSIFIED
@@ -623,7 +635,7 @@ class QualityAssessment:
             is_blinded=classification.is_blinded,
             sample_size=classification.sample_size,
             confidence=classification.confidence,
-            extraction_details=["Fast classification via Claude Haiku"],
+            extraction_details=[detail],
         )
 
     @classmethod

@@ -31,7 +31,7 @@ from .base import (
     ModelPricing,
     ProviderCapabilities,
 )
-from ..data_types import LLMMessage, LLMResponse
+from ..data_types import LLMMessage, LLMResponse, strip_thinking_tags
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,9 @@ class OllamaProvider(BaseProvider):
         response = client.chat(**request_kwargs)
 
         content = response.get("message", {}).get("content", "")
+
+        # Strip thinking tags from reasoning models (DeepSeek, QwQ, etc.)
+        content = strip_thinking_tags(content)
 
         # Get token counts from response (Ollama provides these)
         input_tokens = response.get(

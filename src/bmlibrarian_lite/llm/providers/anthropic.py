@@ -33,7 +33,7 @@ from .base import (
     ModelPricing,
     ProviderCapabilities,
 )
-from ..data_types import LLMMessage, LLMResponse
+from ..data_types import LLMMessage, LLMResponse, strip_thinking_tags
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +207,9 @@ class AnthropicProvider(BaseProvider):
             for block in response.content:
                 if hasattr(block, "text"):
                     content += block.text
+
+        # Strip thinking tags from reasoning models
+        content = strip_thinking_tags(content)
 
         # Handle JSON mode (parse and re-serialize if needed)
         if json_mode:
