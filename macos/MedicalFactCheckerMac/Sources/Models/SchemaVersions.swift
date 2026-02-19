@@ -122,21 +122,17 @@ enum SchemaV2: VersionedSchema {
 /// establishes version tracking.
 enum MedicalFactCheckerMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV0.self, SchemaV1.self, SchemaV2.self]
+        // Note: V0 is excluded because it has the same models as V1, which causes
+        // SwiftData to compute identical checksums and crash with
+        // "Duplicate version checksums across stages detected."
+        // Unversioned databases are handled by CloudKitConfiguration's fallback
+        // strategies (automatic lightweight migration or store reset).
+        [SchemaV1.self, SchemaV2.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV0toV1, migrateV1toV2]
+        [migrateV1toV2]
     }
-
-    /// Migration from V0 to V1: Establish version tracking.
-    ///
-    /// This is a lightweight migration with no actual schema changes.
-    /// It exists to transition unversioned databases to the versioned system.
-    static let migrateV0toV1 = MigrationStage.lightweight(
-        fromVersion: SchemaV0.self,
-        toVersion: SchemaV1.self
-    )
 
     /// Migration from V1 to V2: Add ProcessingCheckpoint.
     ///
