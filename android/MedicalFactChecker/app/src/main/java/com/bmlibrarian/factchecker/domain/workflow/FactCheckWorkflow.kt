@@ -79,6 +79,7 @@ class FactCheckWorkflow @Inject constructor(
     private val usageRepository: UsageRepository,
     private val settingsRepository: SettingsRepository,
     private val parallelScoringService: ParallelScoringService,
+    private val parallelCitationService: ParallelCitationService,
     private val checkpointManager: CheckpointManager,
     private val errorPersistenceManager: ErrorPersistenceManager,
     private val embeddingService: EmbeddingService,
@@ -1032,7 +1033,10 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Extract citation passages from relevant documents.
+     * Extract citation passages from relevant documents using parallel processing.
+     *
+     * Uses ParallelCitationService for concurrent extraction with configurable
+     * concurrency (auto-detected based on provider: 3 for cloud, 1 for local).
      */
     private suspend fun extractCitations(
         documents: List<DocumentEntity>,
@@ -1045,43 +1049,53 @@ class FactCheckWorkflow @Inject constructor(
         val model = settingsRepository.getLlmModel()
         val session = currentSession ?: return
 
-        documents.forEachIndexed { index, doc ->
-            checkBudget(session, config)
+        // Check budget before starting parallel extraction
+        checkBudget(session, config)
 
-            _state.value = WorkflowState.ExtractingCitations(index + 1, documents.size)
-            updateProgress(
-                "Extracting citations from document ${index + 1}",
-                WorkflowProgress.PROGRESS_EXTRACTION_START + (WorkflowProgress.PROGRESS_EXTRACTION_RANGE * (index + 1) / documents.size)
-            )
+        // Build CitationInput structs for thread safety
+        val inputs = documents.map { CitationInput.fromDocument(it) }
 
-            val result = llmService.extractCitations(
-                provider = provider,
-                apiKey = apiKey,
-                model = model,
-                claim = claim,
-                title = doc.title,
-                content = doc.abstractText ?: doc.fullTextMarkdown
-            )
+        // Build lookup map for applying results back to entities
+        val documentsById = documents.associateBy { it.id }
 
-            if (result.isSuccess) {
-                val extractions = result.getOrThrow()
-                val citations = extractions.map { extraction ->
-                    CitationEntity(
-                        documentId = doc.id,
-                        passage = extraction.passage,
-                        relevanceExplanation = extraction.relevance
-                    )
+        val total = documents.size
+        _state.value = WorkflowState.ExtractingCitations(0, total)
+
+        // Extract citations in parallel with incremental result handling
+        val results = parallelCitationService.extractCitations(
+            documents = inputs,
+            claim = claim,
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            onProgress = { _, completed, totalCount ->
+                _state.value = WorkflowState.ExtractingCitations(completed, totalCount)
+                updateProgress(
+                    "Extracting citations $completed/$totalCount",
+                    WorkflowProgress.PROGRESS_EXTRACTION_START + (WorkflowProgress.PROGRESS_EXTRACTION_RANGE * completed / totalCount)
+                )
+            },
+            onResult = { result ->
+                // Save citations immediately as each document completes
+                if (result.isSuccess) {
+                    val citations = result.extractionsOrEmpty.map { extraction ->
+                        CitationEntity(
+                            documentId = result.documentId,
+                            passage = extraction.passage,
+                            relevanceExplanation = extraction.relevance
+                        )
+                    }
+                    documentRepository.saveCitations(citations)
                 }
-                documentRepository.saveCitations(citations)
 
-                // Record usage
+                // Record usage for all results (success and failure)
                 recordUsage(
                     operation = "citation",
-                    inputTokens = estimateTokens(claim + doc.title + (doc.abstractText ?: "")),
-                    outputTokens = Constants.LLM_CITATION_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                    inputTokens = result.inputTokens,
+                    outputTokens = result.outputTokens
                 )
             }
-        }
+        )
     }
 
     /**

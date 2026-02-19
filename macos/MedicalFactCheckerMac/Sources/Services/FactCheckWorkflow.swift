@@ -1496,49 +1496,46 @@ final class FactCheckWorkflow {
 
         updateProgress(.extractingCitations, "Extracting citations 0/\(total)...")
 
-        // Extract citations in parallel with progress reporting
-        let results = await citationService.extractCitations(
+        // Extract citations in parallel with incremental result handling
+        _ = await citationService.extractCitations(
             inputs,
             claim: session.claim,
-            onProgress: { [weak self] (pmid: String, completed: Int, total: Int) in
-                Task { @MainActor in
-                    self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
-                }
+            onProgress: { @MainActor [weak self] (pmid: String, completed: Int, total: Int) in
+                self?.updateProgress(.extractingCitations, "Extracting citations \(completed)/\(total)...")
+            },
+            onResult: { @MainActor [weak self] result in
+                self?.applyCitationResult(result, documentsByPMID: documentsByPMID)
             }
         )
+    }
 
-        // Apply results to documents (on main actor)
-        var successCount = 0
-        var errorCount = 0
-        for result in results {
-            guard let document = documentsByPMID[result.pmid] else { continue }
+    /// Apply a citation result to the corresponding document.
+    ///
+    /// Called incrementally as each document completes citation extraction to update the UI immediately.
+    /// Must be called on the main actor.
+    ///
+    /// - Parameters:
+    ///   - result: The citation result to apply.
+    ///   - documentsByPMID: Lookup map from PMID to Document.
+    private func applyCitationResult(_ result: CitationResult, documentsByPMID: [String: Document]) {
+        guard let session = session else { return }
+        guard let document = documentsByPMID[result.pmid] else { return }
 
-            if result.isSuccess {
-                if result.passages.isEmpty {
-                    print("[Citation] Warning: No passages extracted from document \(result.pmid)")
-                } else {
-                    print("[Citation] Extracted \(result.passages.count) passage(s) from document \(result.pmid)")
-                    successCount += 1
-                }
-
-                for passage in result.passages {
-                    let citation = Citation(passage: passage.text, context: passage.relevance)
-                    citation.document = document
-                    modelContext.insert(citation)
-                    session.citationsExtracted += 1
-                }
-            } else {
-                print("[Citation] Error extracting from \(result.pmid): \(result.errorMessage ?? "unknown")")
-                errorCount += 1
-            }
-
-            // Record usage if available
-            if let usage = result.usage {
-                recordUsage(usage, operationType: "citation")
+        if result.isSuccess {
+            for passage in result.passages {
+                let citation = Citation(passage: passage.text, context: passage.relevance)
+                citation.document = document
+                modelContext.insert(citation)
+                session.citationsExtracted += 1
             }
         }
 
-        print("[Citation] Completed: \(successCount) successful, \(errorCount) errors")
+        // Record usage if available
+        if let usage = result.usage {
+            recordUsage(usage, operationType: "citation")
+        }
+
+        // Save immediately so UI updates
         try? modelContext.save()
     }
 
