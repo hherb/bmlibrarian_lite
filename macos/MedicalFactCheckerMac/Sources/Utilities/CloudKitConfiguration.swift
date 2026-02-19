@@ -138,11 +138,8 @@ enum CloudKitConfiguration {
                 configurations: [configuration]
             )
         } catch {
-            // SwiftData wraps CoreData errors in SwiftDataError, so we check the description
-            let errorDescription = String(describing: error)
-            if errorDescription.contains("134504") ||
-                errorDescription.contains("unknown model version") {
-                print("Staged migration failed (error 134504), attempting automatic migration...")
+            if isMigrationError(error) {
+                print("Staged migration failed: \(error), attempting automatic migration...")
             } else {
                 // Re-throw non-migration errors
                 throw error
