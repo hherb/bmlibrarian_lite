@@ -347,6 +347,7 @@ enum MacFullTextColors {
     static func color(for source: AppFullTextSource) -> Color {
         switch source {
         case .europePMC: return europePMCTint
+        case .europePMCPDF: return europePMCTint
         case .unpaywall: return unpaywallTint
         case .doi: return doiTint
         case .cached: return cachedTint

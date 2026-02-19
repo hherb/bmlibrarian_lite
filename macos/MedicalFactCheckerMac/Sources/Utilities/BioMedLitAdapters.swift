@@ -177,6 +177,8 @@ enum BioMedLitAdapters {
         switch bmlResult {
         case .europePMC(let html, let markdown):
             return .europePMC(html: html, markdown: markdown)
+        case .europePMCPDF(let pdfURL):
+            return FullTextResult(content: .pdfURL(pdfURL), source: .europePMCPDF)
         case .unpaywall(let pdfURL):
             return .unpaywall(pdfURL: pdfURL)
         case .doi(let webURL):

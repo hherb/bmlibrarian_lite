@@ -396,6 +396,8 @@ enum BioMedLitAdapters {
         case .europePMC(let html, let markdown):
             // Store both HTML (for rendering) and markdown (for search/export fallback)
             return AppFullTextResult(content: .html(content: html, markdown: markdown), source: .europePMC)
+        case .europePMCPDF(let pdfURL):
+            return AppFullTextResult(content: .pdfURL(pdfURL), source: .europePMCPDF)
         case .unpaywall(let pdfURL):
             return AppFullTextResult(content: .pdfURL(pdfURL), source: .unpaywall)
         case .doi(let webURL):
@@ -417,6 +419,11 @@ enum BioMedLitAdapters {
             return (
                 content: .jatsContent(html: html, markdown: markdown),
                 source: .europePMC
+            )
+        case .europePMCPDF(let pdfURL):
+            return (
+                content: .pdfURL(pdfURL),
+                source: .europePMCPDF
             )
         case .unpaywall(let pdfURL):
             return (

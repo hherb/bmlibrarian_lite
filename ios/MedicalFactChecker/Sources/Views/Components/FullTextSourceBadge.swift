@@ -63,6 +63,7 @@ struct FullTextSourceBadge: View {
     private var badgeColor: Color {
         switch source {
         case .europePMC: return .blue
+        case .europePMCPDF: return .blue
         case .unpaywall: return .green
         case .doi: return .orange
         case .cached: return .gray

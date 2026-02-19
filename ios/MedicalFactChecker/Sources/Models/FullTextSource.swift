@@ -25,6 +25,9 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     /// Europe PMC XML full text (highest quality, machine-readable).
     case europePMC = "europepmc"
 
+    /// Europe PMC PDF (when XML is unavailable but free PDF exists).
+    case europePMCPDF = "europepmc_pdf"
+
     /// Unpaywall open access PDF.
     case unpaywall = "unpaywall"
 
@@ -41,6 +44,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     var displayName: String {
         switch self {
         case .europePMC: return "Europe PMC"
+        case .europePMCPDF: return "Europe PMC PDF"
         case .unpaywall: return "Unpaywall"
         case .doi: return "Publisher"
         case .cached: return "Cached"
@@ -52,6 +56,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     var iconName: String {
         switch self {
         case .europePMC: return "building.columns"
+        case .europePMCPDF: return "doc.richtext"
         case .unpaywall: return "lock.open"
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
@@ -65,7 +70,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     /// within the app. DOI sources require opening in an external browser.
     var canDisplayInApp: Bool {
         switch self {
-        case .europePMC, .unpaywall, .cached, .uploaded:
+        case .europePMC, .europePMCPDF, .unpaywall, .cached, .uploaded:
             return true
         case .doi:
             return false
