@@ -175,8 +175,10 @@ final class SelectiveSyncTests: XCTestCase {
 
         await manager.pinSession("session-1")
 
-        XCTAssertTrue(await manager.isPinned("session-1"))
-        XCTAssertFalse(await manager.isPinned("session-2"))
+        let isPinned1 = await manager.isPinned("session-1")
+        XCTAssertTrue(isPinned1)
+        let isPinned2 = await manager.isPinned("session-2")
+        XCTAssertFalse(isPinned2)
     }
 
     /// Tests pinning and unpinning a session.
@@ -187,15 +189,18 @@ final class SelectiveSyncTests: XCTestCase {
         )
 
         // Initially not pinned
-        XCTAssertFalse(await manager.isPinned("session-1"))
+        let initiallyPinned = await manager.isPinned("session-1")
+        XCTAssertFalse(initiallyPinned)
 
         // Pin it
         await manager.pinSession("session-1")
-        XCTAssertTrue(await manager.isPinned("session-1"))
+        let afterPin = await manager.isPinned("session-1")
+        XCTAssertTrue(afterPin)
 
         // Unpin it
         await manager.unpinSession("session-1")
-        XCTAssertFalse(await manager.isPinned("session-1"))
+        let afterUnpin = await manager.isPinned("session-1")
+        XCTAssertFalse(afterUnpin)
     }
 
     /// Tests that evicting a pinned session throws an error.
@@ -243,11 +248,14 @@ final class SelectiveSyncTests: XCTestCase {
         let manager = SyncScopeManager(storage: storage, deviceConfig: deviceConfig)
 
         // Whitelisted sessions should be in scope
-        XCTAssertTrue(await manager.isInScope("session-1"))
-        XCTAssertTrue(await manager.isInScope("session-3"))
+        let inScope1 = await manager.isInScope("session-1")
+        XCTAssertTrue(inScope1)
+        let inScope3 = await manager.isInScope("session-3")
+        XCTAssertTrue(inScope3)
 
         // Non-whitelisted session should be out of scope
-        XCTAssertFalse(await manager.isInScope("session-2"))
+        let inScope2 = await manager.isInScope("session-2")
+        XCTAssertFalse(inScope2)
     }
 
     /// Tests that full mode includes all sessions.
@@ -267,9 +275,12 @@ final class SelectiveSyncTests: XCTestCase {
         let manager = SyncScopeManager(storage: storage, deviceConfig: deviceConfig)
 
         // All sessions should be in scope in full mode
-        XCTAssertTrue(await manager.isInScope("session-1"))
-        XCTAssertTrue(await manager.isInScope("session-2"))
-        XCTAssertTrue(await manager.isInScope("any-session"))
+        let fullScope1 = await manager.isInScope("session-1")
+        XCTAssertTrue(fullScope1)
+        let fullScope2 = await manager.isInScope("session-2")
+        XCTAssertTrue(fullScope2)
+        let fullScopeAny = await manager.isInScope("any-session")
+        XCTAssertTrue(fullScopeAny)
     }
 
     /// Tests that minimal mode excludes all sessions.
@@ -289,8 +300,10 @@ final class SelectiveSyncTests: XCTestCase {
         let manager = SyncScopeManager(storage: storage, deviceConfig: deviceConfig)
 
         // All sessions should be out of scope in minimal mode
-        XCTAssertFalse(await manager.isInScope("session-1"))
-        XCTAssertFalse(await manager.isInScope("session-2"))
+        let minScope1 = await manager.isInScope("session-1")
+        XCTAssertFalse(minScope1)
+        let minScope2 = await manager.isInScope("session-2")
+        XCTAssertFalse(minScope2)
     }
 
     /// Tests local exclusion functionality.
@@ -310,22 +323,28 @@ final class SelectiveSyncTests: XCTestCase {
         let manager = SyncScopeManager(storage: storage, deviceConfig: deviceConfig)
 
         // Initially in scope
-        XCTAssertTrue(await manager.isInScope("session-1"))
+        let initiallyInScope = await manager.isInScope("session-1")
+        XCTAssertTrue(initiallyInScope)
 
         // Exclude locally
         await manager.excludeLocally("session-1", reason: .userDeletedLocal)
 
         // Now out of scope
-        XCTAssertFalse(await manager.isInScope("session-1"))
-        XCTAssertTrue(await manager.isExcluded("session-1"))
-        XCTAssertEqual(await manager.getExclusionReason("session-1"), .userDeletedLocal)
+        let afterExclude = await manager.isInScope("session-1")
+        XCTAssertFalse(afterExclude)
+        let isExcluded = await manager.isExcluded("session-1")
+        XCTAssertTrue(isExcluded)
+        let reason = await manager.getExclusionReason("session-1")
+        XCTAssertEqual(reason, .userDeletedLocal)
 
         // Include again
         await manager.includeLocally("session-1")
 
         // Back in scope
-        XCTAssertTrue(await manager.isInScope("session-1"))
-        XCTAssertFalse(await manager.isExcluded("session-1"))
+        let afterInclude = await manager.isInScope("session-1")
+        XCTAssertTrue(afterInclude)
+        let stillExcluded = await manager.isExcluded("session-1")
+        XCTAssertFalse(stillExcluded)
     }
 
     /// Tests recent mode date filtering.
@@ -349,11 +368,13 @@ final class SelectiveSyncTests: XCTestCase {
 
         // Recent session should be in scope (7 days ago)
         let recentDate = Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay * 7)
-        XCTAssertTrue(await manager.isInScope("session-1", sessionDate: recentDate))
+        let recentInScope = await manager.isInScope("session-1", sessionDate: recentDate)
+        XCTAssertTrue(recentInScope)
 
         // Old session should be out of scope (60 days ago)
         let oldDate = Date(timeIntervalSinceNow: -SyncConstants.secondsPerDay * 60)
-        XCTAssertFalse(await manager.isInScope("session-2", sessionDate: oldDate))
+        let oldInScope = await manager.isInScope("session-2", sessionDate: oldDate)
+        XCTAssertFalse(oldInScope)
     }
 
     // MARK: - Storage Monitor Tests
@@ -403,10 +424,12 @@ final class SelectiveSyncTests: XCTestCase {
         let monitor = StorageMonitor(delegate: delegate)
 
         // Should exceed 500 MB limit
-        XCTAssertTrue(try await monitor.isStorageExceeded(maxMB: 500))
+        let exceeded500 = try await monitor.isStorageExceeded(maxMB: 500)
+        XCTAssertTrue(exceeded500)
 
         // Should not exceed 1000 MB limit
-        XCTAssertFalse(try await monitor.isStorageExceeded(maxMB: 1000))
+        let exceeded1000 = try await monitor.isStorageExceeded(maxMB: 1000)
+        XCTAssertFalse(exceeded1000)
     }
 
     /// Tests recommended eviction calculation.

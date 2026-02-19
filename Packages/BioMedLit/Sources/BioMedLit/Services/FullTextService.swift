@@ -44,6 +44,9 @@ public actor FullTextService {
     /// URLSession for network requests.
     private let session: URLSession
 
+    /// Europe PMC service for identifier resolution.
+    private let europePMCService: EuropePMCService
+
     // MARK: - Initialization
 
     /// Initialize the full-text service.
@@ -51,6 +54,7 @@ public actor FullTextService {
     /// - Parameter email: Email address for API identification.
     public init(email: String) {
         self.email = email
+        self.europePMCService = EuropePMCService()
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = BioMedLitConstants.defaultRequestTimeout
@@ -82,8 +86,17 @@ public actor FullTextService {
             category: .fullText
         )
 
+        // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
+        var resolvedPmcId = pmcId
+        var pdfRenderURL: String?
+        if resolvedPmcId == nil || resolvedPmcId?.isEmpty == true {
+            let resolved = await resolvePMCIdAndPDFUrl(pmid: pmid, doi: doi)
+            resolvedPmcId = resolved.pmcId
+            pdfRenderURL = resolved.pdfRenderURL
+        }
+
         // Try Europe PMC first (best quality - machine readable XML)
-        if let pmcId = pmcId, !pmcId.isEmpty {
+        if let pmcId = resolvedPmcId, !pmcId.isEmpty {
             do {
                 let content = try await fetchEuropePMCWithRetry(pmcId: pmcId)
                 BioMedLitLib.logger?.info(
@@ -93,10 +106,19 @@ public actor FullTextService {
                 return .europePMC(html: content.html, markdown: content.markdown)
             } catch {
                 BioMedLitLib.logger?.warning(
-                    "Europe PMC failed for \(pmcId): \(error.localizedDescription)",
+                    "Europe PMC XML failed for \(pmcId): \(error.localizedDescription)",
                     category: .fullText
                 )
             }
+        }
+
+        // Try Europe PMC PDF render URL (when XML unavailable but free PDF exists)
+        if let urlString = pdfRenderURL, let pdfURL = URL(string: urlString) {
+            BioMedLitLib.logger?.info(
+                "Using Europe PMC PDF render: \(urlString)",
+                category: .fullText
+            )
+            return .europePMCPDF(pdfURL: pdfURL)
         }
 
         // Try Unpaywall (open access PDFs)
@@ -202,6 +224,73 @@ public actor FullTextService {
         } catch {
             throw FullTextError.xmlParseError(error.localizedDescription)
         }
+    }
+
+    // MARK: - Identifier Resolution
+
+    /// Resolve a PMC ID and PDF render URL from a PMID or DOI via Europe PMC search.
+    ///
+    /// Tries PMID first (more specific), then DOI. Also extracts the free PDF
+    /// render URL from the ``fullTextUrlList`` in the search response.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID to resolve.
+    ///   - doi: DOI to resolve.
+    /// - Returns: Tuple of PMC ID and PDF render URL (both optional).
+    private func resolvePMCIdAndPDFUrl(
+        pmid: String?,
+        doi: String?
+    ) async -> (pmcId: String?, pdfRenderURL: String?) {
+        // Try resolving by PMID first
+        if let pmid = pmid, !pmid.isEmpty {
+            let query = "ext_id:\(pmid) src:med"
+            let resolved = await searchForPMCIdAndPDFUrl(query: query)
+            if let pmcId = resolved.pmcId {
+                BioMedLitLib.logger?.info(
+                    "Resolved PMID \(pmid) to \(pmcId)",
+                    category: .fullText
+                )
+                return resolved
+            }
+        }
+
+        // Try resolving by DOI
+        if let doi = doi, !doi.isEmpty {
+            let query = "DOI:\"\(doi)\""
+            let resolved = await searchForPMCIdAndPDFUrl(query: query)
+            if let pmcId = resolved.pmcId {
+                BioMedLitLib.logger?.info(
+                    "Resolved DOI \(doi) to \(pmcId)",
+                    category: .fullText
+                )
+                return resolved
+            }
+        }
+
+        return (nil, nil)
+    }
+
+    /// Search Europe PMC and extract PMC ID and PDF render URL from the first result.
+    private func searchForPMCIdAndPDFUrl(
+        query: String
+    ) async -> (pmcId: String?, pdfRenderURL: String?) {
+        do {
+            let result = try await europePMCService.search(
+                query: query,
+                pageSize: 1,
+                requireAbstract: false
+            )
+            if let firstArticle = result.articles.first {
+                let pmcId = firstArticle.pmcId?.isEmpty == false ? firstArticle.pmcId : nil
+                return (pmcId, firstArticle.pdfRenderURL)
+            }
+        } catch {
+            BioMedLitLib.logger?.debug(
+                "PMC ID resolution failed for query '\(query)': \(error.localizedDescription)",
+                category: .fullText
+            )
+        }
+        return (nil, nil)
     }
 
     // MARK: - Unpaywall

@@ -76,17 +76,21 @@ final class ChangeTrackingTests: XCTestCase {
     func testLocalStorageFileExists() async throws {
         try await storage.writeFile(Data(), at: "exists.txt")
 
-        XCTAssertTrue(await storage.fileExists(at: "exists.txt"))
-        XCTAssertFalse(await storage.fileExists(at: "not_exists.txt"))
+        let exists = await storage.fileExists(at: "exists.txt")
+        XCTAssertTrue(exists)
+        let notExists = await storage.fileExists(at: "not_exists.txt")
+        XCTAssertFalse(notExists)
     }
 
     /// Test delete file.
     func testLocalStorageDeleteFile() async throws {
         try await storage.writeFile(Data(), at: "to_delete.txt")
-        XCTAssertTrue(await storage.fileExists(at: "to_delete.txt"))
+        let existsBeforeDelete = await storage.fileExists(at: "to_delete.txt")
+        XCTAssertTrue(existsBeforeDelete)
 
         try await storage.deleteFile(at: "to_delete.txt")
-        XCTAssertFalse(await storage.fileExists(at: "to_delete.txt"))
+        let existsAfterDelete = await storage.fileExists(at: "to_delete.txt")
+        XCTAssertFalse(existsAfterDelete)
     }
 
     /// Test deleting non-existent file doesn't throw.
@@ -106,10 +110,12 @@ final class ChangeTrackingTests: XCTestCase {
         )
 
         // Original file should be gone
-        XCTAssertFalse(await storage.fileExists(at: "bad_file.json"))
+        let originalGone = await storage.fileExists(at: "bad_file.json")
+        XCTAssertFalse(originalGone)
 
         // Should exist in quarantine
-        XCTAssertTrue(await storage.fileExists(at: quarantinePath))
+        let quarantineExists = await storage.fileExists(at: quarantinePath)
+        XCTAssertTrue(quarantineExists)
         XCTAssertTrue(quarantinePath.hasPrefix(SyncConstants.quarantineDirectory))
     }
 
@@ -410,7 +416,8 @@ final class ChangeTrackingTests: XCTestCase {
 
         // Check device file exists
         let devicePath = SyncFileNaming.deviceFilePath(deviceId: "register-test")
-        XCTAssertTrue(await storage.fileExists(at: devicePath))
+        let deviceFileExists = await storage.fileExists(at: devicePath)
+        XCTAssertTrue(deviceFileExists)
 
         // Check changes directory exists
         let changesPath = SyncFileNaming.deviceChangesDirectory(deviceId: "register-test")

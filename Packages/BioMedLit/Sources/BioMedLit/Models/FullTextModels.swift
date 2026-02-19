@@ -21,6 +21,9 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// Europe PMC XML converted to HTML/markdown.
     case europePMC = "europepmc"
 
+    /// Europe PMC PDF (when XML is unavailable but free PDF exists).
+    case europePMCPDF = "europepmc_pdf"
+
     /// Open access PDF via Unpaywall.
     case unpaywall = "unpaywall"
 
@@ -35,6 +38,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
         switch self {
         case .europePMC:
             return "Europe PMC"
+        case .europePMCPDF:
+            return "Europe PMC PDF"
         case .unpaywall:
             return "Unpaywall"
         case .doi:
@@ -50,6 +55,9 @@ public enum FullTextResult: Sendable {
     /// Europe PMC XML converted to HTML and markdown.
     case europePMC(html: String, markdown: String)
 
+    /// Europe PMC PDF URL (when XML is unavailable but free PDF exists).
+    case europePMCPDF(pdfURL: URL)
+
     /// Open access PDF URL from Unpaywall.
     case unpaywall(pdfURL: URL)
 
@@ -64,6 +72,8 @@ public enum FullTextResult: Sendable {
         switch self {
         case .europePMC:
             return .europePMC
+        case .europePMCPDF:
+            return .europePMCPDF
         case .unpaywall:
             return .unpaywall
         case .doi:
@@ -89,9 +99,11 @@ public enum FullTextResult: Sendable {
         return nil
     }
 
-    /// PDF URL if available (Unpaywall or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
     public var pdfURL: URL? {
         switch self {
+        case .europePMCPDF(let url):
+            return url
         case .unpaywall(let url):
             return url
         case .cached(let path):

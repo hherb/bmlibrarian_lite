@@ -96,7 +96,11 @@ data class EuropePMCArticle(
     /** MeSH heading list. */
     val meshHeadingList: MeshHeadingList? = null,
     /** Keyword list. */
-    val keywordList: KeywordList? = null
+    val keywordList: KeywordList? = null,
+    /** Whether PDF is available. */
+    val hasPDF: String? = null,
+    /** Full-text URL list with free PDF render URLs. */
+    val fullTextUrlList: FullTextUrlList? = null
 )
 
 /**
@@ -168,6 +172,32 @@ data class MeshQualifier(
 @Serializable
 data class KeywordList(
     val keyword: List<String>? = null
+)
+
+/**
+ * Container for full-text URL list from Europe PMC API.
+ */
+@Serializable
+data class FullTextUrlList(
+    val fullTextUrl: List<FullTextUrlEntry>? = null
+)
+
+/**
+ * Individual full-text URL entry from Europe PMC API.
+ *
+ * Contains document format, availability, and URL for accessing
+ * different versions of the article (PDF, HTML, DOI).
+ */
+@Serializable
+data class FullTextUrlEntry(
+    /** Document format (e.g., "pdf", "html", "doi"). */
+    val documentStyle: String? = null,
+    /** Hosting site (e.g., "Europe_PMC", "DOI"). */
+    val site: String? = null,
+    /** URL to the document. */
+    val url: String? = null,
+    /** Availability status (e.g., "Free", "Subscription required"). */
+    val availability: String? = null
 )
 
 /**

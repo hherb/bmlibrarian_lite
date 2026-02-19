@@ -75,6 +75,17 @@ class FullTextService @Inject constructor(
         ) : FullTextResult()
 
         /**
+         * PDF available from Europe PMC render URL (when XML is unavailable).
+         *
+         * @param pdfUrl URL to the Europe PMC PDF.
+         * @param localPath Local file path if downloaded, null otherwise.
+         */
+        data class EuropePmcPdf(
+            val pdfUrl: String,
+            val localPath: String? = null
+        ) : FullTextResult()
+
+        /**
          * Full text available as PDF from Unpaywall.
          *
          * @param pdfUrl URL to the PDF.
@@ -115,14 +126,31 @@ class FullTextService @Inject constructor(
         pmid: String?,
         email: String = Constants.UNPAYWALL_DEFAULT_EMAIL
     ): Result<FullTextResult> = withContext(Dispatchers.IO) {
-        // Try Europe PMC XML first if PMC ID is available
-        if (!pmcId.isNullOrEmpty()) {
-            Log.d(TAG, "Attempting Europe PMC XML for $pmcId")
-            val xmlResult = tryEuropePmcXml(pmcId)
+        // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
+        var resolvedPmcId = pmcId
+        var pdfRenderUrl: String? = null
+        if (resolvedPmcId.isNullOrEmpty()) {
+            val resolution = resolvePmcIdAndPdfUrl(pmid = pmid, doi = doi)
+            resolvedPmcId = resolution.pmcId
+            pdfRenderUrl = resolution.pdfRenderUrl
+        }
+
+        // Try Europe PMC XML first if PMC ID is available (directly or resolved)
+        if (!resolvedPmcId.isNullOrEmpty()) {
+            Log.d(TAG, "Attempting Europe PMC XML for $resolvedPmcId")
+            val xmlResult = tryEuropePmcXml(resolvedPmcId)
             if (xmlResult.isSuccess) {
                 return@withContext xmlResult
             }
             Log.d(TAG, "Europe PMC XML failed: ${xmlResult.exceptionOrNull()?.message}")
+        }
+
+        // Try Europe PMC PDF render URL (when XML unavailable but free PDF exists)
+        if (!pdfRenderUrl.isNullOrEmpty()) {
+            Log.d(TAG, "Using Europe PMC PDF render: $pdfRenderUrl")
+            return@withContext Result.success(
+                FullTextResult.EuropePmcPdf(pdfUrl = pdfRenderUrl)
+            )
         }
 
         // Try Unpaywall if DOI is available
@@ -257,6 +285,69 @@ class FullTextService @Inject constructor(
     }
 
     /**
+     * Resolution result containing PMC ID and optional PDF render URL.
+     */
+    private data class PmcResolution(
+        val pmcId: String? = null,
+        val pdfRenderUrl: String? = null
+    )
+
+    /**
+     * Resolve a PMC ID and PDF render URL from a PMID or DOI via Europe PMC search.
+     *
+     * Tries PMID first (more specific), then DOI. Also extracts the free PDF
+     * render URL from the fullTextUrlList in the search response.
+     *
+     * @param pmid PubMed ID to resolve.
+     * @param doi DOI to resolve.
+     * @return PmcResolution with PMC ID and PDF render URL (both nullable).
+     */
+    private suspend fun resolvePmcIdAndPdfUrl(pmid: String?, doi: String?): PmcResolution {
+        // Try resolving by PMID first
+        if (!pmid.isNullOrEmpty()) {
+            val query = "ext_id:$pmid src:med"
+            val resolution = searchForPmcIdAndPdfUrl(query)
+            if (resolution.pmcId != null) {
+                Log.d(TAG, "Resolved PMID $pmid to ${resolution.pmcId}")
+                return resolution
+            }
+        }
+
+        // Try resolving by DOI
+        if (!doi.isNullOrEmpty()) {
+            val query = "DOI:\"$doi\""
+            val resolution = searchForPmcIdAndPdfUrl(query)
+            if (resolution.pmcId != null) {
+                Log.d(TAG, "Resolved DOI $doi to ${resolution.pmcId}")
+                return resolution
+            }
+        }
+
+        return PmcResolution()
+    }
+
+    /**
+     * Search Europe PMC and extract PMC ID and PDF render URL from the first result.
+     */
+    private suspend fun searchForPmcIdAndPdfUrl(query: String): PmcResolution {
+        return try {
+            val result = europePmcService.search(
+                query = query,
+                batchSize = 1
+            )
+            val article = result.getOrNull()?.articles?.firstOrNull()
+            val pmcId = article?.pmcid?.takeIf { it.isNotEmpty() }
+            val pdfRenderUrl = article?.fullTextUrlList?.fullTextUrl
+                ?.firstOrNull { it.documentStyle == "pdf" && it.availability == "Free" }
+                ?.url
+            PmcResolution(pmcId = pmcId, pdfRenderUrl = pdfRenderUrl)
+        } catch (e: Exception) {
+            Log.d(TAG, "PMC ID resolution failed for query '$query': ${e.message}")
+            PmcResolution()
+        }
+    }
+
+    /**
      * Download a PDF to local cache.
      *
      * @param pdfUrl URL of the PDF to download.
@@ -352,6 +443,7 @@ class FullTextService @Inject constructor(
     fun getSourceConstant(result: FullTextResult): String? {
         return when (result) {
             is FullTextResult.EuropePmcXml -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
+            is FullTextResult.EuropePmcPdf -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
             is FullTextResult.UnpaywallPdf -> Constants.FULLTEXT_SOURCE_UNPAYWALL
             is FullTextResult.DoiUrl -> Constants.FULLTEXT_SOURCE_DOI
             is FullTextResult.Unavailable -> null

@@ -138,6 +138,12 @@ public actor EuropePMCService {
             let hasFullText = result.inPMC == "Y"
             let isOpenAccess = result.isOpenAccess == "Y"
 
+            // Extract free PDF render URL from fullTextUrlList
+            let pdfRenderURL: String? = {
+                guard let urls = result.fullTextUrlList?.fullTextUrl else { return nil }
+                return urls.first(where: { $0.documentStyle == "pdf" && $0.availability == "Free" })?.url
+            }()
+
             let article = SearchArticle(
                 pmid: pmid,
                 pmcId: result.pmcid,
@@ -150,7 +156,8 @@ public actor EuropePMCService {
                 publicationDate: result.firstPublicationDate,
                 hasFullText: hasFullText,
                 isOpenAccess: isOpenAccess,
-                source: .europePMC
+                source: .europePMC,
+                pdfRenderURL: pdfRenderURL
             )
             articles.append(article)
         }
@@ -280,6 +287,21 @@ struct EuropePMCResult: Codable {
     let abstractText: String?
     let isOpenAccess: String?
     let inPMC: String?
+    let hasPDF: String?
+    let fullTextUrlList: EuropePMCFullTextUrlList?
+}
+
+/// Europe PMC full-text URL list wrapper.
+struct EuropePMCFullTextUrlList: Codable {
+    let fullTextUrl: [EuropePMCFullTextUrlEntry]?
+}
+
+/// Europe PMC full-text URL entry.
+struct EuropePMCFullTextUrlEntry: Codable {
+    let documentStyle: String?
+    let site: String?
+    let url: String?
+    let availability: String?
 }
 
 /// Europe PMC journal info.

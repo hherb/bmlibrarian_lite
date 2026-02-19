@@ -64,6 +64,7 @@ class FulltextSourceType(Enum):
 
     CACHED_FULLTEXT = "cached_fulltext"  # Previously cached markdown
     EUROPEPMC_XML = "europepmc_xml"  # Fresh from Europe PMC XML API
+    EUROPEPMC_PDF = "europepmc_pdf"  # PDF from Europe PMC (when XML unavailable)
     CACHED_PDF = "cached_pdf"  # Previously cached PDF
     DOWNLOADED_PDF = "downloaded_pdf"  # Freshly downloaded PDF
     ABSTRACT_ONLY = "abstract_only"  # Only abstract available
@@ -223,6 +224,22 @@ class FulltextDiscoverer:
                 error="Cancelled",
             )
 
+        # 2b. Try Europe PMC PDF render (when XML unavailable but free PDF exists)
+        if (result.article_info
+                and result.article_info.has_pdf
+                and result.article_info.pdf_render_url):
+            self._emit_progress("discovery", "checking_europepmc_pdf")
+            pdf_result = self._try_europepmc_pdf(doc_dict, result.article_info)
+            if pdf_result.success:
+                return pdf_result
+
+        if self._cancelled:
+            return FulltextResult(
+                success=False,
+                source_type=FulltextSourceType.NOT_FOUND,
+                error="Cancelled",
+            )
+
         # 3. Check for cached PDF
         self._emit_progress("discovery", "checking_pdf_cache")
         cached_pdf = find_existing_pdf(doc_dict)
@@ -329,6 +346,79 @@ class FulltextDiscoverer:
                 success=False,
                 source_type=FulltextSourceType.NOT_FOUND,
                 error=f"Europe PMC error: {e}",
+            )
+
+    def _try_europepmc_pdf(
+        self,
+        doc_dict: Dict[str, Any],
+        article_info: ArticleInfo,
+    ) -> FulltextResult:
+        """Try to download PDF from Europe PMC render URL.
+
+        Used when JATS XML is unavailable but a free PDF exists via the
+        Europe PMC ``?pdf=render`` endpoint.
+
+        Args:
+            doc_dict: Document dictionary for path generation
+            article_info: ArticleInfo with pdf_render_url populated
+
+        Returns:
+            FulltextResult with extracted text or failure info
+        """
+        try:
+            pdf_url = article_info.pdf_render_url
+            logger.info(f"Trying Europe PMC PDF render: {pdf_url}")
+            self._emit_progress("download", "fetching_europepmc_pdf")
+
+            pdf_path = generate_pdf_path(doc_dict)
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+            response = self._europepmc._session.get(
+                pdf_url,
+                timeout=60,
+            )
+            response.raise_for_status()
+
+            # Verify response is a PDF (check magic bytes)
+            content = response.content
+            if not content.startswith(b"%PDF"):
+                logger.warning("Europe PMC PDF render URL did not return a PDF")
+                return FulltextResult(
+                    success=False,
+                    source_type=FulltextSourceType.NOT_FOUND,
+                    article_info=article_info,
+                    error="Europe PMC PDF render URL did not return a PDF",
+                )
+
+            # Save the PDF
+            with open(pdf_path, "wb") as f:
+                f.write(content)
+
+            # Extract text from PDF
+            text = extract_pdf_text(pdf_path)
+            if text.strip():
+                return FulltextResult(
+                    success=True,
+                    source_type=FulltextSourceType.EUROPEPMC_PDF,
+                    markdown_content=text,
+                    file_path=pdf_path,
+                    article_info=article_info,
+                )
+
+            return FulltextResult(
+                success=False,
+                source_type=FulltextSourceType.NOT_FOUND,
+                article_info=article_info,
+                error="Failed to extract text from Europe PMC PDF",
+            )
+
+        except Exception as e:
+            logger.warning(f"Europe PMC PDF download failed: {e}")
+            return FulltextResult(
+                success=False,
+                source_type=FulltextSourceType.NOT_FOUND,
+                article_info=article_info,
+                error=f"Europe PMC PDF error: {e}",
             )
 
     def _try_pdf_download(

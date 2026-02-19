@@ -93,6 +93,9 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
     /// Source provider of this result.
     public let source: SearchProvider
 
+    /// Free PDF URL from Europe PMC fullTextUrlList (when XML is unavailable).
+    public let pdfRenderURL: String?
+
     public init(
         pmid: String,
         pmcId: String? = nil,
@@ -105,7 +108,8 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         publicationDate: String? = nil,
         hasFullText: Bool = false,
         isOpenAccess: Bool = false,
-        source: SearchProvider
+        source: SearchProvider,
+        pdfRenderURL: String? = nil
     ) {
         self.id = pmid
         self.pmid = pmid
@@ -120,6 +124,7 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         self.hasFullText = hasFullText
         self.isOpenAccess = isOpenAccess
         self.source = source
+        self.pdfRenderURL = pdfRenderURL
     }
 }
 

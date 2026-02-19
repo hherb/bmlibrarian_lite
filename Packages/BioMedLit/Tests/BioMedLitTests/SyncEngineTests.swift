@@ -159,7 +159,8 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(config.encryption, .none)
 
         // Verify workspace file created
-        XCTAssertTrue(await storage.fileExists(at: SyncConstants.workspaceFile))
+        let workspaceFileExists = await storage.fileExists(at: SyncConstants.workspaceFile)
+        XCTAssertTrue(workspaceFileExists)
 
         // Verify directories created
         let directories = try await storage.listDirectories(at: "")
@@ -187,11 +188,13 @@ final class SyncEngineTests: XCTestCase {
     func testGetOrCreateWorkspaceCreates() async throws {
         let initializer = WorkspaceInitializer(storage: storage)
 
-        XCTAssertFalse(await initializer.workspaceExists())
+        let existsBefore = await initializer.workspaceExists()
+        XCTAssertFalse(existsBefore)
 
         let config = try await initializer.getOrCreateWorkspace()
 
-        XCTAssertTrue(await initializer.workspaceExists())
+        let existsAfter = await initializer.workspaceExists()
+        XCTAssertTrue(existsAfter)
         XCTAssertEqual(config.schemaVersion, SyncConstants.schemaVersion)
     }
 
@@ -227,11 +230,13 @@ final class SyncEngineTests: XCTestCase {
 
         // Verify device file created
         let devicePath = SyncFileNaming.deviceFilePath(deviceId: device.deviceId)
-        XCTAssertTrue(await storage.fileExists(at: devicePath))
+        let deviceFileExists = await storage.fileExists(at: devicePath)
+        XCTAssertTrue(deviceFileExists)
 
         // Verify changes directory created
         let changesPath = "\(SyncConstants.changesDirectory)/\(device.deviceId)"
-        XCTAssertTrue(await storage.fileExists(at: changesPath))
+        let changesDirExists = await storage.fileExists(at: changesPath)
+        XCTAssertTrue(changesDirExists)
     }
 
     /// Test device load by ID.
@@ -315,8 +320,10 @@ final class SyncEngineTests: XCTestCase {
             writer: writer
         )
 
-        XCTAssertFalse(await engine.isSyncInProgress())
-        XCTAssertNil(await engine.getLastSyncTime())
+        let syncInProgress = await engine.isSyncInProgress()
+        XCTAssertFalse(syncInProgress)
+        let lastSyncTime = await engine.getLastSyncTime()
+        XCTAssertNil(lastSyncTime)
     }
 
     /// Test sync result structure.

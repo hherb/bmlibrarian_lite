@@ -65,6 +65,27 @@ from .data_models import CursorPaginationState
 logger = logging.getLogger(__name__)
 
 
+def _extract_free_pdf_url(result: dict) -> str | None:
+    """Extract free PDF URL from Europe PMC fullTextUrlList.
+
+    The Europe PMC search API returns a fullTextUrlList with entries for
+    different document formats. This extracts the first free PDF URL,
+    which uses the ``?pdf=render`` pattern for articles that have a PDF
+    in PMC but may not have JATS XML available.
+
+    Args:
+        result: Raw result dict from Europe PMC API
+
+    Returns:
+        URL string for the free PDF, or None if not available
+    """
+    for entry in result.get("fullTextUrlList", {}).get("fullTextUrl", []):
+        if (entry.get("documentStyle") == "pdf"
+                and entry.get("availability") == "Free"):
+            return entry.get("url")
+    return None
+
+
 @dataclass
 class ArticleInfo:
     """Information about an article from Europe PMC.
@@ -83,6 +104,7 @@ class ArticleInfo:
         has_pdf: Whether PDF is available
         is_preprint: Whether this is a preprint (from PPR source)
         source: Europe PMC source code (MED, PMC, PPR, etc.)
+        pdf_render_url: Free PDF URL from Europe PMC fullTextUrlList
     """
 
     pmid: str | None = None
@@ -98,6 +120,7 @@ class ArticleInfo:
     has_pdf: bool = False
     is_preprint: bool = False
     source: str = ""
+    pdf_render_url: str | None = None
 
 
 class EuropePMCClient:
@@ -214,6 +237,7 @@ class EuropePMCClient:
                 is_open_access=result.get("isOpenAccess") == "Y",
                 has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
                 has_pdf=result.get("hasPDF") == "Y",
+                pdf_render_url=_extract_free_pdf_url(result),
             )
 
         except requests.exceptions.RequestException as e:
@@ -461,6 +485,7 @@ class EuropePMCClient:
                 has_pdf=result.get("hasPDF") == "Y",
                 is_preprint=is_preprint,
                 source=source,
+                pdf_render_url=_extract_free_pdf_url(result),
             )
 
         except Exception as e:
