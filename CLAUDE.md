@@ -9,6 +9,8 @@ BMLibrarian Lite: Cross-platform biomedical literature research with AI-powered 
 - **iOS/macOS** (Swift/SwiftUI): SwiftData, NLEmbedding, OpenAI-compatible API
 - **Android** (Kotlin/Compose): Room, Hilt, MVVM
 
+**Current version:** 0.3.0
+
 ## Commands
 
 ```bash
@@ -28,41 +30,63 @@ mypy src/
 ## Python Structure (`src/bmlibrarian_lite/`)
 
 ```
-agents/           # SearchAgent, ScoringAgent, CitationAgent, ReportingAgent, InterrogationAgent
-benchmarking/     # Model comparison, statistics
-gui/              # PySide6: SystematicReview, ResearchQuestions, AuditTrail, Report, DocumentInterrogation tabs
-llm/              # LLMClient (Anthropic/Ollama providers)
-pubmed/           # PubMedSearchClient
-quality/          # QualityManager, study classification
-config.py         # LiteConfig (~/.bmlibrarian_lite/)
-storage.py        # LiteStorage (ChromaDB + SQLite)
-europepmc.py      # EuropePMCClient (cursor pagination)
-search_merger.py  # Deduplication (PMID/DOI/PMC/title)
-fulltext_discovery.py  # Europe PMC XML → Unpaywall → DOI
-embeddings.py     # LiteEmbedder (FastEmbed)
+agents/               # SearchAgent, ScoringAgent, CitationAgent, ReportingAgent, InterrogationAgent, report_risk_helpers
+benchmarking/         # Model comparison, statistics (relevance + quality)
+gui/                  # PySide6: SystematicReview, ResearchQuestions, AuditTrail, Report, DocumentInterrogation tabs
+                      #   transparency_badge, transparency_settings_dialog, quality_badge, quality_filter_panel
+llm/                  # LLMClient (Anthropic/Ollama providers), token_tracker
+pubmed/               # PubMedSearchClient
+quality/              # QualityManager, study classification, evidence_summary, metadata_filter
+transparency/         # TransparencyManager, transparency_models, transparency_settings
+study_transparency_analyzer/  # Full LLM-based transparency analysis (funding, COI, data availability, trial registration)
+config.py             # LiteConfig (~/.bmlibrarian_lite/)
+storage.py            # LiteStorage (SQLite + sqlite-vec)
+data_models.py        # LiteDocument, ScoredDocument, Citation, SearchProvider, pagination models
+europepmc.py          # EuropePMCClient (cursor pagination)
+search_service.py     # Unified search across PubMed + Europe PMC
+search_merger.py      # Deduplication (PMID/DOI/PMC/title)
+query_translator.py   # Natural language → structured query
+fulltext_discovery.py # Europe PMC XML → Unpaywall PDF → DOI fallback
+pdf_discovery.py      # PDF source discovery
+embeddings.py         # LiteEmbedder (FastEmbed)
+chunking.py           # Text chunking utilities
+pdf_utils.py          # PDF text extraction
+constants.py          # Application constants
+exceptions.py         # Custom exception hierarchy
 ```
 
 ## Mobile Apps
 
 **iOS** (`ios/MedicalFactChecker/`), **macOS** (`macos/MedicalFactCheckerMac/`):
-- SwiftUI + SwiftData models (Document, FactCheckSession, SearchProvider)
-- Services: FactCheckWorkflow, LLMService, EmbeddingService
-- Views: FactCheck, History, Report, Settings
+- SwiftUI + SwiftData models (Document, FactCheckSession, SearchProvider, FullTextSource, SchemaVersions)
+- Services: FactCheckWorkflow, LLMService, EmbeddingService, ParallelScoringService, ParallelCitationService, CheckpointedScoringService, CheckpointManager, ModelFetchService, CloudKitConfiguration, BackgroundTaskManager
+- Views: FactCheck, FullText, History, Report, Settings, Onboarding
+- Components: TransparencyDetailView, TransparencyRiskBadge, TransparencySummarySection, ErrorQueueView, ProcessingProgressView
 
 **Android** (`android/MedicalFactChecker/`):
 - data/local: Room DB + DAOs
-- data/remote: PubMed, Europe PMC, LLM, Unpaywall APIs
-- domain: Models, WorkflowState
-- ui: Compose screens + ViewModels
-- di: Hilt modules
+- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs
+- domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
+- ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
+- ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls
+- util: JATSXMLParser, JATSModels, CostCalculator, ResponseParser, PdfExporter
+- di: Hilt modules (App, Workflow, Network, Database)
 
 ## BioMedLit Swift Package (`Packages/BioMedLit/`)
 
 Shared iOS/macOS components:
-- `JATS/`: XML parsing → HTML/Markdown
+- `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
 - `Services/`: EuropePMCService, PubMedService, FullTextService
-- `Sync/`: iCloud/local folder sync (SyncEngine, SelectiveSyncCoordinator, SessionEvictionManager)
-- `Utilities/`: RetryHelper (exponential backoff)
+- `Transparency/`: Study transparency analysis
+  - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
+  - `Models/`: TransparencyModels, TransparencyConstants
+  - `Services/`: TransparencyAnalysisService, ClinicalTrialsService, CrossRefService
+- `Sync/`: iCloud/local folder sync
+  - SyncEngine, SyncCoordinator, SelectiveSyncCoordinator, SyncStateManager, SyncScopeManager
+  - iCloudSyncStorage, LocalFolderSyncStorage, OnDemandFetcher
+  - SessionEvictionManager, WorkspaceInitializer, StorageMonitor
+  - ChangeLogReader/Writer, LWWMergeStrategy, IntegrityFunctions
+- `Utilities/`: RetryHelper, CostCalculator, BudgetChecker, QueryTranslator, ResponseParser, SearchResultMerger, ParallelProcessingConstants, ConcurrencyDetector
 
 ## Code Style
 
@@ -82,8 +106,8 @@ Shared iOS/macOS components:
 
 - `doc/llm/golden_rules.md` - Python/PySide standards
 - `doc/llm/general_golden_rules.md` - Swift/Kotlin standards
-- `doc/cross_platform/` - Platform-agnostic algorithms
+- `doc/cross_platform/` - Platform-agnostic algorithms (parallel processing, full-text retrieval, hybrid search, JATS parsing, sync protocol)
 - `doc/developer/europepmc_and_pubmed.md` - API guide
+- `doc/developer/guide.md` - Developer guide with architecture, code style, release process
 
 Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
-

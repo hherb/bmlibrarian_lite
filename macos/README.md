@@ -25,8 +25,18 @@ A native macOS application for medical fact-checking using biomedical literature
 - **Dynamic model fetching**: Automatically fetches available models from provider APIs
 - **Dual scoring system**: LLM relevance scoring plus on-device NLEmbedding semantic similarity
 - **HyDE scoring**: Hypothetical Document Embedding for improved semantic matching
+- **Parallel processing**: Concurrent document scoring and citation extraction with automatic concurrency detection
+- **Checkpointing**: Resumable workflows that save progress per-document, surviving interruptions
 - **Citation extraction**: Extracts key passages with clickable references
 - **Evidence synthesis**: Generates verdicts with supporting citations
+
+### Study Transparency Analysis
+- **Funding disclosure**: Automatic detection of funding source declarations
+- **Conflict of interest**: COI statement analysis
+- **Data availability**: Assessment of data sharing practices
+- **Trial registration**: Verification against ClinicalTrials.gov
+- **Risk badges**: Visual indicators on document cards for transparency concerns
+- **Report integration**: Transparency findings feed into risk warnings in generated reports
 
 ### Cloud Sync
 - **iCloud integration**: Optional CloudKit sync across devices (opt-in, disabled by default)
@@ -130,10 +140,15 @@ macos/MedicalFactCheckerMac/
     │   └── FullTextSource.swift             # Content source tracking
     ├── Services/
     │   ├── LLMService.swift                 # OpenAI-compatible API client
-    │   ├── PubMedService.swift              # NCBI E-utilities client
-    │   ├── EuropePMCService.swift           # Europe PMC REST API
-    │   ├── FullTextService.swift            # Multi-source full-text retrieval
+    │   ├── PubMedService.swift              # NCBI E-utilities client (via BioMedLit)
+    │   ├── EuropePMCService.swift           # Europe PMC REST API (via BioMedLit)
+    │   ├── FullTextService.swift            # Multi-source full-text retrieval (via BioMedLit)
     │   ├── EmbeddingService.swift           # NLEmbedding with HyDE
+    │   ├── ParallelScoringService.swift     # Concurrent document scoring
+    │   ├── ParallelCitationService.swift    # Concurrent citation extraction
+    │   ├── CheckpointedScoringService.swift # Resumable scoring with checkpoints
+    │   ├── CheckpointManager.swift          # Per-document checkpoint persistence
+    │   ├── ErrorPersistenceManager.swift    # Error queue persistence
     │   ├── ModelFetchService.swift          # Dynamic model fetching
     │   ├── CloudKitConfiguration.swift      # iCloud sync management
     │   ├── SearchServiceFactory.swift       # Multi-provider routing
@@ -145,7 +160,13 @@ macos/MedicalFactCheckerMac/
     │   ├── History/                         # Past sessions
     │   ├── Settings/                        # Configuration
     │   ├── Onboarding/                      # Setup wizard
-    │   └── Help/                            # Documentation
+    │   ├── Help/                            # Documentation
+    │   └── Components/                      # Shared components
+    │       ├── MacTransparencyDetailView    # Transparency analysis details
+    │       ├── MacTransparencyRiskBadge     # Risk indicator badges
+    │       ├── MacTransparencySummarySection # Transparency summary
+    │       ├── MacErrorQueueView            # Collapsible error display
+    │       └── MacProcessingProgressView    # Per-document progress
     └── Utilities/
         ├── KeychainHelper.swift             # Secure credential storage
         ├── CostCalculator.swift             # Token cost estimation
@@ -172,11 +193,13 @@ macos/MedicalFactCheckerMac/
 
 ## License
 
-Copyright (C) 2024-2025 Dr Horst Herb
+Copyright (C) 2024-2026 Dr Horst Herb
 
 AGPL-3.0 License - see main project LICENSE file for details.
 
 ## Related
 
 - [iOS App](../ios/MedicalFactChecker/) - Mobile version for iPhone/iPad
+- [Android App](../android/MedicalFactChecker/) - Android version
 - [Python Desktop](../) - Cross-platform Python/Qt version
+- [BioMedLit Package](../Packages/BioMedLit/) - Shared Swift library

@@ -19,7 +19,10 @@ The app supports multiple LLM providers including Anthropic Claude, OpenAI, Deep
 - **Multi-Provider LLM Support**: Choose from Anthropic, OpenAI, DeepSeek, Groq, Mistral, or run locally with Ollama
 - **Dual Search Providers**: Search PubMed, Europe PMC, or both simultaneously
 - **Smart Document Scoring**: LLM-powered relevance scoring with rationale
-- **Evidence Reports**: Generated markdown reports with verdicts and citations
+- **Study Transparency Analysis**: Automatic analysis of funding disclosure, conflict of interest, data availability, and trial registration with risk badges on document cards
+- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Unpaywall PDF, DOI) with JATS XML rendering
+- **Parallel Processing**: Concurrent document scoring and citation extraction
+- **Evidence Reports**: Generated markdown reports with verdicts, citations, and risk warnings
 - **Budget Management**: Per-run and monthly spending limits to control API costs
 - **Session History**: Browse and revisit past fact-check sessions
 - **PDF Export**: Export evidence reports as PDF documents
@@ -118,21 +121,35 @@ The app follows a clean architecture pattern with MVVM presentation layer:
 ```
 app/
 ├── data/                    # Data layer
-│   ├── local/               # Room database, DAOs, entities
-│   ├── remote/              # API clients (PubMed, Europe PMC, LLM)
+│   ├── local/               # Room database, DAOs, entities, converters
+│   ├── remote/              # API clients
+│   │   ├── pubmed/          # PubMed E-utilities client
+│   │   ├── europepmc/       # Europe PMC REST API client
+│   │   ├── fulltext/        # Full-text retrieval service
+│   │   └── llm/             # Multi-provider LLM client
 │   └── repository/          # Repository implementations
 ├── domain/                  # Domain layer
 │   ├── model/               # Domain models
-│   ├── workflow/            # Fact-check workflow engine
-│   └── usecase/             # Use cases
+│   ├── workflow/            # Fact-check workflow engine (scoring, searching, reporting)
+│   ├── usecase/             # Use cases
+│   ├── embedding/           # Embedding service
+│   └── sync/                # Sync operations
 ├── ui/                      # Presentation layer
-│   ├── factcheck/           # Fact check screen
-│   ├── report/              # Report screen
+│   ├── factcheck/           # Fact check screen with transparency badges
+│   ├── fulltext/            # Full-text viewer with source badges
+│   ├── report/              # Report screen with risk warnings
 │   ├── history/             # History screen
-│   ├── settings/            # Settings screen
+│   ├── settings/            # Settings screen with model pricing
+│   ├── onboarding/          # Onboarding screen
+│   ├── components/          # Shared UI components
 │   └── navigation/          # Navigation components
-├── di/                      # Hilt dependency injection
+├── di/                      # Hilt dependency injection (App, Workflow, Network, Database)
 └── util/                    # Utilities
+    ├── JATSXMLParser        # JATS XML to markdown conversion
+    ├── JATSModels           # JATS data structures
+    ├── CostCalculator       # Token cost estimation
+    ├── ResponseParser       # LLM response parsing
+    └── PdfExporter          # PDF generation
 ```
 
 ### Key Components
@@ -143,6 +160,8 @@ app/
 | `LLMService` | Multi-provider LLM API client with retry logic |
 | `PubMedService` | NCBI E-utilities client with XML parsing |
 | `EuropePMCService` | Europe PMC REST API client |
+| `FullTextService` | Multi-source full-text retrieval (Europe PMC XML, Unpaywall, DOI) |
+| `JATSXMLParser` | JATS XML to markdown conversion for full-text display |
 | `SettingsRepository` | Encrypted settings storage |
 | `CostCalculator` | Token cost estimation and budget tracking |
 
@@ -225,7 +244,7 @@ The app synthesizes information from peer-reviewed literature but:
 
 ## License
 
-Copyright (C) 2024-2025 Dr Horst Herb
+Copyright (C) 2024-2026 Dr Horst Herb
 
 AGPL-3.0 License - see the root LICENSE file for details.
 

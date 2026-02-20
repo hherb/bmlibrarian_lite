@@ -25,8 +25,18 @@ A native iOS app (iPhone/iPad) for medical fact-checking using biomedical litera
 - **Dynamic model fetching**: Automatically fetches available models from provider APIs
 - **Dual scoring system**: LLM relevance scoring plus optional on-device NLEmbedding semantic similarity
 - **HyDE scoring**: Hypothetical Document Embedding for improved semantic matching
+- **Parallel processing**: Concurrent document scoring and citation extraction with automatic concurrency detection
+- **Checkpointing**: Resumable workflows that save progress per-document, surviving interruptions
 - **Citation extraction**: Extracts key passages with clickable references
 - **Evidence synthesis**: Generates verdicts with supporting citations
+
+### Study Transparency Analysis
+- **Funding disclosure**: Automatic detection of funding source declarations
+- **Conflict of interest**: COI statement analysis
+- **Data availability**: Assessment of data sharing practices
+- **Trial registration**: Verification against ClinicalTrials.gov
+- **Risk badges**: Visual indicators on document cards for transparency concerns
+- **Report integration**: Transparency findings feed into risk warnings in generated reports
 
 ### Cloud Sync
 - **iCloud integration**: Optional CloudKit sync across devices (opt-in, disabled by default)
@@ -126,11 +136,17 @@ Sources/
 │   └── FullTextSource         # Source tracking for full-text content
 ├── Services/                  # Business logic
 │   ├── LLMService             # OpenAI-compatible API client with retry
-│   ├── PubMedService          # PubMed E-utilities client
-│   ├── EuropePMCService       # Europe PMC REST API client
-│   ├── FullTextService        # Multi-source full-text retrieval
+│   ├── PubMedService          # PubMed E-utilities client (via BioMedLit)
+│   ├── EuropePMCService       # Europe PMC REST API client (via BioMedLit)
+│   ├── FullTextService        # Multi-source full-text retrieval (via BioMedLit)
 │   ├── EmbeddingService       # NLEmbedding scoring with HyDE
+│   ├── ParallelScoringService # Concurrent document scoring
+│   ├── ParallelCitationService # Concurrent citation extraction
+│   ├── CheckpointedScoringService # Resumable scoring with checkpoints
+│   ├── CheckpointManager      # Per-document checkpoint persistence
+│   ├── ErrorPersistenceManager # Error queue persistence
 │   ├── ModelFetchService      # Dynamic model fetching from APIs
+│   ├── BackgroundTaskManager  # Background task support
 │   ├── CloudKitConfiguration  # iCloud sync management
 │   └── FactCheckWorkflow      # Workflow orchestrator
 ├── Views/                     # SwiftUI views
@@ -139,7 +155,14 @@ Sources/
 │   ├── Report/                # Report display with markdown rendering
 │   ├── History/               # Past sessions
 │   ├── Settings/              # Configuration with model pricing
-│   └── Onboarding/            # Disclaimer view
+│   ├── Onboarding/            # Disclaimer view
+│   └── Components/            # Shared components
+│       ├── TransparencyDetailView    # Transparency analysis details
+│       ├── TransparencyRiskBadge     # Risk indicator badges
+│       ├── TransparencySummarySection # Transparency summary
+│       ├── ErrorQueueView            # Collapsible error display
+│       ├── ProcessingProgressView    # Per-document progress
+│       └── SortingControlsView       # Document sort options
 └── Utilities/                 # Helpers
     ├── KeychainHelper         # Secure credential storage
     ├── CostCalculator         # Token cost estimation
@@ -186,6 +209,6 @@ View current pricing for all models in Settings > View Model Pricing.
 
 ## License
 
-Copyright (C) 2024-2025 Dr Horst Herb
+Copyright (C) 2024-2026 Dr Horst Herb
 
 AGPL-3.0 License - see main project LICENSE file for details.

@@ -95,10 +95,12 @@ bmlibrarian_lite/
 │   ├── pdf_utils.py         # PDF text extraction
 │   ├── utils.py             # Shared utilities
 │   ├── agents/              # LLM-powered agents
+│   │   ├── base.py
 │   │   ├── search_agent.py
 │   │   ├── scoring_agent.py
 │   │   ├── citation_agent.py
 │   │   ├── reporting_agent.py
+│   │   ├── report_risk_helpers.py  # Risk warning integration
 │   │   └── interrogation_agent.py
 │   ├── gui/                 # PySide6 interface
 │   │   ├── app.py           # Main window
@@ -108,16 +110,38 @@ bmlibrarian_lite/
 │   │   ├── report_tab.py
 │   │   ├── audit_trail_tab.py
 │   │   ├── document_card.py
+│   │   ├── document_viewer.py
 │   │   ├── quality_badge.py
+│   │   ├── quality_filter_panel.py
+│   │   ├── quality_summary.py
+│   │   ├── transparency_badge.py          # Risk badges
+│   │   ├── transparency_settings_dialog.py
+│   │   ├── citation_loader.py
+│   │   ├── benchmark_dialog.py
+│   │   ├── quality_benchmark_dialog.py
+│   │   ├── chat_widgets.py
 │   │   └── workers.py
 │   ├── llm/                 # LLM client abstraction
 │   │   ├── client.py
+│   │   ├── token_tracker.py
 │   │   └── providers/       # Anthropic, Ollama
 │   ├── pubmed/              # PubMed API integration
 │   ├── quality/             # Study quality assessment
+│   │   ├── quality_manager.py
+│   │   ├── quality_agent.py
+│   │   ├── study_classifier.py
+│   │   ├── evidence_summary.py
+│   │   ├── metadata_filter.py
+│   │   ├── report_formatter.py
+│   │   └── data_models.py
 │   ├── benchmarking/        # Multi-model benchmarking
-│   ├── transparency/        # Study transparency analysis
-│   ├── study_transparency_analyzer/  # Transparency scoring
+│   ├── transparency/        # Transparency infrastructure
+│   │   ├── transparency_manager.py
+│   │   ├── transparency_models.py
+│   │   └── transparency_settings.py
+│   ├── study_transparency_analyzer/  # LLM-based transparency scoring
+│   │   ├── study_transparency_analyzer.py
+│   │   └── batch_analyzer.py
 │   └── resources/           # Styles and assets
 │       └── styles/
 │           └── dpi_scale.py # DPI scaling utilities
@@ -231,10 +255,10 @@ class CustomAgent(LiteBaseAgent):
 ```
 
 Available agents:
-- `SearchAgent`: Converts natural language to PubMed queries
+- `SearchAgent`: Converts natural language to PubMed/Europe PMC queries
 - `ScoringAgent`: Scores document relevance
 - `CitationAgent`: Extracts citations from documents
-- `ReportingAgent`: Generates synthesis reports with risk warnings
+- `ReportingAgent`: Generates synthesis reports with risk warnings (via `report_risk_helpers`)
 - `InterrogationAgent`: Handles document Q&A
 
 #### Search Service (`search_service.py`)
@@ -252,15 +276,48 @@ for result in results:
     print(f"{result.title} (source: {result.provider})")
 ```
 
-#### Study Transparency
+#### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
-Analyzes studies for transparency indicators:
+The transparency system has two components:
 
-- Funding disclosure analysis
-- Conflict of interest detection
-- Data availability assessment
-- Trial registration verification
-- CrossRef and ClinicalTrials.gov external validation
+**Infrastructure** (`transparency/`):
+- `transparency_manager.py` - Core transparency management and coordination
+- `transparency_models.py` - Data models for transparency results
+- `transparency_settings.py` - User-configurable thresholds and settings
+
+**LLM-Based Analyzer** (`study_transparency_analyzer/`):
+- `study_transparency_analyzer.py` - Main analyzer using LLM for deep analysis
+- `batch_analyzer.py` - Batch processing of multiple studies
+- Analyzes: funding disclosure, conflict of interest, data availability, trial registration
+- Results feed into risk warnings in generated reports via `agents/report_risk_helpers.py`
+
+**GUI Components:**
+- `transparency_badge.py` - Risk badges on document cards
+- `transparency_settings_dialog.py` - Configuration dialog for thresholds
+
+#### Parallel Processing
+
+The desktop app supports parallel scoring and citation extraction for cloud LLM providers. See `doc/cross_platform/parallel_processing.md` for the platform-agnostic algorithm specification.
+
+#### Europe PMC Integration (`europepmc.py`)
+
+Full Europe PMC REST API client with:
+- Cursor-based pagination for efficient result traversal
+- Preprint filtering
+- Full-text XML retrieval
+- Query translation from PubMed syntax
+
+#### Full-Text Discovery (`fulltext_discovery.py`)
+
+Automatic full-text retrieval with fallback chain:
+1. Europe PMC XML (converted via JATS parser)
+2. Europe PMC PDF
+3. Unpaywall PDF (open access)
+4. DOI resolution (publisher website)
+
+#### Search Service (`search_service.py`)
+
+Unified search across PubMed and Europe PMC with automatic deduplication via `search_merger.py` (matching by PMID, DOI, PMC ID, or title similarity).
 
 ### GUI Architecture
 

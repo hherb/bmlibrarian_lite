@@ -1,6 +1,6 @@
 # BioMedLit
 
-A Swift library for biomedical literature retrieval and parsing, designed to be shared between iOS and macOS applications.
+A Swift library for biomedical literature retrieval, parsing, transparency analysis, and cross-device synchronization, designed to be shared between iOS and macOS applications.
 
 ## Features
 
@@ -22,9 +22,37 @@ A Swift library for biomedical literature retrieval and parsing, designed to be 
 
 - **Full-Text Service**: Unified full-text retrieval with fallback chain
   - Europe PMC XML (preferred)
+  - Europe PMC PDF
   - Unpaywall PDF (open access)
   - DOI resolution (publisher website)
   - PDF caching
+
+- **Study Transparency Analysis**: Automated analysis of research transparency indicators
+  - Funding disclosure analysis (FundingAnalyzer)
+  - Conflict of interest detection (COIAnalyzer)
+  - Data availability assessment (DataAvailabilityAnalyzer)
+  - Clinical trial compliance verification (TrialComplianceAnalyzer)
+  - Overall transparency scoring (TransparencyScorer)
+  - External validation via CrossRef metadata API and ClinicalTrials.gov
+
+- **Sync Engine**: Cross-device synchronization for iOS/macOS
+  - iCloud (CloudKit) and local folder storage backends
+  - Selective sync with SyncScopeManager
+  - Change tracking with ChangeLog reader/writer
+  - Last-Write-Wins merge strategy for conflict resolution
+  - Session eviction management for storage optimization
+  - Workspace initialization and storage monitoring
+  - Data integrity checking and validation
+  - On-demand document fetching
+
+- **Utilities**: Shared helpers for all platforms
+  - RetryHelper with exponential backoff
+  - CostCalculator for token cost estimation
+  - BudgetChecker for spending limits
+  - QueryTranslator for search syntax translation
+  - ResponseParser for LLM response handling
+  - SearchResultMerger for multi-provider deduplication
+  - ConcurrencyDetector and ParallelProcessingConstants for parallel processing
 
 ## Requirements
 
@@ -138,7 +166,7 @@ import BioMedLit
 
 let service = FullTextService(email: "your@email.com")
 
-// Fetch full text (tries Europe PMC, then Unpaywall, then DOI)
+// Fetch full text (tries Europe PMC XML, Europe PMC PDF, Unpaywall, then DOI)
 let result = try await service.fetchFullText(
     pmcId: "PMC1234567",
     doi: "10.1234/example",
@@ -149,6 +177,9 @@ switch result {
 case .europePMC(let html, let markdown):
     // Display HTML or markdown
     print("Got Europe PMC content")
+case .europePMCPDF(let pdfURL):
+    // Download or display PDF from Europe PMC
+    print("PDF available at: \(pdfURL)")
 case .unpaywall(let pdfURL):
     // Download or display PDF
     print("PDF available at: \(pdfURL)")
@@ -159,6 +190,27 @@ case .cached(let filePath):
     // Load cached PDF
     print("Cached at: \(filePath)")
 }
+```
+
+### Transparency Analysis
+
+```swift
+import BioMedLit
+
+let service = TransparencyAnalysisService()
+
+// Analyze a document for transparency indicators
+let result = try await service.analyze(
+    abstract: document.abstract,
+    doi: document.doi,
+    pmid: document.pmid
+)
+
+print("Overall score: \(result.overallScore)")
+print("Funding disclosed: \(result.funding.isDisclosed)")
+print("COI declared: \(result.conflictOfInterest.isDeclared)")
+print("Data available: \(result.dataAvailability.isAvailable)")
+print("Trial registered: \(result.trialCompliance.isRegistered)")
 ```
 
 ### Custom Logging
@@ -190,94 +242,73 @@ struct OSLogger: BioMedLitLogger {
 }
 ```
 
-## Migration Guide
+## Architecture
 
-### Migrating from App-Specific Implementations
-
-If your iOS or macOS app has its own JATS parsing or search services, follow these steps to migrate to BioMedLit:
-
-#### 1. Update Package Dependencies
-
-Add BioMedLit to your Package.swift or Xcode project.
-
-#### 2. Update Imports
-
-Replace:
-```swift
-// Old
-import Foundation
-
-// New
-import BioMedLit
 ```
-
-#### 3. Update JATS Parser Usage
-
-Replace:
-```swift
-// Old (iOS)
-let parser = JATSXMLParser(data: data)
-let markdown = try parser.parseToMarkdown()
-
-// New
-let parser = JATSXMLParser(data: data, knownPMCId: pmcId)
-let markdown = try parser.parseToMarkdown()
-// Or get HTML for better rendering:
-let html = try parser.parseToHTML()
+Sources/BioMedLit/
+├── BioMedLit.swift              # Package entry point and configuration
+├── JATS/                        # JATS XML parsing
+│   ├── JATSXMLParser.swift      # XML → HTML/Markdown converter
+│   └── JATSModels.swift         # Article, section, figure, table models
+├── Models/                      # Shared data models
+│   ├── FullTextModels.swift     # Full-text document structures
+│   ├── SearchProvider.swift     # Search provider enums
+│   ├── StructuredQuery.swift    # Query representation
+│   └── Verdict.swift            # Verdict data
+├── Services/                    # API clients
+│   ├── PubMedService.swift      # NCBI E-utilities client
+│   ├── EuropePMCService.swift   # Europe PMC REST API
+│   └── FullTextService.swift    # Multi-source full-text retrieval
+├── Transparency/                # Study transparency analysis
+│   ├── Analysis/                # Individual analyzers
+│   │   ├── TransparencyScorer.swift
+│   │   ├── FundingAnalyzer.swift
+│   │   ├── COIAnalyzer.swift
+│   │   ├── DataAvailabilityAnalyzer.swift
+│   │   └── TrialComplianceAnalyzer.swift
+│   ├── Models/                  # Transparency data models
+│   │   ├── TransparencyModels.swift
+│   │   └── TransparencyConstants.swift
+│   └── Services/                # External validation services
+│       ├── TransparencyAnalysisService.swift
+│       ├── ClinicalTrialsService.swift
+│       └── CrossRefService.swift
+├── Sync/                        # Cross-device synchronization
+│   ├── SyncEngine.swift         # Main orchestration
+│   ├── SyncCoordinator.swift    # Coordination logic
+│   ├── SelectiveSyncCoordinator.swift
+│   ├── SyncStateManager.swift   # State persistence
+│   ├── SyncScopeManager.swift   # Sync scope management
+│   ├── iCloudSyncStorage.swift  # CloudKit backend
+│   ├── LocalFolderSyncStorage.swift
+│   ├── OnDemandFetcher.swift    # Lazy document fetching
+│   ├── SessionEvictionManager.swift
+│   ├── WorkspaceInitializer.swift
+│   ├── StorageMonitor.swift     # Storage usage tracking
+│   ├── ChangeLogReader.swift    # Change tracking
+│   ├── ChangeLogWriter.swift
+│   ├── LWWMergeStrategy.swift   # Conflict resolution
+│   ├── IntegrityFunctions.swift # Data integrity
+│   ├── IntegrityModels.swift
+│   ├── IntegrityError.swift
+│   ├── SyncConstants.swift
+│   ├── SyncFileNaming.swift
+│   ├── SyncStorageProtocol.swift
+│   └── WorkspaceModels.swift
+└── Utilities/                   # Shared helpers
+    ├── RetryHelper.swift        # Exponential backoff
+    ├── Constants.swift          # API URLs and constants
+    ├── CostCalculator.swift     # Token cost estimation
+    ├── BudgetChecker.swift      # Spending limits
+    ├── QueryTranslator.swift    # Search syntax translation
+    ├── ResponseParser.swift     # LLM response parsing
+    ├── SearchResultMerger.swift # Multi-provider deduplication
+    ├── ReportFormatter.swift    # Report formatting
+    ├── PromptTemplates.swift    # LLM prompt templates
+    ├── QueryConstants.swift     # Query-related constants
+    ├── ConcurrencyDetector.swift
+    └── ParallelProcessingConstants.swift
 ```
-
-#### 4. Update Service Usage
-
-Replace:
-```swift
-// Old
-let service = FullTextService.create(from: settings)
-
-// New
-let service = FullTextService(email: settings.ncbiEmail)
-```
-
-#### 5. Update Result Handling
-
-The new `FullTextResult` enum provides more detailed information:
-
-```swift
-// Old
-switch result.content {
-case .markdown(let text):
-    // Handle markdown
-case .pdfURL(let url):
-    // Handle PDF
-case .webURL(let url):
-    // Handle web
-}
-
-// New
-switch result {
-case .europePMC(let html, let markdown):
-    // Now have both HTML and markdown!
-case .unpaywall(let pdfURL):
-    // Handle PDF
-case .doi(let webURL):
-    // Handle web
-case .cached(let filePath):
-    // Handle cached content
-}
-```
-
-#### 6. Remove Duplicate Code
-
-After migration, you can remove these files from your app:
-- `JATSXMLParser.swift` (use BioMedLit version)
-- `EuropePMCService.swift` (use BioMedLit version)
-- `PubMedService.swift` (use BioMedLit version)
-- `FullTextService.swift` (use BioMedLit version)
-- `RetryHelper.swift` (use BioMedLit version)
-
-Keep app-specific files:
-- `Document.swift` (SwiftData model)
-- `AppSettings.swift` (app configuration)
-- View files (UI is platform-specific)
 
 ## API Reference
 
@@ -296,6 +327,24 @@ Keep app-specific files:
 - `EuropePMCService` - Europe PMC search
 - `PubMedService` - PubMed search
 - `FullTextService` - Full-text retrieval
+- `TransparencyAnalysisService` - Study transparency analysis
+- `ClinicalTrialsService` - ClinicalTrials.gov integration
+- `CrossRefService` - CrossRef metadata API
+
+### Transparency
+
+- `TransparencyScorer` - Overall transparency scoring
+- `FundingAnalyzer` - Funding disclosure analysis
+- `COIAnalyzer` - Conflict of interest detection
+- `DataAvailabilityAnalyzer` - Data availability assessment
+- `TrialComplianceAnalyzer` - Clinical trial compliance
+
+### Sync
+
+- `SyncEngine` - Main sync orchestration
+- `SelectiveSyncCoordinator` - Selective sync support
+- `SessionEvictionManager` - Session lifecycle management
+- `SyncStorageProtocol` - Storage backend abstraction
 
 ### Models
 
@@ -310,7 +359,11 @@ Keep app-specific files:
 - `RetryHelper` - Retry with exponential backoff
 - `RetryConfiguration` - Retry settings
 - `BioMedLitConstants` - API URLs and constants
+- `ConcurrencyDetector` - Auto-detect parallelism level
+- `ParallelProcessingConstants` - Concurrency configuration
 
 ## License
+
+Copyright (C) 2024-2026 Dr Horst Herb
 
 This project is licensed under the GNU Affero General Public License v3.0 - see the LICENSE file for details.

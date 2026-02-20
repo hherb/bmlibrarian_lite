@@ -81,9 +81,9 @@ The Systematic Review tab provides a complete workflow for conducting literature
 1. **Enter Research Question**: Type your research question in natural language
 2. **Search**: The system searches PubMed and/or Europe PMC, deduplicating results across providers
 3. **Review Articles**: Browse the retrieved articles with metadata
-4. **Score Relevance**: AI scores articles on a 1-5 scale for relevance to your question
+4. **Score Relevance**: AI scores articles on a 1-5 scale for relevance to your question (with parallel processing for cloud providers)
 5. **Transparency Analysis**: Studies are analyzed for funding disclosure, conflict of interest, data availability, and trial registration
-6. **Extract Citations**: Key passages are automatically extracted from high-scoring articles
+6. **Extract Citations**: Key passages are automatically extracted from high-scoring articles (with parallel processing)
 7. **Generate Report**: A synthesized report is created summarizing the evidence, including risk warnings based on transparency analysis
 
 #### Search Providers
@@ -175,12 +175,13 @@ Transparency results feed into risk warnings that appear in generated reports, f
 
 ### Full-Text Discovery
 
-BMLibrarian Lite can automatically find and retrieve full-text content:
+BMLibrarian Lite can automatically find and retrieve full-text content through a fallback chain:
 
-- **Europe PMC XML**: Free full-text articles in structured format
-- **Unpaywall**: Open access versions of paywalled articles
-- **DOI Resolution**: Direct publisher links
-- **Manual Upload**: Upload PDFs for documents not found automatically
+1. **Europe PMC XML**: Free full-text articles in structured JATS format
+2. **Europe PMC PDF**: PDF versions from Europe PMC
+3. **Unpaywall**: Open access versions of paywalled articles
+4. **DOI Resolution**: Direct publisher links
+5. **Manual Upload**: Upload PDFs for documents not found automatically
 
 JATS XML articles are rendered with full support for tables, figures, references, and anchor navigation.
 
@@ -293,11 +294,11 @@ No external database server is required.
 
 BMLibrarian Lite is also available as native mobile and desktop apps:
 
-- **iOS**: Available on the App Store as "Medical Fact Checker"
-- **macOS**: Native SwiftUI app with iCloud sync
-- **Android**: Available on Google Play as "Medical Fact Checker"
+- **iOS**: Native SwiftUI app with iCloud sync, transparency analysis, parallel processing, and full-text access
+- **macOS**: Native SwiftUI app with iCloud sync, transparency analysis, parallel processing, and full-text access
+- **Android**: Native Kotlin/Compose app with transparency analysis, parallel processing, and full-text access
 
-These apps share the same core algorithms but use platform-native storage and ML capabilities.
+These apps share the same core algorithms (documented in `doc/cross_platform/`) but use platform-native storage and ML capabilities. iOS and macOS share code via the BioMedLit Swift package.
 
 ## Workflow Tips
 
