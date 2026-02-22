@@ -140,3 +140,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "integration: marks tests as integration tests requiring network access (deselect with '-m \"not integration\"')",
+]

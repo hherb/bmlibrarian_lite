@@ -207,6 +207,23 @@ class SessionRepository @Inject constructor(
         sessionDao.updateHydeAbstract(sessionId, hydeAbstract)
     }
 
+    /**
+     * Update smart search state for a session.
+     *
+     * @param sessionId Session ID
+     * @param enabled Whether smart search has been activated
+     * @param queriesJson JSON-encoded alternative queries
+     * @param fetchedPmids Comma-separated PMIDs already fetched
+     */
+    suspend fun updateSmartSearchState(
+        sessionId: String,
+        enabled: Boolean,
+        queriesJson: String?,
+        fetchedPmids: String?
+    ) {
+        sessionDao.updateSmartSearchState(sessionId, enabled, queriesJson, fetchedPmids)
+    }
+
     // ==================== Delete Operations ====================
 
     /**

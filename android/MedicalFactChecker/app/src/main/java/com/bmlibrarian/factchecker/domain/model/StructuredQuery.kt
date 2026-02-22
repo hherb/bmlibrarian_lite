@@ -80,6 +80,63 @@ data class StructuredQuery(
         }
 
         /**
+         * Parse an array of StructuredQuery objects from LLM JSON response.
+         *
+         * Expected JSON format:
+         * ```json
+         * [
+         *   {"concepts": [{"name": "...", "mesh_terms": ["..."], "keywords": ["..."]}]},
+         *   {"concepts": [...]}
+         * ]
+         * ```
+         *
+         * Handles common LLM response patterns including markdown code blocks.
+         *
+         * @param jsonString JSON string from LLM containing an array of queries
+         * @return List of parsed StructuredQuery objects, or empty list if parsing fails
+         */
+        fun parseArray(jsonString: String): List<StructuredQuery> {
+            return try {
+                val cleanJson = extractJSONArray(jsonString)
+                val responses = json.decodeFromString<List<LLMQueryResponse>>(cleanJson)
+                responses.map { it.toStructuredQuery() }.filter { !it.isEmpty }
+            } catch (e: Exception) {
+                println("[StructuredQuery] Array parse error: ${e.message}")
+                emptyList()
+            }
+        }
+
+        /**
+         * Extract a JSON array from a string that may have markdown wrapping.
+         */
+        private fun extractJSONArray(text: String): String {
+            var cleaned = text.trim()
+
+            // Try markdown code block with json tag
+            val jsonBlockPattern = Regex("```json\\s*([\\s\\S]*?)```")
+            jsonBlockPattern.find(cleaned)?.let {
+                cleaned = it.groupValues[1].trim()
+            }
+
+            // Try plain code block
+            if (cleaned.contains("```")) {
+                val codeBlockPattern = Regex("```\\s*([\\s\\S]*?)```")
+                codeBlockPattern.find(cleaned)?.let {
+                    cleaned = it.groupValues[1].trim()
+                }
+            }
+
+            // Find array bounds
+            val startIndex = cleaned.indexOf('[')
+            val endIndex = cleaned.lastIndexOf(']')
+            if (startIndex >= 0 && endIndex > startIndex) {
+                return cleaned.substring(startIndex, endIndex + 1)
+            }
+
+            return cleaned
+        }
+
+        /**
          * Extract JSON from a string that may have markdown wrapping.
          */
         private fun extractJSON(text: String): String {

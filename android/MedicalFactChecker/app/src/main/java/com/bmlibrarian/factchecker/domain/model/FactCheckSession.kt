@@ -68,8 +68,14 @@ data class FactCheckSession(
     /** Last update timestamp. */
     val updatedAt: Date,
 
-    /** Whether more documents are available. */
-    val hasMoreDocuments: Boolean
+    /** Whether more documents are available from pagination. */
+    val hasMoreDocuments: Boolean,
+
+    /** Whether smart search has been activated. */
+    val smartSearchEnabled: Boolean = false,
+
+    /** Whether more evidence can be gathered (pagination or smart search). */
+    val canGetMoreEvidence: Boolean = true
 ) {
     /**
      * Check if the session is in a terminal state.
@@ -128,7 +134,9 @@ data class FactCheckSession(
                 errorMessage = entity.errorMessage,
                 createdAt = entity.createdAt,
                 updatedAt = entity.updatedAt,
-                hasMoreDocuments = entity.hasMoreDocuments
+                hasMoreDocuments = entity.hasMoreDocuments,
+                smartSearchEnabled = entity.smartSearchEnabled,
+                canGetMoreEvidence = entity.canGetMoreEvidence
             )
         }
     }

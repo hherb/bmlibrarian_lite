@@ -1005,22 +1005,25 @@ final class FactCheckWorkflow {
 
         // Update search options if provided (allows changing provider mid-session)
         if let newOptions = searchOptions {
+            let previousProvider = session.searchProviderEnum
             currentSearchOptions = newOptions
             session.searchProvider = newOptions.provider.rawValue
             session.includePreprints = newOptions.includePreprints
 
-            // Reset pagination state for the new provider
-            if newOptions.provider == .pubmed {
-                // Switching to PubMed: reset PubMed state, keep Europe PMC state
-                session.pubmedOffset = 0
-                session.pubmedHasMore = true
-            } else if newOptions.provider == .europePMC {
-                // Switching to Europe PMC: reset Europe PMC state, keep PubMed state
-                session.europePMCOffset = 0
-                session.europePMCCursor = nil
-                session.europePMCHasMore = true
+            // Only reset pagination state if the provider actually changed
+            if previousProvider != newOptions.provider {
+                if newOptions.provider == .pubmed {
+                    // Switching to PubMed: reset PubMed state, keep Europe PMC state
+                    session.pubmedOffset = 0
+                    session.pubmedHasMore = true
+                } else if newOptions.provider == .europePMC {
+                    // Switching to Europe PMC: reset Europe PMC state, keep PubMed state
+                    session.europePMCOffset = 0
+                    session.europePMCCursor = nil
+                    session.europePMCHasMore = true
+                }
+                // For .both, both providers are used so we don't reset
             }
-            // For .both, both providers are used so we don't reset
 
             try? modelContext.save()
         }

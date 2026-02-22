@@ -33,6 +33,10 @@ import UIKit
 struct ReportContentView: View {
     let report: EvidenceReport
     var workflow: FactCheckWorkflow?
+
+    /// Callback when user requests more evidence (navigates to Check tab and triggers fetch).
+    var onRequestMoreEvidence: (() -> Void)?
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingPDFExportSheet = false
     @State private var selectedPaperSize: PaperSize = PDFExporter.preferredPaperSize
@@ -185,14 +189,12 @@ struct ReportContentView: View {
             }
 
             // Get More Evidence button
-            if workflow != nil && canGetMoreEvidence {
+            if onRequestMoreEvidence != nil && canGetMoreEvidence {
                 GetMoreEvidenceSection(
                     session: report.session,
                     isFetching: isFetchingEvidence,
                     onFetchMore: {
-                        Task {
-                            await workflow?.fetchMoreEvidence()
-                        }
+                        onRequestMoreEvidence?()
                     }
                 )
             }

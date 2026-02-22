@@ -73,7 +73,6 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
-import com.bmlibrarian.factchecker.ui.factcheck.components.ResumedSessionBanner
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
 import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
@@ -86,6 +85,7 @@ import com.bmlibrarian.factchecker.util.CostCalculator
  *
  * @param viewModel The ViewModel managing screen state
  * @param sessionIdToRestore Optional session ID to restore from history
+ * @param fetchMoreOnLoad Whether to immediately trigger fetchMoreEvidence (from Report tab)
  * @param onNavigateToReport Callback when workflow completes to navigate to report
  * @param onNavigateToFullText Callback to navigate to full-text viewer for a document
  */
@@ -93,6 +93,7 @@ import com.bmlibrarian.factchecker.util.CostCalculator
 fun FactCheckScreen(
     viewModel: FactCheckViewModel = hiltViewModel(),
     sessionIdToRestore: String? = null,
+    fetchMoreOnLoad: Boolean = false,
     onNavigateToReport: () -> Unit = {},
     onNavigateToFullText: (documentId: String) -> Unit = {}
 ) {
@@ -104,6 +105,13 @@ fun FactCheckScreen(
     LaunchedEffect(sessionIdToRestore) {
         if (sessionIdToRestore != null) {
             viewModel.restoreSession(sessionIdToRestore)
+        }
+    }
+
+    // Trigger fetchMoreEvidence if requested (from Report tab "Get More Evidence" button)
+    LaunchedEffect(fetchMoreOnLoad) {
+        if (fetchMoreOnLoad) {
+            viewModel.addMoreResults()
         }
     }
 
@@ -153,24 +161,10 @@ fun FactCheckScreen(
                 ClaimInput(
                     claimText = uiState.claimText,
                     onClaimTextChange = viewModel::updateClaimText,
-                    onSubmit = if (uiState.isResumedSession) viewModel::addMoreResults else viewModel::startFactCheck,
+                    onSubmit = viewModel::startFactCheck,
                     isEnabled = !uiState.isRunning && !uiState.showConfigWarning,
                     modifier = Modifier.fillMaxWidth()
                 )
-            }
-
-            // Resumed session banner (shown when restoring from history)
-            if (uiState.isResumedSession) {
-                item(key = "resumed_banner") {
-                    ResumedSessionBanner(
-                        documentCount = uiState.documents.size,
-                        scoredCount = uiState.scoredDocuments.size,
-                        canAddMore = uiState.canFetchMoreDocuments,
-                        isLoading = uiState.isRunning,
-                        onAddMore = viewModel::addMoreResults,
-                        onNewQuestion = viewModel::startNewQuestion
-                    )
-                }
             }
 
             // Generated query display (show once generated)

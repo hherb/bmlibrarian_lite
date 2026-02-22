@@ -59,6 +59,9 @@ struct MacContentView: View {
     /// The claim text for fact checking (persisted across tab switches).
     @State private var claimText: String = ""
 
+    /// When true, MacFactCheckView should trigger `fetchMoreEvidence()` on the current workflow.
+    @State private var shouldFetchMoreEvidence = false
+
     /// The currently selected document for full-text viewing.
     @State private var selectedFullTextDocument: Document?
 
@@ -130,6 +133,7 @@ struct MacContentView: View {
             MacFactCheckView(
                 workflow: $activeWorkflow,
                 claimText: $claimText,
+                shouldFetchMoreEvidence: $shouldFetchMoreEvidence,
                 onReportGenerated: { report in
                     currentReport = report
                     selectedNavItem = .report
@@ -149,6 +153,7 @@ struct MacContentView: View {
                 report: currentReport,
                 workflow: activeWorkflow,
                 onRequestMoreEvidence: {
+                    shouldFetchMoreEvidence = true
                     selectedNavItem = .factCheck
                 }
             )
@@ -190,13 +195,13 @@ struct MacContentView: View {
     /// This method is called when the user clicks "Continue Search" in history. It:
     /// 1. Restores the original claim text to the input field
     /// 2. Creates a workflow with the session loaded (without running it)
-    /// 3. Sets up callbacks for any subsequent actions (like "Add More Results")
+    /// 3. Sets up callbacks for any subsequent actions (like "Get More Evidence")
     /// 4. Sets the current report so the Report view shows it
     /// 5. Navigates to the Fact Check view
     ///
     /// The session's documents, scores, and report are displayed without
-    /// re-running the workflow. The user can then click "Add More Results"
-    /// to fetch additional documents if more are available.
+    /// re-running the workflow. The user can use "Get More Evidence" in the
+    /// Report view to fetch additional documents if more are available.
     ///
     /// - Parameter session: The fact-check session to restore for viewing.
     private func restoreSession(_ session: FactCheckSession) {

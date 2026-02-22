@@ -342,11 +342,8 @@ struct MacReportView: View {
                 .foregroundColor(.secondary)
 
             Button(action: {
-                // Navigate to Fact Check tab first, then start fetching
+                // Navigate to Fact Check tab, which will trigger fetchMoreEvidence
                 onRequestMoreEvidence?()
-                Task {
-                    await workflow?.fetchMoreEvidence()
-                }
             }) {
                 HStack {
                     Image(systemName: "arrow.triangle.2.circlepath")

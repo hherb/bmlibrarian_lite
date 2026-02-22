@@ -21,12 +21,6 @@ import SwiftData
 ///
 /// Left column: Claim input, controls, and progress.
 /// Right column: Scored documents and results.
-///
-/// When a session is restored from history, this view displays:
-/// - The original claim text (restored)
-/// - A "Resumed Session" banner with document counts
-/// - "Add More Results" button instead of "Check Evidence"
-/// - The session's scored documents
 struct MacFactCheckView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppSettings.self) private var settings
@@ -36,6 +30,9 @@ struct MacFactCheckView: View {
 
     /// Binding to the claim text (owned by parent to persist across tab switches).
     @Binding var claimText: String
+
+    /// When true, triggers `fetchMoreEvidence()` on the current workflow (set by Report view).
+    @Binding var shouldFetchMoreEvidence: Bool
 
     /// Callback when a report is generated (navigates to Report view).
     var onReportGenerated: ((EvidenceReport) -> Void)?
@@ -52,30 +49,10 @@ struct MacFactCheckView: View {
 
     // MARK: - Computed Properties
 
-    /// Whether the current workflow is resuming an existing session with documents and a report.
-    ///
-    /// Returns true when:
-    /// - A workflow exists with a session
-    /// - The session has at least one document
-    /// - The session has an existing report
-    ///
-    /// This is used to display the resumed session banner and modify UI text accordingly.
-    private var isResumedSession: Bool {
-        guard let session = workflow?.session else { return false }
-        return (session.documents?.count ?? 0) > 0 && session.report != nil
-    }
-
     /// The text to display on the submit button based on workflow state.
-    ///
-    /// Shows context-appropriate text:
-    /// - "Checking..." when workflow is running
-    /// - "Add More Results" when resuming an existing session
-    /// - "Check Evidence" for new fact-checks
     private var buttonText: String {
         if workflow?.isRunning ?? false {
             return "Checking..."
-        } else if isResumedSession {
-            return "Add More Results"
         } else {
             return "Check Evidence"
         }
@@ -117,6 +94,13 @@ struct MacFactCheckView: View {
                 includePreprints = session.includePreprints
             }
         }
+        .onChange(of: shouldFetchMoreEvidence) { _, newValue in
+            guard newValue, let workflow = workflow else { return }
+            shouldFetchMoreEvidence = false
+            Task {
+                await workflow.fetchMoreEvidence(searchOptions: buildSearchOptions())
+            }
+        }
     }
 
     // MARK: - Left Column
@@ -145,14 +129,6 @@ struct MacFactCheckView: View {
                     onSubmit: handleSubmit
                 )
 
-                // Resumed Session Banner
-                if isResumedSession, let session = workflow?.session {
-                    MacResumedSessionBanner(
-                        session: session,
-                        onNewQuestion: startNewQuestion
-                    )
-                }
-
                 // Budget display
                 MacBudgetDisplayView()
 
@@ -180,25 +156,6 @@ struct MacFactCheckView: View {
                         onRetry: {
                             Task {
                                 await workflow.retryReportGeneration()
-                            }
-                        }
-                    )
-                }
-
-                // Get More Evidence Section (for completed sessions that weren't resumed)
-                // For resumed sessions, the top "Add More Results" button handles this
-                if let workflow = workflow,
-                   let session = workflow.session,
-                   session.report != nil,
-                   session.canGetMoreEvidence,
-                   !workflow.isRunning,
-                   !isResumedSession {
-                    MacGetMoreEvidenceSection(
-                        session: session,
-                        isFetching: workflow.isRunning,
-                        onFetchMore: {
-                            Task {
-                                await workflow.fetchMoreEvidence(searchOptions: buildSearchOptions())
                             }
                         }
                     )
@@ -280,31 +237,9 @@ struct MacFactCheckView: View {
 
     // MARK: - Actions
 
-    /// Handles the submit button action.
-    ///
-    /// For resumed sessions with existing documents, this fetches more evidence
-    /// to append to the existing results. For new fact-checks, this starts
-    /// a fresh workflow.
+    /// Handles the submit button action — always starts a new fact-check.
     private func handleSubmit() {
-        if isResumedSession, let workflow = workflow {
-            // Resumed session: fetch more evidence to append to existing documents
-            // Pass current search options to allow provider switching mid-session
-            Task {
-                await workflow.fetchMoreEvidence(searchOptions: buildSearchOptions())
-            }
-        } else {
-            // New fact-check: start fresh
-            startFactCheck()
-        }
-    }
-
-    /// Clears the current resumed session and prepares for a new question.
-    ///
-    /// Resets the claim text and workflow state so the user can enter a fresh
-    /// research question without the previous session's data.
-    private func startNewQuestion() {
-        claimText = ""
-        workflow = nil
+        startFactCheck()
     }
 
     /// Builds search options from the current UI state.

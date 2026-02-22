@@ -148,7 +148,7 @@ fun AppNavigation() {
                 )
             }
 
-            // FactCheck screen with optional sessionId argument for restoring from history
+            // FactCheck screen with optional arguments for restoring or fetching more
             composable(
                 route = NavRoute.FactCheck.routeWithArgs,
                 arguments = listOf(
@@ -156,12 +156,18 @@ fun AppNavigation() {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
+                    },
+                    navArgument(NavRoute.FactCheck.ARG_FETCH_MORE) {
+                        type = NavType.BoolType
+                        defaultValue = false
                     }
                 )
             ) { backStackEntry ->
                 val sessionId = backStackEntry.arguments?.getString(NavRoute.FactCheck.ARG_SESSION_ID)
+                val fetchMore = backStackEntry.arguments?.getBoolean(NavRoute.FactCheck.ARG_FETCH_MORE) ?: false
                 FactCheckScreen(
                     sessionIdToRestore = sessionId,
+                    fetchMoreOnLoad = fetchMore,
                     onNavigateToReport = {
                         navController.navigate(NavRoute.Report.route) {
                             popUpTo(NavRoute.FactCheck.route) {
@@ -193,6 +199,16 @@ fun AppNavigation() {
                     sessionId = sessionId,
                     onNavigateToFullText = { documentId ->
                         navController.navigate(NavRoute.FullText.createRoute(documentId))
+                    },
+                    onRequestMoreEvidence = {
+                        // Navigate to FactCheck with fetchMore flag to trigger evidence fetch
+                        navController.navigate(NavRoute.FactCheck.createRoute(fetchMore = true)) {
+                            popUpTo(NavRoute.FactCheck.route) {
+                                saveState = false
+                            }
+                            launchSingleTop = true
+                            restoreState = false
+                        }
                     }
                 )
             }

@@ -66,7 +66,8 @@ data class ReportUiState(
     val isLoadingFullText: Boolean = false,
     val isExporting: Boolean = false,
     val exportError: String? = null,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val canGetMoreEvidence: Boolean = false
 )
 
 /**
@@ -186,15 +187,20 @@ class ReportViewModel @Inject constructor(
             it.copy(
                 report = null,
                 documents = emptyList(),
-                isLoading = true
+                isLoading = true,
+                canGetMoreEvidence = false
             )
         }
 
         loadJob = viewModelScope.launch {
             try {
+                // Load session to check if more evidence is available
+                val session = sessionRepository.getSession(sessionId)
+                val canGetMore = session?.canGetMoreEvidence ?: false
+
                 // Load report
                 val report = reportRepository.getReportBySession(sessionId)
-                _uiState.update { it.copy(report = report) }
+                _uiState.update { it.copy(report = report, canGetMoreEvidence = canGetMore) }
 
                 // Load documents for reference lookup (use first() to get single emission)
                 val docs = documentRepository.getScoredDocumentsBySession(sessionId).first()
@@ -222,7 +228,8 @@ class ReportViewModel @Inject constructor(
             it.copy(
                 report = null,
                 documents = emptyList(),
-                isLoading = true
+                isLoading = true,
+                canGetMoreEvidence = false
             )
         }
 
@@ -235,8 +242,9 @@ class ReportViewModel @Inject constructor(
                     // Load the report directly instead of calling loadReport()
                     // to avoid creating a separate job
                     currentSessionId = latestSession.id
+                    val canGetMore = latestSession.canGetMoreEvidence
                     val report = reportRepository.getReportBySession(latestSession.id)
-                    _uiState.update { it.copy(report = report) }
+                    _uiState.update { it.copy(report = report, canGetMoreEvidence = canGetMore) }
 
                     val docs = documentRepository.getScoredDocumentsBySession(latestSession.id).first()
                     _uiState.update { it.copy(documents = docs, isLoading = false) }

@@ -53,24 +53,27 @@ sealed class NavRoute(
         selectedIcon = Icons.Filled.CheckCircle,
         unselectedIcon = Icons.Outlined.CheckCircle
     ) {
-        /** Route pattern with optional sessionId argument for session restoration. */
-        const val routeWithArgs = "factcheck?sessionId={sessionId}"
+        /** Route pattern with optional arguments for session restoration and fetch-more trigger. */
+        const val routeWithArgs = "factcheck?sessionId={sessionId}&fetchMore={fetchMore}"
 
         /** Argument key for session ID to restore. */
         const val ARG_SESSION_ID = "sessionId"
+
+        /** Argument key for triggering fetch-more-evidence on navigation. */
+        const val ARG_FETCH_MORE = "fetchMore"
 
         /**
          * Creates a route with the specified session ID for restoration.
          *
          * @param sessionId The session ID to restore, or null for normal fact-check
+         * @param fetchMore Whether to immediately trigger fetchMoreEvidence
          * @return The navigation route string
          */
-        fun createRoute(sessionId: String? = null): String {
-            return if (sessionId != null) {
-                "factcheck?sessionId=$sessionId"
-            } else {
-                route
-            }
+        fun createRoute(sessionId: String? = null, fetchMore: Boolean = false): String {
+            val params = mutableListOf<String>()
+            if (sessionId != null) params.add("sessionId=$sessionId")
+            if (fetchMore) params.add("fetchMore=true")
+            return if (params.isEmpty()) route else "factcheck?${params.joinToString("&")}"
         }
     }
 

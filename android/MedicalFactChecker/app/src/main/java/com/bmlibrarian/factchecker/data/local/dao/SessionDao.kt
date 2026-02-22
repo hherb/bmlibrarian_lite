@@ -233,6 +233,31 @@ interface SessionDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    /**
+     * Update smart search state for a session.
+     *
+     * @param id Session ID
+     * @param enabled Whether smart search has been activated
+     * @param queriesJson JSON-encoded alternative queries
+     * @param fetchedPmids Comma-separated PMIDs already fetched
+     * @param updatedAt Timestamp for the update
+     */
+    @Query("""
+        UPDATE sessions SET
+            smart_search_enabled = :enabled,
+            alternative_queries_json = :queriesJson,
+            fetched_pmids = :fetchedPmids,
+            updated_at = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateSmartSearchState(
+        id: String,
+        enabled: Boolean,
+        queriesJson: String?,
+        fetchedPmids: String?,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
     // ==================== Delete Operations ====================
 
     /**

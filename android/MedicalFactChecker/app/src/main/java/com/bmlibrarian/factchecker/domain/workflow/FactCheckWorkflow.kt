@@ -295,15 +295,19 @@ class FactCheckWorkflow @Inject constructor(
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FETCHING_MORE_EVIDENCE)
 
         try {
+            // Refresh session to get latest state
+            val freshSession = sessionRepository.getSession(session.id) ?: session
+            currentSession = freshSession
+
             // Fetch more documents
-            if (session.hasMoreDocuments) {
+            if (freshSession.hasMoreDocuments) {
                 updateProgress("Fetching more documents...", WorkflowProgress.PROGRESS_EXTRACTION_START)
-                val newDocs = searchForDocuments(session, config, isNextBatch = true)
+                val newDocs = searchForDocuments(freshSession, config, isNextBatch = true)
 
                 if (newDocs.isNotEmpty()) {
                     // Score new documents
                     updateProgress("Scoring new documents...", WorkflowProgress.PROGRESS_SCORING_MORE_EVIDENCE)
-                    scoreDocuments(newDocs, session.claimText, config)
+                    scoreDocuments(newDocs, freshSession.claimText, config)
 
                     // Extract citations from newly scored relevant documents
                     updateProgress("Extracting citations...", WorkflowProgress.basePercentageFor(WorkflowStep.EXTRACTING_CITATIONS))
@@ -319,7 +323,23 @@ class FactCheckWorkflow @Inject constructor(
                     }
                     val docsNeedingCitations = relevantDocs.filter { citationCounts[it] == 0 }
 
-                    extractCitations(docsNeedingCitations, session.claimText, session.id, config)
+                    extractCitations(docsNeedingCitations, freshSession.claimText, session.id, config)
+                }
+            } else if (!freshSession.smartSearchEnabled && config.smartSearchEnabled) {
+                // Pagination exhausted but smart search not tried — try alternative queries
+                updateProgress("Trying alternative search strategies...", WorkflowProgress.PROGRESS_SEARCHING_START)
+                executeSmartSearch(freshSession, config)
+
+                // Extract citations from any new relevant documents found by smart search
+                val allRelevantDocs = documentRepository.getDocumentsBySessionSync(session.id)
+                    .filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
+                val citationCounts = allRelevantDocs.associateWith { doc ->
+                    documentRepository.getCitationCountForDocument(doc.id)
+                }
+                val docsNeedingCitations = allRelevantDocs.filter { citationCounts[it] == 0 }
+                if (docsNeedingCitations.isNotEmpty()) {
+                    updateProgress("Extracting citations...", WorkflowProgress.basePercentageFor(WorkflowStep.EXTRACTING_CITATIONS))
+                    extractCitations(docsNeedingCitations, freshSession.claimText, session.id, config)
                 }
             }
 
@@ -586,12 +606,23 @@ class FactCheckWorkflow @Inject constructor(
             val hasMore = updatedSession.hasMoreDocuments &&
                     updatedSession.currentBatch < config.maxBatches
 
-            if (relevantCount < config.targetRelevantDocuments && hasMore) {
-                // Try smart search first if enabled
-                if (config.smartSearchEnabled && relevantCount < config.smartSearchThreshold) {
-                    // Could implement smart search here in future
+            // Try smart search if enabled and not enough relevant docs
+            if (config.smartSearchEnabled && relevantCount < config.smartSearchThreshold &&
+                !updatedSession.smartSearchEnabled) {
+                executeSmartSearch(updatedSession, config)
+                // Re-check after smart search
+                val relevantAfterSmart = documentRepository.getRelevantCount(session.id, config.relevanceThreshold)
+                if (relevantAfterSmart >= config.targetRelevantDocuments) {
+                    // Smart search found enough — proceed to citations
+                    currentStep = WorkflowStep.EXTRACTING_CITATIONS
+                    sessionRepository.updateWorkflowStep(session.id, currentStep)
                 }
+            }
 
+            // Re-check relevant count (may have changed after smart search)
+            val currentRelevant = documentRepository.getRelevantCount(session.id, config.relevanceThreshold)
+
+            if (currentRelevant < config.targetRelevantDocuments && hasMore) {
                 // Calculate available documents
                 val availableCount = calculateAvailableDocuments(updatedSession)
 
@@ -599,12 +630,12 @@ class FactCheckWorkflow @Inject constructor(
                     currentStep = WorkflowStep.AWAITING_USER_DECISION
                     sessionRepository.updateWorkflowStep(session.id, currentStep)
                     _state.value = WorkflowState.AwaitingUserDecision(
-                        relevantCount = relevantCount,
+                        relevantCount = currentRelevant,
                         targetCount = config.targetRelevantDocuments,
                         availableCount = availableCount
                     )
                     updateProgress(
-                        "Found $relevantCount relevant documents. Fetch more?",
+                        "Found $currentRelevant relevant documents. Fetch more?",
                         WorkflowProgress.PROGRESS_AWAITING_USER
                     )
                     return // Wait for user decision
@@ -1177,6 +1208,248 @@ class FactCheckWorkflow @Inject constructor(
         )
 
         return report
+    }
+
+    // ==================== Smart Search ====================
+
+    /**
+     * Execute smart search by generating and trying alternative queries.
+     *
+     * When the initial search yields insufficient relevant documents, this method
+     * asks the LLM to generate 2-3 alternative structured queries and searches
+     * with each one, deduplicating by PMID. Mirrors the iOS `executeSmartSearch()`.
+     *
+     * @param session The current session
+     * @param config Workflow configuration
+     */
+    private suspend fun executeSmartSearch(session: SessionEntity, config: WorkflowConfig) {
+        val provider = getLLMProvider()
+        val apiKey = settingsRepository.getLlmApiKey()
+        val model = settingsRepository.getLlmModel()
+
+        // Generate alternative queries
+        updateProgress("Generating alternative search strategies...", WorkflowProgress.PROGRESS_SEARCHING_START)
+        checkBudget(session, config)
+
+        val relevantCount = documentRepository.getRelevantCount(session.id, config.relevanceThreshold)
+        val updatedSession = sessionRepository.getSession(session.id) ?: session
+
+        val result = llmService.generateAlternativeQueries(
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            claim = session.claimText,
+            initialQuery = updatedSession.pubmedQuery,
+            totalResults = updatedSession.pubmedTotalResults + updatedSession.epmcTotalResults,
+            relevantCount = relevantCount
+        )
+
+        // Record usage for the query generation call
+        recordUsage(
+            operation = "smart_search_query_generation",
+            inputTokens = estimateTokens(session.claimText),
+            outputTokens = Constants.LLM_QUERY_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+        )
+
+        val alternatives = result.getOrNull()
+        if (alternatives.isNullOrEmpty()) {
+            // No alternatives generated — mark smart search as tried so we don't retry
+            sessionRepository.updateSmartSearchState(
+                sessionId = session.id,
+                enabled = true,
+                queriesJson = null,
+                fetchedPmids = null
+            )
+            return
+        }
+
+        // Track already-fetched PMIDs to avoid duplicates
+        val existingDocs = documentRepository.getDocumentsBySessionSync(session.id)
+        val fetchedPmids = existingDocs.mapNotNull { it.pmid }.toMutableSet()
+
+        // Store alternatives and mark smart search as enabled
+        val alternativesJson = try {
+            kotlinx.serialization.json.Json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(StructuredQuery.serializer()),
+                alternatives
+            )
+        } catch (e: Exception) { null }
+
+        sessionRepository.updateSmartSearchState(
+            sessionId = session.id,
+            enabled = true,
+            queriesJson = alternativesJson,
+            fetchedPmids = fetchedPmids.joinToString(",")
+        )
+
+        // Execute each alternative query
+        for ((index, altQuery) in alternatives.withIndex()) {
+            checkBudget(session, config)
+
+            val queryDescription = altQuery.concepts.firstOrNull()?.name ?: "alternative ${index + 1}"
+            val searchRange = WorkflowProgress.PROGRESS_SCORING_START - WorkflowProgress.PROGRESS_SEARCHING_START
+            updateProgress(
+                "Smart search ${index + 1}/${alternatives.size}: $queryDescription...",
+                WorkflowProgress.PROGRESS_SEARCHING_START +
+                    (searchRange * (index + 1) / (alternatives.size + 1))
+            )
+
+            // Build structured query with preprint preference applied
+            val altWithPreprints = altQuery.copy(excludePreprints = !config.includePreprints)
+
+            // Search using the appropriate provider
+            val newDocs = executeAlternativeSearch(
+                altStructuredQuery = altWithPreprints,
+                session = updatedSession,
+                config = config,
+                fetchedPmids = fetchedPmids
+            )
+
+            if (newDocs.isNotEmpty()) {
+                // Update fetched PMIDs
+                newDocs.mapNotNull { it.pmid }.forEach { fetchedPmids.add(it) }
+                sessionRepository.updateSmartSearchState(
+                    sessionId = session.id,
+                    enabled = true,
+                    queriesJson = alternativesJson,
+                    fetchedPmids = fetchedPmids.joinToString(",")
+                )
+
+                // Score new documents
+                updateProgress(
+                    "Scoring smart search results...",
+                    WorkflowProgress.PROGRESS_SCORING_START
+                )
+                scoreDocuments(newDocs, session.claimText, config)
+            }
+
+            // Check if we now have enough relevant documents
+            val newRelevantCount = documentRepository.getRelevantCount(session.id, config.relevanceThreshold)
+            if (newRelevantCount >= config.targetRelevantDocuments) {
+                Log.i(TAG, "Smart search found enough relevant documents ($newRelevantCount)")
+                break
+            }
+        }
+    }
+
+    /**
+     * Execute a single alternative search query, filtering out already-fetched PMIDs.
+     *
+     * @param altStructuredQuery The alternative structured query to execute
+     * @param session Current session
+     * @param config Workflow configuration
+     * @param fetchedPmids Set of PMIDs already fetched (for deduplication)
+     * @return List of new document entities saved to database
+     */
+    private suspend fun executeAlternativeSearch(
+        altStructuredQuery: StructuredQuery,
+        session: SessionEntity,
+        config: WorkflowConfig,
+        fetchedPmids: Set<String>
+    ): List<DocumentEntity> {
+        val allDocuments = mutableListOf<DocumentEntity>()
+        val batchNumber = session.currentBatch + 1
+
+        when (config.searchProvider) {
+            SearchProvider.PUBMED -> {
+                val queryString = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED)
+                if (queryString.isEmpty()) return emptyList()
+                val result = pubMedService.search(
+                    query = queryString,
+                    offset = 0,
+                    batchSize = config.batchSize,
+                    email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                )
+                if (result.isSuccess) {
+                    val searchResult = result.getOrThrow()
+                    val entities = pubMedService.toDocumentEntities(
+                        articles = searchResult.articles,
+                        sessionId = session.id,
+                        batchNumber = batchNumber,
+                        startPosition = documentRepository.getDocumentCount(session.id)
+                    ).filter { it.pmid !in fetchedPmids }
+                    allDocuments.addAll(entities)
+                }
+            }
+            SearchProvider.EUROPE_PMC -> {
+                val queryString = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC)
+                if (queryString.isEmpty()) return emptyList()
+                val result = europePMCService.search(
+                    query = queryString,
+                    cursor = null,
+                    batchSize = config.batchSize,
+                    includePreprints = config.includePreprints
+                )
+                if (result.isSuccess) {
+                    val searchResult = result.getOrThrow()
+                    val entities = europePMCService.toDocumentEntities(
+                        articles = searchResult.articles,
+                        sessionId = session.id,
+                        batchNumber = batchNumber,
+                        startPosition = documentRepository.getDocumentCount(session.id)
+                    ).filter { it.pmid !in fetchedPmids }
+                    allDocuments.addAll(entities)
+                }
+            }
+            SearchProvider.BOTH -> {
+                val halfBatch = config.batchSize / 2
+                // Search PubMed
+                val pubmedQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED)
+                if (pubmedQuery.isNotEmpty()) {
+                    val pubmedResult = pubMedService.search(
+                        query = pubmedQuery,
+                        offset = 0,
+                        batchSize = halfBatch,
+                        email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                    )
+                    if (pubmedResult.isSuccess) {
+                        val sr = pubmedResult.getOrThrow()
+                        allDocuments.addAll(
+                            pubMedService.toDocumentEntities(
+                                articles = sr.articles,
+                                sessionId = session.id,
+                                batchNumber = batchNumber,
+                                startPosition = documentRepository.getDocumentCount(session.id)
+                            ).filter { it.pmid !in fetchedPmids }
+                        )
+                    }
+                }
+                // Search Europe PMC
+                val epmcQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC)
+                if (epmcQuery.isNotEmpty()) {
+                    val existingPmids = fetchedPmids + allDocuments.mapNotNull { it.pmid }.toSet()
+                    val epmcResult = europePMCService.search(
+                        query = epmcQuery,
+                        cursor = null,
+                        batchSize = halfBatch,
+                        includePreprints = config.includePreprints
+                    )
+                    if (epmcResult.isSuccess) {
+                        val sr = epmcResult.getOrThrow()
+                        allDocuments.addAll(
+                            europePMCService.toDocumentEntities(
+                                articles = sr.articles,
+                                sessionId = session.id,
+                                batchNumber = batchNumber,
+                                startPosition = documentRepository.getDocumentCount(session.id)
+                            ).filter { it.pmid !in existingPmids }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Save new documents
+        if (allDocuments.isNotEmpty()) {
+            documentRepository.saveDocuments(allDocuments)
+
+            // Compute embedding scores if enabled
+            if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
+                computeEmbeddingScores(allDocuments, session.claimText)
+            }
+        }
+
+        return allDocuments
     }
 
     // ==================== Helper Methods ====================

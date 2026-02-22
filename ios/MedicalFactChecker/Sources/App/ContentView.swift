@@ -42,6 +42,9 @@ struct ContentView: View {
     @State private var factCheckClaimText: String = ""
     @State private var factCheckWorkflow: FactCheckWorkflow?
 
+    /// When true, FactCheckView should trigger `fetchMoreEvidence()` on the current workflow.
+    @State private var shouldFetchMoreEvidence = false
+
     /// Controls showing onboarding from settings.
     @State private var showingOnboardingFromSettings = false
 
@@ -75,7 +78,8 @@ struct ContentView: View {
                     selectedTab = .report
                 },
                 claimText: $factCheckClaimText,
-                workflow: $factCheckWorkflow
+                workflow: $factCheckWorkflow,
+                shouldFetchMoreEvidence: $shouldFetchMoreEvidence
             )
             .tabItem {
                 Label("Check", systemImage: "checkmark.shield")
@@ -94,7 +98,15 @@ struct ContentView: View {
             .tag(AppTab.fullText)
 
             LazyTabContent(tab: .report, visitedTabs: $visitedTabs) {
-                ReportTabView(report: currentReport, workflow: factCheckWorkflow)
+                ReportTabView(
+                    report: currentReport,
+                    workflow: factCheckWorkflow,
+                    onRequestMoreEvidence: {
+                        shouldFetchMoreEvidence = true
+                        visitedTabs.insert(.check)
+                        selectedTab = .check
+                    }
+                )
             }
             .tabItem {
                 Label("Report", systemImage: "chart.bar.doc.horizontal")
@@ -149,13 +161,13 @@ struct ContentView: View {
     /// This method is called when the user taps a history item. It:
     /// 1. Restores the original claim text to the input field
     /// 2. Creates a workflow with the session loaded (without running it)
-    /// 3. Sets up callbacks for any subsequent actions (like "Add More Results")
+    /// 3. Sets up callbacks for any subsequent actions (like "Get More Evidence")
     /// 4. Sets the current report so the Report tab shows it
     /// 5. Navigates to the Check tab
     ///
     /// The session's documents, scores, and report are displayed without
-    /// re-running the workflow. The user can then click "Add More Results"
-    /// to fetch additional documents if more are available.
+    /// re-running the workflow. The user can use "Get More Evidence" in the
+    /// Report tab to fetch additional documents if more are available.
     ///
     /// - Parameter session: The fact-check session to restore for viewing.
     private func restoreSession(_ session: FactCheckSession) {
@@ -245,9 +257,12 @@ struct ReportTabView: View {
     let report: EvidenceReport?
     var workflow: FactCheckWorkflow?
 
+    /// Callback when user requests more evidence (navigates to Check tab and triggers fetch).
+    var onRequestMoreEvidence: (() -> Void)?
+
     var body: some View {
         if let report = report {
-            ReportContentView(report: report, workflow: workflow)
+            ReportContentView(report: report, workflow: workflow, onRequestMoreEvidence: onRequestMoreEvidence)
         } else {
             emptyState
         }

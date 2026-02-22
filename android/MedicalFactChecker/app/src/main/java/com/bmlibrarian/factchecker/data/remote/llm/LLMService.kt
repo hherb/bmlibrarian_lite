@@ -181,6 +181,86 @@ class LLMService @Inject constructor(
     }
 
     /**
+     * Generate alternative search queries when initial search yields insufficient results.
+     *
+     * Asks the LLM to generate 2-3 alternative structured queries using different
+     * search strategies (synonyms, broader/narrower terms, split compound questions).
+     *
+     * Mirrors the iOS PromptTemplates.alternativeQueries() for cross-platform consistency.
+     *
+     * @param provider The LLM provider configuration
+     * @param apiKey The API key for authentication
+     * @param model The model ID to use
+     * @param claim The original medical claim/question
+     * @param initialQuery The initial query that was tried
+     * @param totalResults Total results from the initial search
+     * @param relevantCount Number of relevant documents found
+     * @return Result containing a list of alternative StructuredQuery objects
+     */
+    suspend fun generateAlternativeQueries(
+        provider: LLMProvider,
+        apiKey: String,
+        model: String,
+        claim: String,
+        initialQuery: String?,
+        totalResults: Int,
+        relevantCount: Int
+    ): Result<List<StructuredQuery>> {
+        val userPrompt = """
+            The following medical question did not return enough relevant results with the initial search.
+
+            Question: $claim
+            Initial query: ${initialQuery ?: "N/A"}
+            Results found: $totalResults
+            Relevant documents: $relevantCount
+
+            Generate 2-3 alternative search strategies as structured queries. Consider:
+            1. If comparing two treatments/medications, search for each one separately
+            2. Use different synonyms or related terms
+            3. Break compound questions into simpler components
+            4. Try broader or narrower search terms
+            5. Focus on key outcomes or mechanisms
+
+            Return a JSON array of structured query objects. Each object should have:
+            - "concepts": an array of concepts, each with "name", "mesh_terms", and "keywords"
+
+            Example response:
+            [
+              {
+                "concepts": [
+                  {"name": "treatment A", "mesh_terms": ["MeSH Term A"], "keywords": ["keyword A"]},
+                  {"name": "condition", "mesh_terms": ["Condition MeSH"], "keywords": ["condition"]}
+                ]
+              },
+              {
+                "concepts": [
+                  {"name": "treatment B", "mesh_terms": ["MeSH Term B"], "keywords": ["keyword B"]},
+                  {"name": "condition", "mesh_terms": ["Condition MeSH"], "keywords": ["condition"]}
+                ]
+              }
+            ]
+
+            Generate alternative structured queries for the medical question:
+        """.trimIndent()
+
+        return chat(
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            systemPrompt = "You are a medical librarian expert at generating alternative search strategies for biomedical literature databases.",
+            userPrompt = userPrompt,
+            maxTokens = 1024,
+            temperature = 0.3
+        ).mapCatching { result ->
+            val queries = StructuredQuery.parseArray(result.content)
+            if (queries.isEmpty()) {
+                throw IllegalStateException("Failed to parse alternative queries from LLM response")
+            }
+            queries
+        }
+    }
+
+    /**
      * Score a document's relevance to a claim.
      *
      * @param provider The LLM provider configuration

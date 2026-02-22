@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -212,6 +212,20 @@ abstract class AppDatabase : RoomDatabase() {
                 // Add HyDE fields to sessions table
                 database.execSQL("ALTER TABLE sessions ADD COLUMN hyde_abstract TEXT")
                 database.execSQL("ALTER TABLE sessions ADD COLUMN hyde_generated_at INTEGER")
+            }
+        }
+
+        /**
+         * Migration from version 4 to 5.
+         *
+         * Adds smart search fields to sessions table for alternative query
+         * generation when initial search yields insufficient results.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE sessions ADD COLUMN smart_search_enabled INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE sessions ADD COLUMN alternative_queries_json TEXT")
+                database.execSQL("ALTER TABLE sessions ADD COLUMN fetched_pmids TEXT")
             }
         }
     }

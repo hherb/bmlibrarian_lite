@@ -33,10 +33,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -89,6 +92,7 @@ import com.bmlibrarian.factchecker.util.Constants
 fun ReportScreen(
     sessionId: String? = null,
     onNavigateToFullText: ((String) -> Unit)? = null,
+    onRequestMoreEvidence: (() -> Unit)? = null,
     viewModel: ReportViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -233,6 +237,15 @@ fun ReportScreen(
                     Text("Share")
                 }
             }
+
+            // Get More Evidence section
+            if (onRequestMoreEvidence != null && uiState.canGetMoreEvidence) {
+                Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+                GetMoreEvidenceSection(
+                    onRequestMoreEvidence = onRequestMoreEvidence
+                )
+            }
         }
 
         // Paper size selection dialog
@@ -336,6 +349,59 @@ private suspend fun handleEvent(
 
         is ReportUiEvent.NavigateToFullText -> {
             onNavigateToFullText?.invoke(event.documentId)
+        }
+    }
+}
+
+/**
+ * Section prompting the user to fetch additional evidence for the current report.
+ *
+ * Displayed when more search results are available. Navigates to the Check
+ * screen and triggers fetchMoreEvidence on the active workflow.
+ *
+ * @param onRequestMoreEvidence Callback to navigate to Check tab and trigger fetch
+ */
+@Composable
+private fun GetMoreEvidenceSection(
+    onRequestMoreEvidence: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(Constants.UI_CARD_CORNER_RADIUS.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(Constants.UI_SCREEN_PADDING.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Need More Evidence?",
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+
+            Button(
+                onClick = onRequestMoreEvidence,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(Constants.UI_ICON_SIZE.dp)
+                )
+                Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING.dp))
+                Text("Get More Evidence")
+            }
         }
     }
 }
