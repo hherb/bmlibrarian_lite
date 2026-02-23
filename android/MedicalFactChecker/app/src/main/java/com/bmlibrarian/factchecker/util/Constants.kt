@@ -164,6 +164,9 @@ object Constants {
     /** Smaller padding inside compact components. */
     const val UI_CARD_PADDING_SMALL = 12
 
+    /** Standard corner radius for cards. */
+    const val UI_CARD_CORNER_RADIUS = 12
+
     /** Standard spacing between related elements. */
     const val UI_ELEMENT_SPACING = 8
 
