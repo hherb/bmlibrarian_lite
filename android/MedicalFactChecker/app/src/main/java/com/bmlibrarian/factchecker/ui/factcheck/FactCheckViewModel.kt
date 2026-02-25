@@ -539,6 +539,17 @@ class FactCheckViewModel @Inject constructor(
                                     fullTextFetchedAt = java.util.Date()
                                 )
                             }
+                            is FullTextService.FullTextResult.EuropePmcPdf -> {
+                                val localPath = fullTextService.downloadPdf(
+                                    fullTextResult.pdfUrl,
+                                    document.id
+                                )
+                                document.copy(
+                                    pdfPath = localPath,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+                                    fullTextFetchedAt = java.util.Date()
+                                )
+                            }
                             is FullTextService.FullTextResult.UnpaywallPdf -> {
                                 // Download PDF
                                 val localPath = fullTextService.downloadPdf(
