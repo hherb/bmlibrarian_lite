@@ -98,22 +98,35 @@ For higher rate limits with PubMed (10 requests/sec vs 3 requests/sec), obtain a
 ```python
 from study_transparency_analyzer import StudyTransparencyAnalyzer
 
-# Initialize with your email
+# Initialize — full-text auto-discovery is enabled by default
 analyzer = StudyTransparencyAnalyzer(
     email="your.email@example.com",
-    pubmed_api_key="optional_api_key"  # Optional
+    pubmed_api_key="optional_api_key",  # Optional
 )
 
-# Analyze by DOI (API metadata only)
+# Analyze by DOI — automatically discovers full text via Europe PMC,
+# Unpaywall, PMC, cached PDFs, and optionally browser fallback
 report = analyzer.analyze(doi="10.1056/NEJMoa2034577")
 
-# Analyze by PMID
+# Analyze by PMID — also auto-discovers full text
 report = analyzer.analyze(pmid="33301246")
 
-# Analyze with full-text content for deeper analysis
+# Override with your own full-text content (skips auto-discovery)
 with open("article_fulltext.txt") as f:
     fulltext = f.read()
 report = analyzer.analyze(doi="10.1056/NEJMoa2034577", fulltext=fulltext)
+
+# Disable browser fallback (for mobile/CI environments)
+analyzer_no_browser = StudyTransparencyAnalyzer(
+    email="your.email@example.com",
+    use_browser_fallback=False,  # No Playwright
+)
+
+# Disable auto-discovery entirely (API metadata only)
+analyzer_api_only = StudyTransparencyAnalyzer(
+    email="your.email@example.com",
+    auto_discover_fulltext=False,
+)
 
 # Access results
 print(f"Title: {report.title}")
@@ -141,12 +154,20 @@ print(json.dumps(report.to_dict(), indent=2))
 ### Command Line Usage
 
 ```bash
-# Basic analysis (API metadata only)
+# Full analysis — auto-discovers full text from all available sources
 python study_transparency_analyzer.py --pmid 33301246 --email your@email.com
 
-# With full-text file for deeper analysis
+# Without browser fallback (safe for CI/mobile/headless)
+python study_transparency_analyzer.py --pmid 33301246 --email your@email.com \
+    --no-browser
+
+# With manual full-text file (skips auto-discovery)
 python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" \
     --email your@email.com --fulltext article.txt
+
+# API metadata only (no full-text discovery at all)
+python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" \
+    --email your@email.com --no-fulltext-discovery
 
 # With JSON output
 python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" \
@@ -402,9 +423,26 @@ API metadata (PubMed, CrossRef, Europe PMC) provides a starting point, but often
 - **Funding role details** - Who designed the study, collected data, etc.
 - **Acknowledgments** - Additional industry relationships not in COI
 
-### How It Works
+### Automatic Full-Text Discovery
 
-When the `fulltext` parameter is provided to `analyze()`, the function `extract_fulltext_sections()` scans for standard biomedical section headers and extracts the content:
+By default, `analyze()` automatically attempts to retrieve full-text content when none is provided. The discovery chain tries sources in order of quality and speed:
+
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 | Cached markdown | Previously retrieved and converted full text |
+| 2 | Europe PMC XML | Machine-readable JATS XML, converted to markdown (best quality) |
+| 3 | Europe PMC PDF | Free PDF from Europe PMC render endpoint |
+| 4 | Cached PDF | Previously downloaded PDF, text extracted |
+| 5 | PDF download | Unpaywall, PubMed Central, publisher HTTP, DOI resolution |
+| 6 | Browser fallback | Playwright/Chromium for bot-protected sites (optional) |
+
+**Disabling browser fallback:** Set `use_browser_fallback=False` in the constructor for environments without a browser (mobile apps, CI, headless servers). Sources 1-5 still work without a browser.
+
+**Disabling auto-discovery entirely:** Set `auto_discover_fulltext=False` to use only API metadata (equivalent to the old behaviour).
+
+### How Section Extraction Works
+
+Once full text is available (auto-discovered or manually provided), `extract_fulltext_sections()` scans for standard biomedical section headers:
 
 ```python
 # Sections extracted (canonical key -> header patterns)
@@ -428,20 +466,25 @@ Full-text sections take priority over API-sourced data:
 ### Example
 
 ```python
+# Auto-discovery (default) — the analyzer finds full text automatically
 analyzer = StudyTransparencyAnalyzer(email="your@email.com")
+report = analyzer.analyze(doi="10.1016/S0140-6736(25)01578-8")
+# Full text auto-discovered via Europe PMC, Unpaywall, etc.
 
-# Read full text from file
+# Manual override — provide your own full text
 with open("lancet_article.txt") as f:
     fulltext = f.read()
-
-# Full-text enriched analysis
 report = analyzer.analyze(
     doi="10.1016/S0140-6736(25)01578-8",
     fulltext=fulltext,
 )
 
-# Without full text: COI might be empty, data availability UNKNOWN
-# With full text: COI detects 20+ pharma relationships, data NOT_AVAILABLE
+# Mobile/CI safe — no browser, but still tries API-based sources
+analyzer = StudyTransparencyAnalyzer(
+    email="your@email.com",
+    use_browser_fallback=False,
+)
+report = analyzer.analyze(doi="10.1016/S0140-6736(25)01578-8")
 ```
 
 ---
@@ -544,8 +587,28 @@ class DataAvailabilityInfo:
 
 ```python
 class StudyTransparencyAnalyzer:
-    def __init__(self, email: str, pubmed_api_key: Optional[str] = None):
-        """Initialize with API credentials."""
+    def __init__(
+        self,
+        email: str,
+        pubmed_api_key: Optional[str] = None,
+        unpaywall_email: Optional[str] = None,
+        use_browser_fallback: bool = True,
+        browser_headless: bool = False,
+        auto_discover_fulltext: bool = True,
+    ):
+        """
+        Initialize the analyzer.
+
+        Args:
+            email: Contact email (required by APIs)
+            pubmed_api_key: Optional NCBI API key for higher rate limits
+            unpaywall_email: Email for Unpaywall API (defaults to email)
+            use_browser_fallback: If True, use Playwright browser for
+                bot-protected downloads. Set to False for mobile/CI.
+            browser_headless: If True, run browser without visible window
+            auto_discover_fulltext: If True, automatically discover
+                full text when none is provided to analyze().
+        """
 
     def analyze(
         self,
@@ -556,13 +619,16 @@ class StudyTransparencyAnalyzer:
         """
         Main analysis method.
 
+        When fulltext is not provided and auto_discover_fulltext is
+        enabled, automatically tries: cached markdown, Europe PMC XML,
+        Europe PMC PDF, cached PDF, Unpaywall/PMC/publisher downloads,
+        and optionally browser fallback.
+
         Args:
             doi: Digital Object Identifier
             pmid: PubMed ID
-            fulltext: Optional full-text content (plain text or markdown).
-                When provided, the analyzer extracts COI, data sharing,
-                and funding sections directly from the text, yielding
-                much richer analysis than API metadata alone.
+            fulltext: Optional full-text content. When provided,
+                auto-discovery is skipped.
 
         Returns:
             TransparencyReport with all analysis results
@@ -593,15 +659,20 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
 ### Single Study Analysis
 
 ```bash
-# Basic usage
+# Full analysis — auto-discovers full text from all sources
 python study_transparency_analyzer.py --pmid 33301246 --email you@email.com
 
-# By DOI
-python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" --email you@email.com
-
-# With full-text file for deeper analysis
+# Without browser fallback (safe for CI/mobile/headless servers)
 python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
-    --fulltext article.txt
+    --no-browser
+
+# With manual full-text file (skips auto-discovery)
+python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" \
+    --email you@email.com --fulltext article.txt
+
+# API metadata only (no full-text discovery at all)
+python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
+    --no-fulltext-discovery
 
 # Output formats
 python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
@@ -616,6 +687,10 @@ python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
 # With NCBI API key (faster)
 python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
     --api-key YOUR_NCBI_API_KEY
+
+# Custom Unpaywall email
+python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
+    --unpaywall-email your-unpaywall@email.com
 ```
 
 ### CLI Arguments
@@ -626,7 +701,10 @@ python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
 | `--pmid` | One of doi/pmid | PubMed ID |
 | `--email` | Yes | Contact email (required by APIs) |
 | `--api-key` | No | NCBI API key for higher rate limits |
-| `--fulltext` | No | Path to full-text file (plain text or markdown) |
+| `--fulltext` | No | Path to full-text file (skips auto-discovery) |
+| `--unpaywall-email` | No | Email for Unpaywall API (defaults to `--email`) |
+| `--no-browser` | No | Disable Playwright browser fallback (for CI/mobile) |
+| `--no-fulltext-discovery` | No | Skip auto full-text discovery entirely |
 | `--output` | No | Output format: `summary`, `text`, or `json` (default: `summary`) |
 | `--output-file` | No | Write output to file instead of stdout |
 

@@ -111,6 +111,9 @@ class TestTransparencyManagerInit:
             mock_cls.assert_called_once_with(
                 email="test@example.com",
                 pubmed_api_key="test_key",
+                unpaywall_email="test@example.com",
+                use_browser_fallback=False,
+                auto_discover_fulltext=True,
             )
             manager.stop()
 

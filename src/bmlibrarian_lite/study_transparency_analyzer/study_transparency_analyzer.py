@@ -1267,19 +1267,42 @@ def calculate_transparency_score(report: TransparencyReport) -> float:
 class StudyTransparencyAnalyzer:
     """Main class for analyzing study transparency."""
 
-    def __init__(self, email: str, pubmed_api_key: Optional[str] = None):
+    def __init__(
+        self,
+        email: str,
+        pubmed_api_key: Optional[str] = None,
+        unpaywall_email: Optional[str] = None,
+        use_browser_fallback: bool = True,
+        browser_headless: bool = False,
+        auto_discover_fulltext: bool = True,
+    ):
         """
         Initialize the analyzer.
 
         Args:
             email: Contact email (required by APIs)
             pubmed_api_key: Optional NCBI API key for higher rate limits
+            unpaywall_email: Email for Unpaywall API (defaults to email)
+            use_browser_fallback: If True, use Playwright browser for
+                bot-protected downloads. Set to False for mobile/CI
+                environments where a browser is unavailable.
+            browser_headless: If True, run browser without visible window
+            auto_discover_fulltext: If True, automatically attempt full-text
+                discovery when no fulltext is provided to analyze().
+                Tries cached markdown, Europe PMC XML, Europe PMC PDF,
+                cached PDF, and PDF download (with optional browser fallback).
         """
+        self.email = email
         self.pubmed = PubMedClient(email, pubmed_api_key)
         self.crossref = CrossRefClient(email)
         self.clinicaltrials = ClinicalTrialsClient()
         self.europepmc = EuropePMCClient()
         self.openalex = OpenAlexClient(email)
+
+        self._unpaywall_email = unpaywall_email or email
+        self._use_browser_fallback = use_browser_fallback
+        self._browser_headless = browser_headless
+        self._auto_discover_fulltext = auto_discover_fulltext
 
     def analyze(
         self,
@@ -1290,13 +1313,21 @@ class StudyTransparencyAnalyzer:
         """
         Analyze a study for transparency indicators.
 
+        When ``fulltext`` is not provided and ``auto_discover_fulltext``
+        is enabled, the analyzer automatically tries to retrieve full-text
+        content via:
+        1. Cached full-text markdown
+        2. Europe PMC XML (converted to markdown)
+        3. Europe PMC PDF render
+        4. Cached PDF (text extracted)
+        5. PDF download via Unpaywall/PMC/publisher (optionally with
+           browser fallback, controlled by ``use_browser_fallback``)
+
         Args:
             doi: Digital Object Identifier
             pmid: PubMed ID
             fulltext: Optional full-text content (plain text or markdown).
-                When provided, the analyzer extracts COI, data sharing,
-                and funding sections directly from the text, yielding
-                much richer analysis than API metadata alone.
+                When provided, automatic discovery is skipped.
 
         Returns:
             TransparencyReport with analysis results
@@ -1311,39 +1342,123 @@ class StudyTransparencyAnalyzer:
         report.doi = doi
         report.pmid = pmid
 
-        # Extract sections from full text if provided
+        # Step 1: Get basic metadata and resolve IDs
+        self._fetch_basic_metadata(report)
+
+        # Step 2: Auto-discover full text if not provided
+        if not fulltext and self._auto_discover_fulltext:
+            fulltext = self._discover_fulltext(report)
+
+        # Extract sections from full text
         fulltext_sections = {}
         if fulltext:
             fulltext_sections = extract_fulltext_sections(fulltext)
-            report.data_sources_used.append("Full-text")
+            if "Full-text" not in report.data_sources_used:
+                report.data_sources_used.append("Full-text")
             if fulltext_sections:
                 logger.info(
                     "Extracted full-text sections: %s",
                     list(fulltext_sections.keys()),
                 )
 
-        # Step 1: Get basic metadata and resolve IDs
-        self._fetch_basic_metadata(report)
-
-        # Step 2: Get funder information
+        # Step 3: Get funder information
         self._fetch_funder_info(report)
 
-        # Step 3: Get trial registration info
+        # Step 4: Get trial registration info
         self._fetch_trial_info(report)
 
-        # Step 4: Analyze COI statement (full text overrides API data)
+        # Step 5: Analyze COI statement (full text overrides API data)
         self._analyze_conflicts(report, fulltext_sections)
 
-        # Step 5: Analyze data availability (full text overrides API data)
+        # Step 6: Analyze data availability (full text overrides API data)
         self._analyze_data_availability(report, fulltext_sections)
 
-        # Step 6: Calculate transparency score
+        # Step 7: Calculate transparency score
         report.transparency_score = calculate_transparency_score(report)
 
-        # Step 7: Generate risk of bias indicators
+        # Step 8: Generate risk of bias indicators
         self._identify_risk_indicators(report)
 
         return report
+
+    def _discover_fulltext(self, report: TransparencyReport) -> Optional[str]:
+        """Attempt to discover and retrieve full-text content.
+
+        Uses the project's FulltextDiscoverer to try multiple sources
+        (cached markdown, Europe PMC XML/PDF, cached PDF, Unpaywall,
+        PMC, publisher HTTP, and optionally browser fallback).
+
+        Args:
+            report: TransparencyReport with resolved identifiers
+                (doi, pmid, pmcid populated by _fetch_basic_metadata).
+
+        Returns:
+            Full-text content as string, or None if unavailable.
+        """
+        try:
+            from ..fulltext_discovery import FulltextDiscoverer
+        except ImportError:
+            logger.debug(
+                "fulltext_discovery module not available; "
+                "skipping automatic full-text retrieval"
+            )
+            return None
+
+        doi = report.doi
+        pmid = report.pmid
+        pmcid = getattr(report, 'pmcid', None)
+
+        if not doi and not pmid and not pmcid:
+            return None
+
+        logger.info(
+            "Auto-discovering full text: doi=%s, pmid=%s, pmcid=%s",
+            doi, pmid, pmcid,
+        )
+
+        try:
+            discoverer = FulltextDiscoverer(
+                unpaywall_email=self._unpaywall_email,
+                use_browser_fallback=self._use_browser_fallback,
+                browser_headless=self._browser_headless,
+            )
+
+            result = discoverer.discover_fulltext(
+                pmid=pmid,
+                pmcid=pmcid,
+                doi=doi,
+                title=report.title,
+            )
+
+            if result.success and result.markdown_content:
+                source = result.source_type.value
+                logger.info(
+                    "Full-text discovered via %s (%d chars)",
+                    source,
+                    len(result.markdown_content),
+                )
+                report.data_sources_used.append(f"Full-text ({source})")
+                return result.markdown_content
+
+            if result.is_paywall:
+                logger.info(
+                    "Full text behind paywall: %s",
+                    result.paywall_url or "unknown URL",
+                )
+                report.warnings.append(
+                    f"Full text behind paywall"
+                    + (f": {result.paywall_url}" if result.paywall_url else "")
+                )
+            else:
+                logger.info(
+                    "Full-text discovery failed: %s",
+                    result.error or "unknown reason",
+                )
+
+        except Exception as e:
+            logger.warning("Full-text discovery error: %s", e)
+
+        return None
 
     def _fetch_basic_metadata(self, report: TransparencyReport):
         """Fetch and consolidate basic article metadata."""
@@ -1701,7 +1816,24 @@ def main():
     )
     parser.add_argument(
         '--fulltext',
-        help='Path to full-text file (plain text or markdown)'
+        help='Path to full-text file (plain text or markdown). '
+             'When provided, automatic full-text discovery is skipped.'
+    )
+    parser.add_argument(
+        '--unpaywall-email',
+        help='Email for Unpaywall API (defaults to --email)'
+    )
+    parser.add_argument(
+        '--no-browser',
+        action='store_true',
+        help='Disable Playwright browser fallback for PDF downloads. '
+             'Use this in headless/CI/mobile environments.'
+    )
+    parser.add_argument(
+        '--no-fulltext-discovery',
+        action='store_true',
+        help='Skip automatic full-text discovery entirely. '
+             'Only use API metadata (and --fulltext if provided).'
     )
 
     args = parser.parse_args()
@@ -1715,8 +1847,17 @@ def main():
         with open(args.fulltext, 'r', encoding='utf-8') as f:
             fulltext = f.read()
 
+    # When fulltext is provided manually, skip auto-discovery
+    auto_discover = not args.no_fulltext_discovery and not args.fulltext
+
     # Run analysis
-    analyzer = StudyTransparencyAnalyzer(args.email, args.api_key)
+    analyzer = StudyTransparencyAnalyzer(
+        email=args.email,
+        pubmed_api_key=args.api_key,
+        unpaywall_email=args.unpaywall_email,
+        use_browser_fallback=not args.no_browser,
+        auto_discover_fulltext=auto_discover,
+    )
     report = analyzer.analyze(doi=args.doi, pmid=args.pmid, fulltext=fulltext)
 
     # Format output

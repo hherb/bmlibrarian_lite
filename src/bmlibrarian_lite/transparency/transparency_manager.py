@@ -79,10 +79,15 @@ class TransparencyManager(QObject):
         self.config = config
         self.settings = config.transparency
 
-        # Initialize the analyzer
+        # Initialize the analyzer with full-text discovery enabled.
+        # Browser fallback is disabled for background analysis to avoid
+        # blocking threads with Playwright; API-based sources are sufficient.
         self._analyzer = StudyTransparencyAnalyzer(
             email=email,
             pubmed_api_key=pubmed_api_key,
+            unpaywall_email=email,
+            use_browser_fallback=False,
+            auto_discover_fulltext=True,
         )
 
         # Thread pool for background analysis
@@ -213,8 +218,8 @@ class TransparencyManager(QObject):
                 time.sleep(self._min_request_interval - elapsed)
             self._last_request_time = time.time()
 
-        # Run the analyzer
-        report = self._analyzer.analyze(pmid=pmid, doi=doi)
+        # Run the analyzer (full_text overrides auto-discovery when provided)
+        report = self._analyzer.analyze(pmid=pmid, doi=doi, fulltext=full_text)
 
         # Extract data availability level
         data_availability_level = "unknown"
@@ -256,7 +261,11 @@ class TransparencyManager(QObject):
                 if risk_level == TransparencyRisk.HIGH
                 else 0
             ),
-            full_text_analyzed=full_text is not None,
+            full_text_analyzed=(
+                full_text is not None
+                or "Full-text" in report.data_sources_used
+                or any("Full-text" in s for s in report.data_sources_used)
+            ),
         )
 
         # Store result
