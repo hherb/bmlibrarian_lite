@@ -11,13 +11,14 @@
 3. [Quick Start](#quick-start)
 4. [Data Sources & APIs](#data-sources--apis)
 5. [Detection Methods](#detection-methods)
-6. [API Reference](#api-reference)
-7. [Command Line Interface](#command-line-interface)
-8. [Batch Processing](#batch-processing)
-9. [Interpreting Results](#interpreting-results)
-10. [Limitations & Caveats](#limitations--caveats)
-11. [Extending the Tool](#extending-the-tool)
-12. [References & Further Reading](#references--further-reading)
+6. [Full-Text Analysis](#full-text-analysis)
+7. [API Reference](#api-reference)
+8. [Command Line Interface](#command-line-interface)
+9. [Batch Processing](#batch-processing)
+10. [Interpreting Results](#interpreting-results)
+11. [Limitations & Caveats](#limitations--caveats)
+12. [Extending the Tool](#extending-the-tool)
+13. [References & Further Reading](#references--further-reading)
 
 ---
 
@@ -26,10 +27,11 @@
 The Study Transparency Analyzer is a Python tool designed to automate the detection of:
 
 1. **Industry sponsorship** in medical research publications
-2. **Data disclosure levels** (full open, restricted, or withheld)
-3. **Clinical trial registration compliance**
-4. **Conflict of interest disclosures**
-5. **Potential outcome switching** (registered vs. reported outcomes)
+2. **Institutional-intermediary industry funding** (pharma money routed through universities)
+3. **Data disclosure levels** (full open, restricted, effectively unavailable, or withheld)
+4. **Clinical trial registration compliance**
+5. **Conflict of interest disclosures** (including named pharma company detection)
+6. **Potential outcome switching** (registered vs. reported outcomes)
 
 ### Why This Matters
 
@@ -43,16 +45,17 @@ Research has consistently shown that industry-sponsored studies are more likely 
 
 ### What This Tool Does
 
-Given a **DOI** or **PubMed ID (PMID)**, the analyzer:
+Given a **DOI** or **PubMed ID (PMID)**, and optionally **full-text content**, the analyzer:
 
 1. Queries multiple databases (PubMed, CrossRef, ClinicalTrials.gov, Europe PMC, OpenAlex)
 2. Extracts funding/sponsor information
 3. Classifies sponsors as industry vs. government/academic
-4. Analyzes conflict of interest statements
-5. Checks data availability statements
-6. Verifies clinical trial registration and results posting compliance
-7. Calculates an overall transparency score
-8. Identifies risk of bias indicators
+4. Analyzes conflict of interest statements using multi-pass pharma name detection
+5. Detects institutional-intermediary industry funding patterns
+6. Checks data availability statements for effective refusals
+7. Verifies clinical trial registration and results posting compliance
+8. Calculates an overall transparency score with compound penalties
+9. Identifies risk of bias indicators
 
 ---
 
@@ -67,15 +70,15 @@ Given a **DOI** or **PubMed ID (PMID)**, the analyzer:
 ### Setup
 
 ```bash
-# Clone or download the tool
+# As part of BMLibrarian Lite
+cd bmlibrarian_lite
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+
+# Standalone usage
 cd study_transparency_analyzer
-
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
 ### Optional: NCBI API Key
@@ -83,7 +86,7 @@ pip install -r requirements.txt
 For higher rate limits with PubMed (10 requests/sec vs 3 requests/sec), obtain a free API key:
 
 1. Register at https://www.ncbi.nlm.nih.gov/account/
-2. Go to Settings → API Key Management
+2. Go to Settings > API Key Management
 3. Generate a new key
 
 ---
@@ -101,11 +104,16 @@ analyzer = StudyTransparencyAnalyzer(
     pubmed_api_key="optional_api_key"  # Optional
 )
 
-# Analyze by DOI
+# Analyze by DOI (API metadata only)
 report = analyzer.analyze(doi="10.1056/NEJMoa2034577")
 
-# Or by PMID
+# Analyze by PMID
 report = analyzer.analyze(pmid="33301246")
+
+# Analyze with full-text content for deeper analysis
+with open("article_fulltext.txt") as f:
+    fulltext = f.read()
+report = analyzer.analyze(doi="10.1056/NEJMoa2034577", fulltext=fulltext)
 
 # Access results
 print(f"Title: {report.title}")
@@ -113,6 +121,17 @@ print(f"Sponsor Type: {report.sponsor_type.value}")
 print(f"Industry Funded: {report.industry_funding_detected}")
 print(f"Transparency Score: {report.transparency_score}/100")
 print(f"Risk Indicators: {report.risk_of_bias_indicators}")
+
+# COI details
+if report.coi_info:
+    print(f"Industry Ties: {report.coi_info.has_industry_ties}")
+    print(f"COI Confidence: {report.coi_info.confidence}")
+    print(f"Relationships: {report.coi_info.disclosed_relationships}")
+
+# Data availability details
+if report.data_availability:
+    print(f"Data Level: {report.data_availability.disclosure_level.value}")
+    print(f"Restrictions: {report.data_availability.restrictions}")
 
 # Export to JSON
 import json
@@ -122,8 +141,12 @@ print(json.dumps(report.to_dict(), indent=2))
 ### Command Line Usage
 
 ```bash
-# Basic analysis
+# Basic analysis (API metadata only)
 python study_transparency_analyzer.py --pmid 33301246 --email your@email.com
+
+# With full-text file for deeper analysis
+python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" \
+    --email your@email.com --fulltext article.txt
 
 # With JSON output
 python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" \
@@ -199,6 +222,17 @@ The tool chains multiple APIs to gather comprehensive information:
 
 **API Documentation:** https://docs.openalex.org/
 
+### 6. Full-Text Content (Optional)
+
+**What it provides:**
+- Complete COI disclosure statements (often truncated in API metadata)
+- Data sharing/availability sections
+- Funding role sections
+- Acknowledgments with detailed industry relationships
+- Contributor/author role disclosures
+
+**Sources:** Can be provided from any source (Lancet, BMJ, JAMA, etc.) as plain text or markdown. The analyzer's `extract_fulltext_sections()` function parses standard biomedical section headers.
+
 ---
 
 ## Detection Methods
@@ -252,29 +286,90 @@ GOVERNMENT_PATTERNS = [
 
 **Confidence Level:** MEDIUM (0.5-0.8) - Heuristic-based
 
-#### Layer 4: COI Statement Analysis
+#### Layer 4: Named Pharma Company Detection in COI Statements
+
+A curated list of 40+ pharmaceutical and biotech company names is scanned against COI disclosure text:
 
 ```python
-# Patterns indicating industry ties in COI statements
-r'(?:received|reports?) (?:grants?|funding|honoraria) from'
-r'(?:consultant|advisory board|speaker) for'
-r'employee of'
-r'(?:stock|shares?|equity) in'
+KNOWN_PHARMA_NAMES = [
+    r'\bpfizer\b', r'\bastrazeneca\b', r'\bbayer\b',
+    r'\bglaxosmithkline\b', r'\bgsk\b',
+    r'\bjohnson\s*&\s*johnson\b', r'\bjanssen\b',
+    r'\beli\s+lilly\b', r'\blilly\b',
+    r'\bmerck\b', r'\bmsd\b', r'\bmerck sharp\b',
+    r'\bnovartis\b', r'\bnovo nordisk\b',
+    r'\broche\b', r'\bsanofi\b',
+    r'\bgilead\b', r'\babbvie\b', r'\bcelgene\b',
+    r'\bamgen\b', r'\bbristol[- ]?myers\b', r'\bbiogen\b',
+    r'\bboehringer\s+ingelheim\b',
+    r'\btakeda\b', r'\bregeneron\b', r'\bteva\b',
+    # ... and more
+]
 ```
 
-**Confidence Level:** MEDIUM (0.6-0.9) - Dependent on disclosure quality
+**Confidence Level:** HIGH (0.70-0.98) - Direct company name matching. Confidence scales with the number of unique companies found.
+
+#### Layer 5: Institutional Intermediary Detection
+
+Detects the common pattern where pharma money flows through universities or hospitals rather than directly to authors:
+
+```python
+INSTITUTIONAL_INTERMEDIARY_PATTERNS = [
+    r'(?:funding|grants?|support|contracts?)\s+(?:to|paid to)\s+(?:the\s+)?(?:university|institution|hospital)',
+    r'(?:but\s+)?no personal (?:funding|payment|honorari)',
+    r'(?:grants?|contracts?|funding)\s+(?:or\s+\w+\s+)?(?:to|paid to)\s+(?:his|her|their)\s+institution',
+    r'(?:research\s+)?grant\s+support\s+through\b',
+    r'salary\s+support\s+from\b',
+]
+```
+
+**Purpose:** Many COI statements claim "no personal funding" while the same paragraph names pharmaceutical companies that fund the author's institution. This layer ensures such disclosures are correctly classified as industry ties.
+
+**Confidence Level:** HIGH (0.80-0.98) - When combined with pharma name detection
+
+### COI Statement Analysis (Multi-Pass)
+
+The `analyze_coi_statement()` function uses a 4-pass approach:
+
+| Pass | Signal | Description |
+|------|--------|-------------|
+| **1** | Named pharma companies | Scan for 40+ pharma/biotech company names |
+| **2** | Institutional intermediaries | Detect "funding to institution from [pharma]" |
+| **3** | Generic industry keywords | "grants from", "honoraria", "advisory board", etc. |
+| **4** | "No conflict" declarations | Only trusted if statement < 500 chars AND no pharma names found |
+
+**Key design decision:** Long, detailed COI statements that name pharmaceutical companies are *disclosures*, not *denials*, even if they contain phrases like "no personal funding". The blanket denial check in Pass 4 is only applied to short statements that contain no pharma company names.
 
 ### Data Disclosure Level Detection
 
-The tool classifies data availability into five levels:
+The tool classifies data availability into five levels, using priority-ordered detection:
 
 | Level | Description | Detection Method |
 |-------|-------------|------------------|
 | `FULL_OPEN` | Data in public repository | Repository name detected (Zenodo, Figshare, GEO, etc.) |
-| `AVAILABLE_ON_REQUEST` | Available upon request | Phrases like "available upon reasonable request" |
-| `RESTRICTED` | Significant restrictions | IRB, ethics, confidentiality mentioned |
-| `NOT_AVAILABLE` | Explicitly not shared | "cannot be shared", "proprietary" |
+| `NOT_AVAILABLE` | Effectively unavailable | Sponsor confidentiality agreements, data not released, collaboration-locked |
+| `RESTRICTED` | Significant restrictions | IRB, ethics, on-request with conditions |
+| `AVAILABLE_ON_REQUEST` | Available upon request | "available upon reasonable request" (without restriction signals) |
 | `NOT_STATED` | No statement found | No data availability section detected |
+
+#### Effective Refusal Detection
+
+A key improvement is the detection of data sharing statements that *look like policies* but constitute effective refusals. These are now classified as `NOT_AVAILABLE` rather than `RESTRICTED`:
+
+```python
+DATA_REPOSITORIES['effectively_unavailable'] = [
+    # Data restricted to named collaboration with no external access
+    r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding',
+    # Multiple restriction signals in same statement
+    r'not be released.*(?:data custodians?|directly to)',
+    # Sponsor-gated access
+    r'(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))',
+]
+```
+
+Additionally, strong refusal patterns like "data will not be released", "sponsor agreements prevent disclosure", and "confidentiality agreements with sponsors" trigger `NOT_AVAILABLE` classification regardless of other language in the statement.
+
+**Human-readable restriction labels:** When restrictions are detected, the report includes descriptive labels (e.g., "Sponsor confidentiality agreement restricts access") rather than raw regex patterns.
 
 ### Trial Results Compliance
 
@@ -292,6 +387,61 @@ def check_results_compliance(trial, publication_date):
             return ResultsComplianceStatus.MISSING
 
     return ResultsComplianceStatus.UNKNOWN
+```
+
+---
+
+## Full-Text Analysis
+
+### Why Full Text Matters
+
+API metadata (PubMed, CrossRef, Europe PMC) provides a starting point, but often contains incomplete or truncated information. Full-text analysis provides:
+
+- **Complete COI statements** - PubMed often truncates long disclosures
+- **Data sharing sections** - Not always captured in API metadata
+- **Funding role details** - Who designed the study, collected data, etc.
+- **Acknowledgments** - Additional industry relationships not in COI
+
+### How It Works
+
+When the `fulltext` parameter is provided to `analyze()`, the function `extract_fulltext_sections()` scans for standard biomedical section headers and extracts the content:
+
+```python
+# Sections extracted (canonical key -> header patterns)
+section_headers = {
+    'coi': ['declaration of interests', 'conflict of interest', 'competing interests', 'disclosures'],
+    'data_sharing': ['data sharing', 'data availability', 'data access'],
+    'funding': ['funding', 'financial support', 'sources of funding'],
+    'funding_role': ['role of the funding source', 'role of the sponsor'],
+    'acknowledgments': ['acknowledgments', 'acknowledgements'],
+    'contributors': ['contributors', 'author contributions'],
+}
+```
+
+### Priority Order
+
+Full-text sections take priority over API-sourced data:
+
+1. **COI:** Full-text `coi` section > PubMed COI statement > Europe PMC
+2. **Data availability:** Full-text `data_sharing` section > Europe PMC XML extraction
+
+### Example
+
+```python
+analyzer = StudyTransparencyAnalyzer(email="your@email.com")
+
+# Read full text from file
+with open("lancet_article.txt") as f:
+    fulltext = f.read()
+
+# Full-text enriched analysis
+report = analyzer.analyze(
+    doi="10.1016/S0140-6736(25)01578-8",
+    fulltext=fulltext,
+)
+
+# Without full text: COI might be empty, data availability UNKNOWN
+# With full text: COI detects 20+ pharma relationships, data NOT_AVAILABLE
 ```
 
 ---
@@ -362,9 +512,32 @@ class DataDisclosureLevel(Enum):
     FULL_OPEN = "full_open"              # Data in public repository
     AVAILABLE_ON_REQUEST = "on_request"   # Available upon request
     RESTRICTED = "restricted"             # Significant restrictions
-    NOT_AVAILABLE = "not_available"       # Explicitly not shared
+    NOT_AVAILABLE = "not_available"       # Effectively unavailable
     NOT_STATED = "not_stated"             # No statement
     UNKNOWN = "unknown"
+```
+
+### ConflictOfInterest
+
+```python
+@dataclass
+class ConflictOfInterest:
+    statement: str                         # Raw COI statement text
+    has_industry_ties: bool                # Whether industry ties detected
+    disclosed_relationships: List[str]     # Extracted relationship descriptions
+    confidence: float                      # 0.0 to 1.0
+```
+
+### DataAvailabilityInfo
+
+```python
+@dataclass
+class DataAvailabilityInfo:
+    statement: Optional[str]               # Raw data availability statement
+    disclosure_level: DataDisclosureLevel   # Classification
+    repository_url: Optional[str]          # URL if open access
+    accession_number: Optional[str]        # Accession number if available
+    restrictions: List[str]                # Human-readable restriction descriptions
 ```
 
 ### Key Methods
@@ -374,17 +547,43 @@ class StudyTransparencyAnalyzer:
     def __init__(self, email: str, pubmed_api_key: Optional[str] = None):
         """Initialize with API credentials."""
 
-    def analyze(self, doi: str = None, pmid: str = None) -> TransparencyReport:
+    def analyze(
+        self,
+        doi: str = None,
+        pmid: str = None,
+        fulltext: str = None,
+    ) -> TransparencyReport:
         """
         Main analysis method.
 
         Args:
             doi: Digital Object Identifier
             pmid: PubMed ID
+            fulltext: Optional full-text content (plain text or markdown).
+                When provided, the analyzer extracts COI, data sharing,
+                and funding sections directly from the text, yielding
+                much richer analysis than API metadata alone.
 
         Returns:
             TransparencyReport with all analysis results
         """
+```
+
+### Standalone Functions
+
+```python
+def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
+    """Analyze a COI statement for industry ties using multi-pass detection."""
+
+def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
+    """Analyze a data availability statement with effective refusal detection."""
+
+def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
+    """Extract transparency-relevant sections from full-text content.
+
+    Returns dict with keys: 'coi', 'data_sharing', 'funding',
+    'funding_role', 'acknowledgments', 'contributors'.
+    """
 ```
 
 ---
@@ -399,6 +598,10 @@ python study_transparency_analyzer.py --pmid 33301246 --email you@email.com
 
 # By DOI
 python study_transparency_analyzer.py --doi "10.1056/NEJMoa2034577" --email you@email.com
+
+# With full-text file for deeper analysis
+python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
+    --fulltext article.txt
 
 # Output formats
 python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
@@ -415,34 +618,45 @@ python study_transparency_analyzer.py --pmid 33301246 --email you@email.com \
     --api-key YOUR_NCBI_API_KEY
 ```
 
+### CLI Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--doi` | One of doi/pmid | Digital Object Identifier |
+| `--pmid` | One of doi/pmid | PubMed ID |
+| `--email` | Yes | Contact email (required by APIs) |
+| `--api-key` | No | NCBI API key for higher rate limits |
+| `--fulltext` | No | Path to full-text file (plain text or markdown) |
+| `--output` | No | Output format: `summary`, `text`, or `json` (default: `summary`) |
+| `--output-file` | No | Write output to file instead of stdout |
+
 ### Example Output
 
 ```
 ============================================================
 STUDY TRANSPARENCY ANALYSIS
 ============================================================
-Title: Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine
-DOI: 10.1056/NEJMoa2034577
-PMID: 33301246
+Title: Efficacy and safety of statin therapy in older people...
+DOI: 10.1016/S0140-6736(25)01578-8
+PMID: N/A
 
-TRANSPARENCY SCORE: 65/100
+TRANSPARENCY SCORE: 25/100
 
 KEY FINDINGS:
-  • Sponsor Type: INDUSTRY
-  • Industry Funding: YES (confidence: 100%)
-  • Data Availability: Available on Request
-  • Trial Registration: YES (1 found)
-  • Results Compliance: COMPLIANT
-  • COI Disclosed: YES
+  * Sponsor Type: ACADEMIC
+  * Industry Funding: NO
+  * Data Availability: Not Available
+  * Trial Registration: None found
+  * COI Disclosed: YES (confidence: 98%)
 
-⚠️  RISK INDICATORS:
-  • Industry funding detected
-  • Authors have industry financial ties
+RISK INDICATORS:
+  * Authors have disclosed industry financial ties
+  * Industry funding routed through institutional intermediaries
+  * Data effectively unavailable despite sharing statement
+  * Industry ties combined with restricted/unavailable data
+  * Clinical trial without detected registration
 
-WARNINGS:
-  • Industry funding detected but data not fully open
-
-Data sources: PubMed, CrossRef, ClinicalTrials.gov
+Data sources: PubMed, CrossRef, Europe PMC, Full-text
 ============================================================
 ```
 
@@ -509,25 +723,27 @@ AGGREGATE FINDINGS:
 Industry-funded studies: 23 (48.9%)
 
 Data Availability Breakdown:
-  • Full open access: 8 (17.0%)
-  • Restricted/Not available: 19 (40.4%)
-  • No statement: 20 (42.6%)
+  * Full open access: 8 (17.0%)
+  * Effectively unavailable: 4 (8.5%)
+  * Restricted/Not available: 19 (40.4%)
+  * No statement: 20 (42.6%)
 
 Missing trial results (ClinicalTrials.gov): 5
 
 Average Transparency Score: 52.3/100
 
 Transparency Score Distribution:
-  • 0-25 (Poor): 5
-  • 26-50 (Below Average): 18
-  • 51-75 (Average): 19
-  • 76-100 (Good): 5
+  * 0-25 (Poor): 5
+  * 26-50 (Below Average): 18
+  * 51-75 (Average): 19
+  * 76-100 (Good): 5
 
 Most Common Risk Indicators:
-  • Industry funding detected: 23
-  • Authors have industry financial ties: 18
-  • No conflict of interest statement found: 12
-  • Industry-funded with restricted data access: 11
+  * Industry funding detected: 23
+  * Authors have industry financial ties: 18
+  * No conflict of interest statement found: 12
+  * Industry ties combined with restricted/unavailable data: 11
+  * Industry funding routed through institutional intermediaries: 7
 ======================================================================
 ```
 
@@ -537,26 +753,33 @@ Most Common Risk Indicators:
 
 ### Transparency Score
 
-The transparency score (0-100) is calculated based on:
+The transparency score (0-100) is calculated from a base of 50 points:
 
-| Factor | Points |
-|--------|--------|
-| **Data Availability** | |
-| Full open access | +20 |
-| Available on request | +10 |
-| Restricted | 0 |
-| Not available | -10 |
-| No statement | -5 |
-| **COI Disclosure** | |
-| Has COI statement | +10 |
-| No COI statement | -5 |
-| **Trial Registration** | |
-| Has registration | +10 |
-| Results posted | +5 |
-| Results missing | -10 |
-| **Penalties** | |
-| Outcome switching detected | -15 |
-| Industry + no data sharing | -10 |
+| Factor | Points | Notes |
+|--------|--------|-------|
+| **Data Availability** | | |
+| Full open access | +20 | Data in a public repository |
+| Available on request | +5 | Reduced from +10; "on request" often means no access |
+| Restricted | -5 | IRB, ethics committee, or other restrictions |
+| Not available | -15 | Effectively unavailable or explicitly denied |
+| No statement | -5 | No data availability section found |
+| **COI Disclosure** | | |
+| Has COI statement (no industry ties) | +5 | Credit for disclosure |
+| Has COI statement (with industry ties) | 0 | +5 for disclosure, -5 for industry ties |
+| No COI statement | -5 | |
+| **Trial Registration** | | |
+| Has registration | +10 | |
+| Results posted (compliant) | +5 | |
+| Results missing (overdue) | -10 | |
+| **Penalties** | | |
+| Outcome switching detected | -15 | |
+| Industry ties + restricted/unavailable data | -10 | Compound penalty |
+
+**Scoring philosophy:**
+- Having a COI statement is valued (disclosure), but disclosed industry ties still reduce the score because the underlying situation carries bias risk regardless of disclosure quality.
+- "Available on request" receives only +5 points (not +10) because research shows these requests are frequently denied.
+- Industry ties through institutional intermediaries are scored identically to direct ties.
+- The compound penalty for industry ties + restricted data reflects the particularly concerning situation where independent verification is impossible.
 
 **Interpretation:**
 - **76-100**: Good transparency
@@ -571,8 +794,12 @@ Common indicators and their implications:
 | Indicator | Implication |
 |-----------|-------------|
 | "Industry funding detected" | Potential financial bias; outcomes may favor sponsor |
-| "Authors have industry financial ties" | Personal financial interests may influence reporting |
+| "Authors have disclosed industry financial ties" | Personal financial interests may influence reporting |
+| "Industry funding routed through institutional intermediaries" | Pharma money flows through universities; bias risk same as direct funding |
 | "Industry-funded with restricted data access" | Cannot independently verify findings |
+| "Data effectively unavailable despite sharing statement" | Statement exists but data is systematically denied |
+| "Industry ties combined with restricted/unavailable data" | Most concerning combination: industry influence + no independent verification |
+| "Data access restricted" | Data available but with significant barriers |
 | "Trial results not posted to ClinicalTrials.gov" | Possible selective reporting; legally required for many trials |
 | "Clinical trial without detected registration" | Cannot verify pre-specified outcomes |
 | "No conflict of interest statement found" | May have undisclosed conflicts |
@@ -580,20 +807,29 @@ Common indicators and their implications:
 ### Confidence Scores
 
 - **1.0**: Authoritative source (Funder Registry DOI, official classification)
-- **0.7-0.9**: Strong pattern match with corroborating evidence
-- **0.5-0.7**: Pattern match without corroboration
-- **< 0.5**: Weak evidence, high uncertainty
+- **0.7-0.98**: Named pharma company detection (scales with number of unique companies)
+- **0.5-0.7**: Generic industry keyword match without corroboration
+- **0.3**: Statement present but no clear signals
+- **0.0**: No statement available
 
 ---
 
 ## Limitations & Caveats
 
+### What This Tool Can Now Detect
+
+1. **Institutional-Intermediary Industry Funding** - Pharma money routed through universities is now detected via `INSTITUTIONAL_INTERMEDIARY_PATTERNS` and `KNOWN_PHARMA_NAMES`
+
+2. **Effective Data Refusals** - Data sharing statements that sound like policies but constitute refusals (e.g., "confidentiality agreements with sponsors prevent disclosure") are now classified as `NOT_AVAILABLE`
+
+3. **Long COI Statements with Blanket Phrasing** - A 10,000-character COI naming 20 pharma companies is correctly identified as an industry-tied disclosure, even if it contains "no personal funding"
+
 ### What This Tool Cannot Detect
 
-1. **Indirect Industry Influence**
-   - Contract research organizations (CROs) acting as intermediaries
+1. **Undisclosed Industry Relationships**
    - Ghost authorship (industry employees writing without attribution)
-   - Consultant arrangements not disclosed in COI statements
+   - Consultant arrangements not mentioned in COI statements
+   - Relationships disclosed only in supplementary materials not in the full text
 
 2. **Selective Outcome Reporting**
    - The tool can detect if trial registration exists but NLP comparison of registered vs. reported outcomes is limited
@@ -611,6 +847,9 @@ Common indicators and their implications:
    - Observational studies, case series, etc. may not have trial registrations
    - Industry influence harder to detect without clear funding statements
 
+6. **Novel Pharma Companies**
+   - The `KNOWN_PHARMA_NAMES` list covers 40+ major companies but cannot detect every startup or regional pharmaceutical company
+
 ### Data Quality Considerations
 
 | Data Source | Coverage | Reliability | Notes |
@@ -618,8 +857,10 @@ Common indicators and their implications:
 | CrossRef Funders | ~60% of articles | High | Best for recent publications |
 | PubMed Grants | Variable | Medium | Depends on journal indexing |
 | ClinicalTrials.gov | Required trials only | High | US-focused; FDAAA scope |
-| COI Statements | Variable | Medium | Quality varies by journal |
+| COI Statements (API) | Variable | Medium | Often truncated |
+| COI Statements (Full Text) | High | High | Complete text; best signal source |
 | Data Availability | ~40% of articles | Medium | Relatively new requirement |
+| Full-Text Sections | Depends on access | High | Best results with complete text |
 
 ### False Positives/Negatives
 
@@ -627,15 +868,25 @@ Common indicators and their implications:
 - Academic medical centers with pharma-sounding names
 - Non-profit organizations with industry ties
 - Investigator-initiated studies with industry drug supply
+- Legitimate data protection requirements (rare diseases, identifiable patients)
 
 **False Negatives (Under-detection):**
 - Studies funded through unrestricted educational grants
 - Authors with undisclosed conflicts
 - Studies in journals not indexed in PubMed
+- Novel or small pharmaceutical companies not in `KNOWN_PHARMA_NAMES`
+- Data restrictions described only in supplementary files
 
 ---
 
 ## Extending the Tool
+
+### Adding New Pharma Companies
+
+```python
+# Add to KNOWN_PHARMA_NAMES in study_transparency_analyzer.py
+KNOWN_PHARMA_NAMES.append(r'\bnew pharma name\b')
+```
 
 ### Adding New Industry Funders
 
@@ -645,6 +896,24 @@ KNOWN_INDUSTRY_FUNDER_DOIS["10.13039/XXXXXXXXXX"] = "New Pharma Company"
 ```
 
 Find Funder Registry DOIs at: https://www.crossref.org/services/funder-registry/
+
+### Adding New Effective Refusal Patterns
+
+```python
+# Add to DATA_REPOSITORIES['effectively_unavailable']
+DATA_REPOSITORIES['effectively_unavailable'].append(
+    r'new pattern for detecting data refusals'
+)
+```
+
+### Adding New Intermediary Patterns
+
+```python
+# Add to INSTITUTIONAL_INTERMEDIARY_PATTERNS
+INSTITUTIONAL_INTERMEDIARY_PATTERNS.append(
+    r'new pattern for institutional intermediary funding'
+)
+```
 
 ### Custom Classification Rules
 
@@ -682,21 +951,6 @@ class ExtendedAnalyzer(StudyTransparencyAnalyzer):
     def _fetch_additional_data(self, report: TransparencyReport):
         data = self.new_source.get_data(report.doi)
         # Process and add to report
-```
-
-### Async Version for High-Throughput
-
-```python
-import aiohttp
-import asyncio
-
-class AsyncStudyAnalyzer:
-    """Async version for analyzing many studies quickly."""
-
-    async def analyze_batch(self, identifiers: List[str]) -> List[TransparencyReport]:
-        async with aiohttp.ClientSession() as session:
-            tasks = [self._analyze_single(session, id) for id in identifiers]
-            return await asyncio.gather(*tasks)
 ```
 
 ---
@@ -742,7 +996,7 @@ class AsyncStudyAnalyzer:
 
 ## License
 
-MIT License - Free for academic and commercial use.
+GNU Affero General Public License v3.0 (AGPL-3.0) - Part of BMLibrarian Lite.
 
 ## Contributing
 
@@ -751,6 +1005,8 @@ Contributions welcome! Areas of particular interest:
 - Additional regional trial registries (EudraCT, ISRCTN, etc.)
 - Machine learning for COI statement analysis
 - Integration with Retraction Watch database
+- Expansion of `KNOWN_PHARMA_NAMES` for regional pharmaceutical companies
+- Additional effective refusal patterns for data availability statements
 
 ---
 

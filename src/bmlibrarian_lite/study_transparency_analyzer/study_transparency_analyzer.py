@@ -203,7 +203,7 @@ KNOWN_INDUSTRY_FUNDER_DOIS = {
 
 # Keywords indicating industry affiliation in text
 INDUSTRY_KEYWORDS = [
-    r'\bpharma(?:ceutical)?\b',
+    r'\bpharma(?:ceutical)?s?\b',
     r'\bbiotech(?:nology)?\b',
     r'\bmedical device\b',
     r'\bdrug compan(?:y|ies)\b',
@@ -221,6 +221,48 @@ INDUSTRY_KEYWORDS = [
     r'\bspeaker(?:\'s)? (?:bureau|fee)\b',
     r'\bhonorari(?:a|um)\b',
     r'\bgrant(?:s)? from\b',
+]
+
+# Known pharmaceutical/biotech company names for direct matching in COI text.
+# These detect industry ties even when funding is routed through institutions.
+KNOWN_PHARMA_NAMES = [
+    r'\bpfizer\b', r'\bastrazeneca\b', r'\bbayer\b',
+    r'\bglaxosmithkline\b', r'\bgsk\b',
+    r'\bjohnson\s*&\s*johnson\b', r'\bjanssen\b',
+    r'\beli\s+lilly\b', r'\blilly\b',
+    r'\bmerck\b', r'\bmsd\b', r'\bmerck sharp\b',
+    r'\bnovartis\b', r'\bnovo nordisk\b',
+    r'\broche\b', r'\bsanofi\b',
+    r'\bgilead\b', r'\babbvie\b', r'\bcelgene\b',
+    r'\bamgen\b', r'\bbristol[- ]?myers\b', r'\bbiogen\b',
+    r'\bboehringer\s+ingelheim\b',
+    r'\btakeda\b', r'\bucb\b', r'\bregeneron\b',
+    r'\bteva\b', r'\ballergan\b', r'\bmedtronic\b',
+    r'\bboston scientific\b', r'\babbott\b',
+    r'\bviatris\b', r'\bcsl behring\b',
+    r'\bdaiichi[- ]?sankyo\b', r'\beisai\b',
+    r'\bastellas\b', r'\bsumitomo\b',
+    r'\bservier\b', r'\bsandoz\b',
+    r'\bchugai\b', r'\bkyowa\b', r'\bkowa\b',
+    r'\besperion\b', r'\banthos\b',
+    r'\bsingulex\b', r'\bcleerly\b',
+]
+
+# Patterns for institutional-intermediary industry funding in COI statements.
+# These detect the common pattern where pharma money flows to a university/
+# institution rather than directly to the author, often phrased as:
+#   "funding to the University of X (but no personal funding) from [pharma]"
+INSTITUTIONAL_INTERMEDIARY_PATTERNS = [
+    # "funding/grants to [institution] from [company]"
+    r'(?:funding|grants?|support|contracts?)\s+(?:to|paid to)\s+(?:the\s+)?(?:university|institution|hospital)',
+    # "(but no personal funding) from" - classic intermediary disclaimer
+    r'(?:but\s+)?no personal (?:funding|payment|honorari)',
+    # "grants or contracts to his/her/their institution"
+    r'(?:grants?|contracts?|funding)\s+(?:or\s+\w+\s+)?(?:to|paid to)\s+(?:his|her|their)\s+institution',
+    # "research grant support through [institution]"
+    r'(?:research\s+)?grant\s+support\s+through\b',
+    # "salary support from [center] which gets research grant support from"
+    r'salary\s+support\s+from\b',
 ]
 
 # Known government/academic funder patterns
@@ -260,7 +302,26 @@ DATA_REPOSITORIES = {
         r'proprietary',
         r'cannot be shared',
         r'not (?:publicly )?available',
-    ]
+        # Effective refusals dressed as policy
+        r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)',
+        r'not be released to others',
+        r'requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to',
+        r'on the understanding that\b.*\bnot\b',
+        r'used only for the purpose of\b',
+        r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent',
+        r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
+        r'data\s+custodians?\b',
+    ],
+    # Patterns that indicate an effectively unavailable dataset, where the
+    # sharing statement reads like a policy but access is systematically denied.
+    'effectively_unavailable': [
+        # Data restricted to named collaboration with no external access
+        r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding',
+        # Multiple restriction signals in same statement
+        r'not be released.*(?:data custodians?|directly to)',
+        # Sponsor-gated access
+        r'(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))',
+    ],
 }
 
 
@@ -724,7 +785,19 @@ class OpenAlexClient:
 # =============================================================================
 
 def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
-    """Analyze conflict of interest statement for industry ties."""
+    """Analyze conflict of interest statement for industry ties.
+
+    Uses a multi-pass approach:
+    1. Scan for named pharmaceutical companies (highest signal).
+    2. Detect institutional-intermediary funding patterns where industry
+       money flows to a university/institution rather than the author.
+    3. Check generic industry keywords.
+    4. Only then check for "no conflict" declarations — and only if
+       the statement is short and contains no pharma company names.
+       Long, detailed COI statements that name pharma companies are
+       disclosures, not denials, even if they contain phrases like
+       "no personal funding".
+    """
     if not coi_text:
         return ConflictOfInterest(
             statement="",
@@ -734,55 +807,130 @@ def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
 
     coi_lower = coi_text.lower()
 
-    # Check for explicit "no conflicts" statements
-    no_conflict_patterns = [
-        r'no (?:potential )?conflict',
-        r'nothing to (?:disclose|declare)',
-        r'no (?:competing|financial) interest',
-        r'no relationship',
-        r'none (?:declared|to declare)',
-    ]
+    # --- Pass 1: Named pharmaceutical company detection ---
+    pharma_companies_found = []
+    for pattern in KNOWN_PHARMA_NAMES:
+        matches = re.findall(pattern, coi_lower)
+        if matches:
+            pharma_companies_found.extend(matches)
 
-    for pattern in no_conflict_patterns:
+    # --- Pass 2: Institutional intermediary patterns ---
+    intermediary_signals = []
+    for pattern in INSTITUTIONAL_INTERMEDIARY_PATTERNS:
         if re.search(pattern, coi_lower):
-            return ConflictOfInterest(
-                statement=coi_text,
-                has_industry_ties=False,
-                confidence=0.9
-            )
+            intermediary_signals.append(pattern)
 
-    # Check for industry-related keywords
-    industry_matches = []
+    # --- Pass 3: Generic industry keywords ---
+    industry_keyword_matches = []
     for pattern in INDUSTRY_KEYWORDS:
         matches = re.findall(pattern, coi_lower)
-        industry_matches.extend(matches)
+        industry_keyword_matches.extend(matches)
 
-    has_industry = len(industry_matches) > 0
-    confidence = min(0.5 + len(industry_matches) * 0.1, 0.95) if has_industry else 0.5
+    # --- Pass 4: "No conflict" declarations ---
+    # Only trust these if the statement is short (< 500 chars) AND
+    # no pharma companies were named. Long COI statements that name
+    # specific companies are disclosures, not blanket denials.
+    no_conflict_patterns = [
+        r'no (?:potential )?conflicts?(?:\s+of\s+interest)?',
+        r'nothing to (?:disclose|declare)',
+        r'no (?:competing|financial) interests?',
+        r'no relationships?(?:\s+to\s+disclose)?',
+        r'none (?:declared|to declare)',
+        r'no competing interests',
+        r'declare no competing interests',
+    ]
 
-    # Extract specific relationships mentioned
+    blanket_denial = False
+    if len(coi_text) < 500 and not pharma_companies_found:
+        for pattern in no_conflict_patterns:
+            if re.search(pattern, coi_lower):
+                blanket_denial = True
+                break
+
+    if blanket_denial:
+        return ConflictOfInterest(
+            statement=coi_text,
+            has_industry_ties=False,
+            confidence=0.9
+        )
+
+    # --- Determine industry ties and confidence ---
+    has_industry = False
+    confidence = 0.3  # baseline for any statement without clear signals
+
+    # Pharma company names are the strongest signal
+    if pharma_companies_found:
+        has_industry = True
+        n = len(set(pharma_companies_found))
+        confidence = min(0.7 + n * 0.03, 0.98)
+
+    # Intermediary patterns boost confidence further
+    if intermediary_signals:
+        has_industry = True
+        confidence = min(confidence + 0.1, 0.98)
+
+    # Generic keywords as fallback
+    if industry_keyword_matches and not pharma_companies_found:
+        has_industry = True
+        confidence = min(0.5 + len(industry_keyword_matches) * 0.1, 0.90)
+
+    # --- Extract specific relationships mentioned ---
     relationships = []
     relationship_patterns = [
-        r'(?:received|reports?|has|have) (?:grants?|funding|honoraria|fees?|payments?) from ([^.;]+)',
-        r'(?:consultant|advisory board|speaker) for ([^.;]+)',
-        r'employee of ([^.;]+)',
-        r'(?:stock|shares?|equity) in ([^.;]+)',
+        # Direct grants/funding from companies
+        r'(?:received|reports?|has|have|declares?|discloses?)\s+'
+        r'(?:grants?|funding|honoraria|fees?|payments?|support)\s+'
+        r'(?:from|by)\s+([^.;]+)',
+        # Institutional grants from companies (the intermediary pattern)
+        r'(?:funding|grants?|contracts?|support)\s+'
+        r'(?:to\s+(?:the\s+)?(?:university|institution)\s+(?:of\s+)?\w+\s+)?'
+        r'(?:\([^)]*\)\s*)?from\s+([^.;]+)',
+        # Consulting/advisory roles
+        r'(?:consult(?:ant|ing)|advisory board|speaker)\s+(?:for|with)\s+([^.;]+)',
+        # Employment
+        r'(?:employee|employed)\s+(?:of|by|at)\s+([^.;]+)',
+        # Stock/equity
+        r'(?:stock|shares?|equity|stock options?)\s+(?:in|of)\s+([^.;]+)',
+        # DSMB/steering committee roles for pharma trials
+        r'(?:dsmb|data\s+(?:and\s+)?safety\s+monitoring|steering\s+committee)\s+'
+        r'(?:for|of|member\s+for)\s+(?:the\s+)?(?:\w+\s+){0,3}(?:trial|study)\s+'
+        r'(?:of\s+\w+\s+)?(?:supported\s+by|funded\s+by|from)\s+([^.;]+)',
     ]
 
     for pattern in relationship_patterns:
         matches = re.findall(pattern, coi_lower)
-        relationships.extend(matches)
+        relationships.extend(m.strip() for m in matches if len(m.strip()) > 2)
+
+    # Deduplicate and clean
+    clean_relationships = []
+    seen = set()
+    for rel in relationships:
+        # Trim overly long captures
+        rel = rel[:200].strip().rstrip(',')
+        if rel not in seen and len(rel) > 2:
+            seen.add(rel)
+            clean_relationships.append(rel)
 
     return ConflictOfInterest(
         statement=coi_text,
         has_industry_ties=has_industry,
-        disclosed_relationships=list(set(relationships)),
+        disclosed_relationships=clean_relationships,
         confidence=confidence
     )
 
 
 def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
-    """Analyze data availability statement."""
+    """Analyze data availability statement.
+
+    Uses a priority-ordered approach:
+    1. Check for genuinely open data (public repositories).
+    2. Check for effectively unavailable data — statements that read
+       like policies but constitute refusals (e.g., "data will not be
+       released to others", "confidentiality agreements with sponsors
+       prevent disclosure").
+    3. Check for restricted/on-request access.
+    4. Fall back to UNKNOWN if no patterns match.
+    """
     if not text:
         return DataAvailabilityInfo(
             disclosure_level=DataDisclosureLevel.NOT_STATED
@@ -790,45 +938,236 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
 
     text_lower = text.lower()
 
-    # Check for full open access indicators
+    # --- Step 1: Check for full open access indicators ---
     for repo_pattern in DATA_REPOSITORIES['full_open']:
         if re.search(repo_pattern, text_lower):
-            # Try to extract repository URL
             url_match = re.search(r'https?://[^\s<>"]+', text)
-            accession_match = re.search(r'(?:accession|identifier)[:\s]+([A-Z0-9]+)', text, re.I)
+            accession_match = re.search(
+                r'(?:accession|identifier)[:\s]+([A-Z0-9]+)', text, re.I
+            )
 
             return DataAvailabilityInfo(
                 statement=text,
                 disclosure_level=DataDisclosureLevel.FULL_OPEN,
                 repository_url=url_match.group(0) if url_match else None,
-                accession_number=accession_match.group(1) if accession_match else None
+                accession_number=(
+                    accession_match.group(1) if accession_match else None
+                ),
             )
 
-    # Check for restricted access indicators
+    # --- Step 2: Check for effectively unavailable data ---
+    # These are statements that look like sharing policies but amount
+    # to a refusal — data locked behind collaborations, sponsor
+    # confidentiality agreements, or systematic gatekeeping.
+
+    # Map patterns to human-readable descriptions for the restrictions list
+    _restriction_labels = {
+        r'cannot be shared': "Data cannot be shared",
+        r'not (?:publicly )?available': "Data not publicly available",
+        r'proprietary': "Data described as proprietary",
+        r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)':
+            "Data will not be released",
+        r'not be released to others': "Data will not be released to others",
+        r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent':
+            "Sponsor agreements prevent disclosure",
+        r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?':
+            "Confidentiality agreements with sponsors",
+        r'upon (?:reasonable )?request': "Available upon request",
+        r'available from (?:the )?(?:corresponding )?author':
+            "Available from author",
+        r'contact (?:the )?(?:corresponding )?author':
+            "Contact corresponding author",
+        r'data sharing agreement': "Requires data sharing agreement",
+        r'institutional review board': "Requires IRB approval",
+        r'irb approval': "Requires IRB approval",
+        r'ethics committee': "Requires ethics committee approval",
+        r'confidential(?:ity)?': "Confidentiality restrictions",
+        r'requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to':
+            "Data requests redirected to third party",
+        r'on the understanding that\b.*\bnot\b':
+            "Data provided under restrictive understanding",
+        r'used only for the purpose of\b':
+            "Data restricted to specific purpose",
+        r'data\s+custodians?\b': "Data held by custodians (not authors)",
+        r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding':
+            "Data restricted to named collaboration",
+        r'not be released.*(?:data custodians?|directly to)':
+            "Data will not be released; requests redirected",
+        r'(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))':
+            "Sponsor confidentiality agreement restricts access",
+    }
+
+    def _label_for_pattern(pattern: str) -> str:
+        return _restriction_labels.get(pattern, pattern)
+
+    effectively_unavailable_signals = []
+    for pattern in DATA_REPOSITORIES.get('effectively_unavailable', []):
+        if re.search(pattern, text_lower):
+            effectively_unavailable_signals.append(_label_for_pattern(pattern))
+
+    strong_refusal_patterns = [
+        r'cannot be shared',
+        r'not (?:publicly )?available',
+        r'proprietary',
+        r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)',
+        r'not be released to others',
+        r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent',
+        r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
+    ]
+    strong_refusal_found = False
+    for pattern in strong_refusal_patterns:
+        if re.search(pattern, text_lower):
+            strong_refusal_found = True
+            break
+
+    if effectively_unavailable_signals or strong_refusal_found:
+        restrictions = list(effectively_unavailable_signals)
+        for pattern in DATA_REPOSITORIES['restricted']:
+            if re.search(pattern, text_lower):
+                label = _label_for_pattern(pattern)
+                if label not in restrictions:
+                    restrictions.append(label)
+
+        return DataAvailabilityInfo(
+            statement=text,
+            disclosure_level=DataDisclosureLevel.NOT_AVAILABLE,
+            restrictions=restrictions,
+        )
+
+    # --- Step 3: Check for restricted/on-request access ---
     restrictions = []
     for pattern in DATA_REPOSITORIES['restricted']:
         if re.search(pattern, text_lower):
-            restrictions.append(pattern)
+            restrictions.append(_label_for_pattern(pattern))
 
     if restrictions:
-        if any(p in ['cannot be shared', 'not (?:publicly )?available', 'proprietary']
-               for p in restrictions):
-            return DataAvailabilityInfo(
-                statement=text,
-                disclosure_level=DataDisclosureLevel.NOT_AVAILABLE,
-                restrictions=restrictions
-            )
-        else:
-            return DataAvailabilityInfo(
-                statement=text,
-                disclosure_level=DataDisclosureLevel.AVAILABLE_ON_REQUEST,
-                restrictions=restrictions
-            )
+        return DataAvailabilityInfo(
+            statement=text,
+            disclosure_level=DataDisclosureLevel.RESTRICTED,
+            restrictions=restrictions,
+        )
 
     return DataAvailabilityInfo(
         statement=text,
-        disclosure_level=DataDisclosureLevel.UNKNOWN
+        disclosure_level=DataDisclosureLevel.UNKNOWN,
     )
+
+
+def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
+    """Extract transparency-relevant sections from full-text content.
+
+    Scans for common section headers used in biomedical articles and
+    returns the text content following each header until the next
+    recognised section begins.
+
+    Args:
+        fulltext: Plain-text (or simple markdown) article content.
+
+    Returns:
+        Dictionary mapping section names to their text content.
+        Keys may include: 'coi', 'data_sharing', 'funding',
+        'funding_role', 'acknowledgments', 'contributors'.
+    """
+    # Map of canonical key -> list of header patterns (case-insensitive)
+    section_headers: Dict[str, List[str]] = {
+        'coi': [
+            'declaration of interests',
+            'declarations? of interest',
+            'conflict of interest',
+            'conflicts? of interest',
+            'competing interests?',
+            'disclosures?',
+        ],
+        'data_sharing': [
+            'data sharing',
+            'data availability',
+            'data access',
+            'availability of data',
+        ],
+        'funding': [
+            'funding',
+            'financial support',
+            'grant support',
+            'sources? of (?:support|funding)',
+        ],
+        'funding_role': [
+            'role of the funding source',
+            'role of the funder',
+            'role of the sponsor',
+            'funder role',
+        ],
+        'acknowledgments': [
+            'acknowledgm?ents?',
+        ],
+        'contributors': [
+            'contributors?',
+            'author contributions?',
+        ],
+    }
+
+    # All possible headers as a flat list (for detecting section boundaries)
+    all_header_patterns = []
+    for patterns in section_headers.values():
+        all_header_patterns.extend(patterns)
+
+    lines = fulltext.split('\n')
+    sections: Dict[str, str] = {}
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or len(stripped) > 120:
+            continue
+
+        stripped_lower = stripped.lower()
+
+        for key, patterns in section_headers.items():
+            if key in sections:
+                continue  # Already found this section
+
+            for pattern in patterns:
+                if re.search(
+                    rf'^(?:#*\s*)?{pattern}\s*:?\s*$',
+                    stripped_lower,
+                ):
+                    # Found a header — collect content until next section
+                    content_lines = []
+                    for j in range(i + 1, len(lines)):
+                        next_stripped = lines[j].strip()
+                        if not next_stripped:
+                            content_lines.append('')
+                            continue
+
+                        # Stop at next recognised section header
+                        if len(next_stripped) <= 120:
+                            next_lower = next_stripped.lower()
+                            is_next_header = False
+                            for hp in all_header_patterns:
+                                if re.search(
+                                    rf'^(?:#*\s*)?{hp}\s*:?\s*$',
+                                    next_lower,
+                                ):
+                                    is_next_header = True
+                                    break
+                            # Also stop at references section
+                            if re.search(
+                                r'^(?:#*\s*)?(?:references?|bibliography|supplementary)\s*',
+                                next_lower,
+                            ):
+                                is_next_header = True
+
+                            if is_next_header:
+                                break
+
+                        content_lines.append(next_stripped)
+
+                    text = ' '.join(
+                        ln for ln in content_lines if ln
+                    ).strip()
+                    if text:
+                        sections[key] = text
+                    break  # Done with this header pattern set
+
+    return sections
 
 
 def check_results_compliance(trial: TrialRegistration, publication_date: Optional[datetime]) -> ResultsComplianceStatus:
@@ -855,7 +1194,17 @@ def check_results_compliance(trial: TrialRegistration, publication_date: Optiona
 
 
 def calculate_transparency_score(report: TransparencyReport) -> float:
-    """Calculate overall transparency score (0-100)."""
+    """Calculate overall transparency score (0-100).
+
+    Scoring philosophy:
+    - Having a COI statement is good (disclosure is valued), but industry
+      ties disclosed via COI reduce the score because the underlying
+      situation carries bias risk regardless of disclosure quality.
+    - Effectively unavailable data is worse than restricted access.
+    - Industry ties through institutional intermediaries are scored the
+      same as direct ties — the bias risk is the same even if the money
+      doesn't reach the author's personal bank account.
+    """
     score = 50.0  # Base score
 
     # Data availability (+/- 20 points)
@@ -864,18 +1213,22 @@ def calculate_transparency_score(report: TransparencyReport) -> float:
         if level == DataDisclosureLevel.FULL_OPEN:
             score += 20
         elif level == DataDisclosureLevel.AVAILABLE_ON_REQUEST:
-            score += 10
+            score += 5
         elif level == DataDisclosureLevel.RESTRICTED:
-            score += 0
+            score -= 5
         elif level == DataDisclosureLevel.NOT_AVAILABLE:
-            score -= 10
+            score -= 15
         elif level == DataDisclosureLevel.NOT_STATED:
             score -= 5
 
-    # COI disclosure (+/- 10 points)
+    # COI disclosure (+/- 15 points)
     if report.coi_info:
         if report.coi_info.statement:
-            score += 10  # Has COI statement
+            score += 5  # Credit for having a statement at all
+            if report.coi_info.has_industry_ties:
+                # Disclosed industry ties: credit for transparency,
+                # but the underlying situation carries bias risk
+                score -= 5
         else:
             score -= 5  # No COI statement
 
@@ -891,10 +1244,18 @@ def calculate_transparency_score(report: TransparencyReport) -> float:
     if report.outcome_switching_detected:
         score -= 15
 
-    # Industry funding without full disclosure
-    if report.industry_funding_detected:
-        if report.data_availability and report.data_availability.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE:
-            score -= 10
+    # Industry ties combined with restricted data is especially concerning
+    has_industry_ties = (
+        report.industry_funding_detected
+        or (report.coi_info and report.coi_info.has_industry_ties)
+    )
+    if has_industry_ties:
+        if report.data_availability:
+            if report.data_availability.disclosure_level in (
+                DataDisclosureLevel.NOT_AVAILABLE,
+                DataDisclosureLevel.RESTRICTED,
+            ):
+                score -= 10  # Industry ties + restricted data
 
     return max(0, min(100, score))
 
@@ -920,13 +1281,22 @@ class StudyTransparencyAnalyzer:
         self.europepmc = EuropePMCClient()
         self.openalex = OpenAlexClient(email)
 
-    def analyze(self, doi: str = None, pmid: str = None) -> TransparencyReport:
+    def analyze(
+        self,
+        doi: str = None,
+        pmid: str = None,
+        fulltext: str = None,
+    ) -> TransparencyReport:
         """
         Analyze a study for transparency indicators.
 
         Args:
             doi: Digital Object Identifier
             pmid: PubMed ID
+            fulltext: Optional full-text content (plain text or markdown).
+                When provided, the analyzer extracts COI, data sharing,
+                and funding sections directly from the text, yielding
+                much richer analysis than API metadata alone.
 
         Returns:
             TransparencyReport with analysis results
@@ -941,6 +1311,17 @@ class StudyTransparencyAnalyzer:
         report.doi = doi
         report.pmid = pmid
 
+        # Extract sections from full text if provided
+        fulltext_sections = {}
+        if fulltext:
+            fulltext_sections = extract_fulltext_sections(fulltext)
+            report.data_sources_used.append("Full-text")
+            if fulltext_sections:
+                logger.info(
+                    "Extracted full-text sections: %s",
+                    list(fulltext_sections.keys()),
+                )
+
         # Step 1: Get basic metadata and resolve IDs
         self._fetch_basic_metadata(report)
 
@@ -950,11 +1331,11 @@ class StudyTransparencyAnalyzer:
         # Step 3: Get trial registration info
         self._fetch_trial_info(report)
 
-        # Step 4: Analyze COI statement
-        self._analyze_conflicts(report)
+        # Step 4: Analyze COI statement (full text overrides API data)
+        self._analyze_conflicts(report, fulltext_sections)
 
-        # Step 5: Analyze data availability
-        self._analyze_data_availability(report)
+        # Step 5: Analyze data availability (full text overrides API data)
+        self._analyze_data_availability(report, fulltext_sections)
 
         # Step 6: Calculate transparency score
         report.transparency_score = calculate_transparency_score(report)
@@ -1132,12 +1513,29 @@ class StudyTransparencyAnalyzer:
                     if compliance != ResultsComplianceStatus.UNKNOWN:
                         report.results_compliance = compliance
 
-    def _analyze_conflicts(self, report: TransparencyReport):
-        """Analyze conflict of interest disclosures."""
+    def _analyze_conflicts(
+        self,
+        report: TransparencyReport,
+        fulltext_sections: Optional[Dict[str, str]] = None,
+    ):
+        """Analyze conflict of interest disclosures.
 
-        coi_text = getattr(report, '_coi_statement', None)
+        Args:
+            report: TransparencyReport being built.
+            fulltext_sections: Optional dict from extract_fulltext_sections().
+                The 'coi' key, if present, takes priority over API data
+                because it contains the complete disclosure text.
+        """
+        # Priority: full-text COI section > PubMed COI statement > Europe PMC
+        coi_text = None
 
-        # Try to get from Europe PMC if not in PubMed
+        if fulltext_sections and fulltext_sections.get('coi'):
+            coi_text = fulltext_sections['coi']
+            logger.info("Using COI statement from full-text (%d chars)", len(coi_text))
+        else:
+            coi_text = getattr(report, '_coi_statement', None)
+
+        # Try to get from Europe PMC if still missing
         if not coi_text and (report.pmid or report.pmcid):
             europepmc_data = self.europepmc.get_article(
                 pmid=report.pmid,
@@ -1145,7 +1543,6 @@ class StudyTransparencyAnalyzer:
             )
             if europepmc_data:
                 report.data_sources_used.append("Europe PMC")
-                # Europe PMC may have COI in full text
 
         report.coi_info = analyze_coi_statement(coi_text)
 
@@ -1156,21 +1553,32 @@ class StudyTransparencyAnalyzer:
                     "Industry funding detected but COI statement does not mention industry ties"
                 )
 
-    def _analyze_data_availability(self, report: TransparencyReport):
-        """Analyze data availability and sharing."""
+    def _analyze_data_availability(
+        self,
+        report: TransparencyReport,
+        fulltext_sections: Optional[Dict[str, str]] = None,
+    ):
+        """Analyze data availability and sharing.
 
-        # Try to get data availability statement from full text
+        Args:
+            report: TransparencyReport being built.
+            fulltext_sections: Optional dict from extract_fulltext_sections().
+                The 'data_sharing' key, if present, takes priority over
+                Europe PMC XML extraction.
+        """
         data_statement = None
 
-        # Check Europe PMC for open access full text
-        if report.pmcid:
+        # Priority: full-text data sharing section > Europe PMC XML
+        if fulltext_sections and fulltext_sections.get('data_sharing'):
+            data_statement = fulltext_sections['data_sharing']
+            logger.info("Using data sharing statement from full-text (%d chars)", len(data_statement))
+        elif report.pmcid:
+            # Fallback: Check Europe PMC for open access full text
             full_text = self.europepmc.get_full_text_xml(report.pmcid)
             if full_text:
-                # Extract data availability section
                 import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(full_text)
-                    # Look for data availability in various locations
                     for section in root.findall('.//sec'):
                         title = section.findtext('title', '').lower()
                         if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):
@@ -1204,18 +1612,53 @@ class StudyTransparencyAnalyzer:
         # COI concerns
         if report.coi_info:
             if report.coi_info.has_industry_ties:
-                indicators.append("Authors have industry financial ties")
+                indicators.append("Authors have disclosed industry financial ties")
+                # Check for institutional intermediary pattern
+                coi_lower = report.coi_info.statement.lower()
+                for pattern in INSTITUTIONAL_INTERMEDIARY_PATTERNS:
+                    if re.search(pattern, coi_lower):
+                        indicators.append(
+                            "Industry funding routed through institutional intermediaries"
+                        )
+                        break
             if not report.coi_info.statement:
                 indicators.append("No conflict of interest statement found")
 
+        # Data availability concerns
+        if report.data_availability:
+            if report.data_availability.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE:
+                indicators.append("Data effectively unavailable despite sharing statement")
+            elif report.data_availability.disclosure_level == DataDisclosureLevel.RESTRICTED:
+                indicators.append("Data access restricted")
+
+        # Combined risk: industry ties + unavailable data
+        has_industry_ties = (
+            report.industry_funding_detected
+            or (report.coi_info and report.coi_info.has_industry_ties)
+        )
+        if has_industry_ties and report.data_availability:
+            if report.data_availability.disclosure_level in (
+                DataDisclosureLevel.NOT_AVAILABLE,
+                DataDisclosureLevel.RESTRICTED,
+            ):
+                indicators.append(
+                    "Industry ties combined with restricted/unavailable data"
+                )
+
         # No trial registration for clinical study
         if not report.trial_registrations:
-            # Check if this appears to be a clinical trial
             if report.title and any(kw in report.title.lower() for kw in
                 ['trial', 'randomized', 'randomised', 'rct', 'phase i', 'phase ii', 'phase iii']):
                 indicators.append("Clinical trial without detected registration")
 
-        report.risk_of_bias_indicators = indicators
+        # Deduplicate while preserving order
+        seen = set()
+        unique = []
+        for ind in indicators:
+            if ind not in seen:
+                seen.add(ind)
+                unique.append(ind)
+        report.risk_of_bias_indicators = unique
 
 
 # =============================================================================
@@ -1256,15 +1699,25 @@ def main():
         '--output-file',
         help='Write output to file'
     )
+    parser.add_argument(
+        '--fulltext',
+        help='Path to full-text file (plain text or markdown)'
+    )
 
     args = parser.parse_args()
 
     if not args.doi and not args.pmid:
         parser.error("Must provide either --doi or --pmid")
 
+    # Load full text if provided
+    fulltext = None
+    if args.fulltext:
+        with open(args.fulltext, 'r', encoding='utf-8') as f:
+            fulltext = f.read()
+
     # Run analysis
     analyzer = StudyTransparencyAnalyzer(args.email, args.api_key)
-    report = analyzer.analyze(doi=args.doi, pmid=args.pmid)
+    report = analyzer.analyze(doi=args.doi, pmid=args.pmid, fulltext=fulltext)
 
     # Format output
     if args.output == 'json':
