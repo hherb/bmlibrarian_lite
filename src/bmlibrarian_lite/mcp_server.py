@@ -28,11 +28,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
 from mcp.server import Server
+from mcp.server.session import ServerSession
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
@@ -55,6 +57,64 @@ _PROVIDER_MAP = {
     "europepmc": SearchProvider.EUROPEPMC,
     "both": SearchProvider.BOTH,
 }
+
+# Total progress steps for fact_check_claim pipeline.
+# search(1) + score(N) + cite(N) + report(1) — N determined at runtime.
+_FC_SEARCH_STEP = 1
+_FC_REPORT_STEP = 1
+
+
+class _ProgressReporter:
+    """Bridge sync progress callbacks to async MCP progress notifications.
+
+    Created per-request when the client supplies a progress token.
+    Callable from any thread — uses ``run_coroutine_threadsafe`` to post
+    the async notification back to the event loop.
+    """
+
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        session: ServerSession,
+        token: str | int,
+    ) -> None:
+        self._loop = loop
+        self._session = session
+        self._token = token
+        self._current: float = 0
+        self._total: float | None = None
+
+    def set_total(self, total: float) -> None:
+        """Set the total number of progress steps."""
+        self._total = total
+
+    def advance(self, message: str, steps: float = 1) -> None:
+        """Advance progress and send a notification."""
+        self._current += steps
+        coro = self._session.send_progress_notification(
+            progress_token=self._token,
+            progress=self._current,
+            total=self._total,
+            message=message,
+        )
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            future.result(timeout=5)
+        except Exception:
+            logger.debug("Failed to send progress notification", exc_info=True)
+
+    def make_callback(self, prefix: str) -> Callable[[int, int], None]:
+        """Return a callback compatible with agent ``progress_callback`` signatures.
+
+        Args:
+            prefix: Label prepended to each notification (e.g. "Scoring").
+
+        Returns:
+            A ``(current, total) -> None`` callback.
+        """
+        def _cb(current: int, total: int) -> None:
+            self.advance(f"{prefix} ({current}/{total})")
+        return _cb
 
 
 @dataclass
@@ -208,15 +268,21 @@ TOOLS = [
 # -- Handlers ----------------------------------------------------------------
 
 
-def _handle_fact_check(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any]:
+def _handle_fact_check(
+    args: dict[str, Any],
+    ctx: _AgentsContext,
+    progress: _ProgressReporter | None = None,
+) -> dict[str, Any]:
     """Run the full fact-checking pipeline.
 
     Executes search, scoring, citation extraction, and report generation.
+    Sends MCP progress notifications at each stage when *progress* is provided.
 
     Args:
         args: Tool arguments (claim, max_results, min_score, search_provider,
             include_preprints).
         ctx: Shared agent context.
+        progress: Optional progress reporter for client notifications.
 
     Returns:
         Dictionary with report markdown, search metadata, and scored sources.
@@ -228,6 +294,8 @@ def _handle_fact_check(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, A
     include_preprints = bool(args.get("include_preprints", False))
 
     # 1. Search
+    if progress:
+        progress.advance("Searching literature databases…")
     session, documents = ctx.search_agent.search(
         question=claim,
         max_results=max_results,
@@ -245,11 +313,18 @@ def _handle_fact_check(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, A
             "sources": [],
         }
 
+    # Now we know document count — set total for remaining steps.
+    # Total = search(done) + score(N) + cite(N) + report(1)
+    n_docs = len(documents)
+    if progress:
+        progress.set_total(_FC_SEARCH_STEP + n_docs + n_docs + _FC_REPORT_STEP)
+
     # 2. Score
     scored_documents = ctx.scoring_agent.score_documents(
         question=claim,
         documents=documents,
         min_score=min_score,
+        progress_callback=progress.make_callback("Scoring documents") if progress else None,
     )
 
     if not scored_documents:
@@ -270,9 +345,12 @@ def _handle_fact_check(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, A
         question=claim,
         scored_documents=scored_documents,
         min_score=min_score,
+        progress_callback=progress.make_callback("Extracting citations") if progress else None,
     )
 
     # 4. Generate report
+    if progress:
+        progress.advance("Generating evidence report…")
     report = ctx.reporting_agent.generate_report(
         question=claim,
         citations=citations,
@@ -432,11 +510,25 @@ _HANDLERS: dict[str, Any] = {
 }
 
 
-def _dispatch(name: str, args: dict[str, Any], ctx: _AgentsContext) -> Any:
-    """Route a tool call to the appropriate handler (sync)."""
+def _dispatch(
+    name: str,
+    args: dict[str, Any],
+    ctx: _AgentsContext,
+    progress: _ProgressReporter | None = None,
+) -> Any:
+    """Route a tool call to the appropriate handler (sync).
+
+    Args:
+        name: Tool name.
+        args: Tool arguments.
+        ctx: Shared agent context.
+        progress: Optional progress reporter (passed to fact_check_claim).
+    """
     handler = _HANDLERS.get(name)
     if handler is None:
         raise ValueError(f"Unknown tool: {name}")
+    if name == "fact_check_claim":
+        return handler(args, ctx, progress=progress)
     return handler(args, ctx)
 
 
@@ -480,8 +572,19 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         try:
             loop = asyncio.get_running_loop()
+
+            # Build a progress reporter if the client sent a progressToken.
+            progress: _ProgressReporter | None = None
+            try:
+                req_ctx = server.request_context
+                token = req_ctx.meta.progressToken if req_ctx.meta else None
+                if token is not None:
+                    progress = _ProgressReporter(loop, req_ctx.session, token)
+            except LookupError:
+                pass
+
             result = await loop.run_in_executor(
-                None, partial(_dispatch, name, arguments, ctx)
+                None, partial(_dispatch, name, arguments, ctx, progress)
             )
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
         except LiteError as exc:

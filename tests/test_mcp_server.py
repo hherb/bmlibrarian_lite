@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -40,6 +41,7 @@ from bmlibrarian_lite.mcp_server import (
     _handle_fact_check,
     _handle_fulltext,
     _handle_search,
+    _ProgressReporter,
 )
 
 # -- Fixtures ----------------------------------------------------------------
@@ -429,3 +431,146 @@ class TestAskDocument:
 
         _, kwargs = ctx.interrogation_agent.ask.call_args
         assert kwargs["document_id"] == "doi-10.1234"
+
+
+# -- Progress reporting tests ------------------------------------------------
+
+
+def _make_progress() -> _ProgressReporter:
+    """Create a _ProgressReporter with a mock session and a running event loop."""
+    import threading
+
+    loop = asyncio.new_event_loop()
+    # Run the loop in a background thread so run_coroutine_threadsafe works.
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+
+    session = MagicMock(spec_set=["send_progress_notification"])
+    # Make the coroutine return immediately.
+    async def _noop(*args: object, **kwargs: object) -> None:
+        pass
+    session.send_progress_notification = MagicMock(side_effect=_noop)
+    reporter = _ProgressReporter(loop, session, token="tok-1")
+    # Stash thread for cleanup.
+    reporter._thread = thread  # type: ignore[attr-defined]
+    return reporter
+
+
+def _cleanup_progress(reporter: _ProgressReporter) -> None:
+    """Stop the event loop and join the thread."""
+    reporter._loop.call_soon_threadsafe(reporter._loop.stop)
+    reporter._thread.join(timeout=2)  # type: ignore[attr-defined]
+    reporter._loop.close()
+
+
+class TestProgressReporter:
+    """Tests for _ProgressReporter sync-to-async bridge."""
+
+    def test_advance_sends_notification(self) -> None:
+        """advance() calls send_progress_notification via the event loop."""
+        reporter = _make_progress()
+        reporter.set_total(10)
+        reporter.advance("step one")
+
+        reporter._session.send_progress_notification.assert_called_once()
+        call_kwargs = reporter._session.send_progress_notification.call_args[1]
+        assert call_kwargs["progress_token"] == "tok-1"
+        assert call_kwargs["progress"] == 1.0
+        assert call_kwargs["total"] == 10
+        assert call_kwargs["message"] == "step one"
+        _cleanup_progress(reporter)
+
+    def test_advance_accumulates(self) -> None:
+        """Multiple advance calls accumulate progress."""
+        reporter = _make_progress()
+        reporter.set_total(5)
+        reporter.advance("a")
+        reporter.advance("b", steps=2)
+
+        assert reporter._current == 3.0
+        assert reporter._session.send_progress_notification.call_count == 2
+        _cleanup_progress(reporter)
+
+    def test_make_callback_returns_callable(self) -> None:
+        """make_callback returns a (current, total) -> None callable."""
+        reporter = _make_progress()
+        reporter.set_total(20)
+        cb = reporter.make_callback("Scoring")
+        cb(1, 5)
+        cb(2, 5)
+
+        assert reporter._current == 2.0
+        last_kwargs = reporter._session.send_progress_notification.call_args[1]
+        assert "Scoring (2/5)" in last_kwargs["message"]
+        _cleanup_progress(reporter)
+
+
+class TestFactCheckProgress:
+    """Tests for progress integration in _handle_fact_check."""
+
+    def test_full_pipeline_sends_progress(self) -> None:
+        """Full pipeline sends progress notifications at each stage."""
+        ctx = _make_context()
+        session = _make_session()
+        doc = _make_document()
+        scored = _make_scored_document(doc)
+        citation = _make_citation(doc)
+
+        ctx.search_agent.search.return_value = (session, [doc])
+        ctx.scoring_agent.score_documents.return_value = [scored]
+        ctx.citation_agent.extract_all_citations.return_value = [citation]
+        ctx.reporting_agent.generate_report.return_value = "# Report"
+
+        reporter = _make_progress()
+        result = _handle_fact_check({"claim": "test"}, ctx, progress=reporter)
+
+        assert result["report"] == "# Report"
+        # At minimum: search + report = 2 direct advance calls.
+        # Scoring/citation callbacks are passed to agents (mocked, so not called).
+        assert reporter._session.send_progress_notification.call_count >= 2
+
+        # Verify scoring agent received a progress_callback.
+        _, score_kwargs = ctx.scoring_agent.score_documents.call_args
+        assert score_kwargs["progress_callback"] is not None
+
+        # Verify citation agent received a progress_callback.
+        _, cite_kwargs = ctx.citation_agent.extract_all_citations.call_args
+        assert cite_kwargs["progress_callback"] is not None
+        _cleanup_progress(reporter)
+
+    def test_no_progress_still_works(self) -> None:
+        """Pipeline works fine with progress=None (no client token)."""
+        ctx = _make_context()
+        session = _make_session()
+        ctx.search_agent.search.return_value = (session, [])
+
+        result = _handle_fact_check({"claim": "test"}, ctx, progress=None)
+        assert result["documents_found"] == 0
+
+    def test_dispatch_passes_progress_to_fact_check(self) -> None:
+        """_dispatch routes progress to fact_check_claim."""
+        ctx = _make_context()
+        session = _make_session()
+        ctx.search_agent.search.return_value = (session, [])
+
+        reporter = _make_progress()
+        result = _dispatch("fact_check_claim", {"claim": "test"}, ctx, progress=reporter)
+
+        assert result["documents_found"] == 0
+        # Search step notification should have been sent.
+        reporter._session.send_progress_notification.assert_called()
+        _cleanup_progress(reporter)
+
+    def test_dispatch_ignores_progress_for_other_tools(self) -> None:
+        """_dispatch does not pass progress to non-fact-check tools."""
+        ctx = _make_context()
+        session = _make_session()
+        ctx.search_agent.search.return_value = (session, [])
+
+        reporter = _make_progress()
+        result = _dispatch("search_literature", {"query": "test"}, ctx, progress=reporter)
+
+        assert result["total_results"] == 0
+        # No progress sent for search_literature.
+        reporter._session.send_progress_notification.assert_not_called()
+        _cleanup_progress(reporter)

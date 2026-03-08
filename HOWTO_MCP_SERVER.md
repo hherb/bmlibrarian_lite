@@ -366,6 +366,42 @@ Common error types:
 | `ConfigurationError` | Missing API key or invalid config |
 | `LiteStorageError` | Database issue |
 
+## Progress Notifications
+
+The `fact_check_claim` tool sends MCP progress notifications so clients can
+display real-time status during long-running operations. To receive them, include
+a `progressToken` in the `_meta` field of your `tools/call` request:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "fact_check_claim",
+    "arguments": { "claim": "Metformin reduces mortality in CKD patients" },
+    "_meta": { "progressToken": "my-token-123" }
+  }
+}
+```
+
+The server sends `notifications/progress` messages at each pipeline stage:
+
+| Progress | Message |
+|----------|---------|
+| 1 / total | `Searching literature databases…` |
+| 2..N+1 / total | `Scoring documents (i/N)` |
+| N+2..2N+1 / total | `Extracting citations (i/N)` |
+| 2N+2 / total | `Generating evidence report…` |
+
+Where `total = 2 + 2N` and N is the number of documents retrieved. The total is
+set after the search step completes (once N is known).
+
+**Client support:** Claude Desktop and Claude Code display these automatically.
+For custom clients, listen for `notifications/progress` and match on the
+`progressToken` you sent. If you omit the token, no progress notifications are
+sent and the tool behaves identically otherwise.
+
+---
+
 ## Performance Considerations
 
 | Tool | Typical Duration | LLM Calls |
