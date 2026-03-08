@@ -293,9 +293,18 @@ class LiteStorage:
         )
         conn.row_factory = sqlite3.Row
         # Enable extension loading and load sqlite-vec
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+        try:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+        except AttributeError:
+            raise RuntimeError(
+                "This Python was built without SQLite loadable extension support. "
+                "bmlibrarian-lite requires a Python with --enable-loadable-sqlite-extensions. "
+                "If using 'uv tool install', specify a compatible Python, e.g.:\n"
+                "  uv tool install --python $(brew --prefix)/bin/python3 bmlibrarian-lite\n"
+                "Or install via: uv pip install bmlibrarian-lite"
+            ) from None
         try:
             yield conn
         finally:
