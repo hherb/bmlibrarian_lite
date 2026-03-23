@@ -14,8 +14,9 @@ A native iOS app (iPhone/iPad) for medical fact-checking using biomedical litera
 ### Full-Text Access
 - **Multi-source retrieval**: Automatic fallback chain for full-text content:
   1. Europe PMC XML (converted to readable markdown)
-  2. Unpaywall PDF (open access)
-  3. DOI resolution (publisher website)
+  2. Europe PMC PDF (free PDF render URL from search API — no extra API call)
+  3. Unpaywall PDF (open access)
+  4. DOI resolution (publisher website)
 - **JATS XML parsing**: Converts PubMed Central/Europe PMC XML to formatted markdown
 - **PDF viewer**: Built-in PDF display with download and caching
 - **Source badges**: Visual indicators showing content source
@@ -25,23 +26,26 @@ A native iOS app (iPhone/iPad) for medical fact-checking using biomedical litera
 - **Dynamic model fetching**: Automatically fetches available models from provider APIs
 - **Dual scoring system**: LLM relevance scoring plus optional on-device NLEmbedding semantic similarity
 - **HyDE scoring**: Hypothetical Document Embedding for improved semantic matching
-- **Parallel processing**: Concurrent document scoring and citation extraction with automatic concurrency detection
+- **Smart search**: Automatic alternative query generation when initial results are insufficient — LLM generates 2-3 alternative structured queries using different search strategies (synonyms, broader/narrower terms, split compound questions)
+- **Parallel processing**: Concurrent document scoring and citation extraction with automatic concurrency detection and semaphore-based sliding window
 - **Checkpointing**: Resumable workflows that save progress per-document, surviving interruptions
-- **Citation extraction**: Extracts key passages with clickable references
+- **Citation extraction**: Extracts key passages with clickable references, direction classification (supports/refutes/neutral), and study type identification
 - **Evidence synthesis**: Generates verdicts with supporting citations
 
 ### Study Transparency Analysis
-- **Funding disclosure**: Automatic detection of funding source declarations
-- **Conflict of interest**: COI statement analysis
-- **Data availability**: Assessment of data sharing practices
-- **Trial registration**: Verification against ClinicalTrials.gov
-- **Risk badges**: Visual indicators on document cards for transparency concerns
-- **Report integration**: Transparency findings feed into risk warnings in generated reports
+- **Funding disclosure**: Automatic detection of funding source declarations with industry intermediary detection
+- **Conflict of interest**: Multi-pass COI analysis with direct pharma name matching, institutional intermediary patterns, and industry keyword detection
+- **Data availability**: Assessment of data sharing practices with effective refusal detection (sponsor confidentiality, collaboration-locked data)
+- **Trial registration**: Verification against ClinicalTrials.gov with outcome switching detection and results posting status
+- **Risk badges**: Color-coded visual indicators (green/orange/red) on document cards for transparency concerns
+- **Detail views**: Expandable transparency breakdown with circular progress score, confidence percentages, and per-category risk analysis
+- **Report integration**: Transparency findings feed into risk warnings in generated reports with aggregate risk distribution
 
 ### Cloud Sync
 - **iCloud integration**: Optional CloudKit sync across devices (opt-in, disabled by default)
 - **Privacy-first**: Data stays local unless you explicitly enable sync
 - **SwiftData persistence**: All sessions, documents, and reports stored locally
+- **Robust migration**: Three-strategy database migration (staged → automatic lightweight → fresh start) for reliable upgrades
 
 ### Export & Sharing
 - **PDF export**: Generate PDF reports with configurable paper size (A4/Letter)
@@ -65,7 +69,7 @@ A native iOS app (iPhone/iPad) for medical fact-checking using biomedical litera
 
 | Provider | Models (January 2026) | API Key Required |
 |----------|----------------------|------------------|
-| Anthropic | Claude Sonnet 4.5, Haiku 4.5, Opus 4.5 | Yes |
+| Anthropic | Claude Sonnet 4.5/4.6, Haiku 4.5, Opus 4.5/4.6 | Yes |
 | OpenAI | GPT-5.2, o4-mini, o3, GPT-4o | Yes |
 | DeepSeek | DeepSeek V3.2 (Chat/Reasoner) | Yes |
 | Groq | Llama 4 Maverick/Scout, Llama 3.3 | Yes |

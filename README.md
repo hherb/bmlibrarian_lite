@@ -26,12 +26,14 @@ BMLibrarian Lite is available on multiple platforms:
 Cross-platform desktop application for comprehensive systematic literature review.
 
 - **Systematic Literature Review**: Search PubMed and Europe PMC, score documents, extract citations, and generate reports
-- **Study Transparency Analysis**: Automated analysis of funding disclosure, conflict of interest, data availability, and trial registration with risk warnings in reports
-- **Document Interrogation**: Interactive Q&A with loaded documents
-- **Full-Text Discovery**: Automatic full-text retrieval via Europe PMC XML, Unpaywall PDF, and DOI resolution
+- **Study Transparency Analysis**: Multi-pass analysis of funding disclosure, conflict of interest (with industry intermediary detection), data availability (with effective refusal detection), and trial registration — with risk warnings in reports
+- **MCP Server**: Expose bmlibrarian_lite as an expert medical fact-checker via [Model Context Protocol](https://modelcontextprotocol.io/) for use with Claude Desktop, Claude Code, or any MCP-compatible client
+- **Document Interrogation**: Interactive RAG-based Q&A with loaded documents
+- **Full-Text Discovery**: Automatic full-text retrieval via Europe PMC XML, Europe PMC PDF, Unpaywall PDF, and DOI resolution
 - **Quality Assessment**: Automated study quality evaluation with evidence grading
 - **Multi-Model Benchmarking**: Compare LLM models on relevance scoring and quality classification
 - **Parallel Processing**: Concurrent scoring and citation extraction with checkpointing and cancellation support
+- **Smart Search**: Automatic alternative query generation when initial results are insufficient
 - **Research Questions Management**: Save, re-run, and manage past research questions
 - **Audit Trail**: Real-time visibility into the review workflow with LLM reasoning transparency
 - **Multiple LLM Providers**: Support for both Anthropic Claude (online) and Ollama (local)
@@ -45,9 +47,10 @@ Native iOS app for medical fact-checking on-the-go.
 - **Multiple LLM Providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, and custom endpoints
 - **Dual Scoring System**: LLM-based relevance scoring plus on-device NLEmbedding semantic similarity
 - **HyDE Enhancement**: Hypothetical Document Embedding for improved semantic matching
-- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration analysis with risk badges
+- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration analysis with risk badges and detailed breakdown views
+- **Smart Search**: Automatic alternative query generation when initial results are insufficient
 - **Parallel Processing**: Concurrent document scoring and citation extraction with checkpointing
-- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Unpaywall PDF, DOI) with JATS XML rendering
+- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Europe PMC PDF, Unpaywall PDF, DOI) with JATS XML rendering
 - **Hybrid Search**: Search PubMed, Europe PMC, or both simultaneously with deduplication
 - **Budget Controls**: Per-run and monthly spending limits with real-time cost tracking
 - **iCloud Sync**: Optional CloudKit integration for syncing data across devices
@@ -60,9 +63,10 @@ Native macOS app optimized for desktop workflows.
 
 - **Native macOS UI**: Optimized layouts for larger screens with keyboard navigation
 - **Multiple LLM Providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, and custom endpoints
-- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration analysis with risk badges
+- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration analysis with risk badges and detailed breakdown views
+- **Smart Search**: Automatic alternative query generation when initial results are insufficient
 - **Parallel Processing**: Concurrent document scoring and citation extraction with checkpointing
-- **Full-Text Viewer**: View retrieved full-text articles with JATS XML rendering
+- **Full-Text Viewer**: View retrieved full-text articles with JATS XML rendering and Europe PMC PDF fallback
 - **Hybrid Search**: Search both PubMed and Europe PMC simultaneously
 - **PDF Export**: Native AppKit-based PDF generation with A4/Letter paper sizes
 - **iCloud Sync**: CloudKit integration for syncing with iOS devices
@@ -75,7 +79,9 @@ Native Android app with Material 3 design.
 - **Medical Fact Checker**: Same fact-checking workflow as iOS/macOS
 - **Multiple LLM Providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, and custom endpoints
 - **Study Transparency Analysis**: Funding, COI, data availability, and trial registration badges
-- **Full-Text Access**: Multi-source retrieval with JATS XML parsing
+- **Smart Search**: Automatic alternative query generation when initial results are insufficient
+- **HyDE Enhancement**: Hypothetical Document Embedding for improved semantic matching
+- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Europe PMC PDF, Unpaywall PDF, DOI) with JATS XML parsing
 - **Hybrid Search**: PubMed, Europe PMC, or both simultaneously
 - **Parallel Processing**: Concurrent document scoring and citation extraction
 - **Budget Controls**: Per-run and monthly spending limits
@@ -90,7 +96,7 @@ Shared iOS/macOS library (`Packages/BioMedLit/`) providing:
 
 - **JATS XML Parsing**: Full-featured parser converting Journal Article Tag Suite XML to HTML/Markdown
 - **Search Services**: PubMed and Europe PMC API clients with pagination
-- **Full-Text Service**: Unified retrieval with fallback chain (Europe PMC XML → Unpaywall PDF → DOI)
+- **Full-Text Service**: Unified retrieval with fallback chain (Europe PMC XML → Europe PMC PDF → Unpaywall PDF → DOI)
 - **Transparency Analysis**: Funding, COI, data availability, and trial compliance analyzers with CrossRef and ClinicalTrials.gov integration
 - **Sync Engine**: iCloud/local folder synchronization with selective sync, change tracking, and conflict resolution
 - **Utilities**: Retry helpers, cost calculator, query translator, response parser
@@ -173,6 +179,24 @@ bmll clear
 # Show version
 bmll --version
 ```
+
+### MCP Server
+
+BMLibrarian Lite can be used as an MCP server, allowing Claude Desktop, Claude Code, or any MCP-compatible client to use it as an expert medical fact-checker. See [HOWTO_MCP_SERVER.md](HOWTO_MCP_SERVER.md) for full setup instructions.
+
+```bash
+# Install as a uv tool (recommended)
+uv tool install bmlibrarian-lite
+
+# Or run from a local checkout
+bmlibrarian-lite-mcp
+```
+
+The MCP server exposes four tools:
+- **`fact_check_claim`**: Full evidence pipeline (search, score, cite, report) with progress notifications
+- **`search_literature`**: Search PubMed and/or Europe PMC for articles
+- **`get_document_fulltext`**: Retrieve full text by PMID, DOI, or PMC ID
+- **`ask_document`**: RAG-based Q&A on loaded documents
 
 ### iOS App
 
@@ -385,16 +409,18 @@ BMLibrarian Lite is designed for ease of use and portability:
 |---------|-------------|------------------|---------|-----------|-------------|
 | Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData | SwiftData | Room (SQLite) |
 | Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding | Apple NLEmbedding | N/A |
-| Full-Text Discovery | Full | Europe PMC + Unpaywall + DOI | Europe PMC + Unpaywall + DOI | Europe PMC + Unpaywall + DOI | Europe PMC + Unpaywall + DOI |
+| Full-Text Discovery | Full | Europe PMC XML/PDF + Unpaywall + DOI | Europe PMC XML/PDF + Unpaywall + DOI | Europe PMC XML/PDF + Unpaywall + DOI | Europe PMC XML/PDF + Unpaywall + DOI |
 | PDF Export | N/A | N/A | Included | Included | Included |
 | Transparency Analysis | N/A | Included | Included | Included | Included |
 | Parallel Processing | N/A | Included | Included | Included | Included |
 | Multi-Agent Workflow | Full orchestration | Simplified | Streamlined | Streamlined | Streamlined |
 | Plugin System | Lab plugins | N/A | N/A | N/A | N/A |
+| MCP Server | N/A | Included | N/A | N/A | N/A |
 | Multi-Model Benchmarking | N/A | Included | N/A | N/A | N/A |
+| Smart Search | N/A | Included | Included | Included | Included |
 | Research Questions | N/A | Save & re-run | History view | History view | History view |
 | Budget Controls | N/A | N/A | Per-run & monthly | Per-run & monthly | Per-run & monthly |
-| HyDE Embedding | N/A | N/A | Included | Included | N/A |
+| HyDE Embedding | N/A | N/A | Included | Included | Included |
 | Local LLM Support | N/A | Ollama | Ollama | Ollama | N/A |
 | Search Providers | N/A | PubMed + Europe PMC | PubMed + Europe PMC | PubMed + Europe PMC | PubMed + Europe PMC |
 | iCloud Sync | N/A | N/A | Included | Included | N/A |

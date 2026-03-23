@@ -18,10 +18,12 @@ The app supports multiple LLM providers including Anthropic Claude, OpenAI, Deep
 
 - **Multi-Provider LLM Support**: Choose from Anthropic, OpenAI, DeepSeek, Groq, Mistral, or run locally with Ollama
 - **Dual Search Providers**: Search PubMed, Europe PMC, or both simultaneously
+- **Smart Search**: Automatic alternative query generation when initial results are insufficient — LLM generates 2-3 alternative structured queries using different search strategies (synonyms, broader/narrower terms, split compound questions)
 - **Smart Document Scoring**: LLM-powered relevance scoring with rationale
+- **HyDE Enhancement**: Hypothetical Document Embedding — generates synthetic scientific abstracts from claims to improve embedding-based document retrieval
 - **Study Transparency Analysis**: Automatic analysis of funding disclosure, conflict of interest, data availability, and trial registration with risk badges on document cards
-- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Unpaywall PDF, DOI) with JATS XML rendering
-- **Parallel Processing**: Concurrent document scoring and citation extraction
+- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Europe PMC PDF, Unpaywall PDF, DOI) with JATS XML rendering
+- **Parallel Processing**: Concurrent document scoring and semaphore-based parallel citation extraction with incremental result reporting
 - **Evidence Reports**: Generated markdown reports with verdicts, citations, and risk warnings
 - **Budget Management**: Per-run and monthly spending limits to control API costs
 - **Session History**: Browse and revisit past fact-check sessions
@@ -129,11 +131,14 @@ app/
 │   │   └── llm/             # Multi-provider LLM client
 │   └── repository/          # Repository implementations
 ├── domain/                  # Domain layer
-│   ├── model/               # Domain models
-│   ├── workflow/            # Fact-check workflow engine (scoring, searching, reporting)
+│   ├── model/               # Domain models (StructuredQuery with array parsing)
+│   ├── workflow/            # Fact-check workflow engine (scoring, searching, reporting,
+│   │                        #   ParallelCitationService, CitationInput/Result, smart search)
 │   ├── usecase/             # Use cases
 │   ├── embedding/           # Embedding service
 │   └── sync/                # Sync operations
+├── ml/                      # Machine learning
+│   └── HydeGenerator        # Hypothetical Document Embedding generation
 ├── ui/                      # Presentation layer
 │   ├── factcheck/           # Fact check screen with transparency badges
 │   ├── fulltext/            # Full-text viewer with source badges
@@ -156,11 +161,13 @@ app/
 
 | Component | Description |
 |-----------|-------------|
-| `FactCheckWorkflow` | State machine orchestrating the fact-check process |
-| `LLMService` | Multi-provider LLM API client with retry logic |
+| `FactCheckWorkflow` | State machine orchestrating the fact-check process with smart search |
+| `ParallelCitationService` | Semaphore-based parallel citation extraction with incremental callbacks |
+| `LLMService` | Multi-provider LLM API client with retry logic and alternative query generation |
+| `HydeGenerator` | Hypothetical Document Embedding for improved semantic matching |
 | `PubMedService` | NCBI E-utilities client with XML parsing |
-| `EuropePMCService` | Europe PMC REST API client |
-| `FullTextService` | Multi-source full-text retrieval (Europe PMC XML, Unpaywall, DOI) |
+| `EuropePMCService` | Europe PMC REST API client with PDF URL extraction |
+| `FullTextService` | Multi-source full-text retrieval (Europe PMC XML/PDF, Unpaywall, DOI) |
 | `JATSXMLParser` | JATS XML to markdown conversion for full-text display |
 | `SettingsRepository` | Encrypted settings storage |
 | `CostCalculator` | Token cost estimation and budget tracking |
@@ -169,11 +176,15 @@ app/
 
 The app uses Room with the following entities:
 
-- `SessionEntity` - Fact-check workflow sessions
-- `DocumentEntity` - Scientific articles from search results
+- `SessionEntity` - Fact-check workflow sessions (includes smart search state, HyDE abstracts, and fetched PMIDs for deduplication)
+- `DocumentEntity` - Scientific articles from search results (includes embedding scores and full-text HTML)
 - `CitationEntity` - Extracted citation passages
 - `ReportEntity` - Generated evidence reports
 - `UsageRecordEntity` - API usage tracking for budget management
+- `ProcessingCheckpointEntity` - Per-document processing checkpoints for resumable workflows
+- `ProcessingErrorEntity` - Error queue for retry handling
+
+Database migrations: v1→v2 (checkpoints/errors), v2→v3 (embedding fields), v3→v4 (HyDE), v4→v5 (smart search)
 
 ## Building
 
