@@ -55,6 +55,8 @@ from .constants import (
     EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
     EUROPEPMC_MAX_RETRIES,
     EUROPEPMC_SEARCH_PAGE_SIZE,
+    PARALLEL_WORKERS_OLLAMA_DEFAULT,
+    PARALLEL_WORKERS_CLOUD_DEFAULT,
 )
 from .data_models import SearchProvider
 from .transparency import TransparencySettings, get_default_settings
@@ -360,6 +362,58 @@ class EuropePMCConfig:
 
 
 @dataclass
+class ParallelProcessingConfig:
+    """
+    Parallel processing configuration for scoring and citation extraction.
+
+    Workers set to 0 means auto-detect: 1 for Ollama (local), 4 for cloud APIs.
+    Users can override to any value between 1 and 10.
+
+    Attributes:
+        scoring_workers: Number of parallel workers for document scoring (0=auto)
+        citation_workers: Number of parallel workers for citation extraction (0=auto)
+    """
+
+    scoring_workers: int = 0
+    citation_workers: int = 0
+
+    # def get_effective_workers(self, provider: str) -> int:
+    #     """Get effective worker count for a given provider."""
+    #     return self._resolve(0, provider)
+
+    def get_scoring_workers(self, provider: str) -> int:
+        """Get effective scoring worker count for a given provider."""
+        return self._resolve(self.scoring_workers, provider)
+
+    def get_citation_workers(self, provider: str) -> int:
+        """Get effective citation worker count for a given provider."""
+        return self._resolve(self.citation_workers, provider)
+
+    def _resolve(self, override: int, provider: str) -> int:
+        """Resolve worker count from override or provider default."""
+        if override > 0:
+            return override
+        if provider == "ollama":
+            return PARALLEL_WORKERS_OLLAMA_DEFAULT
+        return PARALLEL_WORKERS_CLOUD_DEFAULT
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "scoring_workers": self.scoring_workers,
+            "citation_workers": self.citation_workers,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ParallelProcessingConfig":
+        """Create from dictionary."""
+        return cls(
+            scoring_workers=int(data.get("scoring_workers", 0)),
+            citation_workers=int(data.get("citation_workers", 0)),
+        )
+
+
+@dataclass
 class StorageConfig:
     """Storage configuration with derived paths."""
 
@@ -588,6 +642,7 @@ class LiteConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
+    parallel: ParallelProcessingConfig = field(default_factory=ParallelProcessingConfig)
     transparency: TransparencySettings = field(default_factory=get_default_settings)
 
     # Validation cache (not serialized)
@@ -708,6 +763,9 @@ class LiteConfig:
         if "benchmark" in data:
             config.benchmark = BenchmarkConfig.from_dict(data["benchmark"])
 
+        if "parallel" in data:
+            config.parallel = ParallelProcessingConfig.from_dict(data["parallel"])
+
         if "transparency" in data:
             config.transparency = TransparencySettings.from_dict(data["transparency"])
 
@@ -755,6 +813,7 @@ class LiteConfig:
                 "search_provider": self.search.search_provider.value,
             },
             "benchmark": self.benchmark.to_dict(),
+            "parallel": self.parallel.to_dict(),
             "transparency": self.transparency.to_dict(),
         }
 

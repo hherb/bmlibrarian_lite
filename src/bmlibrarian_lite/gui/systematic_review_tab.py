@@ -28,6 +28,8 @@ The report is displayed in the separate Report tab.
 """
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Any, Dict
 
 from PySide6.QtWidgets import (
@@ -138,6 +140,7 @@ class WorkflowWorker(QThread):
         self.preloaded_documents = preloaded_documents
         self.pubmed_query = pubmed_query
         self._cancelled = False
+        self._cancel_event = threading.Event()
         self._checkpoint_id: Optional[str] = None
 
     def run(self) -> None:
@@ -285,30 +288,61 @@ class WorkflowWorker(QThread):
 
             scoring_agent = LiteScoringAgent(config=self.config)
 
-            # Score documents one at a time, persisting and emitting immediately
+            # Score documents, persisting and emitting each result immediately
             all_scored_docs: List[ScoredDocument] = []
             scored_docs: List[ScoredDocument] = []
             total = len(documents)
 
-            for i, doc in enumerate(documents):
-                if self._cancelled:
-                    break
+            scoring_provider = self.config.models.get_task_config(
+                "document_scoring"
+            ).provider
+            scoring_workers = self.config.parallel.get_scoring_workers(
+                scoring_provider
+            )
 
-                self.progress.emit("scoring", i + 1, total)
+            if scoring_workers <= 1:
+                # Sequential path
+                for i, doc in enumerate(documents):
+                    if self._cancelled:
+                        break
 
-                # Score single document
-                scored_doc = scoring_agent.score_document(self.question, doc)
+                    self.progress.emit("scoring", i + 1, total)
+                    scored_doc = scoring_agent.score_document(self.question, doc)
+                    self.storage.save_scored_document(scored_doc, checkpoint.id)
+                    self.document_scored.emit(scored_doc)
+                    all_scored_docs.append(scored_doc)
+                    if scored_doc.score >= self.min_score:
+                        scored_docs.append(scored_doc)
+            else:
+                # Parallel path — persist and emit each result as it completes
+                lock = threading.Lock()
+                completed = 0
 
-                # Persist immediately to database (crash-safe)
-                self.storage.save_scored_document(scored_doc, checkpoint.id)
+                def _score_one(doc: LiteDocument) -> ScoredDocument:
+                    return scoring_agent.score_document(self.question, doc)
 
-                # Emit signal immediately for GUI update
-                self.document_scored.emit(scored_doc)
+                with ThreadPoolExecutor(max_workers=scoring_workers) as executor:
+                    futures = {
+                        executor.submit(_score_one, doc): doc
+                        for doc in documents
+                    }
+                    for future in as_completed(futures):
+                        if self._cancelled:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
 
-                # Track for metadata and downstream processing
-                all_scored_docs.append(scored_doc)
-                if scored_doc.score >= self.min_score:
-                    scored_docs.append(scored_doc)
+                        scored_doc = future.result()
+
+                        with lock:
+                            completed += 1
+                            current = completed
+
+                        self.progress.emit("scoring", current, total)
+                        self.storage.save_scored_document(scored_doc, checkpoint.id)
+                        self.document_scored.emit(scored_doc)
+                        all_scored_docs.append(scored_doc)
+                        if scored_doc.score >= self.min_score:
+                            scored_docs.append(scored_doc)
 
             # Sort by score descending for downstream use
             scored_docs.sort(key=lambda x: x.score, reverse=True)
@@ -343,11 +377,20 @@ class WorkflowWorker(QThread):
             def citation_progress(current: int, total: int) -> None:
                 self.progress.emit("citations", current, total)
 
+            citation_provider = self.config.models.get_task_config(
+                "citation_extraction"
+            ).provider
+            citation_workers = self.config.parallel.get_citation_workers(
+                citation_provider
+            )
+
             citations = citation_agent.extract_all_citations(
                 self.question,
                 scored_docs,
                 min_score=self.min_score,
                 progress_callback=citation_progress,
+                max_workers=citation_workers,
+                cancelled=self._cancel_event,
             )
 
             # Emit per-citation signals for audit trail and save to database
@@ -417,6 +460,7 @@ class WorkflowWorker(QThread):
     def cancel(self) -> None:
         """Cancel the workflow."""
         self._cancelled = True
+        self._cancel_event.set()
 
 
 class SystematicReviewTab(QWidget):

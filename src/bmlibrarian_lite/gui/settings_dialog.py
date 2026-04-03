@@ -67,6 +67,7 @@ from ..constants import (
     MAX_MAX_RESULTS,
     MAX_RESULTS_STEP,
     MIN_MAX_RESULTS,
+    PARALLEL_WORKERS_MAX,
     PROVIDER_DISPLAY_NAMES,
 )
 from ..data_models import SearchProvider
@@ -424,6 +425,33 @@ class SettingsDialog(QDialog):
         default_layout.addRow("Max Tokens:", self.default_max_tokens_spin)
 
         layout.addWidget(default_group)
+
+        # Parallel processing section
+        parallel_group = QGroupBox("Parallel Processing")
+        parallel_layout = QFormLayout(parallel_group)
+        parallel_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        self.scoring_workers_spin = QSpinBox()
+        self.scoring_workers_spin.setRange(0, PARALLEL_WORKERS_MAX)
+        self.scoring_workers_spin.setValue(0)
+        self.scoring_workers_spin.setSpecialValueText("Auto")
+        self.scoring_workers_spin.setToolTip(
+            "Parallel workers for document scoring.\n"
+            "Auto = 1 for Ollama, 4 for cloud APIs."
+        )
+        parallel_layout.addRow("Scoring workers:", self.scoring_workers_spin)
+
+        self.citation_workers_spin = QSpinBox()
+        self.citation_workers_spin.setRange(0, PARALLEL_WORKERS_MAX)
+        self.citation_workers_spin.setValue(0)
+        self.citation_workers_spin.setSpecialValueText("Auto")
+        self.citation_workers_spin.setToolTip(
+            "Parallel workers for citation extraction.\n"
+            "Auto = 1 for Ollama, 4 for cloud APIs."
+        )
+        parallel_layout.addRow("Citation workers:", self.citation_workers_spin)
+
+        layout.addWidget(parallel_group)
 
         # Task-specific overrides in a scrollable area
         task_group = QGroupBox("Task-Specific Overrides (Optional)")
@@ -978,6 +1006,10 @@ class SettingsDialog(QDialog):
         self.default_temperature_spin.setValue(self.config.models.default_temperature)
         self.default_max_tokens_spin.setValue(self.config.models.default_max_tokens)
 
+        # Parallel processing
+        self.scoring_workers_spin.setValue(self.config.parallel.scoring_workers)
+        self.citation_workers_spin.setValue(self.config.parallel.citation_workers)
+
         # Task-specific overrides
         for task_id, widgets in self._task_widgets.items():
             if task_id in self.config.models.tasks:
@@ -1069,6 +1101,10 @@ class SettingsDialog(QDialog):
         self.config.models.default_model = self.default_model_combo.currentText()
         self.config.models.default_temperature = self.default_temperature_spin.value()
         self.config.models.default_max_tokens = self.default_max_tokens_spin.value()
+
+        # Save parallel processing
+        self.config.parallel.scoring_workers = self.scoring_workers_spin.value()
+        self.config.parallel.citation_workers = self.citation_workers_spin.value()
 
         # Save task-specific overrides
         for task_id, widgets in self._task_widgets.items():

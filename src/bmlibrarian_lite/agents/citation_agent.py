@@ -27,9 +27,11 @@ Includes robust retry logic using tenacity for handling API failures and timeout
 import json
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
-from ..data_models import Citation, ScoredDocument, EvaluationErrorCode
+from ..data_models import Citation, ScoredDocument
 from ..exceptions import JSONParseError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception
 from .base import LiteBaseAgent
@@ -180,9 +182,11 @@ Extract the most relevant passages that help answer the research question."""
         scored_documents: list[ScoredDocument],
         min_score: int = 3,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        max_workers: int = 1,
+        cancelled: Optional[threading.Event] = None,
     ) -> list[Citation]:
         """
-        Extract citations from all scored documents.
+        Extract citations from all scored documents, optionally in parallel.
 
         Documents that fail extraction are skipped and logged.
         The method continues processing remaining documents.
@@ -192,36 +196,87 @@ Extract the most relevant passages that help answer the research question."""
             scored_documents: Documents to extract from
             min_score: Minimum score to process
             progress_callback: Optional callback(current, total)
+            max_workers: Number of parallel workers (1=sequential)
+            cancelled: Optional threading.Event; when set, stops processing
 
         Returns:
             List of all extracted citations
         """
-        all_citations = []
+        all_citations: list[Citation] = []
         failed_count = 0
         # Filter out documents with negative scores (error codes) and below threshold
         eligible = [d for d in scored_documents if d.score >= min_score]
         total = len(eligible)
 
-        logger.info(f"Extracting citations from {total} documents")
+        logger.info(
+            f"Extracting citations from {total} documents (workers={max_workers})"
+        )
 
-        for i, scored_doc in enumerate(eligible):
-            if progress_callback:
-                progress_callback(i + 1, total)
+        if max_workers <= 1:
+            # Sequential path
+            for i, scored_doc in enumerate(eligible):
+                if cancelled and cancelled.is_set():
+                    logger.info("Citation extraction cancelled")
+                    break
 
-            citations = self.extract_citations(question, scored_doc)
+                if progress_callback:
+                    progress_callback(i + 1, total)
 
-            if not citations:
-                failed_count += 1
-                logger.warning(
-                    f"Document {scored_doc.document.id}: No citations extracted "
-                    f"({i+1}/{total})"
-                )
-            else:
-                all_citations.extend(citations)
-                logger.debug(
-                    f"Extracted {len(citations)} citations from "
-                    f"{scored_doc.document.id}"
-                )
+                citations = self.extract_citations(question, scored_doc)
+
+                if not citations:
+                    failed_count += 1
+                    logger.warning(
+                        f"Document {scored_doc.document.id}: No citations extracted "
+                        f"({i+1}/{total})"
+                    )
+                else:
+                    all_citations.extend(citations)
+                    logger.debug(
+                        f"Extracted {len(citations)} citations from "
+                        f"{scored_doc.document.id}"
+                    )
+        else:
+            # Parallel path
+            lock = threading.Lock()
+            completed = 0
+
+            def _extract_one(doc: ScoredDocument) -> list[Citation]:
+                return self.extract_citations(question, doc)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_extract_one, scored_doc): i
+                    for i, scored_doc in enumerate(eligible)
+                }
+                for future in as_completed(futures):
+                    if cancelled and cancelled.is_set():
+                        logger.info("Citation extraction cancelled, cancelling pending tasks")
+                        for f in futures:
+                            f.cancel()
+                        break
+
+                    idx = futures[future]
+                    citations = future.result()
+                    doc_id = eligible[idx].document.id
+
+                    with lock:
+                        completed += 1
+                        current = completed
+                        if not citations:
+                            failed_count += 1
+                            logger.warning(
+                                f"Document {doc_id}: No citations extracted "
+                                f"({current}/{total})"
+                            )
+                        else:
+                            all_citations.extend(citations)
+                            logger.debug(
+                                f"Extracted {len(citations)} citations from {doc_id}"
+                            )
+
+                    if progress_callback:
+                        progress_callback(current, total)
 
         if failed_count > 0:
             logger.warning(

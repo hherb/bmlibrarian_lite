@@ -28,6 +28,8 @@ Errors are reported via negative score values (EvaluationErrorCode enum).
 import json
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
 from ..data_models import LiteDocument, ScoredDocument, EvaluationErrorCode
@@ -179,9 +181,11 @@ Evaluate the relevance of this document to the research question."""
         documents: list[LiteDocument],
         min_score: int = 1,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        max_workers: int = 1,
+        cancelled: Optional[threading.Event] = None,
     ) -> list[ScoredDocument]:
         """
-        Score multiple documents.
+        Score multiple documents, optionally in parallel.
 
         Documents that fail scoring (negative scores) are excluded from results
         but logged for visibility. Use get_failed_documents() on the result
@@ -192,6 +196,8 @@ Evaluate the relevance of this document to the research question."""
             documents: Documents to score
             min_score: Minimum score to include in results (1-5)
             progress_callback: Optional callback(current, total) for progress
+            max_workers: Number of parallel workers (1=sequential)
+            cancelled: Optional threading.Event; when set, stops processing
 
         Returns:
             List of scored documents (filtered by min_score), sorted by score descending.
@@ -201,30 +207,57 @@ Evaluate the relevance of this document to the research question."""
         failed_count = 0
         total = len(documents)
 
-        logger.info(f"Scoring {total} documents for question: {question[:50]}...")
+        logger.info(
+            f"Scoring {total} documents for question: {question[:50]}... "
+            f"(workers={max_workers})"
+        )
 
-        for i, doc in enumerate(documents):
-            if progress_callback:
-                progress_callback(i + 1, total)
+        if max_workers <= 1:
+            # Sequential path — no threading overhead
+            for i, doc in enumerate(documents):
+                if cancelled and cancelled.is_set():
+                    logger.info("Scoring cancelled")
+                    break
 
-            scored_doc = self.score_document(question, doc)
+                if progress_callback:
+                    progress_callback(i + 1, total)
 
-            # Check for error (negative score)
-            if scored_doc.score < 0:
-                failed_count += 1
-                logger.warning(
-                    f"Document {doc.id}: scoring failed with error code "
-                    f"{scored_doc.score} ({i+1}/{total})"
-                )
-                continue
+                scored_doc = self.score_document(question, doc)
+                self._collect_scored(scored_doc, scored, min_score, i, total)
+                if scored_doc.score < 0:
+                    failed_count += 1
+        else:
+            # Parallel path
+            lock = threading.Lock()
+            completed = 0
 
-            if scored_doc.score >= min_score:
-                scored.append(scored_doc)
+            def _score_one(doc: LiteDocument) -> ScoredDocument:
+                return self.score_document(question, doc)
 
-            logger.debug(
-                f"Document {doc.id}: score={scored_doc.score} "
-                f"({i+1}/{total})"
-            )
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_score_one, doc): i
+                    for i, doc in enumerate(documents)
+                }
+                for future in as_completed(futures):
+                    if cancelled and cancelled.is_set():
+                        logger.info("Scoring cancelled, cancelling pending tasks")
+                        for f in futures:
+                            f.cancel()
+                        break
+
+                    idx = futures[future]
+                    scored_doc = future.result()
+
+                    with lock:
+                        completed += 1
+                        current = completed
+                        self._collect_scored(scored_doc, scored, min_score, idx, total)
+                        if scored_doc.score < 0:
+                            failed_count += 1
+
+                    if progress_callback:
+                        progress_callback(current, total)
 
         # Sort by score descending
         scored.sort(key=lambda x: x.score, reverse=True)
@@ -239,6 +272,30 @@ Evaluate the relevance of this document to the research question."""
                 f"Scored {total} documents, {len(scored)} with score >= {min_score}"
             )
         return scored
+
+    def _collect_scored(
+        self,
+        scored_doc: ScoredDocument,
+        scored: list[ScoredDocument],
+        min_score: int,
+        index: int,
+        total: int,
+    ) -> None:
+        """Collect a scored document result, logging as appropriate."""
+        if scored_doc.score < 0:
+            logger.warning(
+                f"Document {scored_doc.document.id}: scoring failed with error code "
+                f"{scored_doc.score} ({index+1}/{total})"
+            )
+            return
+
+        if scored_doc.score >= min_score:
+            scored.append(scored_doc)
+
+        logger.debug(
+            f"Document {scored_doc.document.id}: score={scored_doc.score} "
+            f"({index+1}/{total})"
+        )
 
     def _parse_score_response(self, response: str) -> dict:
         """
