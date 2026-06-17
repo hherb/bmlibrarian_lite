@@ -129,6 +129,22 @@ final class FactCheckWorkflow {
         self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
     }
 
+    /// Create a fact-check workflow using just the model context.
+    ///
+    /// This convenience initializer extracts the model container from the context.
+    /// Use this when you only have access to the model context.
+    ///
+    /// - Parameters:
+    ///   - modelContext: SwiftData model context for persistence.
+    ///   - settings: App settings for configuration.
+    convenience init(modelContext: ModelContext, settings: AppSettings = .shared) {
+        self.init(
+            modelContext: modelContext,
+            modelContainer: modelContext.container,
+            settings: settings
+        )
+    }
+
     // MARK: - Main Entry Points
 
     /// Start a new fact-check for the given claim.
@@ -1021,7 +1037,7 @@ final class FactCheckWorkflow {
 
             // Build provider-specific query string
             let provider = currentSearchOptions?.provider ?? .pubmed
-            session.pubmedQuery = QueryBuilderFactory.build(from: parsed, for: provider)
+            session.pubmedQuery = QueryBuilderFactory.build(from: parsed, for: BioMedLitAdapters.toBioMedLitProvider(provider))
         } else {
             // Fallback: create a simple query from the claim
             print("[QueryConversion] Failed to parse structured query, using fallback")
@@ -1034,7 +1050,7 @@ final class FactCheckWorkflow {
 
             structuredQuery = fallbackQuery
             let provider = currentSearchOptions?.provider ?? .pubmed
-            session.pubmedQuery = QueryBuilderFactory.build(from: fallbackQuery, for: provider)
+            session.pubmedQuery = QueryBuilderFactory.build(from: fallbackQuery, for: BioMedLitAdapters.toBioMedLitProvider(provider))
         }
 
         try? modelContext.save()
@@ -1053,7 +1069,7 @@ final class FactCheckWorkflow {
                 structured.excludePreprints = !options.includePreprints
             }
             // Use the new structured query system
-            query = QueryBuilderFactory.build(from: structured, for: provider)
+            query = QueryBuilderFactory.build(from: structured, for: BioMedLitAdapters.toBioMedLitProvider(provider))
             print("[Search] Using structured query for \(provider.displayName): \(query)")
         } else if let pubmedQuery = session.pubmedQuery {
             // Fall back to stored PubMed query (for resumed sessions)
@@ -1907,7 +1923,8 @@ final class FactCheckWorkflow {
         }
 
         // Store alternatives as query strings for debugging/persistence
-        let queryStrings = alternatives.map { QueryBuilderFactory.build(from: $0, for: provider) }
+        let bmlProvider = BioMedLitAdapters.toBioMedLitProvider(provider)
+        let queryStrings = alternatives.map { QueryBuilderFactory.build(from: $0, for: bmlProvider) }
         session.alternativeQueries = try? JSONEncoder().encode(queryStrings).base64EncodedString()
         session.smartSearchEnabled = true
         session.currentAlternativeQueryIndex = 0
@@ -1924,7 +1941,7 @@ final class FactCheckWorkflow {
             try checkBudget()
 
             session.currentAlternativeQueryIndex = index
-            let queryString = QueryBuilderFactory.build(from: structuredQuery, for: provider)
+            let queryString = QueryBuilderFactory.build(from: structuredQuery, for: bmlProvider)
             updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(queryString.prefix(50))...")
 
             try await executeAlternativeStructuredQuery(structuredQuery, existingPmids: existingPmids, existingDois: existingDois)
@@ -1964,7 +1981,7 @@ final class FactCheckWorkflow {
         }
 
         // Build provider-specific query string
-        let query = QueryBuilderFactory.build(from: queryWithPrefs, for: provider)
+        let query = QueryBuilderFactory.build(from: queryWithPrefs, for: BioMedLitAdapters.toBioMedLitProvider(provider))
 
         // Build search options for this alternative query
         var options = currentSearchOptions ?? settings.buildSearchOptions()

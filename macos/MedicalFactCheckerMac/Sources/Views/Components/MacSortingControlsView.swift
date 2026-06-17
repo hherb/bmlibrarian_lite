@@ -88,7 +88,7 @@ protocol SortableDocument {
     var score: Int? { get }
 
     /// Document title for alphabetical sorting.
-    var title: String? { get }
+    var title: String { get }
 
     /// Publication year for chronological sorting.
     var year: Int? { get }
@@ -109,11 +109,11 @@ extension Array where Element: SortableDocument {
             return sorted { ($0.score ?? 0) < ($1.score ?? 0) }
         case .titleAZ:
             return sorted {
-                ($0.title ?? "").localizedCaseInsensitiveCompare($1.title ?? "") == .orderedAscending
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
         case .titleZA:
             return sorted {
-                ($0.title ?? "").localizedCaseInsensitiveCompare($1.title ?? "") == .orderedDescending
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending
             }
         case .yearNewest:
             return sorted { ($0.year ?? 0) > ($1.year ?? 0) }
