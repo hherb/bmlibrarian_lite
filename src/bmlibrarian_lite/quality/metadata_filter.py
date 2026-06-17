@@ -290,11 +290,25 @@ class MetadataFilter:
                 design = self._type_to_design.get(priority_type, StudyDesign.UNKNOWN)
                 return design, priority_type
 
-        # Check for partial matches (some types have variants)
-        for pub_type in normalized.keys():
-            for known_type, design in self._type_to_design.items():
+        # Check for partial matches (some types have variants).
+        #
+        # Iterate known types in evidence-priority order rather than dict
+        # insertion order so the most informative type wins when several could
+        # substring-match (e.g. a string containing both "Randomized Controlled
+        # Trial" and "Comment" must classify as RCT, not Comment). Types absent
+        # from the priority list are checked last, preserving their order.
+        priority_set = set(self._type_priority)
+        ordered_known_types = self._type_priority + [
+            t for t in self._type_to_design if t not in priority_set
+        ]
+        for known_type in ordered_known_types:
+            design = self._type_to_design.get(known_type)
+            if design is None:
+                continue
+            known_lower = known_type.lower()
+            for pub_type in normalized.keys():
                 # Case-insensitive substring match
-                if known_type.lower() in pub_type.lower():
+                if known_lower in pub_type.lower():
                     return design, pub_type
 
         return StudyDesign.UNKNOWN, None
