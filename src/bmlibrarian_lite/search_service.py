@@ -355,8 +355,14 @@ class SearchService:
         if len(merged) > max_results:
             merged = merged[:max_results]
 
-        # Estimate total available
-        total_available = pubmed_result.total_count + epmc_pagination.total_count
+        # Estimate total available. PubMed and Europe PMC index largely the
+        # same records, so summing their hit counts would roughly double-count
+        # the overlap. The true size of the union is unknowable without
+        # fetching every result, so report a conservative lower bound: the
+        # union is at least as large as the bigger of the two result sets.
+        total_available = max(
+            pubmed_result.total_count, epmc_pagination.total_count
+        )
 
         return UnifiedSearchResult(
             articles=merged,
