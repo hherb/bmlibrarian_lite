@@ -1888,7 +1888,7 @@ class LiteStorage:
         with self._sqlite_connection() as conn:
             for doc_id in document_ids:
                 try:
-                    conn.execute(
+                    cursor = conn.execute(
                         """
                         INSERT OR IGNORE INTO question_documents
                         (question_hash, document_id, search_session_id)
@@ -1896,7 +1896,11 @@ class LiteStorage:
                         """,
                         (question_hash, doc_id, search_session_id),
                     )
-                    if conn.total_changes > 0:
+                    # rowcount reflects THIS statement (1 if inserted, 0 if the
+                    # row was ignored as a duplicate). conn.total_changes is
+                    # cumulative for the connection's lifetime and would
+                    # over-count once any single row has been inserted.
+                    if cursor.rowcount > 0:
                         added += 1
                 except Exception:
                     # Ignore duplicates or other errors

@@ -328,19 +328,25 @@ Evaluate the relevance of this document to the research question."""
                 if depth == 0 and end_idx > start_idx:
                     json_str = response[start_idx:end_idx]
                     data = json.loads(json_str)
-                    score = int(data.get("score", 1))
-                    score = max(1, min(5, score))  # Clamp to 1-5
+                    raw_score = data.get("score")
+                    # A missing/None score means the model did not actually
+                    # score the document. Do NOT default to a valid score here -
+                    # fall through to the text/parse-failure handling so the
+                    # caller can retry instead of recording a fabricated score.
+                    if raw_score is not None:
+                        score = int(raw_score)
+                        score = max(1, min(5, score))  # Clamp to 1-5
 
-                    # Handle explanation that might be a nested object
-                    explanation = data.get("explanation", "")
-                    if isinstance(explanation, dict):
-                        # Convert nested explanation to string
-                        explanation = json.dumps(explanation)
+                        # Handle explanation that might be a nested object
+                        explanation = data.get("explanation", "")
+                        if isinstance(explanation, dict):
+                            # Convert nested explanation to string
+                            explanation = json.dumps(explanation)
 
-                    return {
-                        "score": score,
-                        "explanation": explanation,
-                    }
+                        return {
+                            "score": score,
+                            "explanation": explanation,
+                        }
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
