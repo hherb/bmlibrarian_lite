@@ -319,12 +319,19 @@ def _handle_fact_check(
     if progress:
         progress.set_total(_FC_SEARCH_STEP + n_docs + n_docs + _FC_REPORT_STEP)
 
+    # Resolve parallel worker counts from config
+    scoring_provider = ctx.config.models.get_task_config("document_scoring").provider
+    citation_provider = ctx.config.models.get_task_config("citation_extraction").provider
+    scoring_workers = ctx.config.parallel.get_scoring_workers(scoring_provider)
+    citation_workers = ctx.config.parallel.get_citation_workers(citation_provider)
+
     # 2. Score
     scored_documents = ctx.scoring_agent.score_documents(
         question=claim,
         documents=documents,
         min_score=min_score,
         progress_callback=progress.make_callback("Scoring documents") if progress else None,
+        max_workers=scoring_workers,
     )
 
     if not scored_documents:
@@ -346,6 +353,7 @@ def _handle_fact_check(
         scored_documents=scored_documents,
         min_score=min_score,
         progress_callback=progress.make_callback("Extracting citations") if progress else None,
+        max_workers=citation_workers,
     )
 
     # 4. Generate report

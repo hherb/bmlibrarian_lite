@@ -125,6 +125,20 @@ DEFAULT_LLM_MAX_TOKENS = 4096
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 
 # =============================================================================
+# Parallel Processing Settings
+# =============================================================================
+
+# Default parallel workers for local inference (Ollama)
+PARALLEL_WORKERS_OLLAMA_DEFAULT = 1
+
+# Default parallel workers for cloud APIs (Anthropic, OpenAI, etc.)
+PARALLEL_WORKERS_CLOUD_DEFAULT = 4
+
+# Parallel workers range for UI
+PARALLEL_WORKERS_MIN = 1
+PARALLEL_WORKERS_MAX = 10
+
+# =============================================================================
 # LLM Task Types
 # =============================================================================
 

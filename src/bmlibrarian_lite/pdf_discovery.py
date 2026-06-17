@@ -828,8 +828,19 @@ class PDFDiscoverer:
                 allow_redirects=True,
             )
 
+            # Read the first chunk once. Sniffing the body (paywall text / PDF
+            # magic bytes) consumes bytes from the stream, and iter_content does
+            # NOT rewind, so we must reuse this prefix when writing the file -
+            # otherwise the saved PDF would be missing its first bytes (header)
+            # for any source served without an explicit PDF Content-Type.
+            content_iter = response.iter_content(chunk_size=8192)
+            try:
+                body_prefix = next(content_iter, b"")
+            except Exception:
+                body_prefix = b""
+
             # Check for paywall indicators
-            if self._is_paywall_response(response, source.url):
+            if self._is_paywall_response(response, source.url, body_prefix):
                 logger.info(f"Paywall detected at {source.url}")
                 return DiscoveryResult(
                     success=False,
@@ -842,7 +853,7 @@ class PDFDiscoverer:
 
             # Verify it's actually a PDF
             content_type = response.headers.get("Content-Type", "")
-            if "pdf" not in content_type.lower() and not self._looks_like_pdf(response):
+            if "pdf" not in content_type.lower() and not self._looks_like_pdf(body_prefix):
                 logger.warning(f"Response is not a PDF: {content_type}")
                 return DiscoveryResult(
                     success=False,
@@ -857,10 +868,14 @@ class PDFDiscoverer:
                     error=f"PDF too large ({int(content_length) / 1024 / 1024:.1f} MB)",
                 )
 
-            # Save the PDF
+            # Save the PDF, writing the already-consumed prefix first.
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            if self._cancelled:
+                return DiscoveryResult(success=False, error="Cancelled")
             with open(output_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                if body_prefix:
+                    f.write(body_prefix)
+                for chunk in content_iter:
                     if self._cancelled:
                         output_path.unlink(missing_ok=True)
                         return DiscoveryResult(success=False, error="Cancelled")
@@ -965,8 +980,21 @@ class PDFDiscoverer:
             logger.exception(f"Browser download error for {source.url}")
             return DiscoveryResult(success=False, error=str(e))
 
-    def _is_paywall_response(self, response: requests.Response, url: str) -> bool:
-        """Check if response indicates a paywall."""
+    def _is_paywall_response(
+        self,
+        response: requests.Response,
+        url: str,
+        body_prefix: bytes = b"",
+    ) -> bool:
+        """Check if response indicates a paywall.
+
+        Args:
+            response: The HTTP response (used for status/headers/url only).
+            url: The requested URL.
+            body_prefix: The already-read start of the response body. Passed in
+                by the caller so this check does not consume the stream that is
+                still needed to write the file.
+        """
         # Check status code
         if response.status_code in [401, 403]:
             return True
@@ -984,31 +1012,25 @@ class PDFDiscoverer:
             if any(ind in url_lower for ind in paywall_indicators):
                 return True
 
-            # Check first part of response body for paywall text
-            try:
-                # Read just the beginning to check
-                content_start = next(response.iter_content(chunk_size=4096), b"")
-                content_text = content_start.decode("utf-8", errors="ignore").lower()
-                paywall_texts = [
-                    "access denied", "not authorized", "subscription required",
-                    "purchase article", "buy this article", "institutional access",
-                    "log in to access", "sign in required",
-                ]
-                if any(text in content_text for text in paywall_texts):
-                    return True
-            except Exception:
-                pass
+            # Check the already-read start of the body for paywall text
+            content_text = body_prefix.decode("utf-8", errors="ignore").lower()
+            paywall_texts = [
+                "access denied", "not authorized", "subscription required",
+                "purchase article", "buy this article", "institutional access",
+                "log in to access", "sign in required",
+            ]
+            if any(text in content_text for text in paywall_texts):
+                return True
 
         return False
 
-    def _looks_like_pdf(self, response: requests.Response) -> bool:
-        """Check if response content starts with PDF magic bytes."""
-        try:
-            # Read first few bytes
-            content_start = next(response.iter_content(chunk_size=8), b"")
-            return content_start.startswith(b"%PDF")
-        except Exception:
-            return False
+    def _looks_like_pdf(self, body_prefix: bytes) -> bool:
+        """Check if the response body starts with PDF magic bytes.
+
+        Args:
+            body_prefix: The already-read start of the response body.
+        """
+        return body_prefix.startswith(b"%PDF")
 
     def _verify_pdf_content(
         self,

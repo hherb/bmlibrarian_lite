@@ -467,6 +467,20 @@ def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
             return EvaluationErrorCode.API_RATE_LIMIT
         if exc.status_code and exc.status_code >= 500:
             return EvaluationErrorCode.API_SERVER_ERROR
+        # No usable status code (None, or a 4xx without a specific handler):
+        # inspect the message before assuming a connection error. Otherwise an
+        # auth/rate-limit/timeout APIError is mislabeled as a connection error,
+        # and the message heuristics further below are unreachable for any
+        # APIError because this branch returns first.
+        msg = str(exc).lower()
+        if "rate limit" in msg or "429" in msg:
+            return EvaluationErrorCode.API_RATE_LIMIT
+        if "timeout" in msg or "timed out" in msg:
+            return EvaluationErrorCode.API_TIMEOUT
+        if "auth" in msg or "unauthorized" in msg or "401" in msg or "403" in msg:
+            return EvaluationErrorCode.API_AUTH_ERROR
+        if "server error" in msg or "500" in msg or "502" in msg or "503" in msg:
+            return EvaluationErrorCode.API_SERVER_ERROR
         return EvaluationErrorCode.API_CONNECTION_ERROR
 
     if isinstance(exc, RetryExhaustedError):
