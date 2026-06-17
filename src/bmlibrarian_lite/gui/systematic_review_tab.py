@@ -198,10 +198,13 @@ class WorkflowWorker(QThread):
                     metadata.pubmed_query = session.query
                     metadata.pubmed_search_date = session.created_at
                     metadata.documents_retrieved = len(documents)
-                    # Total available stored in session metadata if available
+                    # Total available stored in session metadata if available.
+                    # The search agent stores this under the 'total_available'
+                    # key (not 'total_count'); reading the wrong key silently
+                    # fell back to the retrieved-document count.
                     if hasattr(session, 'metadata') and session.metadata:
                         metadata.total_results_available = session.metadata.get(
-                            'total_count', len(documents)
+                            'total_available', len(documents)
                         )
                     else:
                         metadata.total_results_available = len(documents)
