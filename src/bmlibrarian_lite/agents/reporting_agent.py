@@ -483,8 +483,12 @@ Key passages:
             date_str = metadata.pubmed_search_date.strftime("%Y-%m-%d")
             lines.append(f"- **Search Date:** {date_str}")
 
+        # When searching both providers the union size is a conservative lower
+        # bound (see SearchService._search_both), so qualify the figure rather
+        # than presenting it as an exact total.
+        total_prefix = "≥" if metadata.total_is_lower_bound else ""
         lines.extend([
-            f"- **Total Results Available:** {metadata.total_results_available:,}",
+            f"- **Total Results Available:** {total_prefix}{metadata.total_results_available:,}",
             f"- **Documents Retrieved:** {metadata.documents_retrieved:,}",
             "",
             "### Document Screening",

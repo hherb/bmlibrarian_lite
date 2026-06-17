@@ -981,6 +981,9 @@ class ReportMetadata:
         pubmed_query: PubMed query string used for search
         pubmed_search_date: When the PubMed search was executed
         total_results_available: Total results available in PubMed
+        total_is_lower_bound: Whether total_results_available is a conservative
+            lower bound rather than an exact count (true for "Both" mode, where
+            the PubMed/Europe PMC union size is unknowable without full retrieval)
         documents_retrieved: Number of documents actually retrieved
 
         documents_scored: Total documents that were scored
@@ -1012,6 +1015,7 @@ class ReportMetadata:
     pubmed_query: str = ""
     pubmed_search_date: Optional[datetime] = None
     total_results_available: int = 0
+    total_is_lower_bound: bool = False
     documents_retrieved: int = 0
 
     # Scoring info
@@ -1052,6 +1056,7 @@ class ReportMetadata:
                 else None
             ),
             "total_results_available": self.total_results_available,
+            "total_is_lower_bound": self.total_is_lower_bound,
             "documents_retrieved": self.documents_retrieved,
             "documents_scored": self.documents_scored,
             "documents_accepted": self.documents_accepted,
@@ -1090,6 +1095,7 @@ class ReportMetadata:
             pubmed_query=data.get("pubmed_query", ""),
             pubmed_search_date=search_date,
             total_results_available=data.get("total_results_available", 0),
+            total_is_lower_bound=data.get("total_is_lower_bound", False),
             documents_retrieved=data.get("documents_retrieved", 0),
             documents_scored=data.get("documents_scored", 0),
             documents_accepted=data.get("documents_accepted", 0),

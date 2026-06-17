@@ -50,7 +50,13 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig
 from ..storage import LiteStorage
-from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
+from ..data_models import (
+    LiteDocument,
+    ScoredDocument,
+    Citation,
+    ReportMetadata,
+    SearchProvider,
+)
 from ..agents import (
     LiteSearchAgent,
     LiteScoringAgent,
@@ -205,6 +211,13 @@ class WorkflowWorker(QThread):
                     if hasattr(session, 'metadata') and session.metadata:
                         metadata.total_results_available = session.metadata.get(
                             'total_available', len(documents)
+                        )
+                        # "Both" mode reports a lower bound for the union of
+                        # PubMed + Europe PMC; flag it so the report qualifies
+                        # the figure with "≥" instead of implying an exact total.
+                        metadata.total_is_lower_bound = (
+                            session.metadata.get('provider')
+                            == SearchProvider.BOTH.value
                         )
                     else:
                         metadata.total_results_available = len(documents)
