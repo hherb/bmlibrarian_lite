@@ -339,9 +339,17 @@ class SearchService:
             prefer_pubmed=True,
         )
 
-        # Calculate duplicates removed
+        # Calculate duplicates removed (before any abstract filtering so this
+        # count reflects genuine cross-provider deduplication only).
         total_before_merge = len(pubmed_articles) + len(epmc_articles)
         duplicates_removed = total_before_merge - len(merged)
+
+        # Drop articles without an abstract, matching the single-provider
+        # search paths (_search_pubmed / _search_europepmc). Downstream scoring
+        # and citation extraction operate on the abstract, so abstract-less
+        # documents would otherwise be stored and scored on empty text in
+        # "Both" mode only.
+        merged = [m for m in merged if m.abstract]
 
         # Limit to max_results
         if len(merged) > max_results:

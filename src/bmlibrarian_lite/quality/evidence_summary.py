@@ -223,7 +223,17 @@ class EvidenceSummaryGenerator:
         with_sample = [a for a in assessments if a.sample_size]
         if with_sample:
             sorted_samples = sorted(a.sample_size for a in with_sample)
-            median_n = sorted_samples[len(sorted_samples) // 2]
+            n = len(sorted_samples)
+            mid = n // 2
+            if n % 2 == 1:
+                median_n = sorted_samples[mid]
+            else:
+                # True median: average the two middle values (the previous
+                # code returned only the upper-middle element, biasing the
+                # reported median upward on even-sized sets).
+                median_n = (sorted_samples[mid - 1] + sorted_samples[mid]) / 2
+                if median_n == int(median_n):
+                    median_n = int(median_n)
             if median_n < SMALL_SAMPLE_SIZE_THRESHOLD:
                 notes.append(
                     f"Median sample size is {median_n}; small samples may "
