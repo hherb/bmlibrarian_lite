@@ -1746,6 +1746,11 @@ class StudyTransparencyAnalyzer:
             elif report.data_availability.disclosure_level == DataDisclosureLevel.RESTRICTED:
                 indicators.append("Data access restricted")
 
+        # Outcome switching (kept aligned with the Swift implementation in
+        # Packages/BioMedLit TransparencyScorer.identifyRiskIndicators)
+        if report.outcome_switching_detected:
+            indicators.append("Outcome switching detected")
+
         # Combined risk: industry ties + unavailable data
         has_industry_ties = (
             report.industry_funding_detected

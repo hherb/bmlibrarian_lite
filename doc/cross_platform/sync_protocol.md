@@ -374,6 +374,12 @@ interface SyncStorage:
     watchForChanges(callback: (String) -> Unit) -> Token
 ```
 
+Semantics:
+
+- `fileExists` returns true when either a file or a directory exists at the
+  path. Callers probe both individual files (workspace config, manifests)
+  and directories (a device's change-log directory) with this call.
+
 ### Platform Implementations
 
 | Platform | Storage Implementation |

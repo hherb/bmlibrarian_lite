@@ -387,8 +387,10 @@ public enum ClinicalTrialPatterns {
     ]
 
     /// NCT ID pattern for ClinicalTrials.gov registration numbers.
-    /// Matches format: NCT followed by 8 digits (e.g., NCT01234567).
-    public static let nctIdPattern = #"NCT\d{8}"#
+    /// Matches format: NCT followed by exactly 8 digits (e.g., NCT01234567).
+    /// Lookarounds reject IDs embedded in longer tokens, such as
+    /// `NCT1234567890` (too many digits) or `SOMENCT12345678`.
+    public static let nctIdPattern = #"(?<![A-Za-z0-9])NCT\d{8}(?!\d)"#
 
     /// Registry names that indicate trial registration.
     /// Used to identify which registry a trial is registered with.

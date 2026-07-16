@@ -670,6 +670,7 @@ public struct TransparencyResultBuilder: Sendable {
             resultsCompliance: resultsCompliance,
             coiAnalysis: coiAnalysis,
             trialRegistrations: trialRegistrations,
+            outcomeSwitchingDetected: outcomeSwitchingDetected,
             title: title
         )
 

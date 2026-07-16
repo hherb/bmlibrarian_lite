@@ -225,12 +225,17 @@ public enum TransparencyScorer {
     /// Examines all transparency factors and generates a list of human-readable
     /// risk indicator strings for display in the UI.
     ///
+    /// Indicator strings are kept aligned with the Python reference
+    /// implementation in
+    /// `src/bmlibrarian_lite/study_transparency_analyzer/`.
+    ///
     /// - Parameters:
     ///   - industryFundingDetected: Whether industry funding was detected.
     ///   - dataAvailability: Data availability analysis result.
     ///   - resultsCompliance: Results posting compliance status.
     ///   - coiAnalysis: COI analysis result.
     ///   - trialRegistrations: List of trial registrations found.
+    ///   - outcomeSwitchingDetected: Whether outcome switching was detected.
     ///   - title: Study title (for missing registration check).
     /// - Returns: List of human-readable risk indicator strings.
     public static func identifyRiskIndicators(
@@ -239,6 +244,7 @@ public enum TransparencyScorer {
         resultsCompliance: ResultsComplianceStatus,
         coiAnalysis: COIAnalysisResult,
         trialRegistrations: [TrialRegistration],
+        outcomeSwitchingDetected: Bool,
         title: String?
     ) -> [String] {
         var indicators: [String] = []
@@ -260,10 +266,25 @@ public enum TransparencyScorer {
 
         // COI concerns
         if coiAnalysis.hasIndustryTies {
-            indicators.append("Authors have industry financial ties")
+            indicators.append("Authors have disclosed industry financial ties")
         }
         if coiAnalysis.statement == nil {
             indicators.append("No conflict of interest statement found")
+        }
+
+        // Data availability concerns (independent of funding source)
+        switch dataAvailability.disclosureLevel {
+        case .notAvailable:
+            indicators.append("Data effectively unavailable despite sharing statement")
+        case .restricted:
+            indicators.append("Data access restricted")
+        default:
+            break
+        }
+
+        // Outcome switching
+        if outcomeSwitchingDetected {
+            indicators.append("Outcome switching detected")
         }
 
         // Missing trial registration

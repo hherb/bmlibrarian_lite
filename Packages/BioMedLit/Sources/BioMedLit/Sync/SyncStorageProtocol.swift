@@ -115,10 +115,15 @@ public protocol SyncStorageProtocol: Sendable {
     /// - Throws: `SyncStorageError` on failure (except missing file).
     func deleteFile(at path: String) async throws
 
-    /// Checks if a file exists.
+    /// Checks if a path exists.
+    ///
+    /// Returns true when either a file or a directory exists at the path,
+    /// mirroring `FileManager.fileExists(atPath:)`. Callers probe both
+    /// individual files (e.g. the workspace config) and directories
+    /// (e.g. a device's change-log directory) with this method.
     ///
     /// - Parameter path: Path relative to sync root.
-    /// - Returns: True if file exists (not directory).
+    /// - Returns: True if a file or directory exists at the path.
     func fileExists(at path: String) async -> Bool
 
     /// Creates a directory (including parents).

@@ -334,9 +334,9 @@ final class TransparencyModelsTests: XCTestCase {
 
         let result = builder.build()
 
-        XCTAssertTrue(result.riskIndicators.contains("Industry-funded study"))
-        XCTAssertTrue(result.riskIndicators.contains("Data not available"))
-        XCTAssertTrue(result.riskIndicators.contains("Trial results not posted"))
+        XCTAssertTrue(result.riskIndicators.contains("Industry funding detected"))
+        XCTAssertTrue(result.riskIndicators.contains("Data effectively unavailable despite sharing statement"))
+        XCTAssertTrue(result.riskIndicators.contains("Trial results not posted to ClinicalTrials.gov"))
         XCTAssertTrue(result.riskIndicators.contains("Outcome switching detected"))
     }
 
