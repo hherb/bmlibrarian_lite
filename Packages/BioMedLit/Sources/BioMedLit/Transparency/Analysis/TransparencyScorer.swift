@@ -67,7 +67,7 @@ public enum TransparencyScorer {
         score += dataAvailabilityPoints(for: dataAvailability.disclosureLevel)
 
         // COI disclosure points
-        score += coiDisclosurePoints(hasStatement: coiAnalysis.statement != nil)
+        score += coiDisclosurePoints(hasStatement: coiAnalysis.hasStatement)
 
         // Trial registration points
         score += trialRegistrationPoints(
@@ -225,12 +225,17 @@ public enum TransparencyScorer {
     /// Examines all transparency factors and generates a list of human-readable
     /// risk indicator strings for display in the UI.
     ///
+    /// Indicator strings are kept aligned with the Python reference
+    /// implementation in
+    /// `src/bmlibrarian_lite/study_transparency_analyzer/`.
+    ///
     /// - Parameters:
     ///   - industryFundingDetected: Whether industry funding was detected.
     ///   - dataAvailability: Data availability analysis result.
     ///   - resultsCompliance: Results posting compliance status.
     ///   - coiAnalysis: COI analysis result.
     ///   - trialRegistrations: List of trial registrations found.
+    ///   - outcomeSwitchingDetected: Whether outcome switching was detected.
     ///   - title: Study title (for missing registration check).
     /// - Returns: List of human-readable risk indicator strings.
     public static func identifyRiskIndicators(
@@ -239,31 +244,47 @@ public enum TransparencyScorer {
         resultsCompliance: ResultsComplianceStatus,
         coiAnalysis: COIAnalysisResult,
         trialRegistrations: [TrialRegistration],
+        outcomeSwitchingDetected: Bool,
         title: String?
     ) -> [String] {
         var indicators: [String] = []
 
         // Industry funding indicators
         if industryFundingDetected {
-            indicators.append("Industry funding detected")
+            indicators.append(RiskIndicatorStrings.industryFunding)
 
             let restrictedLevels: [DataDisclosureLevel] = [.notAvailable, .restricted]
             if restrictedLevels.contains(dataAvailability.disclosureLevel) {
-                indicators.append("Industry-funded with restricted data access")
+                indicators.append(RiskIndicatorStrings.industryRestrictedData)
             }
         }
 
         // Trial results compliance
         if resultsCompliance == .missing {
-            indicators.append("Trial results not posted to ClinicalTrials.gov")
+            indicators.append(RiskIndicatorStrings.resultsNotPosted)
         }
 
         // COI concerns
         if coiAnalysis.hasIndustryTies {
-            indicators.append("Authors have industry financial ties")
+            indicators.append(RiskIndicatorStrings.industryTiesDisclosed)
         }
-        if coiAnalysis.statement == nil {
-            indicators.append("No conflict of interest statement found")
+        if !coiAnalysis.hasStatement {
+            indicators.append(RiskIndicatorStrings.missingCoiStatement)
+        }
+
+        // Data availability concerns (independent of funding source)
+        switch dataAvailability.disclosureLevel {
+        case .notAvailable:
+            indicators.append(RiskIndicatorStrings.dataEffectivelyUnavailable)
+        case .restricted:
+            indicators.append(RiskIndicatorStrings.dataAccessRestricted)
+        default:
+            break
+        }
+
+        // Outcome switching
+        if outcomeSwitchingDetected {
+            indicators.append(RiskIndicatorStrings.outcomeSwitching)
         }
 
         // Missing trial registration
@@ -306,7 +327,7 @@ public enum TransparencyScorer {
 
         // COI disclosure
         let coiStatus: String
-        if result.coiAnalysis.statement != nil {
+        if result.coiAnalysis.hasStatement {
             coiStatus = result.coiAnalysis.hasIndustryTies ? "Disclosed" : "No conflicts"
         } else {
             coiStatus = "Not Disclosed"

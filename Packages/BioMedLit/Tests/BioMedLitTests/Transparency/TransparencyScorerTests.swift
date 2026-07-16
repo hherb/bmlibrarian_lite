@@ -277,6 +277,7 @@ final class TransparencyScorerTests: XCTestCase {
             resultsCompliance: .unknown,
             coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
+            outcomeSwitchingDetected: false,
             title: nil
         )
 
@@ -292,6 +293,7 @@ final class TransparencyScorerTests: XCTestCase {
             resultsCompliance: .missing,
             coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
+            outcomeSwitchingDetected: false,
             title: nil
         )
 
@@ -310,10 +312,11 @@ final class TransparencyScorerTests: XCTestCase {
             resultsCompliance: .unknown,
             coiAnalysis: coiWithTies,
             trialRegistrations: [],
+            outcomeSwitchingDetected: false,
             title: nil
         )
 
-        XCTAssertTrue(indicators.contains("Authors have industry financial ties"))
+        XCTAssertTrue(indicators.contains("Authors have disclosed industry financial ties"))
     }
 
     /// Test missing COI risk indicator.
@@ -324,6 +327,22 @@ final class TransparencyScorerTests: XCTestCase {
             resultsCompliance: .unknown,
             coiAnalysis: COIAnalysisResult.notAvailable,
             trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+
+        XCTAssertTrue(indicators.contains("No conflict of interest statement found"))
+    }
+
+    /// Test that an empty COI statement counts as missing (Python parity).
+    func testIdentifyRiskIndicatorsEmptyCOIStatement() {
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: ""),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
             title: nil
         )
 
@@ -338,10 +357,53 @@ final class TransparencyScorerTests: XCTestCase {
             resultsCompliance: .unknown,
             coiAnalysis: COIAnalysisResult(statement: "None"),
             trialRegistrations: [],
+            outcomeSwitchingDetected: false,
             title: "Randomized Controlled Trial"
         )
 
         XCTAssertTrue(indicators.contains { $0.contains("without detected registration") })
+    }
+
+    /// Test outcome switching risk indicator.
+    func testIdentifyRiskIndicatorsOutcomeSwitching() {
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: "None"),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: true,
+            title: nil
+        )
+
+        XCTAssertTrue(indicators.contains("Outcome switching detected"))
+    }
+
+    /// Test standalone data availability risk indicators (without industry funding).
+    func testIdentifyRiskIndicatorsDataAvailability() {
+        let unavailable = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .notAvailable),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: "None"),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+        XCTAssertTrue(
+            unavailable.contains("Data effectively unavailable despite sharing statement")
+        )
+
+        let restricted = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .restricted),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: "None"),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+        XCTAssertTrue(restricted.contains("Data access restricted"))
     }
 
     // MARK: - Tooltip Tests

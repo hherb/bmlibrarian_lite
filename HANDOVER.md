@@ -6,102 +6,70 @@ its slice has landed; add a new section when handing off new work.
 
 ---
 
-## Next slice: fix the 5 pre-existing BioMedLit test failures
+## Recently landed (context)
 
-**State as of 2026-07-16** (branch `retire-standalone-macos-app`, PR #99):
-`swift test` in `Packages/BioMedLit` runs 445 tests with **11 assertion
-failures across 5 test cases** (plus 19 skipped). These failures predate PR #99
-— verified identical before and after its changes — and became visible again
-because that PR repaired the broken SwiftPM test infrastructure. They fall into
-three independent groups with verified root causes, listed easiest-first.
+- **BioMedLit test failures fixed** (2026-07-16): all 5 pre-existing failing
+  test cases resolved; `swift test` in `Packages/BioMedLit` is now fully green
+  (447 tests, 0 failures, 19 skips). Three root causes fixed:
+  - NCT ID regex gained lookaround boundaries
+    (`TransparencyConstants.nctIdPattern`) so over-long IDs like
+    `NCT1234567890` no longer partially match.
+  - `SyncStorage.fileExists` now means "path exists (file **or** directory)",
+    matching `iCloudSyncStorage` and `FileManager.fileExists(atPath:)`.
+    `LocalFolderSyncStorage` previously returned false for directories, which
+    silently broke `WorkspaceInitializer.listDevices`,
+    `SyncEngine.updateManifest`, and `SyncCoordinator.loadInitialSequence`
+    (all probe the `changes/<deviceId>` directory). Protocol docs and
+    `doc/cross_platform/sync_protocol.md` updated.
+  - Risk indicator strings aligned to the canonical Python set in
+    `src/bmlibrarian_lite/study_transparency_analyzer/`;
+    `outcomeSwitchingDetected` wired into
+    `TransparencyScorer.identifyRiskIndicators` (new required parameter) and
+    the standalone data-availability indicators added. Python analyzer gained
+    the same "Outcome switching detected" indicator for parity, with new
+    tests in `tests/test_study_transparency_analyzer.py`.
+- **Review follow-ups on the above** (2026-07-17): indicator strings hoisted
+  into named constants on both platforms (`RiskIndicatorStrings` in
+  `TransparencyConstants.swift`, `RISK_INDICATOR_*` in
+  `study_transparency_analyzer.py`) — implementations use the constants,
+  tests keep pinning the literals. Swift now treats an **empty** COI
+  statement as missing (new `COIAnalysisResult.hasStatement`), matching
+  Python's `if not coi_info.statement` in scoring, risk level, indicators,
+  and tooltip.
 
-### Reproduce
+## Next slice candidate: finish Swift↔Python risk-indicator parity
 
-```bash
-cd Packages/BioMedLit
-swift test 2>&1 | grep -E "Test Case.*failed"
-```
+The canonical indicator implementation is Python
+(`study_transparency_analyzer.py`, `_identify_risk_indicators`). Swift
+(`Packages/BioMedLit/.../TransparencyScorer.swift`, `identifyRiskIndicators`)
+now matches for the common indicators, but still lacks:
 
-Failing cases:
+- `"Industry funding routed through institutional intermediaries"` — Python
+  pattern-matches the COI statement against
+  `INSTITUTIONAL_INTERMEDIARY_PATTERNS`; Swift has no equivalent.
+- `"Industry ties combined with restricted/unavailable data"` — Python's
+  combined-risk indicator (industry funding *or* COI industry ties, plus
+  restricted/unavailable data).
+- Order-preserving dedup of the indicator list (Python dedupes; Swift's
+  current logic cannot produce duplicates, so this only matters once the
+  combined indicators land).
+- **Data-availability classification and scoring parity** — tracked in
+  issue #101. Swift's `DataAvailabilityAnalyzer` never emits `.restricted`
+  (on-request statements map to `.availableOnRequest`, where Python assigns
+  `RESTRICTED`), so the "Data access restricted" indicator is unreachable
+  from the built-in Swift analyzer; Swift also lacks Python's
+  "effectively unavailable" pattern tier, and the scoring deltas differ
+  (see the issue for the full table). Expect user-visible score/risk
+  changes on iOS/macOS when aligning.
 
-- `SyncEngineTests` — `testDeviceRegistration`, `testListDevices`, `testFindDeviceByName`
-- `TransparencyModelsTests` — `testBuilderRiskIndicatorIdentification`
-- `TrialComplianceAnalyzerTests` — `testExtractNCTIdsInvalidFormat`
+Keep the strings byte-identical to Python, add matching tests in
+`Tests/BioMedLitTests/Transparency/TransparencyScorerTests.swift`, and check
+whether Android has grown an indicator implementation that also needs
+aligning (as of 2026-07-16 it has none).
 
-### Group 1 — NCT ID regex lacks trailing boundary (smallest fix)
+### Acceptance
 
-`testExtractNCTIdsInvalidFormat` expects `NCT1234567890` (11 digits) to be
-rejected, but `nctIdPattern = #"NCT\d{8}"#`
-(`Sources/BioMedLit/Transparency/Models/TransparencyConstants.swift:391`)
-matches its first 8 digits, producing a spurious `NCT12345678`.
-
-- Fix: add a trailing boundary, e.g. `#"NCT\d{8}(?!\d)"#`. Consider whether a
-  leading boundary is also wanted (`SOMENCT12345678` currently matches too).
-- Check all users of the pattern before changing it (`grep -rn nctIdPattern
-  Sources/`), and re-run the whole `TrialComplianceAnalyzerTests` suite — the
-  valid-format and longer-text extraction tests must keep passing.
-
-### Group 2 — sync storage `fileExists` is file-only, but callers probe directories
-
-All three `SyncEngineTests` failures share one root cause.
-`LocalFolderSyncStorage.fileExists`
-(`Sources/BioMedLit/Sync/LocalFolderSyncStorage.swift:240`) deliberately
-returns `false` for directories ("true only if it exists AND is a file"), but:
-
-- `WorkspaceInitializer.listDevices`
-  (`Sources/BioMedLit/Sync/WorkspaceInitializer.swift:228`) guards on
-  `fileExists(at: SyncConstants.devicesDirectory)` — a directory — so it
-  always returns `[]`. That breaks `testListDevices` (0 vs 2) and
-  `testFindDeviceByName` (nil). Note `testLoadDeviceById` passes, because
-  loading probes the device *file*.
-- `testDeviceRegistration` (`Tests/BioMedLitTests/SyncEngineTests.swift:239`)
-  asserts `fileExists` on the device's `changes/<deviceId>` *directory*.
-
-This is a protocol-semantics decision, not a one-liner:
-
-1. Decide whether `SyncStorage` gains a `directoryExists(at:)` requirement, or
-   whether `fileExists` should mean "path exists" — check how
-   `iCloudSyncStorage` implements `fileExists` before choosing, and keep the
-   two implementations consistent.
-2. `doc/cross_platform/` contains the sync protocol documentation — update it
-   if the protocol surface changes.
-3. Update `listDevices` (and audit other `fileExists` callers in
-   `Sources/BioMedLit/Sync/` for directory probes: `grep -rn "fileExists"
-   Sources/BioMedLit/Sync/`) and the test's directory assertion to match the
-   decision.
-
-### Group 3 — risk indicator strings drifted, and outcome switching is unwired
-
-`testBuilderRiskIndicatorIdentification`
-(`Tests/BioMedLitTests/Transparency/TransparencyModelsTests.swift:328`) expects
-indicators `"Industry-funded study"`, `"Data not available"`,
-`"Trial results not posted"`, `"Outcome switching detected"`. But
-`TransparencyScorer.identifyRiskIndicators`
-(`Sources/BioMedLit/Transparency/Analysis/TransparencyScorer.swift:236`):
-
-- emits different strings (`"Industry funding detected"`,
-  `"Trial results not posted to ClinicalTrials.gov"`, …);
-- emits a data-availability indicator only *in combination with* industry
-  funding, never standalone;
-- has **no outcome-switching parameter at all**, even though
-  `TransparencyResultBuilder` carries `outcomeSwitchingDetected` — the flag is
-  simply never turned into an indicator.
-
-Steps:
-
-1. Decide the canonical indicator strings. These surface in user-facing UI
-   (transparency views on iOS/macOS/Android) and exist on other platforms —
-   check `src/bmlibrarian_lite/study_transparency_analyzer/` (Python) and the
-   Android transparency code for the wording used there, then align.
-2. Wire `outcomeSwitchingDetected` from the builder into
-   `identifyRiskIndicators`, and add a standalone data-availability indicator.
-3. Update either the implementation strings or the test expectations to the
-   canonical set; re-run the full `Transparency*` test suites.
-
-### Acceptance for this slice
-
-- `cd Packages/BioMedLit && swift test` → 0 failures (19 skips are fine).
-- App package still green: `cd ios/MedicalFactChecker && swift test`
-  (173 XCTest + 76 Swift Testing, 0 failures as of 2026-07-16).
-- If the sync protocol surface changed: `doc/cross_platform/` updated and
-  `iCloudSyncStorage` kept consistent with `LocalFolderSyncStorage`.
+- `cd Packages/BioMedLit && swift test` → 0 failures.
+- `pytest tests/` → 0 failures (Python is reference; should not change).
+- Indicator strings identical across `TransparencyScorer.swift` and
+  `study_transparency_analyzer.py`.

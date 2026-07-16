@@ -238,11 +238,10 @@ public actor LocalFolderSyncStorage: SyncStorageProtocol {
     }
 
     public func fileExists(at path: String) async -> Bool {
-        let url = resolve(path)
-        var isDirectory: ObjCBool = false
-        let exists = fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        // Return true only if it exists AND is a file (not directory)
-        return exists && !isDirectory.boolValue
+        // True for files and directories alike, matching the protocol
+        // contract and iCloudSyncStorage — sync callers probe change-log
+        // directories as well as individual files.
+        fileManager.fileExists(atPath: resolve(path).path)
     }
 
     public func createDirectory(at path: String) async throws {

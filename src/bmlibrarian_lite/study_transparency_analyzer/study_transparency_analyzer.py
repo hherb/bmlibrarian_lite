@@ -326,6 +326,33 @@ DATA_REPOSITORIES = {
 
 
 # =============================================================================
+# RISK INDICATOR STRINGS
+# =============================================================================
+
+# Canonical risk-of-bias indicator strings shown in the UI. The Swift
+# implementation (Packages/BioMedLit, TransparencyConstants.swift,
+# RiskIndicatorStrings) must keep these byte-identical; cross-platform
+# tests pin the literals.
+RISK_INDICATOR_INDUSTRY_FUNDING = "Industry funding detected"
+RISK_INDICATOR_INDUSTRY_RESTRICTED_DATA = "Industry-funded with restricted data access"
+RISK_INDICATOR_RESULTS_NOT_POSTED = "Trial results not posted to ClinicalTrials.gov"
+RISK_INDICATOR_INDUSTRY_TIES_DISCLOSED = "Authors have disclosed industry financial ties"
+RISK_INDICATOR_INSTITUTIONAL_INTERMEDIARY = (
+    "Industry funding routed through institutional intermediaries"
+)
+RISK_INDICATOR_MISSING_COI_STATEMENT = "No conflict of interest statement found"
+RISK_INDICATOR_DATA_EFFECTIVELY_UNAVAILABLE = (
+    "Data effectively unavailable despite sharing statement"
+)
+RISK_INDICATOR_DATA_ACCESS_RESTRICTED = "Data access restricted"
+RISK_INDICATOR_OUTCOME_SWITCHING = "Outcome switching detected"
+RISK_INDICATOR_COMBINED_INDUSTRY_DATA = (
+    "Industry ties combined with restricted/unavailable data"
+)
+RISK_INDICATOR_MISSING_TRIAL_REGISTRATION = "Clinical trial without detected registration"
+
+
+# =============================================================================
 # API CLIENTS
 # =============================================================================
 
@@ -1711,40 +1738,43 @@ class StudyTransparencyAnalyzer:
 
         # Industry funding without full data sharing
         if report.industry_funding_detected:
-            indicators.append("Industry funding detected")
+            indicators.append(RISK_INDICATOR_INDUSTRY_FUNDING)
 
             if report.data_availability:
                 if report.data_availability.disclosure_level in [
                     DataDisclosureLevel.NOT_AVAILABLE,
                     DataDisclosureLevel.RESTRICTED
                 ]:
-                    indicators.append("Industry-funded with restricted data access")
+                    indicators.append(RISK_INDICATOR_INDUSTRY_RESTRICTED_DATA)
 
         # Missing results on ClinicalTrials.gov
         if report.results_compliance == ResultsComplianceStatus.MISSING:
-            indicators.append("Trial results not posted to ClinicalTrials.gov")
+            indicators.append(RISK_INDICATOR_RESULTS_NOT_POSTED)
 
         # COI concerns
         if report.coi_info:
             if report.coi_info.has_industry_ties:
-                indicators.append("Authors have disclosed industry financial ties")
+                indicators.append(RISK_INDICATOR_INDUSTRY_TIES_DISCLOSED)
                 # Check for institutional intermediary pattern
                 coi_lower = report.coi_info.statement.lower()
                 for pattern in INSTITUTIONAL_INTERMEDIARY_PATTERNS:
                     if re.search(pattern, coi_lower):
-                        indicators.append(
-                            "Industry funding routed through institutional intermediaries"
-                        )
+                        indicators.append(RISK_INDICATOR_INSTITUTIONAL_INTERMEDIARY)
                         break
             if not report.coi_info.statement:
-                indicators.append("No conflict of interest statement found")
+                indicators.append(RISK_INDICATOR_MISSING_COI_STATEMENT)
 
         # Data availability concerns
         if report.data_availability:
             if report.data_availability.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE:
-                indicators.append("Data effectively unavailable despite sharing statement")
+                indicators.append(RISK_INDICATOR_DATA_EFFECTIVELY_UNAVAILABLE)
             elif report.data_availability.disclosure_level == DataDisclosureLevel.RESTRICTED:
-                indicators.append("Data access restricted")
+                indicators.append(RISK_INDICATOR_DATA_ACCESS_RESTRICTED)
+
+        # Outcome switching (kept aligned with the Swift implementation in
+        # Packages/BioMedLit TransparencyScorer.identifyRiskIndicators)
+        if report.outcome_switching_detected:
+            indicators.append(RISK_INDICATOR_OUTCOME_SWITCHING)
 
         # Combined risk: industry ties + unavailable data
         has_industry_ties = (
@@ -1756,15 +1786,13 @@ class StudyTransparencyAnalyzer:
                 DataDisclosureLevel.NOT_AVAILABLE,
                 DataDisclosureLevel.RESTRICTED,
             ):
-                indicators.append(
-                    "Industry ties combined with restricted/unavailable data"
-                )
+                indicators.append(RISK_INDICATOR_COMBINED_INDUSTRY_DATA)
 
         # No trial registration for clinical study
         if not report.trial_registrations:
             if report.title and any(kw in report.title.lower() for kw in
                 ['trial', 'randomized', 'randomised', 'rct', 'phase i', 'phase ii', 'phase iii']):
-                indicators.append("Clinical trial without detected registration")
+                indicators.append(RISK_INDICATOR_MISSING_TRIAL_REGISTRATION)
 
         # Deduplicate while preserving order
         seen = set()

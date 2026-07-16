@@ -257,6 +257,6 @@ public enum TrialComplianceAnalyzer {
             return nil
         }
 
-        return "Clinical trial without detected registration"
+        return RiskIndicatorStrings.missingTrialRegistration
     }
 }

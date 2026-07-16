@@ -366,6 +366,50 @@ public enum DataRepositoryPatterns {
     public static let accessionPattern = #"(?:accession|identifier)[:\s]+([a-zA-Z0-9]+)"#
 }
 
+// MARK: - Risk Indicator Strings
+
+/// Canonical risk-of-bias indicator strings shown in the UI.
+///
+/// These must stay byte-identical to the Python reference implementation
+/// (`RISK_INDICATOR_*` constants in
+/// `src/bmlibrarian_lite/study_transparency_analyzer/study_transparency_analyzer.py`);
+/// cross-platform tests pin the literals.
+public enum RiskIndicatorStrings {
+
+    /// Industry funding was detected.
+    public static let industryFunding = "Industry funding detected"
+
+    /// Industry funding combined with restricted/unavailable data.
+    public static let industryRestrictedData =
+        "Industry-funded with restricted data access"
+
+    /// Trial results were due but not posted to ClinicalTrials.gov.
+    public static let resultsNotPosted =
+        "Trial results not posted to ClinicalTrials.gov"
+
+    /// Authors disclosed industry financial ties in the COI statement.
+    public static let industryTiesDisclosed =
+        "Authors have disclosed industry financial ties"
+
+    /// No conflict of interest statement was found.
+    public static let missingCoiStatement =
+        "No conflict of interest statement found"
+
+    /// A sharing statement exists but the data is effectively unavailable.
+    public static let dataEffectivelyUnavailable =
+        "Data effectively unavailable despite sharing statement"
+
+    /// Data access is restricted (e.g. request/approval required).
+    public static let dataAccessRestricted = "Data access restricted"
+
+    /// Reported outcomes deviate from registered outcomes.
+    public static let outcomeSwitching = "Outcome switching detected"
+
+    /// The study appears to be a clinical trial but no registration was found.
+    public static let missingTrialRegistration =
+        "Clinical trial without detected registration"
+}
+
 // MARK: - Clinical Trial Patterns
 
 /// Patterns for clinical trial detection.
@@ -387,8 +431,10 @@ public enum ClinicalTrialPatterns {
     ]
 
     /// NCT ID pattern for ClinicalTrials.gov registration numbers.
-    /// Matches format: NCT followed by 8 digits (e.g., NCT01234567).
-    public static let nctIdPattern = #"NCT\d{8}"#
+    /// Matches format: NCT followed by exactly 8 digits (e.g., NCT01234567).
+    /// Lookarounds reject IDs embedded in longer tokens, such as
+    /// `NCT1234567890` (too many digits) or `SOMENCT12345678`.
+    public static let nctIdPattern = #"(?<![A-Za-z0-9])NCT\d{8}(?!\d)"#
 
     /// Registry names that indicate trial registration.
     /// Used to identify which registry a trial is registered with.
