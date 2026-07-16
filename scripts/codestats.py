@@ -7,8 +7,7 @@ documentation, and code structure for all project components.
 
 Usage:
     python scripts/codestats.py              # All projects
-    python scripts/codestats.py --ios        # iOS only
-    python scripts/codestats.py --macos      # macOS only
+    python scripts/codestats.py --ios        # iOS/macOS multiplatform app only
     python scripts/codestats.py --android    # Android only
     python scripts/codestats.py --bmll       # Python desktop app only
     python scripts/codestats.py --ios --android  # Multiple projects
@@ -520,8 +519,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate code statistics for BMLibrarian Lite projects"
     )
-    parser.add_argument("--ios", action="store_true", help="Include iOS project")
-    parser.add_argument("--macos", action="store_true", help="Include macOS project")
+    parser.add_argument("--ios", action="store_true", help="Include iOS/macOS multiplatform project")
     parser.add_argument("--android", action="store_true", help="Include Android project")
     parser.add_argument("--bmll", action="store_true", help="Include Python desktop app")
     parser.add_argument("--swift-package", action="store_true", help="Include BioMedLit Swift package")
@@ -529,8 +527,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # If no specific project selected, analyze all
-    if not any([args.ios, args.macos, args.android, args.bmll, args.swift_package]):
-        args.ios = args.macos = args.android = args.bmll = args.swift_package = True
+    if not any([args.ios, args.android, args.bmll, args.swift_package]):
+        args.ios = args.android = args.bmll = args.swift_package = True
 
     # Find project root
     script_path = Path(__file__).resolve()
@@ -572,19 +570,6 @@ def main() -> None:
             stats = analyze_project(
                 "MedicalFactChecker (iOS)",
                 ios_root,
-                (".swift",),
-                analyze_swift_file,
-                exclude_dirs,
-            )
-            all_stats.append(stats)
-
-    # Analyze macOS app
-    if args.macos:
-        macos_root = project_root / "macos" / "MedicalFactCheckerMac"
-        if macos_root.exists():
-            stats = analyze_project(
-                "MedicalFactChecker (macOS)",
-                macos_root,
                 (".swift",),
                 analyze_swift_file,
                 exclude_dirs,
@@ -634,8 +619,6 @@ def main() -> None:
             base = project_root / "src"
         elif stats.name == "MedicalFactChecker (iOS)":
             base = project_root / "ios" / "MedicalFactChecker"
-        elif stats.name == "MedicalFactChecker (macOS)":
-            base = project_root / "macos" / "MedicalFactCheckerMac"
         elif stats.name == "BioMedLit (Swift Package)":
             base = project_root / "Packages" / "BioMedLit"
         else:
