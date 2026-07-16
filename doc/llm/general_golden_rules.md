@@ -8,3 +8,4 @@
 8. All errors must be handled, logged, and reported to the user: No exceptions. 
 9. when using less familiar external libraries / APIs, research their documentation first to ensure correct use
 10. always keep cross platform compatibility in mind when thinking about solutions 
+11. Our projects use the AGPL 3.0 license. Do not use incompatible 3rd party libraries
