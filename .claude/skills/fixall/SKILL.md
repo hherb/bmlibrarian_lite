@@ -2,6 +2,8 @@
 name: fixall
 description: Use when a code review has produced issues that need to be addressed and the pull request finalized on the bmlibrarian_lite project.
 disable-model-invocation: true
+allowed-tools: Read, Edit, Bash(git add *), Bash(git commit *), Bash(git push *), Bash(git status *), Bash(git diff *), Bash(gh issue *), Bash(gh pr *), Bash(pytest *), Bash(uv run pytest *), Bash(ruff *), Bash(mypy *), Bash(swift test*), Bash(swift build*), Bash(xcodebuild *), Bash(./gradlew *)
+
 ---
 
 Address all issues identified in the code review one by one. If fixing them appears manageable within this session, fix them now. If not, lodge the issue on GitHub. Once all issues have been addressed, run the test suites for the platform(s) you touched:

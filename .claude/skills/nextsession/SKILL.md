@@ -2,6 +2,8 @@
 name: nextsession
 description: Use when starting or resuming a work session on the bmlibrarian_lite project, to load current project state and re-establish the coding rules and session workflow before doing any work.
 disable-model-invocation: true
+allowed-tools: Read, Edit, Bash(git add *), Bash(git commit *), Bash(git push *), Bash(git status *), Bash(git diff *), Bash(gh issue *), Bash(gh pr *), Bash(pytest *), Bash(uv run pytest *), Bash(ruff *), Bash(mypy *), Bash(swift test*), Bash(swift build*), Bash(xcodebuild *), Bash(./gradlew *)
+
 ---
 
 read HANDOVER.md and follow the instructions. Ask me if you have any questions.
