@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import XCTest
+import SwiftData
 @testable import MedicalFactChecker
 
 final class CostCalculatorTests: XCTestCase {
@@ -100,7 +101,7 @@ final class UsageRecordTests: XCTestCase {
             costUSD: costUSD,
             operationType: "test"
         )
-        // Note: In a real test, we'd need to override the monthKey
+        record.monthKey = monthKey
         return record
     }
 }
@@ -593,8 +594,9 @@ final class QueryBuilderTests: XCTestCase {
         XCTAssertTrue(result.contains("amlodipine[tiab]"))
         // Should contain abstract filter
         XCTAssertTrue(result.contains("hasabstract"))
-        // Should contain publication type filter
-        XCTAssertTrue(result.contains("Clinical Trial[pt]"))
+        // Should exclude non-article publication types (exclude-list approach)
+        XCTAssertTrue(result.contains("NOT ("))
+        XCTAssertTrue(result.contains("Editorial[pt]"))
     }
 
     func testPubMedQueryBuilderMultipleConcepts() {
@@ -655,8 +657,8 @@ final class QueryBuilderTests: XCTestCase {
 
         // Should contain MeSH in TITLE_ABS field (quoted)
         XCTAssertTrue(result.contains("TITLE_ABS:\"Amlodipine\""))
-        // Should contain keyword in TITLE_ABS field
-        XCTAssertTrue(result.contains("TITLE_ABS:amlodipine"))
+        // Should contain keyword in TITLE_ABS field (keywords are always quoted)
+        XCTAssertTrue(result.contains("TITLE_ABS:\"amlodipine\""))
         // Should contain abstract filter
         XCTAssertTrue(result.contains("HAS_ABSTRACT:y"))
         // Should exclude preprints by default
@@ -2035,6 +2037,8 @@ final class DocumentSortingTests: XCTestCase {
         let title: String?
         let year: Int?
         let pmid: String  // For identification in tests
+
+        var sortableTitle: String? { title }
 
         init(pmid: String, score: Int? = nil, title: String? = nil, year: Int? = nil) {
             self.pmid = pmid

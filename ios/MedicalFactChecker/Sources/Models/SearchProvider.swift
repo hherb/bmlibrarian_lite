@@ -74,16 +74,22 @@ enum SearchProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    #if os(iOS)
     /// Theme color for the provider.
     var themeColor: Color {
+        #if os(macOS)
+        switch self {
+        case .pubmed: return Color(nsColor: .systemBlue).opacity(0.8)
+        case .europePMC: return Color(nsColor: .systemIndigo)
+        case .both: return Color(nsColor: .systemCyan)
+        }
+        #else
         switch self {
         case .pubmed: return .blue
         case .europePMC: return .green
         case .both: return .purple
         }
+        #endif
     }
-    #endif
 
     /// Whether this provider supports preprint filtering.
     var supportsPreprints: Bool {

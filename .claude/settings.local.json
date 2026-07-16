@@ -53,7 +53,15 @@
       "Bash(tar tzf:*)",
       "Bash(twine check:*)",
       "Bash(twine upload:*)",
-      "Bash(git tag:*)"
+      "Bash(git tag:*)",
+      "WebFetch(domain:pmc.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:www.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:www.ebi.ac.uk)",
+      "WebFetch(domain:api.unpaywall.org)",
+      "WebFetch(domain:europepmc.org)",
+      "Bash(echo:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run pytest:*)"
     ]
   }
 }

@@ -213,9 +213,9 @@ xcodebuild test \
     -scheme MedicalFactChecker \
     -destination 'platform=iOS Simulator,name=iPhone 15'
 
-# Run tests for macOS
+# Run tests for macOS (same multiplatform scheme, macOS destination)
 xcodebuild test \
-    -scheme MedicalFactCheckerMac \
+    -scheme MedicalFactChecker \
     -destination 'platform=macOS'
 
 # Run tests via Swift Package Manager (for BioMedLit package)

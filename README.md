@@ -217,17 +217,18 @@ The iOS app is located in `ios/MedicalFactChecker/`. To build:
 
 ### macOS App
 
-The macOS app is a separate project located in `macos/MedicalFactCheckerMac/`. To build:
+The macOS app is built from the same multiplatform project as the iOS app (`ios/MedicalFactChecker/`). To build:
 
-1. **Open in Xcode**: Open `macos/MedicalFactCheckerMac/MedicalFactCheckerMac.xcodeproj`
+1. **Open in Xcode**: Open `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`
 2. **Configure signing**: Set your development team in project settings
-3. **Build and run**: Select "My Mac" as the target and build
+3. **Build and run**: Select "My Mac" as the run destination and build
 
 **Or build from command line:**
 ```bash
-cd macos/MedicalFactCheckerMac
-xcodebuild -project MedicalFactCheckerMac.xcodeproj \
-           -scheme MedicalFactCheckerMac \
+cd ios/MedicalFactChecker
+xcodebuild -project MedicalFactChecker.xcodeproj \
+           -scheme MedicalFactChecker \
+           -destination 'platform=macOS' \
            -configuration Debug \
            build
 ```
