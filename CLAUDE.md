@@ -57,7 +57,7 @@ exceptions.py         # Custom exception hierarchy
 
 ## Mobile Apps
 
-**iOS** (`ios/MedicalFactChecker/`), **macOS** (`macos/MedicalFactCheckerMac/`):
+**iOS + macOS** (`ios/MedicalFactChecker/`, multiplatform project; macOS-specific views under `Sources/macOS/`):
 - SwiftUI + SwiftData models (Document, FactCheckSession, SearchProvider, FullTextSource, SchemaVersions)
 - Services: FactCheckWorkflow, LLMService, EmbeddingService, ParallelScoringService, ParallelCitationService, CheckpointedScoringService, CheckpointManager, ModelFetchService, CloudKitConfiguration, BackgroundTaskManager
 - Views: FactCheck, FullText, History, Report, Settings, Onboarding

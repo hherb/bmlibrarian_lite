@@ -146,8 +146,7 @@ bmlibrarian_lite/
 │       └── styles/
 │           └── dpi_scale.py # DPI scaling utilities
 ├── tests/                   # Test suite
-├── ios/                     # iOS app (Swift/SwiftUI)
-├── macos/                   # macOS app (Swift/SwiftUI)
+├── ios/                     # iOS + macOS multiplatform app (Swift/SwiftUI)
 ├── android/                 # Android app (Kotlin/Compose)
 └── Packages/BioMedLit/      # Shared Swift package (iOS/macOS)
 ```
