@@ -334,6 +334,21 @@ final class TransparencyScorerTests: XCTestCase {
         XCTAssertTrue(indicators.contains("No conflict of interest statement found"))
     }
 
+    /// Test that an empty COI statement counts as missing (Python parity).
+    func testIdentifyRiskIndicatorsEmptyCOIStatement() {
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: ""),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+
+        XCTAssertTrue(indicators.contains("No conflict of interest statement found"))
+    }
+
     /// Test missing registration risk indicator.
     func testIdentifyRiskIndicatorsMissingRegistration() {
         let indicators = TransparencyScorer.identifyRiskIndicators(

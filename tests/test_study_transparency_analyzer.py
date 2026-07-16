@@ -90,3 +90,6 @@ class TestIdentifyRiskIndicators:
         assert "Trial results not posted to ClinicalTrials.gov" in indicators
         assert "Data effectively unavailable despite sharing statement" in indicators
         assert "Outcome switching detected" in indicators
+        # Empty COI statement counts as missing (mirrored by
+        # COIAnalysisResult.hasStatement on the Swift side)
+        assert "No conflict of interest statement found" in indicators

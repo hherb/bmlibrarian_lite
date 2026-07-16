@@ -28,6 +28,14 @@ its slice has landed; add a new section when handing off new work.
     the standalone data-availability indicators added. Python analyzer gained
     the same "Outcome switching detected" indicator for parity, with new
     tests in `tests/test_study_transparency_analyzer.py`.
+- **Review follow-ups on the above** (2026-07-17): indicator strings hoisted
+  into named constants on both platforms (`RiskIndicatorStrings` in
+  `TransparencyConstants.swift`, `RISK_INDICATOR_*` in
+  `study_transparency_analyzer.py`) — implementations use the constants,
+  tests keep pinning the literals. Swift now treats an **empty** COI
+  statement as missing (new `COIAnalysisResult.hasStatement`), matching
+  Python's `if not coi_info.statement` in scoring, risk level, indicators,
+  and tooltip.
 
 ## Next slice candidate: finish Swift↔Python risk-indicator parity
 
@@ -45,6 +53,14 @@ now matches for the common indicators, but still lacks:
 - Order-preserving dedup of the indicator list (Python dedupes; Swift's
   current logic cannot produce duplicates, so this only matters once the
   combined indicators land).
+- **Data-availability classification and scoring parity** — tracked in
+  issue #101. Swift's `DataAvailabilityAnalyzer` never emits `.restricted`
+  (on-request statements map to `.availableOnRequest`, where Python assigns
+  `RESTRICTED`), so the "Data access restricted" indicator is unreachable
+  from the built-in Swift analyzer; Swift also lacks Python's
+  "effectively unavailable" pattern tier, and the scoring deltas differ
+  (see the issue for the full table). Expect user-visible score/risk
+  changes on iOS/macOS when aligning.
 
 Keep the strings byte-identical to Python, add matching tests in
 `Tests/BioMedLitTests/Transparency/TransparencyScorerTests.swift`, and check

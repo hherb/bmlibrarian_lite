@@ -67,7 +67,7 @@ public enum TransparencyScorer {
         score += dataAvailabilityPoints(for: dataAvailability.disclosureLevel)
 
         // COI disclosure points
-        score += coiDisclosurePoints(hasStatement: coiAnalysis.statement != nil)
+        score += coiDisclosurePoints(hasStatement: coiAnalysis.hasStatement)
 
         // Trial registration points
         score += trialRegistrationPoints(
@@ -251,40 +251,40 @@ public enum TransparencyScorer {
 
         // Industry funding indicators
         if industryFundingDetected {
-            indicators.append("Industry funding detected")
+            indicators.append(RiskIndicatorStrings.industryFunding)
 
             let restrictedLevels: [DataDisclosureLevel] = [.notAvailable, .restricted]
             if restrictedLevels.contains(dataAvailability.disclosureLevel) {
-                indicators.append("Industry-funded with restricted data access")
+                indicators.append(RiskIndicatorStrings.industryRestrictedData)
             }
         }
 
         // Trial results compliance
         if resultsCompliance == .missing {
-            indicators.append("Trial results not posted to ClinicalTrials.gov")
+            indicators.append(RiskIndicatorStrings.resultsNotPosted)
         }
 
         // COI concerns
         if coiAnalysis.hasIndustryTies {
-            indicators.append("Authors have disclosed industry financial ties")
+            indicators.append(RiskIndicatorStrings.industryTiesDisclosed)
         }
-        if coiAnalysis.statement == nil {
-            indicators.append("No conflict of interest statement found")
+        if !coiAnalysis.hasStatement {
+            indicators.append(RiskIndicatorStrings.missingCoiStatement)
         }
 
         // Data availability concerns (independent of funding source)
         switch dataAvailability.disclosureLevel {
         case .notAvailable:
-            indicators.append("Data effectively unavailable despite sharing statement")
+            indicators.append(RiskIndicatorStrings.dataEffectivelyUnavailable)
         case .restricted:
-            indicators.append("Data access restricted")
+            indicators.append(RiskIndicatorStrings.dataAccessRestricted)
         default:
             break
         }
 
         // Outcome switching
         if outcomeSwitchingDetected {
-            indicators.append("Outcome switching detected")
+            indicators.append(RiskIndicatorStrings.outcomeSwitching)
         }
 
         // Missing trial registration
@@ -327,7 +327,7 @@ public enum TransparencyScorer {
 
         // COI disclosure
         let coiStatus: String
-        if result.coiAnalysis.statement != nil {
+        if result.coiAnalysis.hasStatement {
             coiStatus = result.coiAnalysis.hasIndustryTies ? "Disclosed" : "No conflicts"
         } else {
             coiStatus = "Not Disclosed"

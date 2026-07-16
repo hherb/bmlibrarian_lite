@@ -316,6 +316,14 @@ public struct COIAnalysisResult: Sendable, Codable, Equatable {
 
     /// Empty result when no COI statement is available.
     public static let notAvailable = COIAnalysisResult()
+
+    /// Whether a non-empty COI statement is available.
+    ///
+    /// An empty statement counts as missing, matching the Python reference
+    /// implementation (`if not coi_info.statement`).
+    public var hasStatement: Bool {
+        !(statement?.isEmpty ?? true)
+    }
 }
 
 /// Data availability analysis result.
@@ -660,7 +668,7 @@ public struct TransparencyResultBuilder: Sendable {
             score: score,
             industryFunding: industryFundingDetected,
             dataAvailability: dataAvailability.disclosureLevel,
-            coiDisclosed: coiAnalysis.statement != nil
+            coiDisclosed: coiAnalysis.hasStatement
         )
 
         // Identify risk indicators using TransparencyScorer

@@ -190,6 +190,13 @@ final class TransparencyModelsTests: XCTestCase {
         XCTAssertEqual(coi.confidence, 0.0)
     }
 
+    func testCOIAnalysisResultHasStatement() {
+        XCTAssertTrue(COIAnalysisResult(statement: "No conflicts declared").hasStatement)
+        XCTAssertFalse(COIAnalysisResult(statement: nil).hasStatement)
+        // Empty statements count as missing, matching the Python reference
+        XCTAssertFalse(COIAnalysisResult(statement: "").hasStatement)
+    }
+
     // MARK: - DataAvailabilityResult Tests
 
     func testDataAvailabilityResultCreation() {
