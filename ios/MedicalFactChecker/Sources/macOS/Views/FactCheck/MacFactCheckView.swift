@@ -872,10 +872,12 @@ struct MacGetMoreEvidenceSection: View {
 #Preview {
     @Previewable @State var previewWorkflow: FactCheckWorkflow? = nil
     @Previewable @State var previewClaimText: String = ""
+    @Previewable @State var previewShouldFetchMore: Bool = false
 
     MacFactCheckView(
         workflow: $previewWorkflow,
         claimText: $previewClaimText,
+        shouldFetchMoreEvidence: $previewShouldFetchMore,
         onReportGenerated: nil,
         onShowFullText: nil
     )
