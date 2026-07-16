@@ -293,6 +293,36 @@ class FullTextViewModel @Inject constructor(
                 )
             }
 
+            is FullTextResult.EuropePmcPdf -> {
+                Log.d(TAG, "Got Europe PMC PDF URL for ${doc.id}: ${result.pdfUrl}")
+
+                // Download the PDF
+                val localPath = fullTextService.downloadPdf(result.pdfUrl, doc.id)
+
+                if (localPath != null) {
+                    // Update database with PDF path
+                    documentDao.update(
+                        doc.copy(
+                            pdfPath = localPath,
+                            fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+                            fullTextFetchedAt = Date()
+                        )
+                    )
+
+                    _state.value = FullTextState.PdfContent(
+                        pdfPath = localPath,
+                        title = doc.title,
+                        source = "Europe PMC"
+                    )
+                } else {
+                    // Couldn't download, provide URL for external viewing
+                    _state.value = FullTextState.WebUrl(
+                        url = result.pdfUrl,
+                        title = doc.title
+                    )
+                }
+            }
+
             is FullTextResult.UnpaywallPdf -> {
                 Log.d(TAG, "Got Unpaywall PDF URL for ${doc.id}: ${result.pdfUrl}")
 

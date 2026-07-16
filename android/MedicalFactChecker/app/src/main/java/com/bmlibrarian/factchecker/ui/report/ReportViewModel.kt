@@ -464,6 +464,17 @@ class ReportViewModel @Inject constructor(
                                     fullTextFetchedAt = Date()
                                 )
                             }
+                            is FullTextService.FullTextResult.EuropePmcPdf -> {
+                                val localPath = fullTextService.downloadPdf(
+                                    fullTextResult.pdfUrl,
+                                    document.id
+                                )
+                                document.copy(
+                                    pdfPath = localPath,
+                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+                                    fullTextFetchedAt = Date()
+                                )
+                            }
                             is FullTextService.FullTextResult.UnpaywallPdf -> {
                                 val localPath = fullTextService.downloadPdf(
                                     fullTextResult.pdfUrl,
