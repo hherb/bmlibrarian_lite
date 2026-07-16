@@ -29,11 +29,6 @@ let package = Package(
             name: "MedicalFactChecker",
             targets: ["MedicalFactChecker"]
         ),
-        // Shared library for cross-platform code (models, services, utilities)
-        .library(
-            name: "MedicalFactCheckerShared",
-            targets: ["MedicalFactCheckerShared"]
-        ),
     ],
     dependencies: [
         // BioMedLit shared library for JATS parsing and literature services
@@ -49,29 +44,6 @@ let package = Package(
             path: "Sources",
             exclude: [
                 "macOS",
-            ]
-        ),
-        // Shared code target for cross-platform use
-        // Contains models, services, and utilities that work on both iOS and macOS
-        // Note: This target now depends on BioMedLit for JATS parsing and search services
-        .target(
-            name: "MedicalFactCheckerShared",
-            dependencies: [
-                .product(name: "BioMedLit", package: "BioMedLit"),
-            ],
-            path: "Sources",
-            exclude: [
-                "App",
-                "Views",
-                "macOS",
-                "Preview Content",
-                "Assets.xcassets",
-                "Info.plist",
-            ],
-            sources: [
-                "Models",
-                "Services",
-                "Utilities",
             ]
         ),
         // Test target

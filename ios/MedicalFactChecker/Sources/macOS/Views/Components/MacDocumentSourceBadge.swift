@@ -119,22 +119,6 @@ struct DocumentSourceBadge: View {
     }
 }
 
-// MARK: - SearchProvider Extension
-
-extension SearchProvider {
-    /// Theme color for this search provider.
-    var themeColor: Color {
-        switch self {
-        case .pubmed:
-            return Color(nsColor: .systemBlue).opacity(0.8)
-        case .europePMC:
-            return Color(nsColor: .systemIndigo)
-        case .both:
-            return Color(nsColor: .systemCyan)
-        }
-    }
-}
-
 // MARK: - Preview
 
 #Preview {

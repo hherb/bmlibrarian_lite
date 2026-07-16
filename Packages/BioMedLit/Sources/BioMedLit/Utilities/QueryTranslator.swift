@@ -45,11 +45,14 @@ public enum QueryTranslator {
 
         var result = query
 
-        // Apply transformations in order
+        // Special filters must run before field tags so that known
+        // publication types (e.g. "Systematic Review"[pt]) are mapped to
+        // their kebab-case Europe PMC values before the generic [pt]
+        // handling consumes them.
+        result = translateSpecialFilters(result, direction: .toEuropePMC)
         result = translateMeSHTerms(result, direction: .toEuropePMC)
         result = translateFieldTags(result, direction: .toEuropePMC)
         result = translateDateFilters(result, direction: .toEuropePMC)
-        result = translateSpecialFilters(result, direction: .toEuropePMC)
         result = cleanupQuery(result)
 
         return result
@@ -64,11 +67,13 @@ public enum QueryTranslator {
 
         var result = query
 
-        // Apply transformations in order
+        // Special filters must run before field tags so that HAS_ABSTRACT:y
+        // is translated as a whole before the generic ABSTRACT: handling
+        // would corrupt it.
+        result = translateSpecialFilters(result, direction: .toPubMed)
         result = translateMeSHTerms(result, direction: .toPubMed)
         result = translateFieldTags(result, direction: .toPubMed)
         result = translateDateFilters(result, direction: .toPubMed)
-        result = translateSpecialFilters(result, direction: .toPubMed)
         result = cleanupQuery(result)
 
         return result
@@ -114,8 +119,10 @@ public enum QueryTranslator {
     /// - Parameter query: Query string to analyze.
     /// - Returns: True if query appears to be Europe PMC syntax.
     public static func isEuropePMCSyntax(_ query: String) -> Bool {
+        // Patterns must be uppercase: they are matched against the
+        // uppercased query below.
         let europePMCPatterns = [
-            "MeSH_TERM:",
+            "MESH_TERM:",
             "TITLE_ABS:",
             "TITLE:",
             "ABSTRACT:",
@@ -247,13 +254,14 @@ public enum QueryTranslator {
             caseInsensitive: true
         )
 
-        // Unquoted multi-word term: something something[tag]
-        // Match word characters and spaces, but not operators or special chars
-        // The pattern captures words (possibly with spaces) before the tag
+        // Unquoted single term: something[tag]
+        // Only a single token is tagged, mirroring PubMed semantics where an
+        // unquoted field tag applies to the immediately preceding term; a
+        // multi-token match would absorb boolean operators into the phrase.
         result = applyRegex(
             to: result,
-            pattern: "([a-zA-Z][a-zA-Z0-9]*(?:\\s+[a-zA-Z][a-zA-Z0-9]*)*)\\s*\(escapedTag)",
-            template: "\(europePMCPrefix)\"$1\"",
+            pattern: "([\\w-]+)\\s*\(escapedTag)",
+            template: "\(europePMCPrefix)$1",
             caseInsensitive: true
         )
 

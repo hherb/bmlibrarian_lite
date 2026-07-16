@@ -397,13 +397,13 @@ public enum PubMedQueryBuilder {
         var terms: [String] = []
 
         // Add MeSH terms
-        for mesh in concept.meshTerms {
+        for mesh in concept.meshTerms.prefix(QueryConstants.maxMeSHTermsPerConcept) {
             terms.append("\"\(mesh)\"\(QueryConstants.pubmedMeSHFieldTag)")
         }
 
         // Add keywords (title/abstract search)
         // Multi-word keywords need quotes; single-word keywords don't
-        for keyword in concept.keywords {
+        for keyword in concept.keywords.prefix(QueryConstants.maxKeywordsPerConcept) {
             if keyword.contains(" ") {
                 terms.append("\"\(keyword)\"\(QueryConstants.pubmedTitleAbstractFieldTag)")
             } else {
@@ -507,12 +507,12 @@ public enum EuropePMCQueryBuilder {
         var terms: [String] = []
 
         // Add MeSH term text as keywords (search as free text)
-        for mesh in concept.meshTerms {
+        for mesh in concept.meshTerms.prefix(QueryConstants.maxMeSHTermsPerConcept) {
             terms.append("\(QueryConstants.europePMCTitleAbstractField)\"\(mesh)\"")
         }
 
         // Add keywords (search in title/abstract)
-        for keyword in concept.keywords {
+        for keyword in concept.keywords.prefix(QueryConstants.maxKeywordsPerConcept) {
             terms.append("\(QueryConstants.europePMCTitleAbstractField)\"\(keyword)\"")
         }
 
