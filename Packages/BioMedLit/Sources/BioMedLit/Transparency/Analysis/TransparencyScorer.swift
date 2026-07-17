@@ -23,12 +23,14 @@ import Foundation
 /// calculating scores based on data availability, COI disclosure, trial
 /// registration, and other factors.
 ///
-/// Scoring breakdown:
+/// Scoring breakdown (kept identical to the canonical Python reference,
+/// `calculate_transparency_score`):
 /// - Base score: 50 points
-/// - Data availability: +20 (open), +10 (request), 0 (restricted), -10 (unavailable), -5 (not stated)
-/// - COI disclosure: +10 (has statement), -5 (missing)
+/// - Data availability: +20 (open), +5 (request), -5 (restricted), -15 (unavailable), -5 (not stated)
+/// - COI disclosure: +5 (has statement), an extra -5 if the statement discloses
+///   industry ties, -5 (missing)
 /// - Trial registration: +10 (has registration), +5 (results compliant), -10 (results missing)
-/// - Penalties: -15 (outcome switching), -10 (industry + no data sharing)
+/// - Penalties: -15 (outcome switching), -10 (industry ties + restricted/unavailable data)
 ///
 /// Usage:
 /// ```swift
@@ -67,7 +69,10 @@ public enum TransparencyScorer {
         score += dataAvailabilityPoints(for: dataAvailability.disclosureLevel)
 
         // COI disclosure points
-        score += coiDisclosurePoints(hasStatement: coiAnalysis.hasStatement)
+        score += coiDisclosurePoints(
+            hasStatement: coiAnalysis.hasStatement,
+            hasIndustryTies: coiAnalysis.hasIndustryTies
+        )
 
         // Trial registration points
         score += trialRegistrationPoints(
@@ -80,9 +85,11 @@ public enum TransparencyScorer {
             score += TransparencyConstants.outcomeSwitchingPenalty
         }
 
-        // Industry funding + restricted data penalty
-        if industryFundingDetected &&
-           dataAvailability.disclosureLevel == .notAvailable {
+        // Industry ties (funding or disclosed COI) combined with
+        // restricted/unavailable data is especially concerning.
+        let hasIndustryTies = industryFundingDetected || coiAnalysis.hasIndustryTies
+        let restrictedOrUnavailable: [DataDisclosureLevel] = [.notAvailable, .restricted]
+        if hasIndustryTies && restrictedOrUnavailable.contains(dataAvailability.disclosureLevel) {
             score += TransparencyConstants.industryNoDataPenalty
         }
 
@@ -106,7 +113,7 @@ public enum TransparencyScorer {
         case .availableOnRequest:
             return TransparencyConstants.onRequestDataPoints
         case .restricted:
-            return 0
+            return TransparencyConstants.restrictedDataPenalty
         case .notAvailable:
             return TransparencyConstants.noDataPenalty
         case .notStated:
@@ -118,14 +125,27 @@ public enum TransparencyScorer {
 
     /// Calculate points for COI disclosure.
     ///
-    /// Awards points for having a COI statement, penalizes for missing.
+    /// Credits having a COI statement (disclosure is valued), but applies an
+    /// additional penalty when the statement discloses industry ties, since
+    /// the underlying situation carries bias risk regardless of disclosure
+    /// quality. A missing statement is penalized. Mirrors the Python reference.
     ///
-    /// - Parameter hasStatement: True if a COI statement was found.
+    /// - Parameters:
+    ///   - hasStatement: True if a non-empty COI statement was found.
+    ///   - hasIndustryTies: True if the statement discloses industry ties.
     /// - Returns: Points to add (positive) or subtract (negative) from score.
-    public static func coiDisclosurePoints(hasStatement: Bool) -> Int {
-        hasStatement ?
-            TransparencyConstants.coiStatementPoints :
-            TransparencyConstants.missingCoiPenalty
+    public static func coiDisclosurePoints(
+        hasStatement: Bool,
+        hasIndustryTies: Bool = false
+    ) -> Int {
+        guard hasStatement else {
+            return TransparencyConstants.missingCoiPenalty
+        }
+        var points = TransparencyConstants.coiStatementPoints
+        if hasIndustryTies {
+            points += TransparencyConstants.coiIndustryTiesPenalty
+        }
+        return points
     }
 
     /// Calculate points for trial registration.
@@ -248,13 +268,13 @@ public enum TransparencyScorer {
         title: String?
     ) -> [String] {
         var indicators: [String] = []
+        let restrictedOrUnavailable: [DataDisclosureLevel] = [.notAvailable, .restricted]
 
         // Industry funding indicators
         if industryFundingDetected {
             indicators.append(RiskIndicatorStrings.industryFunding)
 
-            let restrictedLevels: [DataDisclosureLevel] = [.notAvailable, .restricted]
-            if restrictedLevels.contains(dataAvailability.disclosureLevel) {
+            if restrictedOrUnavailable.contains(dataAvailability.disclosureLevel) {
                 indicators.append(RiskIndicatorStrings.industryRestrictedData)
             }
         }
@@ -267,6 +287,15 @@ public enum TransparencyScorer {
         // COI concerns
         if coiAnalysis.hasIndustryTies {
             indicators.append(RiskIndicatorStrings.industryTiesDisclosed)
+
+            // Industry funding routed through an institutional intermediary.
+            if let statement = coiAnalysis.statement,
+               RegexHelper.anyMatch(
+                   patterns: COIPatterns.institutionalIntermediaryPatterns,
+                   in: statement.lowercased()
+               ) {
+                indicators.append(RiskIndicatorStrings.institutionalIntermediary)
+            }
         }
         if !coiAnalysis.hasStatement {
             indicators.append(RiskIndicatorStrings.missingCoiStatement)
@@ -287,6 +316,12 @@ public enum TransparencyScorer {
             indicators.append(RiskIndicatorStrings.outcomeSwitching)
         }
 
+        // Combined risk: industry ties (funding or disclosed COI) + restricted/unavailable data.
+        let hasIndustryTies = industryFundingDetected || coiAnalysis.hasIndustryTies
+        if hasIndustryTies && restrictedOrUnavailable.contains(dataAvailability.disclosureLevel) {
+            indicators.append(RiskIndicatorStrings.combinedIndustryData)
+        }
+
         // Missing trial registration
         if let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: title,
@@ -295,7 +330,9 @@ public enum TransparencyScorer {
             indicators.append(warning)
         }
 
-        return indicators
+        // Deduplicate while preserving order (mirrors the Python reference).
+        var seen = Set<String>()
+        return indicators.filter { seen.insert($0).inserted }
     }
 
     // MARK: - Tooltip Formatting

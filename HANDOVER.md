@@ -8,68 +8,52 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
-- **BioMedLit test failures fixed** (2026-07-16): all 5 pre-existing failing
-  test cases resolved; `swift test` in `Packages/BioMedLit` is now fully green
-  (447 tests, 0 failures, 19 skips). Three root causes fixed:
-  - NCT ID regex gained lookaround boundaries
-    (`TransparencyConstants.nctIdPattern`) so over-long IDs like
-    `NCT1234567890` no longer partially match.
-  - `SyncStorage.fileExists` now means "path exists (file **or** directory)",
-    matching `iCloudSyncStorage` and `FileManager.fileExists(atPath:)`.
-    `LocalFolderSyncStorage` previously returned false for directories, which
-    silently broke `WorkspaceInitializer.listDevices`,
-    `SyncEngine.updateManifest`, and `SyncCoordinator.loadInitialSequence`
-    (all probe the `changes/<deviceId>` directory). Protocol docs and
-    `doc/cross_platform/sync_protocol.md` updated.
-  - Risk indicator strings aligned to the canonical Python set in
-    `src/bmlibrarian_lite/study_transparency_analyzer/`;
-    `outcomeSwitchingDetected` wired into
-    `TransparencyScorer.identifyRiskIndicators` (new required parameter) and
-    the standalone data-availability indicators added. Python analyzer gained
-    the same "Outcome switching detected" indicator for parity, with new
-    tests in `tests/test_study_transparency_analyzer.py`.
-- **Review follow-ups on the above** (2026-07-17): indicator strings hoisted
-  into named constants on both platforms (`RiskIndicatorStrings` in
-  `TransparencyConstants.swift`, `RISK_INDICATOR_*` in
-  `study_transparency_analyzer.py`) — implementations use the constants,
-  tests keep pinning the literals. Swift now treats an **empty** COI
-  statement as missing (new `COIAnalysisResult.hasStatement`), matching
-  Python's `if not coi_info.statement` in scoring, risk level, indicators,
-  and tooltip.
+- **Swift↔Python transparency parity completed** (2026-07-17, closes #101):
+  the Swift `BioMedLit` transparency pipeline now mirrors the canonical Python
+  reference (`study_transparency_analyzer.py`) for data-availability
+  classification, scoring, and risk indicators.
+  - `DataAvailabilityAnalyzer.analyze` ported to Python's priority tiers:
+    full-open → effectively-unavailable (strong refusals + sponsor/collaboration
+    gating ⇒ `.notAvailable`) → restricted (on-request/approval ⇒ `.restricted`,
+    previously `.availableOnRequest`) → unknown. Pattern lists and restriction
+    labels are byte-identical to Python's `DATA_REPOSITORIES` and
+    `_restriction_labels`. **Swift-only GDPR/HIPAA/privacy/patient-consent
+    patterns were dropped** for exact classification parity (see follow-ups).
+  - Scoring (`TransparencyScorer` / `TransparencyConstants`) aligned to Python:
+    on-request +5 (was +10), restricted −5 (was 0), not-available −15 (was −10),
+    COI statement +5 (was +10) with an extra −5 when industry ties are disclosed,
+    and the industry-ties + restricted/unavailable combined −10 now fires on
+    COI-disclosed ties as well as detected funding. **User-visible score/risk
+    shifts on iOS/macOS are expected and intended.**
+  - Risk indicators gained the institutional-intermediary and combined
+    industry+data strings plus order-preserving dedup, matching Python.
+  - Cross-platform contract pinned by tests on both sides:
+    `TransparencyScorerTests`, `DataAvailabilityAnalyzerTests`,
+    `TransparencyConstantsTests`, and new Python classes in
+    `tests/test_study_transparency_analyzer.py`
+    (`TestAnalyzeDataAvailability`, `TestCalculateTransparencyScore`).
+- **Earlier BioMedLit parity work** (PR #100, 2026-07-16/17): fixed the 5
+  pre-existing Swift test failures (NCT-ID regex boundaries, `fileExists`
+  directory semantics, risk-indicator string alignment) and hoisted the
+  risk-indicator strings into named constants on both platforms.
 
-## Next slice candidate: finish Swift↔Python risk-indicator parity
+## Potential follow-ups
 
-The canonical indicator implementation is Python
-(`study_transparency_analyzer.py`, `_identify_risk_indicators`). Swift
-(`Packages/BioMedLit/.../TransparencyScorer.swift`, `identifyRiskIndicators`)
-now matches for the common indicators, but still lacks:
+- **Restore GDPR/HIPAA/privacy/patient-consent detection** — these restriction
+  patterns were dropped from Swift to match Python exactly. To keep the
+  detection breadth without re-diverging, add them to *both*
+  `study_transparency_analyzer.py` (`DATA_REPOSITORIES['restricted']` and
+  `_restriction_labels`) and `DataRepositoryPatterns` in one change, with tests
+  on both sides. This shifts Python scores, so treat it as its own slice.
+- **Android transparency classifier** — Android still has no data-availability
+  classifier or risk-indicator implementation to align (as of 2026-07-17).
+- **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,
+  low/medium/high) has no Python counterpart and was left unchanged. Revisit
+  only if a canonical cross-platform risk-level definition is introduced.
 
-- `"Industry funding routed through institutional intermediaries"` — Python
-  pattern-matches the COI statement against
-  `INSTITUTIONAL_INTERMEDIARY_PATTERNS`; Swift has no equivalent.
-- `"Industry ties combined with restricted/unavailable data"` — Python's
-  combined-risk indicator (industry funding *or* COI industry ties, plus
-  restricted/unavailable data).
-- Order-preserving dedup of the indicator list (Python dedupes; Swift's
-  current logic cannot produce duplicates, so this only matters once the
-  combined indicators land).
-- **Data-availability classification and scoring parity** — tracked in
-  issue #101. Swift's `DataAvailabilityAnalyzer` never emits `.restricted`
-  (on-request statements map to `.availableOnRequest`, where Python assigns
-  `RESTRICTED`), so the "Data access restricted" indicator is unreachable
-  from the built-in Swift analyzer; Swift also lacks Python's
-  "effectively unavailable" pattern tier, and the scoring deltas differ
-  (see the issue for the full table). Expect user-visible score/risk
-  changes on iOS/macOS when aligning.
-
-Keep the strings byte-identical to Python, add matching tests in
-`Tests/BioMedLitTests/Transparency/TransparencyScorerTests.swift`, and check
-whether Android has grown an indicator implementation that also needs
-aligning (as of 2026-07-16 it has none).
-
-### Acceptance
+### Verify
 
 - `cd Packages/BioMedLit && swift test` → 0 failures.
-- `pytest tests/` → 0 failures (Python is reference; should not change).
-- Indicator strings identical across `TransparencyScorer.swift` and
-  `study_transparency_analyzer.py`.
+- `pytest tests/` → 0 failures (Python is the reference).
+- macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
+  'platform=macOS' build` from `ios/MedicalFactChecker/`.

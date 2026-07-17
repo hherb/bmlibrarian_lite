@@ -168,8 +168,8 @@ final class TransparencyAnalysisServiceTests: XCTestCase {
 
         let result = builder.build()
 
-        // Base score (50) + full open data (20) + COI statement (10) = 80
-        XCTAssertEqual(result.transparencyScore, 80)
+        // Base score (50) + full open data (20) + COI statement (5) = 75
+        XCTAssertEqual(result.transparencyScore, 75)
     }
 
     /// Test builder with industry funding and no data sharing.
@@ -183,8 +183,8 @@ final class TransparencyAnalysisServiceTests: XCTestCase {
 
         let result = builder.build()
 
-        // Base (50) - no data (-10) - missing COI (-5) - industry+no data (-10) = 25
-        XCTAssertEqual(result.transparencyScore, 25)
+        // Base (50) - no data (-15) - missing COI (-5) - industry+no data (-10) = 20
+        XCTAssertEqual(result.transparencyScore, 20)
         XCTAssertEqual(result.riskLevel, .high)
     }
 
