@@ -8,6 +8,26 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Privacy/legal open-data false positive fixed** (2026-07-17, closes #113):
+  the #104 privacy/legal tokens (`\bprivacy\b`/`\bhipaa\b`/…) fired standalone,
+  so a genuinely-open statement that named no *recognized* repository but
+  mentioned a privacy token *reassuringly* ("De-identified data are openly
+  shared; no HIPAA-protected identifiers remain"; "available in the
+  supplementary materials; patient privacy was protected") was mis-flagged
+  RESTRICTED. Fixed by **broadening the full-open tier** with three narrow
+  open-availability affirmation patterns — `openly (?:available|shared|accessible)`,
+  `freely (?:available|shared|accessible)`, `available (?:in|within|as|via|through)
+  (?:the )?supplement` — appended byte-identically to Python
+  `DATA_REPOSITORIES['full_open']` and Swift `DataRepositoryPatterns.fullOpenPatterns`
+  (21→24 entries). Such statements now classify FULL_OPEN (an **intended upward**
+  transparency-score shift for the affected shapes: +20 vs −5). Bare `available`
+  is deliberately not matched, so "available upon request"/"from the corresponding
+  author" stay RESTRICTED; the up-front refusal guard still wins ("freely
+  available … but … cannot be shared" → NOT_AVAILABLE). The two pinned tradeoff
+  tests were flipped to `..._open_affirmation_without_repository_is_full_open`
+  (assert FULL_OPEN) with an added strong-refusal guard on both platforms; the
+  four #104 privacy/legal true-positive tests are unchanged. Spec + plan:
+  `docs/superpowers/{specs,plans}/2026-07-17-tighten-privacy-legal-*`.
 - **Python Step-3 RESTRICTED dedup parity fixed** (2026-07-17, closes #114):
   Python `analyze_data_availability` Step 3 appended restriction labels
   without dedup, while Swift `orderedRestrictionLabels` (used in both tiers)
@@ -127,15 +147,6 @@ its slice has landed; add a new section when handing off new work.
 
 ## Potential follow-ups
 
-- **Tighten privacy/GDPR/HIPAA restricted-tier precision** (issue #113) — the
-  #104 tokens fire standalone, so a privacy/legal mention in an otherwise-open
-  statement that names no *recognized* repository ("supplementary materials",
-  de-identified open sharing) is flagged RESTRICTED (a genuine open-data false
-  positive; `\bprivacy\b` is the loosest). Either require co-occurrence with a
-  restriction cue or broaden the full-open guard. Current behavior is pinned by
-  `test_privacy_without_recognized_repository_is_restricted` (Python) /
-  `testPrivacyWithoutRecognizedRepositoryIsRestricted` (Swift), so a fix is a
-  visible change. Keep Python↔Swift byte-identical.
 - **LLM-assisted disambiguation of repo + soft-restriction** (issue #109) —
   a public-repository mention combined with a *soft* on-request restriction
   ("data in GEO; raw data from the corresponding author upon request") is
