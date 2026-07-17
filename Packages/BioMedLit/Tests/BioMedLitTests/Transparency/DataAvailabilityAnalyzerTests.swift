@@ -161,6 +161,60 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertTrue(result.restrictions.contains { $0.contains("IRB") })
     }
 
+    /// GDPR-restricted statement classifies as restricted (issue #104).
+    func testAnalyzeGDPRRestriction() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Individual patient data are restricted under GDPR."
+        )
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+        XCTAssertEqual(result.restrictions, ["GDPR restrictions"])
+    }
+
+    /// HIPAA-restricted statement classifies as restricted (issue #104).
+    func testAnalyzeHIPAARestriction() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Access to the dataset is limited by HIPAA."
+        )
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+        XCTAssertEqual(result.restrictions, ["HIPAA restrictions"])
+    }
+
+    /// Privacy-restricted statement classifies as restricted (issue #104).
+    func testAnalyzePrivacyRestriction() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Sharing is constrained by participant privacy considerations."
+        )
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+        XCTAssertEqual(result.restrictions, ["Privacy restrictions"])
+    }
+
+    /// Patient-consent restriction classifies as restricted (issue #104).
+    func testAnalyzePatientConsentRestriction() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Data access requires patient consent."
+        )
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+        XCTAssertEqual(result.restrictions, ["Patient consent required"])
+    }
+
+    /// A bare 'privacy' mention must not override a public repository (issue #104).
+    func testPrivacyDoesNotOverrideFullOpen() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are deposited in Zenodo; no privacy concerns were identified."
+        )
+        XCTAssertEqual(result.disclosureLevel, .fullOpen)
+    }
+
+    /// GDPR plus an explicit refusal escalates to notAvailable (issue #104).
+    func testGDPRWithStrongRefusalIsNotAvailable() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "The data are not publicly available owing to GDPR."
+        )
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+        XCTAssertTrue(result.restrictions.contains("Data not publicly available"))
+        XCTAssertTrue(result.restrictions.contains("GDPR restrictions"))
+    }
+
     /// Test analyzing data sharing agreement requirement.
     func testAnalyzeDataSharingAgreement() {
         let statement = "Data available subject to a data sharing agreement."
