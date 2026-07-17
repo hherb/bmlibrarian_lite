@@ -285,9 +285,9 @@ DATA_REPOSITORIES = {
     'full_open': [
         r'zenodo', r'figshare', r'dryad', r'osf\.io', r'open science framework',
         r'github', r'gitlab', r'dataverse', r'mendeley data',
-        r'gene expression omnibus', r'geo', r'arrayexpress',
-        r'protein data bank', r'pdb', r'genbank', r'sra',
-        r'european nucleotide archive', r'ena',
+        r'gene expression omnibus', r'\bgeo\b', r'arrayexpress',
+        r'protein data bank', r'\bpdb\b', r'genbank', r'\bsra\b',
+        r'european nucleotide archive', r'\bena\b',
         r'clinicalstudydatarequest', r'vivli', r'yoda',
     ],
     'restricted': [
@@ -323,6 +323,19 @@ DATA_REPOSITORIES = {
         r'(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))',
     ],
 }
+
+# Strong-refusal indicators that escalate a statement to NOT_AVAILABLE, even
+# when a public repository is also named. A subset of the 'restricted'
+# patterns. Mirrors the Swift ``DataRepositoryPatterns.strongRefusalPatterns``.
+STRONG_REFUSAL_PATTERNS = [
+    r'cannot be shared',
+    r'not (?:publicly )?available',
+    r'proprietary',
+    r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)',
+    r'not be released to others',
+    r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent',
+    r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
+]
 
 
 # =============================================================================
@@ -950,13 +963,24 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     """Analyze data availability statement.
 
     Uses a priority-ordered approach:
-    1. Check for genuinely open data (public repositories).
+    1. Check for genuinely open data (public repositories) — but only when the
+       statement does not also refuse access. A repository *name* appearing in
+       a statement does not by itself prove open access: a statement may name a
+       repository while denying access ("genomic data could not be deposited in
+       GEO for privacy reasons; the data are not publicly available"). Explicit
+       unavailability/refusal signals therefore take precedence over a
+       co-occurring repository mention.
     2. Check for effectively unavailable data — statements that read
        like policies but constitute refusals (e.g., "data will not be
        released to others", "confidentiality agreements with sponsors
        prevent disclosure").
     3. Check for restricted/on-request access.
     4. Fall back to UNKNOWN if no patterns match.
+
+    Note: A repository mention combined with a *soft* restriction (e.g. "raw
+    data available from the corresponding author upon request") is genuinely
+    ambiguous and is deterministically kept as FULL_OPEN here; optional
+    LLM-assisted disambiguation of that case is tracked in issue #109.
     """
     if not text:
         return DataAvailabilityInfo(
@@ -965,22 +989,33 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
 
     text_lower = text.lower()
 
-    # --- Step 1: Check for full open access indicators ---
-    for repo_pattern in DATA_REPOSITORIES['full_open']:
-        if re.search(repo_pattern, text_lower):
-            url_match = re.search(r'https?://[^\s<>"]+', text)
-            accession_match = re.search(
-                r'(?:accession|identifier)[:\s]+([A-Z0-9]+)', text, re.I
-            )
+    # A refusal/unavailability signal anywhere in the statement overrides a
+    # co-occurring repository mention, so detect it up front and skip Step 1
+    # when present (Step 2 then classifies it as NOT_AVAILABLE).
+    has_unavailability_signal = any(
+        re.search(pattern, text_lower)
+        for pattern in (
+            DATA_REPOSITORIES['effectively_unavailable'] + STRONG_REFUSAL_PATTERNS
+        )
+    )
 
-            return DataAvailabilityInfo(
-                statement=text,
-                disclosure_level=DataDisclosureLevel.FULL_OPEN,
-                repository_url=url_match.group(0) if url_match else None,
-                accession_number=(
-                    accession_match.group(1) if accession_match else None
-                ),
-            )
+    # --- Step 1: Check for full open access indicators ---
+    if not has_unavailability_signal:
+        for repo_pattern in DATA_REPOSITORIES['full_open']:
+            if re.search(repo_pattern, text_lower):
+                url_match = re.search(r'https?://[^\s<>"]+', text)
+                accession_match = re.search(
+                    r'(?:accession|identifier)[:\s]+([A-Z0-9]+)', text, re.I
+                )
+
+                return DataAvailabilityInfo(
+                    statement=text,
+                    disclosure_level=DataDisclosureLevel.FULL_OPEN,
+                    repository_url=url_match.group(0) if url_match else None,
+                    accession_number=(
+                        accession_match.group(1) if accession_match else None
+                    ),
+                )
 
     # --- Step 2: Check for effectively unavailable data ---
     # These are statements that look like sharing policies but amount
@@ -1032,20 +1067,9 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
         if re.search(pattern, text_lower):
             effectively_unavailable_signals.append(_label_for_pattern(pattern))
 
-    strong_refusal_patterns = [
-        r'cannot be shared',
-        r'not (?:publicly )?available',
-        r'proprietary',
-        r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)',
-        r'not be released to others',
-        r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent',
-        r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
-    ]
-    strong_refusal_found = False
-    for pattern in strong_refusal_patterns:
-        if re.search(pattern, text_lower):
-            strong_refusal_found = True
-            break
+    strong_refusal_found = any(
+        re.search(pattern, text_lower) for pattern in STRONG_REFUSAL_PATTERNS
+    )
 
     if effectively_unavailable_signals or strong_refusal_found:
         restrictions = list(effectively_unavailable_signals)
