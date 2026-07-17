@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Parity is mandatory: the three new patterns must be **byte-identical** across Python `DATA_REPOSITORIES['full_open']` and Swift `DataRepositoryPatterns.fullOpenPatterns`.
-- The three patterns, verbatim: `openly (?:available|shared|accessible)`, `freely (?:available|shared|accessible)`, `available (?:in|within|as|via|through) (?:the )?supplement`.
+- The three patterns, verbatim (each carries a `(?<!not )` negation guard added during review — see #117): `(?<!not )openly (?:available|shared|accessible)`, `(?<!not )freely (?:available|shared|accessible)`, `(?<!not )available (?:in|within|as|via|through) (?:the )?supplement`. (Tasks 1–2 below show the pre-guard literals; the review fix commit `b2e0886` added the lookbehind to both platforms plus a `test_negated_affirmation_does_not_trigger_full_open` / `testNegatedAffirmationDoesNotTriggerFullOpen` regression test.)
 - Python is the canonical reference; Swift mirrors it.
 - No changes to any tier other than adding to full-open. No change to the four #104 privacy/legal restricted patterns themselves.
 - Branch: `fix/tighten-privacy-legal-precision-113`. Spec: `docs/superpowers/specs/2026-07-17-tighten-privacy-legal-data-restriction-precision-design.md`.

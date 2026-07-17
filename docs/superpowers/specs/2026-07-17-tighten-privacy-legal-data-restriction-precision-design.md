@@ -51,9 +51,9 @@ Appended to `DATA_REPOSITORIES['full_open']` (Python) and
 as the #113 open-availability affirmation set:
 
 ```
-openly (?:available|shared|accessible)
-freely (?:available|shared|accessible)
-available (?:in|within|as|via|through) (?:the )?supplement
+(?<!not )openly (?:available|shared|accessible)
+(?<!not )freely (?:available|shared|accessible)
+(?<!not )available (?:in|within|as|via|through) (?:the )?supplement
 ```
 
 Deliberately narrow: **bare `available` is not matched**, so "available upon
@@ -63,6 +63,24 @@ Step 1 classification (any full-open match ⇒ `FULL_OPEN`). They are **not** ad
 to `repositoryMappings`, so `detectRepositoryName` still returns `nil` for them
 (an affirmation yields `FULL_OPEN` with no repository name, summarized as "Data
 publicly available").
+
+**Negation guard (added during review).** Because the affirmations match on a
+substring basis, an immediately-negated affirmation ("Raw data are *not openly
+accessible* without IRB approval") would otherwise falsely classify `FULL_OPEN`
+and drop a real restriction — the dangerous over-stating-openness direction. Each
+pattern therefore carries a negative lookbehind `(?<!not )`, so a negated
+affirmation falls through to the normal tiers (the IRB example → `RESTRICTED`).
+`(?<!not )` is fixed-width and evaluates identically in Python `re`, Swift
+ICU/`NSRegularExpression`, and Kotlin `java.util.regex`, keeping the three
+patterns byte-identical across platforms. Regression test:
+`test_negated_affirmation_does_not_trigger_full_open` (Python) /
+`testNegatedAffirmationDoesNotTriggerFullOpen` (Swift). **Residual, tracked in
+issue #117:** a *non-adjacent* negator with an intervening word ("data *will not
+be* openly shared", "data *cannot be* openly shared") is not caught by the
+adjacency lookbehind and still over-matches; these are rarer than the common
+"will not be shared" / "cannot be shared" forms (already caught by
+`STRONG_REFUSAL_PATTERNS`), so they are deferred rather than chased with stacked
+lookbehinds.
 
 ## Behavior change
 

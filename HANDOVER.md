@@ -15,9 +15,11 @@ its slice has landed; add a new section when handing off new work.
   shared; no HIPAA-protected identifiers remain"; "available in the
   supplementary materials; patient privacy was protected") was mis-flagged
   RESTRICTED. Fixed by **broadening the full-open tier** with three narrow
-  open-availability affirmation patterns — `openly (?:available|shared|accessible)`,
-  `freely (?:available|shared|accessible)`, `available (?:in|within|as|via|through)
-  (?:the )?supplement` — appended byte-identically to Python
+  open-availability affirmation patterns, each carrying a `(?<!not )` negation
+  guard — `(?<!not )openly (?:available|shared|accessible)`,
+  `(?<!not )freely (?:available|shared|accessible)`,
+  `(?<!not )available (?:in|within|as|via|through) (?:the )?supplement` — appended
+  byte-identically to Python
   `DATA_REPOSITORIES['full_open']` and Swift `DataRepositoryPatterns.fullOpenPatterns`
   (21→24 entries). Such statements now classify FULL_OPEN (an **intended upward**
   transparency-score shift for the affected shapes: +20 vs −5). Bare `available`
@@ -25,8 +27,12 @@ its slice has landed; add a new section when handing off new work.
   author" stay RESTRICTED; the up-front refusal guard still wins ("freely
   available … but … cannot be shared" → NOT_AVAILABLE). The two pinned tradeoff
   tests were flipped to `..._open_affirmation_without_repository_is_full_open`
-  (assert FULL_OPEN) with an added strong-refusal guard on both platforms; the
-  four #104 privacy/legal true-positive tests are unchanged. Spec + plan:
+  (assert FULL_OPEN) with added strong-refusal and negated-affirmation guard
+  tests on both platforms; the four #104 privacy/legal true-positive tests are
+  unchanged. The `(?<!not )` lookbehind keeps an immediately-negated affirmation
+  ("not openly accessible ... IRB approval") classifying RESTRICTED rather than a
+  false FULL_OPEN; residual non-adjacent negation ("will not be openly shared")
+  is tracked in **#117**. Spec + plan:
   `docs/superpowers/{specs,plans}/2026-07-17-tighten-privacy-legal-*`.
 - **Python Step-3 RESTRICTED dedup parity fixed** (2026-07-17, closes #114):
   Python `analyze_data_availability` Step 3 appended restriction labels
