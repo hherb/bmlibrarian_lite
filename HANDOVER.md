@@ -112,6 +112,12 @@ its slice has landed; add a new section when handing off new work.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,
   low/medium/high) has no Python counterpart and was left unchanged. Revisit
   only if a canonical cross-platform risk-level definition is introduced.
+- **Cache compiled regexes in `RegexHelper`** (issue #111) — `anyMatch`
+  recompiles an `NSRegularExpression` per call and re-lowercases the text once
+  per pattern; several analyzers loop `anyMatch(patterns: [pattern], …)`.
+  Negligible today (single-statement labeling, not a hot path); memoize
+  compiled patterns inside `RegexHelper` if it ever moves onto one. Follow-up
+  from #110.
 
 ### Verify
 
