@@ -215,28 +215,40 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertTrue(result.restrictions.contains("GDPR restrictions"))
     }
 
-    /// Pin the accepted precision tradeoff for privacy/legal tokens (issue #113).
+    /// Open-availability affirmations classify `.fullOpen` without a named
+    /// repository (issue #113 fix).
     ///
-    /// Full-open is inferred only from a *recognized* repository keyword, so a
-    /// privacy/legal token in an otherwise-open statement that names no such
-    /// repository (e.g. "supplementary materials", de-identified open sharing)
-    /// is deliberately flagged `.restricted`. This over-matches genuinely-open
-    /// data; tightening it is tracked in issue #113. Pinned here so any future
-    /// precision fix is an intentional, visible change rather than a silent one.
-    func testPrivacyWithoutRecognizedRepositoryIsRestricted() {
+    /// Full-open is inferred from open-availability affirmations
+    /// ("openly shared", "available in the supplementary materials", "freely
+    /// available"), not only from recognized repository keywords, so a
+    /// reassuring privacy/legal token in a genuinely-open statement no longer
+    /// produces a false `.restricted`.
+    func testOpenAffirmationWithoutRepositoryIsFullOpen() {
         let openlyShared = DataAvailabilityAnalyzer.analyze(
             statement: "De-identified data are openly shared; no "
                 + "HIPAA-protected identifiers remain."
         )
-        XCTAssertEqual(openlyShared.disclosureLevel, .restricted)
-        XCTAssertEqual(openlyShared.restrictions, ["HIPAA restrictions"])
+        XCTAssertEqual(openlyShared.disclosureLevel, .fullOpen)
 
         let supplementary = DataAvailabilityAnalyzer.analyze(
             statement: "All data are available in the supplementary materials; "
                 + "patient privacy was protected throughout."
         )
-        XCTAssertEqual(supplementary.disclosureLevel, .restricted)
-        XCTAssertEqual(supplementary.restrictions, ["Privacy restrictions"])
+        XCTAssertEqual(supplementary.disclosureLevel, .fullOpen)
+
+        let freely = DataAvailabilityAnalyzer.analyze(
+            statement: "The complete dataset is freely available to all researchers."
+        )
+        XCTAssertEqual(freely.disclosureLevel, .fullOpen)
+    }
+
+    /// An open affirmation cannot override an explicit strong refusal (#113).
+    func testOpenAffirmationWithStrongRefusalIsNotAvailable() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are freely available in summary form but the "
+                + "individual-level data cannot be shared."
+        )
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
     }
 
     /// Two restricted patterns sharing a label yield it once (issue #114).
