@@ -336,6 +336,21 @@ class TestAnalyzeDataAvailability:
         assert supplementary.disclosure_level == DataDisclosureLevel.RESTRICTED
         assert supplementary.restrictions == ["Privacy restrictions"]
 
+    def test_restricted_label_sharing_patterns_deduplicated(self) -> None:
+        """Two RESTRICTED patterns sharing a label yield it once (issue #114).
+
+        ``institutional review board`` and ``irb approval`` both map to
+        "Requires IRB approval", so a statement matching both must not list the
+        label twice. Pins Step 3 dedup parity with the Swift
+        ``orderedRestrictionLabels`` path.
+        """
+        result = analyze_data_availability(
+            "Access to the data requires institutional review board review "
+            "and IRB approval."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert result.restrictions == ["Requires IRB approval"]
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.

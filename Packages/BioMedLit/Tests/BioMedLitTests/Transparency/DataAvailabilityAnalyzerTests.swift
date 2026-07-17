@@ -239,6 +239,21 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertEqual(supplementary.restrictions, ["Privacy restrictions"])
     }
 
+    /// Two restricted patterns sharing a label yield it once (issue #114).
+    ///
+    /// `institutional review board` and `irb approval` both map to
+    /// "Requires IRB approval", so a statement matching both must not list the
+    /// label twice. Pins Step 3 dedup parity with the Python
+    /// `analyze_data_availability` reference.
+    func testRestrictedLabelSharingPatternsDeduplicated() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Access to the data requires institutional review board "
+                + "review and IRB approval."
+        )
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+        XCTAssertEqual(result.restrictions, ["Requires IRB approval"])
+    }
+
     /// Test analyzing data sharing agreement requirement.
     func testAnalyzeDataSharingAgreement() {
         let statement = "Data available subject to a data sharing agreement."
