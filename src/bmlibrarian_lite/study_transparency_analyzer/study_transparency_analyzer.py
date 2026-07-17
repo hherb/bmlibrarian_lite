@@ -289,6 +289,14 @@ DATA_REPOSITORIES = {
         r'protein data bank', r'\bpdb\b', r'genbank', r'\bsra\b',
         r'european nucleotide archive', r'\bena\b',
         r'clinicalstudydatarequest', r'vivli', r'yoda',
+        # Open-availability affirmations (issue #113): genuinely-open statements
+        # that name no repository but explicitly affirm open access. Deliberately
+        # narrow — bare "available" is not matched, so "available upon request"
+        # and "available from the corresponding author" stay RESTRICTED. Mirrors
+        # the Swift ``DataRepositoryPatterns.fullOpenPatterns``.
+        r'openly (?:available|shared|accessible)',
+        r'freely (?:available|shared|accessible)',
+        r'available (?:in|within|as|via|through) (?:the )?supplement',
     ],
     'restricted': [
         r'upon (?:reasonable )?request',

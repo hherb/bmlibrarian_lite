@@ -312,29 +312,44 @@ class TestAnalyzeDataAvailability:
         assert "Data not publicly available" in result.restrictions
         assert "GDPR restrictions" in result.restrictions
 
-    def test_privacy_without_recognized_repository_is_restricted(self) -> None:
-        """Pin the accepted precision tradeoff for privacy/legal tokens (issue #113).
+    def test_open_affirmation_without_repository_is_full_open(self) -> None:
+        """Open-availability affirmations classify FULL_OPEN with no named repository (#113).
 
-        Full-open is inferred only from a *recognized* repository keyword, so a
-        privacy/legal token in an otherwise-open statement that names no such
-        repository (e.g. "supplementary materials", de-identified open sharing)
-        is deliberately flagged RESTRICTED. This over-matches genuinely-open
-        data; tightening it is tracked in issue #113. Pinned here so any future
-        precision fix is an intentional, visible change rather than a silent one.
+        Full-open is inferred from open-availability affirmations
+        ("openly shared", "available in the supplementary materials", "freely
+        available"), not only from recognized repository keywords, so a
+        reassuring privacy/legal token in a genuinely-open statement no longer
+        produces a false RESTRICTED.
         """
         openly_shared = analyze_data_availability(
             "De-identified data are openly shared; no HIPAA-protected "
             "identifiers remain."
         )
-        assert openly_shared.disclosure_level == DataDisclosureLevel.RESTRICTED
-        assert openly_shared.restrictions == ["HIPAA restrictions"]
+        assert openly_shared.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
         supplementary = analyze_data_availability(
             "All data are available in the supplementary materials; patient "
             "privacy was protected throughout."
         )
-        assert supplementary.disclosure_level == DataDisclosureLevel.RESTRICTED
-        assert supplementary.restrictions == ["Privacy restrictions"]
+        assert supplementary.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        freely = analyze_data_availability(
+            "The complete dataset is freely available to all researchers."
+        )
+        assert freely.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+    def test_open_affirmation_with_strong_refusal_is_not_available(self) -> None:
+        """An open affirmation cannot override an explicit strong refusal (#113).
+
+        The up-front unavailability guard must still skip the full-open step, so
+        a statement that both affirms availability and refuses access
+        classifies NOT_AVAILABLE.
+        """
+        result = analyze_data_availability(
+            "Data are freely available in summary form but the individual-level "
+            "data cannot be shared."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
 
     def test_restricted_label_sharing_patterns_deduplicated(self) -> None:
         """Two RESTRICTED patterns sharing a label yield it once (issue #114).
