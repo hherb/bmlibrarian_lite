@@ -8,6 +8,19 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Full-open bare-substring over-match fixed** (2026-07-17, closes #106):
+  the short repository tokens `geo`/`ena`/`sra`/`pdb` in the full-open pattern
+  lists were bare substrings, so unrelated words (`geographic`→`geo`,
+  `phenomena`→`ena`) produced a false FULL_OPEN that overrode a genuine
+  restriction (full-open is checked first). Word-anchored to `\bgeo\b` etc. on
+  both platforms — Python `DATA_REPOSITORIES['full_open']` and Swift
+  `DataRepositoryPatterns.fullOpenPatterns` — with mirrored regression tests
+  (`test_geographic_word_does_not_trigger_full_open` /
+  `test_phenomena_word_does_not_trigger_full_open` /
+  `test_standalone_short_token_still_full_open` and the Swift equivalents).
+  Follow-up #107 filed for the Swift-only `repositoryMappings` display path,
+  which still uses bare tokens (cosmetic; can mislabel a repo name but never
+  misclassifies, and has no Python counterpart).
 - **Swift↔Python transparency parity completed** (2026-07-17, closes #101):
   the Swift `BioMedLit` transparency pipeline now mirrors the canonical Python
   reference (`study_transparency_analyzer.py`) for data-availability
@@ -56,9 +69,12 @@ its slice has landed; add a new section when handing off new work.
 - **Automated Swift↔Python parity drift guard** (issue #105) — parity is
   currently maintained by convention plus mirrored per-platform tests. A shared
   language-neutral fixture asserted on both sides would catch silent divergence.
-- **Full-open substring over-match** (issue #106) — bare `geo`/`ena`/`sra`/`pdb`
-  tokens in the full-open pattern lists can false-positive; anchor with word
-  boundaries on both platforms (pre-existing, parity-preserving).
+- **Swift repository-name display over-match** (issue #107) — the Swift-only
+  `DataAvailabilityAnalyzer.repositoryMappings` display path still uses bare
+  `geo`/`ena`/`sra`/`pdb` substrings and can mislabel a repo name (e.g. return
+  "GEO" for a GenBank deposit mentioning "geographic"). Display-only, never
+  misclassifies; no Python counterpart. Anchor + make `detectRepositoryName`
+  regex-aware. Follow-up from #106.
 - **Android transparency classifier** — Android still has no data-availability
   classifier or risk-indicator implementation to align (as of 2026-07-17).
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,

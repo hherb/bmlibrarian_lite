@@ -177,6 +177,40 @@ class TestAnalyzeDataAvailability:
         )
         assert result.disclosure_level == DataDisclosureLevel.UNKNOWN
 
+    def test_geographic_word_does_not_trigger_full_open(self) -> None:
+        """'geographic' must not match the bare 'geo' repository token.
+
+        The short repository tokens (geo/ena/sra/pdb) are word-anchored so an
+        unrelated word cannot produce a false FULL_OPEN that overrides a genuine
+        restriction. The Swift ``DataAvailabilityAnalyzer`` mirrors this.
+        """
+        result = analyze_data_availability(
+            "Geographic data underlying this study are not publicly available."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
+
+    def test_phenomena_word_does_not_trigger_full_open(self) -> None:
+        """'phenomena' must not match the bare 'ena' repository token."""
+        result = analyze_data_availability(
+            "The phenomena studied are described; data available upon "
+            "request from the corresponding author."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+    def test_standalone_short_token_still_full_open(self) -> None:
+        """A standalone short repository token still classifies as FULL_OPEN.
+
+        Word-anchoring must not over-tighten: a genuine deposit named only by
+        its short token (e.g. GEO, SRA) is still a public repository.
+        """
+        for token in ("GEO", "SRA", "ENA", "PDB"):
+            result = analyze_data_availability(
+                f"Raw data have been deposited in {token} under accession XYZ123."
+            )
+            assert (
+                result.disclosure_level == DataDisclosureLevel.FULL_OPEN
+            ), token
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.

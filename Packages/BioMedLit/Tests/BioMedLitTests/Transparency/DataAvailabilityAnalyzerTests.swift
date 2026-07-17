@@ -227,6 +227,40 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertEqual(result.disclosureLevel, .unknown)
     }
 
+    /// Test that "geographic" does not trigger the bare "geo" repository token.
+    ///
+    /// The short repository tokens (geo/ena/sra/pdb) are word-anchored so an
+    /// unrelated word cannot produce a false `.fullOpen` that overrides a
+    /// genuine restriction. Mirrors the Python reference.
+    func testGeographicWordDoesNotTriggerFullOpen() {
+        let statement = "Geographic data underlying this study are not publicly available."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+    }
+
+    /// Test that "phenomena" does not trigger the bare "ena" repository token.
+    func testPhenomenaWordDoesNotTriggerFullOpen() {
+        let statement =
+            "The phenomena studied are described; data available upon request from the corresponding author."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+    }
+
+    /// Test that a standalone short repository token still classifies as full open.
+    ///
+    /// Word-anchoring must not over-tighten: a genuine deposit named only by
+    /// its short token (e.g. GEO, SRA) is still a public repository.
+    func testStandaloneShortTokenStillFullOpen() {
+        for token in ["GEO", "SRA", "ENA", "PDB"] {
+            let statement = "Raw data have been deposited in \(token) under accession XYZ123."
+            let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+            XCTAssertEqual(result.disclosureLevel, .fullOpen, token)
+        }
+    }
+
     // MARK: - URL Extraction Tests
 
     /// Test extracting HTTPS URL.

@@ -285,9 +285,9 @@ DATA_REPOSITORIES = {
     'full_open': [
         r'zenodo', r'figshare', r'dryad', r'osf\.io', r'open science framework',
         r'github', r'gitlab', r'dataverse', r'mendeley data',
-        r'gene expression omnibus', r'geo', r'arrayexpress',
-        r'protein data bank', r'pdb', r'genbank', r'sra',
-        r'european nucleotide archive', r'ena',
+        r'gene expression omnibus', r'\bgeo\b', r'arrayexpress',
+        r'protein data bank', r'\bpdb\b', r'genbank', r'\bsra\b',
+        r'european nucleotide archive', r'\bena\b',
         r'clinicalstudydatarequest', r'vivli', r'yoda',
     ],
     'restricted': [
