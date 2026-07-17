@@ -261,6 +261,59 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         }
     }
 
+    /// Test that short tokens embedded mid-word do not trigger full open.
+    ///
+    /// Complements the geographic/phenomena cases by exercising the two short
+    /// tokens without common English-word collisions (sra/pdb). The carrier
+    /// words are synthetic boundary probes: dropping the `\b` anchors on
+    /// `\bsra\b` / `\bpdb\b` would make these false-positive. Mirrors Python.
+    func testShortTokenEmbeddedInWordIsNotFullOpen() {
+        for word in ["misranked", "compdb"] {
+            let statement = "The \(word) results are summarized in the manuscript text."
+            let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+            XCTAssertNotEqual(result.disclosureLevel, .fullOpen, word)
+        }
+    }
+
+    /// Test that a repository name is overridden by an explicit refusal.
+    ///
+    /// A repository *name* in a statement does not prove open access. When a
+    /// strong-refusal signal co-occurs, it takes precedence over the repository
+    /// mention. Mirrors the Python reference.
+    func testRepositoryNamedButAccessRefusedIsNotAvailable() {
+        let statement =
+            "Sequencing data could not be deposited in GEO for privacy reasons; "
+            + "the individual patient data cannot be shared."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+    }
+
+    /// Test that "not publicly available" overrides a co-occurring repository name.
+    func testRepositoryNamedButNotPubliclyAvailableIsNotAvailable() {
+        let statement =
+            "Although GenBank was used during analysis, the data are not publicly available."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+    }
+
+    /// Test that a repository plus a *soft* on-request restriction stays full open.
+    ///
+    /// Pins the deterministic baseline for the genuinely ambiguous case (public
+    /// deposit plus "available upon request"): the heuristic keeps it
+    /// `.fullOpen`. Optional LLM-assisted disambiguation is tracked in #109.
+    func testRepositoryWithSoftRequestStaysFullOpen() {
+        let statement =
+            "Processed data are available in GEO under accession GSE12345. "
+            + "Raw individual-level data are available from the corresponding "
+            + "author upon reasonable request."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .fullOpen)
+    }
+
     // MARK: - URL Extraction Tests
 
     /// Test extracting HTTPS URL.

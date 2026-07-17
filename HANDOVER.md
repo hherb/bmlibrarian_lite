@@ -8,6 +8,23 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Full-open now yields to co-occurring refusals** (2026-07-17, PR #108):
+  a repository *name* in a statement no longer unconditionally wins. Because
+  full-open was checked first, "genomic data could not be deposited in GEO …;
+  the data are not publicly available" classified as FULL_OPEN, masking the
+  refusal. Both platforms now detect a strong-refusal / effectively-unavailable
+  signal up front and skip the full-open tier when present (→ NOT_AVAILABLE).
+  Python promoted its previously-inline `strong_refusal_patterns` to the module
+  constant `STRONG_REFUSAL_PATTERNS` so the up-front guard and Step 2 share one
+  list (mirrors Swift `DataRepositoryPatterns.strongRefusalPatterns`); Swift
+  added the guard in `DataAvailabilityAnalyzer.analyze`. Mirrored tests:
+  `test_repository_named_but_access_refused_is_not_available` /
+  `test_repository_named_but_not_publicly_available_is_not_available` /
+  `test_repository_with_soft_request_stays_full_open` (+ the Swift equivalents),
+  plus `test_short_token_embedded_in_word_is_not_full_open` filling the sra/pdb
+  over-match coverage gap. The residual ambiguity — a repository mention plus a
+  *soft* on-request restriction — is deterministically kept FULL_OPEN and its
+  optional LLM-assisted disambiguation tracked in #109.
 - **Full-open bare-substring over-match fixed** (2026-07-17, closes #106):
   the short repository tokens `geo`/`ena`/`sra`/`pdb` in the full-open pattern
   lists were bare substrings, so unrelated words (`geographic`→`geo`,
@@ -66,6 +83,13 @@ its slice has landed; add a new section when handing off new work.
   `_restriction_labels`) and `DataRepositoryPatterns` in one change, with tests
   on both sides. This shifts Python scores, so treat it as its own slice and
   call it out in release notes (mobile loses this detection breadth until then).
+- **LLM-assisted disambiguation of repo + soft-restriction** (issue #109) —
+  a public-repository mention combined with a *soft* on-request restriction
+  ("data in GEO; raw data from the corresponding author upon request") is
+  genuinely ambiguous and is deterministically kept FULL_OPEN today. Add an
+  optional, config-gated, deterministic-fallback LLM layer (via the existing
+  `llm` abstraction / Swift `LLMService`) at the orchestration layer, keeping
+  the pure classifier and its parity tests unchanged. Follow-up from #106/#108.
 - **Automated Swift↔Python parity drift guard** (issue #105) — parity is
   currently maintained by convention plus mirrored per-platform tests. A shared
   language-neutral fixture asserted on both sides would catch silent divergence.

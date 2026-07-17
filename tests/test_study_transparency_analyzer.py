@@ -211,6 +211,55 @@ class TestAnalyzeDataAvailability:
                 result.disclosure_level == DataDisclosureLevel.FULL_OPEN
             ), token
 
+    @pytest.mark.parametrize("word", ["misranked", "compdb"])
+    def test_short_token_embedded_in_word_is_not_full_open(self, word: str) -> None:
+        """Short tokens embedded mid-word must not trigger FULL_OPEN.
+
+        Complements the geographic/phenomena cases by exercising the two short
+        tokens without common English-word collisions (sra/pdb). The carrier
+        words are synthetic word-boundary probes: dropping the word-boundary
+        anchors on the sra/pdb tokens would make these false-positive.
+        """
+        result = analyze_data_availability(
+            f"The {word} results are summarized in the manuscript text."
+        )
+        assert result.disclosure_level != DataDisclosureLevel.FULL_OPEN
+
+    def test_repository_named_but_access_refused_is_not_available(self) -> None:
+        """A repository name is overridden by an explicit refusal.
+
+        A repository *name* in a statement does not prove open access. When a
+        strong-refusal signal co-occurs, it takes precedence over the
+        repository mention. The Swift ``DataAvailabilityAnalyzer`` mirrors this.
+        """
+        result = analyze_data_availability(
+            "Sequencing data could not be deposited in GEO for privacy reasons; "
+            "the individual patient data cannot be shared."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
+
+    def test_repository_named_but_not_publicly_available_is_not_available(self) -> None:
+        """'not publicly available' overrides a co-occurring repository name."""
+        result = analyze_data_availability(
+            "Although GenBank was used during analysis, the data are not "
+            "publicly available."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
+
+    def test_repository_with_soft_request_stays_full_open(self) -> None:
+        """Repository + a *soft* on-request restriction stays FULL_OPEN.
+
+        This pins the deterministic baseline for the genuinely ambiguous case
+        (public deposit plus "available upon request"): the heuristic keeps it
+        FULL_OPEN. Optional LLM-assisted disambiguation is tracked in #109.
+        """
+        result = analyze_data_availability(
+            "Processed data are available in GEO under accession GSE12345. "
+            "Raw individual-level data are available from the corresponding "
+            "author upon reasonable request."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.

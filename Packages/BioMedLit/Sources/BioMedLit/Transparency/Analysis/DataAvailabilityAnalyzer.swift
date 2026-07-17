@@ -66,7 +66,9 @@ public enum DataAvailabilityAnalyzer {
     /// Uses the same priority-ordered tiers as the canonical Python reference
     /// (`analyze_data_availability`), so the same statement classifies
     /// identically on both platforms:
-    /// 1. **Full open** — data in a public repository.
+    /// 1. **Full open** — data in a public repository, *unless* the statement
+    ///    also refuses access (a repository name alone does not prove open
+    ///    access), in which case tier 2 takes precedence.
     /// 2. **Not available** — statements that read like a sharing policy but
     ///    amount to a refusal (locked to a collaboration, sponsor
     ///    confidentiality, "will not be released", proprietary, cannot be
@@ -74,6 +76,11 @@ public enum DataAvailabilityAnalyzer {
     /// 3. **Restricted** — on-request/approval-gated access.
     /// 4. **Unknown** — a statement exists but no pattern matches.
     /// 5. **Not stated** — no statement found (empty/nil input).
+    ///
+    /// A repository mention combined with a *soft* restriction (e.g. "raw data
+    /// available from the corresponding author upon request") is genuinely
+    /// ambiguous and is deterministically kept as `.fullOpen`; optional
+    /// LLM-assisted disambiguation of that case is tracked in issue #109.
     ///
     /// - Parameter statement: The data availability statement text.
     /// - Returns: DataAvailabilityResult with classification, repository info, and restrictions.
@@ -84,8 +91,22 @@ public enum DataAvailabilityAnalyzer {
 
         let statementLower = statement.lowercased()
 
-        // --- Step 1: Full open access (highest priority) ---
-        if let fullOpenResult = checkFullOpenAccess(statement: statement, lowercased: statementLower) {
+        // A repository *name* appearing in a statement does not by itself prove
+        // open access: a statement may name a repository while denying access
+        // ("genomic data could not be deposited in GEO for privacy reasons; the
+        // data are not publicly available"). A refusal/unavailability signal
+        // anywhere in the statement therefore takes precedence over a
+        // co-occurring repository mention. Mirrors the Python reference
+        // (``analyze_data_availability``).
+        let hasUnavailabilitySignal = RegexHelper.anyMatch(
+            patterns: DataRepositoryPatterns.effectivelyUnavailablePatterns
+                + DataRepositoryPatterns.strongRefusalPatterns,
+            in: statementLower
+        )
+
+        // --- Step 1: Full open access (highest priority, unless contradicted) ---
+        if !hasUnavailabilitySignal,
+           let fullOpenResult = checkFullOpenAccess(statement: statement, lowercased: statementLower) {
             return fullOpenResult
         }
 
