@@ -215,28 +215,40 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertTrue(result.restrictions.contains("GDPR restrictions"))
     }
 
-    /// Pin the accepted precision tradeoff for privacy/legal tokens (issue #113).
+    /// Open-availability affirmations classify `.fullOpen` without a named
+    /// repository (issue #113 fix).
     ///
-    /// Full-open is inferred only from a *recognized* repository keyword, so a
-    /// privacy/legal token in an otherwise-open statement that names no such
-    /// repository (e.g. "supplementary materials", de-identified open sharing)
-    /// is deliberately flagged `.restricted`. This over-matches genuinely-open
-    /// data; tightening it is tracked in issue #113. Pinned here so any future
-    /// precision fix is an intentional, visible change rather than a silent one.
-    func testPrivacyWithoutRecognizedRepositoryIsRestricted() {
+    /// Full-open is inferred from open-availability affirmations
+    /// ("openly shared", "available in the supplementary materials", "freely
+    /// available"), not only from recognized repository keywords, so a
+    /// reassuring privacy/legal token in a genuinely-open statement no longer
+    /// produces a false `.restricted`.
+    func testOpenAffirmationWithoutRepositoryIsFullOpen() {
         let openlyShared = DataAvailabilityAnalyzer.analyze(
             statement: "De-identified data are openly shared; no "
                 + "HIPAA-protected identifiers remain."
         )
-        XCTAssertEqual(openlyShared.disclosureLevel, .restricted)
-        XCTAssertEqual(openlyShared.restrictions, ["HIPAA restrictions"])
+        XCTAssertEqual(openlyShared.disclosureLevel, .fullOpen)
 
         let supplementary = DataAvailabilityAnalyzer.analyze(
             statement: "All data are available in the supplementary materials; "
                 + "patient privacy was protected throughout."
         )
-        XCTAssertEqual(supplementary.disclosureLevel, .restricted)
-        XCTAssertEqual(supplementary.restrictions, ["Privacy restrictions"])
+        XCTAssertEqual(supplementary.disclosureLevel, .fullOpen)
+
+        let freely = DataAvailabilityAnalyzer.analyze(
+            statement: "The complete dataset is freely available to all researchers."
+        )
+        XCTAssertEqual(freely.disclosureLevel, .fullOpen)
+    }
+
+    /// An open affirmation cannot override an explicit strong refusal (#113).
+    func testOpenAffirmationWithStrongRefusalIsNotAvailable() {
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are freely available in summary form but the "
+                + "individual-level data cannot be shared."
+        )
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
     }
 
     /// Two restricted patterns sharing a label yield it once (issue #114).
@@ -252,6 +264,47 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         )
         XCTAssertEqual(result.disclosureLevel, .restricted)
         XCTAssertEqual(result.restrictions, ["Requires IRB approval"])
+    }
+
+    /// A negated open-availability affirmation must not classify `.fullOpen` (#113 review).
+    ///
+    /// The affirmation patterns carry a negative lookbehind, so an immediately
+    /// negated affirmation falls through to the normal tiers instead of a false
+    /// `.fullOpen` that would drop a real restriction.
+    func testNegatedAffirmationDoesNotTriggerFullOpen() {
+        let irb = DataAvailabilityAnalyzer.analyze(
+            statement: "Raw data are not openly accessible without IRB approval."
+        )
+        XCTAssertEqual(irb.disclosureLevel, .restricted)
+        XCTAssertEqual(irb.restrictions, ["Requires IRB approval"])
+
+        let author = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not freely shared; available from the corresponding author."
+        )
+        XCTAssertEqual(author.disclosureLevel, .restricted)
+
+        let notOpen = DataAvailabilityAnalyzer.analyze(statement: "The data are not openly available.")
+        XCTAssertNotEqual(notOpen.disclosureLevel, .fullOpen)
+    }
+
+    /// A negated affirmation with one intervening adverb classifies `.notAvailable` (#113 review).
+    ///
+    /// The negative lookbehind only guards an *immediately* preceding "not ",
+    /// so the strong-refusal patterns tolerate one intervening word
+    /// (`(?:\w+ )?`): "will not be openly shared" / "cannot be openly shared"
+    /// set the up-front unavailability signal and skip the full-open step,
+    /// escalating to `.notAvailable` instead of a false `.fullOpen`. Residual
+    /// multi-word / alternate-negator forms remain tracked in #117.
+    func testNonAdjacentNegatedAffirmationIsNotAvailable() {
+        let willNot = DataAvailabilityAnalyzer.analyze(
+            statement: "The data will not be openly shared with third parties."
+        )
+        XCTAssertEqual(willNot.disclosureLevel, .notAvailable)
+        XCTAssertEqual(willNot.restrictions, ["Data will not be released"])
+
+        let cannot = DataAvailabilityAnalyzer.analyze(statement: "Raw data cannot be openly shared.")
+        XCTAssertEqual(cannot.disclosureLevel, .notAvailable)
+        XCTAssertEqual(cannot.restrictions, ["Data cannot be shared"])
     }
 
     /// Test analyzing data sharing agreement requirement.

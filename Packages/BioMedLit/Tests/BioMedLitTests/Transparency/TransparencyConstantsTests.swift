@@ -249,6 +249,20 @@ final class TransparencyConstantsTests: XCTestCase {
             patterns: patterns,
             in: "Available upon request"
         ))
+
+        // #113 open-availability affirmations
+        XCTAssertTrue(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "Data are openly shared"
+        ))
+        XCTAssertTrue(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "available in the supplementary materials"
+        ))
+        XCTAssertTrue(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "the dataset is freely available"
+        ))
     }
 
     func testRestrictedPatternsMatch() {

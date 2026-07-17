@@ -289,6 +289,16 @@ DATA_REPOSITORIES = {
         r'protein data bank', r'\bpdb\b', r'genbank', r'\bsra\b',
         r'european nucleotide archive', r'\bena\b',
         r'clinicalstudydatarequest', r'vivli', r'yoda',
+        # Open-availability affirmations (issue #113): genuinely-open statements
+        # that name no repository but explicitly affirm open access. Deliberately
+        # narrow — bare "available" is not matched, so "available upon request"
+        # and "available from the corresponding author" stay RESTRICTED. Mirrors
+        # the Swift ``DataRepositoryPatterns.fullOpenPatterns``.
+        # The negative lookbehind guards against a negated affirmation ("not
+        # openly accessible") falsely matching FULL_OPEN (issue #113 review).
+        r'(?<!not )openly (?:available|shared|accessible)',
+        r'(?<!not )freely (?:available|shared|accessible)',
+        r'(?<!not )available (?:in|within|as|via|through) (?:the )?supplement',
     ],
     'restricted': [
         r'upon (?:reasonable )?request',
@@ -300,10 +310,10 @@ DATA_REPOSITORIES = {
         r'ethics committee',
         r'confidential(?:ity)?',
         r'proprietary',
-        r'cannot be shared',
+        r'cannot be (?:\w+ )?shared',
         r'not (?:publicly )?available',
         # Effective refusals dressed as policy
-        r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)',
+        r'(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)',
         r'not be released to others',
         r'requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to',
         r'on the understanding that\b.*\bnot\b',
@@ -335,11 +345,15 @@ DATA_REPOSITORIES = {
 # Strong-refusal indicators that escalate a statement to NOT_AVAILABLE, even
 # when a public repository is also named. A subset of the 'restricted'
 # patterns. Mirrors the Swift ``DataRepositoryPatterns.strongRefusalPatterns``.
+# The ``(?:\w+ )?`` in the refusal patterns tolerates one intervening adverb so
+# a negated open affirmation ("will not be openly shared", "cannot be openly
+# shared") sets the up-front unavailability signal and skips the full-open step
+# (issue #113 review); non-adjacent multi-word negators remain tracked in #117.
 STRONG_REFUSAL_PATTERNS = [
-    r'cannot be shared',
+    r'cannot be (?:\w+ )?shared',
     r'not (?:publicly )?available',
     r'proprietary',
-    r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)',
+    r'(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)',
     r'not be released to others',
     r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent',
     r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
@@ -1032,10 +1046,10 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
 
     # Map patterns to human-readable descriptions for the restrictions list
     _restriction_labels = {
-        r'cannot be shared': "Data cannot be shared",
+        r'cannot be (?:\w+ )?shared': "Data cannot be shared",
         r'not (?:publicly )?available': "Data not publicly available",
         r'proprietary': "Data described as proprietary",
-        r'(?:would|will|shall) not be (?:released|shared|disclosed|provided)':
+        r'(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)':
             "Data will not be released",
         r'not be released to others': "Data will not be released to others",
         r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent':
