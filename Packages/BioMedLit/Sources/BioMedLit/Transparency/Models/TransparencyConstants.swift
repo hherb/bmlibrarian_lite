@@ -372,14 +372,15 @@ public enum DataRepositoryPatterns {
         "clinicalstudydatarequest",
         "vivli",
         "yoda",
-
         // Open-availability affirmations (issue #113): genuinely-open statements
         // that name no repository but explicitly affirm open access. Deliberately
         // narrow — bare "available" is not matched. Mirrors Python's
         // DATA_REPOSITORIES['full_open'].
-        #"openly (?:available|shared|accessible)"#,
-        #"freely (?:available|shared|accessible)"#,
-        #"available (?:in|within|as|via|through) (?:the )?supplement"#,
+        // The negative lookbehind guards against a negated affirmation ("not
+        // openly accessible") falsely matching FULL_OPEN (issue #113 review).
+        #"(?<!not )openly (?:available|shared|accessible)"#,
+        #"(?<!not )freely (?:available|shared|accessible)"#,
+        #"(?<!not )available (?:in|within|as|via|through) (?:the )?supplement"#,
     ]
 
     /// Restricted/on-request access indicators.

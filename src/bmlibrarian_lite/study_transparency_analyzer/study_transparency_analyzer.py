@@ -294,9 +294,11 @@ DATA_REPOSITORIES = {
         # narrow — bare "available" is not matched, so "available upon request"
         # and "available from the corresponding author" stay RESTRICTED. Mirrors
         # the Swift ``DataRepositoryPatterns.fullOpenPatterns``.
-        r'openly (?:available|shared|accessible)',
-        r'freely (?:available|shared|accessible)',
-        r'available (?:in|within|as|via|through) (?:the )?supplement',
+        # The negative lookbehind guards against a negated affirmation ("not
+        # openly accessible") falsely matching FULL_OPEN (issue #113 review).
+        r'(?<!not )openly (?:available|shared|accessible)',
+        r'(?<!not )freely (?:available|shared|accessible)',
+        r'(?<!not )available (?:in|within|as|via|through) (?:the )?supplement',
     ],
     'restricted': [
         r'upon (?:reasonable )?request',

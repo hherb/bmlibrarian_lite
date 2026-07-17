@@ -266,6 +266,27 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertEqual(result.restrictions, ["Requires IRB approval"])
     }
 
+    /// A negated open-availability affirmation must not classify `.fullOpen` (#113 review).
+    ///
+    /// The affirmation patterns carry a negative lookbehind, so an immediately
+    /// negated affirmation falls through to the normal tiers instead of a false
+    /// `.fullOpen` that would drop a real restriction.
+    func testNegatedAffirmationDoesNotTriggerFullOpen() {
+        let irb = DataAvailabilityAnalyzer.analyze(
+            statement: "Raw data are not openly accessible without IRB approval."
+        )
+        XCTAssertEqual(irb.disclosureLevel, .restricted)
+        XCTAssertEqual(irb.restrictions, ["Requires IRB approval"])
+
+        let author = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not freely shared; available from the corresponding author."
+        )
+        XCTAssertEqual(author.disclosureLevel, .restricted)
+
+        let notOpen = DataAvailabilityAnalyzer.analyze(statement: "The data are not openly available.")
+        XCTAssertNotEqual(notOpen.disclosureLevel, .fullOpen)
+    }
+
     /// Test analyzing data sharing agreement requirement.
     func testAnalyzeDataSharingAgreement() {
         let statement = "Data available subject to a data sharing agreement."

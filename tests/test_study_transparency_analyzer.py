@@ -366,6 +366,28 @@ class TestAnalyzeDataAvailability:
         assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
         assert result.restrictions == ["Requires IRB approval"]
 
+    def test_negated_affirmation_does_not_trigger_full_open(self) -> None:
+        """A negated open-availability affirmation must not classify FULL_OPEN (#113 review).
+
+        The affirmation patterns carry a negative lookbehind, so an immediately
+        negated affirmation ("not openly accessible", "not freely shared")
+        falls through to the normal tiers instead of a false FULL_OPEN that
+        would drop a real restriction.
+        """
+        irb = analyze_data_availability(
+            "Raw data are not openly accessible without IRB approval."
+        )
+        assert irb.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert irb.restrictions == ["Requires IRB approval"]
+
+        author = analyze_data_availability(
+            "Data are not freely shared; available from the corresponding author."
+        )
+        assert author.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        not_open = analyze_data_availability("The data are not openly available.")
+        assert not_open.disclosure_level != DataDisclosureLevel.FULL_OPEN
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.
