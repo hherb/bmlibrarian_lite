@@ -35,7 +35,14 @@ public enum DataAvailabilityAnalyzer {
     // MARK: - Repository Mappings
 
     /// Repository name mappings for detection.
-    /// Key: pattern to search for (lowercase), Value: human-readable name.
+    ///
+    /// Key: case-insensitive regex pattern to search for, Value: human-readable
+    /// name. Patterns are matched by `detectRepositoryName(in:)` via
+    /// `RegexHelper.anyMatch`. The short tokens (geo/ena/sra/pdb) are
+    /// word-anchored (`\bgeo\b` etc.) so an unrelated word cannot mislabel the
+    /// repository (e.g. "geographic" resolving to "GEO" ahead of "GenBank").
+    /// This mirrors the anchoring already applied to the classification patterns
+    /// in `DataRepositoryPatterns.fullOpenPatterns` (issues #106/#107).
     private static let repositoryMappings: [(pattern: String, name: String)] = [
         ("zenodo", "Zenodo"),
         ("figshare", "Figshare"),
@@ -45,17 +52,17 @@ public enum DataAvailabilityAnalyzer {
         ("gitlab", "GitLab"),
         ("dataverse", "Dataverse"),
         ("gene expression omnibus", "Gene Expression Omnibus"),
-        ("geo", "GEO"),
+        (#"\bgeo\b"#, "GEO"),
         ("arrayexpress", "ArrayExpress"),
         ("genbank", "GenBank"),
-        ("sra", "Sequence Read Archive"),
+        (#"\bsra\b"#, "Sequence Read Archive"),
         ("vivli", "Vivli"),
         ("yoda", "YODA Project"),
         ("mendeley data", "Mendeley Data"),
         ("protein data bank", "Protein Data Bank"),
-        ("pdb", "PDB"),
+        (#"\bpdb\b"#, "PDB"),
         ("european nucleotide archive", "European Nucleotide Archive"),
-        ("ena", "ENA"),
+        (#"\bena\b"#, "ENA"),
         ("clinicalstudydatarequest", "ClinicalStudyDataRequest.com"),
     ]
 
@@ -228,16 +235,17 @@ public enum DataAvailabilityAnalyzer {
 
     /// Detect repository name from text.
     ///
-    /// Scans for known repository name patterns and returns the human-readable
-    /// name of the first match found.
+    /// Scans for known repository name patterns (case-insensitive regex) and
+    /// returns the human-readable name of the first match found. Short tokens
+    /// are word-anchored in `repositoryMappings`, so an unrelated word cannot
+    /// mislabel the repository.
     ///
-    /// - Parameter text: Lowercased text to search.
+    /// - Parameter text: Text to search (typically already lowercased).
     /// - Returns: Repository name if detected, nil otherwise.
     public static func detectRepositoryName(in text: String) -> String? {
-        for (pattern, name) in repositoryMappings {
-            if text.contains(pattern) {
-                return name
-            }
+        for (pattern, name) in repositoryMappings
+        where RegexHelper.anyMatch(patterns: [pattern], in: text) {
+            return name
         }
         return nil
     }

@@ -450,6 +450,58 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         )
     }
 
+    /// Test that a carrier word does not mislabel the repository via a short token.
+    ///
+    /// The short repository tokens (geo/ena/sra/pdb) are word-anchored in
+    /// `repositoryMappings`, so "geographic" no longer resolves to "GEO" ahead
+    /// of the genuine "GenBank" mention. Display-path regression from issue #107
+    /// (classification of this statement is unaffected — see #106).
+    func testDetectRepositoryGenBankNotOvermatchedByGeographic() {
+        XCTAssertEqual(
+            DataAvailabilityAnalyzer.detectRepositoryName(
+                in: "sequences in genbank; sampled across diverse geographic regions."
+            ),
+            "GenBank"
+        )
+    }
+
+    /// Test that a short token embedded in an unrelated word detects no repository.
+    ///
+    /// Each carrier word contains a short token as a substring (geographic⊃geo,
+    /// phenomena⊃ena, misranked⊃sra, compdb⊃pdb) but names no repository, so the
+    /// word-anchored lookup returns nil rather than a false label. Mirrors the
+    /// classification-path guards in `testShortTokenEmbeddedInWordIsNotFullOpen`.
+    func testDetectRepositoryShortTokenCarrierWordReturnsNil() {
+        for word in ["geographic", "phenomena", "misranked", "compdb"] {
+            XCTAssertNil(
+                DataAvailabilityAnalyzer.detectRepositoryName(
+                    in: "the \(word) results are summarized in the manuscript text."
+                ),
+                word
+            )
+        }
+    }
+
+    /// Test that standalone short tokens are still detected as their repository.
+    ///
+    /// Word-anchoring must not over-tighten: a repository named only by its short
+    /// token still resolves to the correct human-readable name.
+    func testDetectRepositoryStandaloneShortTokensStillDetected() {
+        let cases: [(token: String, name: String)] = [
+            ("geo", "GEO"),
+            ("sra", "Sequence Read Archive"),
+            ("ena", "ENA"),
+            ("pdb", "PDB"),
+        ]
+        for (token, name) in cases {
+            XCTAssertEqual(
+                DataAvailabilityAnalyzer.detectRepositoryName(in: "deposited in \(token)"),
+                name,
+                token
+            )
+        }
+    }
+
     // MARK: - Restriction Extraction Tests
 
     /// Test extracting single restriction.

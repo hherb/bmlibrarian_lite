@@ -8,6 +8,20 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Swift repository-name display over-match fixed** (2026-07-17, closes #107):
+  the Swift-only `DataAvailabilityAnalyzer.repositoryMappings` display path still
+  used bare `geo`/`ena`/`sra`/`pdb` substrings matched with `String.contains`,
+  so `detectRepositoryName` could mislabel a repository (e.g. a GenBank deposit
+  mentioning "geographic" resolved to "GEO", since `geo` is listed before
+  `genbank`). The four short tokens are now word-anchored (`\bgeo\b` etc.) in
+  `repositoryMappings` and `detectRepositoryName` matches via
+  `RegexHelper.anyMatch`, mirroring the classification anchoring done in #106.
+  Display-only, Swift-only, never affected classification and has no Python
+  counterpart. Regression tests:
+  `testDetectRepositoryGenBankNotOvermatchedByGeographic`,
+  `testDetectRepositoryShortTokenCarrierWordReturnsNil`,
+  `testDetectRepositoryStandaloneShortTokensStillDetected` (guards against
+  over-tightening).
 - **Full-open now yields to co-occurring refusals** (2026-07-17, PR #108):
   a repository *name* in a statement no longer unconditionally wins. Because
   full-open was checked first, "genomic data could not be deposited in GEO …;
@@ -93,17 +107,17 @@ its slice has landed; add a new section when handing off new work.
 - **Automated Swift↔Python parity drift guard** (issue #105) — parity is
   currently maintained by convention plus mirrored per-platform tests. A shared
   language-neutral fixture asserted on both sides would catch silent divergence.
-- **Swift repository-name display over-match** (issue #107) — the Swift-only
-  `DataAvailabilityAnalyzer.repositoryMappings` display path still uses bare
-  `geo`/`ena`/`sra`/`pdb` substrings and can mislabel a repo name (e.g. return
-  "GEO" for a GenBank deposit mentioning "geographic"). Display-only, never
-  misclassifies; no Python counterpart. Anchor + make `detectRepositoryName`
-  regex-aware. Follow-up from #106.
 - **Android transparency classifier** — Android still has no data-availability
   classifier or risk-indicator implementation to align (as of 2026-07-17).
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,
   low/medium/high) has no Python counterpart and was left unchanged. Revisit
   only if a canonical cross-platform risk-level definition is introduced.
+- **Cache compiled regexes in `RegexHelper`** (issue #111) — `anyMatch`
+  recompiles an `NSRegularExpression` per call and re-lowercases the text once
+  per pattern; several analyzers loop `anyMatch(patterns: [pattern], …)`.
+  Negligible today (single-statement labeling, not a hot path); memoize
+  compiled patterns inside `RegexHelper` if it ever moves onto one. Follow-up
+  from #110.
 
 ### Verify
 
