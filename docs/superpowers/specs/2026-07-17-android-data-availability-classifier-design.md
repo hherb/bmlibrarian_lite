@@ -71,7 +71,7 @@ drift). Authoritative locations in
 
 | Kotlin symbol | Python source | Notes |
 |---|---|---|
-| `DataRepositoryPatterns.fullOpenPatterns` | `DATA_REPOSITORIES['full_open']` (~L285–292, 21 patterns) | short tokens word-anchored (`\bgeo\b`, `\bpdb\b`, `\bsra\b`, `\bena\b`) |
+| `DataRepositoryPatterns.fullOpenPatterns` | `DATA_REPOSITORIES['full_open']` (21 repository patterns + 3 open-availability affirmation patterns from the #113 fix = 24) | short tokens word-anchored (`\bgeo\b`, `\bpdb\b`, `\bsra\b`, `\bena\b`); affirmations: `openly (?:available\|shared\|accessible)`, `freely (?:available\|shared\|accessible)`, `available (?:in\|within\|as\|via\|through) (?:the )?supplement` |
 | `DataRepositoryPatterns.restrictedPatterns` | `DATA_REPOSITORIES['restricted']` (~L293–322, 23 patterns) | includes the #104 privacy/legal set (`\bgdpr\b`, `\bhipaa\b`, `\bprivacy\b`, `\bpatient consent\b`) |
 | `DataRepositoryPatterns.effectivelyUnavailablePatterns` | `DATA_REPOSITORIES['effectively_unavailable']` (~L325–332, 3 patterns) | |
 | `DataRepositoryPatterns.strongRefusalPatterns` | `STRONG_REFUSAL_PATTERNS` (~L338–346, 7 patterns) | subset of restricted |
@@ -188,7 +188,9 @@ the Swift `DataAvailabilityAnalyzerTests` classification/extraction subset:
 - `\bgdpr\b` / `\bhipaa\b` / `\bprivacy\b` / `\bpatient consent\b` → `RESTRICTED`
 - privacy token does not override a genuine full-open repository mention
 - GDPR co-occurring with a strong refusal → `NOT_AVAILABLE`
-- privacy without a recognized repository → `RESTRICTED` (the #113 tradeoff — see below)
+- open-availability affirmation without a named repository → `FULL_OPEN` (the
+  #113 fix: "openly shared …", "available in the supplementary materials …")
+- an open affirmation co-occurring with a strong refusal still → `NOT_AVAILABLE`
 - restricted label-sharing patterns deduplicated (e.g. `institutional review
   board` + `irb approval` → single "Requires IRB approval")
 - `detectRepositoryName`: GenBank not over-matched by "geographic"; short-token
@@ -198,14 +200,17 @@ the Swift `DataAvailabilityAnalyzerTests` classification/extraction subset:
 `DataRepositoryPatternsTest` pins the pattern-list contents/counts and the
 `restrictionLabel` lookup for representative patterns.
 
-## Inherited cross-platform behavior (not "fixed" here)
+## Dependency: builds on the #113 fix
 
-The known #113 tradeoff — a privacy/legal token (`\bprivacy\b` is loosest) in an
-otherwise-open statement that names no *recognized* repository is flagged
-`RESTRICTED` (an open-data false positive) — is **inherited by parity** and
-pinned by the `privacy_without_recognized_repository → RESTRICTED` test. Android
-matches Python/Swift; it does not diverge to "fix" it. Any precision change is a
-cross-platform decision made on all three platforms together (#113).
+This slice ports the **corrected** classifier, not the historical one. The #113
+privacy/legal open-data false positive is fixed first on Python + Swift (PR 1,
+spec `2026-07-17-tighten-privacy-legal-data-restriction-precision-design.md`),
+which broadens the full-open tier with three open-availability affirmation
+patterns. Android's `fullOpenPatterns` therefore **includes those three
+affirmation patterns from the start**, and the Android test asserts the fixed
+behavior (open affirmation without a repository → `FULL_OPEN`), matching
+Python/Swift. Land PR 1 before finalizing PR 2 so the canonical reference already
+carries the fix when parity is cross-checked.
 
 ## Non-goals / constraints
 
