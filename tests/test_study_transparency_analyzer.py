@@ -312,6 +312,30 @@ class TestAnalyzeDataAvailability:
         assert "Data not publicly available" in result.restrictions
         assert "GDPR restrictions" in result.restrictions
 
+    def test_privacy_without_recognized_repository_is_restricted(self) -> None:
+        """Pin the accepted precision tradeoff for privacy/legal tokens (issue #113).
+
+        Full-open is inferred only from a *recognized* repository keyword, so a
+        privacy/legal token in an otherwise-open statement that names no such
+        repository (e.g. "supplementary materials", de-identified open sharing)
+        is deliberately flagged RESTRICTED. This over-matches genuinely-open
+        data; tightening it is tracked in issue #113. Pinned here so any future
+        precision fix is an intentional, visible change rather than a silent one.
+        """
+        openly_shared = analyze_data_availability(
+            "De-identified data are openly shared; no HIPAA-protected "
+            "identifiers remain."
+        )
+        assert openly_shared.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert openly_shared.restrictions == ["HIPAA restrictions"]
+
+        supplementary = analyze_data_availability(
+            "All data are available in the supplementary materials; patient "
+            "privacy was protected throughout."
+        )
+        assert supplementary.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert supplementary.restrictions == ["Privacy restrictions"]
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.

@@ -215,6 +215,30 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertTrue(result.restrictions.contains("GDPR restrictions"))
     }
 
+    /// Pin the accepted precision tradeoff for privacy/legal tokens (issue #113).
+    ///
+    /// Full-open is inferred only from a *recognized* repository keyword, so a
+    /// privacy/legal token in an otherwise-open statement that names no such
+    /// repository (e.g. "supplementary materials", de-identified open sharing)
+    /// is deliberately flagged `.restricted`. This over-matches genuinely-open
+    /// data; tightening it is tracked in issue #113. Pinned here so any future
+    /// precision fix is an intentional, visible change rather than a silent one.
+    func testPrivacyWithoutRecognizedRepositoryIsRestricted() {
+        let openlyShared = DataAvailabilityAnalyzer.analyze(
+            statement: "De-identified data are openly shared; no "
+                + "HIPAA-protected identifiers remain."
+        )
+        XCTAssertEqual(openlyShared.disclosureLevel, .restricted)
+        XCTAssertEqual(openlyShared.restrictions, ["HIPAA restrictions"])
+
+        let supplementary = DataAvailabilityAnalyzer.analyze(
+            statement: "All data are available in the supplementary materials; "
+                + "patient privacy was protected throughout."
+        )
+        XCTAssertEqual(supplementary.disclosureLevel, .restricted)
+        XCTAssertEqual(supplementary.restrictions, ["Privacy restrictions"])
+    }
+
     /// Test analyzing data sharing agreement requirement.
     func testAnalyzeDataSharingAgreement() {
         let statement = "Data available subject to a data sharing agreement."

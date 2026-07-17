@@ -29,6 +29,9 @@ its slice has landed; add a new section when handing off new work.
   parity. Bare `informed consent` deliberately excluded (would over-match
   ~every clinical paper). Spec + plan:
   `docs/superpowers/{specs,plans}/2026-07-17-restore-privacy-legal-data-restriction-detection*`.
+  Known accepted tradeoff (now pinned by a test, tracked for a precision fix in
+  issue #113): a privacy/legal token in an otherwise-open statement naming no
+  *recognized* repository is flagged RESTRICTED (open-data false positive).
 - **Swift repository-name display over-match fixed** (2026-07-17, closes #107):
   the Swift-only `DataAvailabilityAnalyzer.repositoryMappings` display path still
   used bare `geo`/`ena`/`sra`/`pdb` substrings matched with `String.contains`,
@@ -111,6 +114,21 @@ its slice has landed; add a new section when handing off new work.
 
 ## Potential follow-ups
 
+- **Tighten privacy/GDPR/HIPAA restricted-tier precision** (issue #113) — the
+  #104 tokens fire standalone, so a privacy/legal mention in an otherwise-open
+  statement that names no *recognized* repository ("supplementary materials",
+  de-identified open sharing) is flagged RESTRICTED (a genuine open-data false
+  positive; `\bprivacy\b` is the loosest). Either require co-occurrence with a
+  restriction cue or broaden the full-open guard. Current behavior is pinned by
+  `test_privacy_without_recognized_repository_is_restricted` (Python) /
+  `testPrivacyWithoutRecognizedRepositoryIsRestricted` (Swift), so a fix is a
+  visible change. Keep Python↔Swift byte-identical.
+- **Python/Swift Step-3 dedup asymmetry** (issue #114, pre-existing) — Python
+  `analyze_data_availability` Step 3 appends restriction labels without dedup
+  while Swift `orderedRestrictionLabels` dedups; label-sharing patterns (e.g.
+  `institutional review board` + `irb approval` → "Requires IRB approval") can
+  diverge. Add the `if label not in restrictions` guard to Python + a mirrored
+  IRB-style test.
 - **LLM-assisted disambiguation of repo + soft-restriction** (issue #109) —
   a public-repository mention combined with a *soft* on-request restriction
   ("data in GEO; raw data from the corresponding author upon request") is
