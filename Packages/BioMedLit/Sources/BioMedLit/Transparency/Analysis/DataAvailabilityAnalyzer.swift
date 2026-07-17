@@ -59,33 +59,21 @@ public enum DataAvailabilityAnalyzer {
         ("clinicalstudydatarequest", "ClinicalStudyDataRequest.com"),
     ]
 
-    /// Restriction pattern mappings.
-    /// Key: pattern to search for (lowercase), Value: human-readable description.
-    private static let restrictionMappings: [(pattern: String, description: String)] = [
-        ("upon reasonable request", "Available upon reasonable request"),
-        ("upon request", "Available upon request"),
-        ("data sharing agreement", "Requires data sharing agreement"),
-        ("institutional review board", "IRB approval required"),
-        ("irb approval", "IRB approval required"),
-        ("ethics committee", "Ethics committee approval required"),
-        ("confidential", "Confidentiality restrictions"),
-        ("proprietary", "Proprietary data"),
-        ("privacy", "Privacy restrictions"),
-        ("patient consent", "Patient consent required"),
-        ("gdpr", "GDPR restrictions"),
-        ("hipaa", "HIPAA restrictions"),
-    ]
-
     // MARK: - Main Analysis
 
     /// Analyze a data availability statement.
     ///
-    /// Classification hierarchy (checked in order):
-    /// 1. Full open - data in public repository
-    /// 2. Not available - explicitly unavailable
-    /// 3. Available on request - can be obtained from authors
-    /// 4. Unknown - statement exists but classification unclear
-    /// 5. Not stated - no statement found
+    /// Uses the same priority-ordered tiers as the canonical Python reference
+    /// (`analyze_data_availability`), so the same statement classifies
+    /// identically on both platforms:
+    /// 1. **Full open** — data in a public repository.
+    /// 2. **Not available** — statements that read like a sharing policy but
+    ///    amount to a refusal (locked to a collaboration, sponsor
+    ///    confidentiality, "will not be released", proprietary, cannot be
+    ///    shared, not publicly available).
+    /// 3. **Restricted** — on-request/approval-gated access.
+    /// 4. **Unknown** — a statement exists but no pattern matches.
+    /// 5. **Not stated** — no statement found (empty/nil input).
     ///
     /// - Parameter statement: The data availability statement text.
     /// - Returns: DataAvailabilityResult with classification, repository info, and restrictions.
@@ -96,30 +84,45 @@ public enum DataAvailabilityAnalyzer {
 
         let statementLower = statement.lowercased()
 
-        // Check for full open access (highest priority)
+        // --- Step 1: Full open access (highest priority) ---
         if let fullOpenResult = checkFullOpenAccess(statement: statement, lowercased: statementLower) {
             return fullOpenResult
         }
 
-        // Check for explicit unavailability
-        if containsUnavailabilityIndicators(statementLower) {
+        // --- Step 2: Effectively unavailable (refusals dressed as policy) ---
+        let effectivelyUnavailableSignals = orderedRestrictionLabels(
+            for: DataRepositoryPatterns.effectivelyUnavailablePatterns,
+            in: statementLower
+        )
+        let strongRefusalFound = RegexHelper.anyMatch(
+            patterns: DataRepositoryPatterns.strongRefusalPatterns,
+            in: statementLower
+        )
+
+        if !effectivelyUnavailableSignals.isEmpty || strongRefusalFound {
+            var restrictions = effectivelyUnavailableSignals
+            for label in extractRestrictions(from: statementLower)
+            where !restrictions.contains(label) {
+                restrictions.append(label)
+            }
             return DataAvailabilityResult(
                 statement: statement,
                 disclosureLevel: .notAvailable,
-                restrictions: extractRestrictions(from: statementLower)
+                restrictions: restrictions
             )
         }
 
-        // Check for restricted/request-only access
-        if containsRestrictedAccessIndicators(statementLower) {
+        // --- Step 3: Restricted/on-request access ---
+        let restrictions = extractRestrictions(from: statementLower)
+        if !restrictions.isEmpty {
             return DataAvailabilityResult(
                 statement: statement,
-                disclosureLevel: .availableOnRequest,
-                restrictions: extractRestrictions(from: statementLower)
+                disclosureLevel: .restricted,
+                restrictions: restrictions
             )
         }
 
-        // Statement exists but unclear classification
+        // --- Step 4: Statement exists but unclear classification ---
         return DataAvailabilityResult(
             statement: statement,
             disclosureLevel: .unknown
@@ -166,22 +169,6 @@ public enum DataAvailabilityAnalyzer {
         }
 
         return nil
-    }
-
-    /// Check if statement contains unavailability indicators.
-    ///
-    /// - Parameter text: Lowercased statement text.
-    /// - Returns: True if data is explicitly unavailable.
-    public static func containsUnavailabilityIndicators(_ text: String) -> Bool {
-        RegexHelper.anyMatch(patterns: DataRepositoryPatterns.unavailablePatterns, in: text)
-    }
-
-    /// Check if statement contains restricted access indicators.
-    ///
-    /// - Parameter text: Lowercased statement text.
-    /// - Returns: True if restricted access is indicated.
-    public static func containsRestrictedAccessIndicators(_ text: String) -> Bool {
-        RegexHelper.anyMatch(patterns: DataRepositoryPatterns.restrictedPatterns, in: text)
     }
 
     // MARK: - Extraction Functions
@@ -237,21 +224,39 @@ public enum DataAvailabilityAnalyzer {
     /// Extract restriction descriptions from text.
     ///
     /// Identifies mentions of access restrictions such as IRB approval,
-    /// data sharing agreements, confidentiality requirements, etc.
+    /// data sharing agreements, confidentiality requirements, etc. Labels are
+    /// produced in `restrictedPatterns` order with order-preserving dedup,
+    /// mirroring the Python reference.
     ///
     /// - Parameter text: Lowercased statement text.
     /// - Returns: List of detected restrictions as human-readable descriptions.
     public static func extractRestrictions(from text: String) -> [String] {
-        var restrictions: [String] = []
+        orderedRestrictionLabels(for: DataRepositoryPatterns.restrictedPatterns, in: text)
+    }
 
-        for (pattern, description) in restrictionMappings {
-            if text.contains(pattern) || RegexHelper.anyMatch(patterns: [pattern], in: text) {
-                restrictions.append(description)
+    /// Resolve human-readable restriction labels for the patterns that match.
+    ///
+    /// Iterates the patterns in order and appends each pattern's mapped label
+    /// (see `DataRepositoryPatterns.restrictionLabel(for:)`), skipping labels
+    /// already present so the result is order-preserving and deduplicated.
+    ///
+    /// - Parameters:
+    ///   - patterns: Restriction/refusal patterns to test, in priority order.
+    ///   - text: Lowercased statement text.
+    /// - Returns: Ordered, deduplicated restriction labels for matched patterns.
+    private static func orderedRestrictionLabels(
+        for patterns: [String],
+        in text: String
+    ) -> [String] {
+        var labels: [String] = []
+        for pattern in patterns
+        where RegexHelper.anyMatch(patterns: [pattern], in: text) {
+            let label = DataRepositoryPatterns.restrictionLabel(for: pattern)
+            if !labels.contains(label) {
+                labels.append(label)
             }
         }
-
-        // Deduplicate (some patterns may produce the same description)
-        return Array(Set(restrictions))
+        return labels
     }
 
     // MARK: - Validation

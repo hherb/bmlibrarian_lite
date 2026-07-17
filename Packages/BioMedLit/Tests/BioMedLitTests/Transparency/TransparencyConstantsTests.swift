@@ -280,8 +280,8 @@ final class TransparencyConstantsTests: XCTestCase {
         ))
     }
 
-    func testUnavailablePatternsMatch() {
-        let patterns = DataRepositoryPatterns.unavailablePatterns
+    func testStrongRefusalPatternsMatch() {
+        let patterns = DataRepositoryPatterns.strongRefusalPatterns
 
         XCTAssertTrue(RegexHelper.anyMatch(
             patterns: patterns,
@@ -299,6 +299,40 @@ final class TransparencyConstantsTests: XCTestCase {
             patterns: patterns,
             in: "Data not available due to privacy"
         ))
+        XCTAssertTrue(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "Confidentiality agreements with sponsors prevent disclosure"
+        ))
+    }
+
+    func testEffectivelyUnavailablePatternsMatch() {
+        let patterns = DataRepositoryPatterns.effectivelyUnavailablePatterns
+
+        XCTAssertTrue(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "Data were provided to the ATLAS collaboration on the understanding that they remain confidential"
+        ))
+        XCTAssertTrue(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "confidentiality agreement with the trial sponsor"
+        ))
+    }
+
+    func testRestrictionLabelLookup() {
+        // A mapped pattern resolves to its human-readable label.
+        XCTAssertEqual(
+            DataRepositoryPatterns.restrictionLabel(for: "irb approval"),
+            "Requires IRB approval"
+        )
+        // Every restricted/effectively-unavailable pattern has a label.
+        let mapped = DataRepositoryPatterns.restrictedPatterns
+            + DataRepositoryPatterns.effectivelyUnavailablePatterns
+        for pattern in mapped {
+            XCTAssertNotNil(
+                DataRepositoryPatterns.restrictionLabels[pattern],
+                "Missing label for pattern: \(pattern)"
+            )
+        }
     }
 
     func testURLPatternExtraction() {

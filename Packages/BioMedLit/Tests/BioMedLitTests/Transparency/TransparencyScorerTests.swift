@@ -48,8 +48,8 @@ final class TransparencyScorerTests: XCTestCase {
             outcomeSwitchingDetected: false
         )
 
-        // Base (50) + data (20) + COI (10) + trial (10) + results (5) = 95
-        XCTAssertEqual(score, 95)
+        // Base (50) + data (20) + COI (5) + trial (10) + results (5) = 90
+        XCTAssertEqual(score, 90)
     }
 
     /// Test poor transparency score calculation.
@@ -63,8 +63,8 @@ final class TransparencyScorerTests: XCTestCase {
             outcomeSwitchingDetected: true
         )
 
-        // Base (50) + data (-10) + COI (-5) + outcome (-15) + industry+nodata (-10) = 10
-        XCTAssertEqual(score, 10)
+        // Base (50) + data (-15) + COI (-5) + outcome (-15) + industry+nodata (-10) = 5
+        XCTAssertEqual(score, 5)
     }
 
     /// Test score is clamped to valid range.
@@ -94,8 +94,8 @@ final class TransparencyScorerTests: XCTestCase {
             outcomeSwitchingDetected: false
         )
 
-        // Base (50) + data (10) + COI (10) = 70
-        XCTAssertEqual(score, 70)
+        // Base (50) + data (5) + COI (5) = 60
+        XCTAssertEqual(score, 60)
     }
 
     // MARK: - Data Availability Points Tests
@@ -112,7 +112,7 @@ final class TransparencyScorerTests: XCTestCase {
         )
         XCTAssertEqual(
             TransparencyScorer.dataAvailabilityPoints(for: .restricted),
-            0
+            TransparencyConstants.restrictedDataPenalty
         )
         XCTAssertEqual(
             TransparencyScorer.dataAvailabilityPoints(for: .notAvailable),
@@ -133,13 +133,60 @@ final class TransparencyScorerTests: XCTestCase {
     /// Test COI disclosure points.
     func testCoiDisclosurePoints() {
         XCTAssertEqual(
-            TransparencyScorer.coiDisclosurePoints(hasStatement: true),
+            TransparencyScorer.coiDisclosurePoints(hasStatement: true, hasIndustryTies: false),
             TransparencyConstants.coiStatementPoints
         )
         XCTAssertEqual(
             TransparencyScorer.coiDisclosurePoints(hasStatement: false),
             TransparencyConstants.missingCoiPenalty
         )
+    }
+
+    /// Test that disclosed industry ties reduce COI disclosure points.
+    func testCoiDisclosurePointsWithIndustryTies() {
+        XCTAssertEqual(
+            TransparencyScorer.coiDisclosurePoints(hasStatement: true, hasIndustryTies: true),
+            TransparencyConstants.coiStatementPoints + TransparencyConstants.coiIndustryTiesPenalty
+        )
+    }
+
+    /// Test that disclosed COI industry ties lower the overall score.
+    func testCalculateScoreCoiIndustryTiesPenalty() {
+        let withoutTies = TransparencyScorer.calculateScore(
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            coiAnalysis: COIAnalysisResult(statement: "Grants from a foundation", hasIndustryTies: false),
+            trialRegistrations: [],
+            resultsCompliance: .unknown,
+            industryFundingDetected: false,
+            outcomeSwitchingDetected: false
+        )
+        let withTies = TransparencyScorer.calculateScore(
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            coiAnalysis: COIAnalysisResult(statement: "Grants from Pfizer", hasIndustryTies: true),
+            trialRegistrations: [],
+            resultsCompliance: .unknown,
+            industryFundingDetected: false,
+            outcomeSwitchingDetected: false
+        )
+
+        // fullOpen (+20) + COI statement (+5): 75 without ties, 70 with the -5 ties penalty.
+        XCTAssertEqual(withoutTies, 75)
+        XCTAssertEqual(withTies, 70)
+    }
+
+    /// Test that disclosed COI industry ties + restricted data trigger the combined penalty.
+    func testCalculateScoreCoiTiesWithRestrictedData() {
+        let score = TransparencyScorer.calculateScore(
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .restricted),
+            coiAnalysis: COIAnalysisResult(statement: "Grants from Pfizer", hasIndustryTies: true),
+            trialRegistrations: [],
+            resultsCompliance: .unknown,
+            industryFundingDetected: false,
+            outcomeSwitchingDetected: false
+        )
+
+        // Base (50) + restricted (-5) + COI statement (+5) + ties (-5) + combined (-10) = 35
+        XCTAssertEqual(score, 35)
     }
 
     // MARK: - Trial Registration Points Tests
@@ -406,6 +453,83 @@ final class TransparencyScorerTests: XCTestCase {
         XCTAssertTrue(restricted.contains("Data access restricted"))
     }
 
+    /// Test institutional-intermediary indicator fires on the disclosure pattern.
+    func testIdentifyRiskIndicatorsInstitutionalIntermediary() {
+        let coi = COIAnalysisResult(
+            statement: "Dr. Smith reports grants to the University of Example from AstraZeneca, "
+                + "but no personal funding.",
+            hasIndustryTies: true
+        )
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            resultsCompliance: .unknown,
+            coiAnalysis: coi,
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+
+        XCTAssertTrue(indicators.contains("Authors have disclosed industry financial ties"))
+        XCTAssertTrue(
+            indicators.contains("Industry funding routed through institutional intermediaries")
+        )
+    }
+
+    /// Test no institutional-intermediary indicator for a plain industry tie.
+    func testIdentifyRiskIndicatorsNoInstitutionalIntermediary() {
+        let coi = COIAnalysisResult(statement: "Grants from Pfizer", hasIndustryTies: true)
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            resultsCompliance: .unknown,
+            coiAnalysis: coi,
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+
+        XCTAssertFalse(
+            indicators.contains("Industry funding routed through institutional intermediaries")
+        )
+    }
+
+    /// Test combined industry-ties + restricted-data indicator (via COI ties, no funding).
+    func testIdentifyRiskIndicatorsCombinedIndustryData() {
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .restricted),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: "Grants from Pfizer", hasIndustryTies: true),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: nil
+        )
+
+        XCTAssertTrue(
+            indicators.contains("Industry ties combined with restricted/unavailable data")
+        )
+    }
+
+    /// Test that the indicator list is deduplicated while preserving order.
+    func testIdentifyRiskIndicatorsDeduplicated() {
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: true,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .notAvailable),
+            resultsCompliance: .missing,
+            coiAnalysis: COIAnalysisResult(statement: "Grants from Pfizer", hasIndustryTies: true),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: true,
+            title: "Randomized Controlled Trial"
+        )
+
+        XCTAssertEqual(Set(indicators).count, indicators.count)
+        // The combined-risk indicator is present for a high-risk report.
+        XCTAssertTrue(
+            indicators.contains("Industry ties combined with restricted/unavailable data")
+        )
+    }
+
     // MARK: - Tooltip Tests
 
     /// Test tooltip formatting.
@@ -485,8 +609,8 @@ final class TransparencyScorerTests: XCTestCase {
 
         let result = builder.build()
 
-        // Base (50) + data (20) + COI (10) = 80
-        XCTAssertEqual(result.transparencyScore, 80)
+        // Base (50) + data (20) + COI (5) = 75
+        XCTAssertEqual(result.transparencyScore, 75)
         XCTAssertEqual(result.riskLevel, .low)
     }
 

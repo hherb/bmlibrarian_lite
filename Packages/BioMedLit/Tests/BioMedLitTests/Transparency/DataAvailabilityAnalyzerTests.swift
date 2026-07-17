@@ -109,11 +109,14 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
     }
 
     /// Test analyzing available on request statement.
+    ///
+    /// On-request access classifies as `.restricted` to match the Python
+    /// reference (which never emits `.availableOnRequest` from this classifier).
     func testAnalyzeAvailableOnRequest() {
         let statement = "Data available upon reasonable request from the corresponding author"
         let result = DataAvailabilityAnalyzer.analyze(statement: statement)
 
-        XCTAssertEqual(result.disclosureLevel, .availableOnRequest)
+        XCTAssertEqual(result.disclosureLevel, .restricted)
         XCTAssertFalse(result.restrictions.isEmpty)
     }
 
@@ -122,7 +125,7 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         let statement = "Data available from the corresponding author on request."
         let result = DataAvailabilityAnalyzer.analyze(statement: statement)
 
-        XCTAssertEqual(result.disclosureLevel, .availableOnRequest)
+        XCTAssertEqual(result.disclosureLevel, .restricted)
     }
 
     /// Test analyzing proprietary data statement.
@@ -154,7 +157,7 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         let statement = "Data available from authors pending IRB approval"
         let result = DataAvailabilityAnalyzer.analyze(statement: statement)
 
-        XCTAssertEqual(result.disclosureLevel, .availableOnRequest)
+        XCTAssertEqual(result.disclosureLevel, .restricted)
         XCTAssertTrue(result.restrictions.contains { $0.contains("IRB") })
     }
 
@@ -163,7 +166,7 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         let statement = "Data available subject to a data sharing agreement."
         let result = DataAvailabilityAnalyzer.analyze(statement: statement)
 
-        XCTAssertEqual(result.disclosureLevel, .availableOnRequest)
+        XCTAssertEqual(result.disclosureLevel, .restricted)
         XCTAssertTrue(result.restrictions.contains { $0.contains("data sharing agreement") })
     }
 
@@ -172,8 +175,48 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         let statement = "Data access requires ethics committee approval."
         let result = DataAvailabilityAnalyzer.analyze(statement: statement)
 
-        XCTAssertEqual(result.disclosureLevel, .availableOnRequest)
-        XCTAssertTrue(result.restrictions.contains { $0.contains("Ethics") })
+        XCTAssertEqual(result.disclosureLevel, .restricted)
+        XCTAssertTrue(result.restrictions.contains { $0.contains("ethics") })
+    }
+
+    /// Test that a sharing statement amounting to a refusal is not available.
+    ///
+    /// "Will not be released to others" reads like a policy but is effectively
+    /// a refusal, so it escalates to `.notAvailable` (Python parity).
+    func testAnalyzeEffectivelyUnavailableRefusal() {
+        let statement = "Individual patient data will not be released to others."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+        XCTAssertFalse(result.restrictions.isEmpty)
+    }
+
+    /// Test that sponsor confidentiality escalates to not available.
+    func testAnalyzeSponsorConfidentiality() {
+        let statement = "Confidentiality agreements with sponsors prevent data disclosure."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+    }
+
+    /// Test that data locked to a named collaboration is not available.
+    ///
+    /// Also pins the restriction ordering for a `.notAvailable` result:
+    /// effectively-unavailable labels come first (in their pattern order),
+    /// followed by restricted-pattern labels, mirroring the Python reference.
+    func testAnalyzeNamedCollaborationLock() {
+        let statement =
+            "Data are provided to the CORE consortium on the understanding that they are not shared."
+        let result = DataAvailabilityAnalyzer.analyze(statement: statement)
+
+        XCTAssertEqual(result.disclosureLevel, .notAvailable)
+        XCTAssertEqual(
+            result.restrictions,
+            [
+                "Data restricted to named collaboration",
+                "Data provided under restrictive understanding",
+            ]
+        )
     }
 
     /// Test analyzing ambiguous statement.
@@ -347,20 +390,17 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertTrue(restrictions.contains { $0.contains("Confidentiality") })
     }
 
-    /// Test extracting privacy restriction.
-    func testExtractRestrictionsPrivacy() {
+    /// Test restriction labels preserve pattern order without duplicates.
+    func testExtractRestrictionsOrderedAndDeduplicated() {
         let restrictions = DataAvailabilityAnalyzer.extractRestrictions(
-            from: "due to patient privacy concerns"
+            from: "available upon request; contact the corresponding author; irb approval required"
         )
-        XCTAssertTrue(restrictions.contains { $0.contains("Privacy") })
-    }
-
-    /// Test extracting GDPR restriction.
-    func testExtractRestrictionsGDPR() {
-        let restrictions = DataAvailabilityAnalyzer.extractRestrictions(
-            from: "data sharing restricted by gdpr regulations"
+        // Order follows restrictedPatterns: request before author-contact before IRB.
+        XCTAssertEqual(
+            restrictions,
+            ["Available upon request", "Contact corresponding author", "Requires IRB approval"]
         )
-        XCTAssertTrue(restrictions.contains { $0.contains("GDPR") })
+        XCTAssertEqual(Set(restrictions).count, restrictions.count)
     }
 
     /// Test no restrictions in text.

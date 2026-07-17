@@ -64,20 +64,35 @@ public enum TransparencyConstants {
 
     // MARK: - Score Adjustments
 
+    // These values mirror the canonical Python reference
+    // (`calculate_transparency_score` in
+    // `src/bmlibrarian_lite/study_transparency_analyzer/study_transparency_analyzer.py`)
+    // so identical inputs produce identical scores on both platforms.
+
     /// Points awarded for full open data access.
     public static let fullOpenDataPoints: Int = 20
 
     /// Points awarded for data available on request.
-    public static let onRequestDataPoints: Int = 10
+    public static let onRequestDataPoints: Int = 5
+
+    /// Penalty for data available only with significant restrictions.
+    public static let restrictedDataPenalty: Int = -5
 
     /// Penalty for data explicitly not available.
-    public static let noDataPenalty: Int = -10
+    public static let noDataPenalty: Int = -15
 
     /// Penalty for missing data availability statement.
     public static let noStatementPenalty: Int = -5
 
     /// Points awarded for having a COI statement.
-    public static let coiStatementPoints: Int = 10
+    public static let coiStatementPoints: Int = 5
+
+    /// Additional penalty when a COI statement discloses industry ties.
+    ///
+    /// Disclosure is credited (`coiStatementPoints`), but the underlying
+    /// situation still carries bias risk, so disclosed industry ties reduce
+    /// the score. Matches Python's `-5` after the `+5` disclosure credit.
+    public static let coiIndustryTiesPenalty: Int = -5
 
     /// Penalty for missing COI statement.
     public static let missingCoiPenalty: Int = -5
@@ -94,7 +109,10 @@ public enum TransparencyConstants {
     /// Penalty for detected outcome switching.
     public static let outcomeSwitchingPenalty: Int = -15
 
-    /// Penalty for industry funding with no data sharing.
+    /// Penalty for industry ties combined with restricted/unavailable data.
+    ///
+    /// Applies when industry funding is detected *or* the COI statement
+    /// discloses industry ties, and the data is restricted or not available.
     public static let industryNoDataPenalty: Int = -10
 
     // MARK: - Score Category Thresholds
@@ -301,6 +319,20 @@ public enum COIPatterns {
         #"employee of ([^.;]+)"#,
         #"(?:stock|shares?|equity) in ([^.;]+)"#,
     ]
+
+    /// Patterns for industry funding routed through institutional intermediaries.
+    ///
+    /// Detects the common disclosure pattern where industry money flows to a
+    /// university/institution rather than directly to the author, often phrased
+    /// as "funding to the University of X (but no personal funding) from [pharma]".
+    /// Mirrors Python's `INSTITUTIONAL_INTERMEDIARY_PATTERNS`.
+    public static let institutionalIntermediaryPatterns: [String] = [
+        #"(?:funding|grants?|support|contracts?)\s+(?:to|paid to)\s+(?:the\s+)?(?:university|institution|hospital)"#,
+        #"(?:but\s+)?no personal (?:funding|payment|honorari)"#,
+        #"(?:grants?|contracts?|funding)\s+(?:or\s+\w+\s+)?(?:to|paid to)\s+(?:his|her|their)\s+institution"#,
+        #"(?:research\s+)?grant\s+support\s+through\b"#,
+        #"salary\s+support\s+from\b"#,
+    ]
 }
 
 // MARK: - Data Repository Patterns
@@ -308,7 +340,12 @@ public enum COIPatterns {
 /// Patterns for data availability analysis.
 ///
 /// These patterns identify data repositories, access restrictions, and
-/// extract repository URLs and accession numbers from data availability statements.
+/// extract repository URLs and accession numbers from data availability
+/// statements. The pattern lists and restriction labels are ported verbatim
+/// from the canonical Python reference (`DATA_REPOSITORIES` and the
+/// `_restriction_labels` map in
+/// `src/bmlibrarian_lite/study_transparency_analyzer/study_transparency_analyzer.py`)
+/// so a given statement classifies identically on both platforms.
 public enum DataRepositoryPatterns {
 
     /// Full open access repository indicators.
@@ -337,8 +374,11 @@ public enum DataRepositoryPatterns {
         "yoda",
     ]
 
-    /// Restricted/request-only access indicators.
-    /// Presence of these terms suggests data requires request or approval.
+    /// Restricted/on-request access indicators.
+    ///
+    /// A statement matching any of these (and none of the stronger refusal
+    /// signals) classifies as `.restricted`. The order is significant: it
+    /// determines the order of the human-readable restriction labels.
     public static let restrictedPatterns: [String] = [
         #"upon (?:reasonable )?request"#,
         #"available from (?:the )?(?:corresponding )?author"#,
@@ -348,15 +388,90 @@ public enum DataRepositoryPatterns {
         "irb approval",
         "ethics committee",
         #"confidential(?:ity)?"#,
-    ]
-
-    /// Explicit data unavailability indicators.
-    /// Presence of these terms suggests data is not available.
-    public static let unavailablePatterns: [String] = [
         "proprietary",
         "cannot be shared",
         #"not (?:publicly )?available"#,
+        #"(?:would|will|shall) not be (?:released|shared|disclosed|provided)"#,
+        "not be released to others",
+        #"requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to"#,
+        #"on the understanding that\b.*\bnot\b"#,
+        #"used only for the purpose of\b"#,
+        #"agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent"#,
+        #"confidentiality\s+agreements?\s+(?:with\s+)?sponsors?"#,
+        #"data\s+custodians?\b"#,
     ]
+
+    /// Strong-refusal indicators that escalate a statement to `.notAvailable`.
+    ///
+    /// These are sharing statements that amount to a refusal (proprietary,
+    /// cannot be shared, sponsor confidentiality, etc.). A subset of
+    /// `restrictedPatterns`, mirroring Python's `strong_refusal_patterns`.
+    public static let strongRefusalPatterns: [String] = [
+        "cannot be shared",
+        #"not (?:publicly )?available"#,
+        "proprietary",
+        #"(?:would|will|shall) not be (?:released|shared|disclosed|provided)"#,
+        "not be released to others",
+        #"agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent"#,
+        #"confidentiality\s+agreements?\s+(?:with\s+)?sponsors?"#,
+    ]
+
+    /// Patterns indicating an effectively unavailable dataset.
+    ///
+    /// The sharing statement reads like a policy but access is systematically
+    /// denied (locked to a named collaboration, sponsor-gated, custodian-held).
+    /// Mirrors Python's `DATA_REPOSITORIES['effectively_unavailable']`.
+    public static let effectivelyUnavailablePatterns: [String] = [
+        #"(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding"#,
+        #"not be released.*(?:data custodians?|directly to)"#,
+        #"(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))"#,
+    ]
+
+    /// Human-readable labels for restriction/refusal patterns.
+    ///
+    /// Keyed by the exact pattern string, mirroring Python's
+    /// `_restriction_labels`. Patterns absent from this map fall back to the
+    /// pattern text itself (see `restrictionLabel(for:)`).
+    public static let restrictionLabels: [String: String] = [
+        "cannot be shared": "Data cannot be shared",
+        #"not (?:publicly )?available"#: "Data not publicly available",
+        "proprietary": "Data described as proprietary",
+        #"(?:would|will|shall) not be (?:released|shared|disclosed|provided)"#:
+            "Data will not be released",
+        "not be released to others": "Data will not be released to others",
+        #"agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent"#:
+            "Sponsor agreements prevent disclosure",
+        #"confidentiality\s+agreements?\s+(?:with\s+)?sponsors?"#:
+            "Confidentiality agreements with sponsors",
+        #"upon (?:reasonable )?request"#: "Available upon request",
+        #"available from (?:the )?(?:corresponding )?author"#: "Available from author",
+        #"contact (?:the )?(?:corresponding )?author"#: "Contact corresponding author",
+        "data sharing agreement": "Requires data sharing agreement",
+        "institutional review board": "Requires IRB approval",
+        "irb approval": "Requires IRB approval",
+        "ethics committee": "Requires ethics committee approval",
+        #"confidential(?:ity)?"#: "Confidentiality restrictions",
+        #"requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to"#:
+            "Data requests redirected to third party",
+        #"on the understanding that\b.*\bnot\b"#:
+            "Data provided under restrictive understanding",
+        #"used only for the purpose of\b"#: "Data restricted to specific purpose",
+        #"data\s+custodians?\b"#: "Data held by custodians (not authors)",
+        #"(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding"#:
+            "Data restricted to named collaboration",
+        #"not be released.*(?:data custodians?|directly to)"#:
+            "Data will not be released; requests redirected",
+        #"(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))"#:
+            "Sponsor confidentiality agreement restricts access",
+    ]
+
+    /// Resolve the human-readable label for a restriction pattern.
+    ///
+    /// - Parameter pattern: The restriction/refusal regex pattern.
+    /// - Returns: The mapped label, or the pattern text itself if unmapped.
+    public static func restrictionLabel(for pattern: String) -> String {
+        restrictionLabels[pattern] ?? pattern
+    }
 
     /// Pattern for extracting URLs from text.
     public static let urlPattern = #"https?://[^\s<>\"']+"#
@@ -391,6 +506,10 @@ public enum RiskIndicatorStrings {
     public static let industryTiesDisclosed =
         "Authors have disclosed industry financial ties"
 
+    /// Industry funding was routed through an institutional intermediary.
+    public static let institutionalIntermediary =
+        "Industry funding routed through institutional intermediaries"
+
     /// No conflict of interest statement was found.
     public static let missingCoiStatement =
         "No conflict of interest statement found"
@@ -404,6 +523,10 @@ public enum RiskIndicatorStrings {
 
     /// Reported outcomes deviate from registered outcomes.
     public static let outcomeSwitching = "Outcome switching detected"
+
+    /// Industry ties combined with restricted or unavailable data.
+    public static let combinedIndustryData =
+        "Industry ties combined with restricted/unavailable data"
 
     /// The study appears to be a clinical trial but no registration was found.
     public static let missingTrialRegistration =
