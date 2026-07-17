@@ -57,6 +57,12 @@ public enum DataDisclosureLevel: String, Sendable, Codable, CaseIterable {
     /// Data fully available in public repository.
     case fullOpen = "full_open"
     /// Data available upon reasonable request.
+    ///
+    /// Note: `DataAvailabilityAnalyzer.analyze` never emits this case —
+    /// on-request statements classify as `.restricted` to match the canonical
+    /// Python reference (`analyze_data_availability`). It is retained for
+    /// externally-constructed results (e.g. an LLM analyzer) and is still
+    /// scored (`TransparencyConstants.onRequestDataPoints`).
     case availableOnRequest = "on_request"
     /// Data available with restrictions (e.g., IRB approval required).
     case restricted

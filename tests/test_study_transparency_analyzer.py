@@ -153,13 +153,22 @@ class TestAnalyzeDataAvailability:
         assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
 
     def test_named_collaboration_lock_is_not_available(self) -> None:
-        """Data locked to a named collaboration is effectively unavailable."""
+        """Data locked to a named collaboration is effectively unavailable.
+
+        Also pins the restriction ordering for a NOT_AVAILABLE result:
+        effectively-unavailable labels first (in their pattern order),
+        then restricted-pattern labels. The Swift
+        ``DataAvailabilityAnalyzer`` mirrors this exact order.
+        """
         result = analyze_data_availability(
             "Data are provided to the CORE consortium on the understanding "
             "that they are not shared."
         )
         assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
-        assert "Data restricted to named collaboration" in result.restrictions
+        assert result.restrictions == [
+            "Data restricted to named collaboration",
+            "Data provided under restrictive understanding",
+        ]
 
     def test_ambiguous_statement_is_unknown(self) -> None:
         """A statement matching no pattern classifies as UNKNOWN."""

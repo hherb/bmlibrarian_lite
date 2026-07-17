@@ -32,6 +32,13 @@ its slice has landed; add a new section when handing off new work.
     `TransparencyConstantsTests`, and new Python classes in
     `tests/test_study_transparency_analyzer.py`
     (`TestAnalyzeDataAvailability`, `TestCalculateTransparencyScore`).
+  - PR #103 review cleanup (2026-07-17): removed the now-orphaned public
+    helpers `DataAvailabilityAnalyzer.containsUnavailabilityIndicators` /
+    `containsRestrictedAccessIndicators` (dead after the tier refactor);
+    documented that `DataDisclosureLevel.availableOnRequest` is never emitted
+    by `analyze` (retained for externally-constructed/LLM results); and pinned
+    the `.notAvailable` restriction **ordering** (effectively-unavailable
+    labels first) in both `testAnalyzeNamedCollaborationLock` cases.
 - **Earlier BioMedLit parity work** (PR #100, 2026-07-16/17): fixed the 5
   pre-existing Swift test failures (NCT-ID regex boundaries, `fileExists`
   directory semantics, risk-indicator string alignment) and hoisted the
@@ -39,12 +46,19 @@ its slice has landed; add a new section when handing off new work.
 
 ## Potential follow-ups
 
-- **Restore GDPR/HIPAA/privacy/patient-consent detection** — these restriction
-  patterns were dropped from Swift to match Python exactly. To keep the
-  detection breadth without re-diverging, add them to *both*
+- **Restore GDPR/HIPAA/privacy/patient-consent detection** (issue #104) —
+  these restriction patterns were dropped from Swift to match Python exactly.
+  To keep the detection breadth without re-diverging, add them to *both*
   `study_transparency_analyzer.py` (`DATA_REPOSITORIES['restricted']` and
   `_restriction_labels`) and `DataRepositoryPatterns` in one change, with tests
-  on both sides. This shifts Python scores, so treat it as its own slice.
+  on both sides. This shifts Python scores, so treat it as its own slice and
+  call it out in release notes (mobile loses this detection breadth until then).
+- **Automated Swift↔Python parity drift guard** (issue #105) — parity is
+  currently maintained by convention plus mirrored per-platform tests. A shared
+  language-neutral fixture asserted on both sides would catch silent divergence.
+- **Full-open substring over-match** (issue #106) — bare `geo`/`ena`/`sra`/`pdb`
+  tokens in the full-open pattern lists can false-positive; anchor with word
+  boundaries on both platforms (pre-existing, parity-preserving).
 - **Android transparency classifier** — Android still has no data-availability
   classifier or risk-indicator implementation to align (as of 2026-07-17).
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,

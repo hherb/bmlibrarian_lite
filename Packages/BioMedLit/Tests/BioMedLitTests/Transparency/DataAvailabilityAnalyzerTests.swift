@@ -200,14 +200,22 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
     }
 
     /// Test that data locked to a named collaboration is not available.
+    ///
+    /// Also pins the restriction ordering for a `.notAvailable` result:
+    /// effectively-unavailable labels come first (in their pattern order),
+    /// followed by restricted-pattern labels, mirroring the Python reference.
     func testAnalyzeNamedCollaborationLock() {
         let statement =
             "Data are provided to the CORE consortium on the understanding that they are not shared."
         let result = DataAvailabilityAnalyzer.analyze(statement: statement)
 
         XCTAssertEqual(result.disclosureLevel, .notAvailable)
-        XCTAssertTrue(
-            result.restrictions.contains("Data restricted to named collaboration")
+        XCTAssertEqual(
+            result.restrictions,
+            [
+                "Data restricted to named collaboration",
+                "Data provided under restrictive understanding",
+            ]
         )
     }
 

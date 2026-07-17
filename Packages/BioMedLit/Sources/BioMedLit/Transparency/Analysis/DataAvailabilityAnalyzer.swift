@@ -171,23 +171,6 @@ public enum DataAvailabilityAnalyzer {
         return nil
     }
 
-    /// Check if statement contains strong-refusal (effectively unavailable) indicators.
-    ///
-    /// - Parameter text: Lowercased statement text.
-    /// - Returns: True if the statement amounts to a refusal to share data.
-    public static func containsUnavailabilityIndicators(_ text: String) -> Bool {
-        RegexHelper.anyMatch(patterns: DataRepositoryPatterns.strongRefusalPatterns, in: text)
-            || RegexHelper.anyMatch(patterns: DataRepositoryPatterns.effectivelyUnavailablePatterns, in: text)
-    }
-
-    /// Check if statement contains restricted access indicators.
-    ///
-    /// - Parameter text: Lowercased statement text.
-    /// - Returns: True if restricted access is indicated.
-    public static func containsRestrictedAccessIndicators(_ text: String) -> Bool {
-        RegexHelper.anyMatch(patterns: DataRepositoryPatterns.restrictedPatterns, in: text)
-    }
-
     // MARK: - Extraction Functions
 
     /// Extract URL from text.
