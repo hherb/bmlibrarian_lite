@@ -388,6 +388,26 @@ class TestAnalyzeDataAvailability:
         not_open = analyze_data_availability("The data are not openly available.")
         assert not_open.disclosure_level != DataDisclosureLevel.FULL_OPEN
 
+    def test_non_adjacent_negated_affirmation_is_not_available(self) -> None:
+        r"""A negated affirmation with one intervening adverb classifies NOT_AVAILABLE (#113 review).
+
+        The negative lookbehind only guards an *immediately* preceding "not ",
+        so the strong-refusal patterns tolerate one intervening word
+        (``(?:\w+ )?``): "will not be openly shared" / "cannot be openly
+        shared" set the up-front unavailability signal and skip the full-open
+        step, escalating to NOT_AVAILABLE instead of a false FULL_OPEN. Residual
+        multi-word / alternate-negator forms remain tracked in #117.
+        """
+        will_not = analyze_data_availability(
+            "The data will not be openly shared with third parties."
+        )
+        assert will_not.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
+        assert will_not.restrictions == ["Data will not be released"]
+
+        cannot = analyze_data_availability("Raw data cannot be openly shared.")
+        assert cannot.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
+        assert cannot.restrictions == ["Data cannot be shared"]
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.

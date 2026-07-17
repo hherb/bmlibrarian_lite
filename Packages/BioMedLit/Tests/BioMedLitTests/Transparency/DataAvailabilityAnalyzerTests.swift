@@ -287,6 +287,26 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         XCTAssertNotEqual(notOpen.disclosureLevel, .fullOpen)
     }
 
+    /// A negated affirmation with one intervening adverb classifies `.notAvailable` (#113 review).
+    ///
+    /// The negative lookbehind only guards an *immediately* preceding "not ",
+    /// so the strong-refusal patterns tolerate one intervening word
+    /// (`(?:\w+ )?`): "will not be openly shared" / "cannot be openly shared"
+    /// set the up-front unavailability signal and skip the full-open step,
+    /// escalating to `.notAvailable` instead of a false `.fullOpen`. Residual
+    /// multi-word / alternate-negator forms remain tracked in #117.
+    func testNonAdjacentNegatedAffirmationIsNotAvailable() {
+        let willNot = DataAvailabilityAnalyzer.analyze(
+            statement: "The data will not be openly shared with third parties."
+        )
+        XCTAssertEqual(willNot.disclosureLevel, .notAvailable)
+        XCTAssertEqual(willNot.restrictions, ["Data will not be released"])
+
+        let cannot = DataAvailabilityAnalyzer.analyze(statement: "Raw data cannot be openly shared.")
+        XCTAssertEqual(cannot.disclosureLevel, .notAvailable)
+        XCTAssertEqual(cannot.restrictions, ["Data cannot be shared"])
+    }
+
     /// Test analyzing data sharing agreement requirement.
     func testAnalyzeDataSharingAgreement() {
         let statement = "Data available subject to a data sharing agreement."

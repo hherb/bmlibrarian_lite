@@ -29,10 +29,21 @@ its slice has landed; add a new section when handing off new work.
   tests were flipped to `..._open_affirmation_without_repository_is_full_open`
   (assert FULL_OPEN) with added strong-refusal and negated-affirmation guard
   tests on both platforms; the four #104 privacy/legal true-positive tests are
-  unchanged. The `(?<!not )` lookbehind keeps an immediately-negated affirmation
-  ("not openly accessible ... IRB approval") classifying RESTRICTED rather than a
-  false FULL_OPEN; residual non-adjacent negation ("will not be openly shared")
-  is tracked in **#117**. Spec + plan:
+  unchanged. Two negation layers guard the over-open direction: the `(?<!not )`
+  lookbehind on each affirmation blocks an immediately-negated affirmation ("not
+  openly accessible … IRB approval" → RESTRICTED), and the strong-refusal
+  patterns (`cannot be (?:\w+ )?shared`, `(?:would|will|shall) not be (?:\w+ )?…`)
+  were broadened with `(?:\w+ )?` so a one-word-intervening negation ("will not
+  be openly shared", "cannot be openly shared") sets the up-front unavailability
+  signal and classifies NOT_AVAILABLE — previously a *newly-introduced* false
+  FULL_OPEN (#113 review, 2026-07-18). Residual multi-word / alternate-negator
+  forms ("never openly shared", "could not be openly shared", "not currently
+  openly available", double-spaced "not  openly") remain tracked in **#117**.
+  Release note: an open affirmation co-occurring with a *soft* on-request
+  restriction ("data are freely available upon reasonable request") now
+  deterministically classifies FULL_OPEN, matching the repo+soft-restriction
+  policy (#109) — an intended upward score shift, not only the reassuring
+  privacy-token shapes. Spec + plan:
   `docs/superpowers/{specs,plans}/2026-07-17-tighten-privacy-legal-*`.
 - **Python Step-3 RESTRICTED dedup parity fixed** (2026-07-17, closes #114):
   Python `analyze_data_availability` Step 3 appended restriction labels

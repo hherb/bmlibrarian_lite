@@ -398,9 +398,9 @@ public enum DataRepositoryPatterns {
         "ethics committee",
         #"confidential(?:ity)?"#,
         "proprietary",
-        "cannot be shared",
+        #"cannot be (?:\w+ )?shared"#,
         #"not (?:publicly )?available"#,
-        #"(?:would|will|shall) not be (?:released|shared|disclosed|provided)"#,
+        #"(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)"#,
         "not be released to others",
         #"requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to"#,
         #"on the understanding that\b.*\bnot\b"#,
@@ -422,11 +422,17 @@ public enum DataRepositoryPatterns {
     /// These are sharing statements that amount to a refusal (proprietary,
     /// cannot be shared, sponsor confidentiality, etc.). A subset of
     /// `restrictedPatterns`, mirroring Python's `strong_refusal_patterns`.
+    ///
+    /// The `(?:\w+ )?` in the refusal patterns tolerates one intervening adverb
+    /// so a negated open affirmation ("will not be openly shared", "cannot be
+    /// openly shared") sets the up-front unavailability signal and skips the
+    /// full-open step (issue #113 review); non-adjacent multi-word negators
+    /// remain tracked in #117.
     public static let strongRefusalPatterns: [String] = [
-        "cannot be shared",
+        #"cannot be (?:\w+ )?shared"#,
         #"not (?:publicly )?available"#,
         "proprietary",
-        #"(?:would|will|shall) not be (?:released|shared|disclosed|provided)"#,
+        #"(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)"#,
         "not be released to others",
         #"agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent"#,
         #"confidentiality\s+agreements?\s+(?:with\s+)?sponsors?"#,
@@ -449,10 +455,10 @@ public enum DataRepositoryPatterns {
     /// `_restriction_labels`. Patterns absent from this map fall back to the
     /// pattern text itself (see `restrictionLabel(for:)`).
     public static let restrictionLabels: [String: String] = [
-        "cannot be shared": "Data cannot be shared",
+        #"cannot be (?:\w+ )?shared"#: "Data cannot be shared",
         #"not (?:publicly )?available"#: "Data not publicly available",
         "proprietary": "Data described as proprietary",
-        #"(?:would|will|shall) not be (?:released|shared|disclosed|provided)"#:
+        #"(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)"#:
             "Data will not be released",
         "not be released to others": "Data will not be released to others",
         #"agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent"#:
