@@ -303,9 +303,9 @@ class DataRepositoryPatternsTest {
         val p = DataRepositoryPatterns.fullOpenPatterns
         assertTrue(p.contains("zenodo"))
         assertTrue(p.contains("\\bgeo\\b"))
-        assertTrue(p.contains("openly (?:available|shared|accessible)"))
-        assertTrue(p.contains("freely (?:available|shared|accessible)"))
-        assertTrue(p.contains("available (?:in|within|as|via|through) (?:the )?supplement"))
+        assertTrue(p.contains("(?<!not )openly (?:available|shared|accessible)"))
+        assertTrue(p.contains("(?<!not )freely (?:available|shared|accessible)"))
+        assertTrue(p.contains("(?<!not )available (?:in|within|as|via|through) (?:the )?supplement"))
         assertEquals(24, p.size)
     }
 
@@ -400,10 +400,12 @@ object DataRepositoryPatterns {
         "yoda",
         // Open-availability affirmations (issue #113): genuinely-open statements
         // that name no repository but explicitly affirm open access. Deliberately
-        // narrow — bare "available" is not matched.
-        "openly (?:available|shared|accessible)",
-        "freely (?:available|shared|accessible)",
-        "available (?:in|within|as|via|through) (?:the )?supplement",
+        // narrow — bare "available" is not matched. The (?<!not ) lookbehind
+        // guards against a negated affirmation ("not openly accessible") falsely
+        // matching FULL_OPEN (issue #113 review).
+        "(?<!not )openly (?:available|shared|accessible)",
+        "(?<!not )freely (?:available|shared|accessible)",
+        "(?<!not )available (?:in|within|as|via|through) (?:the )?supplement",
     )
 
     /** Restricted / on-request indicators. */
@@ -417,9 +419,9 @@ object DataRepositoryPatterns {
         "ethics committee",
         "confidential(?:ity)?",
         "proprietary",
-        "cannot be shared",
+        "cannot be (?:\\w+ )?shared",
         "not (?:publicly )?available",
-        "(?:would|will|shall) not be (?:released|shared|disclosed|provided)",
+        "(?:would|will|shall) not be (?:\\w+ )?(?:released|shared|disclosed|provided)",
         "not be released to others",
         "requests?\\s+(?:for\\s+)?(?:such\\s+)?data\\s+should\\s+be\\s+made\\s+(?:directly\\s+)?to",
         "on the understanding that\\b.*\\bnot\\b",
@@ -435,10 +437,10 @@ object DataRepositoryPatterns {
 
     /** Strong-refusal indicators that escalate to NOT_AVAILABLE. Subset of restricted. */
     val strongRefusalPatterns: List<String> = listOf(
-        "cannot be shared",
+        "cannot be (?:\\w+ )?shared",
         "not (?:publicly )?available",
         "proprietary",
-        "(?:would|will|shall) not be (?:released|shared|disclosed|provided)",
+        "(?:would|will|shall) not be (?:\\w+ )?(?:released|shared|disclosed|provided)",
         "not be released to others",
         "agreements?\\s+(?:with\\s+)?(?:the\\s+)?sponsors?\\s+prevent",
         "confidentiality\\s+agreements?\\s+(?:with\\s+)?sponsors?",
@@ -453,10 +455,10 @@ object DataRepositoryPatterns {
 
     /** Human-readable restriction labels keyed by pattern (insertion order preserved). */
     val restrictionLabels: Map<String, String> = linkedMapOf(
-        "cannot be shared" to "Data cannot be shared",
+        "cannot be (?:\\w+ )?shared" to "Data cannot be shared",
         "not (?:publicly )?available" to "Data not publicly available",
         "proprietary" to "Data described as proprietary",
-        "(?:would|will|shall) not be (?:released|shared|disclosed|provided)" to "Data will not be released",
+        "(?:would|will|shall) not be (?:\\w+ )?(?:released|shared|disclosed|provided)" to "Data will not be released",
         "not be released to others" to "Data will not be released to others",
         "agreements?\\s+(?:with\\s+)?(?:the\\s+)?sponsors?\\s+prevent" to "Sponsor agreements prevent disclosure",
         "confidentiality\\s+agreements?\\s+(?:with\\s+)?sponsors?" to "Confidentiality agreements with sponsors",
@@ -649,6 +651,35 @@ class DataAvailabilityAnalyzerTest {
             DataDisclosureLevel.NOT_AVAILABLE,
             analyze("Data are freely available in summary form but the individual-level data cannot be shared.").disclosureLevel,
         )
+    }
+
+    @Test
+    fun `negated affirmation does not trigger full open`() {
+        // Immediate "not " before the affirmation adverb is blocked by (?<!not ),
+        // so these fall through to the normal tiers (#113 review).
+        val irb = analyze("Raw data are not openly accessible without IRB approval.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, irb.disclosureLevel)
+        assertEquals(listOf("Requires IRB approval"), irb.restrictions)
+
+        val author = analyze("Data are not freely shared; available from the corresponding author.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, author.disclosureLevel)
+
+        val notOpen = analyze("The data are not openly available.")
+        assertNotEquals(DataDisclosureLevel.FULL_OPEN, notOpen.disclosureLevel)
+    }
+
+    @Test
+    fun `non-adjacent negated affirmation is not available`() {
+        // One intervening adverb ("will not be openly shared", "cannot be openly
+        // shared") is caught by the (?:\w+ )?-broadened strong-refusal patterns
+        // → NOT_AVAILABLE (#113 review).
+        val willNot = analyze("The data will not be openly shared with third parties.")
+        assertEquals(DataDisclosureLevel.NOT_AVAILABLE, willNot.disclosureLevel)
+        assertEquals(listOf("Data will not be released"), willNot.restrictions)
+
+        val cannot = analyze("Raw data cannot be openly shared.")
+        assertEquals(DataDisclosureLevel.NOT_AVAILABLE, cannot.disclosureLevel)
+        assertEquals(listOf("Data cannot be shared"), cannot.restrictions)
     }
 
     // ==================== privacy/legal restricted-tier (#104) ====================

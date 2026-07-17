@@ -71,11 +71,11 @@ drift). Authoritative locations in
 
 | Kotlin symbol | Python source | Notes |
 |---|---|---|
-| `DataRepositoryPatterns.fullOpenPatterns` | `DATA_REPOSITORIES['full_open']` (21 repository patterns + 3 open-availability affirmation patterns from the #113 fix = 24) | short tokens word-anchored (`\bgeo\b`, `\bpdb\b`, `\bsra\b`, `\bena\b`); affirmations: `openly (?:available\|shared\|accessible)`, `freely (?:available\|shared\|accessible)`, `available (?:in\|within\|as\|via\|through) (?:the )?supplement` |
-| `DataRepositoryPatterns.restrictedPatterns` | `DATA_REPOSITORIES['restricted']` (~L293–322, 23 patterns) | includes the #104 privacy/legal set (`\bgdpr\b`, `\bhipaa\b`, `\bprivacy\b`, `\bpatient consent\b`) |
-| `DataRepositoryPatterns.effectivelyUnavailablePatterns` | `DATA_REPOSITORIES['effectively_unavailable']` (~L325–332, 3 patterns) | |
-| `DataRepositoryPatterns.strongRefusalPatterns` | `STRONG_REFUSAL_PATTERNS` (~L338–346, 7 patterns) | subset of restricted |
-| `DataRepositoryPatterns.restrictionLabels` | `_restriction_labels` (~L1034–1072) | pattern→label map |
+| `DataRepositoryPatterns.fullOpenPatterns` | `DATA_REPOSITORIES['full_open']` (21 repository patterns + 3 #113 open-availability affirmations = 24) | short tokens word-anchored (`\bgeo\b`, `\bpdb\b`, `\bsra\b`, `\bena\b`); affirmations carry the #113-review negation guard: `(?<!not )openly (?:available\|shared\|accessible)`, `(?<!not )freely (?:available\|shared\|accessible)`, `(?<!not )available (?:in\|within\|as\|via\|through) (?:the )?supplement` |
+| `DataRepositoryPatterns.restrictedPatterns` | `DATA_REPOSITORIES['restricted']` (23 patterns) | includes the #104 privacy/legal set (`\bgdpr\b`, `\bhipaa\b`, `\bprivacy\b`, `\bpatient consent\b`); the two refusal patterns carry the #113-review `(?:\w+ )?` intervening-adverb tolerance: `cannot be (?:\w+ )?shared`, `(?:would\|will\|shall) not be (?:\w+ )?(?:released\|shared\|disclosed\|provided)` |
+| `DataRepositoryPatterns.effectivelyUnavailablePatterns` | `DATA_REPOSITORIES['effectively_unavailable']` (3 patterns) | |
+| `DataRepositoryPatterns.strongRefusalPatterns` | `STRONG_REFUSAL_PATTERNS` (7 patterns) | subset of restricted; same two refusal patterns carry `(?:\w+ )?` |
+| `DataRepositoryPatterns.restrictionLabels` | `_restriction_labels` | pattern→label map; the two refusal keys carry `(?:\w+ )?` (labels unchanged: "Data cannot be shared", "Data will not be released") |
 
 **List order is significant** and must match Python: restriction labels are
 produced by iterating the pattern lists in order, and distinct patterns can
@@ -191,6 +191,13 @@ the Swift `DataAvailabilityAnalyzerTests` classification/extraction subset:
 - open-availability affirmation without a named repository → `FULL_OPEN` (the
   #113 fix: "openly shared …", "available in the supplementary materials …")
 - an open affirmation co-occurring with a strong refusal still → `NOT_AVAILABLE`
+- an immediately-negated affirmation ("not openly accessible … IRB approval" →
+  `RESTRICTED`; "not freely shared; available from … author" → `RESTRICTED`; "not
+  openly available" → not `FULL_OPEN`) — the `(?<!not )` guard (#113 review)
+- a one-word-intervening negated affirmation ("will not be openly shared" →
+  `NOT_AVAILABLE`/"Data will not be released"; "cannot be openly shared" →
+  `NOT_AVAILABLE`/"Data cannot be shared") — the `(?:\w+ )?` refusal broadening
+  (#113 review; residual multi-word/alternate-negator forms tracked in #117)
 - restricted label-sharing patterns deduplicated (e.g. `institutional review
   board` + `irb approval` → single "Requires IRB approval")
 - `detectRepositoryName`: GenBank not over-matched by "geographic"; short-token
