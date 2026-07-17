@@ -260,6 +260,58 @@ class TestAnalyzeDataAvailability:
         )
         assert result.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
+    def test_gdpr_restriction_is_restricted(self) -> None:
+        """A GDPR-restricted statement classifies as RESTRICTED (issue #104)."""
+        result = analyze_data_availability(
+            "Individual patient data are restricted under GDPR."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert result.restrictions == ["GDPR restrictions"]
+
+    def test_hipaa_restriction_is_restricted(self) -> None:
+        """A HIPAA-restricted statement classifies as RESTRICTED (issue #104)."""
+        result = analyze_data_availability(
+            "Access to the dataset is limited by HIPAA."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert result.restrictions == ["HIPAA restrictions"]
+
+    def test_privacy_restriction_is_restricted(self) -> None:
+        """A privacy-restricted statement classifies as RESTRICTED (issue #104)."""
+        result = analyze_data_availability(
+            "Sharing is constrained by participant privacy considerations."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert result.restrictions == ["Privacy restrictions"]
+
+    def test_patient_consent_restriction_is_restricted(self) -> None:
+        """A patient-consent restriction classifies as RESTRICTED (issue #104)."""
+        result = analyze_data_availability(
+            "Data access requires patient consent."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert result.restrictions == ["Patient consent required"]
+
+    def test_privacy_does_not_override_full_open(self) -> None:
+        """A bare 'privacy' mention must not override a public repository.
+
+        The four privacy/legal patterns are restricted-tier; full-open is
+        checked first, so a deposit plus 'no privacy concerns' stays FULL_OPEN.
+        """
+        result = analyze_data_availability(
+            "Data are deposited in Zenodo; no privacy concerns were identified."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+    def test_gdpr_with_strong_refusal_is_not_available(self) -> None:
+        """GDPR plus an explicit refusal escalates to NOT_AVAILABLE (issue #104)."""
+        result = analyze_data_availability(
+            "The data are not publicly available owing to GDPR."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
+        assert "Data not publicly available" in result.restrictions
+        assert "GDPR restrictions" in result.restrictions
+
 
 class TestCalculateTransparencyScore:
     """Reference tests for the transparency score.
