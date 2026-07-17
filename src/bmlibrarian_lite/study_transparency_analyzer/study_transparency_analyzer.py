@@ -1098,10 +1098,16 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
         )
 
     # --- Step 3: Check for restricted/on-request access ---
+    # Order-preserving dedup: distinct patterns can share a label (e.g.
+    # ``institutional review board`` and ``irb approval`` both map to
+    # "Requires IRB approval"), so skip labels already present — mirroring
+    # Step 2 above and the Swift ``orderedRestrictionLabels`` path (issue #114).
     restrictions = []
     for pattern in DATA_REPOSITORIES['restricted']:
         if re.search(pattern, text_lower):
-            restrictions.append(_label_for_pattern(pattern))
+            label = _label_for_pattern(pattern)
+            if label not in restrictions:
+                restrictions.append(label)
 
     if restrictions:
         return DataAvailabilityInfo(

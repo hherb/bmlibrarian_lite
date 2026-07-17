@@ -8,6 +8,19 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Python Step-3 RESTRICTED dedup parity fixed** (2026-07-17, closes #114):
+  Python `analyze_data_availability` Step 3 appended restriction labels
+  without dedup, while Swift `orderedRestrictionLabels` (used in both tiers)
+  and Python's *own* Step 2 already deduped. So distinct patterns sharing a
+  label — `institutional review board` + `irb approval` both → "Requires IRB
+  approval" — listed it twice on Python only (e.g. "requires institutional
+  review board review and IRB approval" → RESTRICTED with a doubled label).
+  Added the `if label not in restrictions` order-preserving guard to Step 3,
+  mirroring Step 2. Classification and the byte-identical pattern/label lists
+  are unchanged; only duplicate labels in the `restrictions` list are removed.
+  Mirrored tests pin the cross-platform contract through the full `analyze`
+  path: `test_restricted_label_sharing_patterns_deduplicated` (Python) /
+  `testRestrictedLabelSharingPatternsDeduplicated` (Swift).
 - **GDPR/HIPAA/privacy/patient-consent detection restored** (2026-07-17,
   closes #104): four word-anchored restricted-tier patterns (`\bgdpr\b`,
   `\bhipaa\b`, `\bprivacy\b`, `\bpatient consent\b`) plus labels ("GDPR
@@ -123,12 +136,6 @@ its slice has landed; add a new section when handing off new work.
   `test_privacy_without_recognized_repository_is_restricted` (Python) /
   `testPrivacyWithoutRecognizedRepositoryIsRestricted` (Swift), so a fix is a
   visible change. Keep Python↔Swift byte-identical.
-- **Python/Swift Step-3 dedup asymmetry** (issue #114, pre-existing) — Python
-  `analyze_data_availability` Step 3 appends restriction labels without dedup
-  while Swift `orderedRestrictionLabels` dedups; label-sharing patterns (e.g.
-  `institutional review board` + `irb approval` → "Requires IRB approval") can
-  diverge. Add the `if label not in restrictions` guard to Python + a mirrored
-  IRB-style test.
 - **LLM-assisted disambiguation of repo + soft-restriction** (issue #109) —
   a public-repository mention combined with a *soft* on-request restriction
   ("data in GEO; raw data from the corresponding author upon request") is
