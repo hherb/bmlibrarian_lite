@@ -311,6 +311,14 @@ DATA_REPOSITORIES = {
         r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent',
         r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
         r'data\s+custodians?\b',
+        # Privacy/legal data-restriction detection (issue #104): GDPR/HIPAA/
+        # privacy/patient-consent statements classify as RESTRICTED. Word-
+        # anchored per #106/#107 to avoid substring over-match. Mirrors the
+        # Swift ``DataRepositoryPatterns.restrictedPatterns``.
+        r'\bgdpr\b',
+        r'\bhipaa\b',
+        r'\bprivacy\b',
+        r'\bpatient consent\b',
     ],
     # Patterns that indicate an effectively unavailable dataset, where the
     # sharing statement reads like a policy but access is systematically denied.
@@ -1051,6 +1059,10 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
         r'used only for the purpose of\b':
             "Data restricted to specific purpose",
         r'data\s+custodians?\b': "Data held by custodians (not authors)",
+        r'\bgdpr\b': "GDPR restrictions",
+        r'\bhipaa\b': "HIPAA restrictions",
+        r'\bprivacy\b': "Privacy restrictions",
+        r'\bpatient consent\b': "Patient consent required",
         r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding':
             "Data restricted to named collaboration",
         r'not be released.*(?:data custodians?|directly to)':

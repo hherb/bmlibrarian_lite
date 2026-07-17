@@ -399,6 +399,13 @@ public enum DataRepositoryPatterns {
         #"agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent"#,
         #"confidentiality\s+agreements?\s+(?:with\s+)?sponsors?"#,
         #"data\s+custodians?\b"#,
+        // Privacy/legal data-restriction detection (issue #104): GDPR/HIPAA/
+        // privacy/patient-consent statements classify as `.restricted`. Word-
+        // anchored per #106/#107. Mirrors Python's DATA_REPOSITORIES['restricted'].
+        #"\bgdpr\b"#,
+        #"\bhipaa\b"#,
+        #"\bprivacy\b"#,
+        #"\bpatient consent\b"#,
     ]
 
     /// Strong-refusal indicators that escalate a statement to `.notAvailable`.
@@ -457,6 +464,10 @@ public enum DataRepositoryPatterns {
             "Data provided under restrictive understanding",
         #"used only for the purpose of\b"#: "Data restricted to specific purpose",
         #"data\s+custodians?\b"#: "Data held by custodians (not authors)",
+        #"\bgdpr\b"#: "GDPR restrictions",
+        #"\bhipaa\b"#: "HIPAA restrictions",
+        #"\bprivacy\b"#: "Privacy restrictions",
+        #"\bpatient consent\b"#: "Patient consent required",
         #"(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding"#:
             "Data restricted to named collaboration",
         #"not be released.*(?:data custodians?|directly to)"#:

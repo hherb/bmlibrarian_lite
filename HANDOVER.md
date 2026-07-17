@@ -8,6 +8,30 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **GDPR/HIPAA/privacy/patient-consent detection restored** (2026-07-17,
+  closes #104): four word-anchored restricted-tier patterns (`\bgdpr\b`,
+  `\bhipaa\b`, `\bprivacy\b`, `\bpatient consent\b`) plus labels ("GDPR
+  restrictions" / "HIPAA restrictions" / "Privacy restrictions" / "Patient
+  consent required") added to the `restricted` tier on **both** platforms —
+  Python `DATA_REPOSITORIES['restricted']` + `_restriction_labels` (which
+  never had them) and Swift `DataRepositoryPatterns.restrictedPatterns` +
+  `restrictionLabels` (dropped in #101 for parity). Statements like "restricted
+  under GDPR" now classify RESTRICTED (was UNKNOWN) — an **intended downward
+  transparency-score shift** (−5, plus the existing −10 industry+restricted
+  penalty) for affected studies on both Python and mobile; call this out in
+  release notes. Precedence is preserved: full-open is still checked first
+  ("deposited in Zenodo; no privacy concerns" stays FULL_OPEN) and a
+  co-occurring strong refusal still escalates ("not publicly available owing to
+  GDPR" → NOT_AVAILABLE). Mirrored six-case tests on both sides
+  (`test_{gdpr,hipaa,privacy,patient_consent}_restriction_is_restricted` +
+  full-open/strong-refusal guards / the Swift `testAnalyze*Restriction`
+  equivalents); the Swift `testRestrictionLabelLookup` auto-pins pattern↔label
+  parity. Bare `informed consent` deliberately excluded (would over-match
+  ~every clinical paper). Spec + plan:
+  `docs/superpowers/{specs,plans}/2026-07-17-restore-privacy-legal-data-restriction-detection*`.
+  Known accepted tradeoff (now pinned by a test, tracked for a precision fix in
+  issue #113): a privacy/legal token in an otherwise-open statement naming no
+  *recognized* repository is flagged RESTRICTED (open-data false positive).
 - **Swift repository-name display over-match fixed** (2026-07-17, closes #107):
   the Swift-only `DataAvailabilityAnalyzer.repositoryMappings` display path still
   used bare `geo`/`ena`/`sra`/`pdb` substrings matched with `String.contains`,
@@ -90,13 +114,21 @@ its slice has landed; add a new section when handing off new work.
 
 ## Potential follow-ups
 
-- **Restore GDPR/HIPAA/privacy/patient-consent detection** (issue #104) —
-  these restriction patterns were dropped from Swift to match Python exactly.
-  To keep the detection breadth without re-diverging, add them to *both*
-  `study_transparency_analyzer.py` (`DATA_REPOSITORIES['restricted']` and
-  `_restriction_labels`) and `DataRepositoryPatterns` in one change, with tests
-  on both sides. This shifts Python scores, so treat it as its own slice and
-  call it out in release notes (mobile loses this detection breadth until then).
+- **Tighten privacy/GDPR/HIPAA restricted-tier precision** (issue #113) — the
+  #104 tokens fire standalone, so a privacy/legal mention in an otherwise-open
+  statement that names no *recognized* repository ("supplementary materials",
+  de-identified open sharing) is flagged RESTRICTED (a genuine open-data false
+  positive; `\bprivacy\b` is the loosest). Either require co-occurrence with a
+  restriction cue or broaden the full-open guard. Current behavior is pinned by
+  `test_privacy_without_recognized_repository_is_restricted` (Python) /
+  `testPrivacyWithoutRecognizedRepositoryIsRestricted` (Swift), so a fix is a
+  visible change. Keep Python↔Swift byte-identical.
+- **Python/Swift Step-3 dedup asymmetry** (issue #114, pre-existing) — Python
+  `analyze_data_availability` Step 3 appends restriction labels without dedup
+  while Swift `orderedRestrictionLabels` dedups; label-sharing patterns (e.g.
+  `institutional review board` + `irb approval` → "Requires IRB approval") can
+  diverge. Add the `if label not in restrictions` guard to Python + a mirrored
+  IRB-style test.
 - **LLM-assisted disambiguation of repo + soft-restriction** (issue #109) —
   a public-repository mention combined with a *soft* on-request restriction
   ("data in GEO; raw data from the corresponding author upon request") is
