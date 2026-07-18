@@ -158,29 +158,6 @@ class LLMService @Inject constructor(
     }
 
     /**
-     * Convert a medical claim to a PubMed query string.
-     *
-     * @deprecated Use convertToStructuredQuery and QueryBuilderFactory for provider-specific queries.
-     *
-     * @param provider The LLM provider configuration
-     * @param apiKey The API key for authentication
-     * @param model The model ID to use
-     * @param claim The medical claim to convert
-     * @return Result containing the PubMed query string
-     */
-    @Deprecated("Use convertToStructuredQuery for provider-specific queries")
-    suspend fun convertToPubMedQuery(
-        provider: LLMProvider,
-        apiKey: String,
-        model: String,
-        claim: String
-    ): Result<String> {
-        return convertToStructuredQuery(provider, apiKey, model, claim).map { structuredQuery ->
-            com.bmlibrarian.factchecker.domain.model.PubMedQueryBuilder.build(structuredQuery)
-        }
-    }
-
-    /**
      * Generate alternative search queries when initial search yields insufficient results.
      *
      * Asks the LLM to generate 2-3 alternative structured queries using different
