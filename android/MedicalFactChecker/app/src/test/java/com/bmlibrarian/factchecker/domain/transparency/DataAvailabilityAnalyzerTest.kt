@@ -68,6 +68,14 @@ class DataAvailabilityAnalyzerTest {
     }
 
     @Test
+    fun `whitespace-only statement is unknown not stated`() {
+        // Only empty/null is NOT_STATED; a whitespace-only statement matches no
+        // pattern and falls through to UNKNOWN, mirroring Python's `if not text`
+        // and Swift's `!statement.isEmpty` guards (review finding #4).
+        assertEquals(DataDisclosureLevel.UNKNOWN, analyze("   ").disclosureLevel)
+    }
+
+    @Test
     fun `ambiguous statement is unknown`() {
         assertEquals(
             DataDisclosureLevel.UNKNOWN,

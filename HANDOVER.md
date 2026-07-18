@@ -16,8 +16,12 @@ its slice has landed; add a new section when handing off new work.
   byte-identical to the merged #113 canonical (the three `(?<!not )` full-open
   affirmations and the `(?:\w+ )?`-broadened refusals included), so a statement
   classifies to the same `DataDisclosureLevel` + restriction labels on Android,
-  Python, and Swift. 42 mirrored JUnit4 tests (incl. the two negation guards);
-  no network/UI/Room/DI. Later slices (COI, scorer + risk indicators,
+  Python, and Swift. 45 mirrored JUnit4 tests (incl. the two negation guards);
+  no network/UI/Room/DI. `RegexHelper` compiles every pattern with the `(?U)`
+  (`UNICODE_CHARACTER_CLASS`) flag so `\w`/`\s`/`\b`/`\d` match Unicode code
+  points like the Python (`str`) and Swift (ICU) engines — reused slices must
+  keep this or non-ASCII input silently diverges from the other platforms.
+  Later slices (COI, scorer + risk indicators,
   funding/trial, JATS extraction, Room + `DocumentCard` UI) tracked in #116.
   This branch also (a) fixed a **pre-existing** non-exhaustive-`when` compile
   error in `ReportUiEventTest.kt` (`NavigateToFullText`) that stopped the whole

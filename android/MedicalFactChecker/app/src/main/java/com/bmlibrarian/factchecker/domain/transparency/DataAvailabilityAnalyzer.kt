@@ -12,7 +12,9 @@ package com.bmlibrarian.factchecker.domain.transparency
  *  2. Effectively unavailable / strong refusal -> NOT_AVAILABLE.
  *  3. Restricted / on-request -> RESTRICTED.
  *  4. A statement with no matching pattern -> UNKNOWN.
- *  5. Empty/blank input -> NOT_STATED.
+ *  5. Empty/null input -> NOT_STATED. (A whitespace-only statement is *not*
+ *     treated as empty: it matches no pattern and falls through to UNKNOWN,
+ *     mirroring Python's `if not text` and Swift's `!statement.isEmpty` guards.)
  */
 object DataAvailabilityAnalyzer {
 
@@ -71,7 +73,7 @@ object DataAvailabilityAnalyzer {
 
     private fun checkFullOpenAccess(statement: String, lower: String): DataAvailabilityResult? {
         for (pattern in DataRepositoryPatterns.fullOpenPatterns) {
-            if (RegexHelper.anyMatch(listOf(pattern), lower)) {
+            if (RegexHelper.matches(pattern, lower)) {
                 return DataAvailabilityResult(
                     statement = statement,
                     disclosureLevel = DataDisclosureLevel.FULL_OPEN,
@@ -92,7 +94,7 @@ object DataAvailabilityAnalyzer {
 
     private fun detectRepositoryName(lower: String): String? {
         for ((pattern, name) in DataRepositoryPatterns.repositoryMappings) {
-            if (RegexHelper.anyMatch(listOf(pattern), lower)) return name
+            if (RegexHelper.matches(pattern, lower)) return name
         }
         return null
     }
@@ -104,7 +106,7 @@ object DataAvailabilityAnalyzer {
     private fun orderedRestrictionLabels(patterns: List<String>, lower: String): List<String> {
         val labels = mutableListOf<String>()
         for (pattern in patterns) {
-            if (RegexHelper.anyMatch(listOf(pattern), lower)) {
+            if (RegexHelper.matches(pattern, lower)) {
                 val label = DataRepositoryPatterns.restrictionLabel(pattern)
                 if (label !in labels) labels.add(label)
             }

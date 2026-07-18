@@ -21,6 +21,23 @@ class RegexHelperTest {
     }
 
     @Test
+    fun `matches finds a single pattern anywhere in text`() {
+        assertTrue(RegexHelper.matches("figshare", "deposited in figshare today"))
+        assertFalse(RegexHelper.matches("zenodo", "no repository named here"))
+    }
+
+    @Test
+    fun `word classes are unicode-aware to match python and swift`() {
+        // Java/Kotlin regex defaults \w to ASCII; the canonical Python (str
+        // patterns) and Swift (ICU NSRegularExpression) engines treat \w as
+        // Unicode. An accented intervening word must therefore still be skipped
+        // by a (?:\w+ )? group so a statement classifies identically on all
+        // three platforms (review finding #1). Without the (?U) flag the
+        // accented word would break the group and this would be false.
+        assertTrue(RegexHelper.matches("cannot be (?:\\w+ )?shared", "these data cannot be résumé shared"))
+    }
+
+    @Test
     fun `firstMatch returns the whole first match`() {
         assertEquals(
             "https://zenodo.org/record/42",
