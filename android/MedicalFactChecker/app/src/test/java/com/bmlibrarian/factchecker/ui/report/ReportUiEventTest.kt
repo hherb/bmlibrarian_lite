@@ -129,7 +129,8 @@ class ReportUiEventTest {
             ReportUiEvent.OpenUrl("https://example.com"),
             ReportUiEvent.ShareText("Subject", "Text"),
             ReportUiEvent.ShareFile(File("test.pdf"), "application/pdf"),
-            ReportUiEvent.ShowSnackbar("Message")
+            ReportUiEvent.ShowSnackbar("Message"),
+            ReportUiEvent.NavigateToFullText("doc-123")
         )
 
         events.forEach { event ->
@@ -138,6 +139,7 @@ class ReportUiEventTest {
                 is ReportUiEvent.ShareText -> "text"
                 is ReportUiEvent.ShareFile -> "file"
                 is ReportUiEvent.ShowSnackbar -> "snackbar"
+                is ReportUiEvent.NavigateToFullText -> "navigate"
             }
             assertTrue(result.isNotEmpty())
         }
