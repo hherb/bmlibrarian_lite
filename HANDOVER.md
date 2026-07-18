@@ -8,212 +8,84 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
-- **Android data-availability classifier, Slice 1** (2026-07-18, #116): the pure
-  Kotlin port of the canonical (Python/Swift) data-availability classifier, in a
-  new package `com.bmlibrarian.factchecker.domain.transparency` —
-  `DataDisclosureLevel`, `DataAvailabilityResult`, `RegexHelper`,
-  `DataRepositoryPatterns`, `DataAvailabilityAnalyzer`. Pattern lists are
-  byte-identical to the merged #113 canonical (the three `(?<!not )` full-open
-  affirmations and the `(?:\w+ )?`-broadened refusals included), so a statement
-  classifies to the same `DataDisclosureLevel` + restriction labels on Android,
-  Python, and Swift. 45 mirrored JUnit4 tests (incl. the two negation guards);
-  no network/UI/Room/DI. `RegexHelper` compiles every pattern with the `(?U)`
-  (`UNICODE_CHARACTER_CLASS`) flag so `\w`/`\s`/`\b`/`\d` match Unicode code
-  points like the Python (`str`) and Swift (ICU) engines — reused slices must
-  keep this or non-ASCII input silently diverges from the other platforms.
-  Later slices (COI, scorer + risk indicators,
-  funding/trial, JATS extraction, Room + `DocumentCard` UI) tracked in #116.
-  This branch also (a) fixed a **pre-existing** non-exhaustive-`when` compile
-  error in `ReportUiEventTest.kt` (`NavigateToFullText`) that stopped the whole
-  Android test module from compiling on master, and (b) updated 5 pre-existing
-  stale tests to intentional shipped values ("Anthropic (Claude)",
-  `ANTHROPIC.supportsModelFetching`, gpt-5.2 default, query=512 iOS-parity token
-  hierarchy). Fixing the compile error unmasked 7 further pre-existing failures
-  (PubMedServiceTest ×6, LLMServiceTest ×1) — unrelated to transparency, lodged
-  as **#119**. Spec + plan:
-  `docs/superpowers/{specs,plans}/2026-07-17-android-data-availability-classifier*`.
-- **Privacy/legal open-data false positive fixed** (2026-07-17, closes #113):
-  the #104 privacy/legal tokens (`\bprivacy\b`/`\bhipaa\b`/…) fired standalone,
-  so a genuinely-open statement that named no *recognized* repository but
-  mentioned a privacy token *reassuringly* ("De-identified data are openly
-  shared; no HIPAA-protected identifiers remain"; "available in the
-  supplementary materials; patient privacy was protected") was mis-flagged
-  RESTRICTED. Fixed by **broadening the full-open tier** with three narrow
-  open-availability affirmation patterns, each carrying a `(?<!not )` negation
-  guard — `(?<!not )openly (?:available|shared|accessible)`,
-  `(?<!not )freely (?:available|shared|accessible)`,
-  `(?<!not )available (?:in|within|as|via|through) (?:the )?supplement` — appended
-  byte-identically to Python
-  `DATA_REPOSITORIES['full_open']` and Swift `DataRepositoryPatterns.fullOpenPatterns`
-  (21→24 entries). Such statements now classify FULL_OPEN (an **intended upward**
-  transparency-score shift for the affected shapes: +20 vs −5). Bare `available`
-  is deliberately not matched, so "available upon request"/"from the corresponding
-  author" stay RESTRICTED; the up-front refusal guard still wins ("freely
-  available … but … cannot be shared" → NOT_AVAILABLE). The two pinned tradeoff
-  tests were flipped to `..._open_affirmation_without_repository_is_full_open`
-  (assert FULL_OPEN) with added strong-refusal and negated-affirmation guard
-  tests on both platforms; the four #104 privacy/legal true-positive tests are
-  unchanged. Two negation layers guard the over-open direction: the `(?<!not )`
-  lookbehind on each affirmation blocks an immediately-negated affirmation ("not
-  openly accessible … IRB approval" → RESTRICTED), and the strong-refusal
-  patterns (`cannot be (?:\w+ )?shared`, `(?:would|will|shall) not be (?:\w+ )?…`)
-  were broadened with `(?:\w+ )?` so a one-word-intervening negation ("will not
-  be openly shared", "cannot be openly shared") sets the up-front unavailability
-  signal and classifies NOT_AVAILABLE — previously a *newly-introduced* false
-  FULL_OPEN (#113 review, 2026-07-18). Residual multi-word / alternate-negator
-  forms ("never openly shared", "could not be openly shared", "not currently
-  openly available", double-spaced "not  openly") remain tracked in **#117**.
-  Release note: an open affirmation co-occurring with a *soft* on-request
-  restriction ("data are freely available upon reasonable request") now
-  deterministically classifies FULL_OPEN, matching the repo+soft-restriction
-  policy (#109) — an intended upward score shift, not only the reassuring
-  privacy-token shapes. Spec + plan:
-  `docs/superpowers/{specs,plans}/2026-07-17-tighten-privacy-legal-*`.
-- **Python Step-3 RESTRICTED dedup parity fixed** (2026-07-17, closes #114):
-  Python `analyze_data_availability` Step 3 appended restriction labels
-  without dedup, while Swift `orderedRestrictionLabels` (used in both tiers)
-  and Python's *own* Step 2 already deduped. So distinct patterns sharing a
-  label — `institutional review board` + `irb approval` both → "Requires IRB
-  approval" — listed it twice on Python only (e.g. "requires institutional
-  review board review and IRB approval" → RESTRICTED with a doubled label).
-  Added the `if label not in restrictions` order-preserving guard to Step 3,
-  mirroring Step 2. Classification and the byte-identical pattern/label lists
-  are unchanged; only duplicate labels in the `restrictions` list are removed.
-  Mirrored tests pin the cross-platform contract through the full `analyze`
-  path: `test_restricted_label_sharing_patterns_deduplicated` (Python) /
-  `testRestrictedLabelSharingPatternsDeduplicated` (Swift).
-- **GDPR/HIPAA/privacy/patient-consent detection restored** (2026-07-17,
-  closes #104): four word-anchored restricted-tier patterns (`\bgdpr\b`,
-  `\bhipaa\b`, `\bprivacy\b`, `\bpatient consent\b`) plus labels ("GDPR
-  restrictions" / "HIPAA restrictions" / "Privacy restrictions" / "Patient
-  consent required") added to the `restricted` tier on **both** platforms —
-  Python `DATA_REPOSITORIES['restricted']` + `_restriction_labels` (which
-  never had them) and Swift `DataRepositoryPatterns.restrictedPatterns` +
-  `restrictionLabels` (dropped in #101 for parity). Statements like "restricted
-  under GDPR" now classify RESTRICTED (was UNKNOWN) — an **intended downward
-  transparency-score shift** (−5, plus the existing −10 industry+restricted
-  penalty) for affected studies on both Python and mobile; call this out in
-  release notes. Precedence is preserved: full-open is still checked first
-  ("deposited in Zenodo; no privacy concerns" stays FULL_OPEN) and a
-  co-occurring strong refusal still escalates ("not publicly available owing to
-  GDPR" → NOT_AVAILABLE). Mirrored six-case tests on both sides
-  (`test_{gdpr,hipaa,privacy,patient_consent}_restriction_is_restricted` +
-  full-open/strong-refusal guards / the Swift `testAnalyze*Restriction`
-  equivalents); the Swift `testRestrictionLabelLookup` auto-pins pattern↔label
-  parity. Bare `informed consent` deliberately excluded (would over-match
-  ~every clinical paper). Spec + plan:
-  `docs/superpowers/{specs,plans}/2026-07-17-restore-privacy-legal-data-restriction-detection*`.
-  Known accepted tradeoff (now pinned by a test, tracked for a precision fix in
-  issue #113): a privacy/legal token in an otherwise-open statement naming no
-  *recognized* repository is flagged RESTRICTED (open-data false positive).
-- **Swift repository-name display over-match fixed** (2026-07-17, closes #107):
-  the Swift-only `DataAvailabilityAnalyzer.repositoryMappings` display path still
-  used bare `geo`/`ena`/`sra`/`pdb` substrings matched with `String.contains`,
-  so `detectRepositoryName` could mislabel a repository (e.g. a GenBank deposit
-  mentioning "geographic" resolved to "GEO", since `geo` is listed before
-  `genbank`). The four short tokens are now word-anchored (`\bgeo\b` etc.) in
-  `repositoryMappings` and `detectRepositoryName` matches via
-  `RegexHelper.anyMatch`, mirroring the classification anchoring done in #106.
-  Display-only, Swift-only, never affected classification and has no Python
-  counterpart. Regression tests:
-  `testDetectRepositoryGenBankNotOvermatchedByGeographic`,
-  `testDetectRepositoryShortTokenCarrierWordReturnsNil`,
-  `testDetectRepositoryStandaloneShortTokensStillDetected` (guards against
-  over-tightening).
-- **Full-open now yields to co-occurring refusals** (2026-07-17, PR #108):
-  a repository *name* in a statement no longer unconditionally wins. Because
-  full-open was checked first, "genomic data could not be deposited in GEO …;
-  the data are not publicly available" classified as FULL_OPEN, masking the
-  refusal. Both platforms now detect a strong-refusal / effectively-unavailable
-  signal up front and skip the full-open tier when present (→ NOT_AVAILABLE).
-  Python promoted its previously-inline `strong_refusal_patterns` to the module
-  constant `STRONG_REFUSAL_PATTERNS` so the up-front guard and Step 2 share one
-  list (mirrors Swift `DataRepositoryPatterns.strongRefusalPatterns`); Swift
-  added the guard in `DataAvailabilityAnalyzer.analyze`. Mirrored tests:
-  `test_repository_named_but_access_refused_is_not_available` /
-  `test_repository_named_but_not_publicly_available_is_not_available` /
-  `test_repository_with_soft_request_stays_full_open` (+ the Swift equivalents),
-  plus `test_short_token_embedded_in_word_is_not_full_open` filling the sra/pdb
-  over-match coverage gap. The residual ambiguity — a repository mention plus a
-  *soft* on-request restriction — is deterministically kept FULL_OPEN and its
-  optional LLM-assisted disambiguation tracked in #109.
-- **Full-open bare-substring over-match fixed** (2026-07-17, closes #106):
-  the short repository tokens `geo`/`ena`/`sra`/`pdb` in the full-open pattern
-  lists were bare substrings, so unrelated words (`geographic`→`geo`,
-  `phenomena`→`ena`) produced a false FULL_OPEN that overrode a genuine
-  restriction (full-open is checked first). Word-anchored to `\bgeo\b` etc. on
-  both platforms — Python `DATA_REPOSITORIES['full_open']` and Swift
-  `DataRepositoryPatterns.fullOpenPatterns` — with mirrored regression tests
-  (`test_geographic_word_does_not_trigger_full_open` /
-  `test_phenomena_word_does_not_trigger_full_open` /
-  `test_standalone_short_token_still_full_open` and the Swift equivalents).
-  Follow-up #107 filed for the Swift-only `repositoryMappings` display path,
-  which still uses bare tokens (cosmetic; can mislabel a repo name but never
-  misclassifies, and has no Python counterpart).
-- **Swift↔Python transparency parity completed** (2026-07-17, closes #101):
-  the Swift `BioMedLit` transparency pipeline now mirrors the canonical Python
-  reference (`study_transparency_analyzer.py`) for data-availability
-  classification, scoring, and risk indicators.
-  - `DataAvailabilityAnalyzer.analyze` ported to Python's priority tiers:
-    full-open → effectively-unavailable (strong refusals + sponsor/collaboration
-    gating ⇒ `.notAvailable`) → restricted (on-request/approval ⇒ `.restricted`,
-    previously `.availableOnRequest`) → unknown. Pattern lists and restriction
-    labels are byte-identical to Python's `DATA_REPOSITORIES` and
-    `_restriction_labels`. **Swift-only GDPR/HIPAA/privacy/patient-consent
-    patterns were dropped** for exact classification parity (see follow-ups).
-  - Scoring (`TransparencyScorer` / `TransparencyConstants`) aligned to Python:
-    on-request +5 (was +10), restricted −5 (was 0), not-available −15 (was −10),
-    COI statement +5 (was +10) with an extra −5 when industry ties are disclosed,
-    and the industry-ties + restricted/unavailable combined −10 now fires on
-    COI-disclosed ties as well as detected funding. **User-visible score/risk
-    shifts on iOS/macOS are expected and intended.**
-  - Risk indicators gained the institutional-intermediary and combined
-    industry+data strings plus order-preserving dedup, matching Python.
-  - Cross-platform contract pinned by tests on both sides:
-    `TransparencyScorerTests`, `DataAvailabilityAnalyzerTests`,
-    `TransparencyConstantsTests`, and new Python classes in
-    `tests/test_study_transparency_analyzer.py`
-    (`TestAnalyzeDataAvailability`, `TestCalculateTransparencyScore`).
-  - PR #103 review cleanup (2026-07-17): removed the now-orphaned public
-    helpers `DataAvailabilityAnalyzer.containsUnavailabilityIndicators` /
-    `containsRestrictedAccessIndicators` (dead after the tier refactor);
-    documented that `DataDisclosureLevel.availableOnRequest` is never emitted
-    by `analyze` (retained for externally-constructed/LLM results); and pinned
-    the `.notAvailable` restriction **ordering** (effectively-unavailable
-    labels first) in both `testAnalyzeNamedCollaborationLock` cases.
-- **Earlier BioMedLit parity work** (PR #100, 2026-07-16/17): fixed the 5
-  pre-existing Swift test failures (NCT-ID regex boundaries, `fileExists`
-  directory semantics, risk-indicator string alignment) and hoisted the
-  risk-indicator strings into named constants on both platforms.
+- **Android PubMed/LLM unit-test failures fixed** (2026-07-18, closes #119):
+  the 7 pre-existing Android failures that #116's compile fix unmasked
+  (`PubMedServiceTest` ×6, `LLMServiceTest` ×1). Root causes were **not** stale
+  tests:
+  - `PubMedService.parseArticleXml` built its parser via Android's
+    `org.xmlpull.v1.XmlPullParserFactory`, which under plain JUnit comes from the
+    stub `android.jar` and throws `RuntimeException("… not mocked")`. The broad
+    `catch (e) { printStackTrace() }` swallowed it → every parse returned an empty
+    list. **Rewrote `parseArticleXml` to a JAXP SAX parser** (`SAXParserFactory` +
+    new inner `PubMedXmlHandler : DefaultHandler`) — pure-JVM, so it runs in unit
+    tests *and* on-device — extracting the same fields. The handler snapshots its
+    character buffer only at the boundaries of the extracted (`TEXT_ELEMENTS`)
+    tags, so inline markup inside a title/abstract (`<i>`, `<sup>` — species
+    names, exponents) is preserved rather than dropped; a markup-terminated title
+    is no longer lost (which under a naive per-`startElement` reset would return a
+    null title and silently drop the whole article). Hardened against XXE /
+    external-DTD network fetches (`SAFE_SAX_FEATURES` + a no-op `resolveEntity`).
+    New regression tests: offline `search parses XML with DOCTYPE …` (real EFetch
+    XML carries a `<!DOCTYPE … remote-DTD>`) and `search preserves text around
+    inline markup …`.
+  - The `createSampleXml` test helper emitted a leading-whitespace-before-`<?xml>`
+    prolog (an artifact of interpolating a multi-line block into `trimIndent()`),
+    which strict SAX correctly rejects ("processing instruction … not allowed");
+    kxml2 had been lenient. Fixed the helper to emit the declaration at column 0.
+  - `LLMServiceTest.convertToPubMedQuery returns query on success` tested the
+    `@Deprecated convertToPubMedQuery` method, which has **no production callers**
+    and now routes through `convertToStructuredQuery` + `PubMedQueryBuilder`.
+    Removed the dead method and its stale test. `PubMedQueryBuilder` stays (used
+    by `ResponseParser`/`QueryBuilder`/`FactCheckWorkflow`).
+  - Result: full Android suite green (511 tests, 0 fail, 18 network-gated skips).
+    The `ReportUiEventTest` compile fix and the 5 stale-value test updates
+    referenced by #119 already landed with #116 (PR #120) — not re-touched here.
+- **Android data-availability classifier, Slice 1** (2026-07-18, #116/PR #120):
+  pure-Kotlin port of the canonical (Python/Swift) classifier in
+  `domain.transparency` (`DataDisclosureLevel`, `DataAvailabilityResult`,
+  `RegexHelper`, `DataRepositoryPatterns`, `DataAvailabilityAnalyzer`),
+  byte-identical patterns to the merged #113 canonical. `RegexHelper` compiles
+  with `(?U)` so `\w\s\b\d` match Unicode like Python/Swift — **reused slices must
+  keep this** or non-ASCII input silently diverges. 45 mirrored JUnit4 tests.
+  Remaining #116 slices below.
+- **Transparency parity, earlier slices** (2026-07-16/17, all merged): Swift↔Python
+  data-availability parity (#101/PR #100/#103); full-open over-match + refusal
+  precedence fixes (#106, #107, PR #108); GDPR/HIPAA/privacy/patient-consent
+  restore (#104); Python Step-3 label dedup (#114); privacy/legal open-data
+  false-positive fix + negation guards (#113/PR #118). Python
+  (`study_transparency_analyzer.py`) is the canonical reference; Swift `BioMedLit`
+  and Android `domain.transparency` mirror it. Details in the linked PRs and
+  `docs/superpowers/{specs,plans}/2026-07-17-*`.
 
 ## Potential follow-ups
 
-- **LLM-assisted disambiguation of repo + soft-restriction** (issue #109) —
-  a public-repository mention combined with a *soft* on-request restriction
-  ("data in GEO; raw data from the corresponding author upon request") is
-  genuinely ambiguous and is deterministically kept FULL_OPEN today. Add an
-  optional, config-gated, deterministic-fallback LLM layer (via the existing
-  `llm` abstraction / Swift `LLMService`) at the orchestration layer, keeping
-  the pure classifier and its parity tests unchanged. Follow-up from #106/#108.
-- **Automated Swift↔Python parity drift guard** (issue #105) — parity is
-  currently maintained by convention plus mirrored per-platform tests. A shared
-  language-neutral fixture asserted on both sides would catch silent divergence.
-- **Android transparency classifier (multi-slice, #116)** — Slice 1 (the pure
-  data-availability classifier) has **landed** (see Recently landed). Remaining
-  slices tracked in #116: COI analyzer, scorer + risk indicators, funding/trial
-  (network), JATS statement extraction, Room persistence + `DocumentCard` UI.
-- **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,
-  low/medium/high) has no Python counterpart and was left unchanged. Revisit
-  only if a canonical cross-platform risk-level definition is introduced.
-- **Cache compiled regexes in `RegexHelper`** (issue #111) — `anyMatch`
-  recompiles an `NSRegularExpression` per call and re-lowercases the text once
-  per pattern; several analyzers loop `anyMatch(patterns: [pattern], …)`.
-  Negligible today (single-statement labeling, not a hot path); memoize
-  compiled patterns inside `RegexHelper` if it ever moves onto one. Follow-up
-  from #110.
+- **#117 — negated open-availability affirmations still over-match FULL_OPEN**:
+  residual of #113. Non-adjacent / alternate-negator forms ("never openly
+  shared", "could not be openly shared", "not currently openly available",
+  double-spaced "not  openly") still classify FULL_OPEN instead of NOT_AVAILABLE.
+  Fix mirrored across Python + Swift + Android `DataRepositoryPatterns`.
+- **#121 — JATS parser untestable like PubMed was** (from #119): `util.jats.
+  JATSXMLParser` also uses Android `XmlPullParser`, so its only coverage is a
+  network-gated integration test (`Assume.assumeTrue(INTEGRATION_TESTS==1)`).
+  Migrating it to the same JAXP SAX approach used for `PubMedService` would make
+  it unit-testable offline.
+- **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
+  indicators, funding/trial (network), JATS statement extraction, Room
+  persistence + `DocumentCard` UI.
+- **#109 — LLM-assisted disambiguation of repo + soft-restriction**: a repo
+  mention + a *soft* on-request restriction is kept FULL_OPEN today; add an
+  optional config-gated deterministic-fallback LLM layer at the orchestration
+  layer, leaving the pure classifier + parity tests unchanged.
+- **#105 — automated Swift↔Python(↔Android) parity drift guard**: a shared
+  language-neutral fixture asserted on all sides to catch silent divergence.
+- **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
+  per call). Negligible today; memoize if it ever hits a hot path.
+- **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
+  no Python counterpart; revisit only if a canonical definition is introduced.
 
 ### Verify
 
+- Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - `cd Packages/BioMedLit && swift test` → 0 failures.
 - `pytest tests/` → 0 failures (Python is the reference).
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination

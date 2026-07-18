@@ -643,6 +643,104 @@ class PubMedServiceTest {
         assertEquals("2024 Jan-Feb", article.publicationDate)
     }
 
+    @Test
+    fun `search parses XML with DOCTYPE without fetching external DTD`() = runTest {
+        // Real PubMed EFetch responses begin with a DOCTYPE that references the
+        // remote NLM DTD. The parser must decode the document offline (blocking
+        // external DTD/entity resolution) rather than reaching out to the network.
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE PubmedArticleSet PUBLIC "-//NLM//DTD PubMedArticle, 1st January 2019//EN" "https://dtd.nlm.nih.gov/ncbi/pubmed/out/pubmed_190101.dtd">
+            <PubmedArticleSet>
+                <PubmedArticle>
+                    <MedlineCitation>
+                        <PMID>32000000</PMID>
+                        <Article>
+                            <ArticleTitle>Article With DOCTYPE</ArticleTitle>
+                        </Article>
+                    </MedlineCitation>
+                </PubmedArticle>
+            </PubmedArticleSet>
+        """.trimIndent()
+
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.success(
+            ESearchResponse(
+                esearchResult = ESearchResult(
+                    count = "1",
+                    idList = listOf("32000000")
+                )
+            )
+        )
+
+        coEvery {
+            api.fetch(any(), any(), any(), any(), any(), any())
+        } returns Response.success(xml)
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        assertTrue(result.isSuccess)
+        val article = result.getOrNull()!!.articles.first()
+        assertEquals("32000000", article.pmid)
+        assertEquals("Article With DOCTYPE", article.title)
+    }
+
+    @Test
+    fun `search preserves text around inline markup in title and abstract`() = runTest {
+        // PubMed titles and abstracts routinely contain inline markup (<i> for
+        // species/gene names, <sup>/<sub> for exponents/subscripts). The parser
+        // must keep the surrounding text - and in particular an article whose
+        // title ends in markup must NOT be dropped for want of a title.
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <PubmedArticleSet>
+                <PubmedArticle>
+                    <MedlineCitation>
+                        <PMID>33000000</PMID>
+                        <Article>
+                            <ArticleTitle>Complete genome sequence of <i>Escherichia coli</i></ArticleTitle>
+                            <Abstract>
+                                <AbstractText>Aspirin lowers CRP by <sup>50</sup>% overall.</AbstractText>
+                            </Abstract>
+                        </Article>
+                    </MedlineCitation>
+                </PubmedArticle>
+            </PubmedArticleSet>
+        """.trimIndent()
+
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.success(
+            ESearchResponse(
+                esearchResult = ESearchResult(
+                    count = "1",
+                    idList = listOf("33000000")
+                )
+            )
+        )
+
+        coEvery {
+            api.fetch(any(), any(), any(), any(), any(), any())
+        } returns Response.success(xml)
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        assertTrue(result.isSuccess)
+        val articles = result.getOrNull()!!.articles
+        assertEquals(1, articles.size)
+        val article = articles.first()
+        assertEquals("Complete genome sequence of Escherichia coli", article.title)
+        assertTrue(
+            "abstract should retain text on both sides of the <sup> markup",
+            article.abstractText?.contains("Aspirin lowers CRP by 50% overall.") == true
+        )
+    }
+
     // ==================== Document Entity Conversion Tests ====================
 
     @Test
@@ -824,6 +922,10 @@ class PubMedServiceTest {
 
     /**
      * Creates a sample PubMed XML response for testing.
+     *
+     * The XML declaration is emitted at column 0 (no leading whitespace); a
+     * conformant XML parser rejects any content, including whitespace, before
+     * the `<?xml ...?>` prolog.
      */
     private fun createSampleXml(pmids: List<String>): String {
         val articles = pmids.mapIndexed { index, pmid ->
@@ -842,11 +944,9 @@ class PubMedServiceTest {
             """.trimIndent()
         }.joinToString("\n")
 
-        return """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <PubmedArticleSet>
-            $articles
-            </PubmedArticleSet>
-        """.trimIndent()
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<PubmedArticleSet>\n" +
+            "$articles\n" +
+            "</PubmedArticleSet>"
     }
 }

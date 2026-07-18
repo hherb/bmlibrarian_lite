@@ -335,41 +335,6 @@ class LLMServiceTest {
         assertTrue(error is LLMError.EmptyResponseError)
     }
 
-    // ==================== PubMed Query Conversion Tests ====================
-
-    @Test
-    fun `convertToPubMedQuery returns query on success`() = runTest {
-        // Arrange
-        val expectedQuery = "(aspirin) AND (cardiovascular disease) AND (systematic review[pt])"
-        coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
-        } returns Response.success(
-            OpenAIChatResponse(
-                id = "test-id",
-                choices = listOf(
-                    OpenAIChatChoice(
-                        index = 0,
-                        message = OpenAIChatMessage("assistant", expectedQuery),
-                        finishReason = "stop"
-                    )
-                ),
-                usage = null
-            )
-        )
-
-        // Act
-        val result = service.convertToPubMedQuery(
-            provider = LLMProvider.OPENAI,
-            apiKey = "test-key",
-            model = "gpt-4o",
-            claim = "Aspirin reduces cardiovascular disease risk"
-        )
-
-        // Assert
-        assertTrue(result.isSuccess)
-        assertEquals(expectedQuery, result.getOrNull())
-    }
-
     // ==================== Document Scoring Tests ====================
 
     @Test

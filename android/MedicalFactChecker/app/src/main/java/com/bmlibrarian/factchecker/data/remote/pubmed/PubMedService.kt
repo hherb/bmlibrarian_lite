@@ -23,11 +23,44 @@ import com.bmlibrarian.factchecker.domain.model.PubMedError
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import kotlinx.coroutines.delay
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import org.xml.sax.Attributes
+import org.xml.sax.InputSource
+import org.xml.sax.helpers.DefaultHandler
 import java.io.StringReader
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.xml.parsers.SAXParserFactory
+
+/**
+ * SAX feature flags that disable external DTD loading and entity expansion.
+ *
+ * Applied defensively (parser implementations that do not recognise a given
+ * feature simply skip it). Together with a no-op entity resolver, these prevent
+ * the parser from fetching the remote NLM PubMed DTD referenced by the EFetch
+ * `<!DOCTYPE>` and guard against XML external-entity (XXE) attacks.
+ */
+private val SAFE_SAX_FEATURES: List<Pair<String, Boolean>> = listOf(
+    "http://apache.org/xml/features/nonvalidating/load-external-dtd" to false,
+    "http://xml.org/sax/features/external-general-entities" to false,
+    "http://xml.org/sax/features/external-parameter-entities" to false,
+)
+
+/**
+ * Element names whose text content the SAX handler extracts.
+ *
+ * The handler resets and snapshots its character buffer only at the boundaries
+ * of these elements. Character data inside inline-markup children (e.g. `<i>`,
+ * `<sup>`, `<sub>` within an `ArticleTitle` or `AbstractText` — common for gene
+ * or species names, exponents and subscripts) is therefore preserved as part of
+ * the enclosing element's text rather than discarded when the child opens. In
+ * PubMed XML these elements never nest one another, so a single flat buffer is
+ * sufficient.
+ */
+private val TEXT_ELEMENTS: Set<String> = setOf(
+    "PMID", "ArticleTitle", "AbstractText", "Title", "Year", "MedlineDate",
+    "LastName", "ForeName", "DescriptorName", "PublicationType", "Keyword",
+    "ELocationID", "ArticleId",
+)
 
 /**
  * Service for PubMed/NCBI E-utilities API interactions.
@@ -309,159 +342,217 @@ class PubMedService @Inject constructor(
     }
 
     /**
-     * Parse PubMed XML response into ParsedArticle objects.
+     * Parse a PubMed EFetch XML response into [ParsedArticle] objects.
+     *
+     * Uses a JAXP SAX parser ([javax.xml.parsers.SAXParserFactory]) rather than
+     * the Android-framework `XmlPullParser`, so the parsing logic is portable
+     * and unit-testable on a plain JVM as well as on-device. External DTD and
+     * entity resolution are disabled ([PubMedXmlHandler.resolveEntity] plus the
+     * SAX feature flags), so the parser never fetches the NLM PubMed DTD over
+     * the network and is not vulnerable to XXE.
+     *
+     * Parsing is resilient: any articles decoded before a malformed-input error
+     * are still returned, matching the behaviour callers rely on.
+     *
+     * @param xml The raw EFetch XML payload.
+     * @return The list of articles that carried at least a PMID and a title.
      */
     private fun parseArticleXml(xml: String): List<ParsedArticle> {
-        val articles = mutableListOf<ParsedArticle>()
-
+        val handler = PubMedXmlHandler()
         try {
-            val factory = XmlPullParserFactory.newInstance()
+            val factory = SAXParserFactory.newInstance()
             factory.isNamespaceAware = false
-            val parser = factory.newPullParser()
-            parser.setInput(StringReader(xml))
-
-            var eventType = parser.eventType
-            var currentArticle: ArticleBuilder? = null
-            var currentTag = ""
-            var parentTag = ""
-
-            // Author parsing state
-            var inAuthor = false
-            var authorLastName = ""
-            var authorForeName = ""
-
-            // Abstract parsing state
-            var inAbstract = false
-            var abstractLabel: String? = null
-
-            // MeSH parsing state
-            var inMeshHeading = false
-
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                when (eventType) {
-                    XmlPullParser.START_TAG -> {
-                        parentTag = currentTag
-                        currentTag = parser.name
-
-                        when (currentTag) {
-                            "PubmedArticle" -> currentArticle = ArticleBuilder()
-                            "Author" -> inAuthor = true
-                            "Abstract" -> inAbstract = true
-                            "AbstractText" -> {
-                                abstractLabel = parser.getAttributeValue(null, "Label")
-                            }
-                            "MeshHeading" -> inMeshHeading = true
-                        }
-                    }
-
-                    XmlPullParser.TEXT -> {
-                        val text = parser.text?.trim() ?: ""
-                        if (text.isNotEmpty() && currentArticle != null) {
-                            when (currentTag) {
-                                "PMID" -> {
-                                    // Only capture the first PMID (article PMID, not reference PMIDs)
-                                    if (currentArticle.pmid == null && parentTag != "CommentsCorrections") {
-                                        currentArticle.pmid = text
-                                    }
-                                }
-                                "ArticleTitle" -> currentArticle.title = cleanXmlText(text)
-                                "AbstractText" -> {
-                                    if (inAbstract) {
-                                        if (abstractLabel != null) {
-                                            currentArticle.abstractSections.add(
-                                                AbstractSection(abstractLabel, cleanXmlText(text))
-                                            )
-                                        }
-                                        currentArticle.abstractText.append(text).append(" ")
-                                    }
-                                }
-                                "Title" -> {
-                                    // Journal title - only if we don't have one yet
-                                    if (currentArticle.journal == null && parentTag == "Journal") {
-                                        currentArticle.journal = text
-                                    }
-                                }
-                                "Year" -> {
-                                    if (currentArticle.year == null) {
-                                        currentArticle.year = text.toIntOrNull()
-                                    }
-                                }
-                                "MedlineDate" -> {
-                                    // Alternative date format (e.g., "2024 Jan-Feb")
-                                    if (currentArticle.year == null) {
-                                        currentArticle.year = text.take(4).toIntOrNull()
-                                        currentArticle.publicationDate = text
-                                    }
-                                }
-                                "LastName" -> if (inAuthor) authorLastName = text
-                                "ForeName" -> if (inAuthor) authorForeName = text
-                                "DescriptorName" -> {
-                                    if (inMeshHeading) {
-                                        currentArticle.meshTerms.add(text)
-                                    }
-                                }
-                                "PublicationType" -> currentArticle.publicationTypes.add(text)
-                                "Keyword" -> currentArticle.keywords.add(text)
-                                "ELocationID" -> {
-                                    val idType = parser.getAttributeValue(null, "EIdType")
-                                    if (idType == "doi" && currentArticle.doi == null) {
-                                        currentArticle.doi = text
-                                    } else if (idType == "pmc" && currentArticle.pmcId == null) {
-                                        currentArticle.pmcId = text
-                                    }
-                                }
-                                "ArticleId" -> {
-                                    val idType = parser.getAttributeValue(null, "IdType")
-                                    when (idType) {
-                                        "doi" -> if (currentArticle.doi == null) currentArticle.doi = text
-                                        "pmc" -> if (currentArticle.pmcId == null) {
-                                            currentArticle.pmcId = if (text.startsWith("PMC")) text else "PMC$text"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    XmlPullParser.END_TAG -> {
-                        when (parser.name) {
-                            "Author" -> {
-                                if (authorLastName.isNotEmpty()) {
-                                    val fullName = if (authorForeName.isNotEmpty()) {
-                                        "$authorLastName $authorForeName"
-                                    } else {
-                                        authorLastName
-                                    }
-                                    currentArticle?.authors?.add(fullName)
-                                }
-                                inAuthor = false
-                                authorLastName = ""
-                                authorForeName = ""
-                            }
-                            "Abstract" -> inAbstract = false
-                            "AbstractText" -> abstractLabel = null
-                            "MeshHeading" -> inMeshHeading = false
-                            "PubmedArticle" -> {
-                                currentArticle?.let { builder ->
-                                    builder.build()?.let { article ->
-                                        articles.add(article)
-                                    }
-                                }
-                                currentArticle = null
-                            }
-                        }
-                        currentTag = parentTag
-                        parentTag = ""
-                    }
+            // Harden against XXE and external-DTD network fetches. Not every SAX
+            // implementation recognises every feature, so apply each defensively.
+            for ((feature, enabled) in SAFE_SAX_FEATURES) {
+                try {
+                    factory.setFeature(feature, enabled)
+                } catch (_: Exception) {
+                    // Feature unsupported by this parser; resolveEntity still blocks fetches.
                 }
-                eventType = parser.next()
             }
+            factory.newSAXParser().parse(InputSource(StringReader(xml)), handler)
         } catch (e: Exception) {
-            // Log but continue with what we have
+            // Resilient: keep any articles parsed before the failure.
             e.printStackTrace()
         }
+        return handler.articles
+    }
 
-        return articles
+    /**
+     * SAX content handler that decodes PubMed EFetch XML into [ParsedArticle]s.
+     *
+     * Text content is buffered per element and consumed on the element's end
+     * event, because SAX may split a single run of character data across
+     * multiple [characters] callbacks. An element-name stack provides parent
+     * context (used to distinguish the article PMID from reference PMIDs and the
+     * journal `Title` from other titles).
+     */
+    private inner class PubMedXmlHandler : DefaultHandler() {
+
+        /** Articles decoded so far; the parse result. */
+        val articles = mutableListOf<ParsedArticle>()
+
+        private val elementStack = ArrayDeque<String>()
+        private val textBuffer = StringBuilder()
+        private var currentArticle: ArticleBuilder? = null
+
+        // Author parsing state
+        private var inAuthor = false
+        private var authorLastName = ""
+        private var authorForeName = ""
+
+        // Abstract parsing state
+        private var inAbstract = false
+        private var abstractLabel: String? = null
+
+        // MeSH parsing state
+        private var inMeshHeading = false
+
+        // Attribute values captured on element open for use at element close
+        private var eLocationIdType: String? = null
+        private var articleIdType: String? = null
+
+        override fun startElement(
+            uri: String?,
+            localName: String?,
+            qName: String,
+            attributes: Attributes
+        ) {
+            when (qName) {
+                "PubmedArticle" -> currentArticle = ArticleBuilder()
+                "Author" -> {
+                    inAuthor = true
+                    authorLastName = ""
+                    authorForeName = ""
+                }
+                "Abstract" -> inAbstract = true
+                "AbstractText" -> abstractLabel = attributes.getValue("Label")
+                "MeshHeading" -> inMeshHeading = true
+                "ELocationID" -> eLocationIdType = attributes.getValue("EIdType")
+                "ArticleId" -> articleIdType = attributes.getValue("IdType")
+            }
+            elementStack.addLast(qName)
+            // Start a fresh capture only for extracted elements, so inline-markup
+            // children opening inside them do not discard the text already read.
+            if (qName in TEXT_ELEMENTS) {
+                textBuffer.setLength(0)
+            }
+        }
+
+        override fun characters(ch: CharArray, start: Int, length: Int) {
+            textBuffer.append(ch, start, length)
+        }
+
+        override fun endElement(uri: String?, localName: String?, qName: String) {
+            consumeText(qName, textBuffer.toString().trim())
+            closeElement(qName)
+            if (elementStack.isNotEmpty()) {
+                elementStack.removeLast()
+            }
+            // Clear only after an extracted element closes; an inline child's end
+            // must leave the enclosing element's accumulated text intact.
+            if (qName in TEXT_ELEMENTS) {
+                textBuffer.setLength(0)
+            }
+        }
+
+        /**
+         * Block external DTD/entity resolution so parsing PubMed XML (which
+         * carries a `<!DOCTYPE>` referencing the remote NLM DTD) never reaches
+         * out to the network and cannot be used for XXE.
+         */
+        override fun resolveEntity(publicId: String?, systemId: String?): InputSource {
+            return InputSource(StringReader(""))
+        }
+
+        /** Apply a leaf element's trimmed text to the article under construction. */
+        private fun consumeText(name: String, value: String) {
+            if (value.isEmpty()) return
+            val article = currentArticle ?: return
+            when (name) {
+                "PMID" -> {
+                    // Only capture the first PMID (article PMID, not reference PMIDs).
+                    if (article.pmid == null && parentElement() != "CommentsCorrections") {
+                        article.pmid = value
+                    }
+                }
+                "ArticleTitle" -> article.title = cleanXmlText(value)
+                "AbstractText" -> {
+                    if (inAbstract) {
+                        val label = abstractLabel
+                        if (label != null) {
+                            article.abstractSections.add(AbstractSection(label, cleanXmlText(value)))
+                        }
+                        article.abstractText.append(value).append(" ")
+                    }
+                }
+                "Title" -> {
+                    // Journal title - only if we don't have one yet.
+                    if (article.journal == null && parentElement() == "Journal") {
+                        article.journal = value
+                    }
+                }
+                "Year" -> if (article.year == null) article.year = value.toIntOrNull()
+                "MedlineDate" -> {
+                    // Alternative date format (e.g., "2024 Jan-Feb").
+                    if (article.year == null) {
+                        article.year = value.take(4).toIntOrNull()
+                        article.publicationDate = value
+                    }
+                }
+                "LastName" -> if (inAuthor) authorLastName = value
+                "ForeName" -> if (inAuthor) authorForeName = value
+                "DescriptorName" -> if (inMeshHeading) article.meshTerms.add(value)
+                "PublicationType" -> article.publicationTypes.add(value)
+                "Keyword" -> article.keywords.add(value)
+                "ELocationID" -> {
+                    if (eLocationIdType == "doi" && article.doi == null) {
+                        article.doi = value
+                    } else if (eLocationIdType == "pmc" && article.pmcId == null) {
+                        article.pmcId = value
+                    }
+                }
+                "ArticleId" -> when (articleIdType) {
+                    "doi" -> if (article.doi == null) article.doi = value
+                    "pmc" -> if (article.pmcId == null) {
+                        article.pmcId = if (value.startsWith("PMC")) value else "PMC$value"
+                    }
+                }
+            }
+        }
+
+        /** Run element-close side effects (state resets, author assembly, article build). */
+        private fun closeElement(name: String) {
+            when (name) {
+                "Author" -> {
+                    if (authorLastName.isNotEmpty()) {
+                        val fullName = if (authorForeName.isNotEmpty()) {
+                            "$authorLastName $authorForeName"
+                        } else {
+                            authorLastName
+                        }
+                        currentArticle?.authors?.add(fullName)
+                    }
+                    inAuthor = false
+                    authorLastName = ""
+                    authorForeName = ""
+                }
+                "Abstract" -> inAbstract = false
+                "AbstractText" -> abstractLabel = null
+                "MeshHeading" -> inMeshHeading = false
+                "ELocationID" -> eLocationIdType = null
+                "ArticleId" -> articleIdType = null
+                "PubmedArticle" -> {
+                    currentArticle?.build()?.let { articles.add(it) }
+                    currentArticle = null
+                }
+            }
+        }
+
+        /** The element enclosing the one currently being closed, or "" at the root. */
+        private fun parentElement(): String =
+            if (elementStack.size >= 2) elementStack[elementStack.size - 2] else ""
     }
 
     /**
