@@ -645,12 +645,19 @@ class PubMedServiceTest {
 
     @Test
     fun `search parses XML with DOCTYPE without fetching external DTD`() = runTest {
-        // Real PubMed EFetch responses begin with a DOCTYPE that references the
-        // remote NLM DTD. The parser must decode the document offline (blocking
-        // external DTD/entity resolution) rather than reaching out to the network.
+        // Real PubMed EFetch responses begin with a DOCTYPE referencing the remote
+        // NLM DTD. The parser must decode the document offline rather than reaching
+        // out to the network.
+        //
+        // The systemId deliberately points at a closed port on the loopback
+        // interface: a parser that resolved external DTDs would attempt (and fail)
+        // that connection, so this test fails if the SAFE_SAX_FEATURES hardening or
+        // the no-op resolveEntity is removed. Using the real https://dtd.nlm.nih.gov
+        // systemId would NOT discriminate - an unhardened parser fetches it
+        // successfully on a networked machine and the test would still pass.
         val xml = """
             <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE PubmedArticleSet PUBLIC "-//NLM//DTD PubMedArticle, 1st January 2019//EN" "https://dtd.nlm.nih.gov/ncbi/pubmed/out/pubmed_190101.dtd">
+            <!DOCTYPE PubmedArticleSet SYSTEM "http://127.0.0.1:1/pubmed_190101.dtd">
             <PubmedArticleSet>
                 <PubmedArticle>
                     <MedlineCitation>
@@ -686,6 +693,106 @@ class PubMedServiceTest {
         val article = result.getOrNull()!!.articles.first()
         assertEquals("32000000", article.pmid)
         assertEquals("Article With DOCTYPE", article.title)
+    }
+
+    @Test
+    fun `search blocks external entity references in fetched XML`() = runTest {
+        // XXE guard: an external general entity pointing at a local file must not
+        // be resolved into the parsed output. With entity resolution blocked the
+        // reference expands to nothing, leaving the surrounding title text intact.
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE PubmedArticleSet [
+            <!ENTITY xxe SYSTEM "file:///etc/passwd">
+            ]>
+            <PubmedArticleSet>
+                <PubmedArticle>
+                    <MedlineCitation>
+                        <PMID>34000000</PMID>
+                        <Article>
+                            <ArticleTitle>Safe&xxe; Title</ArticleTitle>
+                        </Article>
+                    </MedlineCitation>
+                </PubmedArticle>
+            </PubmedArticleSet>
+        """.trimIndent()
+
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.success(
+            ESearchResponse(
+                esearchResult = ESearchResult(
+                    count = "1",
+                    idList = listOf("34000000")
+                )
+            )
+        )
+
+        coEvery {
+            api.fetch(any(), any(), any(), any(), any(), any())
+        } returns Response.success(xml)
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        assertTrue(result.isSuccess)
+        val article = result.getOrNull()!!.articles.first()
+        assertEquals("Safe Title", article.title)
+        assertFalse(
+            "external entity must not be expanded into the parsed title",
+            article.title.contains("root:")
+        )
+    }
+
+    @Test
+    fun `search returns articles decoded before malformed XML aborts the parse`() = runTest {
+        // parseArticleXml is deliberately resilient: a malformed batch still yields
+        // the articles decoded before the failure rather than an empty list. The
+        // document below is truncated mid-way through the SECOND article, after the
+        // first one has closed cleanly.
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <PubmedArticleSet>
+                <PubmedArticle>
+                    <MedlineCitation>
+                        <PMID>35000000</PMID>
+                        <Article>
+                            <ArticleTitle>Complete Article</ArticleTitle>
+                        </Article>
+                    </MedlineCitation>
+                </PubmedArticle>
+                <PubmedArticle>
+                    <MedlineCitation>
+                        <PMID>35000001</PMID>
+                        <Article>
+                            <ArticleTitle>Truncated Article
+        """.trimIndent()
+
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.success(
+            ESearchResponse(
+                esearchResult = ESearchResult(
+                    count = "2",
+                    idList = listOf("35000000", "35000001")
+                )
+            )
+        )
+
+        coEvery {
+            api.fetch(any(), any(), any(), any(), any(), any())
+        } returns Response.success(xml)
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        assertTrue(result.isSuccess)
+        val articles = result.getOrNull()!!.articles
+        assertEquals(1, articles.size)
+        assertEquals("35000000", articles.first().pmid)
+        assertEquals("Complete Article", articles.first().title)
     }
 
     @Test

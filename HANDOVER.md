@@ -24,10 +24,25 @@ its slice has landed; add a new section when handing off new work.
     names, exponents) is preserved rather than dropped; a markup-terminated title
     is no longer lost (which under a naive per-`startElement` reset would return a
     null title and silently drop the whole article). Hardened against XXE /
-    external-DTD network fetches (`SAFE_SAX_FEATURES` + a no-op `resolveEntity`).
-    New regression tests: offline `search parses XML with DOCTYPE …` (real EFetch
-    XML carries a `<!DOCTYPE … remote-DTD>`) and `search preserves text around
-    inline markup …`.
+    external-DTD network fetches (`SAFE_SAX_FEATURES` — including
+    `FEATURE_SECURE_PROCESSING`, which caps internal entity expansion because
+    Android's Expat parser gives no default "billion laughs" limit — plus a no-op
+    `resolveEntity`). Every flag goes through `setFeature` inside a per-flag
+    `try/catch`, so an implementation that does not recognise one skips it.
+    **`setXIncludeAware` is deliberately not called**: JAXP's base implementation
+    throws `UnsupportedOperationException` unless overridden, which the outer catch
+    would swallow into an empty result on-device while JVM tests stayed green — the
+    #119 failure mode exactly. New regression tests:
+    `search parses XML with DOCTYPE …`, `search blocks external entity references
+    …`, `search preserves text around inline markup …`, and `search returns
+    articles decoded before malformed XML aborts the parse` (pins the deliberate
+    partial-result contract). **The two security tests point their `systemId` at a
+    closed loopback port (`http://127.0.0.1:1/…`), not at the real
+    `dtd.nlm.nih.gov` URL — that is load-bearing.** An unhardened parser *fetches*
+    the real NLM systemId successfully (measured: 11.2s vs 1ms), so a realistic
+    systemId makes the test pass either way and guards nothing; against a closed
+    port the unhardened parser fails with `ConnectException`. Both tests were
+    verified red by temporarily removing the hardening.
   - The `createSampleXml` test helper emitted a leading-whitespace-before-`<?xml>`
     prolog (an artifact of interpolating a multi-line block into `trimIndent()`),
     which strict SAX correctly rejects ("processing instruction … not allowed");
@@ -37,9 +52,16 @@ its slice has landed; add a new section when handing off new work.
     and now routes through `convertToStructuredQuery` + `PubMedQueryBuilder`.
     Removed the dead method and its stale test. `PubMedQueryBuilder` stays (used
     by `ResponseParser`/`QueryBuilder`/`FactCheckWorkflow`).
-  - Result: full Android suite green (511 tests, 0 fail, 18 network-gated skips).
+  - Result: full Android suite green (515 tests, 0 fail, 18 network-gated skips).
     The `ReportUiEventTest` compile fix and the 5 stale-value test updates
     referenced by #119 already landed with #116 (PR #120) — not re-touched here.
+  - Deliberately **not** fixed here, lodged as **#123**: `parseArticleXml` still
+    ends its catch with `printStackTrace()`, violating golden rule 8 (errors must
+    be logged and reported to the user). The obvious `Log.e` fix would reintroduce
+    the exact defect this slice removed — `app/build.gradle.kts` sets no
+    `testOptions`, so `unitTests.isReturnDefaultValues` is `false` and
+    `android.util.Log` throws "not mocked" under plain JUnit, which would make the
+    error path untestable again. Needs a JVM-portable logging seam first.
 - **Android data-availability classifier, Slice 1** (2026-07-18, #116/PR #120):
   pure-Kotlin port of the canonical (Python/Swift) classifier in
   `domain.transparency` (`DataDisclosureLevel`, `DataAvailabilityResult`,
@@ -59,6 +81,13 @@ its slice has landed; add a new section when handing off new work.
 
 ## Potential follow-ups
 
+- **#123 — Android parse errors are swallowed (golden rule 8)**: `parseArticleXml`
+  ends its catch with `printStackTrace()` — the only such call left in
+  `app/src/main` — so a truncated EFetch batch silently under-reports articles and
+  a genuine parser defect looks identical to malformed input. Blocked on a
+  JVM-portable logging seam: a plain `Log.e` would reintroduce the untestable
+  Android dependency #119 was about (no `testOptions` ⇒ `Log` throws "not mocked"
+  under JUnit). Overlaps #121.
 - **#117 — negated open-availability affirmations still over-match FULL_OPEN**:
   residual of #113. Non-adjacent / alternate-negator forms ("never openly
   shared", "could not be openly shared", "not currently openly available",

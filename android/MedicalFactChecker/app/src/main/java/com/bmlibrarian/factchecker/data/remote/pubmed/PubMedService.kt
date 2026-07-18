@@ -29,6 +29,7 @@ import org.xml.sax.helpers.DefaultHandler
 import java.io.StringReader
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.xml.XMLConstants
 import javax.xml.parsers.SAXParserFactory
 
 /**
@@ -38,11 +39,17 @@ import javax.xml.parsers.SAXParserFactory
  * feature simply skip it). Together with a no-op entity resolver, these prevent
  * the parser from fetching the remote NLM PubMed DTD referenced by the EFetch
  * `<!DOCTYPE>` and guard against XML external-entity (XXE) attacks.
+ *
+ * Secure processing additionally caps internal entity expansion, so a
+ * "billion laughs" payload cannot exhaust memory. The JVM applies such a limit
+ * by default, but Android's Expat-backed parser makes no such guarantee, so the
+ * flag is requested explicitly rather than relied upon.
  */
 private val SAFE_SAX_FEATURES: List<Pair<String, Boolean>> = listOf(
     "http://apache.org/xml/features/nonvalidating/load-external-dtd" to false,
     "http://xml.org/sax/features/external-general-entities" to false,
     "http://xml.org/sax/features/external-parameter-entities" to false,
+    XMLConstants.FEATURE_SECURE_PROCESSING to true,
 )
 
 /**
@@ -360,8 +367,18 @@ class PubMedService @Inject constructor(
     private fun parseArticleXml(xml: String): List<ParsedArticle> {
         val handler = PubMedXmlHandler()
         try {
+            // Built per call rather than cached in a field: SAXParserFactory is not
+            // thread-safe, and this service is a @Singleton whose parse can be
+            // entered concurrently. Do not "optimise" this into a shared instance.
             val factory = SAXParserFactory.newInstance()
             factory.isNamespaceAware = false
+            // Deliberately NOT calling setXIncludeAware: JAXP's base implementation
+            // throws UnsupportedOperationException unless an implementation
+            // overrides it, and Android's Expat-backed factory is not guaranteed
+            // to. That would be swallowed by the catch below and silently empty
+            // every on-device parse while JVM unit tests stayed green - precisely
+            // the #119 failure mode. XInclude is off by default and requires
+            // namespace awareness (disabled above), so there is nothing to disable.
             // Harden against XXE and external-DTD network fetches. Not every SAX
             // implementation recognises every feature, so apply each defensively.
             for ((feature, enabled) in SAFE_SAX_FEATURES) {
@@ -445,14 +462,22 @@ class PubMedService @Inject constructor(
         }
 
         override fun endElement(uri: String?, localName: String?, qName: String) {
-            consumeText(qName, textBuffer.toString().trim())
+            // Snapshot the buffer only for extracted elements. Inline-markup
+            // children (`<i>`, `<sup>`, …) close without consuming or clearing it,
+            // leaving the enclosing element's accumulated text intact.
+            val isExtracted = qName in TEXT_ELEMENTS
+            if (isExtracted) {
+                // Before the pop, so consumeText's parentElement() sees the parent.
+                consumeText(qName, textBuffer.toString().trim())
+            }
             closeElement(qName)
+            // SAX pairs every startElement with exactly one endElement, so the
+            // stack cannot be empty here; the guard is cheap insurance against a
+            // non-conformant parser aborting a parse of real user data.
             if (elementStack.isNotEmpty()) {
                 elementStack.removeLast()
             }
-            // Clear only after an extracted element closes; an inline child's end
-            // must leave the enclosing element's accumulated text intact.
-            if (qName in TEXT_ELEMENTS) {
+            if (isExtracted) {
                 textBuffer.setLength(0)
             }
         }
