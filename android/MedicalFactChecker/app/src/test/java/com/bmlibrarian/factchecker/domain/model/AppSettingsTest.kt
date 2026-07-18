@@ -95,7 +95,7 @@ class AppSettingsTest {
     fun `llmProvider returns correct provider for valid id`() {
         val settings = AppSettings(llmProviderId = "anthropic")
         assertNotNull(settings.llmProvider)
-        assertEquals("Anthropic", settings.llmProvider?.displayName)
+        assertEquals("Anthropic (Claude)", settings.llmProvider?.displayName)
     }
 
     @Test

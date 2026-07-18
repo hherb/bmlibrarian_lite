@@ -46,9 +46,10 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `default LLM model is GPT-4o`() {
-        // SettingsRepository defaults to GPT-4o for OpenAI
-        val expectedDefault = "gpt-4o"
+    fun `default LLM model is GPT-5-2`() {
+        // SettingsRepository defaults to OpenAI's configured default model,
+        // which is GPT-5.2 as of the Phase 1 iOS parity model catalog update.
+        val expectedDefault = "gpt-5.2"
         assertEquals(expectedDefault, LLMProvider.OPENAI.defaultModel)
     }
 
