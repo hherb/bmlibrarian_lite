@@ -27,7 +27,8 @@ object DataAvailabilityAnalyzer {
         // repository/affirmation mention, so detect it up front and skip Step 1.
         val hasUnavailabilitySignal = RegexHelper.anyMatch(
             DataRepositoryPatterns.effectivelyUnavailablePatterns +
-                DataRepositoryPatterns.strongRefusalPatterns,
+                DataRepositoryPatterns.strongRefusalPatterns +
+                DataRepositoryPatterns.negatedOpennessPatterns,
             lower,
         )
 

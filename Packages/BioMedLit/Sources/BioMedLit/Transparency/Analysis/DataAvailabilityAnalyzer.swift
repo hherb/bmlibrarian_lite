@@ -107,7 +107,8 @@ public enum DataAvailabilityAnalyzer {
         // (``analyze_data_availability``).
         let hasUnavailabilitySignal = RegexHelper.anyMatch(
             patterns: DataRepositoryPatterns.effectivelyUnavailablePatterns
-                + DataRepositoryPatterns.strongRefusalPatterns,
+                + DataRepositoryPatterns.strongRefusalPatterns
+                + DataRepositoryPatterns.negatedOpennessPatterns,
             in: statementLower
         )
 

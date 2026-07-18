@@ -280,6 +280,39 @@ GOVERNMENT_PATTERNS = [
     r'\bgovernment\b', r'\bfederal\b', r'\bstate\b',
 ]
 
+# Negated open-availability affirmations (issue #117).
+#
+# The ``(?<!not )`` lookbehind carried by the full-open affirmations below is
+# fixed-width, so it only suppresses an *immediately* negated affirmation.
+# Every detached negator escaped it and produced a false FULL_OPEN — the
+# dangerous over-stating-openness direction:
+#
+#   "data are not currently openly available"  (intervening word)
+#   "data were never openly shared"            (alternate negator)
+#   "data are not  openly available"           (doubled whitespace)
+#   "the data could not be openly shared"      (modal outside the
+#                                               strong-refusal alternation)
+#
+# Python's ``re`` forbids variable-length lookbehind, and these patterns must
+# stay byte-identical across Python/Swift/Android, so widening the lookbehind
+# is not available. The guard is therefore expressed as a *forward* match: a
+# negator, then at most two intervening words, then the affirmation.
+#
+# The window is bounded rather than open-ended, and the ``(?!and\b|but\b|or\b)``
+# barrier terminates the negation scope at a coordinating conjunction. Both
+# keep the check from reaching into an affirmation the negator does not govern
+# ("data were not embargoed **and** were openly shared" stays FULL_OPEN), which
+# would under-report genuinely open data.
+#
+# Mirrors the Swift ``DataRepositoryPatterns.negatedOpennessPatterns`` and the
+# Android equivalent; the pattern strings are byte-identical on all three.
+NEGATED_OPENNESS_PATTERNS = [
+    r'\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+'
+    r'(?:openly|freely) (?:available|shared|accessible)',
+    r'\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+'
+    r'available (?:in|within|as|via|through) (?:the )?supplement',
+]
+
 # Data repository indicators
 DATA_REPOSITORIES = {
     'full_open': [
@@ -329,6 +362,12 @@ DATA_REPOSITORIES = {
         r'\bhipaa\b',
         r'\bprivacy\b',
         r'\bpatient consent\b',
+        # Negated open-availability affirmations (issue #117). Listed here so a
+        # bare negated affirmation ("data were never openly shared") carries an
+        # explicit restriction label and classifies RESTRICTED, matching the
+        # already-pinned adjacent form ("not openly accessible without IRB
+        # approval"). See NEGATED_OPENNESS_PATTERNS for the rationale.
+        *NEGATED_OPENNESS_PATTERNS,
     ],
     # Patterns that indicate an effectively unavailable dataset, where the
     # sharing statement reads like a policy but access is systematically denied.
@@ -1017,7 +1056,9 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     has_unavailability_signal = any(
         re.search(pattern, text_lower)
         for pattern in (
-            DATA_REPOSITORIES['effectively_unavailable'] + STRONG_REFUSAL_PATTERNS
+            DATA_REPOSITORIES['effectively_unavailable']
+            + STRONG_REFUSAL_PATTERNS
+            + NEGATED_OPENNESS_PATTERNS
         )
     )
 
@@ -1077,6 +1118,8 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
         r'\bhipaa\b': "HIPAA restrictions",
         r'\bprivacy\b': "Privacy restrictions",
         r'\bpatient consent\b': "Patient consent required",
+        NEGATED_OPENNESS_PATTERNS[0]: "Data not openly available",
+        NEGATED_OPENNESS_PATTERNS[1]: "Data not openly available",
         r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding':
             "Data restricted to named collaboration",
         r'not be released.*(?:data custodians?|directly to)':

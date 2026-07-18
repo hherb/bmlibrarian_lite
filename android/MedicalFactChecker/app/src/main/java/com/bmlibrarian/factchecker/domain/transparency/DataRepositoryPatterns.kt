@@ -45,6 +45,47 @@ object DataRepositoryPatterns {
         "(?<!not )available (?:in|within|as|via|through) (?:the )?supplement",
     )
 
+    /**
+     * Negated open-availability affirmations (issue #117).
+     *
+     * The `(?<!not )` lookbehind carried by [fullOpenPatterns] is fixed-width, so
+     * it only suppresses an *immediately* negated affirmation. Every detached
+     * negator escaped it and produced a false FULL_OPEN — the dangerous
+     * over-stating-openness direction:
+     *
+     *   "data are not currently openly available"  (intervening word)
+     *   "data were never openly shared"            (alternate negator)
+     *   "data are not  openly available"           (doubled whitespace)
+     *   "the data could not be openly shared"      (modal outside the
+     *                                               strong-refusal alternation)
+     *
+     * Python's `re` forbids variable-length lookbehind, and these patterns must
+     * stay byte-identical across Python/Swift/Android, so widening the lookbehind
+     * is not available. The guard is therefore expressed as a *forward* match: a
+     * negator, then at most two intervening words, then the affirmation.
+     *
+     * The window is bounded rather than open-ended, and the
+     * `(?!and\b|but\b|or\b)` barrier terminates the negation scope at a
+     * coordinating conjunction. Both keep the check from reaching into an
+     * affirmation the negator does not govern ("data were not embargoed **and**
+     * were openly shared" stays FULL_OPEN), which would under-report genuinely
+     * open data.
+     *
+     * Byte-identical to Python's `NEGATED_OPENNESS_PATTERNS` and the Swift
+     * `DataRepositoryPatterns.negatedOpennessPatterns`. [RegexHelper] compiles
+     * these with `(?U)`, so `\w` and `\b` match Unicode exactly as Python and
+     * ICU do.
+     *
+     * Declared before [restrictedPatterns] because Kotlin initialises `object`
+     * properties in declaration order — a forward reference would be null here.
+     */
+    val negatedOpennessPatterns: List<String> = listOf(
+        "\\b(?:not|never|cannot)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+" +
+            "(?:openly|freely) (?:available|shared|accessible)",
+        "\\b(?:not|never|cannot)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+" +
+            "available (?:in|within|as|via|through) (?:the )?supplement",
+    )
+
     /** Restricted / on-request indicators. */
     val restrictedPatterns: List<String> = listOf(
         "upon (?:reasonable )?request",
@@ -70,7 +111,12 @@ object DataRepositoryPatterns {
         "\\bhipaa\\b",
         "\\bprivacy\\b",
         "\\bpatient consent\\b",
-    )
+        // Negated open-availability affirmations (issue #117). Listed here so a
+        // bare negated affirmation ("data were never openly shared") carries an
+        // explicit restriction label and classifies RESTRICTED, matching the
+        // already-pinned adjacent form ("not openly accessible without IRB
+        // approval"). See negatedOpennessPatterns for the rationale.
+    ) + negatedOpennessPatterns
 
     /** Strong-refusal indicators that escalate to NOT_AVAILABLE. Subset of restricted. */
     val strongRefusalPatterns: List<String> = listOf(
@@ -115,6 +161,8 @@ object DataRepositoryPatterns {
         "\\bhipaa\\b" to "HIPAA restrictions",
         "\\bprivacy\\b" to "Privacy restrictions",
         "\\bpatient consent\\b" to "Patient consent required",
+        negatedOpennessPatterns[0] to "Data not openly available",
+        negatedOpennessPatterns[1] to "Data not openly available",
         "(?:provided|available)\\s+to\\s+the\\s+\\w+\\s+(?:collaboration|consortium|group)\\s+on\\s+the\\s+understanding" to "Data restricted to named collaboration",
         "not be released.*(?:data custodians?|directly to)" to "Data will not be released; requests redirected",
         "(?:confidentiality|agreement)\\s+(?:with\\s+)?(?:the\\s+)?(?:sponsor|industri|pharma|trial\\s+(?:owner|sponsor))" to "Sponsor confidentiality agreement restricts access",

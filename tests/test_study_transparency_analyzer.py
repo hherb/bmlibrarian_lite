@@ -378,7 +378,10 @@ class TestAnalyzeDataAvailability:
             "Raw data are not openly accessible without IRB approval."
         )
         assert irb.disclosure_level == DataDisclosureLevel.RESTRICTED
-        assert irb.restrictions == ["Requires IRB approval"]
+        assert irb.restrictions == [
+            "Requires IRB approval",
+            "Data not openly available",
+        ]
 
         author = analyze_data_availability(
             "Data are not freely shared; available from the corresponding author."
@@ -402,11 +405,79 @@ class TestAnalyzeDataAvailability:
             "The data will not be openly shared with third parties."
         )
         assert will_not.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
-        assert will_not.restrictions == ["Data will not be released"]
+        assert will_not.restrictions == [
+            "Data will not be released",
+            "Data not openly available",
+        ]
 
         cannot = analyze_data_availability("Raw data cannot be openly shared.")
         assert cannot.disclosure_level == DataDisclosureLevel.NOT_AVAILABLE
-        assert cannot.restrictions == ["Data cannot be shared"]
+        assert cannot.restrictions == [
+            "Data cannot be shared",
+            "Data not openly available",
+        ]
+
+    def test_non_adjacent_negator_does_not_trigger_full_open(self) -> None:
+        r"""Negators detached from the affirmation must not classify FULL_OPEN (#117).
+
+        The ``(?<!not )`` lookbehind is fixed-width, so it only suppresses an
+        *immediately* negated affirmation. A negator separated by an intervening
+        word, an alternate negator ("never"), doubled whitespace, or a modal
+        outside ``STRONG_REFUSAL_PATTERNS``' ``(?:would|will|shall)`` list all
+        escaped it and produced a false FULL_OPEN — the dangerous
+        over-stating-openness direction. ``NEGATED_OPENNESS_PATTERNS`` closes
+        the gap with a forward-matching bounded negation scope, dropping the
+        statement to RESTRICTED with an explicit label.
+        """
+        never = analyze_data_availability("Data were never openly shared.")
+        assert never.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert never.restrictions == ["Data not openly available"]
+
+        intervening = analyze_data_availability(
+            "Data are not currently openly available."
+        )
+        assert intervening.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        doubled_space = analyze_data_availability("Data are not  openly available.")
+        assert doubled_space.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        could = analyze_data_availability("The data could not be openly shared.")
+        assert could.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        supplement = analyze_data_availability(
+            "Data are not currently available in the supplementary materials."
+        )
+        assert supplement.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+    def test_negation_scope_stops_at_coordinating_conjunction(self) -> None:
+        r"""A genuine affirmation after an unrelated negation stays FULL_OPEN (#117).
+
+        The bounded negation scope carries a ``(?!and\b|but\b|or\b)`` barrier so
+        it cannot reach across a coordinating conjunction into an affirmation
+        that the negator does not govern. Without the barrier, the window would
+        under-report genuinely open data.
+        """
+        conjunction = analyze_data_availability(
+            "Data were not embargoed and were openly shared."
+        )
+        assert conjunction.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        contrast = analyze_data_availability(
+            "Data are not subject to embargo, but are openly available."
+        )
+        assert contrast.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+    def test_negation_scope_window_is_bounded(self) -> None:
+        """A negator far from the affirmation does not suppress it (#117).
+
+        The scope spans at most two intervening words, so an unrelated earlier
+        negation in the same statement leaves a genuine affirmation intact.
+        """
+        result = analyze_data_availability(
+            "No identifiable fields were retained during curation; "
+            "the processed dataset is openly available."
+        )
+        assert result.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
 
 class TestCalculateTransparencyScore:
