@@ -358,8 +358,31 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
     /// negator does not govern. Without the barrier, the window would
     /// under-report genuinely open data.
     ///
+    /// The conjunction must fall *inside* the two-word window for this test to
+    /// exercise the barrier at all. In "not embargoed and were openly shared"
+    /// the affirmation sits three words after the negator, so the `{0,2}` bound
+    /// already blocks it and the barrier is never consulted — such a sentence
+    /// passes with the barrier deleted and pins nothing. The first two cases
+    /// below therefore place the conjunction at the second window slot,
+    /// immediately before the affirmation: they are the assertions that fail if
+    /// the barrier is removed, and must keep that shape if reworded.
+    ///
     /// Mirrors Python's `test_negation_scope_stops_at_coordinating_conjunction`.
     func testNegationScopeStopsAtCoordinatingConjunction() {
+        // Barrier pins: conjunction inside the window, affirmation immediately
+        // after it. Both flip to `.restricted` if `(?!and\b|but\b|or\b)` is dropped.
+        let immediateAnd = DataAvailabilityAnalyzer.analyze(
+            statement: "Data were not embargoed and openly shared."
+        )
+        XCTAssertEqual(immediateAnd.disclosureLevel, .fullOpen)
+
+        let immediateOr = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not restricted or openly available."
+        )
+        XCTAssertEqual(immediateOr.disclosureLevel, .fullOpen)
+
+        // Broader regression coverage: realistic phrasings that must stay
+        // `.fullOpen`. These are held by the window bound rather than the barrier.
         let conjunction = DataAvailabilityAnalyzer.analyze(
             statement: "Data were not embargoed and were openly shared."
         )
@@ -376,8 +399,27 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
     /// The scope spans at most two intervening words, so an unrelated earlier
     /// negation in the same statement leaves a genuine affirmation intact.
     ///
+    /// The statement must contain a token the patterns actually treat as a
+    /// negator — `not`, `never` or `cannot` — for the bound to be under test. A
+    /// sentence negated only by "No" matches no pattern at any window size and
+    /// would pass with the bound deleted entirely. The first case below keeps a
+    /// real negator seven unpunctuated words from the affirmation, so it fails
+    /// if `{0,2}` is widened; do not reword it in a way that inserts punctuation
+    /// between the two, because `\w+` cannot cross punctuation and the bound
+    /// would stop being what holds the line.
+    ///
     /// Mirrors Python's `test_negation_scope_window_is_bounded`.
     func testNegationScopeWindowIsBounded() {
+        // Window pin: real negator, seven intervening words, no punctuation
+        // between. Flips to `.restricted` if the `{0,2}` bound is widened.
+        let farNegator = DataAvailabilityAnalyzer.analyze(
+            statement: "Reuse is not limited by any licence because these datasets "
+                + "are openly available."
+        )
+        XCTAssertEqual(farNegator.disclosureLevel, .fullOpen)
+
+        // Broader regression coverage: "No" is not in the negator alternation,
+        // so an affirmation later in the statement survives untouched.
         let result = DataAvailabilityAnalyzer.analyze(
             statement: "No identifiable fields were retained during curation; "
                 + "the processed dataset is openly available."

@@ -1053,6 +1053,13 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     # A refusal/unavailability signal anywhere in the statement overrides a
     # co-occurring repository mention, so detect it up front and skip Step 1
     # when present (Step 2 then classifies it as NOT_AVAILABLE).
+    #
+    # Invariant: every list joined here must also be reachable from Step 2 or
+    # Step 3. A pattern added here alone suppresses Step 1 without supplying a
+    # replacement tier, so the statement silently lands in UNKNOWN instead of
+    # FULL_OPEN — a regression no existing test would catch.
+    # NEGATED_OPENNESS_PATTERNS satisfies this by also being appended to
+    # DATA_REPOSITORIES['restricted'] (issue #117).
     has_unavailability_signal = any(
         re.search(pattern, text_lower)
         for pattern in (

@@ -28,6 +28,26 @@ its slice has landed; add a new section when handing off new work.
     genuinely open data. Pinned by
     `test_negation_scope_stops_at_coordinating_conjunction` and
     `test_negation_scope_window_is_bounded` on all three platforms.
+  - **The pins only work at specific sentence shapes — do not reword them.**
+    As first written (PR #124) neither test actually exercised its guard: both
+    passed for unrelated reasons, and the barrier could be deleted from all
+    three platforms with the entire tri-platform suite staying green. Fixed in
+    review; mutation-verified on Python, Swift *and* Kotlin (each guard removed
+    in turn ⇒ exactly its own test fails). The two traps:
+    - The **conjunction must sit inside the two-word window**, immediately
+      before the affirmation ("not embargoed **and** openly shared"). In "not
+      embargoed and *were* openly shared" the affirmation is three words out, so
+      `{0,2}` blocks it first and the barrier is never consulted.
+    - The window pin needs a **real negator** — `not`/`never`/`cannot`. "No" is
+      not in the alternation, so a sentence negated only by "No" matches nothing
+      at any window size. It also needs **no punctuation** between negator and
+      affirmation, because `\w+` cannot cross punctuation and the punctuation
+      would become what holds the line instead of the bound.
+  - **Invariant now documented at each `has_unavailability_signal` site:** every
+    list joined there must also be reachable from Step 2 or Step 3. A pattern
+    added to the signal check alone suppresses Step 1 without supplying a
+    replacement tier, silently landing the statement in UNKNOWN rather than
+    FULL_OPEN — a regression no existing test would catch.
   - Tiering: negated openness is in the **restricted** tier, not
     `STRONG_REFUSAL_PATTERNS`. It suppresses the affirmation and adds the label
     "Data not openly available"; escalation to NOT_AVAILABLE still requires an
@@ -80,6 +100,18 @@ its slice has landed; add a new section when handing off new work.
 - **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
   indicators, funding/trial (network), JATS statement extraction, Room
   persistence + `DocumentCard` UI.
+- **#125 — "no longer openly available" still over-matches FULL_OPEN**: residual
+  of #117, found reviewing PR #124. The negator alternation is
+  `(?:not|never|cannot)`; **`no` is absent**, so "data are no longer openly
+  available", "by no means openly available" and "neither … nor … openly
+  available" all still report FULL_OPEN — the same dangerous
+  over-stating-openness direction #117 closed for detached negators. Not fixed
+  there because adding `no` needs its own false-positive round ("no restrictions
+  apply and data are openly available"), and `neither … nor` is a two-token
+  negator the single-token alternation cannot express at all.
+- **#126 — redundant "Data not openly available" label** (cosmetic): emitted
+  alongside a more specific label for the same clause ("Data cannot be shared",
+  "Requires IRB approval"). Tiers are correct; presentation noise only.
 - **#109 — LLM-assisted disambiguation of repo + soft-restriction**: a repo
   mention + a *soft* on-request restriction is kept FULL_OPEN today; add an
   optional config-gated deterministic-fallback LLM layer at the orchestration

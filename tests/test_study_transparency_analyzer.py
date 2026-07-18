@@ -456,7 +456,30 @@ class TestAnalyzeDataAvailability:
         it cannot reach across a coordinating conjunction into an affirmation
         that the negator does not govern. Without the barrier, the window would
         under-report genuinely open data.
+
+        The conjunction must fall *inside* the two-word window for this test to
+        exercise the barrier at all. In "not embargoed and were openly shared"
+        the affirmation sits three words after the negator, so the ``{0,2}``
+        bound already blocks it and the barrier is never consulted — such a
+        sentence passes with the barrier deleted and pins nothing. The first two
+        cases below therefore place the conjunction at the second window slot,
+        immediately before the affirmation: they are the assertions that fail if
+        the barrier is removed, and must keep that shape if reworded.
         """
+        # Barrier pins: conjunction inside the window, affirmation immediately
+        # after it. Both flip to RESTRICTED if `(?!and\b|but\b|or\b)` is dropped.
+        immediate_and = analyze_data_availability(
+            "Data were not embargoed and openly shared."
+        )
+        assert immediate_and.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        immediate_or = analyze_data_availability(
+            "Data are not restricted or openly available."
+        )
+        assert immediate_or.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Broader regression coverage: realistic phrasings that must stay
+        # FULL_OPEN. These are held by the window bound rather than the barrier.
         conjunction = analyze_data_availability(
             "Data were not embargoed and were openly shared."
         )
@@ -468,11 +491,30 @@ class TestAnalyzeDataAvailability:
         assert contrast.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
     def test_negation_scope_window_is_bounded(self) -> None:
-        """A negator far from the affirmation does not suppress it (#117).
+        r"""A negator far from the affirmation does not suppress it (#117).
 
         The scope spans at most two intervening words, so an unrelated earlier
         negation in the same statement leaves a genuine affirmation intact.
+
+        The statement must contain a token the patterns actually treat as a
+        negator — ``not``, ``never`` or ``cannot`` — for the bound to be under
+        test. A sentence negated only by "No" matches no pattern at any window
+        size and would pass with the bound deleted entirely. The first case
+        below keeps a real negator seven unpunctuated words from the
+        affirmation, so it fails if ``{0,2}`` is widened; do not reword it in a
+        way that inserts punctuation between the two, because ``\w+`` cannot
+        cross punctuation and the bound would stop being what holds the line.
         """
+        # Window pin: real negator, seven intervening words, no punctuation
+        # between. Flips to RESTRICTED if the `{0,2}` bound is widened.
+        far_negator = analyze_data_availability(
+            "Reuse is not limited by any licence because these datasets "
+            "are openly available."
+        )
+        assert far_negator.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Broader regression coverage: "No" is not in the negator alternation,
+        # so an affirmation later in the statement survives untouched.
         result = analyze_data_availability(
             "No identifiable fields were retained during curation; "
             "the processed dataset is openly available."
