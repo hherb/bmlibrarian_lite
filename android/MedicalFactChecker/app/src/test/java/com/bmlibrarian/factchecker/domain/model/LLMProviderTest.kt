@@ -37,7 +37,7 @@ class LLMProviderTest {
         val provider = LLMProvider.fromId("anthropic")
 
         assertNotNull(provider)
-        assertEquals("Anthropic", provider?.displayName)
+        assertEquals("Anthropic (Claude)", provider?.displayName)
         assertTrue(provider?.usesAnthropicFormat == true)
     }
 
@@ -113,8 +113,10 @@ class LLMProviderTest {
     }
 
     @Test
-    fun `Anthropic does not support model fetching`() {
-        assertFalse(LLMProvider.ANTHROPIC.supportsModelFetching)
+    fun `Anthropic supports model fetching`() {
+        // Phase 5 (Dynamic Model Fetching) added fetchAnthropicModels(); Anthropic
+        // now supports listing available models like the other cloud providers.
+        assertTrue(LLMProvider.ANTHROPIC.supportsModelFetching)
     }
 
     // ==================== ALL_PROVIDERS Tests ====================

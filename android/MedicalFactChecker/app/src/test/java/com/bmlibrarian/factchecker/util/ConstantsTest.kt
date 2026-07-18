@@ -121,10 +121,15 @@ class ConstantsTest {
 
     @Test
     fun `LLM max tokens have sensible hierarchy`() {
-        // Query is simple, should be smallest
+        // Query (512, matches iOS) and scoring are the small-budget tasks;
+        // citation and report need more room.
         assertTrue(
-            "Query tokens should be less than scoring",
-            Constants.LLM_QUERY_MAX_TOKENS <= Constants.LLM_SCORING_MAX_TOKENS
+            "Query tokens should not exceed citation tokens",
+            Constants.LLM_QUERY_MAX_TOKENS <= Constants.LLM_CITATION_MAX_TOKENS
+        )
+        assertTrue(
+            "Scoring tokens should not exceed citation tokens",
+            Constants.LLM_SCORING_MAX_TOKENS <= Constants.LLM_CITATION_MAX_TOKENS
         )
 
         // Report is complex, should be largest
