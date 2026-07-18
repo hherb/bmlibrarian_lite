@@ -8,6 +8,26 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Android data-availability classifier, Slice 1** (2026-07-18, #116): the pure
+  Kotlin port of the canonical (Python/Swift) data-availability classifier, in a
+  new package `com.bmlibrarian.factchecker.domain.transparency` —
+  `DataDisclosureLevel`, `DataAvailabilityResult`, `RegexHelper`,
+  `DataRepositoryPatterns`, `DataAvailabilityAnalyzer`. Pattern lists are
+  byte-identical to the merged #113 canonical (the three `(?<!not )` full-open
+  affirmations and the `(?:\w+ )?`-broadened refusals included), so a statement
+  classifies to the same `DataDisclosureLevel` + restriction labels on Android,
+  Python, and Swift. 42 mirrored JUnit4 tests (incl. the two negation guards);
+  no network/UI/Room/DI. Later slices (COI, scorer + risk indicators,
+  funding/trial, JATS extraction, Room + `DocumentCard` UI) tracked in #116.
+  This branch also (a) fixed a **pre-existing** non-exhaustive-`when` compile
+  error in `ReportUiEventTest.kt` (`NavigateToFullText`) that stopped the whole
+  Android test module from compiling on master, and (b) updated 5 pre-existing
+  stale tests to intentional shipped values ("Anthropic (Claude)",
+  `ANTHROPIC.supportsModelFetching`, gpt-5.2 default, query=512 iOS-parity token
+  hierarchy). Fixing the compile error unmasked 7 further pre-existing failures
+  (PubMedServiceTest ×6, LLMServiceTest ×1) — unrelated to transparency, lodged
+  as **#119**. Spec + plan:
+  `docs/superpowers/{specs,plans}/2026-07-17-android-data-availability-classifier*`.
 - **Privacy/legal open-data false positive fixed** (2026-07-17, closes #113):
   the #104 privacy/legal tokens (`\bprivacy\b`/`\bhipaa\b`/…) fired standalone,
   so a genuinely-open statement that named no *recognized* repository but
@@ -174,8 +194,10 @@ its slice has landed; add a new section when handing off new work.
 - **Automated Swift↔Python parity drift guard** (issue #105) — parity is
   currently maintained by convention plus mirrored per-platform tests. A shared
   language-neutral fixture asserted on both sides would catch silent divergence.
-- **Android transparency classifier** — Android still has no data-availability
-  classifier or risk-indicator implementation to align (as of 2026-07-17).
+- **Android transparency classifier (multi-slice, #116)** — Slice 1 (the pure
+  data-availability classifier) has **landed** (see Recently landed). Remaining
+  slices tracked in #116: COI analyzer, scorer + risk indicators, funding/trial
+  (network), JATS statement extraction, Room persistence + `DocumentCard` UI.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`,
   low/medium/high) has no Python counterpart and was left unchanged. Revisit
   only if a canonical cross-platform risk-level definition is introduced.
