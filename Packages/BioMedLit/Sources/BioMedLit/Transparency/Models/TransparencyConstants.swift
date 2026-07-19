@@ -448,11 +448,30 @@ public enum DataRepositoryPatterns {
     /// were openly shared" stays `.fullOpen`), which would under-report
     /// genuinely open data.
     ///
+    /// Issue #125 widened the negator alternation with `no`, `neither` and
+    /// `nor` ("data are no longer openly available", "by no means openly
+    /// available", "posted nor openly available" all escaped the #117
+    /// alternation and reported `.fullOpen`). The worked false-positive shapes
+    /// stay open: "no restrictions apply and data are openly available"
+    /// (window + barrier), "no embargo; data are openly available" (`\w+`
+    /// cannot cross punctuation), "no limits on these openly available
+    /// records" (window bound).
+    ///
+    /// The last two patterns cover the two-token "neither … nor" form, which a
+    /// single-token alternation cannot express ("neither the raw nor the
+    /// processed data are openly available"). Their windows are wider than the
+    /// single-token `{0,2}` because each must span a conjunct noun phrase —
+    /// `{0,3}` words to "nor", `{0,4}` from "nor" to the affirmation — and
+    /// both negators are unambiguous, so the widening does not reopen the
+    /// far-negator hole.
+    ///
     /// Byte-identical to Python's `NEGATED_OPENNESS_PATTERNS` and the Android
     /// equivalent.
     public static let negatedOpennessPatterns: [String] = [
-        #"\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+(?:openly|freely) (?:available|shared|accessible)"#,
-        #"\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+available (?:in|within|as|via|through) (?:the )?supplement"#,
+        #"\b(?:not|no|never|cannot|neither|nor)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+(?:openly|freely) (?:available|shared|accessible)"#,
+        #"\b(?:not|no|never|cannot|neither|nor)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+available (?:in|within|as|via|through) (?:the )?supplement"#,
+        #"\bneither\b(?:\s+(?!and\b|but\b|or\b)\w+){0,3}\s+nor\b(?:\s+(?!and\b|but\b|or\b)\w+){0,4}\s+(?:openly|freely) (?:available|shared|accessible)"#,
+        #"\bneither\b(?:\s+(?!and\b|but\b|or\b)\w+){0,3}\s+nor\b(?:\s+(?!and\b|but\b|or\b)\w+){0,4}\s+available (?:in|within|as|via|through) (?:the )?supplement"#,
     ]
 
     /// Strong-refusal indicators that escalate a statement to `.notAvailable`.
@@ -523,6 +542,8 @@ public enum DataRepositoryPatterns {
         #"\bpatient consent\b"#: "Patient consent required",
         negatedOpennessPatterns[0]: "Data not openly available",
         negatedOpennessPatterns[1]: "Data not openly available",
+        negatedOpennessPatterns[2]: "Data not openly available",
+        negatedOpennessPatterns[3]: "Data not openly available",
         #"(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding"#:
             "Data restricted to named collaboration",
         #"not be released.*(?:data custodians?|directly to)"#:

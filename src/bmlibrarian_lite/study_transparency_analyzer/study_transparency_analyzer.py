@@ -304,12 +304,33 @@ GOVERNMENT_PATTERNS = [
 # ("data were not embargoed **and** were openly shared" stays FULL_OPEN), which
 # would under-report genuinely open data.
 #
+# Issue #125 widened the negator alternation with ``no``, ``neither`` and
+# ``nor`` ("data are no longer openly available", "by no means openly
+# available", "posted nor openly available" all escaped the #117 alternation
+# and reported FULL_OPEN). The worked false-positive shapes stay open: "no
+# restrictions apply and data are openly available" (window + barrier), "no
+# embargo; data are openly available" (``\w+`` cannot cross punctuation),
+# "no limits on these openly available records" (window bound).
+#
+# The last two patterns cover the two-token "neither … nor" form, which a
+# single-token alternation cannot express ("neither the raw nor the processed
+# data are openly available"). Their windows are wider than the single-token
+# ``{0,2}`` because each must span a conjunct noun phrase — ``{0,3}`` words to
+# "nor", ``{0,4}`` from "nor" to the affirmation — and both negators are
+# unambiguous, so the widening does not reopen the far-negator hole.
+#
 # Mirrors the Swift ``DataRepositoryPatterns.negatedOpennessPatterns`` and the
 # Android equivalent; the pattern strings are byte-identical on all three.
 NEGATED_OPENNESS_PATTERNS = [
-    r'\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+'
+    r'\b(?:not|no|never|cannot|neither|nor)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+'
     r'(?:openly|freely) (?:available|shared|accessible)',
-    r'\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+'
+    r'\b(?:not|no|never|cannot|neither|nor)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+'
+    r'available (?:in|within|as|via|through) (?:the )?supplement',
+    r'\bneither\b(?:\s+(?!and\b|but\b|or\b)\w+){0,3}\s+nor\b'
+    r'(?:\s+(?!and\b|but\b|or\b)\w+){0,4}\s+'
+    r'(?:openly|freely) (?:available|shared|accessible)',
+    r'\bneither\b(?:\s+(?!and\b|but\b|or\b)\w+){0,3}\s+nor\b'
+    r'(?:\s+(?!and\b|but\b|or\b)\w+){0,4}\s+'
     r'available (?:in|within|as|via|through) (?:the )?supplement',
 ]
 
@@ -1127,6 +1148,8 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
         r'\bpatient consent\b': "Patient consent required",
         NEGATED_OPENNESS_PATTERNS[0]: "Data not openly available",
         NEGATED_OPENNESS_PATTERNS[1]: "Data not openly available",
+        NEGATED_OPENNESS_PATTERNS[2]: "Data not openly available",
+        NEGATED_OPENNESS_PATTERNS[3]: "Data not openly available",
         r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding':
             "Data restricted to named collaboration",
         r'not be released.*(?:data custodians?|directly to)':

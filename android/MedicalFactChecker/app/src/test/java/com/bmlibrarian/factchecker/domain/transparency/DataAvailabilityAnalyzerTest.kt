@@ -208,26 +208,122 @@ class DataAvailabilityAnalyzerTest {
         // same statement leaves a genuine affirmation intact (#117).
         //
         // The statement must contain a token the patterns actually treat as a
-        // negator — not, never or cannot — for the bound to be under test. A
-        // sentence negated only by "No" matches no pattern at any window size
-        // and would pass with the bound deleted entirely. The first case keeps a
-        // real negator seven unpunctuated words from the affirmation, so it
-        // fails if {0,2} is widened; do not reword it in a way that inserts
-        // punctuation between the two, because \w+ cannot cross punctuation and
-        // the bound would stop being what holds the line.
+        // negator — since #125 that is not, no, never, cannot, neither or nor —
+        // for the bound to be under test. The first case keeps a real negator
+        // seven unpunctuated words from the affirmation, so it fails if {0,2}
+        // is widened; do not reword it in a way that inserts punctuation
+        // between the two, because \w+ cannot cross punctuation and the bound
+        // would stop being what holds the line.
         val farNegator = analyze(
             "Reuse is not limited by any licence because these datasets " +
                 "are openly available.",
         )
         assertEquals(DataDisclosureLevel.FULL_OPEN, farNegator.disclosureLevel)
 
-        // Broader regression coverage: "No" is not in the negator alternation,
-        // so an affirmation later in the statement survives untouched.
+        // Broader regression coverage: "no" negates within the same bounded
+        // window as the other negators (#125), so an affirmation two clauses
+        // away survives: the window bound and the semicolon (which \w+ cannot
+        // cross) both hold the line here.
         val result = analyze(
             "No identifiable fields were retained during curation; " +
                 "the processed dataset is openly available.",
         )
         assertEquals(DataDisclosureLevel.FULL_OPEN, result.disclosureLevel)
+    }
+
+    // ==================== #125 "no" / "neither … nor" negators ====================
+
+    @Test
+    fun `no and neither-nor negators do not trigger full open`() {
+        // The #117 negator alternation was (?:not|never|cannot): "no" was
+        // absent and "neither … nor" is a two-token negator a single-token
+        // alternation cannot express, so "no longer openly available", "by no
+        // means openly available" and "neither the raw nor the processed data
+        // are openly available" all still reported FULL_OPEN — the same
+        // dangerous over-stating-openness direction #117 closed for detached
+        // negators (#125). The alternation now carries no/neither/nor, and two
+        // dedicated patterns cover the two-token "neither … nor" form with
+        // bounded windows ({0,3} words to "nor", {0,4} to the affirmation).
+        // Mirrors Python's test_no_and_neither_nor_negators_do_not_trigger_full_open.
+        val noLonger = analyze("Data are no longer openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, noLonger.disclosureLevel)
+        assertEquals(listOf("Data not openly available"), noLonger.restrictions)
+
+        val freely = analyze("Data are no longer freely available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, freely.disclosureLevel)
+
+        val byNoMeans = analyze("The dataset is by no means openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, byNoMeans.disclosureLevel)
+
+        val bareNo = analyze("No data are openly available for this study.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, bareNo.disclosureLevel)
+
+        // Single-token "neither" (no "nor" clause): held by the alternation
+        // entry, not the two-token patterns.
+        val bareNeither = analyze("Neither dataset is openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, bareNeither.disclosureLevel)
+
+        val neitherNor = analyze("Neither the raw nor the processed data are openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, neitherNor.disclosureLevel)
+        assertEquals(listOf("Data not openly available"), neitherNor.restrictions)
+
+        val neitherNorLong = analyze(
+            "Neither the raw data nor the processed data are openly available.",
+        )
+        assertEquals(DataDisclosureLevel.RESTRICTED, neitherNorLong.disclosureLevel)
+
+        val trailingNor = analyze("The data are not publicly posted nor openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, trailingNor.disclosureLevel)
+
+        val noSupplement = analyze("Data are no longer available in the supplementary materials.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, noSupplement.disclosureLevel)
+
+        val neitherSupplement = analyze("Neither the code nor the data are available in the supplement.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, neitherSupplement.disclosureLevel)
+    }
+
+    @Test
+    fun `no negator does not suppress genuine affirmations`() {
+        // False-positive shapes worked through before adding "no" to the
+        // alternation (#125); each pins the guard that holds it: the
+        // (?!and\b|but\b|or\b) barrier, punctuation (\w+ cannot cross ; or ,),
+        // or the window bound ({0,2} single-token, {0,4} after "nor").
+        // Mirrors Python's test_no_negator_does_not_suppress_genuine_affirmations.
+
+        // Barrier pin (single-token "no"): "and" occupies the window slot
+        // immediately before the affirmation, so this flips to RESTRICTED if
+        // (?!and\b|but\b|or\b) is dropped.
+        val noBarrier = analyze("Data are subject to no embargo and openly available.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, noBarrier.disclosureLevel)
+
+        // Window pin (broader): the conjunction and affirmation sit outside
+        // the two-word window entirely.
+        val noRestrictions = analyze("No restrictions apply and data are openly available.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, noRestrictions.disclosureLevel)
+
+        // Punctuation pin: the semicolon stops the \w+ chain.
+        val noEmbargo = analyze("There is no embargo; the data are openly available.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, noEmbargo.disclosureLevel)
+
+        // Window pin (single-token "no"): three intervening words.
+        val noLimits = analyze("There are no limits on these openly available records.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, noLimits.disclosureLevel)
+
+        // Barrier pin (two-token form): "and" occupies the window slot
+        // immediately before the affirmation, so this flips to RESTRICTED if
+        // the barrier is dropped from the "neither … nor" patterns.
+        val neitherBarrier = analyze(
+            "The data are neither embargoed nor restricted and openly available to all.",
+        )
+        assertEquals(DataDisclosureLevel.FULL_OPEN, neitherBarrier.disclosureLevel)
+
+        // Window pin (two-token form): exactly five unpunctuated words between
+        // "nor" and the affirmation — one past the {0,4} bound — so this flips
+        // to RESTRICTED if the bound is widened even one step to {0,5}.
+        val neitherWindow = analyze(
+            "Neither the sponsor nor the funder restricted access to openly available datasets.",
+        )
+        assertEquals(DataDisclosureLevel.FULL_OPEN, neitherWindow.disclosureLevel)
     }
 
     // ==================== privacy/legal restricted-tier (#104) ====================

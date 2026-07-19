@@ -497,10 +497,9 @@ class TestAnalyzeDataAvailability:
         negation in the same statement leaves a genuine affirmation intact.
 
         The statement must contain a token the patterns actually treat as a
-        negator — ``not``, ``never`` or ``cannot`` — for the bound to be under
-        test. A sentence negated only by "No" matches no pattern at any window
-        size and would pass with the bound deleted entirely. The first case
-        below keeps a real negator seven unpunctuated words from the
+        negator — since #125 that is ``not``, ``no``, ``never``, ``cannot``,
+        ``neither`` or ``nor`` — for the bound to be under test. The first
+        case below keeps a real negator seven unpunctuated words from the
         affirmation, so it fails if ``{0,2}`` is widened; do not reword it in a
         way that inserts punctuation between the two, because ``\w+`` cannot
         cross punctuation and the bound would stop being what holds the line.
@@ -513,13 +512,140 @@ class TestAnalyzeDataAvailability:
         )
         assert far_negator.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
-        # Broader regression coverage: "No" is not in the negator alternation,
-        # so an affirmation later in the statement survives untouched.
+        # Broader regression coverage: "no" negates within the same bounded
+        # window as the other negators (#125), so an affirmation two clauses
+        # away survives: the window bound and the semicolon (which `\w+`
+        # cannot cross) both hold the line here.
         result = analyze_data_availability(
             "No identifiable fields were retained during curation; "
             "the processed dataset is openly available."
         )
         assert result.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+    def test_no_and_neither_nor_negators_do_not_trigger_full_open(self) -> None:
+        r"""Statements negated by "no", "nor" or "neither … nor" must not be FULL_OPEN (#125).
+
+        The #117 negator alternation was ``(?:not|never|cannot)``: "no" was
+        absent and "neither … nor" is a two-token negator a single-token
+        alternation cannot express, so "no longer openly available", "by no
+        means openly available" and "neither the raw nor the processed data
+        are openly available" all still reported the study as fully open —
+        the same dangerous over-stating-openness direction #117 closed for
+        detached negators. The alternation now carries ``no``, ``neither``
+        and ``nor``, and two dedicated patterns cover the two-token
+        "neither … nor" form with bounded windows ({0,3} words to "nor",
+        {0,4} words to the affirmation).
+        """
+        no_longer = analyze_data_availability("Data are no longer openly available.")
+        assert no_longer.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert no_longer.restrictions == ["Data not openly available"]
+
+        freely = analyze_data_availability("Data are no longer freely available.")
+        assert freely.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        by_no_means = analyze_data_availability(
+            "The dataset is by no means openly available."
+        )
+        assert by_no_means.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        bare_no = analyze_data_availability(
+            "No data are openly available for this study."
+        )
+        assert bare_no.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        # Single-token "neither" (no "nor" clause): held by the alternation
+        # entry, not the two-token patterns.
+        bare_neither = analyze_data_availability(
+            "Neither dataset is openly available."
+        )
+        assert bare_neither.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        neither_nor = analyze_data_availability(
+            "Neither the raw nor the processed data are openly available."
+        )
+        assert neither_nor.disclosure_level == DataDisclosureLevel.RESTRICTED
+        assert neither_nor.restrictions == ["Data not openly available"]
+
+        neither_nor_long = analyze_data_availability(
+            "Neither the raw data nor the processed data are openly available."
+        )
+        assert neither_nor_long.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        trailing_nor = analyze_data_availability(
+            "The data are not publicly posted nor openly available."
+        )
+        assert trailing_nor.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        no_supplement = analyze_data_availability(
+            "Data are no longer available in the supplementary materials."
+        )
+        assert no_supplement.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+        neither_supplement = analyze_data_availability(
+            "Neither the code nor the data are available in the supplement."
+        )
+        assert neither_supplement.disclosure_level == DataDisclosureLevel.RESTRICTED
+
+    def test_no_negator_does_not_suppress_genuine_affirmations(self) -> None:
+        r"""The "no"/"neither … nor" additions must not reach real affirmations (#125).
+
+        These are the false-positive shapes worked through before adding
+        ``no`` to the alternation; each pins the guard that holds it:
+
+        - conjunction barrier: ``(?!and\b|but\b|or\b)`` stops the scope at a
+          coordinating conjunction the negator does not govern;
+        - punctuation: ``\w+`` cannot cross ``;`` or ``,``, so a negation in
+          an earlier clause cannot suppress a later affirmation;
+        - window bound: at most two intervening words for single-token
+          negators, {0,4} after "nor" for the two-token form.
+        """
+        # Barrier pin (single-token "no"): "and" occupies the window slot
+        # immediately before the affirmation, so this flips to RESTRICTED if
+        # `(?!and\b|but\b|or\b)` is dropped. (In "no restrictions apply and
+        # data are openly available" the conjunction sits at the third slot,
+        # so the {0,2} bound holds it and the barrier is never consulted —
+        # that shape pins nothing; see the #117 window test for the trap.)
+        no_barrier = analyze_data_availability(
+            "Data are subject to no embargo and openly available."
+        )
+        assert no_barrier.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Window pin (broader): the conjunction and affirmation sit outside
+        # the two-word window entirely.
+        no_restrictions = analyze_data_availability(
+            "No restrictions apply and data are openly available."
+        )
+        assert no_restrictions.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Punctuation pin: the semicolon stops the `\w+` chain.
+        no_embargo = analyze_data_availability(
+            "There is no embargo; the data are openly available."
+        )
+        assert no_embargo.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Window pin (single-token "no"): three intervening words.
+        no_limits = analyze_data_availability(
+            "There are no limits on these openly available records."
+        )
+        assert no_limits.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Barrier pin (two-token form): "and" occupies the window slot
+        # immediately before the affirmation, so this flips to RESTRICTED if
+        # the barrier is dropped from the "neither … nor" patterns.
+        neither_barrier = analyze_data_availability(
+            "The data are neither embargoed nor restricted and openly "
+            "available to all."
+        )
+        assert neither_barrier.disclosure_level == DataDisclosureLevel.FULL_OPEN
+
+        # Window pin (two-token form): exactly five unpunctuated words between
+        # "nor" and the affirmation — one past the {0,4} bound — so this flips
+        # to RESTRICTED if the bound is widened even one step to {0,5}.
+        neither_window = analyze_data_availability(
+            "Neither the sponsor nor the funder restricted access to "
+            "openly available datasets."
+        )
+        assert neither_window.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
 
 class TestCalculateTransparencyScore:

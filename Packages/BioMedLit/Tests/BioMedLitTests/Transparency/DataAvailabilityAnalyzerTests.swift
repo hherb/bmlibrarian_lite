@@ -400,9 +400,8 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
     /// negation in the same statement leaves a genuine affirmation intact.
     ///
     /// The statement must contain a token the patterns actually treat as a
-    /// negator — `not`, `never` or `cannot` — for the bound to be under test. A
-    /// sentence negated only by "No" matches no pattern at any window size and
-    /// would pass with the bound deleted entirely. The first case below keeps a
+    /// negator — since #125 that is `not`, `no`, `never`, `cannot`, `neither`
+    /// or `nor` — for the bound to be under test. The first case below keeps a
     /// real negator seven unpunctuated words from the affirmation, so it fails
     /// if `{0,2}` is widened; do not reword it in a way that inserts punctuation
     /// between the two, because `\w+` cannot cross punctuation and the bound
@@ -418,13 +417,141 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         )
         XCTAssertEqual(farNegator.disclosureLevel, .fullOpen)
 
-        // Broader regression coverage: "No" is not in the negator alternation,
-        // so an affirmation later in the statement survives untouched.
+        // Broader regression coverage: "no" negates within the same bounded
+        // window as the other negators (#125), so an affirmation two clauses
+        // away survives: the window bound and the semicolon (which `\w+`
+        // cannot cross) both hold the line here.
         let result = DataAvailabilityAnalyzer.analyze(
             statement: "No identifiable fields were retained during curation; "
                 + "the processed dataset is openly available."
         )
         XCTAssertEqual(result.disclosureLevel, .fullOpen)
+    }
+
+    /// Statements negated by "no", "nor" or "neither … nor" must not be `.fullOpen` (#125).
+    ///
+    /// The #117 negator alternation was `(?:not|never|cannot)`: "no" was
+    /// absent and "neither … nor" is a two-token negator a single-token
+    /// alternation cannot express, so "no longer openly available", "by no
+    /// means openly available" and "neither the raw nor the processed data
+    /// are openly available" all still reported the study as fully open — the
+    /// same dangerous over-stating-openness direction #117 closed for
+    /// detached negators. The alternation now carries `no`, `neither` and
+    /// `nor`, and two dedicated patterns cover the two-token "neither … nor"
+    /// form with bounded windows ({0,3} words to "nor", {0,4} words to the
+    /// affirmation).
+    ///
+    /// Mirrors Python's `test_no_and_neither_nor_negators_do_not_trigger_full_open`.
+    func testNoAndNeitherNorNegatorsDoNotTriggerFullOpen() {
+        let noLonger = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are no longer openly available."
+        )
+        XCTAssertEqual(noLonger.disclosureLevel, .restricted)
+        XCTAssertEqual(noLonger.restrictions, ["Data not openly available"])
+
+        let freely = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are no longer freely available."
+        )
+        XCTAssertEqual(freely.disclosureLevel, .restricted)
+
+        let byNoMeans = DataAvailabilityAnalyzer.analyze(
+            statement: "The dataset is by no means openly available."
+        )
+        XCTAssertEqual(byNoMeans.disclosureLevel, .restricted)
+
+        let bareNo = DataAvailabilityAnalyzer.analyze(
+            statement: "No data are openly available for this study."
+        )
+        XCTAssertEqual(bareNo.disclosureLevel, .restricted)
+
+        // Single-token "neither" (no "nor" clause): held by the alternation
+        // entry, not the two-token patterns.
+        let bareNeither = DataAvailabilityAnalyzer.analyze(
+            statement: "Neither dataset is openly available."
+        )
+        XCTAssertEqual(bareNeither.disclosureLevel, .restricted)
+
+        let neitherNor = DataAvailabilityAnalyzer.analyze(
+            statement: "Neither the raw nor the processed data are openly available."
+        )
+        XCTAssertEqual(neitherNor.disclosureLevel, .restricted)
+        XCTAssertEqual(neitherNor.restrictions, ["Data not openly available"])
+
+        let neitherNorLong = DataAvailabilityAnalyzer.analyze(
+            statement: "Neither the raw data nor the processed data are openly available."
+        )
+        XCTAssertEqual(neitherNorLong.disclosureLevel, .restricted)
+
+        let trailingNor = DataAvailabilityAnalyzer.analyze(
+            statement: "The data are not publicly posted nor openly available."
+        )
+        XCTAssertEqual(trailingNor.disclosureLevel, .restricted)
+
+        let noSupplement = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are no longer available in the supplementary materials."
+        )
+        XCTAssertEqual(noSupplement.disclosureLevel, .restricted)
+
+        let neitherSupplement = DataAvailabilityAnalyzer.analyze(
+            statement: "Neither the code nor the data are available in the supplement."
+        )
+        XCTAssertEqual(neitherSupplement.disclosureLevel, .restricted)
+    }
+
+    /// The "no"/"neither … nor" additions must not reach real affirmations (#125).
+    ///
+    /// These are the false-positive shapes worked through before adding `no`
+    /// to the alternation; each pins the guard that holds it: the
+    /// `(?!and\b|but\b|or\b)` barrier, punctuation (`\w+` cannot cross `;` or
+    /// `,`), or the window bound ({0,2} for single-token negators, {0,4}
+    /// after "nor" for the two-token form).
+    ///
+    /// Mirrors Python's `test_no_negator_does_not_suppress_genuine_affirmations`.
+    func testNoNegatorDoesNotSuppressGenuineAffirmations() {
+        // Barrier pin (single-token "no"): "and" occupies the window slot
+        // immediately before the affirmation, so this flips to `.restricted`
+        // if `(?!and\b|but\b|or\b)` is dropped.
+        let noBarrier = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are subject to no embargo and openly available."
+        )
+        XCTAssertEqual(noBarrier.disclosureLevel, .fullOpen)
+
+        // Window pin (broader): the conjunction and affirmation sit outside
+        // the two-word window entirely.
+        let noRestrictions = DataAvailabilityAnalyzer.analyze(
+            statement: "No restrictions apply and data are openly available."
+        )
+        XCTAssertEqual(noRestrictions.disclosureLevel, .fullOpen)
+
+        // Punctuation pin: the semicolon stops the `\w+` chain.
+        let noEmbargo = DataAvailabilityAnalyzer.analyze(
+            statement: "There is no embargo; the data are openly available."
+        )
+        XCTAssertEqual(noEmbargo.disclosureLevel, .fullOpen)
+
+        // Window pin (single-token "no"): three intervening words.
+        let noLimits = DataAvailabilityAnalyzer.analyze(
+            statement: "There are no limits on these openly available records."
+        )
+        XCTAssertEqual(noLimits.disclosureLevel, .fullOpen)
+
+        // Barrier pin (two-token form): "and" occupies the window slot
+        // immediately before the affirmation, so this flips to `.restricted`
+        // if the barrier is dropped from the "neither … nor" patterns.
+        let neitherBarrier = DataAvailabilityAnalyzer.analyze(
+            statement: "The data are neither embargoed nor restricted and openly "
+                + "available to all."
+        )
+        XCTAssertEqual(neitherBarrier.disclosureLevel, .fullOpen)
+
+        // Window pin (two-token form): exactly five unpunctuated words between
+        // "nor" and the affirmation — one past the {0,4} bound — so this flips
+        // to `.restricted` if the bound is widened even one step to {0,5}.
+        let neitherWindow = DataAvailabilityAnalyzer.analyze(
+            statement: "Neither the sponsor nor the funder restricted access to "
+                + "openly available datasets."
+        )
+        XCTAssertEqual(neitherWindow.disclosureLevel, .fullOpen)
     }
 
     /// Test analyzing data sharing agreement requirement.
