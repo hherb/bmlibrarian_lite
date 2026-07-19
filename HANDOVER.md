@@ -177,3 +177,28 @@ its slice has landed; add a new section when handing off new work.
   errors** (baseline at time of writing: 135 ruff findings on
   `study_transparency_analyzer/` + its test file counted via
   `--output-format concise | wc -l`, 677 mypy errors across `src/`).
+
+### Xcode Cloud contract (macOS ships from the multiplatform project)
+
+Since the standalone macOS app was retired in `c32d707`, Xcode Cloud archives
+`ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`, scheme
+`MedicalFactChecker`. Two things silently break that build, and neither shows up
+locally — verify against a **fresh clone**, which is all Xcode Cloud gets:
+
+- **No Swift package reference may point outside this repository.** A stray
+  `XCLocalSwiftPackageReference` to a sibling checkout
+  (`../../../locumtracker/…`) failed package resolution before any compilation.
+  It resolves fine on a dev machine where the sibling exists, so local builds
+  stay green while every cloud build dies.
+- **`MedicalFactChecker.xcscheme` must stay shared**
+  (`…xcodeproj/xcshareddata/xcschemes/`). Xcode Cloud can only select shared
+  schemes; the autocreated per-user scheme is invisible to it.
+
+Both invariants are enforced on every PR by
+`.github/workflows/xcode-project-guards.yml`. Reproduce a cloud build with:
+
+```bash
+git clone <repo> /tmp/x && cd /tmp/x/ios/MedicalFactChecker && xcodebuild \
+  -scheme MedicalFactChecker -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO archive
+```
