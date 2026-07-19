@@ -1,4 +1,6 @@
 name: Xcode project guards
+permissions:
+  contents: read
 
 # Enforces the Xcode Cloud build contract documented in HANDOVER.md:
 # no Swift package reference may point outside this repository, and the
