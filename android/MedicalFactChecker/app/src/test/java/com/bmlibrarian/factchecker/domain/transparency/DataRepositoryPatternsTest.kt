@@ -28,14 +28,15 @@ class DataRepositoryPatternsTest {
         assertTrue(p.contains("\\bhipaa\\b"))
         assertTrue(p.contains("\\bprivacy\\b"))
         assertTrue(p.contains("\\bpatient consent\\b"))
-        // The two #117 negated-openness patterns are appended to the restricted
-        // tier so a bare negated affirmation carries an explicit label. They must
-        // be present here, which also pins that `negatedOpennessPatterns` is
-        // declared *before* `restrictedPatterns`: Kotlin initialises `object`
-        // properties in declaration order, so a forward reference would silently
-        // append nothing and leave the #117 over-match unfixed.
+        // The four #117/#125 negated-openness patterns are appended to the
+        // restricted tier so a bare negated affirmation carries an explicit
+        // label. They must be present here, which also pins that
+        // `negatedOpennessPatterns` is declared *before* `restrictedPatterns`:
+        // Kotlin initialises `object` properties in declaration order, so a
+        // forward reference would silently append nothing and leave the
+        // #117/#125 over-match unfixed.
         assertTrue(p.containsAll(DataRepositoryPatterns.negatedOpennessPatterns))
-        assertEquals(25, p.size)
+        assertEquals(27, p.size)
     }
 
     @Test
