@@ -11,6 +11,14 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/set_version.py` now updates the `**Current version:**` line in
+  `CLAUDE.md` and promotes the `CHANGELOG.md` `[Unreleased]` section into a
+  dated release section, rewriting the compare links. Pass `--skip-changelog`
+  to bump versions without touching the changelog.
+- Test coverage for `scripts/set_version.py` (`tests/test_set_version.py`).
+
 ## [0.4.0] - 2026-07-19
 
 ### Added

@@ -530,20 +530,28 @@ This updates:
 - `src/bmlibrarian_lite/__init__.py` (`__version__`)
 - `bmll.py` (`__version__`)
 - `bmlibrarian_lite.spec` (3 locations: BUNDLE version, CFBundleShortVersionString, CFBundleVersion)
-
-The script does not touch `CLAUDE.md` (`**Current version:**`) or `CHANGELOG.md` —
-update both by hand.
+- `CLAUDE.md` (`**Current version:**`)
+- `CHANGELOG.md` (promotes `[Unreleased]` — see below)
 
 ### Changelog
 
 `CHANGELOG.md` is the canonical release history ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-format). Before tagging:
+format). Add entries under `## [Unreleased]` as you merge work, grouped under
+Added / Changed / Deprecated / Removed / Fixed / Security.
 
-1. Move entries from `## [Unreleased]` into a new `## [X.Y.Z] - YYYY-MM-DD` section,
-   grouped under Added / Changed / Deprecated / Removed / Fixed / Security.
-2. Add the version's compare link at the bottom and repoint `[Unreleased]`.
-3. Reuse the section as the GitHub release body:
-   `gh release create X.Y.Z --title "vX.Y.Z" --notes-file <notes> dist/bmlibrarian_lite-X.Y.Z*`
+At release time `set_version.py` promotes that section for you: it inserts a
+dated `## [X.Y.Z] - YYYY-MM-DD` heading, moves the accumulated entries beneath
+it, leaves `[Unreleased]` empty for the next cycle, and rewrites the compare
+links at the bottom of the file. It warns (but still stamps) if `[Unreleased]`
+is empty, and is a no-op if the version already has a section. Pass
+`--skip-changelog` to bump versions without touching it.
+
+Reuse the new section verbatim as the GitHub release body:
+
+```bash
+awk '/^## \[X.Y.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/notes.md
+gh release create X.Y.Z --title "vX.Y.Z" --notes-file /tmp/notes.md dist/bmlibrarian_lite-X.Y.Z*
+```
 
 Releases 0.2.0 and 0.3.0 also have standalone `RELEASE_NOTES_X.Y.Z.md` files,
 linked from their changelog sections. That per-version file pattern is retired —
