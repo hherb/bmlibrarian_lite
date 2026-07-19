@@ -638,12 +638,12 @@ class TestAnalyzeDataAvailability:
         )
         assert neither_barrier.disclosure_level == DataDisclosureLevel.FULL_OPEN
 
-        # Window pin (two-token form): five unpunctuated words between "nor"
-        # and the affirmation, so this flips to RESTRICTED if the {0,4}
-        # bound is widened past the phrase length.
+        # Window pin (two-token form): exactly five unpunctuated words between
+        # "nor" and the affirmation — one past the {0,4} bound — so this flips
+        # to RESTRICTED if the bound is widened even one step to {0,5}.
         neither_window = analyze_data_availability(
-            "Neither the sponsor nor the funder restricted access to the "
-            "openly available dataset."
+            "Neither the sponsor nor the funder restricted access to "
+            "openly available datasets."
         )
         assert neither_window.disclosure_level == DataDisclosureLevel.FULL_OPEN
 

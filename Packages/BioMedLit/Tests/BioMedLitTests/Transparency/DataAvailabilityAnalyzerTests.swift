@@ -544,12 +544,12 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
         )
         XCTAssertEqual(neitherBarrier.disclosureLevel, .fullOpen)
 
-        // Window pin (two-token form): five unpunctuated words between "nor"
-        // and the affirmation, so this flips to `.restricted` if the {0,4}
-        // bound is widened past the phrase length.
+        // Window pin (two-token form): exactly five unpunctuated words between
+        // "nor" and the affirmation — one past the {0,4} bound — so this flips
+        // to `.restricted` if the bound is widened even one step to {0,5}.
         let neitherWindow = DataAvailabilityAnalyzer.analyze(
-            statement: "Neither the sponsor nor the funder restricted access to the "
-                + "openly available dataset."
+            statement: "Neither the sponsor nor the funder restricted access to "
+                + "openly available datasets."
         )
         XCTAssertEqual(neitherWindow.disclosureLevel, .fullOpen)
     }

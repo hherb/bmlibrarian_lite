@@ -34,7 +34,10 @@ its slice has landed; add a new section when handing off new work.
     (the #124-review lesson): a barrier pin needs the conjunction *inside*
     the window immediately before the affirmation; a window pin needs a real
     negator with **no punctuation** before the affirmation (`\w+` cannot
-    cross punctuation, which would otherwise hold the line). The pinned
+    cross punctuation, which would otherwise hold the line), and its word
+    count must sit exactly **one past the bound** so the *first* widening
+    step fails it (the #127-review lesson: the original two-token pin had
+    six intervening words, leaving {0,4}→{0,5} undetected). The pinned
     shapes are documented inline in the three analyzer test files.
   - **Invariant at each `has_unavailability_signal` site:** every list joined
     there must also be reachable from Step 2 or Step 3, else the statement
@@ -50,7 +53,12 @@ its slice has landed; add a new section when handing off new work.
     clause negates a *different* dataset within the window ("openly available
     at Zenodo; no additional data available in the supplement") classifies
     RESTRICTED — same family as the pre-existing `not`-negated supplement
-    behaviour, and errs in the safe (under-stating openness) direction.
+    behaviour, and errs in the safe (under-stating openness) direction. The
+    #127 review probed two more members of the family: "no doubt openly
+    available" (intensifier idiom) and "at no cost openly available"
+    (non-native phrasing) both classify RESTRICTED; the comma'd and
+    conjunction forms ("at no cost, openly…", "at no cost and openly…")
+    stay FULL_OPEN via punctuation and the barrier.
 - **Android PubMed XML parsing** (2026-07-18, #119/PR #122): `parseArticleXml`
   moved off Android's `XmlPullParser` (which throws "not mocked" under plain
   JUnit, and whose exception the broad catch swallowed into an empty result) to

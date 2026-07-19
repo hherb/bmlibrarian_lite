@@ -317,11 +317,11 @@ class DataAvailabilityAnalyzerTest {
         )
         assertEquals(DataDisclosureLevel.FULL_OPEN, neitherBarrier.disclosureLevel)
 
-        // Window pin (two-token form): five unpunctuated words between "nor"
-        // and the affirmation, so this flips to RESTRICTED if the {0,4} bound
-        // is widened past the phrase length.
+        // Window pin (two-token form): exactly five unpunctuated words between
+        // "nor" and the affirmation — one past the {0,4} bound — so this flips
+        // to RESTRICTED if the bound is widened even one step to {0,5}.
         val neitherWindow = analyze(
-            "Neither the sponsor nor the funder restricted access to the openly available dataset.",
+            "Neither the sponsor nor the funder restricted access to openly available datasets.",
         )
         assertEquals(DataDisclosureLevel.FULL_OPEN, neitherWindow.disclosureLevel)
     }
