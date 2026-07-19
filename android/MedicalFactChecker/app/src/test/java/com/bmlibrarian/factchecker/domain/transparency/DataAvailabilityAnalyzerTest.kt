@@ -115,7 +115,10 @@ class DataAvailabilityAnalyzerTest {
         // so these fall through to the normal tiers (#113 review).
         val irb = analyze("Raw data are not openly accessible without IRB approval.")
         assertEquals(DataDisclosureLevel.RESTRICTED, irb.disclosureLevel)
-        assertEquals(listOf("Requires IRB approval"), irb.restrictions)
+        assertEquals(
+            listOf("Requires IRB approval", "Data not openly available"),
+            irb.restrictions,
+        )
 
         val author = analyze("Data are not freely shared; available from the corresponding author.")
         assertEquals(DataDisclosureLevel.RESTRICTED, author.disclosureLevel)
@@ -131,11 +134,100 @@ class DataAvailabilityAnalyzerTest {
         // → NOT_AVAILABLE (#113 review).
         val willNot = analyze("The data will not be openly shared with third parties.")
         assertEquals(DataDisclosureLevel.NOT_AVAILABLE, willNot.disclosureLevel)
-        assertEquals(listOf("Data will not be released"), willNot.restrictions)
+        assertEquals(
+            listOf("Data will not be released", "Data not openly available"),
+            willNot.restrictions,
+        )
 
         val cannot = analyze("Raw data cannot be openly shared.")
         assertEquals(DataDisclosureLevel.NOT_AVAILABLE, cannot.disclosureLevel)
-        assertEquals(listOf("Data cannot be shared"), cannot.restrictions)
+        assertEquals(
+            listOf("Data cannot be shared", "Data not openly available"),
+            cannot.restrictions,
+        )
+    }
+
+    // ==================== #117 detached-negator negation scope ====================
+
+    @Test
+    fun `non-adjacent negator does not trigger full open`() {
+        // The (?<!not ) lookbehind is fixed-width, so an intervening word, an
+        // alternate negator ("never"), doubled whitespace, or a modal outside
+        // the strong-refusal (?:would|will|shall) list all escaped it and
+        // produced a false FULL_OPEN. negatedOpennessPatterns closes the gap
+        // with a forward-matching bounded negation scope (#117).
+        val never = analyze("Data were never openly shared.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, never.disclosureLevel)
+        assertEquals(listOf("Data not openly available"), never.restrictions)
+
+        val intervening = analyze("Data are not currently openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, intervening.disclosureLevel)
+
+        val doubledSpace = analyze("Data are not  openly available.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, doubledSpace.disclosureLevel)
+
+        val could = analyze("The data could not be openly shared.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, could.disclosureLevel)
+
+        val supplement = analyze("Data are not currently available in the supplementary materials.")
+        assertEquals(DataDisclosureLevel.RESTRICTED, supplement.disclosureLevel)
+    }
+
+    @Test
+    fun `negation scope stops at coordinating conjunction`() {
+        // The (?!and\b|but\b|or\b) barrier stops the negation scope reaching
+        // across a conjunction into an affirmation the negator does not govern;
+        // without it the window would under-report genuinely open data (#117).
+        //
+        // The conjunction must fall *inside* the two-word window for this test
+        // to exercise the barrier at all. In "not embargoed and were openly
+        // shared" the affirmation sits three words after the negator, so the
+        // {0,2} bound already blocks it and the barrier is never consulted —
+        // such a sentence passes with the barrier deleted and pins nothing. The
+        // first two cases place the conjunction at the second window slot,
+        // immediately before the affirmation: they are the assertions that fail
+        // if the barrier is removed, and must keep that shape if reworded.
+        val immediateAnd = analyze("Data were not embargoed and openly shared.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, immediateAnd.disclosureLevel)
+
+        val immediateOr = analyze("Data are not restricted or openly available.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, immediateOr.disclosureLevel)
+
+        // Broader regression coverage: realistic phrasings that must stay
+        // FULL_OPEN. These are held by the window bound rather than the barrier.
+        val conjunction = analyze("Data were not embargoed and were openly shared.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, conjunction.disclosureLevel)
+
+        val contrast = analyze("Data are not subject to embargo, but are openly available.")
+        assertEquals(DataDisclosureLevel.FULL_OPEN, contrast.disclosureLevel)
+    }
+
+    @Test
+    fun `negation scope window is bounded`() {
+        // At most two intervening words, so an unrelated earlier negation in the
+        // same statement leaves a genuine affirmation intact (#117).
+        //
+        // The statement must contain a token the patterns actually treat as a
+        // negator — not, never or cannot — for the bound to be under test. A
+        // sentence negated only by "No" matches no pattern at any window size
+        // and would pass with the bound deleted entirely. The first case keeps a
+        // real negator seven unpunctuated words from the affirmation, so it
+        // fails if {0,2} is widened; do not reword it in a way that inserts
+        // punctuation between the two, because \w+ cannot cross punctuation and
+        // the bound would stop being what holds the line.
+        val farNegator = analyze(
+            "Reuse is not limited by any licence because these datasets " +
+                "are openly available.",
+        )
+        assertEquals(DataDisclosureLevel.FULL_OPEN, farNegator.disclosureLevel)
+
+        // Broader regression coverage: "No" is not in the negator alternation,
+        // so an affirmation later in the statement survives untouched.
+        val result = analyze(
+            "No identifiable fields were retained during curation; " +
+                "the processed dataset is openly available.",
+        )
+        assertEquals(DataDisclosureLevel.FULL_OPEN, result.disclosureLevel)
     }
 
     // ==================== privacy/legal restricted-tier (#104) ====================

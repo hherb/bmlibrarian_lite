@@ -8,76 +8,80 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
-- **Android PubMed/LLM unit-test failures fixed** (2026-07-18, closes #119):
-  the 7 pre-existing Android failures that #116's compile fix unmasked
-  (`PubMedServiceTest` ×6, `LLMServiceTest` ×1). Root causes were **not** stale
-  tests:
-  - `PubMedService.parseArticleXml` built its parser via Android's
-    `org.xmlpull.v1.XmlPullParserFactory`, which under plain JUnit comes from the
-    stub `android.jar` and throws `RuntimeException("… not mocked")`. The broad
-    `catch (e) { printStackTrace() }` swallowed it → every parse returned an empty
-    list. **Rewrote `parseArticleXml` to a JAXP SAX parser** (`SAXParserFactory` +
-    new inner `PubMedXmlHandler : DefaultHandler`) — pure-JVM, so it runs in unit
-    tests *and* on-device — extracting the same fields. The handler snapshots its
-    character buffer only at the boundaries of the extracted (`TEXT_ELEMENTS`)
-    tags, so inline markup inside a title/abstract (`<i>`, `<sup>` — species
-    names, exponents) is preserved rather than dropped; a markup-terminated title
-    is no longer lost (which under a naive per-`startElement` reset would return a
-    null title and silently drop the whole article). Hardened against XXE /
-    external-DTD network fetches (`SAFE_SAX_FEATURES` — including
-    `FEATURE_SECURE_PROCESSING`, which caps internal entity expansion because
-    Android's Expat parser gives no default "billion laughs" limit — plus a no-op
-    `resolveEntity`). Every flag goes through `setFeature` inside a per-flag
-    `try/catch`, so an implementation that does not recognise one skips it.
-    **`setXIncludeAware` is deliberately not called**: JAXP's base implementation
-    throws `UnsupportedOperationException` unless overridden, which the outer catch
-    would swallow into an empty result on-device while JVM tests stayed green — the
-    #119 failure mode exactly. New regression tests:
-    `search parses XML with DOCTYPE …`, `search blocks external entity references
-    …`, `search preserves text around inline markup …`, and `search returns
-    articles decoded before malformed XML aborts the parse` (pins the deliberate
-    partial-result contract). **The two security tests point their `systemId` at a
-    closed loopback port (`http://127.0.0.1:1/…`), not at the real
-    `dtd.nlm.nih.gov` URL — that is load-bearing.** An unhardened parser *fetches*
-    the real NLM systemId successfully (measured: 11.2s vs 1ms), so a realistic
-    systemId makes the test pass either way and guards nothing; against a closed
-    port the unhardened parser fails with `ConnectException`. Both tests were
-    verified red by temporarily removing the hardening.
-  - The `createSampleXml` test helper emitted a leading-whitespace-before-`<?xml>`
-    prolog (an artifact of interpolating a multi-line block into `trimIndent()`),
-    which strict SAX correctly rejects ("processing instruction … not allowed");
-    kxml2 had been lenient. Fixed the helper to emit the declaration at column 0.
-  - `LLMServiceTest.convertToPubMedQuery returns query on success` tested the
-    `@Deprecated convertToPubMedQuery` method, which has **no production callers**
-    and now routes through `convertToStructuredQuery` + `PubMedQueryBuilder`.
-    Removed the dead method and its stale test. `PubMedQueryBuilder` stays (used
-    by `ResponseParser`/`QueryBuilder`/`FactCheckWorkflow`).
-  - Result: full Android suite green (515 tests, 0 fail, 18 network-gated skips).
-    The `ReportUiEventTest` compile fix and the 5 stale-value test updates
-    referenced by #119 already landed with #116 (PR #120) — not re-touched here.
-  - Deliberately **not** fixed here, lodged as **#123**: `parseArticleXml` still
-    ends its catch with `printStackTrace()`, violating golden rule 8 (errors must
-    be logged and reported to the user). The obvious `Log.e` fix would reintroduce
-    the exact defect this slice removed — `app/build.gradle.kts` sets no
-    `testOptions`, so `unitTests.isReturnDefaultValues` is `false` and
-    `android.util.Log` throws "not mocked" under plain JUnit, which would make the
-    error path untestable again. Needs a JVM-portable logging seam first.
-- **Android data-availability classifier, Slice 1** (2026-07-18, #116/PR #120):
-  pure-Kotlin port of the canonical (Python/Swift) classifier in
-  `domain.transparency` (`DataDisclosureLevel`, `DataAvailabilityResult`,
-  `RegexHelper`, `DataRepositoryPatterns`, `DataAvailabilityAnalyzer`),
-  byte-identical patterns to the merged #113 canonical. `RegexHelper` compiles
-  with `(?U)` so `\w\s\b\d` match Unicode like Python/Swift — **reused slices must
-  keep this** or non-ASCII input silently diverges. 45 mirrored JUnit4 tests.
-  Remaining #116 slices below.
-- **Transparency parity, earlier slices** (2026-07-16/17, all merged): Swift↔Python
-  data-availability parity (#101/PR #100/#103); full-open over-match + refusal
-  precedence fixes (#106, #107, PR #108); GDPR/HIPAA/privacy/patient-consent
-  restore (#104); Python Step-3 label dedup (#114); privacy/legal open-data
-  false-positive fix + negation guards (#113/PR #118). Python
-  (`study_transparency_analyzer.py`) is the canonical reference; Swift `BioMedLit`
-  and Android `domain.transparency` mirror it. Details in the linked PRs and
-  `docs/superpowers/{specs,plans}/2026-07-17-*`.
+- **Data-availability negation scope** (2026-07-19, closes #117): detached
+  negators no longer over-match FULL_OPEN. The `(?<!not )` lookbehind on the
+  full-open affirmations is *fixed-width*, so it only suppressed an
+  **immediately** negated affirmation; an intervening word ("not currently
+  openly available"), an alternate negator ("never openly shared"), doubled
+  whitespace, or a modal outside the strong-refusal `(?:would|will|shall)`
+  alternation ("could not be openly shared") all escaped it and reported the
+  study as fully open. The supplement affirmation had the same hole ("not
+  currently available in the supplementary materials").
+  - **Why not a wider lookbehind:** Python's `re` forbids variable-length
+    lookbehind, and the patterns must stay byte-identical Python↔Swift↔Android.
+    The guard is therefore a *forward* match — `NEGATED_OPENNESS_PATTERNS` /
+    `negatedOpennessPatterns`: negator, ≤2 intervening words, affirmation.
+  - **The `(?!and\b|but\b|or\b)` barrier is load-bearing**, as is the bounded
+    window. Both stop the scope reaching across a conjunction into an
+    affirmation the negator does not govern — "data were not embargoed **and**
+    were openly shared" must stay FULL_OPEN. Removing either under-reports
+    genuinely open data. Pinned by
+    `test_negation_scope_stops_at_coordinating_conjunction` and
+    `test_negation_scope_window_is_bounded` on all three platforms.
+  - **The pins only work at specific sentence shapes — do not reword them.**
+    As first written (PR #124) neither test actually exercised its guard: both
+    passed for unrelated reasons, and the barrier could be deleted from all
+    three platforms with the entire tri-platform suite staying green. Fixed in
+    review; mutation-verified on Python, Swift *and* Kotlin (each guard removed
+    in turn ⇒ exactly its own test fails). The two traps:
+    - The **conjunction must sit inside the two-word window**, immediately
+      before the affirmation ("not embargoed **and** openly shared"). In "not
+      embargoed and *were* openly shared" the affirmation is three words out, so
+      `{0,2}` blocks it first and the barrier is never consulted.
+    - The window pin needs a **real negator** — `not`/`never`/`cannot`. "No" is
+      not in the alternation, so a sentence negated only by "No" matches nothing
+      at any window size. It also needs **no punctuation** between negator and
+      affirmation, because `\w+` cannot cross punctuation and the punctuation
+      would become what holds the line instead of the bound.
+  - **Invariant now documented at each `has_unavailability_signal` site:** every
+    list joined there must also be reachable from Step 2 or Step 3. A pattern
+    added to the signal check alone suppresses Step 1 without supplying a
+    replacement tier, silently landing the statement in UNKNOWN rather than
+    FULL_OPEN — a regression no existing test would catch.
+  - Tiering: negated openness is in the **restricted** tier, not
+    `STRONG_REFUSAL_PATTERNS`. It suppresses the affirmation and adds the label
+    "Data not openly available"; escalation to NOT_AVAILABLE still requires an
+    independent strong refusal. This keeps the #113-pinned "not openly
+    accessible without IRB approval" → RESTRICTED. Two existing tests gained
+    the new label in their expected `restrictions` lists (tiers unchanged).
+  - **Kotlin gotcha:** `negatedOpennessPatterns` must be declared *before*
+    `restrictedPatterns` — Kotlin initialises `object` properties in declaration
+    order, so a forward reference appends nothing and silently leaves the bug
+    unfixed. `DataRepositoryPatternsTest` pins list size 25 + `containsAll` to
+    catch that. Swift statics are lazy and Python is module-order, so only
+    Kotlin is exposed.
+- **Android PubMed XML parsing** (2026-07-18, #119/PR #122): `parseArticleXml`
+  moved off Android's `XmlPullParser` (which throws "not mocked" under plain
+  JUnit, and whose exception the broad catch swallowed into an empty result) to
+  a pure-JVM JAXP SAX parser, so it runs in unit tests *and* on-device. Two
+  traps worth preserving if this is touched again:
+  - **`setXIncludeAware` is deliberately not called** — JAXP's base
+    implementation throws `UnsupportedOperationException`, which the outer catch
+    would swallow into an empty result on-device while JVM tests stayed green:
+    the #119 failure mode exactly.
+  - **The XXE tests point `systemId` at a closed loopback port
+    (`http://127.0.0.1:1/…`), not the real `dtd.nlm.nih.gov` URL.** An
+    unhardened parser *fetches* the real NLM systemId successfully (11.2s vs
+    1ms), so a realistic systemId passes either way and guards nothing.
+- **Transparency parity, earlier slices** (2026-07-16/18, all merged): Swift↔Python
+  data-availability parity (#101/#103); full-open over-match + refusal precedence
+  (#106, #107); GDPR/HIPAA/privacy/patient-consent restore (#104); Python Step-3
+  label dedup (#114); privacy/legal open-data false-positive + negation guards
+  (#113); Android data-availability classifier port (#116 slice 1, PR #120) —
+  `RegexHelper` compiles with `(?U)` so `\w\s\b\d` match Unicode like
+  Python/Swift; **reused slices must keep this** or non-ASCII input diverges.
+  Python `study_transparency_analyzer.py` is the canonical reference; Swift
+  `BioMedLit` and Android `domain.transparency` mirror it byte-for-byte.
 
 ## Potential follow-ups
 
@@ -88,25 +92,34 @@ its slice has landed; add a new section when handing off new work.
   JVM-portable logging seam: a plain `Log.e` would reintroduce the untestable
   Android dependency #119 was about (no `testOptions` ⇒ `Log` throws "not mocked"
   under JUnit). Overlaps #121.
-- **#117 — negated open-availability affirmations still over-match FULL_OPEN**:
-  residual of #113. Non-adjacent / alternate-negator forms ("never openly
-  shared", "could not be openly shared", "not currently openly available",
-  double-spaced "not  openly") still classify FULL_OPEN instead of NOT_AVAILABLE.
-  Fix mirrored across Python + Swift + Android `DataRepositoryPatterns`.
-- **#121 — JATS parser untestable like PubMed was** (from #119): `util.jats.
-  JATSXMLParser` also uses Android `XmlPullParser`, so its only coverage is a
-  network-gated integration test (`Assume.assumeTrue(INTEGRATION_TESTS==1)`).
-  Migrating it to the same JAXP SAX approach used for `PubMedService` would make
-  it unit-testable offline.
+- **#121 — JATS parser untestable like PubMed was**: `util.jats.JATSXMLParser`
+  also uses Android `XmlPullParser`, so its only coverage is a network-gated
+  integration test (`Assume.assumeTrue(INTEGRATION_TESTS==1)`). Migrating it to
+  the JAXP SAX approach used for `PubMedService` would make it unit-testable
+  offline — see the two traps noted above.
 - **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
   indicators, funding/trial (network), JATS statement extraction, Room
   persistence + `DocumentCard` UI.
+- **#125 — "no longer openly available" still over-matches FULL_OPEN**: residual
+  of #117, found reviewing PR #124. The negator alternation is
+  `(?:not|never|cannot)`; **`no` is absent**, so "data are no longer openly
+  available", "by no means openly available" and "neither … nor … openly
+  available" all still report FULL_OPEN — the same dangerous
+  over-stating-openness direction #117 closed for detached negators. Not fixed
+  there because adding `no` needs its own false-positive round ("no restrictions
+  apply and data are openly available"), and `neither … nor` is a two-token
+  negator the single-token alternation cannot express at all.
+- **#126 — redundant "Data not openly available" label** (cosmetic): emitted
+  alongside a more specific label for the same clause ("Data cannot be shared",
+  "Requires IRB approval"). Tiers are correct; presentation noise only.
 - **#109 — LLM-assisted disambiguation of repo + soft-restriction**: a repo
   mention + a *soft* on-request restriction is kept FULL_OPEN today; add an
   optional config-gated deterministic-fallback LLM layer at the orchestration
   layer, leaving the pure classifier + parity tests unchanged.
-- **#105 — automated Swift↔Python(↔Android) parity drift guard**: a shared
+- **#105 — automated Swift↔Python↔Android parity drift guard**: a shared
   language-neutral fixture asserted on all sides to catch silent divergence.
+  #117 added a throwaway byte-identity check across the three pattern lists;
+  worth generalising into the permanent guard this issue describes.
 - **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
   per call). Negligible today; memoize if it ever hits a hot path.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
@@ -114,8 +127,11 @@ its slice has landed; add a new section when handing off new work.
 
 ### Verify
 
-- Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
-- `cd Packages/BioMedLit && swift test` → 0 failures.
 - `pytest tests/` → 0 failures (Python is the reference).
+- `cd Packages/BioMedLit && swift test` → 0 failures.
+- Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
   'platform=macOS' build` from `ios/MedicalFactChecker/`.
+- `ruff check .` / `mypy src/` carry pre-existing debt; the gate is **no new
+  errors** (baseline at time of writing: 97 ruff findings on the transparency
+  analyzer + tests, 677 mypy errors across `src/`).

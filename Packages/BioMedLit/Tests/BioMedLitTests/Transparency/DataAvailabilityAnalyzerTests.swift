@@ -276,7 +276,7 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
             statement: "Raw data are not openly accessible without IRB approval."
         )
         XCTAssertEqual(irb.disclosureLevel, .restricted)
-        XCTAssertEqual(irb.restrictions, ["Requires IRB approval"])
+        XCTAssertEqual(irb.restrictions, ["Requires IRB approval", "Data not openly available"])
 
         let author = DataAvailabilityAnalyzer.analyze(
             statement: "Data are not freely shared; available from the corresponding author."
@@ -293,18 +293,138 @@ final class DataAvailabilityAnalyzerTests: XCTestCase {
     /// so the strong-refusal patterns tolerate one intervening word
     /// (`(?:\w+ )?`): "will not be openly shared" / "cannot be openly shared"
     /// set the up-front unavailability signal and skip the full-open step,
-    /// escalating to `.notAvailable` instead of a false `.fullOpen`. Residual
-    /// multi-word / alternate-negator forms remain tracked in #117.
+    /// escalating to `.notAvailable` instead of a false `.fullOpen`. Detached
+    /// negators that escape this tolerance are covered by the #117 tests below.
     func testNonAdjacentNegatedAffirmationIsNotAvailable() {
         let willNot = DataAvailabilityAnalyzer.analyze(
             statement: "The data will not be openly shared with third parties."
         )
         XCTAssertEqual(willNot.disclosureLevel, .notAvailable)
-        XCTAssertEqual(willNot.restrictions, ["Data will not be released"])
+        XCTAssertEqual(
+            willNot.restrictions,
+            ["Data will not be released", "Data not openly available"]
+        )
 
         let cannot = DataAvailabilityAnalyzer.analyze(statement: "Raw data cannot be openly shared.")
         XCTAssertEqual(cannot.disclosureLevel, .notAvailable)
-        XCTAssertEqual(cannot.restrictions, ["Data cannot be shared"])
+        XCTAssertEqual(
+            cannot.restrictions,
+            ["Data cannot be shared", "Data not openly available"]
+        )
+    }
+
+    /// Negators detached from the affirmation must not classify `.fullOpen` (#117).
+    ///
+    /// The `(?<!not )` lookbehind is fixed-width, so it only suppresses an
+    /// *immediately* negated affirmation. A negator separated by an intervening
+    /// word, an alternate negator ("never"), doubled whitespace, or a modal
+    /// outside `strongRefusalPatterns`' `(?:would|will|shall)` list all escaped
+    /// it and produced a false `.fullOpen` — the dangerous over-stating-openness
+    /// direction. `negatedOpennessPatterns` closes the gap with a
+    /// forward-matching bounded negation scope, dropping the statement to
+    /// `.restricted` with an explicit label.
+    ///
+    /// Mirrors Python's `test_non_adjacent_negator_does_not_trigger_full_open`.
+    func testNonAdjacentNegatorDoesNotTriggerFullOpen() {
+        let never = DataAvailabilityAnalyzer.analyze(statement: "Data were never openly shared.")
+        XCTAssertEqual(never.disclosureLevel, .restricted)
+        XCTAssertEqual(never.restrictions, ["Data not openly available"])
+
+        let intervening = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not currently openly available."
+        )
+        XCTAssertEqual(intervening.disclosureLevel, .restricted)
+
+        let doubledSpace = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not  openly available."
+        )
+        XCTAssertEqual(doubledSpace.disclosureLevel, .restricted)
+
+        let could = DataAvailabilityAnalyzer.analyze(
+            statement: "The data could not be openly shared."
+        )
+        XCTAssertEqual(could.disclosureLevel, .restricted)
+
+        let supplement = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not currently available in the supplementary materials."
+        )
+        XCTAssertEqual(supplement.disclosureLevel, .restricted)
+    }
+
+    /// A genuine affirmation after an unrelated negation stays `.fullOpen` (#117).
+    ///
+    /// The bounded negation scope carries a `(?!and\b|but\b|or\b)` barrier so it
+    /// cannot reach across a coordinating conjunction into an affirmation the
+    /// negator does not govern. Without the barrier, the window would
+    /// under-report genuinely open data.
+    ///
+    /// The conjunction must fall *inside* the two-word window for this test to
+    /// exercise the barrier at all. In "not embargoed and were openly shared"
+    /// the affirmation sits three words after the negator, so the `{0,2}` bound
+    /// already blocks it and the barrier is never consulted — such a sentence
+    /// passes with the barrier deleted and pins nothing. The first two cases
+    /// below therefore place the conjunction at the second window slot,
+    /// immediately before the affirmation: they are the assertions that fail if
+    /// the barrier is removed, and must keep that shape if reworded.
+    ///
+    /// Mirrors Python's `test_negation_scope_stops_at_coordinating_conjunction`.
+    func testNegationScopeStopsAtCoordinatingConjunction() {
+        // Barrier pins: conjunction inside the window, affirmation immediately
+        // after it. Both flip to `.restricted` if `(?!and\b|but\b|or\b)` is dropped.
+        let immediateAnd = DataAvailabilityAnalyzer.analyze(
+            statement: "Data were not embargoed and openly shared."
+        )
+        XCTAssertEqual(immediateAnd.disclosureLevel, .fullOpen)
+
+        let immediateOr = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not restricted or openly available."
+        )
+        XCTAssertEqual(immediateOr.disclosureLevel, .fullOpen)
+
+        // Broader regression coverage: realistic phrasings that must stay
+        // `.fullOpen`. These are held by the window bound rather than the barrier.
+        let conjunction = DataAvailabilityAnalyzer.analyze(
+            statement: "Data were not embargoed and were openly shared."
+        )
+        XCTAssertEqual(conjunction.disclosureLevel, .fullOpen)
+
+        let contrast = DataAvailabilityAnalyzer.analyze(
+            statement: "Data are not subject to embargo, but are openly available."
+        )
+        XCTAssertEqual(contrast.disclosureLevel, .fullOpen)
+    }
+
+    /// A negator far from the affirmation does not suppress it (#117).
+    ///
+    /// The scope spans at most two intervening words, so an unrelated earlier
+    /// negation in the same statement leaves a genuine affirmation intact.
+    ///
+    /// The statement must contain a token the patterns actually treat as a
+    /// negator — `not`, `never` or `cannot` — for the bound to be under test. A
+    /// sentence negated only by "No" matches no pattern at any window size and
+    /// would pass with the bound deleted entirely. The first case below keeps a
+    /// real negator seven unpunctuated words from the affirmation, so it fails
+    /// if `{0,2}` is widened; do not reword it in a way that inserts punctuation
+    /// between the two, because `\w+` cannot cross punctuation and the bound
+    /// would stop being what holds the line.
+    ///
+    /// Mirrors Python's `test_negation_scope_window_is_bounded`.
+    func testNegationScopeWindowIsBounded() {
+        // Window pin: real negator, seven intervening words, no punctuation
+        // between. Flips to `.restricted` if the `{0,2}` bound is widened.
+        let farNegator = DataAvailabilityAnalyzer.analyze(
+            statement: "Reuse is not limited by any licence because these datasets "
+                + "are openly available."
+        )
+        XCTAssertEqual(farNegator.disclosureLevel, .fullOpen)
+
+        // Broader regression coverage: "No" is not in the negator alternation,
+        // so an affirmation later in the statement survives untouched.
+        let result = DataAvailabilityAnalyzer.analyze(
+            statement: "No identifiable fields were retained during curation; "
+                + "the processed dataset is openly available."
+        )
+        XCTAssertEqual(result.disclosureLevel, .fullOpen)
     }
 
     /// Test analyzing data sharing agreement requirement.

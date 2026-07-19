@@ -25,9 +25,17 @@ object DataAvailabilityAnalyzer {
 
         // A refusal/unavailability signal anywhere overrides a co-occurring
         // repository/affirmation mention, so detect it up front and skip Step 1.
+        //
+        // Invariant: every list joined here must also be reachable from Step 2
+        // or Step 3. A pattern added here alone suppresses Step 1 without
+        // supplying a replacement tier, so the statement silently lands in
+        // UNKNOWN instead of FULL_OPEN — a regression no existing test would
+        // catch. negatedOpennessPatterns satisfies this by also being appended
+        // to restrictedPatterns (issue #117).
         val hasUnavailabilitySignal = RegexHelper.anyMatch(
             DataRepositoryPatterns.effectivelyUnavailablePatterns +
-                DataRepositoryPatterns.strongRefusalPatterns,
+                DataRepositoryPatterns.strongRefusalPatterns +
+                DataRepositoryPatterns.negatedOpennessPatterns,
             lower,
         )
 

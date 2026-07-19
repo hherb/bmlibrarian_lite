@@ -105,9 +105,17 @@ public enum DataAvailabilityAnalyzer {
         // anywhere in the statement therefore takes precedence over a
         // co-occurring repository mention. Mirrors the Python reference
         // (``analyze_data_availability``).
+        //
+        // Invariant: every list joined here must also be reachable from Step 2
+        // or Step 3. A pattern added here alone suppresses Step 1 without
+        // supplying a replacement tier, so the statement silently lands in
+        // `.unknown` instead of `.fullOpen` — a regression no existing test
+        // would catch. `negatedOpennessPatterns` satisfies this by also being
+        // appended to `restrictedPatterns` (issue #117).
         let hasUnavailabilitySignal = RegexHelper.anyMatch(
             patterns: DataRepositoryPatterns.effectivelyUnavailablePatterns
-                + DataRepositoryPatterns.strongRefusalPatterns,
+                + DataRepositoryPatterns.strongRefusalPatterns
+                + DataRepositoryPatterns.negatedOpennessPatterns,
             in: statementLower
         )
 

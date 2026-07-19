@@ -415,6 +415,44 @@ public enum DataRepositoryPatterns {
         #"\bhipaa\b"#,
         #"\bprivacy\b"#,
         #"\bpatient consent\b"#,
+        // Negated open-availability affirmations (issue #117). Listed here so a
+        // bare negated affirmation ("data were never openly shared") carries an
+        // explicit restriction label and classifies `.restricted`, matching the
+        // already-pinned adjacent form ("not openly accessible without IRB
+        // approval"). See `negatedOpennessPatterns` for the rationale.
+    ] + negatedOpennessPatterns
+
+    /// Negated open-availability affirmations (issue #117).
+    ///
+    /// The `(?<!not )` lookbehind carried by `fullOpenPatterns` is fixed-width,
+    /// so it only suppresses an *immediately* negated affirmation. Every
+    /// detached negator escaped it and produced a false `.fullOpen` — the
+    /// dangerous over-stating-openness direction:
+    ///
+    ///   "data are not currently openly available"  (intervening word)
+    ///   "data were never openly shared"            (alternate negator)
+    ///   "data are not  openly available"           (doubled whitespace)
+    ///   "the data could not be openly shared"      (modal outside the
+    ///                                               strong-refusal alternation)
+    ///
+    /// Python's `re` forbids variable-length lookbehind, and these patterns must
+    /// stay byte-identical across Python/Swift/Android, so widening the
+    /// lookbehind is not available. The guard is therefore expressed as a
+    /// *forward* match: a negator, then at most two intervening words, then the
+    /// affirmation.
+    ///
+    /// The window is bounded rather than open-ended, and the
+    /// `(?!and\b|but\b|or\b)` barrier terminates the negation scope at a
+    /// coordinating conjunction. Both keep the check from reaching into an
+    /// affirmation the negator does not govern ("data were not embargoed **and**
+    /// were openly shared" stays `.fullOpen`), which would under-report
+    /// genuinely open data.
+    ///
+    /// Byte-identical to Python's `NEGATED_OPENNESS_PATTERNS` and the Android
+    /// equivalent.
+    public static let negatedOpennessPatterns: [String] = [
+        #"\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+(?:openly|freely) (?:available|shared|accessible)"#,
+        #"\b(?:not|never|cannot)\b(?:\s+(?!and\b|but\b|or\b)\w+){0,2}\s+available (?:in|within|as|via|through) (?:the )?supplement"#,
     ]
 
     /// Strong-refusal indicators that escalate a statement to `.notAvailable`.
@@ -426,8 +464,8 @@ public enum DataRepositoryPatterns {
     /// The `(?:\w+ )?` in the refusal patterns tolerates one intervening adverb
     /// so a negated open affirmation ("will not be openly shared", "cannot be
     /// openly shared") sets the up-front unavailability signal and skips the
-    /// full-open step (issue #113 review); non-adjacent multi-word negators
-    /// remain tracked in #117.
+    /// full-open step (issue #113 review). Detached negators that escape this
+    /// tolerance are handled by `negatedOpennessPatterns` (issue #117).
     public static let strongRefusalPatterns: [String] = [
         #"cannot be (?:\w+ )?shared"#,
         #"not (?:publicly )?available"#,
@@ -483,6 +521,8 @@ public enum DataRepositoryPatterns {
         #"\bhipaa\b"#: "HIPAA restrictions",
         #"\bprivacy\b"#: "Privacy restrictions",
         #"\bpatient consent\b"#: "Patient consent required",
+        negatedOpennessPatterns[0]: "Data not openly available",
+        negatedOpennessPatterns[1]: "Data not openly available",
         #"(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding"#:
             "Data restricted to named collaboration",
         #"not be released.*(?:data custodians?|directly to)"#:
