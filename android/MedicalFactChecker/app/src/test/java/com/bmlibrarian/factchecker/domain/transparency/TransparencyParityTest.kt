@@ -83,49 +83,86 @@ class TransparencyParityTest {
         }
     }
 
-    private fun manifestPatterns(tier: String): List<String> =
-        requireNotNull(manifest.patterns[tier]) { "shared manifest has no '$tier' tier" }
+    /**
+     * Assert a pattern tier equals the shared contract, reporting only what drifted.
+     *
+     * A plain [assertEquals] on these lists dumps both in full — 27 patterns of dense
+     * regex — which buries the one entry that actually changed. Pointing at the
+     * differing index is what makes the failure actionable.
+     */
+    private fun assertTierMatchesContract(actual: List<String>, tier: String) {
+        val expected = requireNotNull(manifest.patterns[tier]) {
+            "shared contract has no '$tier' tier"
+        }
+        if (actual == expected) return
+
+        val header = buildString {
+            append("'$tier' has drifted from the shared contract")
+            if (actual.size != expected.size) {
+                append(" (Kotlin has ${actual.size} patterns, contract has ${expected.size})")
+            }
+        }
+        val differences = actual.zip(expected).withIndex()
+            .filter { (_, pair) -> pair.first != pair.second }
+            .joinToString("\n") { (index, pair) ->
+                "  [$index] Kotlin:   ${pair.first}\n       contract: ${pair.second}"
+            }
+        throw AssertionError(if (differences.isEmpty()) header else "$header:\n$differences")
+    }
 
     // ==================== pattern manifest parity ====================
 
     @Test
-    fun `full open patterns match the shared manifest`() {
-        assertEquals(manifestPatterns("full_open"), DataRepositoryPatterns.fullOpenPatterns)
+    fun `full open patterns match the shared contract`() {
+        assertTierMatchesContract(DataRepositoryPatterns.fullOpenPatterns, "full_open")
     }
 
     @Test
-    fun `negated openness patterns match the shared manifest`() {
-        assertEquals(
-            manifestPatterns("negated_openness"),
+    fun `negated openness patterns match the shared contract`() {
+        assertTierMatchesContract(
             DataRepositoryPatterns.negatedOpennessPatterns,
+            "negated_openness",
         )
     }
 
     @Test
-    fun `restricted patterns match the shared manifest`() {
-        assertEquals(manifestPatterns("restricted"), DataRepositoryPatterns.restrictedPatterns)
+    fun `restricted patterns match the shared contract`() {
+        assertTierMatchesContract(DataRepositoryPatterns.restrictedPatterns, "restricted")
     }
 
     @Test
-    fun `strong refusal patterns match the shared manifest`() {
-        assertEquals(
-            manifestPatterns("strong_refusal"),
-            DataRepositoryPatterns.strongRefusalPatterns,
-        )
+    fun `strong refusal patterns match the shared contract`() {
+        assertTierMatchesContract(DataRepositoryPatterns.strongRefusalPatterns, "strong_refusal")
     }
 
     @Test
-    fun `effectively unavailable patterns match the shared manifest`() {
-        assertEquals(
-            manifestPatterns("effectively_unavailable"),
+    fun `effectively unavailable patterns match the shared contract`() {
+        assertTierMatchesContract(
             DataRepositoryPatterns.effectivelyUnavailablePatterns,
+            "effectively_unavailable",
         )
     }
 
     @Test
-    fun `restriction labels match the shared manifest`() {
+    fun `restriction labels match the shared contract`() {
         val expected = manifest.restrictionLabels.associate { it.pattern to it.label }
-        assertEquals(expected, DataRepositoryPatterns.restrictionLabels)
+        val actual = DataRepositoryPatterns.restrictionLabels
+        if (actual == expected) return
+
+        val differences = (actual.keys + expected.keys).sorted().mapNotNull { pattern ->
+            val kotlin = actual[pattern]
+            val contract = expected[pattern]
+            when {
+                kotlin == contract -> null
+                kotlin == null -> "  $pattern\n    contract only: $contract"
+                contract == null -> "  $pattern\n      Kotlin only: $kotlin"
+                else -> "  $pattern\n       Kotlin: $kotlin\n     contract: $contract"
+            }
+        }
+        throw AssertionError(
+            "restriction labels have drifted from the shared contract:\n" +
+                differences.joinToString("\n"),
+        )
     }
 
     // ==================== behavioural case parity ====================

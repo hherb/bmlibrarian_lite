@@ -39,7 +39,7 @@ All three platforms load the same two files. See the sibling ``README.md``.
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, cast
 
 import pytest
 
@@ -57,7 +57,7 @@ PARITY_FIXTURE_DIR = (
 )
 
 
-def _load_fixture(filename: str) -> Dict[str, Any]:
+def _load_fixture(filename: str) -> dict[str, Any]:
     """Load a parity fixture by name.
 
     Args:
@@ -68,57 +68,63 @@ def _load_fixture(filename: str) -> Dict[str, Any]:
     """
     path = PARITY_FIXTURE_DIR / filename
     assert path.is_file(), f"missing shared parity fixture: {path}"
-    return cast(Dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
-def manifest() -> Dict[str, Any]:
+def manifest() -> dict[str, Any]:
     """The shared pattern/label contract."""
     return _load_fixture("data_availability_patterns.json")
 
 
 @pytest.fixture(scope="module")
-def manifest_patterns(manifest: Dict[str, Any]) -> Dict[str, List[str]]:
+def manifest_patterns(manifest: dict[str, Any]) -> dict[str, list[str]]:
     """The pattern lists from the shared contract."""
-    return cast(Dict[str, List[str]], manifest["patterns"])
+    return cast(dict[str, list[str]], manifest["patterns"])
 
 
 class TestPatternManifestParity:
     """Python's constants must equal the shared contract string-for-string."""
 
     def test_full_open_patterns_match_manifest(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """The repository names and #113 open-availability affirmations."""
         assert DATA_REPOSITORIES["full_open"] == manifest_patterns["full_open"]
 
     def test_negated_openness_patterns_match_manifest(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """The #117/#125 negated open-availability affirmations."""
         assert NEGATED_OPENNESS_PATTERNS == manifest_patterns["negated_openness"]
 
     def test_restricted_patterns_match_manifest(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """The restricted tier, whose order fixes the restriction label order."""
         assert DATA_REPOSITORIES["restricted"] == manifest_patterns["restricted"]
 
     def test_strong_refusal_patterns_match_manifest(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """The refusals that escalate a statement to NOT_AVAILABLE."""
         assert STRONG_REFUSAL_PATTERNS == manifest_patterns["strong_refusal"]
 
     def test_effectively_unavailable_patterns_match_manifest(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """The policy-shaped statements that amount to a refusal."""
         assert (
             DATA_REPOSITORIES["effectively_unavailable"]
             == manifest_patterns["effectively_unavailable"]
         )
 
-    def test_restriction_labels_match_manifest(self, manifest: Dict[str, Any]) -> None:
+    def test_restriction_labels_match_manifest(self, manifest: dict[str, Any]) -> None:
+        """The pattern-to-label map shown to the user."""
         expected = {entry["pattern"]: entry["label"] for entry in manifest["restriction_labels"]}
         assert RESTRICTION_LABELS == expected
 
-    def test_manifest_label_patterns_are_unique(self, manifest: Dict[str, Any]) -> None:
+    def test_manifest_label_patterns_are_unique(self, manifest: dict[str, Any]) -> None:
         """A duplicated key would silently drop an entry on every platform."""
         patterns = [entry["pattern"] for entry in manifest["restriction_labels"]]
         assert len(patterns) == len(set(patterns))
@@ -132,12 +138,13 @@ class TestManifestSelfConsistency:
     """
 
     def test_strong_refusal_is_a_subset_of_restricted(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """Escalation to NOT_AVAILABLE must not bypass the restricted tier's labels."""
         assert set(manifest_patterns["strong_refusal"]) <= set(manifest_patterns["restricted"])
 
     def test_negated_openness_is_appended_to_restricted(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
         """Pins the #117 tail, and with it Kotlin's declaration-order trap.
 
@@ -150,7 +157,7 @@ class TestManifestSelfConsistency:
         assert manifest_patterns["restricted"][-len(negated) :] == negated
 
     def test_every_unavailability_signal_pattern_is_reachable_from_a_later_tier(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
         """The ``has_unavailability_signal`` invariant, as an executable check.
 
@@ -170,7 +177,7 @@ class TestManifestSelfConsistency:
         assert set(probe) <= reachable
 
     def test_every_labelled_pattern_belongs_to_a_tier(
-        self, manifest: Dict[str, Any], manifest_patterns: Dict[str, List[str]]
+        self, manifest: dict[str, Any], manifest_patterns: dict[str, list[str]]
     ) -> None:
         """An orphaned label is dead weight that reads as live behaviour."""
         known = set(manifest_patterns["restricted"]) | set(
@@ -180,7 +187,7 @@ class TestManifestSelfConsistency:
         assert labelled <= known
 
     def test_every_restriction_tier_pattern_has_a_label(
-        self, manifest: Dict[str, Any], manifest_patterns: Dict[str, List[str]]
+        self, manifest: dict[str, Any], manifest_patterns: dict[str, list[str]]
     ) -> None:
         """An unlabelled pattern surfaces its raw regex to the user."""
         labelled = {entry["pattern"] for entry in manifest["restriction_labels"]}
@@ -190,8 +197,9 @@ class TestManifestSelfConsistency:
         assert tiered <= labelled
 
     def test_every_manifest_pattern_compiles(
-        self, manifest_patterns: Dict[str, List[str]]
+        self, manifest_patterns: dict[str, list[str]]
     ) -> None:
+        """An uncompilable pattern would raise at import time on every platform."""
         for tier, patterns in manifest_patterns.items():
             for pattern in patterns:
                 try:
@@ -204,7 +212,8 @@ class TestBehaviouralCaseParity:
     """The worked cases must classify identically on every platform."""
 
     @pytest.mark.parametrize("case", _load_fixture("data_availability_cases.json")["cases"])
-    def test_case_classifies_as_specified(self, case: Dict[str, Any]) -> None:
+    def test_case_classifies_as_specified(self, case: dict[str, Any]) -> None:
+        """One worked statement classifies to the contracted level and labels."""
         info = analyze_data_availability(case["statement"])
 
         assert info.disclosure_level == DataDisclosureLevel(case["disclosure_level"]), (
@@ -213,6 +222,7 @@ class TestBehaviouralCaseParity:
         assert info.restrictions == case["restrictions"], f"[{case['id']}] {case.get('why', '')}"
 
     def test_every_case_id_is_unique(self) -> None:
+        """Ids name the case in every platform's failure message, so they must be distinct."""
         cases = _load_fixture("data_availability_cases.json")["cases"]
         ids = [case["id"] for case in cases]
         assert len(ids) == len(set(ids))
@@ -233,7 +243,7 @@ class TestBehaviouralCaseParity:
         }
         assert covered == reachable
 
-    def test_every_restriction_label_is_exercised(self, manifest: Dict[str, Any]) -> None:
+    def test_every_restriction_label_is_exercised(self, manifest: dict[str, Any]) -> None:
         """Every label the classifier can emit is pinned by at least one case.
 
         Without this, a pattern could diverge across platforms in a way the

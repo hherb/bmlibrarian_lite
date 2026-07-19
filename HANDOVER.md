@@ -8,6 +8,35 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Cross-platform parity drift guard** (#105 landed 2026-07-19): parity between
+  the three data-availability classifiers is now enforced by test, not by
+  convention. The contract lives in `doc/cross_platform/transparency_parity/`
+  (see its `README.md`) and is loaded by all three suites —
+  `tests/test_transparency_parity.py`, `TransparencyParityTests.swift`,
+  `TransparencyParityTest.kt`.
+  - **Two fixtures, both load-bearing.** `data_availability_patterns.json` pins
+    the five tiers + label map string-for-string and order-sensitively;
+    `data_availability_cases.json` pins 64 worked
+    `statement -> (level, ordered restrictions)` cases behaviourally. Mutation
+    checks confirm neither subsumes the other: reordering two Kotlin patterns
+    fails **only** the string half, while dropping `RegexHelper`'s `(?U)` leaves
+    every pattern byte-identical and fails **only** the behavioural case with an
+    accented intervening word.
+  - **Changing a pattern now means editing four places** (contract + three
+    platforms) plus a covering case. That friction is the feature; do not
+    regenerate either fixture mechanically from one platform.
+  - Python's `_restriction_labels` was function-local and unassertable, so it was
+    hoisted to module-level `RESTRICTION_LABELS` beside `_label_for_pattern`.
+  - The structural traps previously documented only in prose are now executable
+    in `TestManifestSelfConsistency` (strong-refusal ⊆ restricted;
+    negated-openness an ordered **suffix** of restricted — the Kotlin
+    declaration-order trap; every unavailability-probe pattern reachable from a
+    later tier; every tier pattern labelled and every label tiered). Each was
+    mutation-verified to fire on exactly its own violation.
+  - Coverage guards keep the behavioural half from developing a blind spot:
+    every reachable disclosure level and every restriction label must be
+    exercised by at least one case. `AVAILABLE_ON_REQUEST` is excluded — the
+    classifier never emits it on any platform.
 - **Data-availability negated openness** (#117 landed 2026-07-19 via PR #124;
   #125 residual fixed 2026-07-19): negators detached from an openness
   affirmation no longer over-match FULL_OPEN. The guard is a *forward* match
@@ -106,11 +135,6 @@ its slice has landed; add a new section when handing off new work.
   mention + a *soft* on-request restriction is kept FULL_OPEN today; add an
   optional config-gated deterministic-fallback LLM layer at the orchestration
   layer, leaving the pure classifier + parity tests unchanged.
-- **#105 — automated Swift↔Python↔Android parity drift guard**: a shared
-  language-neutral fixture asserted on all sides to catch silent divergence.
-  #117 and #125 each ran a throwaway byte-identity check across the three
-  pattern lists; worth generalising into the permanent guard this issue
-  describes.
 - **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
   per call). Negligible today; memoize if it ever hits a hot path.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
@@ -118,6 +142,9 @@ its slice has landed; add a new section when handing off new work.
 
 ### Verify
 
+- Touching any data-availability pattern? Run all three parity suites; a change
+  that does not update `doc/cross_platform/transparency_parity/` **and** all
+  three platforms is meant to fail.
 - `pytest tests/` → 0 failures (Python is the reference).
 - `cd Packages/BioMedLit && swift test` → 0 failures.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.

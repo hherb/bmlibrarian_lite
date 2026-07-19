@@ -107,48 +107,99 @@ final class TransparencyParityTests: XCTestCase {
         try loadFixture("data_availability_cases.json", as: CaseFixture.self).cases
     }
 
+    // MARK: - Drift reporting
+
+    /// Assert a pattern tier equals the shared contract, reporting only what drifted.
+    ///
+    /// A plain `XCTAssertEqual` on these lists dumps both in full — 27 patterns of
+    /// dense regex — which buries the one entry that actually changed. Pointing at
+    /// the differing index is what makes the failure actionable.
+    private func assertTierMatchesContract(
+        _ actual: [String],
+        tier: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let expected = try XCTUnwrap(
+            loadManifest().patterns[tier],
+            "shared contract has no '\(tier)' tier",
+            file: file,
+            line: line
+        )
+        guard actual != expected else { return }
+
+        var message = "'\(tier)' has drifted from the shared contract"
+        if actual.count != expected.count {
+            message += " (Swift has \(actual.count) patterns, contract has \(expected.count))"
+        }
+        let differences = zip(actual, expected).enumerated()
+            .filter { $0.element.0 != $0.element.1 }
+            .map { "  [\($0.offset)] Swift:    \($0.element.0)\n       contract: \($0.element.1)" }
+        if !differences.isEmpty {
+            message += ":\n" + differences.joined(separator: "\n")
+        }
+        XCTFail(message, file: file, line: line)
+    }
+
     // MARK: - Pattern manifest parity
 
-    func testFullOpenPatternsMatchManifest() throws {
-        let manifest = try loadManifest()
-        XCTAssertEqual(DataRepositoryPatterns.fullOpenPatterns, manifest.patterns["full_open"])
+    func testFullOpenPatternsMatchContract() throws {
+        try assertTierMatchesContract(
+            DataRepositoryPatterns.fullOpenPatterns,
+            tier: "full_open"
+        )
     }
 
-    func testNegatedOpennessPatternsMatchManifest() throws {
-        let manifest = try loadManifest()
-        XCTAssertEqual(
+    func testNegatedOpennessPatternsMatchContract() throws {
+        try assertTierMatchesContract(
             DataRepositoryPatterns.negatedOpennessPatterns,
-            manifest.patterns["negated_openness"]
+            tier: "negated_openness"
         )
     }
 
-    func testRestrictedPatternsMatchManifest() throws {
-        let manifest = try loadManifest()
-        XCTAssertEqual(DataRepositoryPatterns.restrictedPatterns, manifest.patterns["restricted"])
+    func testRestrictedPatternsMatchContract() throws {
+        try assertTierMatchesContract(
+            DataRepositoryPatterns.restrictedPatterns,
+            tier: "restricted"
+        )
     }
 
-    func testStrongRefusalPatternsMatchManifest() throws {
-        let manifest = try loadManifest()
-        XCTAssertEqual(
+    func testStrongRefusalPatternsMatchContract() throws {
+        try assertTierMatchesContract(
             DataRepositoryPatterns.strongRefusalPatterns,
-            manifest.patterns["strong_refusal"]
+            tier: "strong_refusal"
         )
     }
 
-    func testEffectivelyUnavailablePatternsMatchManifest() throws {
-        let manifest = try loadManifest()
-        XCTAssertEqual(
+    func testEffectivelyUnavailablePatternsMatchContract() throws {
+        try assertTierMatchesContract(
             DataRepositoryPatterns.effectivelyUnavailablePatterns,
-            manifest.patterns["effectively_unavailable"]
+            tier: "effectively_unavailable"
         )
     }
 
-    func testRestrictionLabelsMatchManifest() throws {
-        let manifest = try loadManifest()
+    func testRestrictionLabelsMatchContract() throws {
         let expected = Dictionary(
-            uniqueKeysWithValues: manifest.restrictionLabels.map { ($0.pattern, $0.label) }
+            uniqueKeysWithValues: try loadManifest().restrictionLabels.map { ($0.pattern, $0.label) }
         )
-        XCTAssertEqual(DataRepositoryPatterns.restrictionLabels, expected)
+        let actual = DataRepositoryPatterns.restrictionLabels
+        guard actual != expected else { return }
+
+        var differences: [String] = []
+        for pattern in Set(actual.keys).union(expected.keys).sorted() {
+            switch (actual[pattern], expected[pattern]) {
+            case let (swift?, contract?) where swift != contract:
+                differences.append("  \(pattern)\n       Swift: \(swift)\n    contract: \(contract)")
+            case (let swift?, nil):
+                differences.append("  \(pattern)\n       Swift only: \(swift)")
+            case (nil, let contract?):
+                differences.append("  \(pattern)\n    contract only: \(contract)")
+            default:
+                continue
+            }
+        }
+        XCTFail("restriction labels have drifted from the shared contract:\n"
+            + differences.joined(separator: "\n"))
     }
 
     // MARK: - Behavioural case parity
