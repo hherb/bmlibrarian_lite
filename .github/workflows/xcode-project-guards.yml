@@ -1,0 +1,30 @@
+name: Xcode project guards
+
+# Enforces the Xcode Cloud build contract documented in HANDOVER.md:
+# no Swift package reference may point outside this repository, and the
+# MedicalFactChecker scheme must stay shared. Both failure modes are
+# invisible in a working checkout, so they are guarded here instead.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.pbxproj'
+      - '**/xcshareddata/xcschemes/**'
+      - '.github/workflows/xcode-project-guards.yml'
+      - '.github/scripts/xcode_project_guards.py'
+  push:
+    branches: [master]
+    paths:
+      - '**/*.pbxproj'
+      - '**/xcshareddata/xcschemes/**'
+      - '.github/workflows/xcode-project-guards.yml'
+      - '.github/scripts/xcode_project_guards.py'
+
+jobs:
+  guards:
+    name: Package refs stay in-repo, scheme stays shared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run guards
+        run: python3 .github/scripts/xcode_project_guards.py

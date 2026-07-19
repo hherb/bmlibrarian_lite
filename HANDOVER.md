@@ -144,7 +144,11 @@ locally — verify against a **fresh clone**, which is all Xcode Cloud gets:
   (`…xcodeproj/xcshareddata/xcschemes/`). Xcode Cloud can only select shared
   schemes; the autocreated per-user scheme is invisible to it.
 
-Reproduce a cloud build with:
-`git clone <repo> /tmp/x && cd /tmp/x/ios/MedicalFactChecker && xcodebuild
--scheme MedicalFactChecker -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
-archive`
+Both invariants are enforced on every PR by
+`.github/workflows/xcode-project-guards.yml`. Reproduce a cloud build with:
+
+```bash
+git clone <repo> /tmp/x && cd /tmp/x/ios/MedicalFactChecker && xcodebuild \
+  -scheme MedicalFactChecker -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO archive
+```
