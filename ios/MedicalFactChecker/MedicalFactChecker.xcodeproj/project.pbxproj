@@ -80,7 +80,6 @@
 		A1000074001 /* FullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000074000 /* FullTextTab.swift */; };
 		A1000052001 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000052000 /* CloudKitConfiguration.swift */; };
 		A1000054001 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000054000 /* BioMedLitAdapters.swift */; };
-		A1000055001 /* BioMedLit in Frameworks */ = {isa = PBXBuildFile; productRef = A1000055000 /* BioMedLit */; };
 		A1000057001 /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057000 /* StructuredQuery.swift */; };
 		A1000058001 /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000058000 /* QueryConstants.swift */; };
 		A1000059001 /* ParallelScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059000 /* ParallelScoringService.swift */; };
@@ -226,7 +225,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				6F36EF622F1C5A5200C0AAEA /* BioMedLit in Frameworks */,
-				A1000055001 /* BioMedLit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -553,7 +551,6 @@
 			);
 			name = MedicalFactChecker;
 			packageProductDependencies = (
-				A1000055000 /* BioMedLit */,
 				6F36EF612F1C5A5200C0AAEA /* BioMedLit */,
 			);
 			productName = MedicalFactChecker;
@@ -585,7 +582,6 @@
 			mainGroup = A1000000010;
 			packageReferences = (
 				6F36EF602F1C5A5200C0AAEA /* XCLocalSwiftPackageReference "../../Packages/BioMedLit" */,
-				6F5748C22F1D0C7E00B07EF1 /* XCLocalSwiftPackageReference "../../../locumtracker/Packages/LocumTrackerCore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A1000000030 /* Products */;
@@ -968,18 +964,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../Packages/BioMedLit;
 		};
-		6F5748C22F1D0C7E00B07EF1 /* XCLocalSwiftPackageReference "../../../locumtracker/Packages/LocumTrackerCore" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../locumtracker/Packages/LocumTrackerCore;
-		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		6F36EF612F1C5A5200C0AAEA /* BioMedLit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = BioMedLit;
-		};
-		A1000055000 /* BioMedLit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BioMedLit;
 		};
