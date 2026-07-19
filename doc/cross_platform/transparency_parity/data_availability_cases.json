@@ -1,0 +1,495 @@
+{
+  "_readme": [
+    "Worked behavioural cases for the data-availability classifier (issue #105).",
+    "",
+    "Python, Swift (BioMedLit) and Kotlin (Android) each run every case through their",
+    "own analyzer and assert the same disclosure level and the same ordered list of",
+    "restriction labels. This is the half of the parity guard that a string comparison",
+    "of the pattern lists cannot provide: it catches regex-engine differences, missing",
+    "compile flags, and tier-ordering changes, where the patterns are spelled",
+    "identically but behave differently.",
+    "",
+    "`restrictions` order is significant. It is the order the patterns appear in the",
+    "restricted tier, with any effectively-unavailable signals first, deduplicated by",
+    "label (issue #114).",
+    "",
+    "`why` records what a case pins, for cases whose point is not obvious from the",
+    "statement. Do not reword a statement carrying a `why`: several pin a regex window",
+    "or barrier at an exact token distance and lose their discriminating power if the",
+    "wording shifts by a word.",
+    "",
+    "See doc/cross_platform/transparency_parity/README.md."
+  ],
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "not-stated-null",
+      "statement": null,
+      "disclosure_level": "not_stated",
+      "restrictions": [],
+      "why": "A missing statement is NOT_STATED on every platform."
+    },
+    {
+      "id": "not-stated-empty",
+      "statement": "",
+      "disclosure_level": "not_stated",
+      "restrictions": [],
+      "why": "An empty statement is NOT_STATED; all three guard on emptiness, not blankness."
+    },
+    {
+      "id": "unknown-whitespace-only",
+      "statement": "   ",
+      "disclosure_level": "unknown",
+      "restrictions": [],
+      "why": "Whitespace is deliberately NOT treated as empty: it matches nothing and falls to UNKNOWN."
+    },
+    {
+      "id": "unknown-no-signal",
+      "statement": "Data availability is described in the study protocol.",
+      "disclosure_level": "unknown",
+      "restrictions": [],
+      "why": "No tier matches."
+    },
+    {
+      "id": "unknown-word-boundary-guards-short-tokens",
+      "statement": "Samples came from a geological survey in the arena district.",
+      "disclosure_level": "unknown",
+      "restrictions": [],
+      "why": "\\bgeo\\b and \\bena\\b must not match inside 'geological'/'arena'."
+    },
+    {
+      "id": "full-open-zenodo",
+      "statement": "All data are deposited in Zenodo.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-figshare",
+      "statement": "Datasets are hosted on Figshare.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-dryad",
+      "statement": "Data are archived in Dryad.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-osf-io",
+      "statement": "Materials are at https://osf.io/abcd1/.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-open-science-framework",
+      "statement": "Deposited with the Open Science Framework.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-github",
+      "statement": "Analysis code and data are on GitHub.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-gitlab",
+      "statement": "Hosted in our institutional GitLab instance.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-dataverse",
+      "statement": "Deposited in the Harvard Dataverse.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-mendeley-data",
+      "statement": "Uploaded to Mendeley Data.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-gene-expression-omnibus",
+      "statement": "Raw counts were submitted to the Gene Expression Omnibus.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-geo-abbreviation",
+      "statement": "Deposited in GEO under accession: GSE12345.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-arrayexpress",
+      "statement": "Microarray data are in ArrayExpress.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-protein-data-bank",
+      "statement": "Structures are in the Protein Data Bank.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-pdb-abbreviation",
+      "statement": "Coordinates were deposited in the PDB.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-genbank",
+      "statement": "Sequences were submitted to GenBank.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-sra-abbreviation",
+      "statement": "Reads are in the SRA.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-european-nucleotide-archive",
+      "statement": "Submitted to the European Nucleotide Archive.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-ena-abbreviation",
+      "statement": "Submitted to the ENA.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-clinicalstudydatarequest",
+      "statement": "Data are available through ClinicalStudyDataRequest.com.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-vivli",
+      "statement": "Data can be requested through Vivli.",
+      "disclosure_level": "full_open",
+      "restrictions": [],
+      "why": "Repository plus a soft restriction stays FULL_OPEN by design (issue #109)."
+    },
+    {
+      "id": "full-open-yoda",
+      "statement": "Available via the YODA Project.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-openly-available",
+      "statement": "The data are openly available.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-freely-accessible",
+      "statement": "All datasets are freely accessible.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-in-supplement",
+      "statement": "Data are available in the supplementary material.",
+      "disclosure_level": "full_open",
+      "restrictions": []
+    },
+    {
+      "id": "full-open-conjunction-barrier-stops-negation-scope",
+      "statement": "Data were not embargoed and are openly shared.",
+      "disclosure_level": "full_open",
+      "restrictions": [],
+      "why": "The (?!and\\b|but\\b|or\\b) barrier stops the negator reaching the affirmation."
+    },
+    {
+      "id": "full-open-conjunction-barrier-after-neither-nor",
+      "statement": "Data are neither embargoed nor restricted and are openly available.",
+      "disclosure_level": "full_open",
+      "restrictions": [],
+      "why": "Barrier applies to the two-token neither/nor form too."
+    },
+    {
+      "id": "full-open-punctuation-stops-negation-scope",
+      "statement": "There is no embargo; data are openly available.",
+      "disclosure_level": "full_open",
+      "restrictions": [],
+      "why": "\\w+ cannot cross punctuation, so the window never reaches the affirmation."
+    },
+    {
+      "id": "full-open-window-bound-stops-far-negator",
+      "statement": "No limits on these openly available records.",
+      "disclosure_level": "full_open",
+      "restrictions": [],
+      "why": "Three intervening words exceed the {0,2} window."
+    },
+    {
+      "id": "full-open-no-restrictions-and-openly-available",
+      "statement": "No restrictions apply and data are openly available.",
+      "disclosure_level": "full_open",
+      "restrictions": [],
+      "why": "Window and barrier together keep a genuinely open statement open."
+    },
+    {
+      "id": "restricted-upon-reasonable-request",
+      "statement": "Data are available upon reasonable request.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Available upon request"
+      ]
+    },
+    {
+      "id": "restricted-from-corresponding-author",
+      "statement": "Data are available from the corresponding author.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Available from author"
+      ]
+    },
+    {
+      "id": "restricted-contact-corresponding-author",
+      "statement": "Please contact the corresponding author for data.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Contact corresponding author"
+      ]
+    },
+    {
+      "id": "restricted-data-sharing-agreement",
+      "statement": "Access requires a data sharing agreement.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Requires data sharing agreement"
+      ]
+    },
+    {
+      "id": "restricted-irb-label-deduplicated",
+      "statement": "Requires institutional review board review and IRB approval.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Requires IRB approval"
+      ],
+      "why": "Two distinct patterns share one label; it must appear once (issue #114)."
+    },
+    {
+      "id": "restricted-ethics-committee",
+      "statement": "Approval from the local ethics committee is required.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Requires ethics committee approval"
+      ]
+    },
+    {
+      "id": "restricted-confidential",
+      "statement": "The individual records are confidential.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Confidentiality restrictions"
+      ]
+    },
+    {
+      "id": "restricted-requests-redirected",
+      "statement": "Requests for such data should be made directly to the study sponsor.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data requests redirected to third party"
+      ]
+    },
+    {
+      "id": "restricted-restrictive-understanding",
+      "statement": "Data were provided on the understanding that they would not be redistributed.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data provided under restrictive understanding"
+      ]
+    },
+    {
+      "id": "restricted-specific-purpose",
+      "statement": "Data may be used only for the purpose of replication.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data restricted to specific purpose"
+      ]
+    },
+    {
+      "id": "restricted-data-custodians",
+      "statement": "The records are held by data custodians at the ministry.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data held by custodians (not authors)"
+      ]
+    },
+    {
+      "id": "restricted-gdpr",
+      "statement": "Sharing is limited under the GDPR.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "GDPR restrictions"
+      ]
+    },
+    {
+      "id": "restricted-hipaa",
+      "statement": "HIPAA precludes broad redistribution of these records.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "HIPAA restrictions"
+      ]
+    },
+    {
+      "id": "restricted-privacy",
+      "statement": "Participant privacy limits redistribution.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Privacy restrictions"
+      ]
+    },
+    {
+      "id": "restricted-patient-consent",
+      "statement": "Sharing is bounded by the patient consent obtained.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Patient consent required"
+      ]
+    },
+    {
+      "id": "restricted-negated-openness-never",
+      "statement": "The data were never openly shared.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data not openly available"
+      ]
+    },
+    {
+      "id": "restricted-negated-openness-intervening-word",
+      "statement": "These files are not currently available in the supplement.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data not openly available"
+      ]
+    },
+    {
+      "id": "restricted-negated-openness-neither-nor",
+      "statement": "Neither the raw nor the processed data are openly available.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data not openly available"
+      ]
+    },
+    {
+      "id": "restricted-negated-openness-unicode-intervening-word",
+      "statement": "Data are not entraînement openly available.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data not openly available"
+      ],
+      "why": "\\w+ must match non-ASCII, so the intervening word counts as one token; an ASCII-only \\w splits it and lets the statement escape to FULL_OPEN."
+    },
+    {
+      "id": "not-available-cannot-be-shared",
+      "statement": "Individual data cannot be shared.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data cannot be shared"
+      ]
+    },
+    {
+      "id": "not-available-not-publicly-available",
+      "statement": "The data are not publicly available.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data not publicly available"
+      ]
+    },
+    {
+      "id": "not-available-proprietary",
+      "statement": "The dataset is proprietary.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data described as proprietary"
+      ]
+    },
+    {
+      "id": "not-available-will-not-be-released",
+      "statement": "Data will not be released.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data will not be released"
+      ]
+    },
+    {
+      "id": "not-available-not-released-to-others-label-order",
+      "statement": "Data will not be released to others.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data will not be released",
+        "Data will not be released to others"
+      ],
+      "why": "Two labels accumulate in restricted-list order."
+    },
+    {
+      "id": "not-available-sponsor-agreements-prevent",
+      "statement": "Agreements with the sponsor prevent disclosure.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Sponsor agreements prevent disclosure"
+      ]
+    },
+    {
+      "id": "not-available-confidentiality-agreements-with-sponsors",
+      "statement": "Confidentiality agreements with sponsors restrict access.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Confidentiality restrictions",
+        "Confidentiality agreements with sponsors"
+      ],
+      "why": "Generic and specific confidentiality labels accumulate in list order."
+    },
+    {
+      "id": "not-available-named-collaboration",
+      "statement": "Data were provided to the ARDS collaboration on the understanding that they would not be shared.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data restricted to named collaboration",
+        "Data will not be released",
+        "Data provided under restrictive understanding"
+      ]
+    },
+    {
+      "id": "not-available-custodian-redirect",
+      "statement": "Data will not be released to others; requests should be made directly to the data custodians.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data will not be released; requests redirected",
+        "Data will not be released",
+        "Data will not be released to others",
+        "Data held by custodians (not authors)"
+      ]
+    },
+    {
+      "id": "not-available-sponsor-confidentiality-agreement",
+      "statement": "Access is governed by a confidentiality agreement with the trial sponsor.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Sponsor confidentiality agreement restricts access",
+        "Confidentiality restrictions"
+      ]
+    },
+    {
+      "id": "not-available-refusal-overrides-repository-mention",
+      "statement": "Genomic data could not be deposited in GEO for privacy reasons; the data are not publicly available.",
+      "disclosure_level": "not_available",
+      "restrictions": [
+        "Data not publicly available",
+        "Privacy restrictions"
+      ],
+      "why": "A refusal anywhere outranks a co-occurring repository name (issue #106)."
+    }
+  ]
+}
