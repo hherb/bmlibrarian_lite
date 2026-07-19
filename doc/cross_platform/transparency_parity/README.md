@@ -72,6 +72,14 @@ The fixtures are read from this directory by path — deliberately not copied in
 per-platform test resources, since all three must read the same bytes and a copy
 would reintroduce the divergence the guard exists to prevent.
 
+Because the fixtures sit outside every Gradle source set, `app/build.gradle.kts`
+declares this directory as an input of the Android test tasks. Without that
+declaration Gradle sees no changed input when only the contract is edited,
+reports `UP-TO-DATE`, and skips the Android parity test entirely — silently
+passing the exact incomplete-edit case the guard exists to catch. Do not remove
+it. (Gradle hashes content, not timestamps, so `touch` alone will still not
+re-run the task; that is correct.)
+
 ## Invariants the Python suite also pins
 
 `TestManifestSelfConsistency` asserts structural properties of the contract
@@ -91,9 +99,20 @@ at once:
 - **Every restriction-tier pattern has a label, and every label belongs to a
   tier.** An unlabelled pattern surfaces its raw regex to the user; an orphaned
   label is dead weight that reads as live behaviour.
-- **Every pattern compiles**, and every reachable disclosure level and every
-  restriction label is exercised by at least one case — so the behavioural half
-  cannot develop a blind spot as patterns are added.
+- **Every pattern compiles**, and every reachable disclosure level, every
+  restriction label and every individual *pattern* is exercised by at least one
+  case — so the behavioural half cannot develop a blind spot as patterns are
+  added.
+
+Per-pattern coverage is deliberately stricter than per-label coverage, and the
+difference is load-bearing. All four negated-openness patterns emit the single
+label "Data not openly available", so a label-keyed guard is satisfied by any one
+of them while the other three stay behaviourally untested on every platform. That
+was not hypothetical: the neither/nor supplement variant shipped with no covering
+case, and only the per-pattern guard found it.
+
+Adding a pattern under an existing label therefore also requires a case that
+matches that pattern specifically.
 
 `AVAILABLE_ON_REQUEST` is deliberately unreachable: on-request phrasing maps to
 `RESTRICTED`. The level exists for scoring and externally-constructed results,

@@ -56,6 +56,12 @@ PARITY_FIXTURE_DIR = (
     Path(__file__).resolve().parents[1] / "doc" / "cross_platform" / "transparency_parity"
 )
 
+#: Pattern/label contract, asserted string-for-string.
+PATTERNS_FIXTURE = "data_availability_patterns.json"
+
+#: Worked ``statement -> (level, restrictions)`` cases, asserted behaviourally.
+CASES_FIXTURE = "data_availability_cases.json"
+
 
 def _load_fixture(filename: str) -> dict[str, Any]:
     """Load a parity fixture by name.
@@ -74,7 +80,7 @@ def _load_fixture(filename: str) -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def manifest() -> dict[str, Any]:
     """The shared pattern/label contract."""
-    return _load_fixture("data_availability_patterns.json")
+    return _load_fixture(PATTERNS_FIXTURE)
 
 
 @pytest.fixture(scope="module")
@@ -211,7 +217,7 @@ class TestManifestSelfConsistency:
 class TestBehaviouralCaseParity:
     """The worked cases must classify identically on every platform."""
 
-    @pytest.mark.parametrize("case", _load_fixture("data_availability_cases.json")["cases"])
+    @pytest.mark.parametrize("case", _load_fixture(CASES_FIXTURE)["cases"])
     def test_case_classifies_as_specified(self, case: dict[str, Any]) -> None:
         """One worked statement classifies to the contracted level and labels."""
         info = analyze_data_availability(case["statement"])
@@ -223,7 +229,7 @@ class TestBehaviouralCaseParity:
 
     def test_every_case_id_is_unique(self) -> None:
         """Ids name the case in every platform's failure message, so they must be distinct."""
-        cases = _load_fixture("data_availability_cases.json")["cases"]
+        cases = _load_fixture(CASES_FIXTURE)["cases"]
         ids = [case["id"] for case in cases]
         assert len(ids) == len(set(ids))
 
@@ -234,7 +240,7 @@ class TestBehaviouralCaseParity:
         to ``RESTRICTED``, so the classifier never emits it. It exists for scoring
         and externally-constructed results, and all three platforms agree on that.
         """
-        cases = _load_fixture("data_availability_cases.json")["cases"]
+        cases = _load_fixture(CASES_FIXTURE)["cases"]
         covered = {case["disclosure_level"] for case in cases}
         reachable = {
             level.value
@@ -251,7 +257,38 @@ class TestBehaviouralCaseParity:
         the behavioural half of the guard with a blind spot that grows silently
         every time a pattern is added.
         """
-        cases = _load_fixture("data_availability_cases.json")["cases"]
+        cases = _load_fixture(CASES_FIXTURE)["cases"]
         emitted = {label for case in cases for label in case["restrictions"]}
         expected = {entry["label"] for entry in manifest["restriction_labels"]}
         assert expected - emitted == set()
+
+    def test_every_contract_pattern_is_exercised(
+        self, manifest_patterns: dict[str, list[str]]
+    ) -> None:
+        """Every pattern in every tier is matched by at least one case statement.
+
+        Label coverage alone leaves a blind spot wherever patterns share a label:
+        the four negated-openness patterns all emit "Data not openly available",
+        so a case exercising any one of them satisfies a label-keyed guard while
+        the other three stay behaviourally untested on all three platforms.
+        Keying the guard on the pattern rather than the label closes that, and
+        keeps it closed as patterns are added under existing labels.
+
+        Matching mirrors the classifier: ``re.search`` against the lowercased
+        statement.
+        """
+        statements = [
+            (case["statement"] or "").lower()
+            for case in _load_fixture(CASES_FIXTURE)["cases"]
+        ]
+        unexercised = sorted(
+            {
+                pattern
+                for patterns in manifest_patterns.values()
+                for pattern in patterns
+                if not any(re.search(pattern, statement) for statement in statements)
+            }
+        )
+        assert unexercised == [], "contract patterns with no covering case:\n  " + "\n  ".join(
+            unexercised
+        )

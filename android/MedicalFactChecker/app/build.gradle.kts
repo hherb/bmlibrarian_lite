@@ -71,6 +71,25 @@ android {
     }
 }
 
+// The transparency parity guard (#105) reads its fixtures from the shared
+// cross-platform contract at the repository root, outside every Gradle source
+// set. Declaring that directory as a test input is what makes an edit to the
+// contract alone invalidate the test task: without it Gradle sees no changed
+// input, reports UP-TO-DATE, and the Android half of the drift guard silently
+// does not run — precisely the incomplete-edit case the guard exists to catch.
+val transparencyParityFixtures: File =
+    rootProject.file("../../doc/cross_platform/transparency_parity")
+
+tasks.withType<Test>().configureEach {
+    // Absent in a partial checkout of android/ alone; the test itself fails with
+    // a clear message in that case, so do not break configuration over it.
+    if (transparencyParityFixtures.isDirectory) {
+        inputs.dir(transparencyParityFixtures)
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("transparencyParityFixtures")
+    }
+}
+
 dependencies {
     // Core Android
     implementation("androidx.core:core-ktx:1.12.0")

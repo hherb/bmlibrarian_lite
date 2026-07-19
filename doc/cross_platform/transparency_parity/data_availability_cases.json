@@ -383,6 +383,15 @@
       ]
     },
     {
+      "id": "restricted-negated-openness-neither-nor-supplement",
+      "statement": "Neither the raw nor the processed data are available in the supplement.",
+      "disclosure_level": "restricted",
+      "restrictions": [
+        "Data not openly available"
+      ],
+      "why": "Pins the neither/nor supplement variant. All four negated-openness patterns share one label, so a label-keyed coverage guard is satisfied by any one of them; only per-pattern coverage reaches this one."
+    },
+    {
       "id": "restricted-negated-openness-unicode-intervening-word",
       "statement": "Data are not entraînement openly available.",
       "disclosure_level": "restricted",

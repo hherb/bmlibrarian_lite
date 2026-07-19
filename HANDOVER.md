@@ -16,7 +16,7 @@ its slice has landed; add a new section when handing off new work.
   `TransparencyParityTest.kt`.
   - **Two fixtures, both load-bearing.** `data_availability_patterns.json` pins
     the five tiers + label map string-for-string and order-sensitively;
-    `data_availability_cases.json` pins 64 worked
+    `data_availability_cases.json` pins 65 worked
     `statement -> (level, ordered restrictions)` cases behaviourally. Mutation
     checks confirm neither subsumes the other: reordering two Kotlin patterns
     fails **only** the string half, while dropping `RegexHelper`'s `(?U)` leaves
@@ -34,9 +34,26 @@ its slice has landed; add a new section when handing off new work.
     later tier; every tier pattern labelled and every label tiered). Each was
     mutation-verified to fire on exactly its own violation.
   - Coverage guards keep the behavioural half from developing a blind spot:
-    every reachable disclosure level and every restriction label must be
-    exercised by at least one case. `AVAILABLE_ON_REQUEST` is excluded — the
-    classifier never emits it on any platform.
+    every reachable disclosure level, every restriction label **and every
+    individual pattern** must be exercised by at least one case.
+    `AVAILABLE_ON_REQUEST` is excluded — the classifier never emits it on any
+    platform.
+  - **Per-pattern coverage is stricter than per-label, and that gap was real.**
+    All four negated-openness patterns emit the single label "Data not openly
+    available", so a label-keyed guard is satisfied by any one of them while the
+    other three go untested everywhere. The neither/nor *supplement* variant
+    shipped uncovered and only the per-pattern guard
+    (`test_every_contract_pattern_is_exercised`) found it. Adding a pattern under
+    an existing label therefore also needs a case matching that pattern
+    specifically.
+  - **Do not remove the `inputs.dir` declaration in `app/build.gradle.kts`.** The
+    fixtures live outside every Gradle source set, so without it Gradle sees no
+    changed input when only the contract is edited, reports `UP-TO-DATE`, and
+    skips the Android parity test — silently passing the exact incomplete-edit
+    case the guard exists to catch. Verified both ways: with the declaration
+    removed, a drifted contract gave `BUILD SUCCESSFUL`; with it, the same drift
+    fails. (Gradle hashes content, not mtime, so `touch` alone still will not
+    re-run the task — that is correct, not a regression.)
 - **Data-availability negated openness** (#117 landed 2026-07-19 via PR #124;
   #125 residual fixed 2026-07-19): negators detached from an openness
   affirmation no longer over-match FULL_OPEN. The guard is a *forward* match
@@ -137,6 +154,12 @@ its slice has landed; add a new section when handing off new work.
   layer, leaving the pure classifier + parity tests unchanged.
 - **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
   per call). Negligible today; memoize if it ever hits a hot path.
+- **#129 — no CI runs any test suite**: `.github/workflows/` holds only the Claude
+  review bots, so nothing runs `pytest` / `swift test` / `./gradlew test` on push
+  or PR. The parity guard above is only as strong as someone remembering to run
+  three toolchains. Python first — cheapest, and it uniquely carries the
+  structural-invariant and coverage checks. Note both lint baselines are large
+  (2078 ruff, 677 mypy), so any gate has to be "no new findings vs. base".
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
   no Python counterpart; revisit only if a canonical definition is introduced.
 

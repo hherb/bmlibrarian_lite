@@ -74,13 +74,44 @@ final class TransparencyParityTests: XCTestCase {
         let cases: [Case]
     }
 
+    /// Pattern/label contract, asserted string-for-string.
+    private static let patternsFixture = "data_availability_patterns.json"
+
+    /// Worked `statement -> (level, restrictions)` cases, asserted behaviourally.
+    private static let casesFixture = "data_availability_cases.json"
+
+    /// Failure to reach the shared contract at all, as distinct from a parity failure.
+    ///
+    /// Kept separate so the message names the cause — a checkout that does not
+    /// contain the contract directory — instead of surfacing as an opaque decode
+    /// or file-not-found error from `Foundation`.
+    private enum FixtureError: Error, CustomStringConvertible {
+        /// The upward walk for the contract directory found no candidate.
+        ///
+        /// - Parameter origin: Source path the walk started from, for the message.
+        case directoryNotFound(origin: String)
+
+        /// Human-readable cause, surfaced by XCTest when the error goes unhandled.
+        var description: String {
+            switch self {
+            case let .directoryNotFound(origin):
+                return "could not locate doc/cross_platform/transparency_parity above \(origin)"
+            }
+        }
+    }
+
     /// Directory holding the shared, language-neutral parity fixtures.
     ///
     /// Located by walking up from this source file rather than by bundling the
     /// files as test resources: all three platforms must read the *same* bytes, so
     /// copying them into a per-platform resource bundle would reintroduce exactly
     /// the divergence this guard exists to prevent.
-    private static let fixtureDirectory: URL = {
+    ///
+    /// `nil` rather than a `fatalError` when the walk comes up empty — which it
+    /// would if this package were ever consumed outside the monorepo. Trapping
+    /// there kills the whole test process; surfacing it as a thrown error lets the
+    /// parity tests fail individually and leaves the rest of the suite readable.
+    private static let fixtureDirectory: URL? = {
         var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while directory.path != "/" {
             let candidate = directory
@@ -90,21 +121,54 @@ final class TransparencyParityTests: XCTestCase {
             }
             directory = directory.deletingLastPathComponent()
         }
-        fatalError("could not locate doc/cross_platform/transparency_parity above \(#filePath)")
+        return nil
     }()
 
-    private func loadFixture<T: Decodable>(_ filename: String, as type: T.Type) throws -> T {
-        let url = Self.fixtureDirectory.appendingPathComponent(filename)
-        let data = try Data(contentsOf: url)
+    /// Read and decode one shared fixture from the contract directory.
+    ///
+    /// - Parameter filename: File name within `fixtureDirectory`.
+    /// - Returns: The decoded fixture.
+    /// - Throws: `FixtureError.directoryNotFound` if the contract directory is not
+    ///   in this checkout, or a `Foundation` read/decode error if the file is
+    ///   missing or malformed.
+    private static func decodeFixture<T: Decodable>(_ filename: String) throws -> T {
+        guard let directory = fixtureDirectory else {
+            throw FixtureError.directoryNotFound(origin: #filePath)
+        }
+        let data = try Data(contentsOf: directory.appendingPathComponent(filename))
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func loadManifest() throws -> PatternManifest {
-        try loadFixture("data_availability_patterns.json", as: PatternManifest.self)
+    /// The pattern/label contract, decoded once per test run.
+    ///
+    /// Six assertions read the manifest; re-reading and re-decoding the file for
+    /// each of them was pure overhead. Stored as a `Result` because a static
+    /// stored property cannot itself throw — the error is rethrown at `get()`, so
+    /// an unreadable contract still fails each test individually rather than
+    /// trapping the process.
+    private static let manifest = Result<PatternManifest, Error> {
+        try decodeFixture(patternsFixture)
     }
 
+    /// The behavioural cases, decoded once per test run. See `manifest`.
+    private static let caseFixture = Result<CaseFixture, Error> {
+        try decodeFixture(casesFixture)
+    }
+
+    /// The shared pattern/label contract.
+    ///
+    /// - Returns: The decoded manifest.
+    /// - Throws: Whatever decoding it raised, rethrown on every access.
+    private func loadManifest() throws -> PatternManifest {
+        try Self.manifest.get()
+    }
+
+    /// The shared behavioural cases.
+    ///
+    /// - Returns: Every worked case, in fixture order.
+    /// - Throws: Whatever decoding it raised, rethrown on every access.
     private func loadCases() throws -> [CaseFixture.Case] {
-        try loadFixture("data_availability_cases.json", as: CaseFixture.self).cases
+        try Self.caseFixture.get().cases
     }
 
     // MARK: - Drift reporting
@@ -179,9 +243,23 @@ final class TransparencyParityTests: XCTestCase {
     }
 
     func testRestrictionLabelsMatchContract() throws {
-        let expected = Dictionary(
-            uniqueKeysWithValues: try loadManifest().restrictionLabels.map { ($0.pattern, $0.label) }
-        )
+        let entries = try loadManifest().restrictionLabels
+
+        // `Dictionary(uniqueKeysWithValues:)` traps on a duplicate key, which in a
+        // hand-edited contract would abort the test process instead of reporting a
+        // fixable mistake. (Kotlin's `associate` is the opposite hazard: it keeps
+        // the last entry and says nothing.)
+        let duplicates = Dictionary(grouping: entries, by: \.pattern)
+            .filter { $0.value.count > 1 }
+            .keys
+            .sorted()
+        guard duplicates.isEmpty else {
+            XCTFail("shared contract has duplicate label patterns:\n  "
+                + duplicates.joined(separator: "\n  "))
+            return
+        }
+
+        let expected = Dictionary(uniqueKeysWithValues: entries.map { ($0.pattern, $0.label) })
         let actual = DataRepositoryPatterns.restrictionLabels
         guard actual != expected else { return }
 
