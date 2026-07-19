@@ -419,6 +419,75 @@ STRONG_REFUSAL_PATTERNS = [
     r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?',
 ]
 
+# Human-readable labels for restriction/refusal patterns, keyed by the exact
+# pattern string. Every pattern in ``DATA_REPOSITORIES['restricted']`` and
+# ``DATA_REPOSITORIES['effectively_unavailable']`` must appear here, or the
+# classifier surfaces its raw regex to the user (``_label_for_pattern`` falls
+# back to the pattern text). Distinct patterns may share a label — the callers
+# deduplicate order-preservingly (issue #114).
+#
+# Mirrors the Swift ``DataRepositoryPatterns.restrictionLabels`` and the Android
+# ``DataRepositoryPatterns.restrictionLabels``; all three are pinned against the
+# shared contract in
+# ``doc/cross_platform/transparency_parity/data_availability_patterns.json``
+# (issue #105).
+RESTRICTION_LABELS = {
+    r'cannot be (?:\w+ )?shared': "Data cannot be shared",
+    r'not (?:publicly )?available': "Data not publicly available",
+    r'proprietary': "Data described as proprietary",
+    r'(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)':
+        "Data will not be released",
+    r'not be released to others': "Data will not be released to others",
+    r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent':
+        "Sponsor agreements prevent disclosure",
+    r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?':
+        "Confidentiality agreements with sponsors",
+    r'upon (?:reasonable )?request': "Available upon request",
+    r'available from (?:the )?(?:corresponding )?author':
+        "Available from author",
+    r'contact (?:the )?(?:corresponding )?author':
+        "Contact corresponding author",
+    r'data sharing agreement': "Requires data sharing agreement",
+    r'institutional review board': "Requires IRB approval",
+    r'irb approval': "Requires IRB approval",
+    r'ethics committee': "Requires ethics committee approval",
+    r'confidential(?:ity)?': "Confidentiality restrictions",
+    r'requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to':
+        "Data requests redirected to third party",
+    r'on the understanding that\b.*\bnot\b':
+        "Data provided under restrictive understanding",
+    r'used only for the purpose of\b':
+        "Data restricted to specific purpose",
+    r'data\s+custodians?\b': "Data held by custodians (not authors)",
+    r'\bgdpr\b': "GDPR restrictions",
+    r'\bhipaa\b': "HIPAA restrictions",
+    r'\bprivacy\b': "Privacy restrictions",
+    r'\bpatient consent\b': "Patient consent required",
+    NEGATED_OPENNESS_PATTERNS[0]: "Data not openly available",
+    NEGATED_OPENNESS_PATTERNS[1]: "Data not openly available",
+    NEGATED_OPENNESS_PATTERNS[2]: "Data not openly available",
+    NEGATED_OPENNESS_PATTERNS[3]: "Data not openly available",
+    r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding':
+        "Data restricted to named collaboration",
+    r'not be released.*(?:data custodians?|directly to)':
+        "Data will not be released; requests redirected",
+    r'(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))':
+        "Sponsor confidentiality agreement restricts access",
+}
+
+
+def _label_for_pattern(pattern: str) -> str:
+    """Resolve the human-readable label for a restriction/refusal pattern.
+
+    Args:
+        pattern: The restriction/refusal regex pattern as written in
+            ``DATA_REPOSITORIES`` or ``STRONG_REFUSAL_PATTERNS``.
+
+    Returns:
+        The mapped label, or the pattern text itself when unmapped.
+    """
+    return RESTRICTION_LABELS.get(pattern, pattern)
+
 
 # =============================================================================
 # RISK INDICATOR STRINGS
@@ -1113,54 +1182,8 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     # to a refusal — data locked behind collaborations, sponsor
     # confidentiality agreements, or systematic gatekeeping.
 
-    # Map patterns to human-readable descriptions for the restrictions list
-    _restriction_labels = {
-        r'cannot be (?:\w+ )?shared': "Data cannot be shared",
-        r'not (?:publicly )?available': "Data not publicly available",
-        r'proprietary': "Data described as proprietary",
-        r'(?:would|will|shall) not be (?:\w+ )?(?:released|shared|disclosed|provided)':
-            "Data will not be released",
-        r'not be released to others': "Data will not be released to others",
-        r'agreements?\s+(?:with\s+)?(?:the\s+)?sponsors?\s+prevent':
-            "Sponsor agreements prevent disclosure",
-        r'confidentiality\s+agreements?\s+(?:with\s+)?sponsors?':
-            "Confidentiality agreements with sponsors",
-        r'upon (?:reasonable )?request': "Available upon request",
-        r'available from (?:the )?(?:corresponding )?author':
-            "Available from author",
-        r'contact (?:the )?(?:corresponding )?author':
-            "Contact corresponding author",
-        r'data sharing agreement': "Requires data sharing agreement",
-        r'institutional review board': "Requires IRB approval",
-        r'irb approval': "Requires IRB approval",
-        r'ethics committee': "Requires ethics committee approval",
-        r'confidential(?:ity)?': "Confidentiality restrictions",
-        r'requests?\s+(?:for\s+)?(?:such\s+)?data\s+should\s+be\s+made\s+(?:directly\s+)?to':
-            "Data requests redirected to third party",
-        r'on the understanding that\b.*\bnot\b':
-            "Data provided under restrictive understanding",
-        r'used only for the purpose of\b':
-            "Data restricted to specific purpose",
-        r'data\s+custodians?\b': "Data held by custodians (not authors)",
-        r'\bgdpr\b': "GDPR restrictions",
-        r'\bhipaa\b': "HIPAA restrictions",
-        r'\bprivacy\b': "Privacy restrictions",
-        r'\bpatient consent\b': "Patient consent required",
-        NEGATED_OPENNESS_PATTERNS[0]: "Data not openly available",
-        NEGATED_OPENNESS_PATTERNS[1]: "Data not openly available",
-        NEGATED_OPENNESS_PATTERNS[2]: "Data not openly available",
-        NEGATED_OPENNESS_PATTERNS[3]: "Data not openly available",
-        r'(?:provided|available)\s+to\s+the\s+\w+\s+(?:collaboration|consortium|group)\s+on\s+the\s+understanding':
-            "Data restricted to named collaboration",
-        r'not be released.*(?:data custodians?|directly to)':
-            "Data will not be released; requests redirected",
-        r'(?:confidentiality|agreement)\s+(?:with\s+)?(?:the\s+)?(?:sponsor|industri|pharma|trial\s+(?:owner|sponsor))':
-            "Sponsor confidentiality agreement restricts access",
-    }
-
-    def _label_for_pattern(pattern: str) -> str:
-        return _restriction_labels.get(pattern, pattern)
-
+    # Patterns map to human-readable descriptions via the module-level
+    # RESTRICTION_LABELS contract (see _label_for_pattern).
     effectively_unavailable_signals = []
     for pattern in DATA_REPOSITORIES.get('effectively_unavailable', []):
         if re.search(pattern, text_lower):

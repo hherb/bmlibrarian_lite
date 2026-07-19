@@ -1,0 +1,221 @@
+{
+  "_readme": [
+    "Canonical cross-platform contract for the data-availability classifier's pattern",
+    "lists and restriction labels (issue #105).",
+    "",
+    "This file is the single source of truth. Python, Swift (BioMedLit) and Kotlin",
+    "(Android) each carry their own transcription of these strings, and each",
+    "platform's test suite asserts its constants equal this file exactly. Editing one",
+    "platform's list without editing this file fails that platform's parity test;",
+    "editing this file without updating the other two fails theirs. That is the point:",
+    "silent divergence becomes impossible.",
+    "",
+    "List order is significant — it determines the order of the human-readable",
+    "restriction labels a statement accumulates.",
+    "",
+    "Do not regenerate this file mechanically from any one platform. Change it by hand,",
+    "deliberately, as part of a change that touches all three.",
+    "",
+    "See doc/cross_platform/transparency_parity/README.md."
+  ],
+  "schema_version": 1,
+  "patterns": {
+    "full_open": [
+      "zenodo",
+      "figshare",
+      "dryad",
+      "osf\\.io",
+      "open science framework",
+      "github",
+      "gitlab",
+      "dataverse",
+      "mendeley data",
+      "gene expression omnibus",
+      "\\bgeo\\b",
+      "arrayexpress",
+      "protein data bank",
+      "\\bpdb\\b",
+      "genbank",
+      "\\bsra\\b",
+      "european nucleotide archive",
+      "\\bena\\b",
+      "clinicalstudydatarequest",
+      "vivli",
+      "yoda",
+      "(?<!not )openly (?:available|shared|accessible)",
+      "(?<!not )freely (?:available|shared|accessible)",
+      "(?<!not )available (?:in|within|as|via|through) (?:the )?supplement"
+    ],
+    "negated_openness": [
+      "\\b(?:not|no|never|cannot|neither|nor)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+(?:openly|freely) (?:available|shared|accessible)",
+      "\\b(?:not|no|never|cannot|neither|nor)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+available (?:in|within|as|via|through) (?:the )?supplement",
+      "\\bneither\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,3}\\s+nor\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,4}\\s+(?:openly|freely) (?:available|shared|accessible)",
+      "\\bneither\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,3}\\s+nor\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,4}\\s+available (?:in|within|as|via|through) (?:the )?supplement"
+    ],
+    "restricted": [
+      "upon (?:reasonable )?request",
+      "available from (?:the )?(?:corresponding )?author",
+      "contact (?:the )?(?:corresponding )?author",
+      "data sharing agreement",
+      "institutional review board",
+      "irb approval",
+      "ethics committee",
+      "confidential(?:ity)?",
+      "proprietary",
+      "cannot be (?:\\w+ )?shared",
+      "not (?:publicly )?available",
+      "(?:would|will|shall) not be (?:\\w+ )?(?:released|shared|disclosed|provided)",
+      "not be released to others",
+      "requests?\\s+(?:for\\s+)?(?:such\\s+)?data\\s+should\\s+be\\s+made\\s+(?:directly\\s+)?to",
+      "on the understanding that\\b.*\\bnot\\b",
+      "used only for the purpose of\\b",
+      "agreements?\\s+(?:with\\s+)?(?:the\\s+)?sponsors?\\s+prevent",
+      "confidentiality\\s+agreements?\\s+(?:with\\s+)?sponsors?",
+      "data\\s+custodians?\\b",
+      "\\bgdpr\\b",
+      "\\bhipaa\\b",
+      "\\bprivacy\\b",
+      "\\bpatient consent\\b",
+      "\\b(?:not|no|never|cannot|neither|nor)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+(?:openly|freely) (?:available|shared|accessible)",
+      "\\b(?:not|no|never|cannot|neither|nor)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+available (?:in|within|as|via|through) (?:the )?supplement",
+      "\\bneither\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,3}\\s+nor\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,4}\\s+(?:openly|freely) (?:available|shared|accessible)",
+      "\\bneither\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,3}\\s+nor\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,4}\\s+available (?:in|within|as|via|through) (?:the )?supplement"
+    ],
+    "strong_refusal": [
+      "cannot be (?:\\w+ )?shared",
+      "not (?:publicly )?available",
+      "proprietary",
+      "(?:would|will|shall) not be (?:\\w+ )?(?:released|shared|disclosed|provided)",
+      "not be released to others",
+      "agreements?\\s+(?:with\\s+)?(?:the\\s+)?sponsors?\\s+prevent",
+      "confidentiality\\s+agreements?\\s+(?:with\\s+)?sponsors?"
+    ],
+    "effectively_unavailable": [
+      "(?:provided|available)\\s+to\\s+the\\s+\\w+\\s+(?:collaboration|consortium|group)\\s+on\\s+the\\s+understanding",
+      "not be released.*(?:data custodians?|directly to)",
+      "(?:confidentiality|agreement)\\s+(?:with\\s+)?(?:the\\s+)?(?:sponsor|industri|pharma|trial\\s+(?:owner|sponsor))"
+    ]
+  },
+  "restriction_labels": [
+    {
+      "pattern": "cannot be (?:\\w+ )?shared",
+      "label": "Data cannot be shared"
+    },
+    {
+      "pattern": "not (?:publicly )?available",
+      "label": "Data not publicly available"
+    },
+    {
+      "pattern": "proprietary",
+      "label": "Data described as proprietary"
+    },
+    {
+      "pattern": "(?:would|will|shall) not be (?:\\w+ )?(?:released|shared|disclosed|provided)",
+      "label": "Data will not be released"
+    },
+    {
+      "pattern": "not be released to others",
+      "label": "Data will not be released to others"
+    },
+    {
+      "pattern": "agreements?\\s+(?:with\\s+)?(?:the\\s+)?sponsors?\\s+prevent",
+      "label": "Sponsor agreements prevent disclosure"
+    },
+    {
+      "pattern": "confidentiality\\s+agreements?\\s+(?:with\\s+)?sponsors?",
+      "label": "Confidentiality agreements with sponsors"
+    },
+    {
+      "pattern": "upon (?:reasonable )?request",
+      "label": "Available upon request"
+    },
+    {
+      "pattern": "available from (?:the )?(?:corresponding )?author",
+      "label": "Available from author"
+    },
+    {
+      "pattern": "contact (?:the )?(?:corresponding )?author",
+      "label": "Contact corresponding author"
+    },
+    {
+      "pattern": "data sharing agreement",
+      "label": "Requires data sharing agreement"
+    },
+    {
+      "pattern": "institutional review board",
+      "label": "Requires IRB approval"
+    },
+    {
+      "pattern": "irb approval",
+      "label": "Requires IRB approval"
+    },
+    {
+      "pattern": "ethics committee",
+      "label": "Requires ethics committee approval"
+    },
+    {
+      "pattern": "confidential(?:ity)?",
+      "label": "Confidentiality restrictions"
+    },
+    {
+      "pattern": "requests?\\s+(?:for\\s+)?(?:such\\s+)?data\\s+should\\s+be\\s+made\\s+(?:directly\\s+)?to",
+      "label": "Data requests redirected to third party"
+    },
+    {
+      "pattern": "on the understanding that\\b.*\\bnot\\b",
+      "label": "Data provided under restrictive understanding"
+    },
+    {
+      "pattern": "used only for the purpose of\\b",
+      "label": "Data restricted to specific purpose"
+    },
+    {
+      "pattern": "data\\s+custodians?\\b",
+      "label": "Data held by custodians (not authors)"
+    },
+    {
+      "pattern": "\\bgdpr\\b",
+      "label": "GDPR restrictions"
+    },
+    {
+      "pattern": "\\bhipaa\\b",
+      "label": "HIPAA restrictions"
+    },
+    {
+      "pattern": "\\bprivacy\\b",
+      "label": "Privacy restrictions"
+    },
+    {
+      "pattern": "\\bpatient consent\\b",
+      "label": "Patient consent required"
+    },
+    {
+      "pattern": "\\b(?:not|no|never|cannot|neither|nor)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+(?:openly|freely) (?:available|shared|accessible)",
+      "label": "Data not openly available"
+    },
+    {
+      "pattern": "\\b(?:not|no|never|cannot|neither|nor)\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,2}\\s+available (?:in|within|as|via|through) (?:the )?supplement",
+      "label": "Data not openly available"
+    },
+    {
+      "pattern": "\\bneither\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,3}\\s+nor\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,4}\\s+(?:openly|freely) (?:available|shared|accessible)",
+      "label": "Data not openly available"
+    },
+    {
+      "pattern": "\\bneither\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,3}\\s+nor\\b(?:\\s+(?!and\\b|but\\b|or\\b)\\w+){0,4}\\s+available (?:in|within|as|via|through) (?:the )?supplement",
+      "label": "Data not openly available"
+    },
+    {
+      "pattern": "(?:provided|available)\\s+to\\s+the\\s+\\w+\\s+(?:collaboration|consortium|group)\\s+on\\s+the\\s+understanding",
+      "label": "Data restricted to named collaboration"
+    },
+    {
+      "pattern": "not be released.*(?:data custodians?|directly to)",
+      "label": "Data will not be released; requests redirected"
+    },
+    {
+      "pattern": "(?:confidentiality|agreement)\\s+(?:with\\s+)?(?:the\\s+)?(?:sponsor|industri|pharma|trial\\s+(?:owner|sponsor))",
+      "label": "Sponsor confidentiality agreement restricts access"
+    }
+  ]
+}
