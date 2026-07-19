@@ -531,6 +531,24 @@ This updates:
 - `bmll.py` (`__version__`)
 - `bmlibrarian_lite.spec` (3 locations: BUNDLE version, CFBundleShortVersionString, CFBundleVersion)
 
+The script does not touch `CLAUDE.md` (`**Current version:**`) or `CHANGELOG.md` —
+update both by hand.
+
+### Changelog
+
+`CHANGELOG.md` is the canonical release history ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+format). Before tagging:
+
+1. Move entries from `## [Unreleased]` into a new `## [X.Y.Z] - YYYY-MM-DD` section,
+   grouped under Added / Changed / Deprecated / Removed / Fixed / Security.
+2. Add the version's compare link at the bottom and repoint `[Unreleased]`.
+3. Reuse the section as the GitHub release body:
+   `gh release create X.Y.Z --title "vX.Y.Z" --notes-file <notes> dist/bmlibrarian_lite-X.Y.Z*`
+
+Releases 0.2.0 and 0.3.0 also have standalone `RELEASE_NOTES_X.Y.Z.md` files,
+linked from their changelog sections. That per-version file pattern is retired —
+new releases go in `CHANGELOG.md` only.
+
 ### Publishing to PyPI
 
 ```bash

@@ -431,6 +431,7 @@ BMLibrarian Lite is designed for ease of use and portability:
 
 Documentation is organized into several categories:
 
+- **Changelog** (`CHANGELOG.md`): Release history and notable changes
 - **User Documentation** (`doc/user/`): End-user guides and tutorials
 - **Developer Documentation** (`doc/developer/`): Architecture, API, and contribution guides
 - **Cross-Platform Algorithms** (`doc/cross_platform/`): Platform-agnostic algorithm specifications
