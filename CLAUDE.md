@@ -9,7 +9,7 @@ BMLibrarian Lite: Cross-platform biomedical literature research with AI-powered 
 - **iOS/macOS** (Swift/SwiftUI): SwiftData, NLEmbedding, OpenAI-compatible API
 - **Android** (Kotlin/Compose): Room, Hilt, MVVM
 
-**Current version:** 0.3.0
+**Current version:** 0.4.0
 
 ## Commands
 
