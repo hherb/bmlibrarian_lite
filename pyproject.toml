@@ -62,7 +62,9 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.4.0",
-    "mypy>=1.9.0",
+    # The CI lint gate (.github/scripts/lint_delta.py) invokes `mypy --output
+    # json`, which only exists from 1.11.
+    "mypy>=1.11",
 ]
 
 [project.scripts]
@@ -112,6 +114,14 @@ packages = ["src/bmlibrarian_lite"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+# Keep these under `lint.` rather than at the top level. Ruff still honours the
+# top-level spelling but warns it is deprecated; once it is removed, a top-level
+# `select` would be ignored and ruff would silently fall back to its small
+# default rule set. The CI no-new-findings gate compares head against base with
+# the same ruff, so both sides would shrink together and the gate would stay
+# green while most of the linting quietly disappeared.
+[tool.ruff.lint]
 select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
@@ -128,7 +138,7 @@ ignore = [
     "D104",   # missing docstring in public package
 ]
 
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.mypy]
