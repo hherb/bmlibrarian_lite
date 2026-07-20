@@ -200,10 +200,15 @@ its slice has landed; add a new section when handing off new work.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
   'platform=macOS' build` from `ios/MedicalFactChecker/`.
-- `ruff check .` / `mypy src/` carry pre-existing debt (2081 and 677 findings), so
-  a clean run is unreachable and the gate is **no new findings vs. the merge
-  base**. CI enforces this on PRs; reproduce it locally with
+- `ruff check .` / `mypy src/` carry pre-existing debt, so a clean run is
+  unreachable and the gate is **no new findings vs. the merge base**. CI enforces
+  this on PRs; reproduce it locally with
   `python .github/scripts/lint_delta.py --base-ref origin/master`.
+  - **Don't record an absolute baseline count — the mypy total is
+    platform-dependent** (677 on macOS, 688 on the Linux runner, from the
+    platform-specific branches it analyses). The gate is immune because it
+    compares two measurements from the same machine in the same run; a committed
+    baseline number would be wrong by ~a dozen the moment it changed hosts.
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 

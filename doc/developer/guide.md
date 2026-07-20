@@ -683,10 +683,16 @@ Two things about this job are deliberate and should not be "optimised" away:
 ### `lint-delta` job
 
 `ruff check .` and `mypy src/` both carry large pre-existing baselines (2081 and
-677 findings respectively when this was written), so requiring a clean run is not
-reachable. Instead `.github/scripts/lint_delta.py` measures both tools on the
+~680 findings respectively when this was written), so requiring a clean run is
+not reachable. Instead `.github/scripts/lint_delta.py` measures both tools on the
 pull request and again in a throwaway worktree at the merge base, and fails only
 on findings the change introduces.
+
+Note that the mypy total is platform-dependent — 677 on macOS against 688 on the
+Linux runner, from differences in the platform-specific branches it analyses.
+This is why the gate compares two measurements taken on the *same* machine in the
+same run rather than checking against a recorded baseline number; a committed
+baseline would be wrong by roughly a dozen findings the moment it moved hosts.
 
 A finding is identified by `(tool, path, code, message)` — without its line and
 column — so inserting code above a pre-existing finding does not re-report it.
