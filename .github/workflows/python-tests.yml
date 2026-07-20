@@ -30,6 +30,9 @@ jobs:
   tests:
     name: pytest (Python 3.12)
     runs-on: ubuntu-latest
+    # The suite finishes in about a minute; without a limit a hung test would
+    # hold the runner for GitHub's six-hour default.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +84,8 @@ jobs:
     # itself, so the comparison would be vacuously empty rather than meaningful.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # Two full ruff+mypy runs take a few minutes; anything longer is a hang.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:

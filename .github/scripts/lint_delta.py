@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,9 +87,40 @@ class Finding:
             A ``::error …::`` line that GitHub renders against the source file.
         """
         return (
-            f"::error file={self.path},line={self.line}::"
-            f"{self.tool} {self.code}: {self.message}"
+            f"::error file={_escape_annotation_property(self.path)},line={self.line}::"
+            f"{self.tool} {self.code}: {_escape_annotation_message(self.message)}"
         )
+
+
+def _escape_annotation_message(value: str) -> str:
+    """Escape text for the message part of a GitHub workflow command.
+
+    GitHub decodes ``%25``/``%0D``/``%0A`` sequences in workflow commands, so a
+    message containing a literal ``%`` (mypy errors about %-formatting, say)
+    would otherwise render garbled or split across lines.
+
+    Args:
+        value: Raw text to embed after the ``::`` separator.
+
+    Returns:
+        The text with ``%``, carriage returns and newlines escaped.
+    """
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_annotation_property(value: str) -> str:
+    """Escape text for a property value of a GitHub workflow command.
+
+    Property values live in a comma-separated list, so ``,`` and ``:`` need
+    escaping on top of the message rules.
+
+    Args:
+        value: Raw property value, e.g. a file path.
+
+    Returns:
+        The value with ``%``, line breaks, ``:`` and ``,`` escaped.
+    """
+    return _escape_annotation_message(value).replace(":", "%3A").replace(",", "%2C")
 
 
 def _relative_path(raw: str, root: Path) -> str:
@@ -326,6 +358,9 @@ def compare(repo: Path, tools: list[str], base_ref: str) -> list[Finding]:
     finally:
         _run(["git", "worktree", "remove", "--force", str(worktree)], repo)
         shutil.rmtree(worktree, ignore_errors=True)
+        # If the remove above failed, the rmtree leaves a stale entry in
+        # .git/worktrees/; prune it so repeated local runs stay clean.
+        _run(["git", "worktree", "prune"], repo)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -365,6 +400,15 @@ def main(argv: list[str] | None = None) -> int:
         # A gate that cannot measure must fail; reporting "no new findings"
         # here would be indistinguishable from a genuinely clean change.
         print(f"::error::lint delta gate could not run: {exc}", file=sys.stderr)
+        return EXIT_GATE_ERROR
+    except Exception as exc:
+        # Anything else is a bug in this script or a tool changing its output
+        # schema (a KeyError, say). It must still exit 2: an unhandled
+        # traceback would exit 1, which this script documents as "new findings
+        # reported". The traceback is kept because, unlike the expected errors
+        # above, the message alone will not say where the bug is.
+        traceback.print_exc(file=sys.stderr)
+        print(f"::error::lint delta gate crashed: {exc!r}", file=sys.stderr)
         return EXIT_GATE_ERROR
 
     if not introduced:

@@ -712,6 +712,13 @@ annotations) and 2 (the gate could not run — never treated as a pass). Renamin
 a file makes every finding it carries look new, because the path is part of the
 identity; fix or split such changes rather than weakening the identity.
 
+Each side runs with its own checkout's `pyproject.toml`, so a pull request that
+*enables* a ruff rule surfaces every pre-existing finding that rule flags as
+new — and fails. That asymmetry is policy, not accident: enabling a rule means
+cleaning up what it catches, in the same pull request. Rule-set expansions
+therefore cannot land incrementally; scope them to a rule whose cleanup fits in
+one review.
+
 The job runs on pull requests only: on a push to `master` the merge base is the
 commit itself, so the comparison would be vacuously empty.
 

@@ -62,7 +62,9 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.4.0",
-    "mypy>=1.9.0",
+    # The CI lint gate (.github/scripts/lint_delta.py) invokes `mypy --output
+    # json`, which only exists from 1.11.
+    "mypy>=1.11",
 ]
 
 [project.scripts]

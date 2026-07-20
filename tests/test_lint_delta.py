@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -228,6 +229,22 @@ class TestAnnotation:
             "::error file=src/a.py,line=42::ruff F401: unused import"
         )
 
+    def test_percent_and_line_breaks_in_message_are_escaped(self):
+        """GitHub decodes %25/%0D/%0A in workflow commands.
+
+        A raw ``%`` (mypy errors about %-formatting, say) would render garbled
+        and a raw newline would split the annotation in two.
+        """
+        finding = make_finding(message="expected '%s'\r\ngot nothing")
+        assert finding.annotation().endswith(
+            "ruff D212: expected '%25s'%0D%0Agot nothing"
+        )
+
+    def test_comma_and_colon_in_path_are_escaped(self):
+        """Property values are comma-separated, so ``,`` and ``:`` cannot appear raw."""
+        finding = make_finding(path="src/od,d:name.py", line=7)
+        assert "file=src/od%2Cd%3Aname.py,line=7" in finding.annotation()
+
 
 class TestCollect:
     """Guarding against a failed tool run being read as a clean result."""
@@ -241,7 +258,7 @@ class TestCollect:
         """
 
         def fake_run(command, cwd):
-            return __import__("subprocess").CompletedProcess(
+            return subprocess.CompletedProcess(
                 command, returncode=2, stdout="", stderr="ruff: invalid config"
             )
 
@@ -262,13 +279,91 @@ class TestMergeBase:
         """A shallow clone must fail the gate, not silently skip it."""
 
         def fake_run(command, cwd):
-            return __import__("subprocess").CompletedProcess(
+            return subprocess.CompletedProcess(
                 command, returncode=128, stdout="", stderr="fatal: Not a valid object name"
             )
 
         monkeypatch.setattr(lint_delta, "_run", fake_run)
         with pytest.raises(RuntimeError, match="merge base"):
             lint_delta.merge_base(tmp_path, "origin/master")
+
+
+class TestCompare:
+    """Orchestration: each tool measured at head and at base, worktree cleaned up."""
+
+    @pytest.fixture
+    def two_commit_repo(self, tmp_path: Path) -> Path:
+        """Create a repository whose HEAD edits a file over its parent commit.
+
+        Returns:
+            Path to the repository's working directory.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def git(*argv: str) -> None:
+            subprocess.run(["git", *argv], cwd=repo, check=True, capture_output=True, text=True)
+
+        git("init")
+        git("config", "user.email", "ci@example.invalid")
+        git("config", "user.name", "CI")
+        git("config", "commit.gpgsign", "false")
+        (repo / "a.py").write_text("x = 1\n")
+        git("add", "a.py")
+        git("commit", "-m", "base")
+        (repo / "a.py").write_text("x = 1\ny = 2\n")
+        git("commit", "-am", "head")
+        return repo
+
+    def test_head_and_base_are_measured_and_diffed(self, two_commit_repo, monkeypatch):
+        """The base run sees the merge-base tree, and only the delta is returned."""
+        measured = []
+
+        def fake_collect(tool, root):
+            measured.append((tool, Path(root), (Path(root) / "a.py").read_text()))
+            if Path(root) == two_commit_repo:
+                return [make_finding(), make_finding(code="F401", message="`os` unused")]
+            return [make_finding()]
+
+        monkeypatch.setattr(lint_delta, "collect", fake_collect)
+        introduced = lint_delta.compare(two_commit_repo, ["ruff"], "HEAD~1")
+
+        assert [finding.code for finding in introduced] == ["F401"]
+        (head_run,) = [entry for entry in measured if entry[1] == two_commit_repo]
+        (base_run,) = [entry for entry in measured if entry[1] != two_commit_repo]
+        assert head_run[2] == "x = 1\ny = 2\n"
+        assert base_run[2] == "x = 1\n"
+        assert not base_run[1].exists()
+
+    def test_worktree_is_removed_even_when_a_tool_fails(self, two_commit_repo, monkeypatch):
+        """The finally block must clean up after a tool run raises."""
+        base_roots = []
+
+        def failing_collect(tool, root):
+            if Path(root) == two_commit_repo:
+                return []
+            base_roots.append(Path(root))
+            raise RuntimeError("tool exploded")
+
+        monkeypatch.setattr(lint_delta, "collect", failing_collect)
+        with pytest.raises(RuntimeError, match="tool exploded"):
+            lint_delta.compare(two_commit_repo, ["ruff"], "HEAD~1")
+        (base_root,) = base_roots
+        assert not base_root.exists()
+
+    def test_no_stale_worktree_registration_survives(self, two_commit_repo, monkeypatch):
+        """Repeated local runs must not accumulate .git/worktrees entries."""
+        monkeypatch.setattr(lint_delta, "collect", lambda tool, root: [])
+        lint_delta.compare(two_commit_repo, ["ruff"], "HEAD~1")
+        listed = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=two_commit_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        # Only the main worktree remains; each entry opens with a "worktree" line.
+        assert listed.count("worktree ") == 1
 
 
 class TestMain:
@@ -282,6 +377,21 @@ class TestMain:
 
         monkeypatch.setattr(lint_delta, "compare", boom)
         assert lint_delta.main([]) == lint_delta.EXIT_GATE_ERROR
+
+    def test_unexpected_crash_also_exits_two(self, monkeypatch, capsys):
+        """A bug or tool schema change must exit 2, not 1.
+
+        An unhandled traceback would terminate Python with exit status 1,
+        which this script documents as "new findings reported" — CI would
+        still fail, but with a status that lies about why.
+        """
+
+        def boom(repo, tools, base_ref):
+            raise KeyError("message")
+
+        monkeypatch.setattr(lint_delta, "compare", boom)
+        assert lint_delta.main([]) == lint_delta.EXIT_GATE_ERROR
+        assert "crashed" in capsys.readouterr().err
 
     def test_new_findings_exit_one(self, monkeypatch):
         """Introduced findings fail the build."""
