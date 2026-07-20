@@ -654,6 +654,61 @@ pytest tests/test_storage.py::TestStorage
 pytest --cov=src/bmlibrarian_lite --cov-report=html
 ```
 
+## Continuous Integration
+
+`.github/workflows/python-tests.yml` runs on every pull request and on every
+push to `master`.
+
+### `pytest` job
+
+Runs `pytest tests/ -m "not integration" --strict-markers` on Ubuntu against
+Python 3.12. Integration tests are deselected because they call Europe PMC and
+PubMed over the network, where they measure those services' availability rather
+than this repository; run them locally with `pytest -m integration`.
+
+Two things about this job are deliberate and should not be "optimised" away:
+
+- **There is no `paths:` filter.** The transparency parity fixtures live in
+  `doc/cross_platform/transparency_parity/`, outside `src/` and `tests/`, and
+  they exist to fail when a pattern change is not mirrored across all three
+  platforms. Any plausible paths filter would skip the run for a contract-only
+  edit — the same silent pass that the `inputs.dir` declaration in the Android
+  `app/build.gradle.kts` exists to prevent.
+- **A Qt preflight step constructs a `QApplication` before the tests run.** The
+  widget suites open with `pytest.importorskip("PySide6")`, so a broken Qt
+  install would skip roughly a hundred tests and leave the job green. The
+  preflight turns that into a loud failure, and it exercises what the tests
+  actually need rather than merely that the package imports.
+
+### `lint-delta` job
+
+`ruff check .` and `mypy src/` both carry large pre-existing baselines (2081 and
+677 findings respectively when this was written), so requiring a clean run is not
+reachable. Instead `.github/scripts/lint_delta.py` measures both tools on the
+pull request and again in a throwaway worktree at the merge base, and fails only
+on findings the change introduces.
+
+A finding is identified by `(tool, path, code, message)` — without its line and
+column — so inserting code above a pre-existing finding does not re-report it.
+Counts still matter: a file going from two to three identical findings reports
+one new finding.
+
+```bash
+# Reproduce the gate locally before pushing
+python .github/scripts/lint_delta.py --base-ref origin/master
+
+# Check a single tool
+python .github/scripts/lint_delta.py --tool ruff
+```
+
+Exit codes are 0 (no new findings), 1 (new findings, listed as GitHub
+annotations) and 2 (the gate could not run — never treated as a pass). Renaming
+a file makes every finding it carries look new, because the path is part of the
+identity; fix or split such changes rather than weakening the identity.
+
+The job runs on pull requests only: on a push to `master` the merge base is the
+commit itself, so the comparison would be vacuously empty.
+
 ## Contributing
 
 ### Pull Request Process
@@ -661,7 +716,9 @@ pytest --cov=src/bmlibrarian_lite --cov-report=html
 1. Create a feature branch from `master`
 2. Implement changes with tests
 3. Ensure all tests pass: `pytest`
-4. Ensure code quality: `ruff check . && mypy src/`
+4. Ensure the change adds no new lint or type findings:
+   `python .github/scripts/lint_delta.py --base-ref origin/master`
+   (a bare `ruff check . && mypy src/` cannot pass — see Continuous Integration)
 5. Submit pull request with clear description
 
 ### Commit Messages

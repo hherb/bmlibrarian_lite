@@ -8,6 +8,32 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Python CI** (#129 landed 2026-07-20): `.github/workflows/python-tests.yml`
+  runs `pytest -m "not integration" --strict-markers` (557 tests, ~1 min) on every
+  PR and every push to master, plus a `lint-delta` job on PRs. Swift and Android
+  still have no CI — that half of #129 is open.
+  - **The test job has no `paths:` filter, on purpose.** The parity fixtures live
+    in `doc/cross_platform/transparency_parity/`, outside `src/` and `tests/`, so
+    any plausible filter would skip the run for a contract-only edit — the exact
+    silent pass the Android `inputs.dir` declaration exists to prevent. Do not add
+    one.
+  - **A Qt preflight constructs a `QApplication` before pytest.** The widget
+    suites open with `pytest.importorskip("PySide6")`, so a broken Qt install
+    would skip ~100 tests and leave the job green. Verified load-bearing: with a
+    bogus `QT_QPA_PLATFORM` the preflight aborts (exit 134).
+  - **`lint_delta.py` compares findings against the merge base**, measured in a
+    throwaway worktree outside the repo (so ruff's `.` target cannot walk into it).
+    Identity is `(tool, path, code, message)` — no line/column — so a pure line
+    shift reports nothing while an added finding is caught. Both halves verified
+    end-to-end against the real tree; four mutations of the delta logic each fail
+    exactly their own test. Renaming a file makes its findings look new; that is
+    the accepted cost of keeping the path in the identity.
+  - **Ruff config moved to `[tool.ruff.lint]`.** The top-level spelling still
+    worked but was deprecated; once ruff drops it, `select` would be ignored and
+    the rule set would collapse to ruff's small default — and because the gate
+    compares head against base with the *same* ruff, both sides would shrink
+    together and it would stay green. Migration verified finding-for-finding
+    identical (2081 before and after).
 - **Cross-platform parity drift guard** (#105 landed 2026-07-19): parity between
   the three data-availability classifiers is now enforced by test, not by
   convention. The contract lives in `doc/cross_platform/transparency_parity/`
@@ -154,12 +180,13 @@ its slice has landed; add a new section when handing off new work.
   layer, leaving the pure classifier + parity tests unchanged.
 - **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
   per call). Negligible today; memoize if it ever hits a hot path.
-- **#129 — no CI runs any test suite**: `.github/workflows/` holds only the Claude
-  review bots, so nothing runs `pytest` / `swift test` / `./gradlew test` on push
-  or PR. The parity guard above is only as strong as someone remembering to run
-  three toolchains. Python first — cheapest, and it uniquely carries the
-  structural-invariant and coverage checks. Note both lint baselines are large
-  (2078 ruff, 677 mypy), so any gate has to be "no new findings vs. base".
+- **#129 (remainder) — no CI for Swift or Android**: the Python half landed (see
+  above), but `swift test` and `./gradlew test` still run only when someone
+  remembers. The parity guard spans three platforms, so two thirds of it is still
+  unenforced on PRs. Swift needs a `macos-latest` runner (`Packages/BioMedLit`
+  first — cheaper than the app, and it holds the Swift parity suite); Android
+  needs the SDK plus the `inputs.dir` behaviour noted above, which means the
+  Gradle job must *not* be given a `paths:` filter either.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
   no Python counterpart; revisit only if a canonical definition is introduced.
 
@@ -173,10 +200,10 @@ its slice has landed; add a new section when handing off new work.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
   'platform=macOS' build` from `ios/MedicalFactChecker/`.
-- `ruff check .` / `mypy src/` carry pre-existing debt; the gate is **no new
-  errors** (baseline at time of writing: 135 ruff findings on
-  `study_transparency_analyzer/` + its test file counted via
-  `--output-format concise | wc -l`, 677 mypy errors across `src/`).
+- `ruff check .` / `mypy src/` carry pre-existing debt (2081 and 677 findings), so
+  a clean run is unreachable and the gate is **no new findings vs. the merge
+  base**. CI enforces this on PRs; reproduce it locally with
+  `python .github/scripts/lint_delta.py --base-ref origin/master`.
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
