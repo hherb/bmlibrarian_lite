@@ -92,17 +92,18 @@ data class LLMProvider(
         /**
          * DeepSeek API provider.
          * OpenAI-compatible API with competitive pricing.
-         * Updated: January 2026 - DeepSeek V3.2
+         * Updated: August 2026 - DeepSeek V4. The V3 IDs deepseek-chat and
+         * deepseek-reasoner were retired in July 2026.
+         * Prices are peak-hour, cache-miss rates; off-peak is half.
          */
         val DEEPSEEK = LLMProvider(
             id = "deepseek",
             displayName = "DeepSeek",
             baseUrl = "https://api.deepseek.com/v1",
-            defaultModel = "deepseek-chat",
+            defaultModel = "deepseek-v4-flash",
             models = listOf(
-                // DeepSeek V3.2 (Latest - January 2026)
-                ModelInfo("deepseek-chat", "DeepSeek V3.2 (Chat)", 0.28, 0.42),
-                ModelInfo("deepseek-reasoner", "DeepSeek V3.2 (Reasoner)", 0.28, 0.42)
+                ModelInfo("deepseek-v4-flash", "DeepSeek V4 Flash", 0.44, 1.32),
+                ModelInfo("deepseek-v4-pro", "DeepSeek V4 Pro", 1.32, 3.96)
             ),
             supportsModelFetching = true
         )

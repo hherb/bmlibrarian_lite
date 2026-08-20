@@ -114,12 +114,10 @@ struct LLMSettingsTab: View {
                 } else {
                     let modelBinding = Binding<String>(
                         get: {
-                            if displayModels.contains(where: { $0.id == settings.llmModel }) {
-                                return settings.llmModel
-                            }
-                            return displayModels.first { $0.isRecommended }?.id
-                                ?? displayModels.first?.id
-                                ?? settings.llmModel
+                            LLMModel.resolveSelection(
+                                current: settings.llmModel,
+                                available: displayModels
+                            )
                         },
                         set: { settings.llmModel = $0 }
                     )
@@ -156,7 +154,7 @@ struct LLMSettingsTab: View {
                     }
                 }
 
-                if settings.selectedProvider == .ollama {
+                if settings.selectedProvider.allowsManualModelEntry {
                     TextField("Custom model name", text: $settings.llmModel)
                 }
             }
@@ -298,7 +296,8 @@ struct LLMSettingsTab: View {
     }
 
     private func loadModels() async {
-        guard settings.selectedProvider.supportsDynamicModelFetching else {
+        let provider = settings.selectedProvider
+        guard provider.supportsDynamicModelFetching else {
             availableModels = []
             return
         }
@@ -306,20 +305,37 @@ struct LLMSettingsTab: View {
         isLoadingModels = true
         modelLoadError = nil
 
-        let models = await ModelFetchService.shared.fetchModels(
-            for: settings.selectedProvider,
-            apiKey: apiKey.isEmpty ? nil : apiKey,
-            baseURL: settings.llmBaseURL
-        )
+        do {
+            let models = try await ModelFetchService.shared.fetchModels(
+                for: provider,
+                apiKey: apiKey.isEmpty ? nil : apiKey,
+                baseURL: settings.llmBaseURL
+            )
 
-        await MainActor.run {
-            if models.isEmpty {
-                availableModels = settings.selectedProvider.fallbackModels
-                modelLoadError = "Using fallback models"
-            } else {
-                availableModels = models
+            await MainActor.run {
+                if models.isEmpty {
+                    availableModels = provider.fallbackModels
+                    modelLoadError = "Provider returned no usable models"
+                } else {
+                    availableModels = models
+                    modelLoadError = nil
+                    // A hosted provider's live list is authoritative: drop a stored
+                    // model it no longer offers, so the app stops sending a dead ID.
+                    if !provider.allowsManualModelEntry {
+                        settings.llmModel = LLMModel.resolveSelection(
+                            current: settings.llmModel,
+                            available: models
+                        )
+                    }
+                }
+                isLoadingModels = false
             }
-            isLoadingModels = false
+        } catch {
+            await MainActor.run {
+                availableModels = provider.fallbackModels
+                modelLoadError = error.localizedDescription
+                isLoadingModels = false
+            }
         }
     }
 
@@ -341,7 +357,8 @@ struct LLMSettingsTab: View {
             let response = try await LLMService.testConnection(
                 baseURL: url,
                 apiKey: apiKey,
-                model: settings.llmModel
+                model: settings.llmModel,
+                provider: settings.selectedProvider
             )
             await MainActor.run {
                 isTestingAPI = false
@@ -625,7 +642,8 @@ struct MacModelPricingView: View {
             ("GPT-4o Mini", 0.15, 0.60),
         ]),
         ("DeepSeek", [
-            ("DeepSeek V3.2", 0.28, 0.42),
+            ("DeepSeek V4 Flash", 0.44, 1.32),
+            ("DeepSeek V4 Pro", 1.32, 3.96),
         ]),
         ("Groq", [
             ("Llama 4 Maverick", 0.50, 0.77),
@@ -694,7 +712,7 @@ struct MacModelPricingView: View {
 
                     MacCostEstimateRow(model: "Claude Sonnet 4.5", cost: "$0.01 - $0.03")
                     MacCostEstimateRow(model: "GPT-4o Mini", cost: "$0.001 - $0.003")
-                    MacCostEstimateRow(model: "DeepSeek V3.2", cost: "$0.002 - $0.005")
+                    MacCostEstimateRow(model: "DeepSeek V4 Flash", cost: "$0.003 - $0.012")
                     MacCostEstimateRow(model: "Llama 4 Scout (Groq)", cost: "$0.001 - $0.003")
                 }
 

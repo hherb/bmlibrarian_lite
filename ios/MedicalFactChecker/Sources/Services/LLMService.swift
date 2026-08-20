@@ -176,7 +176,8 @@ actor LLMService {
             messages: messages,
             temperature: temperature,
             maxTokens: maxTokens,
-            responseFormat: nil
+            responseFormat: nil,
+            thinking: thinkingConfig
         )
 
         let encoder = JSONEncoder()
@@ -300,6 +301,16 @@ actor LLMService {
         }
     }
 
+    /// Chain-of-thought setting to send for the configured provider, if it has one.
+    ///
+    /// DeepSeek V4 enables thinking mode by default: it spends output tokens on
+    /// reasoning and silently ignores `temperature`, which this app relies on for
+    /// repeatable scoring. Opt out explicitly. Other providers do not understand the
+    /// field and may reject it, so they are sent nothing.
+    var thinkingConfig: ThinkingConfig? {
+        provider == .deepseek ? .disabled : nil
+    }
+
     /// Calculate backoff delay with exponential increase and jitter.
     ///
     /// - Parameter attempt: The current attempt number (0-indexed).
@@ -361,14 +372,17 @@ actor LLMService {
     ///   - baseURL: The API base URL.
     ///   - apiKey: The API key to test.
     ///   - model: The model to use for the test.
+    ///   - provider: The provider being tested, so provider-specific request options
+    ///     (such as DeepSeek's thinking mode) match a real call.
     /// - Returns: A success message with the model's response.
     /// - Throws: LLMError if the test fails.
     static func testConnection(
         baseURL: URL,
         apiKey: String,
-        model: String
+        model: String,
+        provider: LLMProvider? = nil
     ) async throws -> String {
-        let service = LLMService(baseURL: baseURL, apiKey: apiKey, model: model)
+        let service = LLMService(baseURL: baseURL, apiKey: apiKey, model: model, provider: provider)
         let (response, _) = try await service.chat(
             messages: [userMessage("Say 'OK' if you can read this.")],
             temperature: 0.0,
@@ -409,12 +423,24 @@ struct ChatCompletionRequest: Codable {
 
     /// Optional response format specification.
     let responseFormat: ResponseFormat?
+
+    /// Optional chain-of-thought setting. Only sent to providers that understand it.
+    let thinking: ThinkingConfig?
 }
 
 /// Response format specification for structured output.
 struct ResponseFormat: Codable {
     /// Format type: "text" or "json_object".
     let type: String
+}
+
+/// Chain-of-thought setting for providers that expose one (currently DeepSeek).
+struct ThinkingConfig: Codable {
+    /// Toggle value: "enabled" or "disabled".
+    let type: String
+
+    /// Turn chain-of-thought off.
+    static let disabled = ThinkingConfig(type: "disabled")
 }
 
 /// Response from the chat completions API.

@@ -71,7 +71,7 @@ A native iOS app (iPhone/iPad) for medical fact-checking using biomedical litera
 |----------|----------------------|------------------|
 | Anthropic | Claude Sonnet 4.5/4.6, Haiku 4.5, Opus 4.5/4.6 | Yes |
 | OpenAI | GPT-5.2, o4-mini, o3, GPT-4o | Yes |
-| DeepSeek | DeepSeek V3.2 (Chat/Reasoner) | Yes |
+| DeepSeek | DeepSeek V4 Flash/Pro | Yes |
 | Groq | Llama 4 Maverick/Scout, Llama 3.3 | Yes |
 | Mistral | Mistral Large 3, Medium 3.1, Codestral | Yes |
 | Ollama | Any locally installed model | No |
@@ -206,7 +206,7 @@ Typical fact-check costs (January 2026 pricing):
 |-------|---------------|
 | Claude Sonnet 4.5 | $0.01 - $0.03 |
 | GPT-4o Mini | $0.001 - $0.003 |
-| DeepSeek V3.2 | $0.002 - $0.005 |
+| DeepSeek V4 Flash | $0.003 - $0.012 |
 | Llama 4 Scout (Groq) | $0.001 - $0.003 |
 
 View current pricing for all models in Settings > View Model Pricing.

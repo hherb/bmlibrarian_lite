@@ -50,9 +50,10 @@ public enum CostCalculator {
         "claude-3-7-sonnet": (3.00, 15.00),
         "claude-3-haiku": (0.25, 1.25),
 
-        // DeepSeek models (February 2026)
-        "deepseek-chat": (0.28, 0.42),
-        "deepseek-reasoner": (0.28, 0.42),
+        // DeepSeek models (August 2026) - peak-hour, cache-miss rates.
+        // The V3 IDs deepseek-chat / deepseek-reasoner were retired in July 2026.
+        "deepseek-v4-flash": (0.44, 1.32),
+        "deepseek-v4-pro": (1.32, 3.96),
 
         // Mistral models (February 2026)
         "mistral-large-3": (0.50, 1.50),

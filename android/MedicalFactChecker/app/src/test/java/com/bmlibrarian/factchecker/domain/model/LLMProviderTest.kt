@@ -164,9 +164,11 @@ class LLMProviderTest {
     }
 
     @Test
-    fun `DeepSeek has chat and reasoner models`() {
-        assertNotNull(LLMProvider.DEEPSEEK.getModel("deepseek-chat"))
-        assertNotNull(LLMProvider.DEEPSEEK.getModel("deepseek-reasoner"))
+    fun `DeepSeek offers the current V4 models`() {
+        // deepseek-chat and deepseek-reasoner were retired in July 2026.
+        assertNotNull(LLMProvider.DEEPSEEK.getModel("deepseek-v4-flash"))
+        assertNotNull(LLMProvider.DEEPSEEK.getModel("deepseek-v4-pro"))
+        assertEquals("deepseek-v4-flash", LLMProvider.DEEPSEEK.defaultModel)
     }
 
     // ==================== Groq Provider Tests ====================

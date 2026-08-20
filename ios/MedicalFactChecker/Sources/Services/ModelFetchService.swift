@@ -44,42 +44,41 @@ actor ModelFetchService {
 
     /// Fetch available models for a provider.
     ///
-    /// Attempts to fetch models dynamically from the provider's API.
-    /// Returns cached results if available and not expired.
-    /// Falls back to hardcoded models if the API call fails.
+    /// Fetches models dynamically from the provider's API, returning cached results
+    /// if available and not expired. Failures are propagated rather than papered over
+    /// with ``LLMProvider/fallbackModels``: a caller that cannot tell a live line-up
+    /// from a hardcoded one cannot tell a retired model ID from a current one either.
     ///
     /// - Parameters:
     ///   - provider: The LLM provider.
     ///   - apiKey: Optional API key for authentication.
     ///   - baseURL: Optional custom base URL.
-    /// - Returns: Array of available models.
+    /// - Returns: The models the provider currently offers. Empty for `.custom`, which
+    ///   has no model listing endpoint.
+    /// - Throws: ``ModelFetchError`` or a networking error if the list cannot be retrieved.
     func fetchModels(
         for provider: LLMProvider,
         apiKey: String? = nil,
         baseURL: String? = nil
-    ) async -> [LLMModel] {
+    ) async throws -> [LLMModel] {
         // Check cache first
         if let cached = cache[provider],
            Date().timeIntervalSince(cached.fetchedAt) < Self.cacheDuration {
             return cached.models
         }
 
-        // Try to fetch from API
-        do {
-            let models = try await fetchModelsFromAPI(
-                provider: provider,
-                apiKey: apiKey,
-                baseURL: baseURL
-            )
+        let models = try await fetchModelsFromAPI(
+            provider: provider,
+            apiKey: apiKey,
+            baseURL: baseURL
+        )
 
-            // Cache successful result
+        // Only cache a real line-up; an empty result would otherwise make the
+        // Refresh button a no-op for a full hour.
+        if !models.isEmpty {
             cache[provider] = (models: models, fetchedAt: Date())
-            return models
-        } catch {
-            print("[ModelFetchService] Failed to fetch models for \(provider): \(error.localizedDescription)")
-            // Return fallback models
-            return provider.fallbackModels
         }
+        return models
     }
 
     /// Clear the model cache for a specific provider or all providers.
@@ -137,9 +136,9 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ModelFetchError.apiError
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: statusCode)
         }
 
         let result = try JSONDecoder().decode(AnthropicModelsResponse.self, from: data)
@@ -219,9 +218,9 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ModelFetchError.apiError
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: statusCode)
         }
 
         let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
@@ -342,9 +341,9 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ModelFetchError.apiError
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: statusCode)
         }
 
         let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
@@ -433,9 +432,9 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ModelFetchError.apiError
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: statusCode)
         }
 
         let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
@@ -523,61 +522,86 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ModelFetchError.apiError
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: statusCode)
         }
 
         let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
 
         return result.data
-            .filter { isUsableDeepSeekModel($0.id) }
+            .filter { Self.isUsableDeepSeekModel($0.id) }
             .map { model in
-                let pricing = getDeepSeekPricing(for: model.id)
+                let pricing = Self.getDeepSeekPricing(for: model.id)
                 return LLMModel(
                     id: model.id,
-                    displayName: formatDeepSeekModelName(model.id),
-                    description: getDeepSeekDescription(for: model.id),
+                    displayName: Self.formatDeepSeekModelName(model.id),
+                    description: Self.getDeepSeekDescription(for: model.id),
                     inputPrice: pricing.input,
                     outputPrice: pricing.output,
-                    isRecommended: model.id == "deepseek-chat"
+                    isRecommended: model.id == "deepseek-v4-flash"
                 )
             }
     }
 
+    /// Model ID substrings that mark a DeepSeek model as not usable for chat completion.
+    private static let deepSeekNonChatMarkers = ["embed", "rerank", "moderation", "ocr", "tts", "whisper"]
+
     /// Check if a DeepSeek model is usable for chat completion.
-    private func isUsableDeepSeekModel(_ modelId: String) -> Bool {
-        ["deepseek-chat", "deepseek-reasoner"].contains(modelId)
+    ///
+    /// DeepSeek's `/models` endpoint lists only its chat models, and it renames the
+    /// whole line-up between generations: `deepseek-chat` / `deepseek-reasoner` were
+    /// retired in July 2026 in favour of `deepseek-v4-flash` / `deepseek-v4-pro`.
+    /// Excluding known non-chat families - rather than whitelisting IDs - keeps the
+    /// model list working when the next generation ships.
+    static func isUsableDeepSeekModel(_ modelId: String) -> Bool {
+        let normalized = modelId.lowercased()
+        return !normalized.isEmpty && !deepSeekNonChatMarkers.contains { normalized.contains($0) }
     }
 
     /// Format DeepSeek model ID to display name.
-    private func formatDeepSeekModelName(_ modelId: String) -> String {
-        switch modelId {
-        case "deepseek-chat":
-            return "DeepSeek V3.2 (Chat)"
-        case "deepseek-reasoner":
-            return "DeepSeek V3.2 (Reasoner)"
-        default:
-            return modelId
-        }
+    ///
+    /// "deepseek-v4-flash" -> "DeepSeek V4 Flash". IDs that don't carry the vendor
+    /// prefix are shown verbatim.
+    static func formatDeepSeekModelName(_ modelId: String) -> String {
+        let vendorPrefix = "deepseek-"
+        guard modelId.lowercased().hasPrefix(vendorPrefix) else { return modelId }
+
+        let words = modelId.dropFirst(vendorPrefix.count)
+            .components(separatedBy: "-")
+            .filter { !$0.isEmpty }
+            .map { component -> String in
+                // Version markers such as "v4" read better fully capitalised.
+                let isVersionMarker = component.count > 1 &&
+                    component.lowercased().hasPrefix("v") &&
+                    component.dropFirst().allSatisfy { $0.isNumber || $0 == "." }
+                return isVersionMarker ? component.uppercased() : component.capitalized
+            }
+
+        return (["DeepSeek"] + words).joined(separator: " ")
     }
 
     /// Get description for DeepSeek models.
-    private func getDeepSeekDescription(for modelId: String) -> String {
-        switch modelId {
-        case "deepseek-chat":
+    static func getDeepSeekDescription(for modelId: String) -> String {
+        let normalized = modelId.lowercased()
+        if normalized.contains("flash") {
             return "General purpose, very affordable"
-        case "deepseek-reasoner":
-            return "Step-by-step reasoning mode"
-        default:
-            return "DeepSeek model"
+        } else if normalized.contains("pro") {
+            return "Flagship quality for harder reasoning"
         }
+        return "DeepSeek model"
     }
 
     /// Get pricing for DeepSeek models.
-    private func getDeepSeekPricing(for modelId: String) -> (input: Double, output: Double) {
-        // Pricing per 1M tokens (January 2026) - cache miss pricing
-        return (0.28, 0.42)
+    ///
+    /// Peak-hour, cache-miss rates per 1M tokens (August 2026). Off-peak rates are
+    /// half of these, so quoting peak never understates a run. Unrecognised IDs get
+    /// the flagship rate for the same reason.
+    static func getDeepSeekPricing(for modelId: String) -> (input: Double, output: Double) {
+        if modelId.lowercased().contains("flash") {
+            return (0.44, 1.32)
+        }
+        return (1.32, 3.96)
     }
 
     /// Fetch models from local Ollama server.
@@ -595,9 +619,9 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ModelFetchError.apiError
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: statusCode)
         }
 
         let result = try JSONDecoder().decode(OllamaModelsResponse.self, from: data)
@@ -671,15 +695,15 @@ private struct OllamaModel: Decodable {
 /// Errors that can occur during model fetching.
 enum ModelFetchError: LocalizedError {
     case noAPIKey
-    case apiError
+    case apiError(statusCode: Int)
     case parseError
 
     var errorDescription: String? {
         switch self {
         case .noAPIKey:
             return "API key required to fetch models"
-        case .apiError:
-            return "Failed to fetch models from API"
+        case .apiError(let statusCode):
+            return "Model list request failed (HTTP \(statusCode))"
         case .parseError:
             return "Failed to parse model response"
         }

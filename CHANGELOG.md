@@ -19,6 +19,26 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   to bump versions without touching the changelog.
 - Test coverage for `scripts/set_version.py` (`tests/test_set_version.py`).
 
+### Fixed
+
+- **iOS/macOS/Android: DeepSeek model list stopped syncing.** DeepSeek retired
+  the `deepseek-chat` / `deepseek-reasoner` IDs in July 2026 in favour of
+  `deepseek-v4-flash` / `deepseek-v4-pro`; all three apps whitelisted the old
+  IDs exactly, so every model the API returned was filtered out and the picker
+  silently fell back to two retired models. The filter now excludes non-chat
+  families instead of whitelisting IDs, fallback models and pricing cover V4,
+  and a successful fetch replaces a stored model the provider no longer offers
+  (hand-typed names for Ollama and custom endpoints are left alone).
+- **iOS/macOS/Android: DeepSeek V4 no longer reasons on every call.** V4 replaced
+  the V3 chat/reasoner split with a `thinking` parameter that defaults to
+  *enabled*, so scoring and citation calls spent output tokens on chain-of-thought
+  and had their `temperature` silently ignored. All three apps now send
+  `{"thinking": {"type": "disabled"}}` to DeepSeek, and the iOS/macOS connection
+  test sends the same options as a real call.
+- **iOS/macOS: model fetch failures are no longer silent.** `ModelFetchService`
+  propagates errors instead of substituting hardcoded models, so Settings shows
+  the real reason (including the HTTP status) rather than a generic notice.
+
 ## [0.4.0] - 2026-07-19
 
 ### Added

@@ -152,21 +152,23 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
 
         case .deepseek:
             return [
-                // DeepSeek V3.2 (Latest - January 2026)
+                // DeepSeek V4 (August 2026). The V3 IDs deepseek-chat and
+                // deepseek-reasoner were retired in July 2026.
+                // Prices are peak-hour, cache-miss rates; off-peak is half.
                 LLMModel(
-                    id: "deepseek-chat",
-                    displayName: "DeepSeek V3.2 (Chat)",
+                    id: "deepseek-v4-flash",
+                    displayName: "DeepSeek V4 Flash",
                     description: "General purpose, very affordable",
-                    inputPrice: 0.28,
-                    outputPrice: 0.42,
+                    inputPrice: 0.44,
+                    outputPrice: 1.32,
                     isRecommended: true
                 ),
                 LLMModel(
-                    id: "deepseek-reasoner",
-                    displayName: "DeepSeek V3.2 (Reasoner)",
-                    description: "Step-by-step reasoning mode",
-                    inputPrice: 0.28,
-                    outputPrice: 0.42
+                    id: "deepseek-v4-pro",
+                    displayName: "DeepSeek V4 Pro",
+                    description: "Flagship quality for harder reasoning",
+                    inputPrice: 1.32,
+                    outputPrice: 3.96
                 ),
             ]
 
@@ -312,6 +314,19 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Whether the user may type a model name this provider does not list.
+    ///
+    /// Local and self-hosted endpoints are the user's own: a name they enter is a
+    /// deliberate choice and must not be second-guessed. Hosted providers own their
+    /// catalogue instead, so a selection missing from it is a retired model, not a
+    /// preference.
+    var allowsManualModelEntry: Bool {
+        switch self {
+        case .ollama, .custom: return true
+        default: return false
+        }
+    }
+
     /// Whether this provider supports dynamic model fetching.
     var supportsDynamicModelFetching: Bool {
         switch self {
@@ -346,7 +361,7 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         case .openai:
             return "GPT-5 and o-series reasoning models."
         case .deepseek:
-            return "DeepSeek V3.2 - high quality at very affordable prices."
+            return "DeepSeek V4 - high quality at very affordable prices."
         case .groq:
             return "Ultra-fast inference for Llama 4 and other open models."
         case .mistral:
@@ -380,6 +395,24 @@ struct LLMModel: Identifiable, Equatable {
 
     /// Whether this model is recommended for this provider.
     var isRecommended: Bool = false
+
+    /// Resolve which model to use, given a stored selection and a provider's line-up.
+    ///
+    /// Providers retire model IDs - DeepSeek retired `deepseek-chat` in July 2026 -
+    /// and the stored selection outlives them, leaving the app sending a dead ID that
+    /// the picker no longer lists.
+    ///
+    /// - Parameters:
+    ///   - current: The currently stored model ID.
+    ///   - available: Models the provider currently offers. Pass an empty array when
+    ///     the line-up could not be retrieved; the selection is then left alone.
+    /// - Returns: `current` when the provider still offers it, otherwise the
+    ///   recommended model, otherwise the first one offered.
+    static func resolveSelection(current: String, available: [LLMModel]) -> String {
+        guard !available.isEmpty else { return current }
+        if available.contains(where: { $0.id == current }) { return current }
+        return available.first { $0.isRecommended }?.id ?? available.first?.id ?? current
+    }
 
     /// Formatted price string for display.
     var priceDescription: String {

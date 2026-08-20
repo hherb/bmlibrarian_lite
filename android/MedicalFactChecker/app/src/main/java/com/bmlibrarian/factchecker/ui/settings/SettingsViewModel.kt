@@ -240,6 +240,7 @@ class SettingsViewModel @Inject constructor(
                 )
                 _fetchedModels.value = models
                 if (models.isNotEmpty()) {
+                    dropRetiredModelSelection(provider, models)
                     showStatus("Fetched ${models.size} models from ${provider.displayName}")
                 } else {
                     showStatus("No models found, using defaults")
@@ -251,6 +252,26 @@ class SettingsViewModel @Inject constructor(
                 _isFetchingModels.value = false
             }
         }
+    }
+
+    /**
+     * Replace a stored model the provider no longer offers.
+     *
+     * A hosted provider's live list is authoritative - DeepSeek retired
+     * deepseek-chat in July 2026 - so a selection missing from it is a dead ID
+     * that would fail on the next call. Ollama is the user's own machine and
+     * accepts any model name they type, so its selection is left alone; custom
+     * endpoints never reach here because they do not support model fetching.
+     *
+     * @param provider The provider whose models were just fetched
+     * @param models The models the provider currently offers (never empty)
+     */
+    private fun dropRetiredModelSelection(provider: LLMProvider, models: List<ModelInfo>) {
+        if (!provider.requiresApiKey) return
+        if (models.any { it.id == settings.value.modelId }) return
+
+        val replacement = models.firstOrNull { it.id == provider.defaultModel } ?: models.first()
+        setModel(replacement.id)
     }
 
     /**

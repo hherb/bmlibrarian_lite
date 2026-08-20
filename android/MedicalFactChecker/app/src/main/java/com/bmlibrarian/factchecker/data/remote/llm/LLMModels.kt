@@ -18,6 +18,8 @@
 
 package com.bmlibrarian.factchecker.data.remote.llm
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -28,6 +30,7 @@ import kotlinx.serialization.Serializable
  *
  * Compatible with OpenAI, DeepSeek, Groq, Mistral, and Ollama.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class OpenAIChatRequest(
     /** Model ID to use for completion. */
@@ -38,8 +41,32 @@ data class OpenAIChatRequest(
     @SerialName("max_tokens")
     val maxTokens: Int,
     /** Sampling temperature (0.0-2.0). */
-    val temperature: Double = 0.0
+    val temperature: Double = 0.0,
+    /**
+     * Chain-of-thought setting, for providers that expose one (currently DeepSeek).
+     *
+     * Left out of the request entirely when null: providers that do not know the
+     * field may reject the whole call, and the shared Json instance encodes defaults.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val thinking: ThinkingConfig? = null
 )
+
+/**
+ * Chain-of-thought setting for providers that expose one (currently DeepSeek).
+ *
+ * @see <a href="https://api-docs.deepseek.com/guides/thinking_mode/">DeepSeek Thinking Mode</a>
+ */
+@Serializable
+data class ThinkingConfig(
+    /** Toggle value: "enabled" or "disabled". */
+    val type: String
+) {
+    companion object {
+        /** Turn chain-of-thought off. */
+        val DISABLED = ThinkingConfig("disabled")
+    }
+}
 
 /**
  * Chat message for OpenAI-compatible APIs.

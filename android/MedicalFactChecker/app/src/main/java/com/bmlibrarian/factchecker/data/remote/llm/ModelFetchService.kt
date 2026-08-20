@@ -56,6 +56,69 @@ class ModelFetchService @Inject constructor(
 
         /** Cache duration in milliseconds (1 hour). */
         private const val CACHE_DURATION_MS = 3600_000L
+
+        /** Model ID substrings that mark a DeepSeek model as not usable for chat completion. */
+        private val DEEPSEEK_NON_CHAT_MARKERS =
+            listOf("embed", "rerank", "moderation", "ocr", "tts", "whisper")
+
+        /** DeepSeek vendor prefix stripped before building a display name. */
+        private const val DEEPSEEK_PREFIX = "deepseek-"
+
+        /**
+         * Check if a DeepSeek model is usable for chat completion.
+         *
+         * DeepSeek's /models endpoint lists only its chat models, and it renames the
+         * whole line-up between generations: deepseek-chat / deepseek-reasoner were
+         * retired in July 2026 in favour of deepseek-v4-flash / deepseek-v4-pro.
+         * Excluding known non-chat families - rather than whitelisting IDs - keeps the
+         * model list working when the next generation ships.
+         */
+        internal fun isUsableDeepSeekModel(modelId: String): Boolean {
+            val normalized = modelId.lowercase()
+            return normalized.isNotEmpty() && DEEPSEEK_NON_CHAT_MARKERS.none { normalized.contains(it) }
+        }
+
+        /**
+         * Format DeepSeek model ID to display name.
+         *
+         * "deepseek-v4-flash" becomes "DeepSeek V4 Flash". IDs without the vendor
+         * prefix are shown verbatim.
+         */
+        internal fun formatDeepSeekModelName(modelId: String): String {
+            if (!modelId.lowercase().startsWith(DEEPSEEK_PREFIX)) return modelId
+
+            val words = modelId.drop(DEEPSEEK_PREFIX.length)
+                .split("-")
+                .filter { it.isNotEmpty() }
+                .map { component ->
+                    // Version markers such as "v4" read better fully capitalised.
+                    val isVersionMarker = component.length > 1 &&
+                        component.lowercase().startsWith("v") &&
+                        component.drop(1).all { it.isDigit() || it == '.' }
+                    if (isVersionMarker) {
+                        component.uppercase()
+                    } else {
+                        component.replaceFirstChar { it.uppercase() }
+                    }
+                }
+
+            return (listOf("DeepSeek") + words).joinToString(" ")
+        }
+
+        /**
+         * Get pricing for DeepSeek models (per 1M tokens).
+         *
+         * Peak-hour, cache-miss rates (August 2026). Off-peak rates are half of these,
+         * so quoting peak never understates a run. Unrecognised IDs get the flagship
+         * rate for the same reason.
+         */
+        internal fun getDeepSeekPricing(modelId: String): Pair<Double, Double> {
+            return if (modelId.lowercase().contains("flash")) {
+                0.44 to 1.32
+            } else {
+                1.32 to 3.96
+            }
+        }
     }
 
     /** Cached models per provider with timestamp. */
@@ -520,35 +583,6 @@ class ModelFetchService @Inject constructor(
                     outputPricePer1M = pricing.second
                 )
             }
-    }
-
-    /**
-     * Check if a DeepSeek model is usable for chat completion.
-     */
-    private fun isUsableDeepSeekModel(modelId: String): Boolean {
-        return modelId in listOf("deepseek-chat", "deepseek-reasoner")
-    }
-
-    /**
-     * Format DeepSeek model ID to display name.
-     */
-    private fun formatDeepSeekModelName(modelId: String): String {
-        return when (modelId) {
-            "deepseek-chat" -> "DeepSeek V3.2 (Chat)"
-            "deepseek-reasoner" -> "DeepSeek V3.2 (Reasoner)"
-            else -> modelId
-        }
-    }
-
-    /**
-     * Get pricing for DeepSeek models (per 1M tokens, January 2026).
-     *
-     * Note: DeepSeek currently has uniform pricing for all models.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    private fun getDeepSeekPricing(modelId: String): Pair<Double, Double> {
-        // Cache miss pricing - uniform for all DeepSeek models
-        return 0.28 to 0.42
     }
 
     /**
