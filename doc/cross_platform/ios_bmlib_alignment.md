@@ -275,8 +275,42 @@ pattern matching at all. The fallback still takes a genuinely untyped
 > takes any `10.`-prefixed string. Worth reporting upstream; Swift is now ahead
 > of Python here rather than behind it.
 
-With both fixed, all 19 network-gated `JATSXMLParserIntegrationTests` pass
-against live PMC, including the two that fail on `master`.
+**`<sub-article>` content was parsed as the article's own.** JATS lets a
+`<sub-article>` carry a complete `<front>`/`<article-meta>` and `<body>`. PLOS
+deposits its entire peer-review history that way — one sub-article per round,
+each with its own DOI, title, authors and prose — and nothing excluded them, so
+the *last* of each silently replaced the real article's. On PMC12774363:
+
+| | master | after 1.3 | fixed |
+| --- | --- | --- | --- |
+| title | `Associated Data` | `Associated Data` | *Lack of ANKMY2 suppresses kidney cystogenesis…* |
+| DOI | `…pgen.1012008.r006` | `…pgen.1012008.r006` | `…pgen.1012008` |
+| body paragraphs | 48 | **230** | 28 |
+
+The middle column is the important one: fixing 1.3 made this *worse*. Review
+correspondence is loose `<p>` inside a sub-article `<body>`, which is exactly the
+shape 1.3 stopped dropping — so ~180 paragraphs of reviewer and editor prose
+entered `bodySections`, where scoring, citation extraction and the transparency
+regexes read them as article text. A `subArticleDepth` counter (not a flag —
+JATS permits nesting) now excludes the whole region, while still maintaining the
+element stack and text buffers so the two stay balanced across it.
+
+**Every PLOS author was dropped.** `<contrib>` was treated as an author only when
+it carried `contrib-type="author"`. JATS also allows the role to be declared once
+on the group, and PLOS uses that form — `<contrib-group content-type="author">`
+with bare `<contrib>` children — so PMC12774363 parsed with **zero** authors. A
+`<contrib>` with no `contrib-type` now inherits its group (an author group, or a
+`<contrib-group>` with no `content-type`, which JATS treats as authors by
+convention); an explicit `contrib-type` still decides on its own, so an editor
+inside an author group stays out.
+
+> **All three are bmlib's too.** On the same article `JATSParser(...).parse()`
+> returns title `Associated Data`, DOI `…r006`, **0** authors and 230 body
+> paragraphs — identical to what Swift produced before these fixes, since bmlib
+> was the source of the port. Reported upstream.
+
+With all of these fixed, all 19 network-gated `JATSXMLParserIntegrationTests`
+pass against live PMC, including the two that fail on `master`.
 
 ---
 

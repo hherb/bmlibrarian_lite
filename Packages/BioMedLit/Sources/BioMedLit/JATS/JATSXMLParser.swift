@@ -99,6 +99,14 @@ public final class JATSXMLParser: NSObject {
     private var inFront = false
     private var inArticleMeta = false
     private var inContribGroup = false
+
+    /// `content-type` of the enclosing `<contrib-group>`, lowercased.
+    ///
+    /// JATS allows the contributor role to be declared once on the group instead
+    /// of on every `<contrib>`. PLOS uses that form — `<contrib-group
+    /// content-type="author">` with bare `<contrib>` children — so requiring
+    /// `contrib-type="author"` on the child dropped every author it publishes.
+    private var currentContribGroupType: String?
     private var inContrib = false
     private var inAff = false
 
@@ -123,6 +131,24 @@ public final class JATSXMLParser: NSObject {
     // Figure/Table state
     private var inFigure = false
     private var inTableWrap = false
+
+    /// How deep the parser is inside `<sub-article>` / `<response>` elements.
+    ///
+    /// JATS lets either carry a complete `<front>`/`<article-meta>` and `<body>`
+    /// of its own. PLOS deposits its whole peer-review history that way — one
+    /// sub-article per round, each with its own DOI, title, authors and prose —
+    /// so without this the last of each silently replaced the real article's, and
+    /// hundreds of paragraphs of reviewer correspondence landed in `bodySections`
+    /// where scoring, citation extraction and the transparency regexes then read
+    /// them as article text.
+    ///
+    /// A depth rather than a flag: JATS permits a sub-article inside a
+    /// sub-article, and a flag cleared by the inner `</sub-article>` would let the
+    /// remainder of the outer one back in.
+    private var subArticleDepth = 0
+
+    /// Whether the parser is currently inside a sub-article or response.
+    private var inSubArticle: Bool { subArticleDepth > 0 }
 
     /// Whether the parser is inside a `<caption>`.
     ///
@@ -923,6 +949,26 @@ public final class JATSXMLParser: NSObject {
 // MARK: - XMLParserDelegate
 
 extension JATSXMLParser: XMLParserDelegate {
+    // MARK: - Contributor Helpers
+
+    /// Whether a `<contrib>` is an author.
+    ///
+    /// An explicit `contrib-type` decides on its own — that is the contributor's
+    /// own claim, and it must be able to say "editor" inside a group of authors.
+    /// A `<contrib>` carrying none inherits the group: an author group, or a
+    /// `<contrib-group>` with no `content-type` at all, which JATS treats as
+    /// authors by convention.
+    ///
+    /// - Parameter attributes: Attributes of the `<contrib>` element.
+    /// - Returns: True if this contributor should be collected as an author.
+    private func isAuthorContrib(_ attributes: [String: String]) -> Bool {
+        if let type = attributes["contrib-type"]?.lowercased() {
+            return type == "author"
+        }
+        guard let groupType = currentContribGroupType else { return true }
+        return groupType == "author" || groupType == "authors"
+    }
+
     // MARK: - Section and Caption Helpers
 
     /// Append caption prose to whichever of the figure or table is open.
@@ -976,6 +1022,15 @@ extension JATSXMLParser: XMLParserDelegate {
             pushTextBuffer()
         }
 
+        // Sub-article content belongs to the sub-article, not to this one. The
+        // stack and the text buffers above are still maintained, so the two stay
+        // balanced across the skipped region and `</sub-article>` lands correctly.
+        if elementName == "sub-article" || elementName == "response" {
+            subArticleDepth += 1
+            return
+        }
+        guard !inSubArticle else { return }
+
         switch elementName {
         // Document structure
         case "front":
@@ -984,8 +1039,9 @@ extension JATSXMLParser: XMLParserDelegate {
             inArticleMeta = true
         case "contrib-group":
             inContribGroup = true
+            currentContribGroupType = attributeDict["content-type"]?.lowercased()
         case "contrib":
-            if attributeDict["contrib-type"] == "author" {
+            if isAuthorContrib(attributeDict) {
                 inContrib = true
                 currentAuthor = AuthorBuilder()
             }
@@ -1150,6 +1206,14 @@ extension JATSXMLParser: XMLParserDelegate {
             _ = elementStack.popLast()
         }
 
+        // See didStartElement. Handled before the guard, or `</sub-article>` would
+        // be skipped by the very depth it is supposed to clear.
+        if elementName == "sub-article" || elementName == "response" {
+            subArticleDepth = max(0, subArticleDepth - 1)
+            return
+        }
+        guard !inSubArticle else { return }
+
         switch elementName {
         // Document structure
         case "front":
@@ -1158,6 +1222,7 @@ extension JATSXMLParser: XMLParserDelegate {
             inArticleMeta = false
         case "contrib-group":
             inContribGroup = false
+            currentContribGroupType = nil
         case "contrib":
             if inContrib, let author = currentAuthor?.build() {
                 authors.append(author)
