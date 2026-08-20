@@ -11,6 +11,8 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-20
+
 ### Added
 
 - `scripts/set_version.py` now updates the `**Current version:**` line in
@@ -182,7 +184,8 @@ First published release.
   `QTimer`.
 - Ollama model listing using object attributes rather than dict access.
 
-[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.1...HEAD
+[0.4.1]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.0...0.4.1
 [0.4.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.1.1...0.2.0

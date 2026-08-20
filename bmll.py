@@ -54,7 +54,7 @@ src_path = Path(__file__).parent / "src"
 if src_path.exists():
     sys.path.insert(0, str(src_path))
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 def setup_logging(verbose: bool = False) -> None:

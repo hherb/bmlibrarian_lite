@@ -58,7 +58,7 @@ from .search_service import SearchService, UnifiedSearchResult
 from .query_translator import QueryTranslator
 from .search_merger import SearchResultMerger, MergedArticle
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 def main() -> int:
