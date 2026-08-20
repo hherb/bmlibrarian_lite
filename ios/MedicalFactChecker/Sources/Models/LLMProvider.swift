@@ -152,21 +152,23 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
 
         case .deepseek:
             return [
-                // DeepSeek V3.2 (Latest - January 2026)
+                // DeepSeek V4 (August 2026). The V3 IDs deepseek-chat and
+                // deepseek-reasoner were retired in July 2026.
+                // Prices are peak-hour, cache-miss rates; off-peak is half.
                 LLMModel(
-                    id: "deepseek-chat",
-                    displayName: "DeepSeek V3.2 (Chat)",
+                    id: "deepseek-v4-flash",
+                    displayName: "DeepSeek V4 Flash",
                     description: "General purpose, very affordable",
-                    inputPrice: 0.28,
-                    outputPrice: 0.42,
+                    inputPrice: 0.44,
+                    outputPrice: 1.32,
                     isRecommended: true
                 ),
                 LLMModel(
-                    id: "deepseek-reasoner",
-                    displayName: "DeepSeek V3.2 (Reasoner)",
-                    description: "Step-by-step reasoning mode",
-                    inputPrice: 0.28,
-                    outputPrice: 0.42
+                    id: "deepseek-v4-pro",
+                    displayName: "DeepSeek V4 Pro",
+                    description: "Flagship quality for harder reasoning",
+                    inputPrice: 1.32,
+                    outputPrice: 3.96
                 ),
             ]
 
@@ -304,19 +306,39 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
     }
 
     /// Whether the provider requires an API key.
+    ///
+    /// Listed case by case rather than with a `default`, so adding a provider is a
+    /// compile error here instead of silently inheriting an assumption. These three
+    /// capabilities decide whether the app demands a key, whether it may overwrite a
+    /// stored model, and whether it calls a listing endpoint - a wrong silent default
+    /// in any of them is a user-visible bug.
     var requiresAPIKey: Bool {
         switch self {
+        case .anthropic, .openai, .deepseek, .groq, .mistral: return true
         case .ollama: return false
         case .custom: return true  // May or may not, but assume yes
-        default: return true
+        }
+    }
+
+    /// Whether the user may type a model name this provider does not list.
+    ///
+    /// Local and self-hosted endpoints are the user's own: a name they enter is a
+    /// deliberate choice and must not be second-guessed. Hosted providers own their
+    /// catalogue instead, so a selection missing from it is a retired model, not a
+    /// preference. `.custom` qualifies because it has no listing endpoint at all,
+    /// so there is never a catalogue to check a name against.
+    var allowsManualModelEntry: Bool {
+        switch self {
+        case .ollama, .custom: return true
+        case .anthropic, .openai, .deepseek, .groq, .mistral: return false
         }
     }
 
     /// Whether this provider supports dynamic model fetching.
     var supportsDynamicModelFetching: Bool {
         switch self {
+        case .anthropic, .openai, .deepseek, .groq, .mistral, .ollama: return true
         case .custom: return false
-        default: return true
         }
     }
 
@@ -346,7 +368,7 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
         case .openai:
             return "GPT-5 and o-series reasoning models."
         case .deepseek:
-            return "DeepSeek V3.2 - high quality at very affordable prices."
+            return "DeepSeek V4 - high quality at very affordable prices."
         case .groq:
             return "Ultra-fast inference for Llama 4 and other open models."
         case .mistral:
@@ -381,8 +403,67 @@ struct LLMModel: Identifiable, Equatable {
     /// Whether this model is recommended for this provider.
     var isRecommended: Bool = false
 
+    /// Whether this entry stands in for a stored selection the provider no longer lists.
+    ///
+    /// Such an entry has no real pricing, so it must not be shown as free.
+    var isUnavailable: Bool = false
+
+    /// Build an entry for a stored model that the provider's line-up does not contain.
+    ///
+    /// The picker must never display a different model from the one the app will send.
+    /// Resolving the selection for display only - without storing it - produced exactly
+    /// that: the user saw a healthy model while a retired ID sat in settings. Listing
+    /// the stored ID explicitly keeps the two in step and makes the problem visible.
+    ///
+    /// Takes the provider rather than a flag because two different questions have to be
+    /// answered: whether the absence is a retirement or a deliberately typed name, and
+    /// whether "no price" means free or merely unknown. Only Ollama runs on the user's
+    /// own machine, so only Ollama is genuinely free.
+    ///
+    /// - Parameters:
+    ///   - id: The stored model ID.
+    ///   - provider: The provider the ID is stored against.
+    /// - Returns: A display-only entry carrying the stored ID.
+    static func notListed(id: String, provider: LLMProvider) -> LLMModel {
+        let manualEntry = provider.allowsManualModelEntry
+        let isLocal = provider == .ollama
+        return LLMModel(
+            id: id,
+            displayName: manualEntry ? id : "\(id) (no longer offered)",
+            description: manualEntry
+                ? "Entered manually."
+                : "This model is not in the provider's current line-up. Choose another.",
+            inputPrice: 0,
+            outputPrice: 0,
+            // Local models really are free; anything else with no price is unpriced,
+            // and showing "Free" for a paid endpoint understates what a run costs.
+            isUnavailable: !isLocal
+        )
+    }
+
+    /// Resolve which model to use, given a stored selection and a provider's line-up.
+    ///
+    /// Providers retire model IDs - DeepSeek retired `deepseek-chat` in July 2026 -
+    /// and the stored selection outlives them, leaving the app sending a dead ID that
+    /// the picker no longer lists.
+    ///
+    /// - Parameters:
+    ///   - current: The currently stored model ID.
+    ///   - available: Models the provider currently offers. Pass an empty array when
+    ///     the line-up could not be retrieved; the selection is then left alone.
+    /// - Returns: `current` when the provider still offers it, otherwise the
+    ///   recommended model, otherwise the first one offered.
+    static func resolveSelection(current: String, available: [LLMModel]) -> String {
+        guard !available.isEmpty else { return current }
+        if available.contains(where: { $0.id == current }) { return current }
+        return available.first { $0.isRecommended }?.id ?? available.first?.id ?? current
+    }
+
     /// Formatted price string for display.
     var priceDescription: String {
+        if isUnavailable {
+            return "Pricing unavailable"
+        }
         if inputPrice == 0 && outputPrice == 0 {
             return "Free (local)"
         }

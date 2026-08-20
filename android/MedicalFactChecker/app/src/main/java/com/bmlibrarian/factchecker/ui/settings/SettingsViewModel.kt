@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bmlibrarian.factchecker.data.local.AppDatabase
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
+import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchException
 import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchService
 import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
@@ -33,6 +34,7 @@ import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.util.CostCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -212,10 +214,15 @@ class SettingsViewModel @Inject constructor(
     /**
      * Fetch available models from the current provider's API.
      *
-     * Uses the ModelFetchService to dynamically fetch models. Falls back to
-     * hardcoded models if fetching fails or the provider doesn't support it.
+     * Uses the ModelFetchService to dynamically fetch models. On failure the hardcoded
+     * catalogue stays on screen so the picker is never empty, but the real reason is
+     * reported and the stored selection is left untouched - only a live list is allowed
+     * to overrule what the user chose.
+     *
+     * @param announceSuccess Whether to report a successful fetch in the status line.
+     *   False for the automatic load on screen entry, which the user did not ask for.
      */
-    fun fetchModels() {
+    fun fetchModels(announceSuccess: Boolean = true) {
         if (_isFetchingModels.value) return
 
         val provider = LLMProvider.fromId(settings.value.llmProviderId) ?: return
@@ -240,17 +247,79 @@ class SettingsViewModel @Inject constructor(
                 )
                 _fetchedModels.value = models
                 if (models.isNotEmpty()) {
-                    showStatus("Fetched ${models.size} models from ${provider.displayName}")
+                    // Only a live list may overrule the stored selection.
+                    dropRetiredModelSelection(provider, models)
+                    if (announceSuccess) {
+                        showStatus("Fetched ${models.size} models from ${provider.displayName}")
+                    }
                 } else {
-                    showStatus("No models found, using defaults")
+                    showStatus("${provider.displayName} returned no usable models")
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ModelFetchException) {
+                // The picker keeps showing the hardcoded catalogue, so say plainly that
+                // these are not the provider's current models.
+                showStatus(e.message ?: "Could not load the model list")
             } catch (e: Exception) {
-                showStatus("Failed to fetch models: ${e.message}")
-                // Keep using fallback models
+                // Nothing else is expected here, but an unhandled throw would take down
+                // the settings screen - report it rather than crashing or hiding it.
+                showStatus("Could not load the model list: ${e.message}")
             } finally {
                 _isFetchingModels.value = false
             }
         }
+    }
+
+    /**
+     * Replace a stored model the provider no longer offers.
+     *
+     * A hosted provider's live list is authoritative - DeepSeek retired
+     * deepseek-chat in July 2026 - so a selection missing from it is a dead ID
+     * that would fail on the next call. Providers that let the user type their own
+     * model name (Ollama, custom endpoints) are exempt: there is no catalogue to
+     * check a hand-typed name against.
+     *
+     * Callers must pass a list that genuinely came from the provider. Passing the
+     * hardcoded fallback here would rewrite a valid selection whenever the network
+     * happened to be down.
+     *
+     * @param provider The provider whose models were just fetched
+     * @param models The models the provider currently offers, from a successful fetch
+     */
+    private fun dropRetiredModelSelection(provider: LLMProvider, models: List<ModelInfo>) {
+        if (provider.allowsManualModelEntry) return
+        if (models.any { it.id == settings.value.modelId }) return
+
+        val replacement = models.firstOrNull { it.id == provider.defaultModel } ?: models.first()
+        setModel(replacement.id)
+    }
+
+    /**
+     * Load the provider's model list when the settings screen opens.
+     *
+     * Existing installs depend on this. A model ID retired between releases is only
+     * detected by comparing the stored selection against a live list, and until this
+     * ran on screen entry nothing else triggered a fetch: a user who upgraded while
+     * their provider retired a model kept sending the dead ID until they happened to
+     * switch provider away and back.
+     *
+     * Conditions that are not a failure - a provider with no listing endpoint, or an
+     * API key the user has not entered yet - are skipped quietly, since the user did
+     * not ask for this fetch. A genuine failure is still reported.
+     */
+    fun loadModelsOnEntry() {
+        if (_fetchedModels.value.isNotEmpty()) return
+
+        val provider = LLMProvider.fromId(settings.value.llmProviderId) ?: return
+        if (!provider.supportsModelFetching) return
+        if (provider.requiresApiKey &&
+            settingsRepository.getApiKey(settings.value.llmProviderId).isEmpty()
+        ) {
+            return
+        }
+
+        fetchModels(announceSuccess = false)
     }
 
     /**

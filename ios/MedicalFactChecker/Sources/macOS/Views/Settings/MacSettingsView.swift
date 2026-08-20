@@ -112,20 +112,16 @@ struct LLMSettingsTab: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
+                    // Bind to the stored value directly. Resolving here would show a model
+                    // the app is not going to send; `pickerModels` lists the stored ID
+                    // instead so the two cannot disagree.
                     let modelBinding = Binding<String>(
-                        get: {
-                            if displayModels.contains(where: { $0.id == settings.llmModel }) {
-                                return settings.llmModel
-                            }
-                            return displayModels.first { $0.isRecommended }?.id
-                                ?? displayModels.first?.id
-                                ?? settings.llmModel
-                        },
+                        get: { settings.llmModel },
                         set: { settings.llmModel = $0 }
                     )
 
                     Picker("Model", selection: modelBinding) {
-                        ForEach(displayModels) { model in
+                        ForEach(pickerModels) { model in
                             HStack {
                                 Text(model.displayName)
                                 if model.isRecommended {
@@ -143,10 +139,22 @@ struct LLMSettingsTab: View {
                     }
                     .pickerStyle(.menu)
 
-                    if let selectedModel = displayModels.first(where: { $0.id == settings.llmModel }) {
+                    if let selectedModel = pickerModels.first(where: { $0.id == settings.llmModel }) {
                         Text(selectedModel.priceDescription)
                             .font(.caption)
                             .foregroundColor(.secondary)
+                    }
+
+                    // Report a failed fetch: without this the picker silently shows the
+                    // hardcoded catalogue and a failure is indistinguishable from success.
+                    if let error = modelLoadError {
+                        HStack(alignment: .firstTextBaseline, spacing: MacSpacing.xxSmall) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("Showing the built-in model list: \(error)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
 
                     if settings.selectedProvider.supportsDynamicModelFetching && !apiKey.isEmpty {
@@ -156,7 +164,11 @@ struct LLMSettingsTab: View {
                     }
                 }
 
-                if settings.selectedProvider == .ollama {
+                // `.custom` also allows manual entry, but has its own model field beside
+                // its base URL under Advanced - binding both here to `llmModel` would
+                // show the same setting twice.
+                if settings.selectedProvider.allowsManualModelEntry,
+                   settings.selectedProvider != .custom {
                     TextField("Custom model name", text: $settings.llmModel)
                 }
             }
@@ -293,12 +305,33 @@ struct LLMSettingsTab: View {
         }
     }
 
+    /// Models to display in the picker.
+    ///
+    /// Returns dynamically fetched models if available, otherwise the provider defaults.
     private var displayModels: [LLMModel] {
         availableModels.isEmpty ? settings.selectedProvider.fallbackModels : availableModels
     }
 
+    /// Models offered in the picker, including the stored selection when it is missing.
+    ///
+    /// Healing only runs after a successful fetch, so a stored ID can outlive the list
+    /// being shown - after a failed fetch, or before an API key is entered. Listing it
+    /// keeps the picker showing the model the app will actually send.
+    private var pickerModels: [LLMModel] {
+        guard !settings.llmModel.isEmpty,
+              !displayModels.contains(where: { $0.id == settings.llmModel })
+        else { return displayModels }
+
+        let stored = LLMModel.notListed(
+            id: settings.llmModel,
+            provider: settings.selectedProvider
+        )
+        return [stored] + displayModels
+    }
+
     private func loadModels() async {
-        guard settings.selectedProvider.supportsDynamicModelFetching else {
+        let provider = settings.selectedProvider
+        guard provider.supportsDynamicModelFetching else {
             availableModels = []
             return
         }
@@ -306,20 +339,37 @@ struct LLMSettingsTab: View {
         isLoadingModels = true
         modelLoadError = nil
 
-        let models = await ModelFetchService.shared.fetchModels(
-            for: settings.selectedProvider,
-            apiKey: apiKey.isEmpty ? nil : apiKey,
-            baseURL: settings.llmBaseURL
-        )
+        do {
+            let models = try await ModelFetchService.shared.fetchModels(
+                for: provider,
+                apiKey: apiKey.isEmpty ? nil : apiKey,
+                baseURL: settings.llmBaseURL
+            )
 
-        await MainActor.run {
-            if models.isEmpty {
-                availableModels = settings.selectedProvider.fallbackModels
-                modelLoadError = "Using fallback models"
-            } else {
-                availableModels = models
+            await MainActor.run {
+                if models.isEmpty {
+                    availableModels = provider.fallbackModels
+                    modelLoadError = "Provider returned no usable models"
+                } else {
+                    availableModels = models
+                    modelLoadError = nil
+                    // A hosted provider's live list is authoritative: drop a stored
+                    // model it no longer offers, so the app stops sending a dead ID.
+                    if !provider.allowsManualModelEntry {
+                        settings.llmModel = LLMModel.resolveSelection(
+                            current: settings.llmModel,
+                            available: models
+                        )
+                    }
+                }
+                isLoadingModels = false
             }
-            isLoadingModels = false
+        } catch {
+            await MainActor.run {
+                availableModels = provider.fallbackModels
+                modelLoadError = error.localizedDescription
+                isLoadingModels = false
+            }
         }
     }
 
@@ -341,7 +391,8 @@ struct LLMSettingsTab: View {
             let response = try await LLMService.testConnection(
                 baseURL: url,
                 apiKey: apiKey,
-                model: settings.llmModel
+                model: settings.llmModel,
+                provider: settings.selectedProvider
             )
             await MainActor.run {
                 isTestingAPI = false
@@ -612,7 +663,11 @@ struct BudgetSettingsTab: View {
 /// Shows per-provider pricing tables with input/output costs,
 /// plus estimated costs per fact-check for common models.
 struct MacModelPricingView: View {
-    /// Current model pricing (January 2026).
+    /// Model pricing shown to the user, per 1M tokens.
+///
+/// Rows are dated individually rather than as a table: a single "last updated"
+/// stamp goes stale the moment one provider changes its rates, which is how this
+/// screen came to advertise January 2026 alongside August 2026 DeepSeek prices.
     private let modelGroups: [(provider: String, models: [(name: String, input: Double, output: Double)])] = [
         ("Anthropic (Claude)", [
             ("Claude Sonnet 4.5", 3.00, 15.00),
@@ -625,7 +680,8 @@ struct MacModelPricingView: View {
             ("GPT-4o Mini", 0.15, 0.60),
         ]),
         ("DeepSeek", [
-            ("DeepSeek V3.2", 0.28, 0.42),
+            ("DeepSeek V4 Flash", 0.44, 1.32),
+            ("DeepSeek V4 Pro", 1.32, 3.96),
         ]),
         ("Groq", [
             ("Llama 4 Maverick", 0.50, 0.77),
@@ -694,11 +750,11 @@ struct MacModelPricingView: View {
 
                     MacCostEstimateRow(model: "Claude Sonnet 4.5", cost: "$0.01 - $0.03")
                     MacCostEstimateRow(model: "GPT-4o Mini", cost: "$0.001 - $0.003")
-                    MacCostEstimateRow(model: "DeepSeek V3.2", cost: "$0.002 - $0.005")
+                    MacCostEstimateRow(model: "DeepSeek V4 Flash", cost: "$0.003 - $0.012")
                     MacCostEstimateRow(model: "Llama 4 Scout (Groq)", cost: "$0.001 - $0.003")
                 }
 
-                Text("Prices last updated January 2026. Check provider websites for current pricing.")
+                Text("Indicative rates per 1M tokens; DeepSeek is quoted at peak-hour, cache-miss rates. Providers change pricing without notice - check their websites before relying on these figures.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             } else {

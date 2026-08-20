@@ -50,9 +50,10 @@ public enum CostCalculator {
         "claude-3-7-sonnet": (3.00, 15.00),
         "claude-3-haiku": (0.25, 1.25),
 
-        // DeepSeek models (February 2026)
-        "deepseek-chat": (0.28, 0.42),
-        "deepseek-reasoner": (0.28, 0.42),
+        // DeepSeek models (August 2026) - peak-hour, cache-miss rates.
+        // The V3 IDs deepseek-chat / deepseek-reasoner were retired in July 2026.
+        "deepseek-v4-flash": (0.44, 1.32),
+        "deepseek-v4-pro": (1.32, 3.96),
 
         // Mistral models (February 2026)
         "mistral-large-3": (0.50, 1.50),
@@ -69,6 +70,11 @@ public enum CostCalculator {
         "llama-3.1-8b": (0.05, 0.08),
         "mixtral-8x7b": (0.24, 0.24),
     ]
+
+    /// Pricing keys ordered longest first, so the most specific match wins deterministically.
+    private static let sortedPricingKeys: [String] = modelPricing.keys.sorted {
+        $0.count == $1.count ? $0 < $1 : $0.count > $1.count
+    }
 
     /// Default pricing for unknown models.
     private static let defaultPricing: (input: Double, output: Double) = (1.0, 3.0)
@@ -170,11 +176,16 @@ public enum CostCalculator {
 
         // Check for partial match (e.g., "gpt-4o-mini-2024-07-18" → "gpt-4o-mini")
         // Try both the full name and the name without tag
+        // Longest key first, and in a fixed order. Dictionary iteration order is
+        // unspecified in Swift, and several keys match the same ID - "claude-opus-4-5-
+        // 20251101" matches both "claude-opus-4-5" and "claude-opus-4", whose rates
+        // differ threefold - so iterating the dictionary directly quoted a price that
+        // depended on hash seeding. The longest match is also the most specific one.
         let candidates = colonComponents.count > 1 ? [normalizedModel, withoutTag] : [normalizedModel]
         for candidate in candidates {
-            for (key, pricing) in modelPricing {
+            for key in sortedPricingKeys {
                 if candidate.hasPrefix(key) || candidate.contains(key) {
-                    return pricing
+                    return modelPricing[key] ?? defaultPricing
                 }
             }
         }

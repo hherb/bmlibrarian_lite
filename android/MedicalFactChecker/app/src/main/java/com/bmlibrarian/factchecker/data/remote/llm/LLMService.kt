@@ -497,11 +497,32 @@ class LLMService @Inject constructor(
                 OpenAIChatMessage(role = "user", content = userPrompt)
             ),
             maxTokens = maxTokens,
-            temperature = temperature
+            temperature = temperature,
+            thinking = thinkingConfigFor(provider)
         )
 
         val response = openAIApi.chatCompletion(url, authorization, request)
         return handleOpenAIResponse(response)
+    }
+
+    companion object {
+        /**
+         * Chain-of-thought setting to send for a provider, if it has one.
+         *
+         * DeepSeek V4 enables thinking mode by default: it spends output tokens on
+         * reasoning and silently ignores temperature, which this app relies on for
+         * repeatable scoring. Opt out explicitly. Other providers do not understand the
+         * field and may reject it, so they are sent nothing.
+         *
+         * Pure and static so the provider-to-setting decision can be tested without
+         * standing up the whole service.
+         *
+         * @param provider The provider the request is going to
+         * @return The setting to send, or null to omit the field
+         */
+        internal fun thinkingConfigFor(provider: LLMProvider): ThinkingConfig? {
+            return if (provider.id == LLMProvider.DEEPSEEK.id) ThinkingConfig.DISABLED else null
+        }
     }
 
     /**

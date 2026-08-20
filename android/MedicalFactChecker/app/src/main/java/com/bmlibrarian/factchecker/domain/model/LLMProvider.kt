@@ -32,6 +32,11 @@ package com.bmlibrarian.factchecker.domain.model
  * @property models List of available models with pricing information
  * @property supportsModelFetching Whether the API supports listing available models
  * @property requiresApiKey Whether an API key is required (false for local providers)
+ * @property allowsManualModelEntry Whether the user may type a model name this provider
+ *   does not list. Local and self-hosted endpoints are the user's own, so a name they
+ *   enter is a deliberate choice and must not be second-guessed; hosted providers own
+ *   their catalogue instead, so a selection missing from it is a retired model rather
+ *   than a preference. Mirrors iOS `LLMProvider.allowsManualModelEntry`.
  * @property usesAnthropicFormat Whether this provider uses Anthropic's native API format
  */
 data class LLMProvider(
@@ -42,6 +47,7 @@ data class LLMProvider(
     val models: List<ModelInfo>,
     val supportsModelFetching: Boolean = false,
     val requiresApiKey: Boolean = true,
+    val allowsManualModelEntry: Boolean = false,
     val usesAnthropicFormat: Boolean = false
 ) {
     companion object {
@@ -92,17 +98,18 @@ data class LLMProvider(
         /**
          * DeepSeek API provider.
          * OpenAI-compatible API with competitive pricing.
-         * Updated: January 2026 - DeepSeek V3.2
+         * Updated: August 2026 - DeepSeek V4. The V3 IDs deepseek-chat and
+         * deepseek-reasoner were retired in July 2026.
+         * Prices are peak-hour, cache-miss rates; off-peak is half.
          */
         val DEEPSEEK = LLMProvider(
             id = "deepseek",
             displayName = "DeepSeek",
             baseUrl = "https://api.deepseek.com/v1",
-            defaultModel = "deepseek-chat",
+            defaultModel = "deepseek-v4-flash",
             models = listOf(
-                // DeepSeek V3.2 (Latest - January 2026)
-                ModelInfo("deepseek-chat", "DeepSeek V3.2 (Chat)", 0.28, 0.42),
-                ModelInfo("deepseek-reasoner", "DeepSeek V3.2 (Reasoner)", 0.28, 0.42)
+                ModelInfo("deepseek-v4-flash", "DeepSeek V4 Flash", 0.44, 1.32),
+                ModelInfo("deepseek-v4-pro", "DeepSeek V4 Pro", 1.32, 3.96)
             ),
             supportsModelFetching = true
         )
@@ -164,7 +171,8 @@ data class LLMProvider(
                 ModelInfo("phi3", "Phi-3", 0.0, 0.0)
             ),
             supportsModelFetching = true,
-            requiresApiKey = false
+            requiresApiKey = false,
+            allowsManualModelEntry = true
         )
 
         /**
@@ -176,7 +184,8 @@ data class LLMProvider(
             displayName = "Custom",
             baseUrl = "",
             defaultModel = "",
-            models = emptyList()
+            models = emptyList(),
+            allowsManualModelEntry = true
         )
 
         /** List of all built-in providers. */

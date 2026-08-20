@@ -10,8 +10,28 @@ its slice has landed; add a new section when handing off new work.
 
 - **Python CI** (#129 landed 2026-07-20): `.github/workflows/python-tests.yml`
   runs `pytest -m "not integration" --strict-markers` (557 tests, ~1 min) on every
-  PR and every push to master, plus a `lint-delta` job on PRs. Swift and Android
-  still have no CI — that half of #129 is open.
+  PR and every push to master, plus a `lint-delta` job on PRs.
+- **Swift and Android CI** (#129 completed, 2026-08-20):
+  `.github/workflows/swift-tests.yml` runs `swift test` for both
+  `Packages/BioMedLit` and `ios/MedicalFactChecker` on a `macos-15` runner
+  (matrix, `fail-fast: false`); `.github/workflows/android-tests.yml` runs
+  `./gradlew testDebugUnitTest` on ubuntu with JDK 17 (matching
+  `jvmTarget = "17"`). Neither has a `paths:` filter, for the same parity-fixture
+  reason as the Python job. All three platforms of the parity guard are now
+  enforced on PRs.
+  - **The Android job needs no SDK install step.** The unit tests are JVM-only;
+    the Gradle Android plugin resolves what it needs from the wrapper.
+- **Model fetch failures are errors, not fallbacks** (PR #135 review follow-up):
+  `ModelFetchService.fetchModels` now *throws* on both Swift and Kotlin instead of
+  returning the hardcoded catalogue. Kotlin raises `ModelFetchException`. The rule
+  behind it: a caller that cannot tell a live line-up from a hardcoded one cannot
+  tell a retired model ID from a current one either — which is exactly how the
+  DeepSeek V3 retirement went unnoticed. **Do not reintroduce a fallback inside the
+  service.** Callers may show the hardcoded list, but must not treat it as
+  authoritative — in particular `dropRetiredModelSelection` /
+  `LLMModel.resolveSelection` must only ever see a list that really came from the
+  provider, or they will rewrite a valid stored selection whenever the network is
+  down.
   - **The test job has no `paths:` filter, on purpose.** The parity fixtures live
     in `doc/cross_platform/transparency_parity/`, outside `src/` and `tests/`, so
     any plausible filter would skip the run for a contract-only edit — the exact
@@ -180,13 +200,18 @@ its slice has landed; add a new section when handing off new work.
   layer, leaving the pure classifier + parity tests unchanged.
 - **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
   per call). Negligible today; memoize if it ever hits a hot path.
-- **#129 (remainder) — no CI for Swift or Android**: the Python half landed (see
-  above), but `swift test` and `./gradlew test` still run only when someone
-  remembers. The parity guard spans three platforms, so two thirds of it is still
-  unenforced on PRs. Swift needs a `macos-latest` runner (`Packages/BioMedLit`
-  first — cheaper than the app, and it holds the Swift parity suite); Android
-  needs the SDK plus the `inputs.dir` behaviour noted above, which means the
-  Gradle job must *not* be given a `paths:` filter either.
+- **#136 — model catalogue pricing disagrees with `CostCalculator`**: GPT-5.2 is
+  advertised at $2.00/$8.00 but billed at $1.75/$14.00, and `mistral-large-latest`
+  matches no pricing key so it bills at the `defaultPricing` placeholder. Needs a
+  decision on which figures are current before it can be fixed.
+- **#137 — pricing duplicated across six sites per platform**; #136 is that
+  duplication having already drifted.
+- **#138 — the model-list fetch has no retry/backoff**, contrary to golden rule 7.
+  More visible now that failures surface instead of silently falling back.
+- **#139 — four providers still filter models by whitelist** (OpenAI, Groq,
+  Mistral, Anthropic), the pattern that broke DeepSeek. Riskier than before, since
+  the healing logic will now rewrite a selection when a whitelist drops new models.
+- **#140 — `ThinkingConfig.type` is a raw `String`** for a two-valued toggle.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
   no Python counterpart; revisit only if a canonical definition is introduced.
 
@@ -197,6 +222,7 @@ its slice has landed; add a new section when handing off new work.
   three platforms is meant to fail.
 - `pytest tests/` → 0 failures (Python is the reference).
 - `cd Packages/BioMedLit && swift test` → 0 failures.
+- `cd ios/MedicalFactChecker && swift test` → 0 failures.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
   'platform=macOS' build` from `ios/MedicalFactChecker/`.

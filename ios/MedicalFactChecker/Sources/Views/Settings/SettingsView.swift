@@ -93,25 +93,18 @@ struct SettingsView: View {
                             Text("Enter model name manually below")
                                 .foregroundColor(.secondary)
                         } else {
-                            // Use a computed binding that ensures the selection is always valid
+                            // Bind to the stored value directly. Resolving here would show
+                            // a model the app is not going to send; `pickerModels` lists
+                            // the stored ID instead so the two cannot disagree.
                             let modelBinding = Binding<String>(
-                                get: {
-                                    // If current model is valid for this provider, use it
-                                    if displayModels.contains(where: { $0.id == settings.llmModel }) {
-                                        return settings.llmModel
-                                    }
-                                    // Otherwise return the default model for this provider
-                                    return displayModels.first { $0.isRecommended }?.id
-                                        ?? displayModels.first?.id
-                                        ?? settings.llmModel
-                                },
+                                get: { settings.llmModel },
                                 set: { newValue in
                                     settings.llmModel = newValue
                                 }
                             )
 
                             Picker("Model", selection: modelBinding) {
-                                ForEach(displayModels) { model in
+                                ForEach(pickerModels) { model in
                                     VStack(alignment: .leading) {
                                         HStack {
                                             Text(model.displayName)
@@ -130,7 +123,7 @@ struct SettingsView: View {
                                 }
                             }
 
-                            if let selectedModel = displayModels.first(where: { $0.id == settings.llmModel }) {
+                            if let selectedModel = pickerModels.first(where: { $0.id == settings.llmModel }) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(selectedModel.description)
                                         .font(.caption)
@@ -146,7 +139,7 @@ struct SettingsView: View {
                                 HStack {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .foregroundColor(.orange)
-                                    Text("Using fallback models: \(error)")
+                                    Text("Showing the built-in model list: \(error)")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
                                 }
@@ -166,8 +159,8 @@ struct SettingsView: View {
                             }
                         }
 
-                        // For Ollama, allow custom model names
-                        if settings.selectedProvider == .ollama {
+                        // Let the user name a model the provider does not list
+                        if settings.selectedProvider.allowsManualModelEntry {
                             TextField("Or enter model name", text: $settings.llmModel)
                                 .autocapitalization(.none)
                         }
@@ -537,6 +530,23 @@ struct SettingsView: View {
         availableModels.isEmpty ? settings.selectedProvider.fallbackModels : availableModels
     }
 
+    /// Models offered in the picker, including the stored selection when it is missing.
+    ///
+    /// Healing only runs after a successful fetch, so a stored ID can outlive the list
+    /// being shown - after a failed fetch, or before an API key is entered. Listing it
+    /// keeps the picker showing the model the app will actually send.
+    private var pickerModels: [LLMModel] {
+        guard !settings.llmModel.isEmpty,
+              !displayModels.contains(where: { $0.id == settings.llmModel })
+        else { return displayModels }
+
+        let stored = LLMModel.notListed(
+            id: settings.llmModel,
+            provider: settings.selectedProvider
+        )
+        return [stored] + displayModels
+    }
+
     // MARK: - Helpers
 
     /// Delete all fact-check sessions and their associated data.
@@ -565,7 +575,8 @@ struct SettingsView: View {
 
     /// Load available models for the current provider.
     private func loadModels() async {
-        guard settings.selectedProvider.supportsDynamicModelFetching else {
+        let provider = settings.selectedProvider
+        guard provider.supportsDynamicModelFetching else {
             availableModels = []
             return
         }
@@ -573,22 +584,37 @@ struct SettingsView: View {
         isLoadingModels = true
         modelLoadError = nil
 
-        let models = await ModelFetchService.shared.fetchModels(
-            for: settings.selectedProvider,
-            apiKey: apiKey.isEmpty ? nil : apiKey,
-            baseURL: settings.llmBaseURL
-        )
+        do {
+            let models = try await ModelFetchService.shared.fetchModels(
+                for: provider,
+                apiKey: apiKey.isEmpty ? nil : apiKey,
+                baseURL: settings.llmBaseURL
+            )
 
-        await MainActor.run {
-            if models.isEmpty {
-                // API returned empty, use fallback
-                availableModels = settings.selectedProvider.fallbackModels
-                modelLoadError = "No models returned from API"
-            } else {
-                availableModels = models
-                modelLoadError = nil
+            await MainActor.run {
+                if models.isEmpty {
+                    availableModels = provider.fallbackModels
+                    modelLoadError = "Provider returned no usable models"
+                } else {
+                    availableModels = models
+                    modelLoadError = nil
+                    // A hosted provider's live list is authoritative: drop a stored
+                    // model it no longer offers, so the app stops sending a dead ID.
+                    if !provider.allowsManualModelEntry {
+                        settings.llmModel = LLMModel.resolveSelection(
+                            current: settings.llmModel,
+                            available: models
+                        )
+                    }
+                }
+                isLoadingModels = false
             }
-            isLoadingModels = false
+        } catch {
+            await MainActor.run {
+                availableModels = provider.fallbackModels
+                modelLoadError = error.localizedDescription
+                isLoadingModels = false
+            }
         }
     }
 
@@ -610,7 +636,8 @@ struct SettingsView: View {
             let response = try await LLMService.testConnection(
                 baseURL: url,
                 apiKey: apiKey,
-                model: settings.llmModel
+                model: settings.llmModel,
+                provider: settings.selectedProvider
             )
             await MainActor.run {
                 isTestingAPI = false
@@ -772,7 +799,11 @@ struct SettingsView: View {
 // MARK: - Model Pricing View
 
 struct ModelPricingView: View {
-    /// Current model pricing (January 2026).
+    /// Model pricing shown to the user, per 1M tokens.
+///
+/// Rows are dated individually rather than as a table: a single "last updated"
+/// stamp goes stale the moment one provider changes its rates, which is how this
+/// screen came to advertise January 2026 alongside August 2026 DeepSeek prices.
     private let modelGroups: [(provider: String, models: [(name: String, input: Double, output: Double)])] = [
         ("Anthropic (Claude)", [
             ("Claude Sonnet 4.5", 3.00, 15.00),
@@ -785,7 +816,8 @@ struct ModelPricingView: View {
             ("GPT-4o Mini", 0.15, 0.60),
         ]),
         ("DeepSeek", [
-            ("DeepSeek V3.2", 0.28, 0.42),
+            ("DeepSeek V4 Flash", 0.44, 1.32),
+            ("DeepSeek V4 Pro", 1.32, 3.96),
         ]),
         ("Groq", [
             ("Llama 4 Maverick", 0.50, 0.77),
@@ -832,13 +864,13 @@ struct ModelPricingView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     CostEstimateRow(model: "Claude Sonnet 4.5", cost: "$0.01 - $0.03")
                     CostEstimateRow(model: "GPT-4o Mini", cost: "$0.001 - $0.003")
-                    CostEstimateRow(model: "DeepSeek V3.2", cost: "$0.002 - $0.005")
+                    CostEstimateRow(model: "DeepSeek V4 Flash", cost: "$0.003 - $0.012")
                     CostEstimateRow(model: "Llama 4 Scout (Groq)", cost: "$0.001 - $0.003")
                 }
             } header: {
                 Text("Cost Estimates")
             } footer: {
-                Text("Prices last updated January 2026. Check provider websites for current pricing.")
+                Text("Indicative rates per 1M tokens; DeepSeek is quoted at peak-hour, cache-miss rates. Providers change pricing without notice - check their websites before relying on these figures.")
                     .font(.caption2)
             }
         }

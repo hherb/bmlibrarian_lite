@@ -1,0 +1,44 @@
+name: Swift tests
+
+permissions:
+  contents: read
+
+# Deliberately NOT filtered by `paths:`, for the same reason as python-tests.yml.
+#
+# Packages/BioMedLit/Tests/BioMedLitTests/Transparency/TransparencyParityTests.swift
+# reads the shared fixtures in doc/cross_platform/transparency_parity/, which live
+# outside both package directories. A paths filter would skip this run for a
+# contract-only edit — the silent pass the parity suite exists to prevent.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: swift-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: swift test (${{ matrix.package }})
+    # macOS runners are billed at a higher rate than ubuntu, so the two Swift
+    # packages share one job matrix rather than each getting a workflow.
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      # Report both packages' results even when one fails; they fail for
+      # unrelated reasons and cancelling the other hides half the picture.
+      fail-fast: false
+      matrix:
+        package:
+          - Packages/BioMedLit
+          - ios/MedicalFactChecker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Run tests
+        working-directory: ${{ matrix.package }}
+        run: swift test
