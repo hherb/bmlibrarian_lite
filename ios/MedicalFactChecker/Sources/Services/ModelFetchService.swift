@@ -19,7 +19,10 @@ import Foundation
 /// Service for fetching available models from LLM provider APIs.
 ///
 /// Supports dynamic model discovery for providers that offer model listing endpoints.
-/// Falls back to hardcoded lists when API calls fail or are not supported.
+/// Failures are propagated to the caller; substituting a hardcoded list would hide a
+/// retired model ID behind a plausible-looking picker, which is how the DeepSeek V3
+/// retirement went unnoticed. Returns an empty list for `.custom`, which has no
+/// listing endpoint.
 actor ModelFetchService {
     // MARK: - Constants
 
@@ -119,6 +122,26 @@ actor ModelFetchService {
         }
     }
 
+    /// Decode a model-list response, reporting a shape change as a parse failure.
+    ///
+    /// A `DecodingError` surfaced as-is reads "The data couldn't be read because it isn't
+    /// in the correct format", which is indistinguishable from a network problem and
+    /// gives the user nothing to act on. A provider changing its response shape is the
+    /// same class of change as retiring a model ID, so it deserves its own message.
+    ///
+    /// - Parameters:
+    ///   - type: The response type to decode.
+    ///   - data: The raw response body.
+    /// - Returns: The decoded response.
+    /// - Throws: `ModelFetchError.parseError` if the body does not match `type`.
+    private static func decodeModelList<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw ModelFetchError.parseError
+        }
+    }
+
     // MARK: - Provider-Specific Fetchers
 
     /// Fetch models from Anthropic API.
@@ -136,12 +159,14 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            throw ModelFetchError.apiError(statusCode: statusCode)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModelFetchError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: httpResponse.statusCode)
         }
 
-        let result = try JSONDecoder().decode(AnthropicModelsResponse.self, from: data)
+        let result = try Self.decodeModelList(AnthropicModelsResponse.self, from: data)
 
         return result.data
             .filter { isUsableAnthropicModel($0.id) }
@@ -218,12 +243,14 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            throw ModelFetchError.apiError(statusCode: statusCode)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModelFetchError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: httpResponse.statusCode)
         }
 
-        let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+        let result = try Self.decodeModelList(OpenAIModelsResponse.self, from: data)
 
         return result.data
             .filter { isUsableOpenAIModel($0.id) }
@@ -341,12 +368,14 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            throw ModelFetchError.apiError(statusCode: statusCode)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModelFetchError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: httpResponse.statusCode)
         }
 
-        let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+        let result = try Self.decodeModelList(OpenAIModelsResponse.self, from: data)
 
         return result.data
             .filter { isUsableGroqModel($0.id) }
@@ -432,12 +461,14 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            throw ModelFetchError.apiError(statusCode: statusCode)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModelFetchError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: httpResponse.statusCode)
         }
 
-        let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+        let result = try Self.decodeModelList(OpenAIModelsResponse.self, from: data)
 
         return result.data
             .filter { isUsableMistralModel($0.id) }
@@ -522,12 +553,14 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            throw ModelFetchError.apiError(statusCode: statusCode)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModelFetchError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: httpResponse.statusCode)
         }
 
-        let result = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+        let result = try Self.decodeModelList(OpenAIModelsResponse.self, from: data)
 
         return result.data
             .filter { Self.isUsableDeepSeekModel($0.id) }
@@ -539,7 +572,7 @@ actor ModelFetchService {
                     description: Self.getDeepSeekDescription(for: model.id),
                     inputPrice: pricing.input,
                     outputPrice: pricing.output,
-                    isRecommended: model.id == "deepseek-v4-flash"
+                    isRecommended: Self.isRecommendedDeepSeekModel(model.id)
                 )
             }
     }
@@ -581,6 +614,19 @@ actor ModelFetchService {
         return (["DeepSeek"] + words).joined(separator: " ")
     }
 
+    /// Whether a DeepSeek model should be flagged as the recommended default.
+    ///
+    /// Keyed off the tier marker rather than an exact ID: pinning "deepseek-v4-flash"
+    /// would leave nothing recommended the moment DeepSeek renames its line-up, and
+    /// the selection would then fall through to whatever the API happened to list
+    /// first - possibly the threefold dearer Pro tier.
+    ///
+    /// - Parameter modelId: The model ID as listed by the provider.
+    /// - Returns: True for the cheap general-purpose tier.
+    static func isRecommendedDeepSeekModel(_ modelId: String) -> Bool {
+        modelId.lowercased().contains("flash")
+    }
+
     /// Get description for DeepSeek models.
     static func getDeepSeekDescription(for modelId: String) -> String {
         let normalized = modelId.lowercased()
@@ -595,8 +641,10 @@ actor ModelFetchService {
     /// Get pricing for DeepSeek models.
     ///
     /// Peak-hour, cache-miss rates per 1M tokens (August 2026). Off-peak rates are
-    /// half of these, so quoting peak never understates a run. Unrecognised IDs get
-    /// the flagship rate for the same reason.
+    /// half of these, so quoting peak never understates a run. An unrecognised ID
+    /// gets the flagship rate for the same reason - except one containing "flash",
+    /// which is priced as V4 Flash. A future cheap tier is therefore quoted at V4
+    /// Flash rates until this table is updated: check it when a new generation ships.
     static func getDeepSeekPricing(for modelId: String) -> (input: Double, output: Double) {
         if modelId.lowercased().contains("flash") {
             return (0.44, 1.32)
@@ -619,12 +667,14 @@ actor ModelFetchService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            throw ModelFetchError.apiError(statusCode: statusCode)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModelFetchError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw ModelFetchError.apiError(statusCode: httpResponse.statusCode)
         }
 
-        let result = try JSONDecoder().decode(OllamaModelsResponse.self, from: data)
+        let result = try Self.decodeModelList(OllamaModelsResponse.self, from: data)
 
         return result.models.map { model in
             LLMModel(
@@ -696,6 +746,7 @@ private struct OllamaModel: Decodable {
 enum ModelFetchError: LocalizedError {
     case noAPIKey
     case apiError(statusCode: Int)
+    case invalidResponse
     case parseError
 
     var errorDescription: String? {
@@ -703,9 +754,14 @@ enum ModelFetchError: LocalizedError {
         case .noAPIKey:
             return "API key required to fetch models"
         case .apiError(let statusCode):
+            if statusCode == 401 || statusCode == 403 {
+                return "Model list request rejected (HTTP \(statusCode)) - check the API key"
+            }
             return "Model list request failed (HTTP \(statusCode))"
+        case .invalidResponse:
+            return "The server did not return an HTTP response - check the base URL"
         case .parseError:
-            return "Failed to parse model response"
+            return "The provider's model list was not in the expected format"
         }
     }
 }

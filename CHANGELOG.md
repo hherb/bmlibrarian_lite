@@ -37,9 +37,36 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   and had their `temperature` silently ignored. All three apps now send
   `{"thinking": {"type": "disabled"}}` to DeepSeek, and the iOS/macOS connection
   test sends the same options as a real call.
-- **iOS/macOS: model fetch failures are no longer silent.** `ModelFetchService`
-  propagates errors instead of substituting hardcoded models, so Settings shows
-  the real reason (including the HTTP status) rather than a generic notice.
+- **iOS/macOS/Android: model fetch failures are no longer silent.**
+  `ModelFetchService` propagates errors instead of substituting hardcoded models,
+  so Settings shows the real reason (including the HTTP status) rather than a
+  generic notice. macOS previously captured that reason and never displayed it,
+  and Android swallowed the failure entirely and reported it as a successful
+  fetch; both now surface it. A rejected API key (HTTP 401/403) says so instead of
+  reading like a server error.
+- **Android: a retired model is now actually replaced.** Nothing triggered a model
+  fetch when the settings screen opened, so an existing install kept sending a
+  model ID the provider had retired until the user happened to switch provider
+  away and back.
+- **Android: a valid model selection is no longer overwritten when offline.**
+  Because a failed fetch returned the hardcoded catalogue, the selection-healing
+  logic treated it as the provider's live line-up and could rewrite a model the
+  user had deliberately chosen.
+- **iOS/macOS: the model picker no longer shows a different model from the one
+  being sent.** The picker resolved the selection for display without storing it,
+  so after a failed fetch it could show a healthy model while a retired ID sat in
+  settings. A stored model the provider no longer lists is now shown explicitly.
+- **Cost estimates no longer depend on dictionary ordering.** `CostCalculator`
+  matched model IDs by iterating an unordered dictionary, and several keys match
+  the same ID, so the rate quoted for a model could vary between runs - threefold
+  for Claude Opus 4.5, twelvefold for GPT-5.2 Pro. The most specific key now wins.
+- **macOS: the Custom provider no longer shows two model-name fields.**
+
+### Changed
+
+- **CI runs the Swift and Android suites** (`swift-tests.yml`,
+  `android-tests.yml`), completing #129. All three platforms of the
+  cross-platform parity guard are now enforced on pull requests.
 
 ## [0.4.0] - 2026-07-19
 

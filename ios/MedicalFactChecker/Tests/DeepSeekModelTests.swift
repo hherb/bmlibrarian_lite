@@ -188,3 +188,86 @@ struct ThinkingModeTests {
         #expect(deepSeekJSON.contains("\"thinking\":{\"type\":\"disabled\"}"))
     }
 }
+
+// MARK: - Model Fetch Error Tests
+
+/// The whole point of threading the HTTP status through `ModelFetchError` is that the
+/// user sees it, so the rendered message is what needs pinning.
+struct ModelFetchErrorTests {
+    @Test func apiErrorReportsTheHTTPStatus() {
+        let message = ModelFetchError.apiError(statusCode: 503).errorDescription ?? ""
+        #expect(message.contains("503"))
+    }
+
+    @Test func rejectedCredentialsSayToCheckTheKey() {
+        // A 401 is the most actionable failure here, and reads identically to a 503
+        // unless it is called out.
+        for status in [401, 403] {
+            let message = ModelFetchError.apiError(statusCode: status).errorDescription ?? ""
+            #expect(message.contains("\(status)"))
+            #expect(message.lowercased().contains("api key"))
+        }
+    }
+
+    @Test func aNonHTTPResponseIsNotReportedAsAStatusCode() {
+        // Previously this surfaced as "HTTP 0", which is not a status and left the user
+        // with nothing to act on.
+        let message = ModelFetchError.invalidResponse.errorDescription ?? ""
+        #expect(!message.contains("0"))
+        #expect(message.lowercased().contains("base url"))
+    }
+}
+
+// MARK: - Unlisted Model Tests
+
+/// A stored model the provider no longer offers must stay visible rather than being
+/// swapped for a healthy-looking one that the app is not going to send.
+struct UnlistedModelTests {
+    @Test func retiredModelIsLabelledAndHasNoPrice() {
+        let stale = LLMModel.notListed(id: "deepseek-chat", provider: .deepseek)
+
+        #expect(stale.id == "deepseek-chat")
+        #expect(stale.displayName.contains("deepseek-chat"))
+        #expect(stale.isUnavailable)
+        // Zero prices must not be read as "free" - the price is unknown, not nothing.
+        #expect(stale.priceDescription != "Free (local)")
+    }
+
+    @Test func handTypedLocalNameIsNotFlaggedAsRetired() {
+        // Ollama accepts any name the user types; absence from the catalogue is
+        // expected there, not a retirement, and a local model really is free.
+        let manual = LLMModel.notListed(id: "my-local-model", provider: .ollama)
+
+        #expect(manual.displayName == "my-local-model")
+        #expect(!manual.isUnavailable)
+        #expect(manual.priceDescription == "Free (local)")
+    }
+
+    @Test func customEndpointModelIsUnpricedRatherThanFree() {
+        // A custom endpoint is usually a paid third party. Reporting it as free would
+        // understate what a run costs, which is the opposite of the intended bias.
+        let custom = LLMModel.notListed(id: "some-hosted-model", provider: .custom)
+
+        #expect(custom.displayName == "some-hosted-model")
+        #expect(custom.priceDescription != "Free (local)")
+    }
+}
+
+// MARK: - DeepSeek Pricing Fallback Tests
+
+struct DeepSeekPricingFallbackTests {
+    @Test func unknownNonFlashIDsGetTheFlagshipRate() {
+        // Deliberate: an estimate that is too high is safer than one that is too low.
+        let pricing = ModelFetchService.getDeepSeekPricing(for: "deepseek-v5-ultra")
+        #expect(pricing.input == 1.32)
+        #expect(pricing.output == 3.96)
+    }
+
+    @Test func aFutureFlashTierIsPricedAsV4Flash() {
+        // Documents the one case where the "never understates" rule does not hold, so
+        // the table gets revisited when a new generation ships.
+        let pricing = ModelFetchService.getDeepSeekPricing(for: "deepseek-v5-flash")
+        #expect(pricing.input == 0.44)
+        #expect(pricing.output == 1.32)
+    }
+}

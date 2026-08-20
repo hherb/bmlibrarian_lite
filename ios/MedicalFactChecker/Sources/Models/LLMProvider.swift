@@ -306,11 +306,17 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
     }
 
     /// Whether the provider requires an API key.
+    ///
+    /// Listed case by case rather than with a `default`, so adding a provider is a
+    /// compile error here instead of silently inheriting an assumption. These three
+    /// capabilities decide whether the app demands a key, whether it may overwrite a
+    /// stored model, and whether it calls a listing endpoint - a wrong silent default
+    /// in any of them is a user-visible bug.
     var requiresAPIKey: Bool {
         switch self {
+        case .anthropic, .openai, .deepseek, .groq, .mistral: return true
         case .ollama: return false
         case .custom: return true  // May or may not, but assume yes
-        default: return true
         }
     }
 
@@ -319,19 +325,20 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
     /// Local and self-hosted endpoints are the user's own: a name they enter is a
     /// deliberate choice and must not be second-guessed. Hosted providers own their
     /// catalogue instead, so a selection missing from it is a retired model, not a
-    /// preference.
+    /// preference. `.custom` qualifies because it has no listing endpoint at all,
+    /// so there is never a catalogue to check a name against.
     var allowsManualModelEntry: Bool {
         switch self {
         case .ollama, .custom: return true
-        default: return false
+        case .anthropic, .openai, .deepseek, .groq, .mistral: return false
         }
     }
 
     /// Whether this provider supports dynamic model fetching.
     var supportsDynamicModelFetching: Bool {
         switch self {
+        case .anthropic, .openai, .deepseek, .groq, .mistral, .ollama: return true
         case .custom: return false
-        default: return true
         }
     }
 
@@ -396,6 +403,44 @@ struct LLMModel: Identifiable, Equatable {
     /// Whether this model is recommended for this provider.
     var isRecommended: Bool = false
 
+    /// Whether this entry stands in for a stored selection the provider no longer lists.
+    ///
+    /// Such an entry has no real pricing, so it must not be shown as free.
+    var isUnavailable: Bool = false
+
+    /// Build an entry for a stored model that the provider's line-up does not contain.
+    ///
+    /// The picker must never display a different model from the one the app will send.
+    /// Resolving the selection for display only - without storing it - produced exactly
+    /// that: the user saw a healthy model while a retired ID sat in settings. Listing
+    /// the stored ID explicitly keeps the two in step and makes the problem visible.
+    ///
+    /// Takes the provider rather than a flag because two different questions have to be
+    /// answered: whether the absence is a retirement or a deliberately typed name, and
+    /// whether "no price" means free or merely unknown. Only Ollama runs on the user's
+    /// own machine, so only Ollama is genuinely free.
+    ///
+    /// - Parameters:
+    ///   - id: The stored model ID.
+    ///   - provider: The provider the ID is stored against.
+    /// - Returns: A display-only entry carrying the stored ID.
+    static func notListed(id: String, provider: LLMProvider) -> LLMModel {
+        let manualEntry = provider.allowsManualModelEntry
+        let isLocal = provider == .ollama
+        return LLMModel(
+            id: id,
+            displayName: manualEntry ? id : "\(id) (no longer offered)",
+            description: manualEntry
+                ? "Entered manually."
+                : "This model is not in the provider's current line-up. Choose another.",
+            inputPrice: 0,
+            outputPrice: 0,
+            // Local models really are free; anything else with no price is unpriced,
+            // and showing "Free" for a paid endpoint understates what a run costs.
+            isUnavailable: !isLocal
+        )
+    }
+
     /// Resolve which model to use, given a stored selection and a provider's line-up.
     ///
     /// Providers retire model IDs - DeepSeek retired `deepseek-chat` in July 2026 -
@@ -416,6 +461,9 @@ struct LLMModel: Identifiable, Equatable {
 
     /// Formatted price string for display.
     var priceDescription: String {
+        if isUnavailable {
+            return "Pricing unavailable"
+        }
         if inputPrice == 0 && outputPrice == 0 {
             return "Free (local)"
         }

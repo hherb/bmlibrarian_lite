@@ -1,0 +1,53 @@
+name: Android tests
+
+permissions:
+  contents: read
+
+# Deliberately NOT filtered by `paths:`, for the same reason as python-tests.yml.
+#
+# The transparency parity assertions in
+# android/.../domain/transparency/TransparencyParityTest.kt read the shared fixtures
+# in doc/cross_platform/transparency_parity/, which live outside android/. A paths
+# filter listing only android/ would skip this run for a contract-only edit — the
+# silent pass the parity suite exists to prevent.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: android-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Gradle unit tests
+    runs-on: ubuntu-latest
+    # The suite runs in a few minutes; without a limit a hung test would hold the
+    # runner for GitHub's six-hour default.
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android/MedicalFactChecker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --console=plain --no-daemon
+
+      - name: Upload test reports
+        # Gradle's HTML report is the only place the individual failure messages
+        # survive, and the log above truncates them.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: android/MedicalFactChecker/app/build/reports/tests/
+          retention-days: 7

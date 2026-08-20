@@ -58,14 +58,21 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 
 ---
 
-## What's New (Version 1.1)
+## What's New (Version 1.5.1)
 
-**Updated AI Models (January 2026)**
-- Added support for Claude 4.5 (Sonnet, Haiku, Opus)
-- Added GPT-5.2 and o4-mini reasoning models
-- Added DeepSeek V3.2 with reasoning mode
-- Added Llama 4 Maverick and Scout via Groq
-- Added Mistral Large 3 and Codestral
+**DeepSeek V4**
+- Updated to DeepSeek V4 Flash and V4 Pro, replacing the retired V3 models
+- Model discovery keeps working when a provider renames its line-up
+- A stored model the provider no longer offers is replaced automatically
+- Model list failures now report the actual reason instead of quietly
+  showing the built-in list
+
+**Supported AI Models**
+- Claude 4.5 (Sonnet, Haiku, Opus)
+- GPT-5.2 and o4-mini reasoning models
+- DeepSeek V4 Flash and V4 Pro
+- Llama 4 Maverick and Scout via Groq
+- Mistral Large 3 and Codestral
 
 **Dynamic Model Discovery**
 - Models are now fetched automatically from provider APIs
@@ -85,6 +92,10 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 ---
 
 ## Version History
+
+### Version 1.5.1 (August 2026)
+- DeepSeek V4 migration after the V3 model retirement
+- Model fetch failures reported instead of silently falling back
 
 ### Version 1.1 (January 2026)
 - Updated to January 2026 AI models

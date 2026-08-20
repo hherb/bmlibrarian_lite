@@ -57,6 +57,32 @@ class LLMProviderTest {
         assertNull(provider)
     }
 
+    // ==================== Manual Model Entry Tests ====================
+
+    @Test
+    fun `only self-hosted and custom endpoints allow manual model entry`() {
+        // This flag gates whether a stored model may be replaced when the provider stops
+        // listing it. Getting it wrong for a hosted provider strands the user on a dead
+        // ID; getting it wrong for Ollama overwrites a name they deliberately typed.
+        assertTrue(LLMProvider.OLLAMA.allowsManualModelEntry)
+        assertTrue(LLMProvider.CUSTOM.allowsManualModelEntry)
+
+        assertFalse(LLMProvider.ANTHROPIC.allowsManualModelEntry)
+        assertFalse(LLMProvider.OPENAI.allowsManualModelEntry)
+        assertFalse(LLMProvider.DEEPSEEK.allowsManualModelEntry)
+        assertFalse(LLMProvider.GROQ.allowsManualModelEntry)
+        assertFalse(LLMProvider.MISTRAL.allowsManualModelEntry)
+    }
+
+    @Test
+    fun `manual entry is not the same question as requiring an API key`() {
+        // These were briefly conflated on Android. A custom endpoint usually needs a key
+        // yet still lets the user name their own model, so one cannot stand in for the
+        // other - see the iOS LLMProvider.allowsManualModelEntry docs.
+        assertTrue(LLMProvider.CUSTOM.requiresApiKey)
+        assertTrue(LLMProvider.CUSTOM.allowsManualModelEntry)
+    }
+
     @Test
     fun `fromId is case sensitive`() {
         val provider = LLMProvider.fromId("ANTHROPIC")

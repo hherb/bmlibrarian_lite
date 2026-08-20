@@ -100,6 +100,12 @@ fun SettingsScreen(
     var showSyncFolderDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Refresh the model list on entry so a model the provider retired since the last
+    // release is detected and replaced, rather than being sent until it fails.
+    LaunchedEffect(Unit) {
+        viewModel.loadModelsOnEntry()
+    }
+
     // Show status message in snackbar
     LaunchedEffect(statusMessage) {
         statusMessage?.let {

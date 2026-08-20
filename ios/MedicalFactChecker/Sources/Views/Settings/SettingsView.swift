@@ -93,21 +93,18 @@ struct SettingsView: View {
                             Text("Enter model name manually below")
                                 .foregroundColor(.secondary)
                         } else {
-                            // Use a computed binding that ensures the selection is always valid
+                            // Bind to the stored value directly. Resolving here would show
+                            // a model the app is not going to send; `pickerModels` lists
+                            // the stored ID instead so the two cannot disagree.
                             let modelBinding = Binding<String>(
-                                get: {
-                                    LLMModel.resolveSelection(
-                                        current: settings.llmModel,
-                                        available: displayModels
-                                    )
-                                },
+                                get: { settings.llmModel },
                                 set: { newValue in
                                     settings.llmModel = newValue
                                 }
                             )
 
                             Picker("Model", selection: modelBinding) {
-                                ForEach(displayModels) { model in
+                                ForEach(pickerModels) { model in
                                     VStack(alignment: .leading) {
                                         HStack {
                                             Text(model.displayName)
@@ -126,7 +123,7 @@ struct SettingsView: View {
                                 }
                             }
 
-                            if let selectedModel = displayModels.first(where: { $0.id == settings.llmModel }) {
+                            if let selectedModel = pickerModels.first(where: { $0.id == settings.llmModel }) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(selectedModel.description)
                                         .font(.caption)
@@ -142,7 +139,7 @@ struct SettingsView: View {
                                 HStack {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .foregroundColor(.orange)
-                                    Text("Using fallback models: \(error)")
+                                    Text("Showing the built-in model list: \(error)")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
                                 }
@@ -533,6 +530,23 @@ struct SettingsView: View {
         availableModels.isEmpty ? settings.selectedProvider.fallbackModels : availableModels
     }
 
+    /// Models offered in the picker, including the stored selection when it is missing.
+    ///
+    /// Healing only runs after a successful fetch, so a stored ID can outlive the list
+    /// being shown - after a failed fetch, or before an API key is entered. Listing it
+    /// keeps the picker showing the model the app will actually send.
+    private var pickerModels: [LLMModel] {
+        guard !settings.llmModel.isEmpty,
+              !displayModels.contains(where: { $0.id == settings.llmModel })
+        else { return displayModels }
+
+        let stored = LLMModel.notListed(
+            id: settings.llmModel,
+            provider: settings.selectedProvider
+        )
+        return [stored] + displayModels
+    }
+
     // MARK: - Helpers
 
     /// Delete all fact-check sessions and their associated data.
@@ -785,7 +799,11 @@ struct SettingsView: View {
 // MARK: - Model Pricing View
 
 struct ModelPricingView: View {
-    /// Current model pricing (January 2026).
+    /// Model pricing shown to the user, per 1M tokens.
+///
+/// Rows are dated individually rather than as a table: a single "last updated"
+/// stamp goes stale the moment one provider changes its rates, which is how this
+/// screen came to advertise January 2026 alongside August 2026 DeepSeek prices.
     private let modelGroups: [(provider: String, models: [(name: String, input: Double, output: Double)])] = [
         ("Anthropic (Claude)", [
             ("Claude Sonnet 4.5", 3.00, 15.00),
@@ -852,7 +870,7 @@ struct ModelPricingView: View {
             } header: {
                 Text("Cost Estimates")
             } footer: {
-                Text("Prices last updated January 2026. Check provider websites for current pricing.")
+                Text("Indicative rates per 1M tokens; DeepSeek is quoted at peak-hour, cache-miss rates. Providers change pricing without notice - check their websites before relying on these figures.")
                     .font(.caption2)
             }
         }

@@ -67,7 +67,7 @@ A native iOS app (iPhone/iPad) for medical fact-checking using biomedical litera
 
 ## Supported LLM Providers
 
-| Provider | Models (January 2026) | API Key Required |
+| Provider | Models | API Key Required |
 |----------|----------------------|------------------|
 | Anthropic | Claude Sonnet 4.5/4.6, Haiku 4.5, Opus 4.5/4.6 | Yes |
 | OpenAI | GPT-5.2, o4-mini, o3, GPT-4o | Yes |
@@ -200,7 +200,7 @@ iOS has strict background execution limits. The app handles this by:
 
 ## Cost Estimation
 
-Typical fact-check costs (January 2026 pricing):
+Typical fact-check costs (indicative; DeepSeek quoted at peak-hour, cache-miss rates):
 
 | Model | Estimated Cost |
 |-------|---------------|

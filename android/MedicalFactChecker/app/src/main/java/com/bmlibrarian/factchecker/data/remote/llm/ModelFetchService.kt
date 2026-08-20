@@ -21,14 +21,31 @@ package com.bmlibrarian.factchecker.data.remote.llm
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.ModelInfo
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * Raised when a provider's model list could not be retrieved.
+ *
+ * Carries a message already phrased for display, so the UI can surface the real reason
+ * instead of a generic "using defaults" notice.
+ *
+ * @param message Human-readable description of what failed
+ * @param cause The underlying network, HTTP or parsing failure
+ */
+class ModelFetchException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
  * Service for fetching available models from LLM provider APIs.
  *
  * Supports dynamic model discovery for providers that offer model listing endpoints.
- * Falls back to hardcoded lists when API calls fail or are not supported.
+ *
+ * Failures are propagated to the caller rather than papered over with the hardcoded
+ * catalogue: a caller that cannot tell a live line-up from a fallback cannot tell a
+ * retired model ID from a current one either, which is how the DeepSeek V3 retirement
+ * went unnoticed. Callers that only need something to show may fall back themselves,
+ * but must not treat a fallback list as authoritative.
  *
  * API Endpoints used:
  * - Anthropic: GET https://api.anthropic.com/v1/models (x-api-key + anthropic-version headers)
@@ -109,8 +126,10 @@ class ModelFetchService @Inject constructor(
          * Get pricing for DeepSeek models (per 1M tokens).
          *
          * Peak-hour, cache-miss rates (August 2026). Off-peak rates are half of these,
-         * so quoting peak never understates a run. Unrecognised IDs get the flagship
-         * rate for the same reason.
+         * so quoting peak never understates a run. An unrecognised ID gets the flagship
+         * rate for the same reason - except one containing "flash", which is priced as
+         * V4 Flash. A future cheap tier is therefore quoted at V4 Flash rates until this
+         * table is updated: check it when a new generation ships.
          */
         internal fun getDeepSeekPricing(modelId: String): Pair<Double, Double> {
             return if (modelId.lowercase().contains("flash")) {
@@ -127,14 +146,20 @@ class ModelFetchService @Inject constructor(
     /**
      * Fetch available models for a provider.
      *
-     * Attempts to fetch models dynamically from the provider's API.
-     * Returns cached results if available and not expired.
-     * Falls back to hardcoded models if the API call fails.
+     * Attempts to fetch models dynamically from the provider's API, returning cached
+     * results if available and not expired.
+     *
+     * A failure throws rather than returning the hardcoded catalogue. Substituting the
+     * fallback here is what hid the DeepSeek V3 retirement: the caller saw a full,
+     * plausible-looking list and had no way to know the fetch had failed, so it kept
+     * treating retired IDs as current. An empty list is returned only when the provider
+     * genuinely listed no usable models - that is a real answer, not a failure.
      *
      * @param provider The LLM provider
      * @param apiKey Optional API key for authentication
      * @param customBaseUrl Optional custom base URL
-     * @return List of available models
+     * @return The models the provider currently offers; empty if it listed none
+     * @throws ModelFetchException if the model list could not be retrieved
      */
     suspend fun fetchModels(
         provider: LLMProvider,
@@ -148,23 +173,28 @@ class ModelFetchService @Inject constructor(
             return cached.models
         }
 
-        // Try to fetch from API
-        return try {
-            val models = fetchModelsFromAPI(provider, apiKey, customBaseUrl)
-            if (models.isNotEmpty()) {
-                // Cache successful result
-                cache[provider.id] = CachedModels(models, System.currentTimeMillis())
-                Log.d(TAG, "Fetched ${models.size} models for ${provider.id}")
-                models
-            } else {
-                Log.w(TAG, "No models returned for ${provider.id}, using fallback")
-                provider.models
-            }
+        val models = try {
+            fetchModelsFromAPI(provider, apiKey, customBaseUrl)
+        } catch (e: CancellationException) {
+            // Structured concurrency: cancellation is not a fetch failure.
+            throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch models for ${provider.id}: ${e.message}")
-            // Return fallback models
-            provider.models
+            Log.w(TAG, "Failed to fetch models for ${provider.id}", e)
+            throw ModelFetchException(
+                "Could not load the model list for ${provider.displayName}: ${e.message}",
+                e
+            )
         }
+
+        // Only cache a real line-up; caching an empty result would make the refresh
+        // action a no-op for the full cache duration.
+        if (models.isNotEmpty()) {
+            cache[provider.id] = CachedModels(models, System.currentTimeMillis())
+            Log.d(TAG, "Fetched ${models.size} models for ${provider.id}")
+        } else {
+            Log.w(TAG, "Provider ${provider.id} returned no usable models")
+        }
+        return models
     }
 
     /**
@@ -225,7 +255,9 @@ class ModelFetchService @Inject constructor(
             throw RuntimeException("API error: ${response.code()} ${response.message()}")
         }
 
-        val body = response.body() ?: return emptyList()
+        // A null body on a 2xx is a broken response, not "this provider offers nothing":
+        // returning an empty list here would be indistinguishable from a real empty answer.
+        val body = response.body() ?: throw RuntimeException("Empty response body")
 
         return body.data
             .filter { isUsableAnthropicModel(it.id) }
@@ -311,7 +343,9 @@ class ModelFetchService @Inject constructor(
             throw RuntimeException("API error: ${response.code()} ${response.message()}")
         }
 
-        val body = response.body() ?: return emptyList()
+        // A null body on a 2xx is a broken response, not "this provider offers nothing":
+        // returning an empty list here would be indistinguishable from a real empty answer.
+        val body = response.body() ?: throw RuntimeException("Empty response body")
 
         return body.data
             .filter { isUsableOpenAIModel(it.id) }
@@ -418,7 +452,9 @@ class ModelFetchService @Inject constructor(
             throw RuntimeException("API error: ${response.code()} ${response.message()}")
         }
 
-        val body = response.body() ?: return emptyList()
+        // A null body on a 2xx is a broken response, not "this provider offers nothing":
+        // returning an empty list here would be indistinguishable from a real empty answer.
+        val body = response.body() ?: throw RuntimeException("Empty response body")
 
         return body.data
             .filter { isUsableGroqModel(it.id) }
@@ -495,7 +531,9 @@ class ModelFetchService @Inject constructor(
             throw RuntimeException("API error: ${response.code()} ${response.message()}")
         }
 
-        val body = response.body() ?: return emptyList()
+        // A null body on a 2xx is a broken response, not "this provider offers nothing":
+        // returning an empty list here would be indistinguishable from a real empty answer.
+        val body = response.body() ?: throw RuntimeException("Empty response body")
 
         return body.data
             .filter { isUsableMistralModel(it.id) }
@@ -570,7 +608,9 @@ class ModelFetchService @Inject constructor(
             throw RuntimeException("API error: ${response.code()} ${response.message()}")
         }
 
-        val body = response.body() ?: return emptyList()
+        // A null body on a 2xx is a broken response, not "this provider offers nothing":
+        // returning an empty list here would be indistinguishable from a real empty answer.
+        val body = response.body() ?: throw RuntimeException("Empty response body")
 
         return body.data
             .filter { isUsableDeepSeekModel(it.id) }
@@ -604,7 +644,9 @@ class ModelFetchService @Inject constructor(
             throw RuntimeException("API error: ${response.code()} ${response.message()}")
         }
 
-        val body = response.body() ?: return emptyList()
+        // A null body on a 2xx is a broken response, not "this provider offers nothing":
+        // returning an empty list here would be indistinguishable from a real empty answer.
+        val body = response.body() ?: throw RuntimeException("Empty response body")
 
         return body.models.map { model ->
             ModelInfo(

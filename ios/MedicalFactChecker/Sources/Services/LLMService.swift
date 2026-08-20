@@ -99,7 +99,19 @@ actor LLMService {
 
     // MARK: - Configuration Updates
 
-    func updateConfiguration(baseURL: URL, apiKey: String, model: String, provider: LLMProvider? = nil) {
+    /// Point this service at a different provider and model.
+    ///
+    /// `provider` is required rather than defaulted: it decides whether DeepSeek is sent
+    /// the opt-out from thinking mode, so omitting it would silently re-enable
+    /// chain-of-thought and make scoring ignore `temperature`. A caller that genuinely
+    /// has no provider must pass `nil` deliberately.
+    ///
+    /// - Parameters:
+    ///   - baseURL: API base URL.
+    ///   - apiKey: API key for the provider.
+    ///   - model: Model ID to send.
+    ///   - provider: The provider being configured.
+    func updateConfiguration(baseURL: URL, apiKey: String, model: String, provider: LLMProvider?) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
@@ -380,7 +392,7 @@ actor LLMService {
         baseURL: URL,
         apiKey: String,
         model: String,
-        provider: LLMProvider? = nil
+        provider: LLMProvider?
     ) async throws -> String {
         let service = LLMService(baseURL: baseURL, apiKey: apiKey, model: model, provider: provider)
         let (response, _) = try await service.chat(
