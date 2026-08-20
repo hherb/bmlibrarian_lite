@@ -64,4 +64,61 @@ final class TransparencyStalenessTests: XCTestCase {
         XCTAssertNotNil(document.transparencyResult, "legacy JSON must still decode")
         XCTAssertTrue(document.transparencyAnalysisIsStale)
     }
+
+    /// Stored JSON that is present but unreadable is not the same as no analysis.
+    ///
+    /// Reading it as absent left the document in a state it could never leave:
+    /// `transparencyResult` is nil so nothing renders, staleness was false so
+    /// nothing warned, and `hasTransparencyAnalysis` reads the raw string and
+    /// returns true, so the workflow filtered it out of re-analysis permanently.
+    func testUndecodableStoredJSONCountsAsStale() {
+        let document = makeDocument()
+        document.transparencyResultJSON = #"{"this":"is not a TransparencyResult"}"#
+
+        XCTAssertTrue(document.hasTransparencyAnalysis)
+        XCTAssertNil(document.transparencyResult)
+        XCTAssertTrue(
+            document.transparencyAnalysisIsStale,
+            "unreadable stored JSON must be re-runnable, not silently inert"
+        )
+    }
+
+    /// A newer result arriving by CloudKit sync from a device on a later build is
+    /// not stale, and must not be offered for a re-analysis that would downgrade it.
+    func testAnalysisFromANewerAnalyzerIsNotStale() throws {
+        let document = makeDocument()
+        document.storeTransparencyResult(
+            TransparencyResult(
+                pmid: "12345678",
+                analyzerVersion: TransparencyConstants.analyzerVersion + 1
+            )
+        )
+
+        XCTAssertFalse(document.transparencyAnalysisIsStale)
+    }
+
+    // MARK: - Storing
+
+    /// The write is reported, so the re-analysis path can say when it did not
+    /// happen instead of clearing its spinner and leaving the stale notice up.
+    func testStoringReportsSuccess() {
+        let document = makeDocument()
+        var builder = TransparencyResultBuilder(pmid: "12345678")
+        builder.title = "A Study"
+
+        XCTAssertTrue(document.storeTransparencyResult(builder.build()))
+    }
+
+    // MARK: - Eligibility
+
+    func testADocumentWithAPMIDCanBeAnalyzed() {
+        XCTAssertTrue(makeDocument().canAnalyzeTransparency)
+    }
+
+    func testADocumentWithNeitherPMIDNorDOICannotBeAnalyzed() {
+        let document = Document(pmid: "", title: "A Study", abstract: "")
+        document.doi = nil
+
+        XCTAssertFalse(document.canAnalyzeTransparency)
+    }
 }

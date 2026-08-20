@@ -59,13 +59,14 @@ other:
 
 ### `funder_names.json` — industry-funder matching
 
-833 real funder names sampled from CrossRef `funder[].name` and PubMed
-`<Grant><Agency>`, 417 of them hand-labelled `industry` / `not_industry` /
-`ambiguous`. Lifted **byte-identical** from bmlib's `tests/data/funder_names.json`
-(issue #36), so drift between the two repositories is a one-line `diff`:
+816 unique real funder names sampled from CrossRef `funder[].name` (431) and
+PubMed `<Grant><Agency>` (402) — 17 names appear in both — of which 417 are
+hand-labelled `industry` / `not_industry` / `ambiguous`. Lifted **byte-identical**
+from bmlib's `tests/data/funder_names.json` (issue #36), so drift between the two
+repositories is a one-line `diff`:
 
 ```bash
-diff /Users/hherb/src/bmlib/tests/data/funder_names.json \
+diff "${BMLIB:-$HOME/src/bmlib}/tests/data/funder_names.json" \
      doc/cross_platform/transparency_parity/funder_names.json
 ```
 
@@ -85,8 +86,17 @@ precision, and a floors-based guard is what keeps a recall-chasing edit honest.
 Ambiguous entries carry a `reason` and are excluded from the metrics — scoring an
 undecidable name would only add noise.
 
-Only Swift and Python read this corpus today; Android has no funder classifier
-yet. When one is added it should read the same file and assert the same floors.
+**Which Python reads this corpus.** The `_is_industry_funder` that scores 0.909 /
+0.333 on these names is **bmlib's** (`bmlib/transparency/analyzer.py`), a separate
+repository — not the canonical desktop implementation named in the table at the
+top of this file. `study_transparency_analyzer.py` still classifies funders with
+`INDUSTRY_KEYWORDS[:6]` in `_classify_funder_by_name`, which has never been
+measured against this corpus and does not read it. Bringing the canonical Python
+onto the same footing is tracked separately; until then, "Python" in this section
+means bmlib's implementation and nothing else.
+
+Android has no funder classifier yet. When one is added it should read the same
+file and assert the same floors.
 
 ## Changing a pattern
 
@@ -110,7 +120,20 @@ measurement rather than a string comparison.
 
 ```bash
 cd Packages/BioMedLit && swift test --filter FunderClassificationTests
+cd Packages/BioMedLit && swift test --filter FunderCorpusCompositionTests
 ```
+
+`FunderClassificationTests` holds the floors; `FunderCorpusCompositionTests` pins
+*which* names are matched, missed and wrongly matched. The floors alone cannot see
+a swap — one recognised funder traded for another leaves both metrics identical —
+and the recall floor of 0.30 against a measured 10/30 tolerates losing a true
+positive outright. Both lists in the composition test are expected to change; the
+point is that changing one is a deliberate edit with the name in the diff.
+
+`IndustryPatternStructureTests` covers the third gap: a pattern that matches
+*nothing* moves no metric, so an invalid regex, a `\b`-anchored string placed in
+the substring list, or an uppercase stem would otherwise ship green and silently
+stop flagging funders.
 
 The fixtures are read from this directory by path — deliberately not copied into
 per-platform test resources, since all three must read the same bytes and a copy

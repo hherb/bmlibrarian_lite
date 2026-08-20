@@ -66,6 +66,29 @@ final class AnalyzerVersionTests: XCTestCase {
         XCTAssertTrue(older.isStale)
     }
 
+    /// Staleness is one-directional. `Document` is CloudKit-synced, so a device
+    /// on an older build can receive a result stamped with a *newer* version;
+    /// comparing with `!=` called that stale and offered a re-analysis that would
+    /// overwrite the better result and sync the downgrade back to the device that
+    /// produced it.
+    func testANewerVersionIsNotStale() {
+        let newer = TransparencyResult(
+            pmid: "1",
+            analyzerVersion: TransparencyConstants.analyzerVersion + 1
+        )
+
+        XCTAssertFalse(newer.isStale)
+    }
+
+    func testTheCurrentVersionIsNotStale() {
+        let current = TransparencyResult(
+            pmid: "1",
+            analyzerVersion: TransparencyConstants.analyzerVersion
+        )
+
+        XCTAssertFalse(current.isStale)
+    }
+
     /// Results stored before versioning existed decode with no version at all.
     /// They predate the fixes by definition, so they must read as stale.
     func testAResultWithNoVersionIsStale() {

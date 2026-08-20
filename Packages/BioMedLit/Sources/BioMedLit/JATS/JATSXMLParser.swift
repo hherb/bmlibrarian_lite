@@ -98,15 +98,21 @@ public final class JATSXMLParser: NSObject {
     // Article metadata state
     private var inFront = false
     private var inArticleMeta = false
-    private var inContribGroup = false
-
-    /// `content-type` of the enclosing `<contrib-group>`, lowercased.
+    /// `content-type` of each open `<contrib-group>`, lowercased, innermost last.
     ///
     /// JATS allows the contributor role to be declared once on the group instead
     /// of on every `<contrib>`. PLOS uses that form — `<contrib-group
     /// content-type="author">` with bare `<contrib>` children — so requiring
     /// `contrib-type="author"` on the child dropped every author it publishes.
-    private var currentContribGroupType: String?
+    ///
+    /// A stack rather than a single value: JATS permits a `<contrib-group>` nested
+    /// inside `<collab>` for consortium authorship, and clearing on the inner
+    /// `</contrib-group>` left the outer group typeless — which ``isAuthorContrib``
+    /// reads as "author", admitting the very editors the group type excludes.
+    private var contribGroupTypeStack: [String?] = []
+
+    /// `content-type` of the innermost open `<contrib-group>`, if any.
+    private var currentContribGroupType: String? { contribGroupTypeStack.last ?? nil }
     private var inContrib = false
     private var inAff = false
 
@@ -150,13 +156,40 @@ public final class JATSXMLParser: NSObject {
     /// Whether the parser is currently inside a sub-article or response.
     private var inSubArticle: Bool { subArticleDepth > 0 }
 
-    /// Whether the parser is inside a `<caption>`.
+    /// What the innermost open `<caption>` belongs to.
     ///
-    /// `<caption>` carries `<title>` and `<p>` — the same element names a
-    /// section uses. Routing them on `inFigure`/`sectionStack` alone renamed the
-    /// enclosing `<sec>` after the figure and spilled caption prose into the
-    /// article text, so the enclosing `<caption>` decides instead.
-    private var inCaption = false
+    /// Read from the caption's own parent element rather than from the ambient
+    /// `inFigure`/`inTableWrap` flags: a `<media>` inside a `<fig>` carries a
+    /// caption of its own, and the flags are still set for the enclosing figure,
+    /// so reading them concatenated the inner caption onto the outer one.
+    private enum CaptionOwner {
+        /// A `<fig>` caption; the text belongs to that figure.
+        case figure
+        /// A `<table-wrap>` caption; the text belongs to that table.
+        case table
+        /// Any other caption host — `<supplementary-material>`, `<media>`,
+        /// `<boxed-text>`, `<fig-group>`, `<disp-formula-group>`. The parser has
+        /// no model for these, so the text is not captured; the point of naming
+        /// them is that it must not reach the enclosing section either.
+        case unmodelled
+    }
+
+    /// Open `<caption>` owners, innermost last.
+    ///
+    /// `<caption>` carries `<title>` and `<p>` — the same element names a section
+    /// uses. Routing them on `inFigure`/`sectionStack` alone renamed the enclosing
+    /// `<sec>` after the figure and spilled caption prose into the article text.
+    /// Any open caption now decides, whatever element it hangs off, and it is a
+    /// stack because JATS permits a captioned element inside a caption.
+    private var captionStack: [CaptionOwner] = []
+
+    /// How deep the parser is inside a footnote belonging to a figure or table.
+    ///
+    /// `<table-wrap-foot>` prose is neither caption nor cell: the rendered table
+    /// does not carry it, so routing it with the cell furniture would drop
+    /// abbreviation expansions, significance markers and per-table funding notes
+    /// that the transparency analysis reads.
+    private var figureFootnoteDepth = 0
     private var currentFigure: FigureBuilder?
     private var currentTable: TableBuilder?
 
@@ -294,6 +327,33 @@ public final class JATSXMLParser: NSObject {
             throw JATSParseError.parsingFailed(errorMessage)
         }
 
+        // The stacks must have unwound. A non-zero depth means an unbalanced
+        // <sub-article>, and everything after the imbalance was excluded as
+        // sub-article content — a truncated parse that would otherwise look like
+        // a thin article.
+        if subArticleDepth != 0 {
+            BioMedLitLib.logger?.error(
+                "JATS sub-article depth ended at \(subArticleDepth), not 0 — "
+                    + "content after the imbalance was discarded",
+                category: .parsing
+            )
+        }
+
+        // parseToMarkdown and parseToHTML both refuse an empty result; without the
+        // same guard here a failed parse returned an empty-but-well-formed article,
+        // indistinguishable from one the publisher deposited as a stub.
+        guard !title.isEmpty || !abstractSections.isEmpty || !bodySections.isEmpty else {
+            throw JATSParseError.noContent
+        }
+
+        if authors.isEmpty {
+            BioMedLitLib.logger?.warning(
+                "JATS parse produced zero authors for "
+                    + "\(pmcId.isEmpty ? (doi.isEmpty ? "an unidentified article" : doi) : pmcId)",
+                category: .parsing
+            )
+        }
+
         return JATSArticle(
             title: title,
             authors: authors,
@@ -388,6 +448,10 @@ public final class JATSXMLParser: NSObject {
                     lines.append(figure.caption)
                     lines.append("")
                 }
+                for footnote in figure.footnotes {
+                    lines.append(footnote)
+                    lines.append("")
+                }
             }
         }
 
@@ -410,6 +474,10 @@ public final class JATSXMLParser: NSObject {
                 // Include markdown table content if available
                 if !table.markdownContent.isEmpty {
                     lines.append(table.markdownContent)
+                    lines.append("")
+                }
+                for footnote in table.footnotes {
+                    lines.append(footnote)
                     lines.append("")
                 }
             }
@@ -625,6 +693,9 @@ public final class JATSXMLParser: NSObject {
                 if !figure.caption.isEmpty {
                     html.append("    <p>\(escapeHTML(figure.caption))</p>")
                 }
+                for footnote in figure.footnotes {
+                    html.append("    <p class=\"footnote\">\(escapeHTML(footnote))</p>")
+                }
                 html.append("  </figcaption>")
                 html.append("</figure>")
             }
@@ -644,6 +715,9 @@ public final class JATSXMLParser: NSObject {
                 }
                 // Build HTML table from rows
                 html.append(buildHTMLTable(table))
+                for footnote in table.footnotes {
+                    html.append("  <p class=\"table-footnote\">\(escapeHTML(footnote))</p>")
+                }
                 html.append("</div>")
             }
         }
@@ -977,22 +1051,50 @@ extension JATSXMLParser: XMLParserDelegate {
     /// which arrive in document order, so they are joined with a single space
     /// into the one `caption` string the models expose.
     ///
-    /// - Parameter text: Whitespace-normalised text of the caption child element.
-    private func appendCaptionText(_ text: String) {
+    /// - Parameters:
+    ///   - text: Whitespace-normalised text of the caption child element.
+    ///   - owner: What the innermost open `<caption>` hangs off.
+    private func appendCaptionText(_ text: String, to owner: CaptionOwner) {
         guard !text.isEmpty else { return }
 
-        if inFigure {
+        switch owner {
+        case .figure:
             guard currentFigure != nil else { return }
             if !(currentFigure?.caption.isEmpty ?? true) {
                 currentFigure?.caption += " "
             }
             currentFigure?.caption += text
-        } else if inTableWrap {
+        case .table:
             guard currentTable != nil else { return }
             if !(currentTable?.caption.isEmpty ?? true) {
                 currentTable?.caption += " "
             }
             currentTable?.caption += text
+        case .unmodelled:
+            // No model to put it in, but it is emphatically not section prose.
+            // Logged so the omission is discoverable rather than silent.
+            BioMedLitLib.logger?.debug(
+                "Dropped caption text from an unmodelled caption host: \(text)",
+                category: .parsing
+            )
+        }
+    }
+
+    /// Append footnote prose to whichever of the figure or table is open.
+    ///
+    /// `<table-wrap-foot>` carries the abbreviation expansions, significance
+    /// markers and per-table funding notes that the rendered table itself does
+    /// not reproduce, so they are kept rather than discarded with the cell
+    /// furniture.
+    ///
+    /// - Parameter text: Whitespace-normalised text of the footnote paragraph.
+    private func appendFootnoteText(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        if inFigure {
+            currentFigure?.footnotes.append(text)
+        } else if inTableWrap {
+            currentTable?.footnotes.append(text)
         }
     }
 
@@ -1038,8 +1140,7 @@ extension JATSXMLParser: XMLParserDelegate {
         case "article-meta":
             inArticleMeta = true
         case "contrib-group":
-            inContribGroup = true
-            currentContribGroupType = attributeDict["content-type"]?.lowercased()
+            contribGroupTypeStack.append(attributeDict["content-type"]?.lowercased())
         case "contrib":
             if isAuthorContrib(attributeDict) {
                 inContrib = true
@@ -1073,7 +1174,17 @@ extension JATSXMLParser: XMLParserDelegate {
                 sectionStack.append(builder)
             }
         case "caption":
-            inCaption = true
+            // The caption's own parent decides, not the ambient figure/table
+            // flags — see `CaptionOwner`. `elementStack` already holds this
+            // element, so the parent is the one below it.
+            switch elementStack.dropLast().last {
+            case "fig":
+                captionStack.append(.figure)
+            case "table-wrap":
+                captionStack.append(.table)
+            default:
+                captionStack.append(.unmodelled)
+            }
         case "fig":
             inFigure = true
             currentFigure = FigureBuilder()
@@ -1092,6 +1203,14 @@ extension JATSXMLParser: XMLParserDelegate {
             inTableWrap = true
             currentTable = TableBuilder()
             currentTable?.id = attributeDict["id"] ?? ""
+        case "table-wrap-foot":
+            figureFootnoteDepth += 1
+        case "fn":
+            // Only footnotes belonging to a figure or table. A <fn> in <back>'s
+            // <fn-group> is article back matter and routes as ordinary prose.
+            if inFigure || inTableWrap {
+                figureFootnoteDepth += 1
+            }
         case "thead":
             if inTableWrap {
                 currentTable?.startHeader()
@@ -1221,8 +1340,7 @@ extension JATSXMLParser: XMLParserDelegate {
         case "article-meta":
             inArticleMeta = false
         case "contrib-group":
-            inContribGroup = false
-            currentContribGroupType = nil
+            _ = contribGroupTypeStack.popLast()
         case "contrib":
             if inContrib, let author = currentAuthor?.build() {
                 authors.append(author)
@@ -1244,13 +1362,29 @@ extension JATSXMLParser: XMLParserDelegate {
                     if let idType = currentArticleIdType {
                         switch idType.lowercased() {
                         case "doi":
+                            // An empty typed element must not latch: it would store
+                            // an empty DOI and then stop classifyArticleIdByPattern
+                            // recovering a real one later in the document.
+                            guard !text.isEmpty else { break }
                             doi = text
                             doiIsAuthoritative = true
                         case "pmc", "pmcid":
+                            // See "doi": an empty element must not latch either.
+                            guard !text.isEmpty else { break }
                             // A caller-supplied id wins: the two should agree, and
                             // if they do not, the caller knows which article it asked for.
                             if pmcId.isEmpty {
                                 pmcId = text
+                            } else if pmcId != text {
+                                // A disagreement is not just a choice of value: it
+                                // says this XML may be for a different article than
+                                // the one that was requested.
+                                BioMedLitLib.logger?.warning(
+                                    "JATS PMC ID mismatch: caller supplied \(pmcId), "
+                                        + "document declares \(text). This XML may be "
+                                        + "for a different article.",
+                                    category: .parsing
+                                )
                             }
                             pmcIdIsAuthoritative = true
                         case "pmcid-ver", "pmcaid", "pmcaiid":
@@ -1285,13 +1419,14 @@ extension JATSXMLParser: XMLParserDelegate {
             }
             inAbstract = false
         case "title":
-            if inFigure || inTableWrap {
+            if let owner = captionStack.last {
                 // <caption><title> is the caption's lead, not a section heading —
                 // but it is the same element name as one, so without this it
-                // would rename the enclosing <sec> after the figure.
-                if inCaption {
-                    appendCaptionText(normalizedText)
-                }
+                // would rename the enclosing <sec> after the figure. Tested before
+                // every prose branch, and for every caption host rather than only
+                // <fig>/<table-wrap>: JATS allows a caption on
+                // <supplementary-material>, <media>, <boxed-text> and more.
+                appendCaptionText(normalizedText, to: owner)
             } else if inAbstract {
                 // If we had previous content, save it before starting new section
                 if !currentAbstractText.isEmpty {
@@ -1307,16 +1442,19 @@ extension JATSXMLParser: XMLParserDelegate {
                 sectionStack[sectionStack.count - 1].title = normalizedText
             }
         case "p":
-            if inFigure || inTableWrap {
-                // Figure and table internals, tested before every prose branch
-                // because a <fig> or <table-wrap> usually sits inside a <sec>:
-                // asking about the section first would blank the caption and
-                // reprint it as article prose. Only <caption> content is kept —
-                // cell and footnote <p> is furniture the rendered table already
-                // carries, and letting it through would duplicate it into the prose.
-                if inCaption {
-                    appendCaptionText(normalizedText)
-                }
+            if let owner = captionStack.last {
+                // See case "title": any open <caption> owns its prose.
+                appendCaptionText(normalizedText, to: owner)
+            } else if figureFootnoteDepth > 0 {
+                // <table-wrap-foot> is not reproduced by the rendered table, so it
+                // is captured rather than dropped with the cell furniture below.
+                appendFootnoteText(normalizedText)
+            } else if inFigure || inTableWrap {
+                // Remaining figure and table internals — cell <p>, mostly — tested
+                // before every prose branch because a <fig> or <table-wrap> usually
+                // sits inside a <sec>: asking about the section first would reprint
+                // the cells as article prose. The rendered table already carries
+                // them, so there is deliberately nothing to do here.
             } else if inAbstract {
                 if !normalizedText.isEmpty {
                     currentAbstractText.append(normalizedText)
@@ -1324,10 +1462,14 @@ extension JATSXMLParser: XMLParserDelegate {
             } else if (inBody || inBack), !sectionStack.isEmpty {
                 // Capture paragraphs in both body and back matter sections
                 sectionStack[sectionStack.count - 1].paragraphs.append(normalizedText)
-            } else if inBody, !normalizedText.isEmpty {
-                // An unsectioned <body> child. Empty paragraphs are dropped rather
-                // than opening a section, so a <body> holding nothing but
-                // whitespace stays body-less.
+            } else if inBody || inBack, !normalizedText.isEmpty {
+                // An unsectioned <body> or <back> child. <sec> is optional in both,
+                // and <ack>/<notes>/<fn-group> routinely hold <p> directly — which
+                // is where funding acknowledgements and competing-interest
+                // statements live, so dropping them blinded the transparency
+                // analysis. Empty paragraphs are dropped rather than opening a
+                // section, so a body holding nothing but whitespace stays
+                // section-less.
                 if implicitBodySection == nil {
                     implicitBodySection = SectionBuilder()
                 }
@@ -1339,6 +1481,9 @@ extension JATSXMLParser: XMLParserDelegate {
             flushImplicitBodySection()
             inBody = false
         case "back":
+            // Mirrors </body>: flush before the flag clears, or unsectioned back
+            // matter would never be emitted.
+            flushImplicitBodySection()
             inBack = false
         case "sec":
             // Guarded to match the push in didStartElement — see the comment there.
@@ -1369,7 +1514,13 @@ extension JATSXMLParser: XMLParserDelegate {
                 currentReference?.label = text
             }
         case "caption":
-            inCaption = false
+            _ = captionStack.popLast()
+        case "table-wrap-foot":
+            figureFootnoteDepth = max(0, figureFootnoteDepth - 1)
+        case "fn":
+            if inFigure || inTableWrap {
+                figureFootnoteDepth = max(0, figureFootnoteDepth - 1)
+            }
 
         // Tables
         case "thead":

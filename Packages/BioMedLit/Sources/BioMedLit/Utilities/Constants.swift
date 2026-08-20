@@ -64,6 +64,19 @@ public enum BioMedLitConstants {
     /// cannot be admitted on the strength of a display string.
     public static let europePMCFreePDFAvailabilityLabels: Set<String> = ["Open access", "Free"]
 
+    /// Europe PMC ``availabilityCode`` values known to mean "not downloadable".
+    ///
+    /// Not consulted when deciding — ``europePMCFreePDFAvailabilityCodes`` is the
+    /// allow-list and remains the only thing that admits an entry. This exists so
+    /// the rejection can be *reported* accurately: a paywalled `S` entry is
+    /// routine and belongs at debug, while a code in neither set means Europe PMC
+    /// has published a value this build has never evaluated, which is how bmlib
+    /// issue #79 recurs and belongs at warning.
+    public static let europePMCKnownUnavailablePDFCodes: Set<String> = ["S"]
+
+    /// Europe PMC ``documentStyle`` marking a PDF entry.
+    public static let europePMCPDFDocumentStyle = "pdf"
+
     // MARK: - PubMed API
 
     /// NCBI E-utilities base URL.

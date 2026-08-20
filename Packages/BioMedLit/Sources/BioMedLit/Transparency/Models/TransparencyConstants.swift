@@ -31,13 +31,19 @@ public enum TransparencyConstants {
     /// for re-analysis instead of being shown beside a current one as if the two
     /// numbers were comparable.
     ///
-    /// **Bump this whenever a change moves stored scores.** History:
+    /// **Bump this whenever a change moves stored scores**, and only ever upward:
+    /// ``TransparencyResult/isStale`` compares with `<` so that a newer result
+    /// arriving by CloudKit sync is not mistaken for an older one. History:
     /// - `1` — the original scoring model (implicit; stored results from this era
     ///   carry no version at all and decode as `nil`).
-    /// - `2` — Europe PMC free-PDF availability allow-list (bmlib #79), JATS
-    ///   caption routing and unsectioned-`<body>` prose (bmlib #30), and the
-    ///   funder patterns recalibrated against the shared labelled corpus
-    ///   (bmlib #36). Each changes which evidence reaches the scorer.
+    /// - `2` — Europe PMC free-PDF availability allow-list (bmlib #79); JATS
+    ///   caption routing, unsectioned-`<body>` prose (bmlib #30) and unsectioned
+    ///   `<back>` prose, which is where acknowledgements and competing-interest
+    ///   statements live; `<sub-article>` peer-review correspondence excluded
+    ///   from the body; `<contrib-group>` author reading; `<table-wrap-foot>`
+    ///   footnotes captured instead of dropped; and the funder patterns
+    ///   recalibrated against the shared labelled corpus (bmlib #36). Each
+    ///   changes which evidence reaches the scorer.
     public static let analyzerVersion = 2
 
 
@@ -280,24 +286,29 @@ public enum IndustryPatterns {
     // "Pharmaceuticals"); a whole word must not ("inc" as a substring matches
     // "Lincoln", "Vincent" and "province").
     //
-    // Membership of both lists was decided by measuring against 833 real names
-    // sampled from CrossRef and PubMed, 417 of them hand-labelled — the shared
+    // Membership of both lists was decided by measuring against 816 unique real
+    // names sampled from CrossRef (431) and PubMed (402) — the two sources
+    // overlap — 417 of them hand-labelled: the shared
     // corpus at `doc/cross_platform/transparency_parity/funder_names.json`
     // (bmlib issue #36). The counts below are from that corpus.
 
     /// Substring stems for funder names — matched *inside* a longer word.
     ///
-    /// Every one scored at least one true positive and no false positives; each
-    /// is also narrower than what it replaced:
-    /// - `pharmaceutic` — 3 TP / 0 FP. Replaces `\bpharma(?:ceutical)?\b`, which
+    /// Every one scored at least one true positive, and each is narrower than
+    /// what it replaced:
+    /// - `pharmaceutic` — 3 TP / 1 FP. Replaces `\bpharma(?:ceutical)?\b`, which
     ///   could not match the standard company-name plural "X Pharmaceuticals"
     ///   because the word boundary lands before the "s"; as a bare substring
     ///   "pharma" instead scored 3 TP / 5 FP by reaching "Pharmacy",
-    ///   "Pharmacology" and "Pharmacogenetics", all academic.
+    ///   "Pharmacology" and "Pharmacogenetics", all academic. The one false
+    ///   positive it does keep — "National Inheritance Studio of Veteran
+    ///   Pharmaceutical Workers of Zhong Lingyun" — is the entire reason overall
+    ///   precision is 0.909 rather than 1.0, so it is worth knowing about rather
+    ///   than filed under "no false positives".
     /// - `therapeutics` — 1 TP / 0 FP.
     /// - `laboratories` — 1 TP / 0 FP. The plural only: "Key Laboratory"
-    ///   (singular) is a Chinese state-lab form that appeared 8 times, and it
-    ///   must keep missing them.
+    ///   (singular) is a Chinese state-lab form, twice in the labelled corpus and
+    ///   common in the unlabelled remainder, and it must keep missing them.
     public static let funderNameStems: [String] = [
         "pharmaceutic",
         "therapeutics",
@@ -318,8 +329,10 @@ public enum IndustryPatterns {
     ///
     /// The rest are legally reserved incorporation suffixes — a public body cannot
     /// use one. Deliberately absent, each for a measured or stated reason:
-    /// - `co` — 4 TP / 1 FP; collides with the English prefix in
-    ///   "project co-sponsored by province…".
+    /// - `co` — 4 TP / 0 FP on the corpus, and excluded anyway: it collides with
+    ///   the English prefix ("project co-sponsored by…"), a form the corpus does
+    ///   not happen to contain. A judgement call against four measured true
+    ///   positives, not a measured false positive.
     /// - `corporation` — 1 TP / 1 FP; US non-profits use it ("Research
     ///   Corporation for Science Advancement").
     /// - `pty` — 0 TP; no corpus evidence, so nothing earned.
@@ -336,8 +349,10 @@ public enum IndustryPatterns {
     ///
     /// **One deliberate deviation from bmlib's list:** `plc` is kept here and
     /// excluded there. bmlib excludes it as "0 TP — no corpus evidence", but
-    /// `pharma`, `biotech`, `corp` and `gmbh` also score 0 TP / 0 FP on the same
-    /// corpus and bmlib keeps all four on the reserved-suffix argument. `plc` is
+    /// `corp` and `gmbh` also score 0 TP / 0 FP on the same corpus and bmlib keeps
+    /// both on the reserved-suffix argument. (`pharma` and `biotech` also score
+    /// 0/0 there, but bmlib keeps those as the safe residue of disqualified stems,
+    /// which is a different argument and not a parallel for this one.) `plc` is
     /// a legally reserved UK public-limited-company suffix in exactly that
     /// position, it scores 0 TP / 0 FP (so precision and recall are unchanged),
     /// and it is the form UK-listed pharma funders report under.

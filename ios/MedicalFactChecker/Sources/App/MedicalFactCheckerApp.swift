@@ -119,7 +119,11 @@ struct MedicalFactCheckerApp: App {
         let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
         let config = BioMedLitConfiguration(
             ncbiEmail: email,
-            logger: nil  // Use default console logger in debug
+            // A real logger, not nil: there is no implicit default, so passing nil
+            // silently discarded every diagnostic the library emits — including
+            // the rejected-PDF and truncated-parse warnings that exist precisely
+            // to make a silent data loss visible.
+            logger: BioMedLitOSLogLogger()
         )
         BioMedLitLib.configure(with: config)
     }

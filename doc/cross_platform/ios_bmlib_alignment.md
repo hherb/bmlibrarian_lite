@@ -149,9 +149,13 @@ is the standard company-name form, so the pattern that exists to catch pharma
 mostly does not. `therapeutics`, `laboratories` and `llc` are absent entirely.
 
 The three false positives are the ones bmlib measured and removed. Issue **#36**
-(0.6.0) calibrated the list against 833 real CrossRef/PubMed funder names, 417 of
-them hand-labelled and committed as `tests/data/funder_names.json`, moving
-**precision 0.400 → 0.917 and recall 0.176 → 0.324**. It split the list into
+(0.6.0) calibrated the list against 816 unique real CrossRef/PubMed funder names
+(431 from CrossRef, 402 from PubMed, 17 in both), 417 of them hand-labelled and
+committed as `tests/data/funder_names.json`. The figures bmlib's own docs quote
+for that change — precision 0.400 → 0.917, recall 0.176 → 0.324 — do **not**
+reproduce against the committed corpus: `_is_industry_funder` scores precision
+0.909 / recall 0.333 on it today, the same as this port. bmlib's ROADMAP,
+CHANGELOG and manual are stale relative to its own code; filed as hherb/bmlib#112. It split the list into
 substring *stems* (`pharmaceutic`, `therapeutics`, `laboratories`) and whole
 *words* (`pharma`, `biotech`, `inc`, `incorporated`, `corp`, `ltd`, `limited`,
 `gmbh`, `llc`), and the corpus explicitly disqualified `biotech` as a substring
@@ -205,17 +209,19 @@ Identical to what bmlib's `_is_industry_funder` scores on the same names.
 matcher beats the old figures.
 
 **One deliberate deviation from bmlib:** `plc` is kept in `funderNameWords` and
-excluded in bmlib. bmlib drops it as "0 TP — no corpus evidence", but `pharma`,
-`biotech`, `corp` and `gmbh` also score 0 TP / 0 FP on the same corpus and bmlib
-keeps all four on the reserved-suffix argument. `plc` is a legally reserved UK
+excluded in bmlib. bmlib drops it as "0 TP — no corpus evidence", but `corp` and
+`gmbh` also score 0 TP / 0 FP on the same corpus and bmlib keeps both on the
+reserved-suffix argument. (`pharma` and `biotech` score 0/0 there too, but bmlib
+keeps those as the safe residue of disqualified stems — a different argument, and
+not a parallel for this one.) `plc` is a legally reserved UK
 public-limited-company suffix in exactly that position, it scores 0 TP / 0 FP so
 precision and recall are unchanged, and it is the form UK-listed pharma funders
 report under.
 
 ### Stored values
 
-All four fixes change which evidence reaches the scorer, so stored transparency
-scores are not comparable across them. `TransparencyResult` now carries
+Every fix in this section changes which evidence reaches the scorer, so stored
+transparency scores are not comparable across them. `TransparencyResult` now carries
 `analyzerVersion`, stamped from `TransparencyConstants.analyzerVersion` (bumped
 to `2`). The field is **optional**: the persisted column is free-form JSON, and a
 required field would strand every earlier analysis behind a decode failure that
@@ -417,7 +423,7 @@ free PDF (1d) → Unpaywall → DOI/PubMed URL.
 | --- | --- | --- |
 | NCBI PMC JATS tier (`efetch`) — issue #47, 0.7.0 | ✅ | ❌ |
 | Second PMC-id resolver (NCBI ID Converter) — #47 | ✅ | ❌ |
-| Free-PDF availability allow-list — #79 | ✅ | ❌ (see 1.1) |
+| Free-PDF availability allow-list — #79 | ✅ | ✅ (1.1) |
 | Body-less JATS detection / `content_kind` | ✅ | ❌ |
 | PDF → text extraction | ✅ | ❌ (see below) |
 | PDF section segmentation | ✅ (0.8.0) | ❌ |
@@ -431,9 +437,9 @@ Three of these are worth naming individually.
 **A downloaded PDF contributes nothing.** `Document.applyFullTextResult` has
 `case .pdfURL: fullTextContent = nil`. The PDF is fetched, cached and rendered for
 the user in `FullTextViewer` (PDFKit, display only), but scoring, citation
-extraction and transparency analysis all see `nil`. Combined with 1.1 — where ~95%
-of Europe PMC's free PDFs are never even offered — the PDF path currently returns
-no text to the pipeline at all. PDFKit's `PDFPage.string` is the native equivalent
+extraction and transparency analysis all see `nil`. Now that 1.1 has landed the
+PDF tier finally *offers* the ~95% of free PDFs it used to discard, which makes
+this the binding constraint: the PDFs arrive and still contribute no text. PDFKit's `PDFPage.string` is the native equivalent
 of what bmlib does with PyMuPDF.
 
 **No `contentKind`.** bmlib distinguishes `fulltext` / `abstract` / `extracted` /

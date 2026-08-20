@@ -186,23 +186,56 @@ public actor EuropePMCService {
     ///
     /// - Parameter result: One Europe PMC search result.
     /// - Returns: The first downloadable PDF URL, or `nil` if the result offers none.
+    ///
+    /// - SeeAlso: ``reportRejectedPDFEntry(_:)`` for how a rejection is reported.
     static func extractFreePDFURL(from result: EuropePMCResult) -> String? {
         guard let entries = result.fullTextUrlList?.fullTextUrl else { return nil }
 
-        for entry in entries where entry.documentStyle == "pdf" {
+        for entry in entries
+        where entry.documentStyle == BioMedLitConstants.europePMCPDFDocumentStyle {
             guard entry.isFreeToDownload else {
-                BioMedLitLib.logger?.debug(
-                    """
-                    Skipping Europe PMC PDF entry: availability=\(entry.availability ?? "nil") \
-                    code=\(entry.availabilityCode ?? "nil")
-                    """,
-                    category: .fullText
-                )
+                reportRejectedPDFEntry(entry)
                 continue
             }
             if let url = entry.url { return url }
         }
         return nil
+    }
+
+    /// Report a PDF entry that was seen and not taken.
+    ///
+    /// The two reasons are not equally interesting, so they are not logged at the
+    /// same level. A recognised paywall code is the allow-list working as designed
+    /// and stays at debug. A code in neither the allow-list nor the known-paywalled
+    /// set means Europe PMC has started publishing a value this build has never
+    /// evaluated: the allow-list then rejects it fail-closed, silently costing
+    /// free PDFs, which is exactly how bmlib issue #79 happened. That warrants a
+    /// warning naming the code, so the fix is a one-line constant edit rather than
+    /// another measurement campaign.
+    ///
+    /// - Parameter entry: The rejected `fullTextUrl` entry.
+    private static func reportRejectedPDFEntry(_ entry: EuropePMCFullTextUrlEntry) {
+        let code = entry.availabilityCode ?? ""
+        let label = entry.availability ?? "nil"
+
+        guard !code.isEmpty,
+              !BioMedLitConstants.europePMCFreePDFAvailabilityCodes.contains(code),
+              !BioMedLitConstants.europePMCKnownUnavailablePDFCodes.contains(code) else {
+            BioMedLitLib.logger?.debug(
+                "Skipping Europe PMC PDF entry: availability=\(label) code=\(code.isEmpty ? "nil" : code)",
+                category: .fullText
+            )
+            return
+        }
+
+        BioMedLitLib.logger?.warning(
+            """
+            Unrecognised Europe PMC availabilityCode '\(code)' (availability=\(label)); \
+            the PDF was rejected fail-closed. If this is a free tier, add it to \
+            BioMedLitConstants.europePMCFreePDFAvailabilityCodes.
+            """,
+            category: .fullText
+        )
     }
 
     // MARK: - Helpers

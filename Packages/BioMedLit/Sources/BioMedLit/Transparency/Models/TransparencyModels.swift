@@ -499,8 +499,15 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     /// A stale result is not wrong so much as incomparable: the evidence reaching
     /// the scorer changed, so its score cannot be read beside a freshly computed
     /// one. Callers should offer a re-run rather than silently trusting it.
+    ///
+    /// Strictly older, not merely different. `Document` is CloudKit-synced, so a
+    /// device still on an older build can receive a result stamped with a *newer*
+    /// version; treating that as stale offered a re-analysis that would overwrite
+    /// the better result with this build's output and sync the downgrade back.
+    /// A result carrying no version at all predates versioning and is stale.
     public var isStale: Bool {
-        analyzerVersion != TransparencyConstants.analyzerVersion
+        guard let analyzerVersion else { return true }
+        return analyzerVersion < TransparencyConstants.analyzerVersion
     }
 
     /// Creates a new TransparencyResult instance.

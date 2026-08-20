@@ -1539,10 +1539,10 @@ struct DocumentDetailSheet: View {
 
                 // A stale result keeps its score on screen but has to be
                 // re-runnable, or the notice above names a fix the user cannot apply.
-                if result.isStale, !(document.pmid.isEmpty && document.doi == nil) {
+                if document.transparencyAnalysisIsStale, document.canAnalyzeTransparency {
                     transparencyAnalyzeButton(title: "Re-analyze")
                 }
-            } else if document.pmid.isEmpty && document.doi == nil {
+            } else if !document.canAnalyzeTransparency {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
                         .foregroundColor(.secondary)
@@ -1597,7 +1597,12 @@ struct DocumentDetailSheet: View {
                     fullText: document.fullTextContent
                 )
                 await MainActor.run {
-                    document.storeTransparencyResult(result)
+                    // A failed write leaves the previous result in place; saying so
+                    // is the difference between "this did not work" and a spinner
+                    // that stops with the stale notice still on screen.
+                    if !document.storeTransparencyResult(result) {
+                        transparencyError = "Analysis completed but could not be saved."
+                    }
                     isLoadingTransparency = false
                 }
             } catch {
