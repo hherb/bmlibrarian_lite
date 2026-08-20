@@ -20,6 +20,9 @@ without a single test failing. Issues #117 and #125 each had to run a throwaway
 byte-identity check across the three lists to confirm they still agreed. This
 directory makes that check permanent.
 
+A third fixture, `funder_names.json`, is a *measurement* corpus rather than a
+pattern contract — see [The funder-name corpus](#the-funder-name-corpus) below.
+
 ## The two fixtures
 
 ### `data_availability_patterns.json` — the strings
@@ -52,6 +55,39 @@ other:
   negated statement escape to `full_open` — the dangerous over-stating-openness
   direction.
 
+## The funder-name corpus
+
+### `funder_names.json` — industry-funder matching
+
+833 real funder names sampled from CrossRef `funder[].name` and PubMed
+`<Grant><Agency>`, 417 of them hand-labelled `industry` / `not_industry` /
+`ambiguous`. Lifted **byte-identical** from bmlib's `tests/data/funder_names.json`
+(issue #36), so drift between the two repositories is a one-line `diff`:
+
+```bash
+diff /Users/hherb/src/bmlib/tests/data/funder_names.json \
+     doc/cross_platform/transparency_parity/funder_names.json
+```
+
+Unlike the two data-availability fixtures, this one does **not** pin strings. It
+pins *measured quality*: `FunderClassificationTests` scores
+`FundingAnalyzer.classifyFunder` against it and asserts floors of precision 0.90
+and recall 0.30, plus that it beats the substring matcher it replaced
+(precision 0.455 / recall 0.167). Current measured figures: **precision 0.909,
+recall 0.333** — identical to what bmlib's `_is_industry_funder` scores on the
+same names.
+
+The distinction matters because the classifier is asymmetric:
+`industryFundingDetected` feeds a HIGH-risk rule and HIGH downgrades a paper's
+quality tier, so a false positive costs more than a false negative. Ties go to
+precision, and a floors-based guard is what keeps a recall-chasing edit honest.
+
+Ambiguous entries carry a `reason` and are excluded from the metrics — scoring an
+undecidable name would only add noise.
+
+Only Swift and Python read this corpus today; Android has no funder classifier
+yet. When one is added it should read the same file and assert the same floors.
+
 ## Changing a pattern
 
 1. Edit `data_availability_patterns.json`.
@@ -66,6 +102,14 @@ the feature: a change that does not touch all three is meant to fail.
 pytest tests/test_transparency_parity.py
 cd Packages/BioMedLit && swift test --filter TransparencyParityTests
 cd android/MedicalFactChecker && ./gradlew test --tests '*TransparencyParityTest'
+```
+
+Changing a *funder* pattern is a different workflow: edit
+`IndustryPatterns.funderNameStems` / `funderNameWords`, then re-run the
+measurement rather than a string comparison.
+
+```bash
+cd Packages/BioMedLit && swift test --filter FunderClassificationTests
 ```
 
 The fixtures are read from this directory by path — deliberately not copied into

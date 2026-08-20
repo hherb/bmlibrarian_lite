@@ -53,6 +53,20 @@ public final class JATSXMLParser: NSObject {
     private var doi = ""
     private var pmcId = ""
     private var pmid = ""
+
+    /// Whether ``doi`` came from an explicit `pub-id-type="doi"`.
+    ///
+    /// A `<front>` carries several ids, and the ones with no recognised type
+    /// fall through to pattern matching. Without this, SAGE's `publisher-id` —
+    /// the DOI with its slash replaced by an underscore — overwrote the real one
+    /// simply by appearing later in the document.
+    private var doiIsAuthoritative = false
+
+    /// Whether ``pmcId`` came from a caller-supplied id or `pub-id-type="pmc"`/`"pmcid"`.
+    ///
+    /// PMC emits `pmcid-ver` (the canonical id plus a version suffix) right after
+    /// `pmcid`; only the first is the id anything else can be looked up by.
+    private var pmcIdIsAuthoritative = false
     private var abstractSections: [JATSAbstractSection] = []
     private var bodySections: [JATSBodySection] = []
     private var figures: [JATSFigureInfo] = []
@@ -99,9 +113,24 @@ public final class JATSXMLParser: NSObject {
     private var inBack = false
     private var sectionStack: [SectionBuilder] = []
 
+    /// Pending prose from an unsectioned `<body>`.
+    ///
+    /// `<sec>` is optional in JATS: a `<body>` may hold `<p>` directly. Without
+    /// this, `case "p"` required a non-empty `sectionStack` and every word of
+    /// such an article was silently dropped (bmlib issue #30).
+    private var implicitBodySection: SectionBuilder?
+
     // Figure/Table state
     private var inFigure = false
     private var inTableWrap = false
+
+    /// Whether the parser is inside a `<caption>`.
+    ///
+    /// `<caption>` carries `<title>` and `<p>` — the same element names a
+    /// section uses. Routing them on `inFigure`/`sectionStack` alone renamed the
+    /// enclosing `<sec>` after the figure and spilled caption prose into the
+    /// article text, so the enclosing `<caption>` decides instead.
+    private var inCaption = false
     private var currentFigure: FigureBuilder?
     private var currentTable: TableBuilder?
 
@@ -139,6 +168,7 @@ public final class JATSXMLParser: NSObject {
         // Pre-populate PMC ID if provided
         if let knownId = knownPMCId, !knownId.isEmpty {
             self.pmcId = knownId.hasPrefix("PMC") ? knownId : "PMC\(knownId)"
+            self.pmcIdIsAuthoritative = true
         }
         super.init()
         parser.delegate = self
@@ -893,6 +923,45 @@ public final class JATSXMLParser: NSObject {
 // MARK: - XMLParserDelegate
 
 extension JATSXMLParser: XMLParserDelegate {
+    // MARK: - Section and Caption Helpers
+
+    /// Append caption prose to whichever of the figure or table is open.
+    ///
+    /// A `<caption>` carries a `<title>` lead and one or more `<p>` elements,
+    /// which arrive in document order, so they are joined with a single space
+    /// into the one `caption` string the models expose.
+    ///
+    /// - Parameter text: Whitespace-normalised text of the caption child element.
+    private func appendCaptionText(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        if inFigure {
+            guard currentFigure != nil else { return }
+            if !(currentFigure?.caption.isEmpty ?? true) {
+                currentFigure?.caption += " "
+            }
+            currentFigure?.caption += text
+        } else if inTableWrap {
+            guard currentTable != nil else { return }
+            if !(currentTable?.caption.isEmpty ?? true) {
+                currentTable?.caption += " "
+            }
+            currentTable?.caption += text
+        }
+    }
+
+    /// Emit any pending unsectioned `<body>` prose as a body section.
+    ///
+    /// Called when a real `<sec>` opens and again at `</body>`, so loose
+    /// paragraphs keep their position in document order. The section carries no
+    /// title — JATS gave it none, and inventing one would put a heading in the
+    /// rendered article that the publisher never wrote.
+    private func flushImplicitBodySection() {
+        guard let pending = implicitBodySection else { return }
+        bodySections.append(pending.build())
+        implicitBodySection = nil
+    }
+
     public func parser(
         _ parser: XMLParser,
         didStartElement elementName: String,
@@ -935,8 +1004,20 @@ extension JATSXMLParser: XMLParserDelegate {
         case "back":
             inBack = true
         case "sec":
-            let builder = SectionBuilder()
-            sectionStack.append(builder)
+            // An <abstract> may be structured with <sec>. Those belong to the
+            // abstract, which has its own accumulator — pushing a builder for them
+            // appended an empty section to bodySections at every </sec>, ahead of
+            // the real ones. The pop below carries the same guard, so the stack
+            // stays balanced.
+            if !inAbstract {
+                // Flush first, so prose that preceded this <sec> becomes its own
+                // body section rather than being folded in after the sectioned content.
+                flushImplicitBodySection()
+                let builder = SectionBuilder()
+                sectionStack.append(builder)
+            }
+        case "caption":
+            inCaption = true
         case "fig":
             inFigure = true
             currentFigure = FigureBuilder()
@@ -1099,8 +1180,21 @@ extension JATSXMLParser: XMLParserDelegate {
                         switch idType.lowercased() {
                         case "doi":
                             doi = text
+                            doiIsAuthoritative = true
                         case "pmc", "pmcid":
-                            pmcId = text
+                            // A caller-supplied id wins: the two should agree, and
+                            // if they do not, the caller knows which article it asked for.
+                            if pmcId.isEmpty {
+                                pmcId = text
+                            }
+                            pmcIdIsAuthoritative = true
+                        case "pmcid-ver", "pmcaid", "pmcaiid":
+                            // PMC-related but not the canonical id: `pmcid-ver` carries a
+                            // version suffix, `pmcaid`/`pmcaiid` are PMC's internal numeric
+                            // article ids. Recognised so they do not reach pattern matching,
+                            // where the first would replace the canonical PMC ID and the
+                            // others would be mistaken for a PMID.
+                            break
                         case "pmid", "pubmed":
                             pmid = text
                         default:
@@ -1126,7 +1220,14 @@ extension JATSXMLParser: XMLParserDelegate {
             }
             inAbstract = false
         case "title":
-            if inAbstract {
+            if inFigure || inTableWrap {
+                // <caption><title> is the caption's lead, not a section heading —
+                // but it is the same element name as one, so without this it
+                // would rename the enclosing <sec> after the figure.
+                if inCaption {
+                    appendCaptionText(normalizedText)
+                }
+            } else if inAbstract {
                 // If we had previous content, save it before starting new section
                 if !currentAbstractText.isEmpty {
                     let content = currentAbstractText.joined(separator: " ")
@@ -1141,26 +1242,44 @@ extension JATSXMLParser: XMLParserDelegate {
                 sectionStack[sectionStack.count - 1].title = normalizedText
             }
         case "p":
-            if inAbstract {
+            if inFigure || inTableWrap {
+                // Figure and table internals, tested before every prose branch
+                // because a <fig> or <table-wrap> usually sits inside a <sec>:
+                // asking about the section first would blank the caption and
+                // reprint it as article prose. Only <caption> content is kept —
+                // cell and footnote <p> is furniture the rendered table already
+                // carries, and letting it through would duplicate it into the prose.
+                if inCaption {
+                    appendCaptionText(normalizedText)
+                }
+            } else if inAbstract {
                 if !normalizedText.isEmpty {
                     currentAbstractText.append(normalizedText)
                 }
             } else if (inBody || inBack), !sectionStack.isEmpty {
                 // Capture paragraphs in both body and back matter sections
                 sectionStack[sectionStack.count - 1].paragraphs.append(normalizedText)
-            } else if inFigure {
-                currentFigure?.caption += normalizedText
-            } else if inTableWrap {
-                currentTable?.caption += normalizedText
+            } else if inBody, !normalizedText.isEmpty {
+                // An unsectioned <body> child. Empty paragraphs are dropped rather
+                // than opening a section, so a <body> holding nothing but
+                // whitespace stays body-less.
+                if implicitBodySection == nil {
+                    implicitBodySection = SectionBuilder()
+                }
+                implicitBodySection?.paragraphs.append(normalizedText)
             }
 
         // Body and back matter sections
         case "body":
+            flushImplicitBodySection()
             inBody = false
         case "back":
             inBack = false
         case "sec":
-            if let builder = sectionStack.popLast() {
+            // Guarded to match the push in didStartElement — see the comment there.
+            // `</sec>` inside an abstract fires before `</abstract>` clears the flag,
+            // so the two guards see the same state.
+            if !inAbstract, let builder = sectionStack.popLast() {
                 let section = builder.build()
                 if sectionStack.isEmpty {
                     bodySections.append(section)
@@ -1185,8 +1304,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 currentReference?.label = text
             }
         case "caption":
-            // Caption content is handled in nested p elements
-            break
+            inCaption = false
 
         // Tables
         case "thead":
@@ -1392,8 +1510,14 @@ extension JATSXMLParser: XMLParserDelegate {
     /// Classify an article ID by its content pattern when type attribute is unavailable.
     private func classifyArticleIdByPattern(_ text: String) {
         if text.hasPrefix("10.") {
+            // A DOI is a `10.NNNN` prefix *and* a slash. Without the shape check
+            // any id starting "10." is taken as one — which is how SAGE's
+            // `publisher-id`, the DOI with the slash replaced by an underscore,
+            // became the stored DOI for every article it publishes.
+            guard !doiIsAuthoritative, text.contains("/") else { return }
             doi = text
         } else if text.hasPrefix("PMC") {
+            guard !pmcIdIsAuthoritative else { return }
             pmcId = text
         } else if text.allSatisfy({ $0.isNumber }) && text.count >= BioMedLitConstants.minPMIDLength {
             // Pure numeric ID - could be PMID or PMC ID

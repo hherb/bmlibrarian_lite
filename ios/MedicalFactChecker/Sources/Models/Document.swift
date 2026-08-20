@@ -186,6 +186,17 @@ final class Document {
         transparencyResultJSON != nil
     }
 
+    /// Whether the stored analysis was produced by an older analyzer.
+    ///
+    /// `false` when there is no analysis at all — nothing stale to warn about.
+    /// Otherwise mirrors ``TransparencyResult/isStale``: the evidence reaching the
+    /// scorer changed, so the stored score cannot be read beside a current one and
+    /// the UI should offer a re-run.
+    var transparencyAnalysisIsStale: Bool {
+        guard let result = transparencyResult else { return false }
+        return result.isStale
+    }
+
     /// Shortcut for badge display without full JSON decode.
     var transparencyRiskLevel: TransparencyRiskLevel? {
         transparencyResult?.riskLevel

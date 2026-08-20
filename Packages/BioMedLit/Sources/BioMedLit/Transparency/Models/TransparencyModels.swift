@@ -483,6 +483,26 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     /// Errors encountered during analysis (partial results may still be valid).
     public let errors: [String]
 
+    /// Version of the analyzer that produced this result.
+    ///
+    /// `nil` for results stored before versioning existed — those predate the
+    /// scoring-relevant fixes by definition, so ``isStale`` reads them as stale.
+    /// Optional rather than required so pre-existing stored JSON still decodes:
+    /// the persisted column is free-form JSON, and a required field would strand
+    /// every earlier analysis behind a decode failure that reads as "never analysed".
+    ///
+    /// See ``TransparencyConstants/analyzerVersion``.
+    public let analyzerVersion: Int?
+
+    /// Whether this result was produced by an older analyzer than the current one.
+    ///
+    /// A stale result is not wrong so much as incomparable: the evidence reaching
+    /// the scorer changed, so its score cannot be read beside a freshly computed
+    /// one. Callers should offer a re-run rather than silently trusting it.
+    public var isStale: Bool {
+        analyzerVersion != TransparencyConstants.analyzerVersion
+    }
+
     /// Creates a new TransparencyResult instance.
     ///
     /// - Parameters:
@@ -511,6 +531,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     ///   - dataSourcesUsed: Data sources used in analysis.
     ///   - warnings: Non-fatal warnings encountered.
     ///   - errors: Errors encountered during analysis.
+    ///   - analyzerVersion: Analyzer version that produced this result (defaults
+    ///     to the current one; pass `nil` only to represent a pre-versioning result).
     public init(
         id: UUID = UUID(),
         doi: String? = nil,
@@ -536,7 +558,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         analysisTimestamp: Date = Date(),
         dataSourcesUsed: [String] = [],
         warnings: [String] = [],
-        errors: [String] = []
+        errors: [String] = [],
+        analyzerVersion: Int? = TransparencyConstants.analyzerVersion
     ) {
         self.id = id
         self.doi = doi
@@ -563,6 +586,7 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         self.dataSourcesUsed = dataSourcesUsed
         self.warnings = warnings
         self.errors = errors
+        self.analyzerVersion = analyzerVersion
     }
 }
 

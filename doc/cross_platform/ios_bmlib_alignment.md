@@ -20,13 +20,20 @@ extraction from LLM responses. Most of those fixes were driven by measurement
 against real corpora and pinned by mutation testing. None of them have reached Swift.
 
 This document is a gap list, ordered by what it costs to leave each one alone.
-It is not a plan; nothing here has been implemented.
+
+**Status.** Everything in §1 is now fixed on `master` — see
+[§1 status](#1-status-fixed) for what landed and what it moved. §2 onward is
+still a plan; nothing there has been implemented.
 
 ---
 
 ## 1. Verified defects — reproduced against the current Swift code
 
-Each of the three below was confirmed by running the real BioMedLit code, not by
+> **All four are fixed.** Each subsection below is kept as the original
+> reproduction — it is the evidence the fix was needed and the shape the
+> regression tests assert. See [§1 status](#1-status-fixed) for what changed.
+
+Each of the four below was confirmed by running the real BioMedLit code, not by
 reading it. bmlib fixed each one and says what it cost.
 
 ### 1.1 The Europe PMC free-PDF filter takes ~4% of what it is offered
@@ -166,6 +173,110 @@ separate, because the generic corporate suffixes match far too freely in running
 text while the disclosure phrases never occur in a funder name. And
 `funder_names.json` is directly portable as a fourth parity fixture alongside
 `data_availability_*.json`.
+
+---
+
+## 1 status: fixed
+
+Landed together, each with regression tests that reproduce the defect above
+before asserting the fix.
+
+| # | Fix | Where |
+| --- | --- | --- |
+| 1.1 | Free-PDF allow-list on `availabilityCode ∈ {OA, F}`, falling back to the display string only for an entry carrying no code; an unrecognised code is rejected without consulting the label. `availabilityCode` is now decoded, and a PDF entry that is seen and not taken is logged. | `EuropePMCService.extractFreePDFURL`, `EuropePMCFullTextUrlEntry.isFreeToDownload`, `BioMedLitConstants.europePMCFreePDFAvailability*` |
+| 1.2 | `<title>` and `<p>` route on the enclosing `<caption>` — tested before every prose branch, because a `<fig>` usually sits inside a `<sec>`. Caption children join with a single space; non-caption `<p>` inside a figure or table is dropped as furniture rather than reaching the section. | `JATSXMLParser.appendCaptionText`, `inCaption` |
+| 1.3 | Loose `<body>` prose accumulates into a titleless section, flushed when a real `<sec>` opens and again at `</body>` so document order is preserved. Whitespace-only paragraphs do not open one. | `JATSXMLParser.flushImplicitBodySection`, `implicitBodySection` |
+| 1.4 | Funder patterns split into substring *stems* and whole *words*, calibrated against the 417-name labelled corpus. COI-prose phrases stay in `industryKeywords`, which `classifyFunder` no longer reads. | `IndustryPatterns.funderNameStems` / `funderNameWords`, `FundingAnalyzer.matchesIndustryName` |
+
+Two further parser defects surfaced while reproducing these and were fixed with
+them — see [Found while fixing](#found-while-fixing-also-fixed).
+
+**Measured effect of 1.4.** Against the corpus, now lifted byte-identical from
+bmlib into `doc/cross_platform/transparency_parity/funder_names.json` as the
+fourth shared fixture:
+
+| | precision | recall |
+| --- | --- | --- |
+| before | 0.455 | 0.167 |
+| after | **0.909** | **0.333** |
+
+Identical to what bmlib's `_is_industry_funder` scores on the same names.
+`FunderClassificationTests` holds floors of 0.90 / 0.30 and asserts the new
+matcher beats the old figures.
+
+**One deliberate deviation from bmlib:** `plc` is kept in `funderNameWords` and
+excluded in bmlib. bmlib drops it as "0 TP — no corpus evidence", but `pharma`,
+`biotech`, `corp` and `gmbh` also score 0 TP / 0 FP on the same corpus and bmlib
+keeps all four on the reserved-suffix argument. `plc` is a legally reserved UK
+public-limited-company suffix in exactly that position, it scores 0 TP / 0 FP so
+precision and recall are unchanged, and it is the form UK-listed pharma funders
+report under.
+
+### Stored values
+
+All four fixes change which evidence reaches the scorer, so stored transparency
+scores are not comparable across them. `TransparencyResult` now carries
+`analyzerVersion`, stamped from `TransparencyConstants.analyzerVersion` (bumped
+to `2`). The field is **optional**: the persisted column is free-form JSON, and a
+required field would strand every earlier analysis behind a decode failure that
+reads as "never analysed". A result decoding to `nil` predates versioning and is
+therefore stale by definition.
+
+`TransparencyResult.isStale` and `Document.transparencyAnalysisIsStale` drive a
+notice in `TransparencyDetailView` / `MacTransparencyDetailView` and a
+"Re-analyze" button in `ReportView` / `MacReportView`. The stale score stays
+visible — it is the last thing that was actually measured — but it is marked so
+it is not read beside a current one as if the two were interchangeable.
+
+Cached full text is **not** invalidated. An article cached before 1.1 keeps
+whatever tier answered at the time; the allow-list applies to the next
+retrieval. Re-running transparency analysis does not re-fetch it.
+
+### Found while fixing, also fixed
+
+Neither was in the original gap list — both surfaced while reproducing §1, and
+both are in `JATSXMLParser`.
+
+**`<sec>` inside `<abstract>` emitted body sections.** Swift pushed a
+`SectionBuilder` for every `<sec>`, including inside a structured abstract, and
+appended a section to `bodySections` at each `</sec>`. Worse than it first
+looked: for a two-section structured abstract the article reported **three** body
+sections, and the two empty ones came *first*, so anything reading
+`bodySections.first` got an empty section rather than the introduction. Both the
+push and the pop are now guarded with `!inAbstract`, as bmlib guards them — and
+the two guards see the same state, because `</sec>` inside an abstract fires
+before `</abstract>` clears the flag. The abstract's own sections are unaffected;
+they were always read by the abstract accumulator.
+
+**`<article-id>` fallback overwrote correctly typed ids.** Ids whose
+`pub-id-type` the parser did not recognise fell through to pattern matching that
+could overwrite a value already read from a typed element. Two real cases, both
+present in the very first integration-test article (PMC12759138):
+
+| element | value | was taken as | is |
+| --- | --- | --- | --- |
+| `<article-id pub-id-type="publisher-id">` | `10.1177_20552076251406653` | the DOI | SAGE's internal id — the DOI with the slash replaced by an underscore |
+| `<article-id pub-id-type="pmcid-ver">` | `PMC12759138.1` | the PMC ID | the canonical id plus a version suffix |
+
+Both overwrote the correct value simply by appearing later in the document. The
+PMC one also overrode a caller-supplied `knownPMCId`, and `pmcaid`/`pmcaiid` —
+PMC's internal numeric article ids — were reachable by the numeric branch and
+could be mistaken for a PMID.
+
+Three guards now: a typed `doi`/`pmc`/`pmcid` marks its value authoritative and
+the pattern fallback will not overwrite it; the DOI branch requires DOI *shape*
+(a `10.` prefix **and** a slash), which is what the underscore form fails; and
+`pmcid-ver`/`pmcaid`/`pmcaiid` are recognised-and-ignored so they never reach
+pattern matching at all. The fallback still takes a genuinely untyped
+`10.1234/x`.
+
+> **This one is bmlib's too.** `JATSParser(data).parse()` returns
+> `doi='10.1177_20552076251406653'` for the same XML — `_classify_article_id`
+> takes any `10.`-prefixed string. Worth reporting upstream; Swift is now ahead
+> of Python here rather than behind it.
+
+With both fixed, all 19 network-gated `JATSXMLParserIntegrationTests` pass
+against live PMC, including the two that fail on `master`.
 
 ---
 
@@ -362,17 +473,17 @@ behind it and the article re-downloads on every run forever.
 
 ## 7. Suggested order
 
-Roughly by (impact × confidence) ÷ effort:
+Roughly by (impact × confidence) ÷ effort. Items 1–3 are **done** — see
+[§1 status](#1-status-fixed).
 
-1. **1.1 Europe PMC availability allow-list** — a two-line predicate; recovers ~95%
-   of the free PDFs the tier already tries to find.
-2. **1.4 funder patterns** — port bmlib's stems/words split and lift
-   `tests/data/funder_names.json` into `doc/cross_platform/` as a fourth parity
-   fixture. Fixes six false negatives and three false positives on a 17-name sample.
-3. **1.2 + 1.3 JATS caption routing and unsectioned body** — both are localised to
-   `didEndElement`; both currently corrupt or discard article text.
-4. **PDF → text via PDFKit** — without it, items 1 and the whole PDF tier still
-   deliver nothing to the pipeline.
+1. ~~**1.1 Europe PMC availability allow-list**~~ — done.
+2. ~~**1.4 funder patterns**~~ — done, corpus lifted as the fourth shared fixture.
+3. ~~**1.2 + 1.3 JATS caption routing and unsectioned body**~~ — done.
+4. **PDF → text via PDFKit** — now the highest-value remaining item, and more so
+   than before: 1.1 means the Europe PMC PDF tier finally offers the ~95% of free
+   PDFs it was discarding, but `Document.applyFullTextResult` still sets
+   `fullTextContent = nil` for `case .pdfURL`, so none of them reach scoring,
+   citation extraction or transparency analysis.
 5. **2.5 trial ids from full text** with the cue window, and **2.4** the
    unreachable-API guard — the two places where iOS currently reports a confident
    wrong answer rather than an unknown.
@@ -381,7 +492,9 @@ Roughly by (impact × confidence) ÷ effort:
 7. Everything in §3's table below the PDF work, then §4/§5 as product priorities
    dictate.
 
-Items 1–4 are behaviour changes that **move stored values**: transparency scores,
-`fullTextContent`, and cached full text are not comparable across them. bmlib flags
-the same class of change on its own releases; the iOS equivalent is deciding
-whether to re-run analysis for stored sessions or to version the stored result.
+Item 4 is a behaviour change that **moves stored values**: `fullTextContent` and
+cached full text are not comparable across it, and giving the scorer a paper's
+full text where it previously saw `nil` moves transparency scores too. The
+mechanism for that is now in place — bump
+`TransparencyConstants.analyzerVersion` and stored results mark themselves stale
+(see [Stored values](#stored-values)).

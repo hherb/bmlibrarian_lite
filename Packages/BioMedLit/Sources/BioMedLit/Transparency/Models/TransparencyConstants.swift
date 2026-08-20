@@ -22,6 +22,25 @@ import Foundation
 /// values used throughout the transparency analysis module.
 public enum TransparencyConstants {
 
+    // MARK: - Analyzer Version
+
+    /// Version of the transparency analyzer that produced a stored result.
+    ///
+    /// Stamped onto every ``TransparencyResult`` at build time, so a result
+    /// computed under an earlier version can be recognised as stale and offered
+    /// for re-analysis instead of being shown beside a current one as if the two
+    /// numbers were comparable.
+    ///
+    /// **Bump this whenever a change moves stored scores.** History:
+    /// - `1` — the original scoring model (implicit; stored results from this era
+    ///   carry no version at all and decode as `nil`).
+    /// - `2` — Europe PMC free-PDF availability allow-list (bmlib #79), JATS
+    ///   caption routing and unsectioned-`<body>` prose (bmlib #30), and the
+    ///   funder patterns recalibrated against the shared labelled corpus
+    ///   (bmlib #36). Each changes which evidence reaches the scorer.
+    public static let analyzerVersion = 2
+
+
     // MARK: - API URLs
 
     /// CrossRef API base URL for funder and DOI metadata lookups.
@@ -221,7 +240,14 @@ public enum KnownIndustryFunders {
 /// statements, author affiliations, and conflict of interest declarations.
 public enum IndustryPatterns {
 
-    /// Keywords indicating industry affiliation in text.
+    /// Keywords indicating industry affiliation in **COI prose**.
+    ///
+    /// Matched against a paper's conflict-of-interest / disclosure statement in
+    /// the full text — running text, not an org name. Deliberately kept separate
+    /// from ``funderNameStems`` / ``funderNameWords``: the generic corporate
+    /// suffixes match far too freely in running text, while the disclosure
+    /// phrases below never occur in a funder name.
+    ///
     /// All patterns are case-insensitive raw strings for regex matching.
     public static let industryKeywords: [String] = [
         #"\bpharma(?:ceutical)?\b"#,
@@ -244,13 +270,87 @@ public enum IndustryPatterns {
         #"\bgrant(?:s)? from\b"#,
     ]
 
-    /// Corporate name suffixes for identifying company names.
-    /// Subset of industryKeywords focused on legal entity suffixes.
-    public static let corporateSuffixes: [String] = [
-        #"\binc\.?\b"#,
-        #"\bcorp(?:oration)?\.?\b"#,
-        #"\bltd\.?\b"#,
+    // MARK: - Funder Name Matching
+    //
+    // Matched against structured funder names — CrossRef `funder[].name` and
+    // PubMed `<Grant><Agency>` — both short org-name strings.
+    //
+    // THE TWO LISTS ARE DIFFERENT KINDS OF THING, AND MERGING THEM IS A BUG.
+    // A stem has to match *inside* a longer word ("pharmaceutic" reaching
+    // "Pharmaceuticals"); a whole word must not ("inc" as a substring matches
+    // "Lincoln", "Vincent" and "province").
+    //
+    // Membership of both lists was decided by measuring against 833 real names
+    // sampled from CrossRef and PubMed, 417 of them hand-labelled — the shared
+    // corpus at `doc/cross_platform/transparency_parity/funder_names.json`
+    // (bmlib issue #36). The counts below are from that corpus.
+
+    /// Substring stems for funder names — matched *inside* a longer word.
+    ///
+    /// Every one scored at least one true positive and no false positives; each
+    /// is also narrower than what it replaced:
+    /// - `pharmaceutic` — 3 TP / 0 FP. Replaces `\bpharma(?:ceutical)?\b`, which
+    ///   could not match the standard company-name plural "X Pharmaceuticals"
+    ///   because the word boundary lands before the "s"; as a bare substring
+    ///   "pharma" instead scored 3 TP / 5 FP by reaching "Pharmacy",
+    ///   "Pharmacology" and "Pharmacogenetics", all academic.
+    /// - `therapeutics` — 1 TP / 0 FP.
+    /// - `laboratories` — 1 TP / 0 FP. The plural only: "Key Laboratory"
+    ///   (singular) is a Chinese state-lab form that appeared 8 times, and it
+    ///   must keep missing them.
+    public static let funderNameStems: [String] = [
+        "pharmaceutic",
+        "therapeutics",
+        "laboratories",
+    ]
+
+    /// Whole-word terms for funder names — matched with word boundaries.
+    ///
+    /// No trailing `\.?` is needed: `\b` already sits between the last letter and
+    /// a following ".", so "Inc" and "Inc." both match.
+    ///
+    /// The first two are the safe residue of stems the corpus disqualified — see
+    /// ``funderNameStems`` for "pharma", and for "biotech": as a substring it
+    /// scored 0 TP / 4 FP, reaching only "Department of Biotechnology" (an Indian
+    /// ministry) and "Biotechnology and Biological Sciences Research Council" (a
+    /// UK research council). "Biotechnology" names a field, not a company type;
+    /// as a bare word it is a company name ("Acme Biotech"), so that form is kept.
+    ///
+    /// The rest are legally reserved incorporation suffixes — a public body cannot
+    /// use one. Deliberately absent, each for a measured or stated reason:
+    /// - `co` — 4 TP / 1 FP; collides with the English prefix in
+    ///   "project co-sponsored by province…".
+    /// - `corporation` — 1 TP / 1 FP; US non-profits use it ("Research
+    ///   Corporation for Science Advancement").
+    /// - `pty` — 0 TP; no corpus evidence, so nothing earned.
+    /// - `ag`, `bv`, `nv`, `sa` — same, and two-letter tokens besides.
+    /// - `ab` — 1 TP / 0 FP; passes the count but excluded because it collides
+    ///   with province and country codes, and these strings carry locations, so
+    ///   "University of Calgary, AB" would be a false positive the corpus cannot
+    ///   see. Costs one true positive, "Roche Sweden AB".
+    /// - `labs` — same call: "Los Alamos National Labs" is not industry. Costs
+    ///   "Tempus Labs".
+    ///
+    /// Ties go to precision here, because `industryFundingDetected` feeds a
+    /// HIGH-risk rule and HIGH downgrades a paper's quality tier.
+    ///
+    /// **One deliberate deviation from bmlib's list:** `plc` is kept here and
+    /// excluded there. bmlib excludes it as "0 TP — no corpus evidence", but
+    /// `pharma`, `biotech`, `corp` and `gmbh` also score 0 TP / 0 FP on the same
+    /// corpus and bmlib keeps all four on the reserved-suffix argument. `plc` is
+    /// a legally reserved UK public-limited-company suffix in exactly that
+    /// position, it scores 0 TP / 0 FP (so precision and recall are unchanged),
+    /// and it is the form UK-listed pharma funders report under.
+    public static let funderNameWords: [String] = [
+        #"\bpharma\b"#,
+        #"\bbiotech\b"#,
+        #"\bincorporated\b"#,
+        #"\binc\b"#,
+        #"\bcorp\b"#,
+        #"\blimited\b"#,
+        #"\bltd\b"#,
         #"\bgmbh\b"#,
+        #"\bllc\b"#,
         #"\bplc\b"#,
     ]
 

@@ -139,10 +139,7 @@ public actor EuropePMCService {
             let isOpenAccess = result.isOpenAccess == "Y"
 
             // Extract free PDF render URL from fullTextUrlList
-            let pdfRenderURL: String? = {
-                guard let urls = result.fullTextUrlList?.fullTextUrl else { return nil }
-                return urls.first(where: { $0.documentStyle == "pdf" && $0.availability == "Free" })?.url
-            }()
+            let pdfRenderURL = EuropePMCService.extractFreePDFURL(from: result)
 
             let article = SearchArticle(
                 pmid: pmid,
@@ -174,6 +171,38 @@ public actor EuropePMCService {
             query: fullQuery,
             provider: .europePMC
         )
+    }
+
+    // MARK: - Free PDF Selection
+
+    /// Extract a free PDF URL from a result's ``fullTextUrlList``.
+    ///
+    /// The search API includes `fullTextUrlList` with `?pdf=render` entries for
+    /// PDFs Europe PMC serves itself, even when JATS XML is unavailable — which
+    /// is exactly when the PDF tier needs one.
+    ///
+    /// Entries that are PDFs but not downloadable are logged rather than dropped
+    /// silently, so "a PDF entry was seen and not taken" is visible in a trace.
+    ///
+    /// - Parameter result: One Europe PMC search result.
+    /// - Returns: The first downloadable PDF URL, or `nil` if the result offers none.
+    static func extractFreePDFURL(from result: EuropePMCResult) -> String? {
+        guard let entries = result.fullTextUrlList?.fullTextUrl else { return nil }
+
+        for entry in entries where entry.documentStyle == "pdf" {
+            guard entry.isFreeToDownload else {
+                BioMedLitLib.logger?.debug(
+                    """
+                    Skipping Europe PMC PDF entry: availability=\(entry.availability ?? "nil") \
+                    code=\(entry.availabilityCode ?? "nil")
+                    """,
+                    category: .fullText
+                )
+                continue
+            }
+            if let url = entry.url { return url }
+        }
+        return nil
     }
 
     // MARK: - Helpers
@@ -302,6 +331,28 @@ struct EuropePMCFullTextUrlEntry: Codable {
     let site: String?
     let url: String?
     let availability: String?
+    let availabilityCode: String?
+}
+
+extension EuropePMCFullTextUrlEntry {
+    /// Whether this entry is one the app may download.
+    ///
+    /// `true` when the entry's access code is one of
+    /// ``BioMedLitConstants/europePMCFreePDFAvailabilityCodes``, or — for an entry
+    /// carrying no code — its display string is one of
+    /// ``BioMedLitConstants/europePMCFreePDFAvailabilityLabels``.
+    ///
+    /// A code that is present but unrecognised returns `false` **without**
+    /// consulting the string: falling back there would let a future code the app
+    /// has never evaluated through on the strength of a label, which is the
+    /// opposite of the under-credit rule the allow-list exists to keep.
+    var isFreeToDownload: Bool {
+        if let code = availabilityCode, !code.isEmpty {
+            return BioMedLitConstants.europePMCFreePDFAvailabilityCodes.contains(code)
+        }
+        guard let availability = availability else { return false }
+        return BioMedLitConstants.europePMCFreePDFAvailabilityLabels.contains(availability)
+    }
 }
 
 /// Europe PMC journal info.

@@ -1108,6 +1108,12 @@ struct MacDocumentDetailSheet: View {
 
             if let result = document.transparencyResult {
                 MacTransparencyDetailView(result: result)
+
+                // A stale result keeps its score on screen but has to be
+                // re-runnable, or the notice above names a fix the user cannot apply.
+                if result.isStale, !(document.pmid.isEmpty && document.doi == nil) {
+                    transparencyAnalyzeButton(title: "Re-analyze")
+                }
             } else if document.pmid.isEmpty && document.doi == nil {
                 HStack(spacing: MacSpacing.standard) {
                     Image(systemName: "info.circle")
@@ -1117,25 +1123,34 @@ struct MacDocumentDetailSheet: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                HStack(spacing: MacSpacing.standard) {
-                    Button(action: analyzeTransparency) {
-                        if isLoadingTransparency {
-                            ProgressView()
-                                .scaleEffect(MacScale.progressViewSmall)
-                        } else {
-                            Label("Analyze Transparency", systemImage: "shield.checkered")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isLoadingTransparency)
+                transparencyAnalyzeButton(title: "Analyze Transparency")
+            }
+        }
+    }
 
-                    if let error = transparencyError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .lineLimit(2)
-                    }
+    /// Button that runs transparency analysis, with any error beside it.
+    ///
+    /// - Parameter title: Button label — "Analyze Transparency" for a first run,
+    ///   "Re-analyze" when replacing a result from an earlier analyzer.
+    @ViewBuilder
+    private func transparencyAnalyzeButton(title: String) -> some View {
+        HStack(spacing: MacSpacing.standard) {
+            Button(action: analyzeTransparency) {
+                if isLoadingTransparency {
+                    ProgressView()
+                        .scaleEffect(MacScale.progressViewSmall)
+                } else {
+                    Label(title, systemImage: "shield.checkered")
                 }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isLoadingTransparency)
+
+            if let error = transparencyError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
             }
         }
     }
