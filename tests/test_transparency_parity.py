@@ -45,8 +45,11 @@ from typing import Any, cast
 import pytest
 
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
+    ACADEMIC_PATTERNS,
     DATA_REPOSITORIES,
+    GOVERNMENT_PATTERNS,
     NEGATED_OPENNESS_PATTERNS,
+    NON_INDUSTRY_PATTERNS,
     RESTRICTION_LABELS,
     STRONG_REFUSAL_PATTERNS,
     DataDisclosureLevel,
@@ -62,6 +65,10 @@ PATTERNS_FIXTURE = "data_availability_patterns.json"
 
 #: Worked ``statement -> (level, restrictions)`` cases, asserted behaviourally.
 CASES_FIXTURE = "data_availability_cases.json"
+
+#: Government/academic sponsor-pattern contract, asserted string-for-string.
+#: Binds Python and Swift only — Android carries no funder classifier.
+SPONSOR_PATTERNS_FIXTURE = "sponsor_patterns.json"
 
 #: Hand-labelled funder names, a *measurement* corpus rather than a pattern
 #: contract. Scored by ``tests/test_funder_classification.py``; the class at the
@@ -140,6 +147,58 @@ class TestPatternManifestParity:
         """A duplicated key would silently drop an entry on every platform."""
         patterns = [entry["pattern"] for entry in manifest["restriction_labels"]]
         assert len(patterns) == len(set(patterns))
+
+
+class TestSponsorPatternManifestParity:
+    """Python's sponsor lists must equal the shared contract string-for-string.
+
+    #147 split one 25-element list into a government half and an academic half to
+    match Swift, and three separate places assert in prose that the two platforms
+    are byte-identical. Prose is not enforcement: before this fixture existed,
+    either platform could edit its list and both suites stayed green. The lists
+    decide the sponsor tier *and*, concatenated, the industry boundary that
+    ``funder_names.json`` measures, so drift is expensive in both directions.
+    """
+
+    @pytest.fixture(scope="class")
+    def sponsor_patterns(self) -> dict[str, list[str]]:
+        """The sponsor-pattern lists from the shared contract."""
+        manifest = _load_fixture(SPONSOR_PATTERNS_FIXTURE)
+        return cast(dict[str, list[str]], manifest["patterns"])
+
+    def test_government_patterns_match_manifest(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """The public bodies, whose half wins outright over the academic one."""
+        assert GOVERNMENT_PATTERNS == sponsor_patterns["government"]
+
+    def test_academic_patterns_match_manifest(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """The institutional funders, reached only when no government pattern hit."""
+        assert ACADEMIC_PATTERNS == sponsor_patterns["academic"]
+
+    def test_the_non_industry_union_is_the_manifest_halves_in_order(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """Concatenation order is the order ``classify_funder_name`` matches in."""
+        assert NON_INDUSTRY_PATTERNS == (
+            sponsor_patterns["government"] + sponsor_patterns["academic"]
+        )
+
+    def test_the_manifest_halves_are_disjoint(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """A pattern in both halves would make the academic tier unreachable for it."""
+        assert set(sponsor_patterns["government"]) & set(sponsor_patterns["academic"]) == set()
+
+    def test_every_manifest_sponsor_pattern_compiles(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """An invalid pattern must fail here, not at classification time."""
+        for half in ("government", "academic"):
+            for pattern in sponsor_patterns[half]:
+                re.compile(pattern)
 
 
 class TestManifestSelfConsistency:

@@ -20,8 +20,13 @@ without a single test failing. Issues #117 and #125 each had to run a throwaway
 byte-identity check across the three lists to confirm they still agreed. This
 directory makes that check permanent.
 
-A third fixture, `funder_names.json`, is a *measurement* corpus rather than a
-pattern contract — see [The funder-name corpus](#the-funder-name-corpus) below.
+`sponsor_patterns.json` is a second pattern contract, covering the
+government/academic sponsor lists — see
+[The sponsor-pattern contract](#the-sponsor-pattern-contract) below. It binds
+Python and Swift only, because Android carries no funder or sponsor classifier.
+
+`funder_names.json` is a *measurement* corpus rather than a pattern contract —
+see [The funder-name corpus](#the-funder-name-corpus) below.
 
 ## The two fixtures
 
@@ -119,10 +124,43 @@ vocabularies, and that only ambiguous entries carry a reason, so that edit has t
 be deliberate. The corpus is also lifted byte-identical from bmlib, so a change
 here means the two repositories have drifted.
 
+## The sponsor-pattern contract
+
+### `sponsor_patterns.json` — who counts as a public funder
+
+The two halves that decide `sponsor_type`, asserted **string-for-string** by
+`TestSponsorPatternManifestParity` (Python) and
+`TransparencyParityTests` (Swift).
+
+| Platform | Lists | Tiering |
+| --- | --- | --- |
+| Python (canonical) | `GOVERNMENT_PATTERNS` / `ACADEMIC_PATTERNS` | `determine_sponsor_type` |
+| Swift (BioMedLit) | `IndustryPatterns.governmentPatterns` / `academicPatterns` | `FundingAnalyzer.determineSponsorType` |
+
+Android is not a party to this contract: it has no funder classifier at all.
+
+The split carries two distinct meanings, and an edit can break either:
+
+- **Within a half** — the government half is tested first, so one public agency
+  outranks any number of universities. Moving a pattern across the boundary
+  re-tiers every study funded by a body matching it.
+- **Across the concatenation** — `government + academic`, in that order, is what
+  `classify_funder_name` / `classifyFunder` matches to mean "not industry".
+  Adding or removing a pattern moves the industry boundary, which is scored
+  against `funder_names.json` and feeds a HIGH-risk rule. That is the more
+  expensive failure, and a string-for-string assertion is what catches it — the
+  precision and recall floors can absorb a single pattern going missing.
+
+Before #147 the government tier was selected by a positional
+`GOVERNMENT_PATTERNS[:10]` slice of the combined list. The contract exists partly
+so that no future edit can reintroduce a boundary that is implied by position
+rather than stated by name.
+
 ## Changing a pattern
 
-1. Edit `data_availability_patterns.json`.
-2. Make the same edit in all three platform sources.
+1. Edit `data_availability_patterns.json` (or `sponsor_patterns.json`).
+2. Make the same edit in all platform sources bound by that contract — all three
+   for data availability, Python and Swift for sponsor patterns.
 3. Add or update cases in `data_availability_cases.json` covering the new
    behaviour, then run all three suites.
 

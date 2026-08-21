@@ -37,23 +37,52 @@ its slice has landed; add a new section when handing off new work.
     parity directory that nothing read. All eight assertions mutation-verified.
 - **Government sponsor tier** (#147 landed 2026-08-21, stacked on #143): the
   `GOVERNMENT_PATTERNS[:10]` slice cut through the middle of the agency list —
-  NIH/NSF/CDC inside it, **FDA, VA, AHRQ and PCORI immediately outside** — so a
-  VA-funded study reported `ACADEMIC`. Split into `GOVERNMENT_PATTERNS` (18) +
-  `ACADEMIC_PATTERNS` (7), byte-identical to Swift's two lists, with
-  `NON_INDUSTRY_PATTERNS` as their concatenation; `determine_sponsor_type` now
-  mirrors `FundingAnalyzer.determineSponsorType` tier for tier, including the
-  `NONPROFIT` fallback that was previously unreachable.
+  NIH/NSF/CDC inside it, **FDA, VA, AHRQ, PCORI, Wellcome and the MRC
+  immediately outside** — so a VA-funded study reported `ACADEMIC`. Split into
+  `GOVERNMENT_PATTERNS` (18) + `ACADEMIC_PATTERNS` (7), byte-identical to Swift's
+  two lists, with `NON_INDUSTRY_PATTERNS` as their concatenation;
+  `determine_sponsor_type` now mirrors `FundingAnalyzer.determineSponsorType`
+  tier for tier, including the `NONPROFIT` fallback that was previously
+  unreachable. **Six funders change tier, not four** — Wellcome and the MRC move
+  too, which is easy to miss because they read as a pre-existing parity choice.
   - **The concatenation is load-bearing.** `classify_funder_name` matches
     `NON_INDUSTRY_PATTERNS`, which *is* the pre-split list in the pre-split
     order, so funder classification — measured against the corpus, feeds the
     HIGH-risk rule — is untouched by the split. Pinned by
-    `TestThePatternSplitPreservesFunderClassification`.
+    `TestThePatternSplitPreservesFunderClassification` against a **frozen copy**
+    of the 25-element list: asserting it equals `GOVERNMENT + ACADEMIC` was a
+    tautology that passed even when both halves lost the same pattern.
+  - **Parity is now enforced, not asserted in prose.**
+    `doc/cross_platform/transparency_parity/sponsor_patterns.json` is the shared
+    contract; `TestSponsorPatternManifestParity` (Python) and
+    `TransparencyParityTests` (Swift) assert their lists against it. Binds Python
+    and Swift only — Android has no funder classifier. Verified by mutation: move
+    one pattern across the boundary in the JSON and both suites fail.
+  - **`NONPROFIT` means "not recognised".** It is reached only by falling through
+    both halves, so it is exactly the confidence-0.3 bucket. On the labelled
+    corpus that is **325 of 417 names (78%)** — academic drops 396 → 68 — so it
+    is the modal outcome, not a corner. `_fetch_funder_info` now logs and attaches
+    a report warning naming the unrecognised funders whenever the tier is reached.
+  - **`update_sponsor_type` was extracted** to mirror Swift's
+    `FundingAnalyzer.updateSponsorType`. The inline chain in `_fetch_trial_info`
+    tested `sponsor_type in [GOVERNMENT, ACADEMIC]` and **omitted NONPROFIT** —
+    dead code until #147 made NONPROFIT reachable, then a live regression: an
+    industry-sponsored registered trial with unrecognised funders reported
+    `NONPROFIT` while `industry_funding_detected` was true, a self-contradictory
+    row in the batch CSV. Swift never had it because its `switch` is exhaustive;
+    Python has no such check, so it is pinned by test instead. The sponsor class
+    is now compared case-insensitively, as Swift already did.
   - **Wellcome (a charity) and the MRC tier as GOVERNMENT** because Swift tiers
     them there. Deliberate parity choice over separate defensibility — revisit on
     both platforms or neither.
   - `government`/`federal`/`state` sit in the *academic* half on both platforms,
     so "Federal Ministry of Health" tiers ACADEMIC. Known and left alone: moving
     them is a Swift behaviour change too.
+  - `\bva\b` is two letters and also the USPS abbreviation for Virginia, so
+    "…, Richmond VA" now tiers GOVERNMENT — outranking the university pattern.
+    #147 made it tier-deciding where it previously only suppressed industry
+    classification. Pinned by `TestKnownPatternCollisions` so the cost stays
+    visible; not marked xfail, because the pattern is Swift's too.
 - **Python CI** (#129 landed 2026-07-20, issue closed 2026-08-21):
   `.github/workflows/python-tests.yml`
   runs `pytest -m "not integration" --strict-markers` (557 tests, ~1 min) on every
@@ -234,17 +263,32 @@ its slice has landed; add a new section when handing off new work.
   not on iOS/macOS. Nothing compares the two lists; the parity fixtures cover the
   data-availability classifier, and the funder lists are pinned by measurement
   instead. One-character fix, but wants a shared fixture or it recurs.
+  (#147 added `sponsor_patterns.json` for the government/academic lists, which is
+  the same shape of guard — `INDUSTRY_KEYWORDS` still has none.)
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry `\bnci\b`, `\bniaid\b`, `\bnhlbi\b`,
   `\bnimh\b` but no singular "National Institute of X" form, while CrossRef
   returns it routinely ("National Cancer Institute", "National Institute of
   Child Health and Human Development"). They tiered ACADEMIC before #147 and
   NONPROFIT after it — both wrong for a US federal agency. Funder classification
-  is unaffected; only `sponsor_type` is. Pinned as a known gap by
-  `test_a_spelled_out_nih_institute_is_a_known_gap`, which is *expected to fail*
-  when this is fixed. Widening to `\bnational institutes? of\b` reaches
+  is unaffected; only `sponsor_type` is. Pinned by
+  `test_a_spelled_out_nih_institute_should_be_government`, written as the
+  behaviour we *want* and marked `xfail(strict=True)`: the gap reads as an open
+  to-do in CI rather than a passing feature, and fixing it makes the test XPASS,
+  which `strict` turns into a failure so the marker must come off. Widening to
+  `\bnational institutes? of\b` reaches
   non-US bodies ("National Institute of Development Administration"), so measure
   first — and change both platforms together.
+- **#152 — Python collapses Swift's two non-industry funder confidences**: Swift
+  returns 0.85 for a government-pattern match and 0.80 for an academic one;
+  Python returns a flat `NON_INDUSTRY_NAME_CONFIDENCE = 0.8` for both, because it
+  matches the concatenation rather than the halves. The `is_industry` boolean
+  agrees, which is why the corpus measurement does not catch it. #147 removed the
+  only obstacle (there is now a government half to test separately) but left the
+  fix out of scope: it belongs to `classify_funder_name` (#143/#149 territory)
+  and changes an exported CSV value. Note Swift's `nonIndustryPatterns` constant
+  is dead code — nothing references it — which is how the divergence stayed
+  invisible.
 - **#146 — no real PMC JATS fixtures**: every JATS test is hand-written synthetic
   XML. The caption-host defect found reviewing #142 affected **86 of 386 real
   articles (22.3%)** while every synthetic routing test passed, and a mutation

@@ -42,8 +42,10 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     SponsorType,
     StudyTransparencyAnalyzer,
     TransparencyReport,
+    TrialRegistration,
     classify_funder_name,
     determine_sponsor_type,
+    update_sponsor_type,
 )
 
 
@@ -125,7 +127,11 @@ class TestTheGovernmentTier:
             "National Institute of General Medical Sciences",
         ],
     )
-    def test_a_spelled_out_nih_institute_is_a_known_gap(self, name: str) -> None:
+    @pytest.mark.xfail(
+        strict=True,
+        reason="#150: NIH institutes are matched only by abbreviation, not spelled out",
+    )
+    def test_a_spelled_out_nih_institute_should_be_government(self, name: str) -> None:
         r"""Individual NIH institutes are only matched by their abbreviations (#150).
 
         The list carries ``\bnci\b``, ``\bniaid\b``, ``\bnhlbi\b`` and
@@ -134,12 +140,15 @@ class TestTheGovernmentTier:
         routinely, including the bare "National Cancer Institute".
 
         Pre-existing on both platforms: these tiered ACADEMIC before #147 and
-        NONPROFIT after it, both wrong for a US federal agency. Pinned as a record
-        of known cost rather than an endorsement, in the same spirit as the
-        recall debt in ``TestCorpusComposition``. Fixing #150 is expected to fail
-        this test, on both platforms at once.
+        NONPROFIT after it, both wrong for a US federal agency.
+
+        Written as the behaviour we want and marked ``xfail(strict=True)`` rather
+        than pinning the wrong answer: this way the gap reads as an open to-do in
+        the CI output instead of a passing feature, and the day #150 lands the
+        test XPASSes — which ``strict`` turns into a failure, forcing the marker
+        off rather than inviting someone to "fix" a green test back to broken.
         """
-        assert determine_sponsor_type([_funder(name)]) == SponsorType.NONPROFIT
+        assert determine_sponsor_type([_funder(name)]) == SponsorType.GOVERNMENT
 
     def test_a_national_research_council_is_government(self) -> None:
         """The MRC is a publicly funded UK research council; Swift tiers it government."""
@@ -230,6 +239,262 @@ class TestTheAnalyzerUsesTheSharedFunction:
         assert report.sponsor_type == SponsorType.INDUSTRY
         assert report.industry_funding_detected
 
+    def test_an_unrecognised_funder_warns_that_nonprofit_is_a_fallback(self) -> None:
+        """NONPROFIT must not read as a positive finding of nonprofit funding.
+
+        It is reached only by falling through both pattern lists, so it means
+        "no funder name was recognised". On the shared labelled corpus that is
+        the majority outcome, so leaving it unqualified would put a confident
+        label on most reports.
+        """
+        analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
+
+        analyzer._fetch_funder_info(report)
+
+        assert report.sponsor_type == SponsorType.NONPROFIT
+        assert any("not recognised" in w for w in report.warnings)
+        assert any("Fondation Zzyzx" in w for w in report.warnings)
+
+    def test_a_recognised_funder_is_not_warned_about(self) -> None:
+        """The warning must be specific to the fallback, not attached to every report."""
+        analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
+
+        analyzer._fetch_funder_info(report)
+
+        assert report.sponsor_type == SponsorType.GOVERNMENT
+        assert not any("not recognised" in w for w in report.warnings)
+
+
+class _StubClinicalTrials:
+    """Minimal stand-in for the ClinicalTrials.gov client.
+
+    Returns one study whose lead sponsor class is fixed by the constructor, so a
+    test can drive :meth:`StudyTransparencyAnalyzer._fetch_trial_info` without a
+    network call.
+    """
+
+    def __init__(self, sponsor_class: str) -> None:
+        """Store the sponsor class this stub will report.
+
+        Args:
+            sponsor_class: Value to place on the returned registration.
+        """
+        self._sponsor_class = sponsor_class
+
+    def get_study(self, trial_id: str) -> dict:
+        """Return a non-empty placeholder study.
+
+        Args:
+            trial_id: Ignored; the stub is indifferent to which trial is asked for.
+
+        Returns:
+            A truthy placeholder, since only ``extract_trial_info`` reads it.
+        """
+        return {"id": trial_id}
+
+    def extract_trial_info(self, study: dict) -> TrialRegistration:
+        """Build a registration carrying the configured sponsor class.
+
+        Args:
+            study: The placeholder from :meth:`get_study`.
+
+        Returns:
+            A :class:`TrialRegistration` for the stubbed study.
+        """
+        return TrialRegistration(
+            registry="ClinicalTrials.gov",
+            registration_id=study["id"],
+            sponsor_class=self._sponsor_class,
+        )
+
+
+class TestTheTrialRegistryUpgrade:
+    """Folding ClinicalTrials.gov's sponsor class into the funder-derived tier.
+
+    Mirrors Swift's ``FundingAnalyzer.updateSponsorType``. The inline version this
+    replaced tested ``sponsor_type in [GOVERNMENT, ACADEMIC]`` and silently omitted
+    NONPROFIT — harmless while NONPROFIT was unreachable, a live defect from the
+    moment #147 made it reachable. Swift never had the bug because its ``switch``
+    is exhaustive; Python has no such compiler check, so it is pinned here instead.
+    """
+
+    @pytest.mark.parametrize(
+        "current",
+        [SponsorType.GOVERNMENT, SponsorType.ACADEMIC, SponsorType.NONPROFIT],
+    )
+    def test_every_non_industry_tier_upgrades_to_mixed(self, current: SponsorType) -> None:
+        """An industry trial sponsor means both sides paid, whatever the funders said.
+
+        NONPROFIT is the case that regressed: the registry says industry, the
+        funder names said nothing recognisable, and the study is mixed.
+        """
+        assert update_sponsor_type(current, "INDUSTRY") == SponsorType.MIXED
+
+    def test_unknown_becomes_industry(self) -> None:
+        """With no funders at all the registry is the only evidence there is."""
+        assert update_sponsor_type(SponsorType.UNKNOWN, "INDUSTRY") == SponsorType.INDUSTRY
+
+    @pytest.mark.parametrize("current", [SponsorType.INDUSTRY, SponsorType.MIXED])
+    def test_the_terminal_tiers_do_not_move(self, current: SponsorType) -> None:
+        """INDUSTRY and MIXED already record industry involvement."""
+        assert update_sponsor_type(current, "INDUSTRY") == current
+
+    @pytest.mark.parametrize("sponsor_class", ["NIH", "OTHER", "OTHER_GOV", "NETWORK"])
+    def test_a_non_industry_sponsor_class_changes_nothing(self, sponsor_class: str) -> None:
+        """The funder names are the better evidence; the registry adds nothing."""
+        assert update_sponsor_type(SponsorType.ACADEMIC, sponsor_class) == SponsorType.ACADEMIC
+
+    def test_an_unregistered_study_changes_nothing(self) -> None:
+        """No registration means no sponsor class to fold in."""
+        assert update_sponsor_type(SponsorType.NONPROFIT, None) == SponsorType.NONPROFIT
+
+    @pytest.mark.parametrize("sponsor_class", ["industry", "Industry", "InDuStRy"])
+    def test_the_sponsor_class_is_matched_case_insensitively(self, sponsor_class: str) -> None:
+        """It is external API data, so its casing is not ours to assume.
+
+        Swift already upper-cases before comparing; Python compared the raw string.
+        """
+        assert update_sponsor_type(SponsorType.ACADEMIC, sponsor_class) == SponsorType.MIXED
+
+
+class TestTheAnalyzerUsesTheSharedUpgrade:
+    """The report path must reach :func:`update_sponsor_type`, not a copy of it.
+
+    The same failure mode as ``TestTheAnalyzerUsesTheSharedFunction``: the tier
+    list was previously transcribed inline in ``_fetch_trial_info``, which is
+    where the missing NONPROFIT lived.
+    """
+
+    CONTACT_EMAIL = "tests@example.org"
+
+    def _analyzer_with_trial(self, sponsor_class: str) -> StudyTransparencyAnalyzer:
+        """Build an analyzer whose trial client is stubbed.
+
+        Args:
+            sponsor_class: Sponsor class the stubbed registry will report.
+
+        Returns:
+            An analyzer ready for ``_fetch_trial_info``.
+        """
+        analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
+        analyzer.clinicaltrials = _StubClinicalTrials(sponsor_class)
+        return analyzer
+
+    def test_an_industry_trial_with_unrecognised_funders_is_mixed(self) -> None:
+        """The regression #147 would otherwise have shipped, end to end.
+
+        Before #147 this funder tiered ACADEMIC and the study reported MIXED.
+        Making NONPROFIT reachable dropped it out of the upgrade list, so the
+        study reported NONPROFIT while ``industry_funding_detected`` was true —
+        a self-contradictory row in the batch CSV export.
+        """
+        analyzer = self._analyzer_with_trial("INDUSTRY")
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_funder_info(report)
+        assert report.sponsor_type == SponsorType.NONPROFIT  # precondition
+
+        analyzer._fetch_trial_info(report)
+
+        assert report.sponsor_type == SponsorType.MIXED
+        assert report.industry_funding_detected
+
+    def test_the_unrecognised_funder_warning_survives_the_upgrade_intact(self) -> None:
+        """The warning must not name a tier the report has since moved off.
+
+        ``_fetch_funder_info`` raises it while the tier is NONPROFIT, and
+        ``_fetch_trial_info`` can then upgrade that to MIXED. A warning reading
+        "sponsor type reported as NONPROFIT" would by then be describing a tier
+        the report no longer carries, which is worse than staying silent — so it
+        is phrased as a statement about the funder names, which stays true.
+        """
+        analyzer = self._analyzer_with_trial("INDUSTRY")
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_funder_info(report)
+        analyzer._fetch_trial_info(report)
+
+        assert report.sponsor_type == SponsorType.MIXED
+        assert any("Fondation Zzyzx" in w for w in report.warnings)
+        assert not any("NONPROFIT" in w for w in report.warnings)
+
+    def test_a_government_funded_industry_trial_is_still_mixed(self) -> None:
+        """The tiers that already worked must survive the rewiring."""
+        analyzer = self._analyzer_with_trial("INDUSTRY")
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_funder_info(report)
+        analyzer._fetch_trial_info(report)
+
+        assert report.sponsor_type == SponsorType.MIXED
+        assert report.industry_funding_detected
+
+    def test_a_non_industry_trial_leaves_the_funder_tier_alone(self) -> None:
+        """An NIH-sponsored registration must not flip anything to mixed."""
+        analyzer = self._analyzer_with_trial("NIH")
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_funder_info(report)
+        analyzer._fetch_trial_info(report)
+
+        assert report.sponsor_type == SponsorType.GOVERNMENT
+        assert not report.industry_funding_detected
+
+
+class TestKnownPatternCollisions:
+    """Patterns that match more than they mean, pinned so the cost stays visible.
+
+    Same purpose as the #150 pin: a two-letter pattern that over-matches is a
+    real cost, and recording it in a test is what stops it being rediscovered
+    from scratch. Unlike #150 these are not marked ``xfail`` — the behaviour is
+    Swift's too, so "fixing" it unilaterally would break parity, and the tests
+    are here to make a future joint change deliberate.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Virginia Commonwealth University, Richmond VA",
+            "Some Foundation, Arlington VA",
+        ],
+    )
+    def test_a_us_postal_address_can_trigger_the_va_pattern(self, name: str) -> None:
+        r"""``\bva\b`` also matches the USPS abbreviation for Virginia.
+
+        Recorded in ``doc/cross_platform/ios_bmlib_alignment.md`` alongside the
+        ``labs``/``ab`` collisions that were rejected from the industry lists on
+        the same grounds. #147 raised the stakes: the pattern used only to
+        suppress industry classification, and now decides the GOVERNMENT tier,
+        outranking the university pattern in the first of these names.
+        """
+        assert determine_sponsor_type([_funder(name)]) == SponsorType.GOVERNMENT
+
+    def test_the_word_boundary_still_protects_virginia_itself(self) -> None:
+        r"""``\bva\b`` does not fire inside "Virginia", which is the saving grace."""
+        assert determine_sponsor_type([_funder("University of Virginia")]) == (
+            SponsorType.ACADEMIC
+        )
+
 
 class TestThePatternSplitPreservesFunderClassification:
     """Splitting the list must not move the industry/non-industry boundary.
@@ -241,8 +506,51 @@ class TestThePatternSplitPreservesFunderClassification:
     ``tests/test_funder_classification.py`` and feeds a HIGH-risk rule.
     """
 
-    def test_the_union_is_the_concatenation_in_order(self) -> None:
-        """Order matters: first match wins, and both halves return non-industry."""
+    #: The 25-element list exactly as it stood before the #147 split, frozen here
+    #: so a pattern cannot be added, dropped or reordered without this test
+    #: failing. Asserting against ``GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS``
+    #: instead would restate the production line and pass even if both halves
+    #: lost the same pattern.
+    PRE_SPLIT_PATTERNS = [
+        r'\bnih\b',
+        r'\bnational institutes? of health\b',
+        r'\bniaid\b',
+        r'\bnci\b',
+        r'\bnhlbi\b',
+        r'\bnimh\b',
+        r'\bnsf\b',
+        r'\bnational science foundation\b',
+        r'\bcdc\b',
+        r'\bcenters? for disease control\b',
+        r'\bfda\b',
+        r'\bfood and drug administration\b',
+        r'\bva\b',
+        r'\bveterans? (?:affairs|administration)\b',
+        r'\bahrq\b',
+        r'\bpcori\b',
+        r'\bwellcome\b',
+        r'\bmedical research council\b',
+        r'\buniversit(?:y|ies)\b',
+        r'\bcollege\b',
+        r'\bhospital\b',
+        r'\bmedical (?:center|school)\b',
+        r'\bgovernment\b',
+        r'\bfederal\b',
+        r'\bstate\b',
+    ]
+
+    def test_the_union_is_exactly_the_pre_split_list(self) -> None:
+        """The patterns and their order must survive the split unchanged.
+
+        This is the test that would catch a pattern being dropped: the corpus
+        measurement in ``tests/test_funder_classification.py`` would shift, but
+        only for names carrying that one pattern, so it can move a long way
+        before a precision or recall floor notices.
+        """
+        assert NON_INDUSTRY_PATTERNS == self.PRE_SPLIT_PATTERNS
+
+    def test_the_union_is_the_two_halves_in_order(self) -> None:
+        """Neither half may carry a pattern that the union then omits."""
         assert NON_INDUSTRY_PATTERNS == GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
 
     def test_the_two_halves_are_disjoint(self) -> None:

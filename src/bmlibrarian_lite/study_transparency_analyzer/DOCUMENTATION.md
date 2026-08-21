@@ -291,16 +291,29 @@ Government and academic patterns are checked **first** and win outright, so a
 university spin-out naming convention cannot flag its parent institution:
 
 ```python
-GOVERNMENT_PATTERNS = [r'\bnih\b', r'\bfda\b', r'\bva\b', r'\bahrq\b', ...]
-ACADEMIC_PATTERNS = [r'\buniversit(?:y|ies)\b', r'\bcollege\b', ...]
+# Abridged. Entries chosen to show the surprises, not the head of each list —
+# see the source for all 18 + 7, and sponsor_patterns.json for the contract.
+GOVERNMENT_PATTERNS = [..., r'\bva\b', r'\bwellcome\b', r'\bmedical research council\b']
+ACADEMIC_PATTERNS = [r'\buniversit(?:y|ies)\b', ..., r'\bgovernment\b', r'\bfederal\b', r'\bstate\b']
 
 # What classify_funder_name() matches: both halves mean "not industry".
 NON_INDUSTRY_PATTERNS = GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
 ```
 
+Two entries in each half are worth knowing before you edit either:
+
+- `wellcome` is a charitable foundation and `medical research council` a UK
+  research council, yet both sit in the **government** half, because Swift tiers
+  them there.
+- `government`, `federal` and `state` are government words sitting in the
+  **academic** half, so "Federal Ministry of Health" tiers `ACADEMIC`. Wrong on
+  both platforms; left alone because moving them is a Swift behaviour change too.
+
 The two halves exist for `determine_sponsor_type()` (see below), not for this
 layer — funder classification matches their concatenation and is indifferent to
-where the split falls.
+where the split falls. (Swift's classifier is *not* indifferent: it tests the
+halves separately and returns 0.85 for a government match against 0.80 for an
+academic one, where Python returns a flat `NON_INDUSTRY_NAME_CONFIDENCE` — #152.)
 
 Industry matching then uses two lists that are **different kinds of thing**. A
 stem must match *inside* a longer word ("pharmaceutic" reaching
@@ -396,16 +409,26 @@ which is why `GOVERNMENT` is tested before `ACADEMIC`.
 
 This mirrors Swift's `FundingAnalyzer.determineSponsorType` tier for tier, and
 both pattern lists are byte-identical across the two platforms — **edit them
-together or not at all.**
+together or not at all.** That is enforced, not merely asked for:
+`doc/cross_platform/transparency_parity/sponsor_patterns.json` is the shared
+contract and both suites assert their lists against it.
 
-Two things worth knowing about the tiers:
+**`NONPROFIT` means "not recognised", not "philanthropically funded."** It is
+reached only by falling through both pattern lists, so it is exactly the set of
+non-industry funders that matched nothing. On the shared labelled corpus that is
+the majority of names, so `_fetch_funder_info` attaches a warning to the report
+whenever the tier is reached, and callers should treat it as unverified. A
+misspelled agency, a non-English funder and a genuine foundation are
+indistinguishable at this tier.
 
-- Before #147 the government tier was selected by a positional
-  `GOVERNMENT_PATTERNS[:10]` slice that cut through the middle of the agency
-  list, so FDA-, VA-, AHRQ- and PCORI-funded studies reported as `ACADEMIC`.
-- Individual NIH institutes are matched only by their abbreviations, so
-  "National Cancer Institute" spelled out still reports `NONPROFIT` rather than
-  `GOVERNMENT`. Tracked as #150, and pinned by test so the gap is visible.
+#### Registered trials can override the tier
+
+`update_sponsor_type()` folds a ClinicalTrials.gov sponsor class into the
+funder-derived tier, mirroring Swift's `FundingAnalyzer.updateSponsorType`. An
+`INDUSTRY` lead sponsor turns `UNKNOWN` into `INDUSTRY` and **every** non-industry
+tier — including `NONPROFIT` — into `MIXED`; `INDUSTRY` and `MIXED` are already
+terminal. Any other sponsor class leaves the tier alone, because the funder names
+are the better evidence.
 
 ### COI Statement Analysis (Multi-Pass)
 
