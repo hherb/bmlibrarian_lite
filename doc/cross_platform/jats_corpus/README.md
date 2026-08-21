@@ -20,8 +20,10 @@ measured, not hypothetical:
 
 The corpus paid for itself before it landed: hand-checking the digests against
 their source XML found five defects, all confirmed against a 225-article survey,
-and reviewing the pull request that added it found a sixth — see **Known
-defects** below.
+and reviewing the pull request that added it found a sixth. Three of the six —
+#156, #157 and #161 — have since been fixed, and the digests moved to prove it.
+Both lists are under
+[The digest is a characterisation, not a specification](#the-digest-is-a-characterisation-not-a-specification).
 
 ## What is here
 
