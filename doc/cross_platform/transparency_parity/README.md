@@ -71,32 +71,53 @@ diff "${BMLIB:-$HOME/src/bmlib}/tests/data/funder_names.json" \
 ```
 
 Unlike the two data-availability fixtures, this one does **not** pin strings. It
-pins *measured quality*: `FunderClassificationTests` scores
-`FundingAnalyzer.classifyFunder` against it and asserts floors of precision 0.90
-and recall 0.30, plus that it beats the substring matcher it replaced
-(precision 0.455 / recall 0.167). Current measured figures: **precision 0.909,
-recall 0.333** — identical to what bmlib's `_is_industry_funder` scores on the
-same names.
+pins *measured quality*, on both platforms:
+
+| Platform | Classifier | Lists | Measurement |
+| --- | --- | --- | --- |
+| Python (canonical) | `study_transparency_analyzer.classify_funder_name` | `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS` | `tests/test_funder_classification.py` |
+| Swift (BioMedLit) | `FundingAnalyzer.classifyFunder` | `IndustryPatterns.funderNameStems` / `funderNameWords` | `FunderClassificationTests` |
+
+Each asserts floors of precision 0.90 and recall 0.30, plus that it beats the
+substring matcher it replaced (precision 0.455 / recall 0.167). Current measured
+figures on both platforms: **precision 0.909, recall 0.333** — the same ten true
+positives, the same single false positive and the same twenty misses, pinned by
+name in `TestCorpusComposition` and `FunderCorpusCompositionTests`. That is what
+makes this a parity check rather than two independent claims: the two platforms
+cannot drift apart without one of them failing its own copy of the composition.
 
 The distinction matters because the classifier is asymmetric:
-`industryFundingDetected` feeds a HIGH-risk rule and HIGH downgrades a paper's
-quality tier, so a false positive costs more than a false negative. Ties go to
-precision, and a floors-based guard is what keeps a recall-chasing edit honest.
+`industry_funding_detected` / `industryFundingDetected` feeds a HIGH-risk rule and
+HIGH downgrades a paper's quality tier, so a false positive costs more than a
+false negative. Ties go to precision, and a floors-based guard is what keeps a
+recall-chasing edit honest.
 
 Ambiguous entries carry a `reason` and are excluded from the metrics — scoring an
 undecidable name would only add noise.
 
-**Which Python reads this corpus.** The `_is_industry_funder` that scores 0.909 /
-0.333 on these names is **bmlib's** (`bmlib/transparency/analyzer.py`), a separate
-repository — not the canonical desktop implementation named in the table at the
-top of this file. `study_transparency_analyzer.py` still classifies funders with
-`INDUSTRY_KEYWORDS[:6]` in `_classify_funder_by_name`, which has never been
-measured against this corpus and does not read it. Bringing the canonical Python
-onto the same footing is tracked separately; until then, "Python" in this section
-means bmlib's implementation and nothing else.
+**What #143 fixed here.** Until then, "Python" in this section meant bmlib's
+`_is_industry_funder` (`bmlib/transparency/analyzer.py`, a separate repository)
+and nothing else: the canonical desktop implementation named in the table at the
+top of this file classified funders with a positional `INDUSTRY_KEYWORDS[:6]`
+slice, never read this corpus, and had never been measured against it. It scored
+**precision 0.444 / recall 0.133** — worse than the matcher bmlib replaced. Four
+of its five false positives were public research bodies (India's Department of
+Biotechnology in three spellings, and the UK's Biotechnology and Biological
+Sciences Research Council), each of which set `industry_funding_detected`, fed
+the HIGH-risk rule, and so downgraded the quality tier of every paper they fund.
+The canonical Python now carries the calibrated lists and reads this file.
 
 Android has no funder classifier yet. When one is added it should read the same
 file and assert the same floors.
+
+**Adding a name to the corpus is not free.** Every published figure above is a
+fraction of its counts, so an edit moves precision, recall and composition on
+both platforms at once — while both suites stay green, because they would simply
+be measuring something else. `TestFunderCorpusContract` in
+`tests/test_transparency_parity.py` pins the counts, the label and source
+vocabularies, and that only ambiguous entries carry a reason, so that edit has to
+be deliberate. The corpus is also lifted byte-identical from bmlib, so a change
+here means the two repositories have drifted.
 
 ## Changing a pattern
 
@@ -114,26 +135,37 @@ cd Packages/BioMedLit && swift test --filter TransparencyParityTests
 cd android/MedicalFactChecker && ./gradlew test --tests '*TransparencyParityTest'
 ```
 
-Changing a *funder* pattern is a different workflow: edit
-`IndustryPatterns.funderNameStems` / `funderNameWords`, then re-run the
-measurement rather than a string comparison.
+Changing a *funder* pattern is a different workflow: edit the lists on **both**
+platforms — `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS` in
+`study_transparency_analyzer.py` and `IndustryPatterns.funderNameStems` /
+`funderNameWords` in `TransparencyConstants.swift` — then re-run the measurement
+rather than a string comparison.
 
 ```bash
-cd Packages/BioMedLit && swift test --filter FunderClassificationTests
-cd Packages/BioMedLit && swift test --filter FunderCorpusCompositionTests
+pytest tests/test_funder_classification.py
+cd Packages/BioMedLit && swift test --filter 'Funder|IndustryPattern'
 ```
 
-`FunderClassificationTests` holds the floors; `FunderCorpusCompositionTests` pins
-*which* names are matched, missed and wrongly matched. The floors alone cannot see
-a swap — one recognised funder traded for another leaves both metrics identical —
-and the recall floor of 0.30 against a measured 10/30 tolerates losing a true
-positive outright. Both lists in the composition test are expected to change; the
-point is that changing one is a deliberate edit with the name in the diff.
+Each platform holds the floors (`TestCorpusMeasurement`,
+`FunderClassificationTests`) and pins *which* names are matched, missed and
+wrongly matched (`TestCorpusComposition`, `FunderCorpusCompositionTests`). The
+floors alone cannot see a swap — one recognised funder traded for another leaves
+both metrics identical — and the recall floor of 0.30 against a measured 10/30
+tolerates losing a true positive outright. All three name lists are expected to
+change; the point is that changing one is a deliberate edit with the funder's
+name in the diff.
 
-`IndustryPatternStructureTests` covers the third gap: a pattern that matches
-*nothing* moves no metric, so an invalid regex, a `\b`-anchored string placed in
-the substring list, or an uppercase stem would otherwise ship green and silently
-stop flagging funders.
+`TestPatternStructure` and `IndustryPatternStructureTests` cover the third gap: a
+pattern that matches *nothing* moves no metric, so a `\b`-anchored string placed
+in the substring list (where it becomes a literal search for a backslash and a
+"b") or an uppercase stem (which can never match a lowercased name) would
+otherwise ship green and silently stop flagging funders.
+
+An invalid regex is the one case where the two platforms differ rather than
+mirror: Python raises `re.error` at classification time, a crash rather than a
+silent no-op, while Swift's `RegexHelper` turns it into `nil` via `try?` and
+skips it for good. Both suites check that every pattern compiles, which is what
+keeps the lists interchangeable despite that.
 
 The fixtures are read from this directory by path — deliberately not copied into
 per-platform test resources, since all three must read the same bytes and a copy

@@ -286,17 +286,11 @@ if trial_info.sponsor_class == 'INDUSTRY':
 
 #### Layer 3: Name Pattern Matching
 
-When DOIs aren't available, the tool uses regex patterns:
+When DOIs aren't available, `classify_funder_name()` matches the funder name.
+Government and academic patterns are checked **first** and win outright, so a
+university spin-out naming convention cannot flag its parent institution:
 
 ```python
-INDUSTRY_KEYWORDS = [
-    r'\bpharma(?:ceutical)?\b',
-    r'\bbiotech(?:nology)?\b',
-    r'\binc\.?\b',
-    r'\bcorp(?:oration)?\.?\b',
-    # ...
-]
-
 GOVERNMENT_PATTERNS = [
     r'\bnih\b',
     r'\bnational institutes? of health\b',
@@ -305,7 +299,39 @@ GOVERNMENT_PATTERNS = [
 ]
 ```
 
-**Confidence Level:** MEDIUM (0.5-0.8) - Heuristic-based
+Industry matching then uses two lists that are **different kinds of thing**. A
+stem must match *inside* a longer word ("pharmaceutic" reaching
+"Pharmaceuticals", the standard company-name plural); a whole word must not
+("inc" as a substring matches "Lincoln", "Vincent" and "province"):
+
+```python
+FUNDER_NAME_STEMS = ["pharmaceutic", "therapeutics", "laboratories"]
+
+FUNDER_NAME_WORDS = [
+    r'\bpharma\b', r'\bbiotech\b', r'\bincorporated\b', r'\binc\b',
+    r'\bcorp\b', r'\blimited\b', r'\bltd\b', r'\bgmbh\b',
+    r'\bllc\b', r'\bplc\b',
+]
+```
+
+Both lists are **calibrated against measured data**, not intuition: 417
+hand-labelled CrossRef and PubMed funder names in
+`doc/cross_platform/transparency_parity/funder_names.json`, where they score
+precision 0.909 / recall 0.333. `tests/test_funder_classification.py` re-measures
+that on every run and pins which names are matched, missed and wrongly matched.
+
+Membership is therefore evidence-driven, and the exclusions matter as much as the
+inclusions — `biotechnology` scored 0 true positives against 4 false positives,
+reaching only an Indian ministry and a UK research council, so only the bare word
+`biotech` is kept. Adding a term without measuring it is how the list regresses.
+
+Note that `INDUSTRY_KEYWORDS` is **not** used here. It holds conflict-of-interest
+*prose* phrases ("advisory board", "employee of") for Layer 4; the generic
+corporate suffixes match far too freely in running text, and the disclosure
+phrases never occur in an organisation name. Merging the two is a bug.
+
+**Confidence Level:** MEDIUM - 0.8 government/academic, 0.75 industry name,
+0.3 unrecognised
 
 #### Layer 4: Named Pharma Company Detection in COI Statements
 
