@@ -8,7 +8,35 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
-- **Python CI** (#129 landed 2026-07-20): `.github/workflows/python-tests.yml`
+- **Funder classifier parity** (#143 landed 2026-08-21): the canonical desktop
+  Python now carries the calibrated `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS`
+  ported from Swift, replacing the positional `INDUSTRY_KEYWORDS[:6]` slice, and
+  `tests/test_funder_classification.py` measures it against the shared corpus.
+  Both platforms now score **precision 0.909 / recall 0.333** with the *same* ten
+  true positives, one false positive and twenty misses, pinned by name on each
+  side. The Python it replaced scored 0.444 / 0.133 and flagged four public
+  research bodies (India's Department of Biotechnology in three spellings, the UK
+  BBSRC) as industry, which fed the HIGH-risk rule and downgraded every paper
+  they fund.
+  - **Never merge the funder lists into `INDUSTRY_KEYWORDS`.** That list is COI
+    *prose*; the corporate suffixes match far too freely in running text and the
+    disclosure phrases never occur in an org name. Pinned by
+    `test_coi_prose_phrases_stay_out_of_the_funder_lists`.
+  - **A stem and a whole word are different kinds of thing.** A stem must match
+    inside a longer word ("pharmaceutic" → "Pharmaceuticals"); a whole word must
+    not ("inc" reaches "Lincoln", "province"). Structure tests pin the anchoring,
+    the lowercasing and that no stem is a regex source — the two failure modes
+    that are otherwise *silent*, since a pattern matching nothing moves no metric.
+  - **Zero-metric entries are real entries.** `plc` scores 0 TP / 0 FP, so
+    dropping it moves neither figure nor the composition; only its own unit test
+    catches it. Mutation-verified, along with dropping a stem, unanchoring
+    `\binc\b` and uppercasing a stem.
+  - `TestFunderCorpusContract` in `tests/test_transparency_parity.py` now checks
+    `funder_names.json` itself (counts, label/source vocabularies, ambiguous
+    entries carrying a reason, name uniqueness) — it was the one fixture in the
+    parity directory that nothing read. All eight assertions mutation-verified.
+- **Python CI** (#129 landed 2026-07-20, issue closed 2026-08-21):
+  `.github/workflows/python-tests.yml`
   runs `pytest -m "not integration" --strict-markers` (557 tests, ~1 min) on every
   PR and every push to master, plus a `lint-delta` job on PRs.
 - **Swift and Android CI** (#129 completed, 2026-08-20):
@@ -173,22 +201,28 @@ its slice has landed; add a new section when handing off new work.
   Python/Swift; **reused slices must keep this** or non-ASCII input diverges.
   Python `study_transparency_analyzer.py` is the canonical reference; Swift
   `BioMedLit` and Android `domain.transparency` mirror it byte-for-byte —
-  **for the data-availability classifier**. This does *not* hold for funder
-  classification: Swift's calibrated `funderNameStems`/`funderNameWords` were
-  ported from **bmlib**, not from the canonical desktop Python, which still uses
-  `INDUSTRY_KEYWORDS[:6]` in `_classify_funder_by_name` and has never been
-  measured against the shared corpus. See #143 before assuming parity here.
+  **for the data-availability classifier**, and since #143 for the funder-name
+  classifier too. It still does *not* hold for `INDUSTRY_KEYWORDS` (COI prose),
+  which is transcribed on both platforms with nothing comparing the copies — see
+  #148.
 
 ## Potential follow-ups
 
-- **#143 — desktop Python funder classifier diverges from the parity corpus**:
-  the canonical implementation named in
-  `doc/cross_platform/transparency_parity/README.md` classifies funders with a
-  positional `INDUSTRY_KEYWORDS[:6]` slice and does not read `funder_names.json`.
-  Swift scores precision 0.909 / recall 0.333 on that corpus; the canonical Python
-  is unmeasured. Also: `tests/test_transparency_parity.py` loads only the two
-  data-availability fixtures, so the funder corpus is the one file in the parity
-  directory that nothing checks.
+- **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
+  entry is `\bpharma(?:ceutical)?s?\b`, Swift's is `\bpharma(?:ceutical)?\b`. All
+  17 other entries are byte-identical. `\b` lands before the "s", so a COI
+  statement using the plural raises the industry-ties indicator on desktop and
+  not on iOS/macOS. Nothing compares the two lists; the parity fixtures cover the
+  data-availability classifier, and the funder lists are pinned by measurement
+  instead. One-character fix, but wants a shared fixture or it recurs.
+- **#147 — `GOVERNMENT_PATTERNS[:10]` is the other positional magic slice**, and
+  it decides GOVERNMENT vs ACADEMIC sponsor type. Deliberately left alone by #143
+  because it cannot be honestly *named*: the ten it selects are US federal
+  agencies, but `fda`, `va`, `ahrq` and `pcori` sit just outside the cut, so
+  VA- and FDA-funded papers currently report as ACADEMIC. Needs a decision on
+  what the tier means before it can be a constant. Swift's
+  `governmentPatterns`/`academicPatterns` split is a *different* cut, so aligning
+  to it is a behaviour change.
 - **#146 — no real PMC JATS fixtures**: every JATS test is hand-written synthetic
   XML. The caption-host defect found reviewing #142 affected **86 of 386 real
   articles (22.3%)** while every synthetic routing test passed, and a mutation
@@ -248,6 +282,14 @@ its slice has landed; add a new section when handing off new work.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.
+- Touching a *funder* pattern is a different workflow — edit the lists on both
+  platforms, then re-run the **measurement**, not a string comparison:
+  `pytest tests/test_funder_classification.py` and
+  `cd Packages/BioMedLit && swift test --filter 'Funder|IndustryPattern'`.
+- Mutation-testing a Python source file? **Back it up with `cp`, not
+  `git checkout`** — the restore step wipes every uncommitted change in the file,
+  and the runs after the first then silently measure a tree with the feature
+  missing. Cost an implementation once already this session.
 - `pytest tests/` → 0 failures (Python is the reference).
 - `cd Packages/BioMedLit && swift test` → 0 failures.
 - `cd ios/MedicalFactChecker && swift test` → 0 failures.

@@ -223,6 +223,113 @@ INDUSTRY_KEYWORDS = [
     r'\bgrant(?:s)? from\b',
 ]
 
+# =============================================================================
+# FUNDER NAME MATCHING (issue #143)
+# =============================================================================
+#
+# Matched against structured funder names — CrossRef ``funder[].name`` and PubMed
+# ``<Grant><Agency>`` — both short org-name strings, never running prose.
+#
+# THE TWO LISTS BELOW ARE DIFFERENT KINDS OF THING, AND MERGING THEM IS A BUG.
+# A stem has to match *inside* a longer word ("pharmaceutic" reaching
+# "Pharmaceuticals"); a whole word must not ("inc" as a substring matches
+# "Lincoln", "Vincent" and "province").
+#
+# They are also deliberately separate from ``INDUSTRY_KEYWORDS`` above, which
+# holds conflict-of-interest *prose* phrases: the generic corporate suffixes
+# match far too freely in running text, while a phrase like "advisory board"
+# never occurs in a funder name.
+#
+# Membership of both lists was decided by measuring against 816 unique real names
+# sampled from CrossRef (431) and PubMed (402) — the two sources overlap — 417 of
+# them hand-labelled: the shared corpus at
+# ``doc/cross_platform/transparency_parity/funder_names.json``. The counts below
+# are from that corpus, and ``tests/test_funder_classification.py`` re-measures
+# them on every run. Swift's ``IndustryPatterns.funderNameStems`` /
+# ``funderNameWords`` carry the identical lists and read the identical corpus.
+
+#: Substring stems for funder names — matched *inside* a longer word.
+#:
+#: Every one scored at least one true positive, and each is narrower than what it
+#: replaced:
+#:
+#: * ``pharmaceutic`` — 3 TP / 1 FP. Replaces ``\bpharma(?:ceutical)?s?\b``, which
+#:   as a bare substring ("pharma") instead reached "Pharmacy", "Pharmacology" and
+#:   "Pharmacogenetics", all academic. The one false positive it does keep —
+#:   "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong
+#:   Lingyun" — is the entire reason overall precision is 0.909 rather than 1.0,
+#:   so it is worth knowing about rather than filed under "no false positives".
+#: * ``therapeutics`` — 1 TP / 0 FP.
+#: * ``laboratories`` — 1 TP / 0 FP. The plural only: "Key Laboratory" (singular)
+#:   is a Chinese state-lab form, twice in the labelled corpus and common in the
+#:   unlabelled remainder, and it must keep missing them.
+FUNDER_NAME_STEMS = [
+    "pharmaceutic",
+    "therapeutics",
+    "laboratories",
+]
+
+#: Whole-word terms for funder names — matched with word boundaries.
+#:
+#: No trailing ``\.?`` is needed: ``\b`` already sits between the last letter and
+#: a following ".", so "Inc" and "Inc." both match.
+#:
+#: The first two are the safe residue of stems the corpus disqualified — see
+#: ``FUNDER_NAME_STEMS`` for "pharma", and for "biotech": as a substring it scored
+#: 0 TP / 4 FP, reaching only "Department of Biotechnology" (an Indian ministry)
+#: and "Biotechnology and Biological Sciences Research Council" (a UK research
+#: council). "Biotechnology" names a field, not a company type; as a bare word it
+#: is a company name ("Acme Biotech"), so that form is kept.
+#:
+#: The rest are legally reserved incorporation suffixes — a public body cannot use
+#: one. Deliberately absent, each for a measured or stated reason:
+#:
+#: * ``co`` — 4 TP / 0 FP on the corpus, and excluded anyway: it collides with the
+#:   English prefix ("project co-sponsored by…"), a form the corpus does not
+#:   happen to contain. A judgement call against four measured true positives, not
+#:   a measured false positive.
+#: * ``corporation`` — 1 TP / 1 FP; US non-profits use it ("Research Corporation
+#:   for Science Advancement").
+#: * ``pty`` — 0 TP; no corpus evidence, so nothing earned.
+#: * ``ag``, ``bv``, ``nv``, ``sa`` — same, and two-letter tokens besides.
+#: * ``ab`` — 1 TP / 0 FP; passes the count but excluded because it collides with
+#:   province and country codes, and these strings carry locations, so "University
+#:   of Calgary, AB" would be a false positive the corpus cannot see. Costs one
+#:   true positive, "Roche Sweden AB".
+#: * ``labs`` — same call: "Los Alamos National Labs" is not industry. Costs
+#:   "Tempus Labs".
+#:
+#: Ties go to precision here, because ``industry_funding_detected`` feeds a
+#: HIGH-risk rule and HIGH downgrades a paper's quality tier.
+FUNDER_NAME_WORDS = [
+    r'\bpharma\b',
+    r'\bbiotech\b',
+    r'\bincorporated\b',
+    r'\binc\b',
+    r'\bcorp\b',
+    r'\blimited\b',
+    r'\bltd\b',
+    r'\bgmbh\b',
+    r'\bllc\b',
+    r'\bplc\b',
+]
+
+#: Confidence reported when a CrossRef Funder Registry DOI is a known industry
+#: funder. The registry is authoritative, so this layer short-circuits the rest.
+KNOWN_FUNDER_CONFIDENCE = 1.0
+
+#: Confidence reported when a government/academic pattern matches the name. Higher
+#: than the industry-name layer because that list names specific public bodies,
+#: while the industry lists are generic company forms.
+NON_INDUSTRY_NAME_CONFIDENCE = 0.8
+
+#: Confidence reported when a funder-name stem or whole word matches.
+INDUSTRY_NAME_CONFIDENCE = 0.75
+
+#: Confidence reported when no layer matched. The classification is "not
+#: industry", but only because nothing was recognised.
+UNKNOWN_FUNDER_CONFIDENCE = 0.3
+
 # Known pharmaceutical/biotech company names for direct matching in COI text.
 # These detect industry ties even when funding is routed through institutions.
 KNOWN_PHARMA_NAMES = [
@@ -489,6 +596,75 @@ def _label_for_pattern(pattern: str) -> str:
     return RESTRICTION_LABELS.get(pattern, pattern)
 
 
+def matches_industry_funder_name(name: str) -> bool:
+    """Whether a funder name carries an industry stem or whole-word marker.
+
+    The single predicate behind both funder sources — CrossRef ``funder[].name``
+    and PubMed ``<Grant><Agency>`` — so there is one definition to test and one to
+    measure against the labelled corpus.
+
+    Deliberately **not** applied to conflict-of-interest prose; see
+    ``INDUSTRY_KEYWORDS`` for why that is a different corpus with different
+    failure modes. Deliberately free of the public-sector precedence too, which
+    belongs to :func:`classify_funder_name` — keeping the predicate free of it is
+    what lets the layer order be tested independently of the lists.
+
+    Args:
+        name: Funder name as it arrives from the provider, in any case.
+
+    Returns:
+        True if a stem matches anywhere in the name, or one of the whole-word
+        terms matches as a word.
+    """
+    name_lower = name.lower()
+
+    if any(stem in name_lower for stem in FUNDER_NAME_STEMS):
+        return True
+    return any(re.search(pattern, name_lower) for pattern in FUNDER_NAME_WORDS)
+
+
+def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool, float]:
+    """Classify a funder as industry or non-industry from its name and DOI.
+
+    Three layers, in order:
+
+    1. A known industry funder DOI from the CrossRef Funder Registry, which is
+       authoritative and short-circuits the rest.
+    2. Government/academic name patterns, which take precedence even when a
+       corporate suffix is present in the same name — a university spin-out
+       naming convention must not flag its parent institution.
+    3. The calibrated funder-name stems and whole words.
+
+    Layer 3 is measured against the shared labelled corpus at
+    ``doc/cross_platform/transparency_parity/funder_names.json``, where it scores
+    precision 0.909 / recall 0.333. ``tests/test_funder_classification.py`` holds
+    the floors and pins which names are matched, missed and wrongly matched;
+    Swift's ``FundingAnalyzer.classifyFunder`` scores identically on the same
+    bytes.
+
+    Args:
+        name: Funder name (required; may be empty).
+        funder_doi: CrossRef Funder Registry DOI, e.g. "10.13039/100004319".
+
+    Returns:
+        Tuple of ``(is_industry, confidence)``, confidence in 0.0-1.0, indicating
+        how reliable the classification is.
+    """
+    if funder_doi is not None and funder_doi in KNOWN_INDUSTRY_FUNDER_DOIS:
+        return True, KNOWN_FUNDER_CONFIDENCE
+
+    name_lower = name.lower()
+
+    for pattern in GOVERNMENT_PATTERNS:
+        if re.search(pattern, name_lower):
+            return False, NON_INDUSTRY_NAME_CONFIDENCE
+
+    if matches_industry_funder_name(name):
+        return True, INDUSTRY_NAME_CONFIDENCE
+
+    return False, UNKNOWN_FUNDER_CONFIDENCE
+
+
 # =============================================================================
 # RISK INDICATOR STRINGS
 # =============================================================================
@@ -729,46 +905,31 @@ class CrossRefClient:
             return None
 
     def extract_funders(self, work: Dict) -> List[FunderInfo]:
-        """Extract funder information from CrossRef work."""
+        """Extract funder information from a CrossRef work.
+
+        Args:
+            work: A CrossRef ``message`` object, whose ``funder`` entries carry a
+                name and optionally a Funder Registry DOI and award numbers.
+
+        Returns:
+            One :class:`FunderInfo` per funder, classified by
+            :func:`classify_funder_name`.
+        """
         funders = []
         for funder in work.get('funder', []):
             funder_doi = funder.get('DOI')
             funder_name = funder.get('name', '')
-            award_numbers = funder.get('award', [])
-
-            # Check if known industry funder
-            is_industry = funder_doi in KNOWN_INDUSTRY_FUNDER_DOIS
-            confidence = 1.0 if is_industry else 0.0
-
-            # Check name patterns if DOI not recognized
-            if not is_industry:
-                is_industry, confidence = self._classify_funder_by_name(funder_name)
+            is_industry, confidence = classify_funder_name(funder_name, funder_doi)
 
             funders.append(FunderInfo(
                 name=funder_name,
                 funder_doi=funder_doi,
-                award_numbers=award_numbers,
+                award_numbers=funder.get('award', []),
                 is_industry=is_industry,
                 confidence=confidence
             ))
 
         return funders
-
-    def _classify_funder_by_name(self, name: str) -> Tuple[bool, float]:
-        """Classify funder as industry/non-industry based on name."""
-        name_lower = name.lower()
-
-        # Check government/academic patterns first
-        for pattern in GOVERNMENT_PATTERNS:
-            if re.search(pattern, name_lower):
-                return False, 0.8
-
-        # Check industry patterns
-        for pattern in INDUSTRY_KEYWORDS[:6]:  # Basic corporate indicators
-            if re.search(pattern, name_lower):
-                return True, 0.7
-
-        return False, 0.3  # Unknown - low confidence
 
 
 class ClinicalTrialsClient:
@@ -1715,19 +1876,12 @@ class StudyTransparencyAnalyzer:
             for funder_data in report._crossref_funders:
                 funder_doi = funder_data.get('DOI')
                 funder_name = funder_data.get('name', '')
-                award_numbers = funder_data.get('award', [])
-
-                # Check against known industry funders
-                is_industry = funder_doi in KNOWN_INDUSTRY_FUNDER_DOIS
-                confidence = 1.0 if is_industry else 0.0
-
-                if not is_industry:
-                    is_industry, confidence = self.crossref._classify_funder_by_name(funder_name)
+                is_industry, confidence = classify_funder_name(funder_name, funder_doi)
 
                 report.funders.append(FunderInfo(
                     name=funder_name,
                     funder_doi=funder_doi,
-                    award_numbers=award_numbers,
+                    award_numbers=funder_data.get('award', []),
                     is_industry=is_industry,
                     confidence=confidence
                 ))
@@ -1741,7 +1895,7 @@ class StudyTransparencyAnalyzer:
                 if any(f.name.lower() == agency.lower() for f in report.funders):
                     continue
 
-                is_industry, confidence = self.crossref._classify_funder_by_name(agency)
+                is_industry, confidence = classify_funder_name(agency)
 
                 report.funders.append(FunderInfo(
                     name=agency,

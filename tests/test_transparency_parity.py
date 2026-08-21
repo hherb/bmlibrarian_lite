@@ -38,6 +38,7 @@ All three platforms load the same two files. See the sibling ``README.md``.
 
 import json
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any, cast
 
@@ -61,6 +62,11 @@ PATTERNS_FIXTURE = "data_availability_patterns.json"
 
 #: Worked ``statement -> (level, restrictions)`` cases, asserted behaviourally.
 CASES_FIXTURE = "data_availability_cases.json"
+
+#: Hand-labelled funder names, a *measurement* corpus rather than a pattern
+#: contract. Scored by ``tests/test_funder_classification.py``; the class at the
+#: bottom of this file checks the corpus itself.
+FUNDER_CORPUS_FIXTURE = "funder_names.json"
 
 
 def _load_fixture(filename: str) -> dict[str, Any]:
@@ -292,3 +298,116 @@ class TestBehaviouralCaseParity:
         assert unexercised == [], "contract patterns with no covering case:\n  " + "\n  ".join(
             unexercised
         )
+
+
+class TestFunderCorpusContract:
+    """The third shared fixture: the labelled funder-name corpus (#143).
+
+    Unlike the two data-availability fixtures, ``funder_names.json`` does not pin
+    strings — it pins *measured quality*, and the measurement lives in
+    ``tests/test_funder_classification.py`` (Python) and
+    ``FunderClassificationTests`` / ``FunderCorpusCompositionTests`` (Swift).
+
+    What belongs here is the corpus itself. Every precision, recall and
+    composition figure on both platforms is a fraction of these counts, so a
+    silent edit to the file moves every published figure at once while both
+    suites stay green — they would simply be measuring something else. The corpus
+    is also lifted byte-identical from bmlib, so a change here means the two
+    repositories have drifted.
+
+    Until #143 this file was the one fixture in the parity directory that no
+    Python test read at all.
+    """
+
+    #: The three labels the corpus uses. ``ambiguous`` names are genuinely
+    #: undecidable from the string alone and are excluded from the metrics, kept
+    #: with a reason rather than dropped.
+    EXPECTED_LABELS = {"industry", "not_industry", "ambiguous"}
+
+    #: Which API the name was sampled from. ``both`` means it appeared in the
+    #: CrossRef and the PubMed sample.
+    EXPECTED_SOURCES = {"crossref", "pubmed", "both"}
+
+    #: Pinned composition of the labelled subset.
+    EXPECTED_TOTAL = 417
+    EXPECTED_INDUSTRY = 30
+    EXPECTED_NOT_INDUSTRY = 382
+    EXPECTED_AMBIGUOUS = 5
+
+    @staticmethod
+    def _entries() -> list[dict[str, Any]]:
+        """The labelled entries from the shared funder corpus."""
+        return cast(list[dict[str, Any]], _load_fixture(FUNDER_CORPUS_FIXTURE)["entries"])
+
+    def test_the_labelled_corpus_is_unchanged(self) -> None:
+        """Every figure both platforms publish is a fraction of these counts."""
+        entries = self._entries()
+        counts = Counter(entry["label"] for entry in entries)
+
+        assert len(entries) == self.EXPECTED_TOTAL
+        assert counts["industry"] == self.EXPECTED_INDUSTRY
+        assert counts["not_industry"] == self.EXPECTED_NOT_INDUSTRY
+        assert counts["ambiguous"] == self.EXPECTED_AMBIGUOUS
+
+    def test_every_entry_carries_a_known_label(self) -> None:
+        """An unknown label would be scored as ``not_industry`` by both platforms.
+
+        Both suites test ``label == "industry"``, so a typo silently relabels the
+        entry rather than failing, and precision moves with no visible cause.
+        """
+        assert {entry["label"] for entry in self._entries()} <= self.EXPECTED_LABELS
+
+    def test_every_entry_carries_a_known_source(self) -> None:
+        """The source records which API returns the name, and so which path it tests."""
+        assert {entry["source"] for entry in self._entries()} <= self.EXPECTED_SOURCES
+
+    def test_every_ambiguous_entry_carries_a_reason(self) -> None:
+        """Ambiguity is excluded from the metrics, so it must be argued rather than assumed.
+
+        Without the reason, an unlabelled name and a deliberately undecidable one
+        are indistinguishable, and dropping a hard case would look like curation.
+        """
+        unreasoned = [
+            entry["name"]
+            for entry in self._entries()
+            if entry["label"] == "ambiguous" and not entry.get("reason", "").strip()
+        ]
+        assert unreasoned == []
+
+    def test_only_ambiguous_entries_carry_a_reason(self) -> None:
+        """A reason on a decided entry reads as doubt the metrics do not act on."""
+        misplaced = [
+            entry["name"]
+            for entry in self._entries()
+            if entry["label"] != "ambiguous" and entry.get("reason")
+        ]
+        assert misplaced == []
+
+    def test_every_name_appears_once(self) -> None:
+        """A duplicated name would be weighted twice in precision and recall.
+
+        The composition tests on both platforms compare *sets*, so a duplicate is
+        invisible there while it moves every ratio.
+        """
+        names = [entry["name"] for entry in self._entries()]
+        duplicated = sorted({name for name in names if names.count(name) > 1})
+        assert duplicated == []
+
+    def test_the_sampled_totals_are_internally_consistent(self) -> None:
+        """The two samples overlap, so the unique total must sit between them and their sum.
+
+        The header records 431 CrossRef and 402 PubMed names de-duplicated to 816
+        unique. An edit that changes one number without the others would leave the
+        provenance describing a corpus that cannot exist.
+        """
+        sampled = _load_fixture(FUNDER_CORPUS_FIXTURE)["sampled"]
+        crossref, pubmed = sampled["crossref"], sampled["pubmed"]
+        overlap = crossref + pubmed - sampled["unique_total"]
+
+        assert 0 <= overlap <= min(crossref, pubmed)
+
+    def test_the_labelled_subset_fits_inside_the_sample(self) -> None:
+        """Not every sampled name is labelled, but no labelled name is unsampled."""
+        sampled = _load_fixture(FUNDER_CORPUS_FIXTURE)["sampled"]
+
+        assert len(self._entries()) <= sampled["unique_total"]
