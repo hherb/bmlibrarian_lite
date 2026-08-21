@@ -28,6 +28,10 @@ struct MacTransparencyDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.standard) {
+            if result.isStale {
+                staleNotice
+            }
+
             scoreHeader
             fundingSection
             coiSection
@@ -334,6 +338,26 @@ struct MacTransparencyDetailView: View {
     }
 
     // MARK: - Metadata Section
+
+    /// Banner shown when this result predates the current analyzer.
+    ///
+    /// The score is left visible rather than hidden — it is the last thing that
+    /// was actually measured — but it is marked so it is not read beside a
+    /// freshly computed one as if the two were comparable.
+    private var staleNotice: some View {
+        HStack(alignment: .top, spacing: MacSpacing.xSmall) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.caption)
+                .foregroundColor(.orange)
+            Text("Analyzed by an earlier version. Re-analyze for a comparable score.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(MacSpacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(MacOpacity.subtle))
+        .cornerRadius(MacCornerRadius.medium)
+    }
 
     private var metadataSection: some View {
         VStack(alignment: .leading, spacing: MacSpacing.xxSmall) {

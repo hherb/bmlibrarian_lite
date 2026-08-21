@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import OSLog
 
 /// BioMedLitLib: Configuration and version namespace for the BioMedLit library.
 ///
@@ -134,5 +135,51 @@ public struct BioMedLitConsoleLogger: BioMedLitLogger {
 
     public func error(_ message: String, category: BioMedLitLogCategory) {
         print("[BioMedLit:\(category.rawValue)] ERROR: \(message)")
+    }
+}
+
+/// Logger backed by the unified logging system (`os.Logger`).
+///
+/// Prefer this over ``BioMedLitConsoleLogger`` in a shipping app: `print` goes
+/// nowhere a user or a support engineer can reach, and the console logger drops
+/// `debug` entirely outside `DEBUG` builds. `os.Logger` keeps working in release,
+/// where the failures worth hearing about — an unrecognised Europe PMC
+/// availability code, a truncated parse — actually happen.
+public struct BioMedLitOSLogLogger: BioMedLitLogger {
+    /// Subsystem the messages are filed under in Console.
+    private let subsystem: String
+
+    /// Creates a logger.
+    ///
+    /// - Parameter subsystem: Reverse-DNS subsystem for Console filtering.
+    ///   Defaults to the host app's bundle identifier.
+    public init(subsystem: String? = nil) {
+        self.subsystem = subsystem
+            ?? Bundle.main.bundleIdentifier
+            ?? "com.bmlibrarian.BioMedLit"
+    }
+
+    /// Returns the `os.Logger` for one category.
+    ///
+    /// - Parameter category: The BioMedLit category to file under.
+    /// - Returns: A logger scoped to this subsystem and category.
+    private func logger(for category: BioMedLitLogCategory) -> Logger {
+        Logger(subsystem: subsystem, category: category.rawValue)
+    }
+
+    public func debug(_ message: String, category: BioMedLitLogCategory) {
+        logger(for: category).debug("\(message, privacy: .public)")
+    }
+
+    public func info(_ message: String, category: BioMedLitLogCategory) {
+        logger(for: category).info("\(message, privacy: .public)")
+    }
+
+    public func warning(_ message: String, category: BioMedLitLogCategory) {
+        logger(for: category).warning("\(message, privacy: .public)")
+    }
+
+    public func error(_ message: String, category: BioMedLitLogCategory) {
+        logger(for: category).error("\(message, privacy: .public)")
     }
 }

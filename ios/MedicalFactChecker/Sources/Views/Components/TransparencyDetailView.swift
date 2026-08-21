@@ -28,6 +28,11 @@ struct TransparencyDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Stale-analysis notice
+            if result.isStale {
+                staleNotice
+            }
+
             // Score Header
             scoreHeader
 
@@ -58,6 +63,28 @@ struct TransparencyDetailView: View {
             // Metadata
             metadataSection
         }
+    }
+
+    // MARK: - Stale Notice
+
+    /// Banner shown when this result predates the current analyzer.
+    ///
+    /// The score is left visible rather than hidden — it is the last thing that
+    /// was actually measured — but it is marked so it is not read beside a
+    /// freshly computed one as if the two were comparable.
+    private var staleNotice: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.caption)
+                .foregroundColor(.orange)
+            Text("Analyzed by an earlier version. Re-analyze for a comparable score.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(6)
     }
 
     // MARK: - Score Header
@@ -359,6 +386,33 @@ struct TransparencyDetailView: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+/// A result stamped with the current analyzer — no stale notice.
+#Preview("Current analysis") {
+    var builder = TransparencyResultBuilder(pmid: "12345678")
+    builder.title = "A Randomised Trial"
+    builder.dataSourcesUsed = ["pubmed", "crossref"]
+    return ScrollView { TransparencyDetailView(result: builder.build()).padding() }
+}
+
+/// A result stored before the analyzer was versioned — the notice this preview exists for.
+#Preview("Stale analysis") {
+    var builder = TransparencyResultBuilder(pmid: "12345678")
+    builder.title = "A Randomised Trial"
+    builder.dataSourcesUsed = ["pubmed", "crossref"]
+    let current = builder.build()
+    let stale = TransparencyResult(
+        pmid: current.pmid,
+        title: current.title,
+        transparencyScore: current.transparencyScore,
+        riskLevel: current.riskLevel,
+        dataSourcesUsed: current.dataSourcesUsed,
+        analyzerVersion: nil
+    )
+    return ScrollView { TransparencyDetailView(result: stale).padding() }
 }
 
 #endif // os(iOS)

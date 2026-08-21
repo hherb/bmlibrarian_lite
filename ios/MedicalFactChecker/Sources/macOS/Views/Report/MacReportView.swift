@@ -1108,7 +1108,13 @@ struct MacDocumentDetailSheet: View {
 
             if let result = document.transparencyResult {
                 MacTransparencyDetailView(result: result)
-            } else if document.pmid.isEmpty && document.doi == nil {
+
+                // A stale result keeps its score on screen but has to be
+                // re-runnable, or the notice above names a fix the user cannot apply.
+                if document.transparencyAnalysisIsStale, document.canAnalyzeTransparency {
+                    transparencyAnalyzeButton(title: "Re-analyze")
+                }
+            } else if !document.canAnalyzeTransparency {
                 HStack(spacing: MacSpacing.standard) {
                     Image(systemName: "info.circle")
                         .foregroundColor(.secondary)
@@ -1117,25 +1123,34 @@ struct MacDocumentDetailSheet: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                HStack(spacing: MacSpacing.standard) {
-                    Button(action: analyzeTransparency) {
-                        if isLoadingTransparency {
-                            ProgressView()
-                                .scaleEffect(MacScale.progressViewSmall)
-                        } else {
-                            Label("Analyze Transparency", systemImage: "shield.checkered")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isLoadingTransparency)
+                transparencyAnalyzeButton(title: "Analyze Transparency")
+            }
+        }
+    }
 
-                    if let error = transparencyError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .lineLimit(2)
-                    }
+    /// Button that runs transparency analysis, with any error beside it.
+    ///
+    /// - Parameter title: Button label — "Analyze Transparency" for a first run,
+    ///   "Re-analyze" when replacing a result from an earlier analyzer.
+    @ViewBuilder
+    private func transparencyAnalyzeButton(title: String) -> some View {
+        HStack(spacing: MacSpacing.standard) {
+            Button(action: analyzeTransparency) {
+                if isLoadingTransparency {
+                    ProgressView()
+                        .scaleEffect(MacScale.progressViewSmall)
+                } else {
+                    Label(title, systemImage: "shield.checkered")
                 }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isLoadingTransparency)
+
+            if let error = transparencyError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
             }
         }
     }
@@ -1154,7 +1169,12 @@ struct MacDocumentDetailSheet: View {
                     fullText: document.fullTextContent
                 )
                 await MainActor.run {
-                    document.storeTransparencyResult(result)
+                    // A failed write leaves the previous result in place; saying so
+                    // is the difference between "this did not work" and a spinner
+                    // that stops with the stale notice still on screen.
+                    if !document.storeTransparencyResult(result) {
+                        transparencyError = "Analysis completed but could not be saved."
+                    }
                     isLoadingTransparency = false
                 }
             } catch {

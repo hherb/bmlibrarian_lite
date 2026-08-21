@@ -235,19 +235,32 @@ final class JATSXMLParserIntegrationTests: XCTestCase {
     }
 
     /// Search Europe PMC and extract the PMC ID from the first result.
+    ///
+    /// Retried on an *empty* result, not only on a thrown error. `search` already
+    /// retries transient failures, but a rate-limited Europe PMC can answer with a
+    /// well-formed zero-hit response instead, and this suite makes enough calls in
+    /// sequence to provoke that: the whole run failed here for an article the same
+    /// query resolves on its own moments later. Without this the nightly job would
+    /// report a service hiccup as a parser regression.
     private func resolveIdentifier(query: String) async throws -> String {
         let service = EuropePMCService()
-        let result = try await service.search(
-            query: query,
-            pageSize: 1,
-            requireAbstract: false
-        )
-        guard let firstArticle = result.articles.first,
-              let pmcId = firstArticle.pmcId, !pmcId.isEmpty else {
-            XCTFail("No PMC ID found for query: \(query)")
-            throw URLError(.resourceUnavailable)
+        do {
+            return try await RetryHelper.retry(config: .networkDefault) {
+                let result = try await service.search(
+                    query: query,
+                    pageSize: 1,
+                    requireAbstract: false
+                )
+                guard let firstArticle = result.articles.first,
+                      let pmcId = firstArticle.pmcId, !pmcId.isEmpty else {
+                    throw URLError(.resourceUnavailable)
+                }
+                return pmcId
+            }
+        } catch {
+            XCTFail("No PMC ID found for query: \(query) — \(error)")
+            throw error
         }
-        return pmcId
     }
 
     // MARK: - Identifier Resolution Tests (PMID)

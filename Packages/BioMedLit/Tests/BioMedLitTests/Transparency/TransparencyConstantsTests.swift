@@ -138,14 +138,42 @@ final class TransparencyConstantsTests: XCTestCase {
         XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "Medical Center grant"))
     }
 
-    func testCorporateSuffixesMatch() {
-        let patterns = IndustryPatterns.corporateSuffixes
+    func testFunderNameWordsMatchAsWholeWords() {
+        let patterns = IndustryPatterns.funderNameWords
 
         XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "Pfizer Inc"))
+        XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "Genentech Inc."))
         XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "Novartis Corp"))
         XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "AstraZeneca Ltd"))
         XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "Boehringer Ingelheim GmbH"))
-        XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "GlaxoSmithKline PLC"))
+        XCTAssertTrue(RegexHelper.anyMatch(patterns: patterns, in: "Flatiron Health LLC"))
+
+        // Word boundaries, not substrings: these are the collisions the
+        // corpus measured and the list is calibrated to avoid.
+        XCTAssertFalse(RegexHelper.anyMatch(patterns: patterns, in: "Lincoln Medical Center"))
+        XCTAssertFalse(RegexHelper.anyMatch(patterns: patterns, in: "Department of Biotechnology"))
+        XCTAssertFalse(RegexHelper.anyMatch(
+            patterns: patterns,
+            in: "Research Corporation for Science Advancement"
+        ))
+    }
+
+    func testFunderNameStemsMatchInsideLongerWords() {
+        let stems = IndustryPatterns.funderNameStems
+
+        func matches(_ name: String) -> Bool {
+            stems.contains { name.lowercased().contains($0) }
+        }
+
+        XCTAssertTrue(matches("Vertex Pharmaceuticals Incorporated"))
+        XCTAssertTrue(matches("Moderna Therapeutics"))
+        XCTAssertTrue(matches("Abbott Laboratories"))
+
+        // The plural only — "Key Laboratory" is a Chinese state-lab form.
+        XCTAssertFalse(matches("Key Laboratory of Molecular Biology"))
+        // Narrower than "pharma", which reached these academic names.
+        XCTAssertFalse(matches("School of Pharmacy"))
+        XCTAssertFalse(matches("Institute of Pharmacology"))
     }
 
     // MARK: - COIPatterns Tests
