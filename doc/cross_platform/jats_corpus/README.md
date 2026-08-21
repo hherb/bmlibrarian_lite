@@ -107,11 +107,22 @@ nesting, figure and table labels, caption text, graphic URLs, reference counts.
 |---|---|
 | #154 | `"affiliationCount": 0` on every author of every article — affiliations are never captured |
 | #155 | `PMC12755737`: 72 references and `PMC13294358`: 23, with `withAuthors`/`withDOI`/`withPMID`/`withYear` all 0 |
-| #156 | `PMC8754430`: 9 figures where the XML has 12; `Figure 2.`, `Figure 4.`, `Figure 5.` are absent |
-| #157 | `PMC12661592`: the single table's label is `"a"`, from its footnote, not `"Table 1."` |
-| #161 | `PMC12755737` and `PMC13294358`: `graphicURL` ends `.gif` — the thumbnail, not the full image |
 | #144 | `unmodelledCaptionDrops` — 36, 6, 2 and 1 on the four articles with `<supplementary-material>`, `<media>` or `<boxed-text>` captions, 0 elsewhere. 21 captions, counted per caption child element |
 | #162 | `PMC13295835` and `PMC13294358`: `markdownDigest` pins a rendering in which `rowspan` cells are misaligned, because the parser never reads `rowspan` |
+
+**Fixed, and the digests moved to prove it.** Kept here because the *shape* is
+what earns these articles their place in the corpus, and a future regression
+would land in exactly these values again:
+
+| Issue | Fixed by | Moved |
+|---|---|---|
+| #156 | a nested `<fig>` no longer drops its parent | `PMC8754430`: 9 figures → 12, with `Figure 2.`, `Figure 4.` and `Figure 5.` restored in document order ahead of their own supplements; six empty paragraphs left three body sections, which is the `<p>` eLife wraps each supplement in, previously read as article prose once the inner `</fig>` cleared the figure flag |
+| #157 | a `<fn>`'s own `<label>` no longer overwrites the exhibit's | `PMC12661592`: the table's label `"a"` → `"Table 1."` |
+| #161 | the first non-thumbnail `<graphic>` wins | `PMC12755737` (4 figures) and `PMC13294358` (2): `graphicURL` `.gif` → `.jpg` |
+
+`corpus.json`'s `figureCount` is compared as an **equality** since #156. It was an
+upper bound while the defect stood, and an upper bound is satisfied by any parser
+that loses figures.
 
 **Characterised and believed correct, but worth knowing:**
 

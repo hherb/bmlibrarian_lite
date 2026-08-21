@@ -428,6 +428,15 @@ struct FigureBuilder {
     var label = ""
     var caption = ""
     var graphicHref = ""
+    /// Whether `graphicHref` came from a `<graphic>` the deposit marks as a
+    /// thumbnail.
+    ///
+    /// A figure commonly carries several `<graphic>` — 58.0% of the 959 figures
+    /// in the survey behind `doc/cross_platform/jats_corpus/` — and the parser
+    /// has to choose one. Recorded so a thumbnail can be held provisionally and
+    /// given up the moment a full image arrives, whichever order the publisher
+    /// deposited them in (#161).
+    var graphicIsThumbnail = false
     var footnotes: [String] = []
 
     func build() -> JATSFigureInfo {

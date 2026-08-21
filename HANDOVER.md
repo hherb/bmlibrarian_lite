@@ -8,81 +8,93 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **JATS exhibit routing** (#156/#157/#161 landed 2026-08-21): the first three of
+  the six defects the corpus found. All three were the same mistake — a piece of
+  markup routed on *ambient* parser state rather than on the element it actually
+  belongs to — and the corpus digests moved to prove each fix.
+  - **#156, a nested `<fig>` dropped its parent.** `currentFigure` was a single
+    slot, so eLife's figure supplements overwrote the figure they belong to and
+    the outer `</fig>` found nothing to build; `inFigure` was cleared by the inner
+    close too, so the parent's remaining content was read as article prose. Now a
+    stack, with `inFigure` derived from it — the `subArticleDepth` lesson, third
+    time. `PMC8754430`: **9 figures → 12**, and six empty paragraphs left three
+    body sections (the `<p>` eLife wraps each supplement in; scalar counts did not
+    move, which is how you can tell nothing real was dropped).
+    - **Slot reservation is the load-bearing half.** A figure is built at its end
+      tag but must be *listed* at its start, or every supplement precedes its own
+      parent. `figureSlots` reserves the entry on open and fills it on close;
+      pop-and-append passes "the parent survives" and fails document order.
+      Mutation-verified separately from the stack itself.
+  - **#157, a `<fn>`'s own `<label>` overwrote the exhibit's.** A footnote marker
+    — "a", "b", "*" — is indistinguishable from a table number when `<label>` is
+    routed on `inTableWrap` alone, and the *last* marker won. `figureFootnoteDepth`
+    was already tracked and already consulted by the `<p>` branch four lines below;
+    the `<label>` branch simply never got it. `PMC12661592`: label `"a"` →
+    `"Table 1."`. The marker itself is dropped — the footnotes are plain strings,
+    so there is nowhere to put it — rather than misfiled.
+  - **#161, the first non-thumbnail `<graphic>` wins.** Assignment was
+    unconditional, so PLOS and Springer's thumbnail-last deposits resolved to a
+    `.gif` thumb. A thumbnail is now held provisionally and given up when a full
+    image arrives, so **both deposit orders** work. `PMC12755737` (4 figures) and
+    `PMC13294358` (2): `.gif` → `.jpg`.
+    - **Each attribute needs a test in both orders**, and this is not obvious:
+      with the thumbnail last, plain first-wins already resolves the image, so
+      that test passes with the attribute dropped from the predicate entirely.
+      Mutation caught exactly that — `specific-use` was uncovered until a
+      thumbnail-first case was added. Thumbnail-ness reads `content-type` **or**
+      `specific-use` containing `thumb`; never the file extension, since a `.gif`
+      is a thumbnail at PLOS and the only image elsewhere.
+  - **`corpus.json`'s `figureCount` is now compared as an equality.** It was an
+    upper bound while #156 stood — a bound every figure-losing parser satisfies.
+    Tighten the accommodation when you fix the defect it accommodates.
+  - Eight mutations, each failing exactly its own test. The two that would
+    otherwise have shipped uncovered: `specific-use` (above) and pop-and-append
+    ordering.
+  - **Both sibling parsers replicate all three, and bmlib was measured, not
+    assumed** — running its parser over the same corpus files reproduced Swift's
+    numbers exactly (9/12, `"a"`, four + two `.gif`). Lodged as bmlib #115/#116/#117.
+    Android is a source read only, because #121 makes it unrunnable offline —
+    lodged as **#165**, which also notes that Kotlin's caption routing is still the
+    pre-#142 shape.
 - **Real PMC JATS corpus** (#146 landed 2026-08-21): seven open-access Europe PMC
-  articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with
-  a stored structural digest, parsed offline by `JATSRealCorpusTests` on every
-  PR. Read that directory's `README.md` before touching it.
-  - **The digest is a characterisation, not a specification.** It records what
-    the parser does today, seven known-wrong behaviours included (#144 and #162
-    joined the five below during review). A digest change
-    is a prompt to read the diff, never by itself proof of a regression *or* of a
-    fix. Two tests put a floor under it:
-    `testEveryArticleClearsTheSpecificationFloor` asserts what must hold for any
-    real article whatever the digest says, and
-    `testTheManifestAgreesWithTheParsedArticle` checks identifiers against values
-    hand-transcribed into `corpus.json` — the one guard that survives a blind
-    regeneration.
-  - **Hand-checking the digests is the step that pays.** It found five real
-    defects — #154, #155, #156, #157, #161 — each then confirmed against a
-    225-article survey, and PR review found #162. Generating a digest and
-    committing it unread would have found none of them and frozen all six as
+  articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with a
+  stored structural digest, parsed offline by `JATSRealCorpusTests` on every PR.
+  **Read that directory's `README.md` before touching it** — it carries the full
+  rationale, the regeneration protocol, the licence position and the survey
+  figures. In short: the digest is a *characterisation*, not a specification, so a
+  digest change is a prompt to read the diff and never by itself proof of a
+  regression *or* a fix; a specification floor plus values hand-transcribed into
+  `corpus.json` (independently of the parser) are what a blind regeneration cannot
+  launder; regeneration always fails, names what it rewrote, and writes nothing in
+  CI; the bytes are never edited.
+  - **Hand-checking the digests is the step that pays.** It found five defects —
+    #154, #155, #156, #157, #161 — and PR review found #162. Generating a digest
+    and committing it unread would have found none of them and frozen all six as
     expectations. #161 was invisible until review replaced a `hasGraphic` boolean
-    with the resolved URL; #162 was invisible until it replaced a row count with a
-    hash of the rendered markdown.
-  - **A regeneration run always fails**, naming what it rewrote, and in CI fails
-    *without writing anything*. It previously asserted, then rewrote all seven
-    digests anyway — the assertion did not stop the loop, so the guard performed
-    the act it existed to prevent.
-  - **What a blind regeneration can still launder, and what it cannot.** It used
-    to turn all of these green: caption text leaking into section prose (the #142
-    defect), replaced titles, filler abstracts, wiped figure captions, a reversed
-    bibliography, reversed author surnames. `corpus.json` now carries `title`,
-    `volume`, `authorCount`, `figureCount`, `tableCount` and `referenceCount`
-    read off the XML **independently of `JATSXMLParser`**, and the specification
-    floor now asserts body prose, a DOI and non-empty figure/table captions. Those
-    close all six. Transcribe those values by hand for any new article — copied
-    from the parser they are worth nothing — and note that
-    `testEveryEntryRecordsItsProvenance` rejects an entry that leaves them empty,
-    because empty compares equal to an empty parse.
-  - **`testParsingReportsNoContentLoss` only hears what the logger records.** The
-    parser announces discarded captions at `debug`, and the recorder ignored
-    `debug` and `info`, so the corpus dropped 21 of its 62 captions on every run
-    under a green test of that name. It now records every level, asserts only the
-    problem levels empty, pins the drops per article as `unmodelledCaptionDrops`,
-    and ends with a positive control — without which the test passes just as
-    happily with the logger never installed.
-  - **The fixture walk stops at the checkout root**, in both
-    `JATSRealCorpusTests` and `TransparencyParityTests` — they must not drift.
-    Both used to climb to `/`, and worktrees live under `.claude/worktrees/`
-    *inside* the main checkout, so `swift test` in a worktree validated that
-    branch's code against the main checkout's fixtures and reported success.
-    Verified: a worktree with the corpus removed now fails all 10 corpus tests
-    with "could not locate doc/cross_platform/jats_corpus", where it previously
-    passed all of them.
-  - **Never edit the bytes.** `testCorpusBytesAreUnmodified` pins each file's
-    SHA-256 and `.gitattributes` keeps them out of line-ending translation.
-    `testTheCorpusHasNotShrunk` pins the article count: every other test loops
-    over the manifest, so an emptied one asserted nothing and passed in 2 ms.
-  - Open follow-ups from the review: **#163** (digest JSON key naming and a
-    schema version — settle before Android reads these files under #121; use
-    explicit `CodingKeys`, since `keyEncodingStrategy` does not round-trip
-    `withDOI`) and **#164** (the 225-article survey exists only as prose, so no
-    replacement article can be measured against it).
-  - **Count the caption's parent, not the element.** The first five articles were
-    chosen by counting `<media>`/`<boxed-text>` *elements*, so the corpus claimed
-    all five caption hosts while covering three. Two CC-BY articles were added in
-    review to make it true.
-  - **Nested `<sub-article>` does not occur in the wild** — 0 of 225 articles,
-    while 69 carry sub-articles at depth 1. So the `subArticleDepth` counter→flag
-    mutation passes the real corpus. That line is held by
-    `JATSNestingTests.testNestedSubArticleTailIsStillExcluded`, which claimed the
-    guard for months without providing it: its outer tail held only loose `<p>`,
-    dropped for an unrelated reason. It now carries a `<sec>` and is the sole
-    test that fails under the mutation.
-  - Verified load-bearing: reverting the caption-host fix fails the corpus on 3
-    of 7 articles; reversing body sections, reversing references, corrupting a
-    graphic URL and blanking abstract prose are each caught, and each passed
-    before review hardened the digest.
+    with the resolved URL; #162 until it replaced a row count with a hash of the
+    rendered markdown. Neither figure moved under the value it replaced.
+  - **Two traps that live only here, because the README does not carry them:**
+    - **The fixture walk stops at the checkout root**, in both `JATSRealCorpusTests`
+      and `TransparencyParityTests` — they must not drift. Both used to climb to
+      `/`, and worktrees live under `.claude/worktrees/` *inside* the main
+      checkout, so `swift test` in a worktree validated that branch's code against
+      the main checkout's fixtures and reported success.
+    - **`testParsingReportsNoContentLoss` only hears what the logger records.** The
+      parser announces discarded captions at `debug`, and the recorder ignored
+      `debug` and `info`, so the corpus dropped 21 of its 62 captions on every run
+      under a green test of that name. It now records every level, asserts only the
+      problem levels empty, pins the drops as `unmodelledCaptionDrops`, and ends
+      with a positive control — without which it passes just as happily with the
+      logger never installed.
+  - **Nested `<sub-article>` does not occur in the wild** — 0 of 225 articles, 69 at
+    depth 1 — so the `subArticleDepth` counter→flag mutation passes the real corpus.
+    That line is held by `JATSNestingTests.testNestedSubArticleTailIsStillExcluded`,
+    synthetic *because* the shape is absent from real input.
+  - Open follow-ups from the review: **#163** (digest JSON key naming and a schema
+    version — settle before Android reads these files under #121; use explicit
+    `CodingKeys`, since `keyEncodingStrategy` does not round-trip `withDOI`) and
+    **#164** (the 225-article survey exists only as prose, so no replacement
+    article can be measured against it).
 - **Funder classifier parity** (#143 landed 2026-08-21): the canonical desktop
   Python now carries the calibrated `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS`
   ported from Swift, replacing the positional `INDUSTRY_KEYWORDS[:6]` slice, and
@@ -334,12 +346,15 @@ its slice has landed; add a new section when handing off new work.
   not on iOS/macOS. Nothing compares the two lists; the parity fixtures cover the
   data-availability classifier, and the funder lists are pinned by measurement
   instead. One-character fix, but wants a shared fixture or it recurs.
-- **#154, #155, #156, #157, #161, #162 — six JATS parser defects the corpus
-  found**, the first five confirmed against a 225-article survey, all still open. Fixing any of them
-  changes `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the
-  evidence — read it rather than regenerating past it. Each likely replicates in
-  Android's `util.jats.JATSXMLParser` and in bmlib, which share this parser's
-  ancestry; check all three before calling a fix complete.
+  #147 added `sponsor_patterns.json` for the government/academic lists, which is
+  the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
+- **#154, #155, #162 — the JATS parser defects the corpus found that are still
+  open** (#156, #157 and #161 landed; see above). Fixing any of them changes
+  `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the evidence —
+  read it rather than regenerating past it. Each replicates in Android's
+  `util.jats.JATSXMLParser` and in bmlib, which share this parser's ancestry;
+  check all three before calling a fix complete, and prefer *running* the sibling
+  parser over the corpus to reading its source where you can.
   - **#154 — author affiliations are never captured.** `currentAffiliations` is
     written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
     98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
@@ -348,24 +363,12 @@ its slice has landed; add a new section when handing off new work.
   - **#155 — `<mixed-citation>` yields no structured reference metadata.** 80.9%
     of articles, **74.6% of all real references**. The citation string survives,
     so it degrades quietly.
-  - **#156 — a nested `<fig>` drops the parent figure.** 19.6% of articles;
-    `currentFigure` is a single slot where `subArticleDepth` and the
-    `contrib-group` role stack already learned otherwise in #142.
-  - **#157 — a `<table-wrap-foot><fn><label>` overwrites the table's label.**
-    13.2% of real tables. `figureFootnoteDepth` already guards the `<p>` branch
-    in the same switch; the `<label>` branch never got it.
-  - **#161 — a figure with several `<graphic>` resolves to the thumbnail.**
-    Last-write-wins, ignoring `content-type`, so **52.9% of real figures** point
-    at a `.gif` thumb instead of the image. A `hasGraphic` boolean hid it
-    completely; storing the URL exposed it on the first hand-check.
   - **#162 — `rowspan` is never read.** `grep -rn rowspan Sources/` returns
     nothing: a spanning cell contributes to its first row only, every later row is
     a cell short, and `padRow` quietly pads the gap so the columns after it shift.
     11 real cells in the corpus. `markdownRowCount` could never see it — a
     rowspan misalignment does not change the row count — which is why the digest
     now stores a `markdownDigest` hash of the rendering instead.
-  (#147 added `sponsor_patterns.json` for the government/academic lists, which is
-  the same shape of guard — `INDUSTRY_KEYWORDS` still has none.)
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry `\bnci\b`, `\bniaid\b`, `\bnhlbi\b`,
   `\bnimh\b` but no singular "National Institute of X" form, while CrossRef
@@ -436,6 +439,13 @@ its slice has landed; add a new section when handing off new work.
   platforms, then re-run the **measurement**, not a string comparison:
   `pytest tests/test_funder_classification.py` and
   `cd Packages/BioMedLit && swift test --filter 'Funder|IndustryPattern'`.
+- Touching the JATS parser? The corpus digests are *expected* to move. Run
+  `cd Packages/BioMedLit && swift test --filter JATSRealCorpusTests`, read what it
+  names, then regenerate with `UPDATE_JATS_DIGESTS=1` and read
+  `git diff doc/cross_platform/jats_corpus/` line by line — that diff is the
+  evidence a fix worked, and regenerating past it is how a regression becomes a
+  committed expectation. Then check the sibling parsers: bmlib's is Python and can
+  be **run** over the same corpus files, which beats reading it.
 - Mutation-testing a Python source file? **Back it up with `cp`, not
   `git checkout`** — the restore step wipes every uncommitted change in the file,
   and the runs after the first then silently measure a tree with the feature

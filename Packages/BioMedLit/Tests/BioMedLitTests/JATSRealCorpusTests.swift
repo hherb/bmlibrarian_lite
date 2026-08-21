@@ -225,9 +225,10 @@ final class JATSRealCorpusTests: XCTestCase {
         let authorCount: Int
         /// `<fig>` elements outside any `<sub-article>`.
         ///
-        /// Compared as an upper bound, not an equality: #156 drops the parent of a
-        /// nested figure, so `PMC8754430` legitimately parses 9 of its 12 today.
-        /// When #156 lands this becomes an equality for every article.
+        /// Compared as an equality since #156 landed. It was an upper bound while
+        /// a nested `<fig>` dropped its parent — `PMC8754430` parsed 9 of its 12 —
+        /// and an upper bound cannot tell a parser that misses figures from one
+        /// that finds them all, which is the whole of what this number is for.
         let figureCount: Int
         /// `<table-wrap>` elements outside any `<sub-article>`.
         let tableCount: Int
@@ -1320,14 +1321,16 @@ final class JATSRealCorpusTests: XCTestCase {
                     article.references.count, entry.referenceCount,
                     "\(entry.pmcId): reference count"
                 )
-                // An upper bound while #156 stands: a nested `<fig>` drops its
-                // parent, so eLife parses 9 of its 12. The floor test asserts the
-                // other end — that an article with figures parses some.
-                XCTAssertLessThanOrEqual(
+                // Hand-transcribed from the XML, so this is the one figure count
+                // in the corpus that a blind digest regeneration cannot move.
+                // Equality since #156: while a nested `<fig>` dropped its parent
+                // this had to be an upper bound, which every figure-losing parser
+                // satisfies.
+                XCTAssertEqual(
                     article.figures.count, entry.figureCount,
                     """
-                    \(entry.pmcId): parsed more figures than the XML has <fig> elements, \
-                    so something is being counted twice
+                    \(entry.pmcId): parsed \(article.figures.count) figures where the XML \
+                    has \(entry.figureCount) <fig> elements outside any <sub-article>
                     """
                 )
             } catch {
