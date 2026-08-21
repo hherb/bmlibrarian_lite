@@ -51,10 +51,14 @@ its slice has landed; add a new section when handing off new work.
     problem levels empty, pins the drops per article as `unmodelledCaptionDrops`,
     and ends with a positive control — without which the test passes just as
     happily with the logger never installed.
-  - **The corpus walk stops at the checkout root.** It used to climb to `/`, and
-    worktrees live under `.claude/worktrees/` *inside* the main checkout, so
-    `swift test` in a worktree validated that branch's parser against master's
-    fixtures and reported success.
+  - **The fixture walk stops at the checkout root**, in both
+    `JATSRealCorpusTests` and `TransparencyParityTests` — they must not drift.
+    Both used to climb to `/`, and worktrees live under `.claude/worktrees/`
+    *inside* the main checkout, so `swift test` in a worktree validated that
+    branch's code against the main checkout's fixtures and reported success.
+    Verified: a worktree with the corpus removed now fails all 10 corpus tests
+    with "could not locate doc/cross_platform/jats_corpus", where it previously
+    passed all of them.
   - **Never edit the bytes.** `testCorpusBytesAreUnmodified` pins each file's
     SHA-256 and `.gitattributes` keeps them out of line-ending translation.
     `testTheCorpusHasNotShrunk` pins the article count: every other test loops
