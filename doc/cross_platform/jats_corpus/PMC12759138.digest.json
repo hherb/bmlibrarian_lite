@@ -269,8 +269,10 @@
       "label" : "Figure 3."
     }
   ],
+  "htmlScalarCount" : 84091,
   "issue" : "",
   "journal" : "Digital Health",
+  "markdownScalarCount" : 69461,
   "pages" : "",
   "pmcId" : "PMC12759138",
   "pmid" : "41488273",
@@ -333,9 +335,14 @@
       "54|1989|",
       "55|2015|10.4018/978-1-4666-8156-9.ch016"
     ],
+    "withArticleTitle" : 54,
     "withAuthors" : 55,
+    "withCitation" : 55,
     "withDOI" : 50,
+    "withFirstPage" : 40,
     "withPMID" : 48,
+    "withSource" : 55,
+    "withVolume" : 53,
     "withYear" : 54
   },
   "tables" : [
@@ -345,6 +352,8 @@
 
       ],
       "label" : "Table 1.",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "2d72a925a5d8a6c877da38c2416da961270fe0bcecb56905c38ff4b01ab00c62",
       "markdownRowCount" : 7
     },
     {
@@ -353,6 +362,8 @@
 
       ],
       "label" : "Table 2.",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "4c39cf3d1cf6209b3320b8b8a1369142713aeb48c6cf0827e8a931218a57ec26",
       "markdownRowCount" : 7
     },
     {
@@ -361,6 +372,8 @@
 
       ],
       "label" : "Table 3.",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "559a3cd111abe9472d88fb7ef918579e5fbd9b22623b844b8b0f667a36efdd75",
       "markdownRowCount" : 7
     },
     {
@@ -369,6 +382,8 @@
 
       ],
       "label" : "Table 4.",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "8ab602c93b14e836661e20b8ab7ca35ab7c7851c5f1b313adbd8a21c76bc48ff",
       "markdownRowCount" : 7
     },
     {
@@ -377,6 +392,8 @@
 
       ],
       "label" : "Table 5.",
+      "markdownColumnCount" : 4,
+      "markdownDigest" : "1f05594163b02571b386c17a579c269dfdff46418bb6b199eb58571bb1baa6a4",
       "markdownRowCount" : 12
     },
     {
@@ -385,6 +402,8 @@
 
       ],
       "label" : "Table 6.",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "c6bc92463b0bb0b994e093ae406241f1b6c7138a9641bd21f2dc538737f3ed72",
       "markdownRowCount" : 12
     },
     {
@@ -393,6 +412,8 @@
 
       ],
       "label" : "Table 7.",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "780fc95e0e5cac0c722997164e1473fea75a521333cdbc80d007ba23b9d928b2",
       "markdownRowCount" : 12
     },
     {
@@ -401,10 +422,13 @@
 
       ],
       "label" : "Table 8.",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "5400e874dc8ff430f2e99ecf2628736b11c52c464d1dca9719c8980dbec6219a",
       "markdownRowCount" : 12
     }
   ],
   "title" : "The evolving landscape of artificial intelligence in patient education: A bibliometric knowledge mapping study",
+  "unmodelledCaptionDrops" : 2,
   "volume" : "12",
   "year" : "2026"
 }

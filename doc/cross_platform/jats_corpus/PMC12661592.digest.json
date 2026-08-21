@@ -33,8 +33,10 @@
   "figures" : [
 
   ],
+  "htmlScalarCount" : 15279,
   "issue" : "",
   "journal" : "JMIR Formative Research",
+  "markdownScalarCount" : 13772,
   "pages" : "",
   "pmcId" : "PMC12661592",
   "pmid" : "41313195",
@@ -52,9 +54,14 @@
       "9.|2024|10.1093/jamia/ocae060",
       "10.|2025|10.2196/63058"
     ],
+    "withArticleTitle" : 7,
     "withAuthors" : 8,
+    "withCitation" : 10,
     "withDOI" : 6,
+    "withFirstPage" : 3,
     "withPMID" : 7,
+    "withSource" : 10,
+    "withVolume" : 5,
     "withYear" : 8
   },
   "tables" : [
@@ -64,10 +71,13 @@
         "AI: artificial intelligence."
       ],
       "label" : "a",
+      "markdownColumnCount" : 2,
+      "markdownDigest" : "42cd86baa13fa1fca0633ed8ef727368c02470411dad18b35fa96a2cd92169e3",
       "markdownRowCount" : 8
     }
   ],
   "title" : "Evaluating the Role of Artificial Intelligence in Breast Self-Examination",
+  "unmodelledCaptionDrops" : 0,
   "volume" : "9",
   "year" : "2025"
 }

@@ -263,8 +263,10 @@
       "label" : "Fig. 2"
     }
   ],
+  "htmlScalarCount" : 35507,
   "issue" : "",
   "journal" : "Scientific Reports",
+  "markdownScalarCount" : 32335,
   "pages" : "19569",
   "pmcId" : "PMC13294358",
   "pmid" : "42342844",
@@ -295,9 +297,14 @@
       "22.||",
       "23.||"
     ],
+    "withArticleTitle" : 0,
     "withAuthors" : 0,
+    "withCitation" : 23,
     "withDOI" : 0,
+    "withFirstPage" : 0,
     "withPMID" : 0,
+    "withSource" : 0,
+    "withVolume" : 0,
     "withYear" : 0
   },
   "tables" : [
@@ -307,10 +314,13 @@
 
       ],
       "label" : "Table 1",
+      "markdownColumnCount" : 7,
+      "markdownDigest" : "9e9f5a3babb7d94f8991e571c6e68450c6795427f34561e1364674bbd1360dda",
       "markdownRowCount" : 13
     }
   ],
   "title" : "Differences in canine serum N-glycosylation pattern during infection and pregnancy",
+  "unmodelledCaptionDrops" : 6,
   "volume" : "16",
   "year" : "2026"
 }

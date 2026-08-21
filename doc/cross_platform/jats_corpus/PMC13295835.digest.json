@@ -186,8 +186,10 @@
       "label" : "Figure 2"
     }
   ],
+  "htmlScalarCount" : 35779,
   "issue" : "6",
   "journal" : "BMJ Open",
+  "markdownScalarCount" : 31019,
   "pages" : "",
   "pmcId" : "PMC13295835",
   "pmid" : "42336790",
@@ -223,9 +225,14 @@
       "27|2014|10.1289/ehp.1206132",
       "28|2004|10.1136/oem.2003.012047"
     ],
+    "withArticleTitle" : 28,
     "withAuthors" : 28,
+    "withCitation" : 0,
     "withDOI" : 27,
+    "withFirstPage" : 25,
     "withPMID" : 24,
+    "withSource" : 28,
+    "withVolume" : 26,
     "withYear" : 28
   },
   "tables" : [
@@ -235,10 +242,13 @@
         "COPD, chronic obstructive pulmonary disease; ICD-10, International Classification of Diseases, 10th revision ."
       ],
       "label" : "Table 1",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "12668ed40a6de43486ce07638890dc20c4778ec2839a466b42ee919d99ad0843",
       "markdownRowCount" : 15
     }
   ],
   "title" : "Extreme heat and cause-specific risk of hospital admission in the adult population in England: a case time series analysis",
+  "unmodelledCaptionDrops" : 1,
   "volume" : "16",
   "year" : "2026"
 }

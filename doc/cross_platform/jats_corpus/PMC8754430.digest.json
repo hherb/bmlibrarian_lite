@@ -225,8 +225,10 @@
       "label" : "Figure 6."
     }
   ],
+  "htmlScalarCount" : 83616,
   "issue" : "",
   "journal" : "eLife",
+  "markdownScalarCount" : 74852,
   "pages" : "",
   "pmcId" : "PMC8754430",
   "pmid" : "34970963",
@@ -284,9 +286,14 @@
       "|2001|10.1038/35073513",
       "|2015|10.7554/eLife.10180"
     ],
+    "withArticleTitle" : 48,
     "withAuthors" : 50,
+    "withCitation" : 11,
     "withDOI" : 50,
+    "withFirstPage" : 41,
     "withPMID" : 48,
+    "withSource" : 50,
+    "withVolume" : 48,
     "withYear" : 50
   },
   "tables" : [
@@ -296,6 +303,8 @@
 
       ],
       "label" : "Table 1.",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "d5913c04d380d0f388467f072c0ba9d257c6a1ad9f34d088c79560ed57e4bac1",
       "markdownRowCount" : 8
     },
     {
@@ -304,10 +313,13 @@
 
       ],
       "label" : "Table 2.",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "3d7cd539782adffbcbf269f2f86fe5d561ff4cb1d9f315f73c5f9a19af8bc0ce",
       "markdownRowCount" : 8
     }
   ],
   "title" : "pH-dependent 11° F1FO ATP synthase sub-steps reveal insight into the FO torque generating mechanism",
+  "unmodelledCaptionDrops" : 0,
   "volume" : "10",
   "year" : "2021"
 }

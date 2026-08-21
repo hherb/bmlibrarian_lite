@@ -244,8 +244,10 @@
       "label" : "Figure 2"
     }
   ],
+  "htmlScalarCount" : 63347,
   "issue" : "1",
   "journal" : "Healthcare",
+  "markdownScalarCount" : 56757,
   "pages" : "",
   "pmcId" : "PMC12785261",
   "pmid" : "41517028",
@@ -288,9 +290,14 @@
       "34.|2023|10.12659/MSM.938835",
       "35.|2024|10.3389/fdgth.2024.1316931"
     ],
+    "withArticleTitle" : 35,
     "withAuthors" : 35,
+    "withCitation" : 13,
     "withDOI" : 35,
+    "withFirstPage" : 22,
     "withPMID" : 33,
+    "withSource" : 35,
+    "withVolume" : 35,
     "withYear" : 35
   },
   "tables" : [
@@ -300,6 +307,8 @@
 
       ],
       "label" : "Table 1",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "e466d5329532a833ab80d125b2a8739b120ffc3df3eb1a287de48e0906dbf270",
       "markdownRowCount" : 8
     },
     {
@@ -308,10 +317,13 @@
 
       ],
       "label" : "Table 2",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "4c253dae816db0d3836746530d01188e5e58ca4c5bc0480062e1f521a264dd08",
       "markdownRowCount" : 12
     }
   ],
   "title" : "Advancing a Hybrid Decision-Making Model in Anesthesiology: Applications of Artificial Intelligence in the Perioperative Setting",
+  "unmodelledCaptionDrops" : 0,
   "volume" : "14",
   "year" : "2025"
 }

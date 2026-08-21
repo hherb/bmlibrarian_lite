@@ -13,7 +13,8 @@ its slice has landed; add a new section when handing off new work.
   a stored structural digest, parsed offline by `JATSRealCorpusTests` on every
   PR. Read that directory's `README.md` before touching it.
   - **The digest is a characterisation, not a specification.** It records what
-    the parser does today, five known-wrong behaviours included. A digest change
+    the parser does today, seven known-wrong behaviours included (#144 and #162
+    joined the five below during review). A digest change
     is a prompt to read the diff, never by itself proof of a regression *or* of a
     fix. Two tests put a floor under it:
     `testEveryArticleClearsTheSpecificationFloor` asserts what must hold for any
@@ -23,15 +24,46 @@ its slice has landed; add a new section when handing off new work.
     regeneration.
   - **Hand-checking the digests is the step that pays.** It found five real
     defects — #154, #155, #156, #157, #161 — each then confirmed against a
-    225-article survey. Generating a digest and committing it unread would have
-    found none of them and frozen all five as expectations. #161 was invisible
-    until review replaced a `hasGraphic` boolean with the resolved URL.
-  - **A regeneration run always fails**, naming what it rewrote, and refuses to
-    run in CI. It previously reported success while asserting nothing.
+    225-article survey, and PR review found #162. Generating a digest and
+    committing it unread would have found none of them and frozen all six as
+    expectations. #161 was invisible until review replaced a `hasGraphic` boolean
+    with the resolved URL; #162 was invisible until it replaced a row count with a
+    hash of the rendered markdown.
+  - **A regeneration run always fails**, naming what it rewrote, and in CI fails
+    *without writing anything*. It previously asserted, then rewrote all seven
+    digests anyway — the assertion did not stop the loop, so the guard performed
+    the act it existed to prevent.
+  - **What a blind regeneration can still launder, and what it cannot.** It used
+    to turn all of these green: caption text leaking into section prose (the #142
+    defect), replaced titles, filler abstracts, wiped figure captions, a reversed
+    bibliography, reversed author surnames. `corpus.json` now carries `title`,
+    `volume`, `authorCount`, `figureCount`, `tableCount` and `referenceCount`
+    read off the XML **independently of `JATSXMLParser`**, and the specification
+    floor now asserts body prose, a DOI and non-empty figure/table captions. Those
+    close all six. Transcribe those values by hand for any new article — copied
+    from the parser they are worth nothing — and note that
+    `testEveryEntryRecordsItsProvenance` rejects an entry that leaves them empty,
+    because empty compares equal to an empty parse.
+  - **`testParsingReportsNoContentLoss` only hears what the logger records.** The
+    parser announces discarded captions at `debug`, and the recorder ignored
+    `debug` and `info`, so the corpus dropped 21 of its 62 captions on every run
+    under a green test of that name. It now records every level, asserts only the
+    problem levels empty, pins the drops per article as `unmodelledCaptionDrops`,
+    and ends with a positive control — without which the test passes just as
+    happily with the logger never installed.
+  - **The corpus walk stops at the checkout root.** It used to climb to `/`, and
+    worktrees live under `.claude/worktrees/` *inside* the main checkout, so
+    `swift test` in a worktree validated that branch's parser against master's
+    fixtures and reported success.
   - **Never edit the bytes.** `testCorpusBytesAreUnmodified` pins each file's
     SHA-256 and `.gitattributes` keeps them out of line-ending translation.
     `testTheCorpusHasNotShrunk` pins the article count: every other test loops
     over the manifest, so an emptied one asserted nothing and passed in 2 ms.
+  - Open follow-ups from the review: **#163** (digest JSON key naming and a
+    schema version — settle before Android reads these files under #121; use
+    explicit `CodingKeys`, since `keyEncodingStrategy` does not round-trip
+    `withDOI`) and **#164** (the 225-article survey exists only as prose, so no
+    replacement article can be measured against it).
   - **Count the caption's parent, not the element.** The first five articles were
     chosen by counting `<media>`/`<boxed-text>` *elements*, so the corpus claimed
     all five caption hosts while covering three. Two CC-BY articles were added in
@@ -298,8 +330,8 @@ its slice has landed; add a new section when handing off new work.
   not on iOS/macOS. Nothing compares the two lists; the parity fixtures cover the
   data-availability classifier, and the funder lists are pinned by measurement
   instead. One-character fix, but wants a shared fixture or it recurs.
-- **#154, #155, #156, #157, #161 — five JATS parser defects the corpus found**,
-  all confirmed against a 225-article survey, all still open. Fixing any of them
+- **#154, #155, #156, #157, #161, #162 — six JATS parser defects the corpus
+  found**, the first five confirmed against a 225-article survey, all still open. Fixing any of them
   changes `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the
   evidence — read it rather than regenerating past it. Each likely replicates in
   Android's `util.jats.JATSXMLParser` and in bmlib, which share this parser's
@@ -322,6 +354,12 @@ its slice has landed; add a new section when handing off new work.
     Last-write-wins, ignoring `content-type`, so **52.9% of real figures** point
     at a `.gif` thumb instead of the image. A `hasGraphic` boolean hid it
     completely; storing the URL exposed it on the first hand-check.
+  - **#162 — `rowspan` is never read.** `grep -rn rowspan Sources/` returns
+    nothing: a spanning cell contributes to its first row only, every later row is
+    a cell short, and `padRow` quietly pads the gap so the columns after it shift.
+    11 real cells in the corpus. `markdownRowCount` could never see it — a
+    rowspan misalignment does not change the row count — which is why the digest
+    now stores a `markdownDigest` hash of the rendering instead.
   (#147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.)
 - **#150 — spelled-out NIH institute names match no government pattern**, on

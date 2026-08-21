@@ -201,8 +201,10 @@
       "label" : "Fig 4"
     }
   ],
+  "htmlScalarCount" : 80373,
   "issue" : "12",
   "journal" : "PLOS One",
+  "markdownScalarCount" : 75311,
   "pages" : "e0338891",
   "pmcId" : "PMC12755737",
   "pmid" : "41474770",
@@ -282,9 +284,14 @@
       "71.||",
       "72.||"
     ],
+    "withArticleTitle" : 0,
     "withAuthors" : 0,
+    "withCitation" : 72,
     "withDOI" : 0,
+    "withFirstPage" : 0,
     "withPMID" : 0,
+    "withSource" : 0,
+    "withVolume" : 0,
     "withYear" : 0
   },
   "tables" : [
@@ -294,10 +301,13 @@
 
       ],
       "label" : "Table 1",
+      "markdownColumnCount" : 3,
+      "markdownDigest" : "0557920840a4d053363c8a2427dc13d2cb4fac703a0a8f63817cd11992acf7c7",
       "markdownRowCount" : 12
     }
   ],
   "title" : "Candidate orphan genes: Reassessing uniqueness",
+  "unmodelledCaptionDrops" : 36,
   "volume" : "20",
   "year" : "2025"
 }
