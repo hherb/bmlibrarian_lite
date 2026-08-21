@@ -54,6 +54,38 @@ final class TransparencyParityTests: XCTestCase {
         }
     }
 
+    private struct SponsorPatternManifest: Decodable {
+        /// One funder name per classification layer, so both platforms probe the
+        /// same inputs rather than each choosing its own representative.
+        struct ConfidenceProbe: Decodable {
+            let layer: String
+            let name: String
+            let doi: String?
+            let isIndustry: Bool
+
+            enum CodingKeys: String, CodingKey {
+                case layer
+                case name
+                case doi
+                case isIndustry = "is_industry"
+            }
+        }
+
+        let patterns: [String: [String]]
+        let confidences: [String: Double]
+        let confidenceProbes: [ConfidenceProbe]
+        /// One representative funder name per pattern, so a pattern that matches
+        /// nothing anywhere cannot hide behind a string-for-string pin.
+        let patternProbes: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case patterns
+            case confidences
+            case confidenceProbes = "confidence_probes"
+            case patternProbes = "pattern_probes"
+        }
+    }
+
     private struct CaseFixture: Decodable {
         struct Case: Decodable {
             let id: String
@@ -79,6 +111,12 @@ final class TransparencyParityTests: XCTestCase {
 
     /// Worked `statement -> (level, restrictions)` cases, asserted behaviourally.
     private static let casesFixture = "data_availability_cases.json"
+
+    /// Government/academic sponsor-pattern contract (#147), asserted string-for-string.
+    ///
+    /// Binds Swift and Python only: Android carries no funder or sponsor
+    /// classifier, unlike the data-availability contract which binds all three.
+    private static let sponsorPatternsFixture = "sponsor_patterns.json"
 
     /// Failure to reach the shared contract at all, as distinct from a parity failure.
     ///
@@ -155,12 +193,29 @@ final class TransparencyParityTests: XCTestCase {
         try decodeFixture(casesFixture)
     }
 
+    /// The sponsor-pattern contract, decoded once per test run. See `manifest`.
+    private static let sponsorManifest = Result<SponsorPatternManifest, Error> {
+        try decodeFixture(sponsorPatternsFixture)
+    }
+
     /// The shared pattern/label contract.
     ///
     /// - Returns: The decoded manifest.
     /// - Throws: Whatever decoding it raised, rethrown on every access.
     private func loadManifest() throws -> PatternManifest {
         try Self.manifest.get()
+    }
+
+    /// One half of the shared sponsor-pattern contract.
+    ///
+    /// - Parameter half: Either `"government"` or `"academic"`.
+    /// - Returns: That half, in contract order.
+    /// - Throws: Whatever decoding it raised, or if the half is absent.
+    private func loadSponsorPatterns(_ half: String) throws -> [String] {
+        try XCTUnwrap(
+            Self.sponsorManifest.get().patterns[half],
+            "shared sponsor contract has no '\(half)' half"
+        )
     }
 
     /// The shared behavioural cases.
@@ -190,6 +245,28 @@ final class TransparencyParityTests: XCTestCase {
             file: file,
             line: line
         )
+        assertPatternsMatch(actual, expected, tier: tier, file: file, line: line)
+    }
+
+    /// Compare one pattern list against the contract, reporting only what drifted.
+    ///
+    /// Split out of `assertTierMatchesContract` so the sponsor-pattern contract
+    /// (#147), which is a different fixture with a different decoded type, gets the
+    /// same actionable failure output instead of a second copy of the diff logic.
+    ///
+    /// - Parameters:
+    ///   - actual: The list as Swift declares it.
+    ///   - expected: The list as the shared contract declares it.
+    ///   - tier: Contract key, named in the failure message.
+    ///   - file: Call site, so failures point at the caller.
+    ///   - line: Call site, so failures point at the caller.
+    private func assertPatternsMatch(
+        _ actual: [String],
+        _ expected: [String],
+        tier: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         guard actual != expected else { return }
 
         var message = "'\(tier)' has drifted from the shared contract"
@@ -203,6 +280,167 @@ final class TransparencyParityTests: XCTestCase {
             message += ":\n" + differences.joined(separator: "\n")
         }
         XCTFail(message, file: file, line: line)
+    }
+
+    // MARK: - Funder confidence parity (#152)
+
+    /// Every layer's representative funder must classify as the contract says.
+    ///
+    /// Asserted behaviourally rather than by reading constants: the confidence
+    /// values are `private` to `FundingAnalyzer`, and behaviour is what reaches a
+    /// user in any case. Python reported a flat 0.8 for both non-industry halves
+    /// until #152 while Swift reported 0.85 and 0.80 — a divergence invisible to
+    /// the funder corpus, which scores only the `isIndustry` boolean.
+    func testEveryProbeReportsTheContractConfidence() throws {
+        let manifest = try Self.sponsorManifest.get()
+        for probe in manifest.confidenceProbes {
+            let expected = try XCTUnwrap(
+                manifest.confidences[probe.layer],
+                "contract has no confidence for layer '\(probe.layer)'"
+            )
+            let (isIndustry, confidence) = FundingAnalyzer.classifyFunder(
+                name: probe.name,
+                doi: probe.doi
+            )
+            XCTAssertEqual(
+                isIndustry,
+                probe.isIndustry,
+                "'\(probe.name)' (\(probe.layer)) classified as isIndustry=\(isIndustry)"
+            )
+            XCTAssertEqual(
+                confidence,
+                expected,
+                accuracy: 1e-9,
+                "'\(probe.name)' reported \(confidence), contract says \(expected) "
+                    + "for layer '\(probe.layer)'"
+            )
+        }
+    }
+
+    /// A confidence nothing exercises is a value no test can defend.
+    func testEveryContractLayerHasAProbe() throws {
+        let manifest = try Self.sponsorManifest.get()
+        let probed = Set(manifest.confidenceProbes.map(\.layer))
+        XCTAssertEqual(probed, Set(manifest.confidences.keys))
+    }
+
+    /// The ladder must stay strictly descending, with no two layers tied.
+    ///
+    /// Order is the part that carries meaning: two layers reporting the same
+    /// confidence would be indistinguishable to a caller ranking funders by it,
+    /// which is the state #152 fixed on the Python side.
+    func testTheConfidenceLadderIsStrictlyDescending() throws {
+        let manifest = try Self.sponsorManifest.get()
+        let ladder = [
+            "known_industry_doi",
+            "government_pattern",
+            "academic_pattern",
+            "industry_name",
+            "unknown",
+        ]
+        let values = try ladder.map {
+            try XCTUnwrap(manifest.confidences[$0], "contract has no layer '\($0)'")
+        }
+        XCTAssertEqual(values, values.sorted(by: >))
+        XCTAssertEqual(Set(values).count, values.count, "two layers share a confidence")
+    }
+
+    // MARK: - Sponsor pattern manifest parity (#147)
+
+    /// The government half must equal the contract string-for-string.
+    ///
+    /// This half wins outright over the academic one in `determineSponsorType`, so
+    /// moving a pattern across the boundary silently re-tiers every study funded by
+    /// a body that matches it.
+    func testGovernmentPatternsMatchContract() throws {
+        assertPatternsMatch(
+            IndustryPatterns.governmentPatterns,
+            try loadSponsorPatterns("government"),
+            tier: "government"
+        )
+    }
+
+    /// The academic half must equal the contract string-for-string.
+    func testAcademicPatternsMatchContract() throws {
+        assertPatternsMatch(
+            IndustryPatterns.academicPatterns,
+            try loadSponsorPatterns("academic"),
+            tier: "academic"
+        )
+    }
+
+    /// The concatenation order is what `classifyFunder` matches in.
+    ///
+    /// Adding or removing a pattern here moves the industry/non-industry boundary,
+    /// which is measured against `funder_names.json` — a more expensive kind of
+    /// drift than a mis-tiered sponsor.
+    func testNonIndustryPatternsAreTheContractHalvesInOrder() throws {
+        let expected = try loadSponsorPatterns("government") + loadSponsorPatterns("academic")
+        assertPatternsMatch(
+            IndustryPatterns.nonIndustryPatterns,
+            expected,
+            tier: "government + academic"
+        )
+    }
+
+    /// A pattern in both halves would make the academic tier unreachable for it.
+    func testTheContractSponsorHalvesAreDisjoint() throws {
+        let government = Set(try loadSponsorPatterns("government"))
+        let academic = Set(try loadSponsorPatterns("academic"))
+        XCTAssertTrue(
+            government.intersection(academic).isEmpty,
+            "a pattern appears in both sponsor halves: \(government.intersection(academic))"
+        )
+    }
+
+    /// Neither half may be empty.
+    ///
+    /// `assertPatternsMatch` compares two arrays, so it passes when both sides are
+    /// empty — an emptied contract half would take the Swift suite green while
+    /// collapsing a whole sponsor tier. Python asserts the same invariant.
+    func testBothContractSponsorHalvesAreNonEmpty() throws {
+        XCTAssertFalse(try loadSponsorPatterns("government").isEmpty)
+        XCTAssertFalse(try loadSponsorPatterns("academic").isEmpty)
+        XCTAssertFalse(IndustryPatterns.governmentPatterns.isEmpty)
+        XCTAssertFalse(IndustryPatterns.academicPatterns.isEmpty)
+    }
+
+    /// Every contract pattern must match at least one probe name.
+    ///
+    /// The string-for-string assertions catch the platforms drifting apart. They
+    /// cannot catch a pattern that never matched anything on any platform, because
+    /// a typo transcribed faithfully into every copy agrees with itself. `\bniaid\b`,
+    /// `\bnhlbi\b` and `\bnimh\b` were in exactly that state.
+    func testEveryContractSponsorPatternIsExercised() throws {
+        let manifest = try Self.sponsorManifest.get()
+        let probes = manifest.patternProbes.map { $0.lowercased() }
+
+        for (tier, patterns) in manifest.patterns {
+            for pattern in patterns {
+                let regex = try NSRegularExpression(pattern: pattern, options: [])
+                let matched = probes.contains { probe in
+                    let range = NSRange(probe.startIndex..., in: probe)
+                    return regex.firstMatch(in: probe, options: [], range: range) != nil
+                }
+                XCTAssertTrue(
+                    matched,
+                    "'\(tier)' pattern \(pattern) is matched by no probe name in the contract"
+                )
+            }
+        }
+    }
+
+    /// A probe that classified as industry would exercise nothing.
+    ///
+    /// Both halves exist to mean "not industry", so an industry verdict would
+    /// satisfy the coverage test above while proving nothing about the pattern the
+    /// name was chosen for.
+    func testEverySponsorPatternProbeIsNonIndustry() throws {
+        let manifest = try Self.sponsorManifest.get()
+        for name in manifest.patternProbes {
+            let (isIndustry, _) = FundingAnalyzer.classifyFunder(name: name, doi: nil)
+            XCTAssertFalse(isIndustry, "'\(name)' classified as industry")
+        }
     }
 
     // MARK: - Pattern manifest parity

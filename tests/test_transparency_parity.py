@@ -45,12 +45,16 @@ from typing import Any, cast
 import pytest
 
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
+    ACADEMIC_PATTERNS,
     DATA_REPOSITORIES,
+    GOVERNMENT_PATTERNS,
     NEGATED_OPENNESS_PATTERNS,
+    NON_INDUSTRY_PATTERNS,
     RESTRICTION_LABELS,
     STRONG_REFUSAL_PATTERNS,
     DataDisclosureLevel,
     analyze_data_availability,
+    classify_funder_name,
 )
 
 PARITY_FIXTURE_DIR = (
@@ -62,6 +66,10 @@ PATTERNS_FIXTURE = "data_availability_patterns.json"
 
 #: Worked ``statement -> (level, restrictions)`` cases, asserted behaviourally.
 CASES_FIXTURE = "data_availability_cases.json"
+
+#: Government/academic sponsor-pattern contract, asserted string-for-string.
+#: Binds Python and Swift only — Android carries no funder classifier.
+SPONSOR_PATTERNS_FIXTURE = "sponsor_patterns.json"
 
 #: Hand-labelled funder names, a *measurement* corpus rather than a pattern
 #: contract. Scored by ``tests/test_funder_classification.py``; the class at the
@@ -140,6 +148,154 @@ class TestPatternManifestParity:
         """A duplicated key would silently drop an entry on every platform."""
         patterns = [entry["pattern"] for entry in manifest["restriction_labels"]]
         assert len(patterns) == len(set(patterns))
+
+
+class TestSponsorPatternManifestParity:
+    """Python's sponsor lists must equal the shared contract string-for-string.
+
+    #147 split one 25-element list into a government half and an academic half to
+    match Swift, and several places assert in prose that the two platforms are
+    byte-identical. Prose is not enforcement: before this fixture existed,
+    either platform could edit its list and both suites stayed green. The lists
+    decide the sponsor tier *and*, concatenated, the industry boundary that
+    ``funder_names.json`` measures, so drift is expensive in both directions.
+    """
+
+    @pytest.fixture(scope="class")
+    def sponsor_patterns(self) -> dict[str, list[str]]:
+        """The sponsor-pattern lists from the shared contract."""
+        manifest = _load_fixture(SPONSOR_PATTERNS_FIXTURE)
+        return cast(dict[str, list[str]], manifest["patterns"])
+
+    def test_government_patterns_match_manifest(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """The public bodies, whose half wins outright over the academic one."""
+        assert GOVERNMENT_PATTERNS == sponsor_patterns["government"]
+
+    def test_academic_patterns_match_manifest(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """The institutional funders, reached only when no government pattern hit."""
+        assert ACADEMIC_PATTERNS == sponsor_patterns["academic"]
+
+    def test_the_non_industry_union_is_the_manifest_halves_in_order(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """Concatenation order is the order ``classify_funder_name`` matches in."""
+        assert NON_INDUSTRY_PATTERNS == (
+            sponsor_patterns["government"] + sponsor_patterns["academic"]
+        )
+
+    def test_the_manifest_halves_are_disjoint(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """A pattern in both halves would make the academic tier unreachable for it."""
+        assert set(sponsor_patterns["government"]) & set(sponsor_patterns["academic"]) == set()
+
+    def test_every_manifest_sponsor_pattern_compiles(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        """An invalid pattern must fail here, not at classification time."""
+        for half in ("government", "academic"):
+            for pattern in sponsor_patterns[half]:
+                re.compile(pattern)
+
+    def test_every_manifest_sponsor_pattern_is_exercised(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        r"""Every pattern matches at least one probe name from the contract.
+
+        The string-for-string assertions above catch the platforms drifting
+        apart. They cannot catch a pattern that never matched anything on any
+        platform — a typo transcribed faithfully into all three copies agrees
+        with itself perfectly. ``\bniaid\b``, ``\bnhlbi\b`` and ``\bnimh\b``
+        were in exactly that state: pinned, and behaviourally untested
+        everywhere.
+        """
+        probes = [name.lower() for name in _load_fixture(SPONSOR_PATTERNS_FIXTURE)["pattern_probes"]]
+        unexercised = sorted(
+            {
+                pattern
+                for patterns in sponsor_patterns.values()
+                for pattern in patterns
+                if not any(re.search(pattern, probe) for probe in probes)
+            }
+        )
+        assert unexercised == [], "contract patterns with no covering probe:\n  " + "\n  ".join(
+            unexercised
+        )
+
+    def test_every_sponsor_pattern_probe_is_non_industry(self) -> None:
+        """A probe that classified as industry would not be exercising its half.
+
+        Both halves exist to mean "not industry", so a probe name reaching the
+        industry layer would satisfy the coverage test above while proving
+        nothing about the pattern it was chosen for.
+        """
+        for name in _load_fixture(SPONSOR_PATTERNS_FIXTURE)["pattern_probes"]:
+            is_industry, _ = classify_funder_name(name)
+            assert not is_industry, f"{name!r} classified as industry"
+
+
+class TestFunderConfidenceParity:
+    """The confidence each classification layer reports (#152).
+
+    Asserted **behaviourally** — classify a representative funder and compare the
+    confidence — rather than by reading constants. Swift's are `private`, so a
+    constant comparison is not available there, and behaviour is what reaches a
+    user in any case.
+
+    Python reported a flat 0.8 for both non-industry halves until #152, where
+    Swift had always reported 0.85 for a government match and 0.80 for an
+    academic one. The funder corpus scores the ``is_industry`` boolean, which
+    agreed throughout, so nothing caught it.
+    """
+
+    @pytest.fixture(scope="class")
+    def contract(self) -> dict[str, Any]:
+        """The sponsor/confidence contract."""
+        return _load_fixture(SPONSOR_PATTERNS_FIXTURE)
+
+    def test_every_probe_reports_the_contract_confidence(
+        self, contract: dict[str, Any]
+    ) -> None:
+        """Each layer's representative funder must classify as the contract says."""
+        confidences = cast(dict[str, float], contract["confidences"])
+        for probe in cast(list[dict[str, Any]], contract["confidence_probes"]):
+            is_industry, confidence = classify_funder_name(probe["name"], probe["doi"])
+            assert is_industry == probe["is_industry"], (
+                f"{probe['name']!r} ({probe['layer']}) classified as "
+                f"is_industry={is_industry}"
+            )
+            assert confidence == confidences[probe["layer"]], (
+                f"{probe['name']!r} reported {confidence}, contract says "
+                f"{confidences[probe['layer']]} for layer {probe['layer']!r}"
+            )
+
+    def test_every_layer_has_a_probe(self, contract: dict[str, Any]) -> None:
+        """A confidence nothing exercises is a value no test can defend."""
+        probed = {probe["layer"] for probe in contract["confidence_probes"]}
+        assert probed == set(contract["confidences"])
+
+    def test_the_ladder_is_strictly_descending(self, contract: dict[str, Any]) -> None:
+        """A registry DOI outranks a named agency, which outranks a generic word.
+
+        Order is the part that carries meaning: the absolute values are a
+        calibration choice, but two layers reporting the same confidence would
+        make them indistinguishable to a caller ranking funders by it — which is
+        exactly the state #152 fixed.
+        """
+        ladder = [
+            "known_industry_doi",
+            "government_pattern",
+            "academic_pattern",
+            "industry_name",
+            "unknown",
+        ]
+        values = [contract["confidences"][layer] for layer in ladder]
+        assert values == sorted(values, reverse=True)
+        assert len(set(values)) == len(values), f"two layers share a confidence: {values}"
 
 
 class TestManifestSelfConsistency:

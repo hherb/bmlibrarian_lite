@@ -20,10 +20,15 @@ without a single test failing. Issues #117 and #125 each had to run a throwaway
 byte-identity check across the three lists to confirm they still agreed. This
 directory makes that check permanent.
 
-A third fixture, `funder_names.json`, is a *measurement* corpus rather than a
-pattern contract — see [The funder-name corpus](#the-funder-name-corpus) below.
+`sponsor_patterns.json` is a second pattern contract, covering the
+government/academic sponsor lists — see
+[The sponsor-pattern contract](#the-sponsor-pattern-contract) below. It binds
+Python and Swift only, because Android carries no funder or sponsor classifier.
 
-## The two fixtures
+`funder_names.json` is a *measurement* corpus rather than a pattern contract —
+see [The funder-name corpus](#the-funder-name-corpus) below.
+
+## The data-availability fixtures
 
 ### `data_availability_patterns.json` — the strings
 
@@ -119,10 +124,96 @@ vocabularies, and that only ambiguous entries carry a reason, so that edit has t
 be deliberate. The corpus is also lifted byte-identical from bmlib, so a change
 here means the two repositories have drifted.
 
+## The sponsor-pattern contract
+
+### `sponsor_patterns.json` — who counts as a public funder
+
+The two halves that decide `sponsor_type`, asserted **string-for-string** by
+`TestSponsorPatternManifestParity` (Python) and
+`TransparencyParityTests` (Swift).
+
+| Platform | Lists | Tiering |
+| --- | --- | --- |
+| Python (canonical) | `GOVERNMENT_PATTERNS` / `ACADEMIC_PATTERNS` | `determine_sponsor_type` |
+| Swift (BioMedLit) | `IndustryPatterns.governmentPatterns` / `academicPatterns` | `FundingAnalyzer.determineSponsorType` |
+
+Android is not a party to this contract: it has no funder classifier at all.
+
+The split carries two distinct meanings, and an edit can break either:
+
+- **Within a half** — the government half is tested first, so one public agency
+  outranks any number of universities. Moving a pattern across the boundary
+  re-tiers every study funded by a body matching it.
+- **Across the concatenation** — `government + academic`, in that order, is what
+  `classify_funder_name` / `classifyFunder` matches to mean "not industry".
+  Adding or removing a pattern moves the industry boundary, which is scored
+  against `funder_names.json` and feeds a HIGH-risk rule. That is the more
+  expensive failure, and a string-for-string assertion is what catches it — the
+  precision and recall floors can absorb a single pattern going missing.
+
+Before #147 the government tier was selected by a positional
+`GOVERNMENT_PATTERNS[:10]` slice of the combined list. The contract exists partly
+so that no future edit can reintroduce a boundary that is implied by position
+rather than stated by name.
+
+### The confidence ladder (#152)
+
+The same file carries the confidence each classification layer reports:
+
+| Layer | Value |
+| --- | --- |
+| `known_industry_doi` | 1.00 |
+| `government_pattern` | 0.85 |
+| `academic_pattern` | 0.80 |
+| `industry_name` | 0.75 |
+| `unknown` | 0.30 |
+
+Asserted **behaviourally**, not by comparing constants: `confidence_probes` names
+one representative funder per layer, and each platform classifies it and checks
+the reported confidence. Swift's constants are `private`, so a constant
+comparison is not available there — and behaviour is what reaches a user anyway.
+
+### `pattern_probes` — patterns that match nothing
+
+A string-for-string pin catches the platforms drifting apart. It cannot catch a
+pattern that never matched anything *on any platform*: a typo transcribed
+faithfully into every copy agrees with itself perfectly. `\bniaid\b`, `\bnhlbi\b`
+and `\bnimh\b` sat in exactly that state — pinned by the contract, exercised by
+no test on either platform.
+
+`pattern_probes` names one representative funder per pattern. Both suites assert
+that every pattern matches at least one probe, and that every probe classifies as
+non-industry (a probe reaching the industry layer would satisfy the coverage
+check while proving nothing). This mirrors `test_every_contract_pattern_is_exercised`
+in the data-availability contract.
+
+### Which artifact is canonical
+
+Both statements in this directory are true of different things, and the
+distinction matters when they disagree:
+
+- **The JSON is canonical for the values.** Change a pattern or a confidence here
+  first, then transcribe it to both platforms. Neither platform's literals are
+  the source.
+- **Python is canonical for the behaviour.** Where the two platforms compute
+  different answers from the same values — as they did on the confidences before
+  #152 — Python's is the one Swift moves to.
+
+Two invariants matter as much as the values. The ladder must stay **strictly
+descending** — two layers sharing a value are indistinguishable to a caller
+ranking funders by confidence — and every layer must have a probe, since a value
+nothing exercises is one no test can defend.
+
+Python returned a flat 0.80 for both non-industry halves until #152, where Swift
+had always reported 0.85 and 0.80. The funder corpus scores the `is_industry`
+boolean, which agreed throughout, so nothing caught it for as long as it existed.
+That is the reason the confidences are in the contract at all.
+
 ## Changing a pattern
 
-1. Edit `data_availability_patterns.json`.
-2. Make the same edit in all three platform sources.
+1. Edit `data_availability_patterns.json` (or `sponsor_patterns.json`).
+2. Make the same edit in all platform sources bound by that contract — all three
+   for data availability, Python and Swift for sponsor patterns.
 3. Add or update cases in `data_availability_cases.json` covering the new
    behaviour, then run all three suites.
 
