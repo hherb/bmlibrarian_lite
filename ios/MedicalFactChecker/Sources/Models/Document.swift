@@ -15,8 +15,19 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import OSLog
 import SwiftData
 import BioMedLit
+
+/// Logger for stored-JSON encode and decode failures on ``Document``.
+///
+/// Declared here rather than taken from the per-platform `AppLogger`: this model
+/// is compiled into the iOS app, the macOS app and the test target, and the two
+/// app loggers do not share a category set.
+private let documentLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.bmlibrarian.MedicalFactChecker",
+    category: "Persistence"
+)
 
 /// A PubMed document retrieved for fact-checking.
 ///
@@ -160,30 +171,99 @@ final class Document {
 
     /// Decoded TransparencyResult from the stored JSON.
     ///
-    /// Returns nil if no analysis has been performed or if decoding fails.
+    /// Returns nil if no analysis has been performed or if decoding fails. The
+    /// two cases are not the same thing, and callers that need to tell them apart
+    /// should test ``hasTransparencyAnalysis`` — a decode failure is a stored
+    /// result this build cannot read, not an absent one. It is logged rather than
+    /// swallowed, because otherwise it presents to the user as "never analysed"
+    /// and there is nothing anywhere to say why.
     var transparencyResult: TransparencyResult? {
         guard let json = transparencyResultJSON,
               let data = json.data(using: .utf8) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(TransparencyResult.self, from: data)
+        do {
+            return try decoder.decode(TransparencyResult.self, from: data)
+        } catch {
+            documentLog.error(
+                """
+                Stored transparency JSON failed to decode for PMID \
+                \(self.pmid, privacy: .public): \(String(describing: error), privacy: .public)
+                """
+            )
+            return nil
+        }
     }
 
     /// Store a TransparencyResult as JSON.
     ///
+    /// Reports whether the write happened. On the re-analysis path a silent
+    /// failure leaves the previous, stale JSON in place while the UI clears its
+    /// spinner and keeps showing the "re-analyze for a comparable score" notice —
+    /// so the notice names a remedy the user has just watched do nothing. The
+    /// caller needs to be able to say so.
+    ///
     /// - Parameter result: The transparency analysis result to store.
-    func storeTransparencyResult(_ result: TransparencyResult) {
+    /// - Returns: `true` if the result was encoded and stored, `false` otherwise.
+    @discardableResult
+    func storeTransparencyResult(_ result: TransparencyResult) -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(result) {
-            transparencyResultJSON = String(data: data, encoding: .utf8)
+        do {
+            let data = try encoder.encode(result)
+            guard let json = String(data: data, encoding: .utf8) else {
+                documentLog.error(
+                    """
+                    Transparency result for PMID \(self.pmid, privacy: .public) \
+                    encoded to non-UTF-8 data and was not stored
+                    """
+                )
+                return false
+            }
+            transparencyResultJSON = json
             transparencyAnalyzedAt = Date()
+            return true
+        } catch {
+            documentLog.error(
+                """
+                Failed to encode transparency result for PMID \
+                \(self.pmid, privacy: .public): \(String(describing: error), privacy: .public)
+                """
+            )
+            return false
         }
     }
 
     /// Whether transparency analysis has been performed for this document.
     var hasTransparencyAnalysis: Bool {
         transparencyResultJSON != nil
+    }
+
+    /// Whether the stored analysis was produced by an older analyzer.
+    ///
+    /// `false` when there is no analysis at all — nothing stale to warn about.
+    /// Otherwise mirrors ``TransparencyResult/isStale``: the evidence reaching the
+    /// scorer changed, so the stored score cannot be read beside a current one and
+    /// the UI should offer a re-run.
+    ///
+    /// Stored JSON that is present but will not decode counts as stale, not as
+    /// absent. Treating it as absent left the document in a state it could never
+    /// leave: nothing to display, nothing to warn about, and — because
+    /// ``hasTransparencyAnalysis`` reads the raw string and returns `true` —
+    /// permanently filtered out of re-analysis.
+    var transparencyAnalysisIsStale: Bool {
+        guard hasTransparencyAnalysis else { return false }
+        guard let result = transparencyResult else { return true }
+        return result.isStale
+    }
+
+    /// Whether transparency analysis can be attempted for this document at all.
+    ///
+    /// The analyzer looks the article up by identifier, so a document carrying
+    /// neither a PMID nor a DOI has nothing to look up. Shared so the report views
+    /// and the workflow agree on what is eligible instead of each restating it.
+    var canAnalyzeTransparency: Bool {
+        !(pmid.isEmpty && doi == nil)
     }
 
     /// Shortcut for badge display without full JSON decode.

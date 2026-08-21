@@ -44,17 +44,11 @@ public enum FundingAnalyzer {
     /// Confidence level for academic pattern matches.
     private static let academicPatternConfidence: Double = 0.80
 
-    /// Confidence level for corporate suffix matches.
-    private static let corporateSuffixConfidence: Double = 0.75
-
-    /// Confidence level for industry keyword matches.
-    private static let industryKeywordConfidence: Double = 0.70
+    /// Confidence level for funder-name stem and whole-word matches.
+    private static let industryNameConfidence: Double = 0.75
 
     /// Default confidence level when classification is uncertain.
     private static let unknownConfidence: Double = 0.30
-
-    /// Number of primary industry keywords to check before falling back to broader patterns.
-    private static let primaryIndustryKeywordCount: Int = 6
 
     // MARK: - Funder Classification
 
@@ -63,8 +57,13 @@ public enum FundingAnalyzer {
     /// Uses a multi-layer approach to determine if a funder is an industry entity:
     /// 1. Check known industry funder DOIs (highest confidence)
     /// 2. Check government/academic name patterns (takes precedence over corporate indicators)
-    /// 3. Check corporate name indicators (legal entity suffixes)
-    /// 4. Check broader industry keywords
+    /// 3. Check the calibrated funder-name stems and whole words
+    ///
+    /// Layer 3 is measured against the shared labelled corpus at
+    /// `doc/cross_platform/transparency_parity/funder_names.json`, where it scores
+    /// precision 0.909 / recall 0.333 — the substring matcher it replaced scored
+    /// precision 0.455 / recall 0.167 on the same names. `FunderClassificationTests`
+    /// holds the floors.
     ///
     /// - Parameters:
     ///   - name: Funder name (required).
@@ -89,19 +88,33 @@ public enum FundingAnalyzer {
             return (false, academicPatternConfidence)
         }
 
-        // Layer 3: Check corporate indicators
-        if RegexHelper.anyMatch(patterns: IndustryPatterns.corporateSuffixes, in: nameLower) {
-            return (true, corporateSuffixConfidence)
-        }
-
-        // Layer 4: Check broader industry keywords (first few are more specific)
-        let primaryPatterns = Array(IndustryPatterns.industryKeywords.prefix(primaryIndustryKeywordCount))
-        if RegexHelper.anyMatch(patterns: primaryPatterns, in: nameLower) {
-            return (true, industryKeywordConfidence)
+        // Layer 3: Check the calibrated funder-name stems and whole words
+        if matchesIndustryName(nameLower) {
+            return (true, industryNameConfidence)
         }
 
         // Unknown - low confidence
         return (false, unknownConfidence)
+    }
+
+    /// Whether a funder name carries an industry stem or whole-word marker.
+    ///
+    /// The single predicate behind both funder sources — CrossRef `funder[].name`
+    /// and PubMed `<Grant><Agency>` — so there is one definition to test and one
+    /// to measure against the labelled corpus.
+    ///
+    /// Deliberately **not** applied to COI prose; see
+    /// ``IndustryPatterns/industryKeywords`` for why that is a different corpus
+    /// with different failure modes.
+    ///
+    /// - Parameter nameLower: The funder name, already lowercased.
+    /// - Returns: True if a stem matches anywhere in the name, or one of the
+    ///   whole-word terms matches as a word.
+    private static func matchesIndustryName(_ nameLower: String) -> Bool {
+        if IndustryPatterns.funderNameStems.contains(where: { nameLower.contains($0) }) {
+            return true
+        }
+        return RegexHelper.anyMatch(patterns: IndustryPatterns.funderNameWords, in: nameLower)
     }
 
     /// Create a FunderInfo from raw funder data.

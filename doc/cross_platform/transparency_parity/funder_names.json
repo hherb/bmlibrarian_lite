@@ -1,0 +1,2106 @@
+{
+  "description": "Hand-labelled funder names for issue #36, used by tests/test_funder_matching.py to measure _is_industry_funder(). Sampled live from CrossRef funder[].name and PubMed <Grant><Agency> by scripts/sample_funder_names.py on 2026-07-30.",
+  "sampled": {
+    "crossref": 431,
+    "pubmed": 402,
+    "unique_total": 816
+  },
+  "labelling_scope": "Not every sampled name is labelled. The labelled subset is the union of: (a) every name flagged by either the old substring matcher or the new one — unflagged names cannot contribute false positives, so this is what bounds precision; (b) every name carrying no public-sector cue word, reviewed in full, which is where a missed company would hide; and (c) a reproducible 60-name sample of the cue-bearing remainder (random.Random(36)), which found no industry funder and so bounds how much recall the cue filter could be hiding.",
+  "labels": {
+    "industry": "A commercial entity.",
+    "not_industry": "Government, university, hospital, charity, or other public-sector funder.",
+    "ambiguous": "Genuinely undecidable from the string alone. Excluded from the metrics, kept with a reason rather than dropped."
+  },
+  "entries": [
+    {
+      "name": "(MOTIR)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "100th Anniversary Chulalongkorn University Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "1Supported by National Natural Science Foundation of China",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "ACL HHS",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "ACS | American Chemical Society Petroleum Research Fund (PRF)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "AHRQ HHS",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "AbbVie",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Abdominal Core Health Quality Collaborative, EndoEvolve, Advanced Medical Solutions",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Agence Régionale de Santé -Grand Est",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Agencia Nacional de Investigación y Desarrollo",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "Agencia Nacional de Promoción de la Investigación, el Desarrollo Tecnológico y la Innovación",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Aldo Leopold Wilderness Research Institute",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "American Concrete Institute Foundation",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "American Heart Association",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "American Heart Association (AHA)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "American Lebanese Syrian Associated Charities",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Amgen",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Anusandhan Research Funding",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Aqua-Synapse",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Arima Genomics",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Arts and Social Sciences Benefactions Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Association of Commonwealth Universities",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Astex Pharmaceuticals, Inc.",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "AstraZeneca",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "AstraZeneca.",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Australia's Nuclear Science and Technology Organisation",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Australian Institute of Nuclear Science and Engineering (AINSE)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Austrian Science Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Austrian Science Fund (FWF)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Author-funded",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "BC Cancer Institutional Funding",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "BLRD VA",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "BRIC NII",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Baily Thomas Charitable Fund",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Baxter Scholarship",
+      "source": "crossref",
+      "label": "ambiguous",
+      "reason": "A company-named award rather than a direct industry grant; Baxter may also be a person."
+    },
+    {
+      "name": "Belgian National Fund for Scientific Research",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Beyond Spring",
+      "source": "crossref",
+      "label": "ambiguous",
+      "reason": "Almost certainly BeyondSpring Pharmaceuticals, but as written it reads as an ordinary phrase."
+    },
+    {
+      "name": "Biodiversa+",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Biotechnology and Biological Sciences Research Council",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Boston University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Brain and Behavior Research Foundation (BBRF)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Bristol Myers Squibb",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Bu çalışma sırasında herhangi bir ticari firmadan, çalışma ile ilgili verilecek kararı olumsuz etkileyebilecek maddi ve/veya manevi herhangi bir destek alınmamıştır.",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "CNES",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "CNRS",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "CONICET",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "CONICET/Dupont",
+      "source": "crossref",
+      "label": "ambiguous",
+      "reason": "One string naming two funders: Argentina's public research council and a company."
+    },
+    {
+      "name": "CREST",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "CRUI - CARE",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "California Institute of Technology",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Cancer Institute NSW Program Grant",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Cancer Research UK",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Capital's Funds for Health lmprovement and Research (CFH)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Cardinal Health, LLC",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Chan Zuckerberg Initiative DAF",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Charles University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Charles University Mobility Fund",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Chia Tai Tianqing Pharmaceutical Group Co., Ltd.",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Chinese geological survay",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Chongqing Health Field National Distinguished Young Scholars Reserve Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Chongqing Medical Youth Top-notch Talent Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Chongqing Science and Technology Bureau Mountaineering Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Chugai Pharmaceutical Co., Ltd",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Ciencia básica y de Frontera. SECIHTI",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Concept Validation Project of Xuzhou Medical University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Conselho Nacional de Desenvolvimento Científico e Tecnológico",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "Cusanus Hochschule",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "DFG project AMPERE",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "DOC | National Oceanic and Atmospheric Administration (NOAA)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "DOD | National Defense Science and Engineering Graduate (NDSEG)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Dansk Nefrologisk Selskab",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Deanship of Research, Jordan University of Science and Technology",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Deanship of Scientific Research, University of Hafer Al Batin",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Defense Advanced Research Projects Agency",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Department of Biotechnology , Ministry of Science and Technology",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Department of Biotechnology, Ministry of Science and Technology, India",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Department of Biotechnology, Ministry of Science and Technology, India (DBT)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Department of Veterans Affairs",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Det Obelske Familiefond",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Deutsche Forschungsgemeinschaft",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "Diaceutics",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Division of Computing and Communication Foundations",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Doctoral Program of Higher Education",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Doctoral Programs of public Health, University of Helsinki",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Dongnam Health University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Dr. Reddy's Laboratories, Hyderabad, India",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Dr. Siu's BMO Chair in Precision Genomics",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "EPSRC",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "EPSRC Centre for Doctoral Training in Continuous Manufacturing and Crystallisation",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "EPSRC grants",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "EU frameworks",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "EU project HighMag",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Edwards Research Scholarship",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Equine and Comparative Neurology Research Group",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Establishment of Hebei Industrial Heritage Planning Comprehensive Database Based on Geographic Information System GIS and Preservation Planning Strategy and Management Based on Database",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "European Regional Development Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "European Space Agency",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "European Union",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "European Union - Next Generation",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "European Union's HORIZON 2020",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "FAST",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "FEDER-MEC",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "FIGS",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "FONDECYT",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "FP7 Marie Curie Career Integration",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "FUNDUNESP",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Faculty of Dentistry, Chulalongkorn University, Thailand",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Faculty of Pharmacy of the University of Montreal",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Flemish Government via the Methusalem project ‘NANO’, a joint initiative of the Universities of Antwerp and Hasselt",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fondo Nacional de Desarrollo Cient?fico y Tecnol?gico",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Forming Japan's Peak Research Universities",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "French Community of Belgian",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "French Minister of Ecology",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundación Séneca",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundamental Research Funds for the Central Universities",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundação de Amparo à Pesquisa do Estado de Minas Gerais",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundação de Amparo à Pesquisa do Estado de São Paulo",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundação de Amparo à Pesquisa do Estado do Rio Grande do Sul (FAPERGS)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundação de Amparo à Pesquisa do Estado do Rio de Janeiro",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundação para a Ciência e Tecnologia",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Fundação para a Ciência e a Tecnologia",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Funds for Research in Dentistry (FIOUCH), Chile.",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Geneos Therapeutics",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "German Research Foundation (DFG)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Goethe Business School GmbH, Frankfurt/Main, Germany",
+      "source": "crossref",
+      "label": "ambiguous",
+      "reason": "Incorporated as a GmbH, but an academic business school rather than a commercial research sponsor."
+    },
+    {
+      "name": "Government of Barbados",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Grantová Agentura České Republiky",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Grants-in-Aid for Scientific Research B",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Grants-in-Aid for Young Scientists A",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Grants-in-Aid for Young Scientists B",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Guangdong Major Project of Basic and Applied Basic Research",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Guardant Health",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Guizhou Education Department Youth Science and Technology Talents Growth Project",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "HHMI (HHMI)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "HHS | NIH | National Institute of Allergy and Infectious Diseases (NIAID)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "HSC R&D Division, Public Health Agency, All-Island Congenital Heart Disease Research Network",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Health Commission of Chengdu Municipality",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Health Services Research and Development",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Helsingin ja Uudenmaan Sairaanhoitopiiri",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Herta Christensens Fond",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "High-Level Talents Fund of Pingdingshan University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Hochschule Heilbronn",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Hochschule für Angewandte Wissenschaften Hamburg",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Howard Hughes Medical Institute",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Huh 7.5 containing bicistronic subgenomic replicons of HCV genotype 2a",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "INSERM",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "IPhys FRC Komi SC UB RAS",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "ImmVira Co., Limited",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Industry Research",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Inheritance and Innovation Team of Traditional Chinese Medicine Processing Technology, Jiangxi University of Chinese Medicine",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Innovate UK",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Innovation Method Fund of China",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Innovative Research Group Project of the National Natural Science Foundation of China",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "Institute for Work and Health",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Institute of Education Sciences",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Institutional Funds",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Instituto de Salud Carlos III",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Intramural Research Program of the National Institutes of Health (NIH)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Invitae Corporation",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Istanbul University Scientific Research Projects Coordination Unit",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "JSPS",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "JSPS KAKENHI",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Janssen Scientific Affairs",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Japan Agency for Medical Research and Development",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Japan Agency for Medical Research and Development (AMED)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Japan Science and Technology Agency",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Jet Propulsion Laboratory",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Jiangsu Province Engineering Research Center of Stomatological Translational Medicine",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Jiangxi Key Laboratory of Inheritance, Innovation and Transformation of Traditional Chinese Medicine Processing",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Johannes Gutenberg University Mainz Research Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Jonas Children's Vision Care, supported by the National Institute of Health",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Junta de Castilla y León",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "KAKENHI",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Kanehara",
+      "source": "crossref",
+      "label": "ambiguous",
+      "reason": "A Japanese medical publisher or a surname — the bare token does not say which."
+    },
+    {
+      "name": "Karen Elise Jensens Fond",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Key Research Projects of Ningxia Medical University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Knut och Alice Wallenbergs Stiftelse",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Knut och Alice Wallenbergs Stiftelse (kawforskning)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Korea Basic Science Institute (KBSI)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Korea Institute for Advancement of Technology",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Korea government",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "LPPM IKIP PGRI Bojonegoro",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "La Roche Posay",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Labour and Welfare of Japan",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Lehigh University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Leibniz-Gemeinschaft",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Liverpool John Moores University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Lockheed Martin",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Lundbeckfonden",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Lån & Spar",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "MEC | Agencia Estatal de Investigación (AEI)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "MEXT",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "MEXT/JSPS KAKENHI",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "MOE | Fundamental Research Funds for the Central Universities (Fundamental Research Fund for the Central Universities)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "MS Australia",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "MSIT",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Mahidol University's Academic Development Scholarship",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Marathon of Hope Cancer Centres Network",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Max-Planck-Gesellschaft (MPG)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Medical Research and Materiel Command",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Medical Scientific Fund of the Mayor of the City of Vienna",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Menzies Institute for Medical Research",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Merck & Co.; Merck Sharp & Dohme",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Ministerio de Ciencia e Innovación",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministerio de Ciencia, Innovación y Universidades (MCIU)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministerio de Ciencia, Tecnología e Innovación",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministerio de Economía y Competitividad",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministero dell’Università e Ricerca Scientifica e Tecnologica",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministry of Earth Sciences, New Delhi",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministry of Economy and Competitiveness",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministry of Education Research Project of Humanities and Social Sciences",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministry of Education, Culture, Sports, Science and Technology of Japan",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ministério da Ciência, Tecnologia e Inovação",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NAOC",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NASA",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NCI NIH HHS",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "NIMH",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NIRS",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NPRP",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NRF",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NSERC",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NSERC Canada Graduate Scholarship-Doctoral",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "NSERC Discovery",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "NTNU Norwegian University of Science and Technology",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NUMEV",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "NVIDIA",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "NanOlogy, LLC",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Natera, Inc",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "National 863 Project",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Board for Higher Mathematics (NBHM)",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Cancer Institute",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Cancer Institute of the National Institutes of Health",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Forensic Service",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National High-Tech R&D Program (863 Program), China",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National IT Industry Promotion Agency",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong Lingyun",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Institute of Child Health and Human Development",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Institute of Development Administration",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Institute of General Medical Sciences Centers of Biomedical Research Excellence",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Institute of Health",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Institutes of Health",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Key Basic Research Program of China",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Key R&D Program of China",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Key Research and Development Plan of China",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Key Research and Development Program of China",
+      "source": "both",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Natural Science Foundation Key Program",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Outstanding Youth Science Fund Project of National Natural Science Foundation of China",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Research Foundation of Korea (NRF)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Science Research Council of Canada",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "National Science and Technology Major Projects for “Major New Drugs Innovation and Development”",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Natural Science Foundation",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Natural Science Foundation of Heilongjiang Province",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Natural Science Foundation of Shandong Province of China",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "New York University (NYU)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ningbo Science and Technology Innovation Project",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "No funding",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "None",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "None.",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Northern Jiangsu Clinical Medicine Research Institute's 2024 Projects",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Nyreforeningen",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Office of Research & Innovation, Michigan State University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Oncology Research Information Exchange Network (ORIEN) Foundation; Community Foundation Tampa Bay",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Organisation for the Prohibition of Chemical Weapons",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "PCF YIA; SPORE, DoD",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "PHRC(MNER France)",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Parks Canada",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Penelitian Kompetitif Unggulan Perguruan Tinggi (PKUPT)",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Personalis",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "PetroChina Major Science and Technology Project",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Pfizer",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Pfizer and Jazz",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Pharmacogenetics and Medicines Optimisation Network of Excellence",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Pharmacy Department, Centre hospitalier de l'Université de Montréal (CHUM)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Pontificia Universidad Javeriana proyect",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Princess Margaret Cancer Foundation.",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Project of Jiangsu Provincial Key Laboratory of New Drug Research and Clinical Pharmacy",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Proxecto Emerxente da Xunta",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Pró-Reitoria de Pesquisa da UNESP",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Pusan National University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "RCCS",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Ratchadaphiseksomphot Endowment Fund 2013 of Chulalongkorn University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Regional Government of Andalusia",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Research Corporation for Science Advancement",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Research and Development",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Robles Chillida",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Roche",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Roche Sweden AB",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Rocky Mountain Research Station",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Russian Academic Excellence Project/FAPERJ",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "RÃ©gion Rhones Alpes",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Région Haute-Normandie",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Région Rhône-Alpes",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Röntgen-Ångström Cluster (RÅC)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "SCOAP3",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "STFC",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "SUSTech Core Research Facilities and the High-Level Special Fund of SUSTech",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Sanming Project of Medicine in Shenzhen",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Sari Agricultural Sciences and natural Resources University, 578 Sari, Iran",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Science and Technology Development Programs of Nanjing Medical University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Science and Technology Innovation Platform Construction",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Science and Technology Project in Guangzhou",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Science-fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Scientific Research (A) provided by JSPS",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Scientific and Technological Research Council of Türkiye",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Seattle Cancer Care Alliance",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Secretaría de Ciencia, Humanidades, Tecnología e Innovación",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Semnan University of Medical Sciences",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shandong Provincial Medical Health Science and Technology Development Plan",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shanghai Basic Research Key Project (No. 12JC1405200, 11JC1405100)",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shanghai International Cooperation Project: (No. 13510711300)",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shanghai Outstanding Undergraduate Scholarship for Interdisciplinary Training",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shanghai University Knowledge Service Platform",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shenzhen Medical Research Fund",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shenzhen University 2035 Program",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Shenzhen University of Information Technology",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Siemens Healthineers",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Slovak Research and Development Agency",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Southern California Education and Research Center",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Spanish National Board of Scientific and Technological Research",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Spar Nord Fonden",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Special PHD Dissertation Fund of the Northeast Forestry University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Stichting De Cock-Hadders",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Stiftelsen för gamla tjänarinnor",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Students Startup and Innovation Policy (SSIP) Cell of Navrachana University, Vadodara, Gujarat",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Sultan Qaboos University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Suzhou Science and Technology Research and Development Plan (Medical and Health Innovation) Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Svenska Forskningsrådet Formas",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Södertörn University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Taiwan Head and Neck Society.",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Tasmania Graduate Research Scholarship",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Technology Innovation Program",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Tecnológico de Monterrey",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Tecnológico de Monterrey (Baur Chair in Nanotechnology)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Tempus Labs",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "TerumoBCT",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Teva",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "The National Natural Science Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "The Slovenian Research and Innovation Agency",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "The University of The West Indies",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "The Xinjiang Talent Development Fund",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "This study is supported via funding from Prince Sattam bin Abdulaziz University project number (PSAU/2025/01/32964)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Tianjin Natural Science Foundation Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Tokyo Women's Medical University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Treatment Technologies and Insights, Incorporated",
+      "source": "crossref",
+      "label": "industry"
+    },
+    {
+      "name": "Türkiye Bilimsel ve Teknolojik Araştırma Kurumu",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "U.S. Fish and Wildlife Service",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "U.S. National Institutes of Health",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "U.S. Public Health Service",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "UC Davis Academic Senate Grant, UC Davis Dept. of Pathology Diagnostic Innovation seed grant, Shriner Children's Neil Reitman Pediatric Burn Institute",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "UGC - SAP - BSRF",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "UK Browsweat",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "UK EPSRC",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "UM High Impact Research Grant UM-MOHE",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "USDOT/STRIDE",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "United Arab Emirates University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universidad Nacional de La Plata",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universita degli Studi di Firenze",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universitas Gadjah Mada",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University Research Fund (BOF) of the University of Antwerp",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Bergen",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Guelph Garthshore Memorial Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Hong Kong",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Montana",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Oulu strategic",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Pisa",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Surabaya",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Tasmania",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Toronto",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Toyama",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "University of Washington",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universität Bremen",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universitätsklinikum Düsseldorf. Anstalt öffentlichen Rechts",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universitätsklinikum Würzburg",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Universitätsklinikum des Saarlandes und Medizinische Fakultät der Universität des Saarlandes",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Utrecht University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "VLIR Belgium Organization",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Vetenskapsrådet",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Vetenskapsrådet (VR)",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Wake Forest University Health Sciences",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "We haven't got any funding agency or supporter.",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "West Light Foundation",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Wissenschaftszentrum Berlin für Sozialforschung",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Xinjiang Science and Technology Support Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Xinxiang Medical University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Xuzhou Medical Key Talent Project",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Xyz",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Yale University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Yellow Sea Fisheries Research Institute",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Yerby Postdoctoral",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Yonsei University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Young Talent Fund of Association for Science and Technology in Shaanxi, China",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Young Teacher Research Cultivation Fund of South China Normal University",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Yunnan Fundamental Research Projects",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "Zentralinstitut für Seelische Gesundheit (ZI)",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Zhejiang Chinese Medical University",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "aaaa",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "genotype 3a",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "genotype 4a",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "no funding",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "no funding associated",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "none",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "not funded",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "the Fundamental Research Funds for the Central Universities",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "the Fundamental Research Funds for the Central Universities, China",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "the Higher Education and Science Committee of the Republic of Armenia",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "the National Key Research and Development Plan",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "the National Natural Science Foundation of China",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "the National Natural Science Fund",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "the National Science and Technology Support Program",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "the Natural Science Foundation of Shaanxi Province under Grant",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "the Postdoctoral Fellowship Program of CPSF",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "the University of Oulu Graduate School, Health and Biosciences Doctoral",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "the special funds for the Science and Technology Programs of Huai'an",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "universtiy of sistan",
+      "source": "crossref",
+      "label": "not_industry"
+    },
+    {
+      "name": "Åhlén Foundation",
+      "source": "pubmed",
+      "label": "not_industry"
+    },
+    {
+      "name": "“Chinese National Major Project for New Drugs Innovation”",
+      "source": "crossref",
+      "label": "not_industry"
+    }
+  ]
+}

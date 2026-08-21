@@ -1,0 +1,43 @@
+name: Swift integration tests (live PMC)
+
+permissions:
+  contents: read
+
+# Scheduled and manual only — never on a pull request.
+#
+# These tests fetch real articles from Europe PMC and PubMed Central, so on a PR
+# they would measure those services' availability rather than this repository,
+# and a network blip would block an unrelated merge. But they are also the only
+# tests in the repo that see a real JATS document: every other JATS fixture is
+# hand-written, and two of the defects fixed in PR #142 were invisible to the
+# synthetic suite and only surfaced by surveying live PMC. Leaving them switched
+# off entirely meant the one suite that can catch that class of bug never ran.
+on:
+  schedule:
+    # 04:17 UTC daily. Off the hour so this does not pile into GitHub's
+    # top-of-hour scheduling backlog.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: swift-integration-tests
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    name: swift test (integration, live network)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Run the network-gated tests
+        working-directory: Packages/BioMedLit
+        # JATSXMLParserIntegrationTests skips every case unless this is set, so
+        # without it the job would pass while running nothing.
+        env:
+          INTEGRATION_TESTS: '1'
+        run: swift test --filter JATSXMLParserIntegrationTests

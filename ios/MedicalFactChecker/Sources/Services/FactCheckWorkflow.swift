@@ -1911,9 +1911,13 @@ final class FactCheckWorkflow {
     private func analyzeTransparency() async {
         guard let session = session else { return }
 
+        // Stale results are re-run, not skipped. Filtering on presence alone left
+        // every result from an earlier analyzer permanently excluded — the version
+        // stamp would mark it stale forever while nothing ever refreshed it, and
+        // the only remedy shipped was a per-document button in a detail sheet.
         let documentsToAnalyze = (session.documents ?? [])
             .filter { $0.meetsThreshold(settings.minScoreThreshold) }
-            .filter { !$0.hasTransparencyAnalysis }
+            .filter { !$0.hasTransparencyAnalysis || $0.transparencyAnalysisIsStale }
 
         guard !documentsToAnalyze.isEmpty else {
             updateProgress(.analyzingTransparency, "No documents to analyze for transparency")

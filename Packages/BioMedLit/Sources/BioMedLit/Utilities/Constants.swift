@@ -32,6 +32,51 @@ public enum BioMedLitConstants {
     /// Maximum page size for Europe PMC searches.
     public static let europePMCMaxPageSize = 1000
 
+    /// Europe PMC ``availabilityCode`` values whose PDF may be downloaded.
+    ///
+    /// Europe PMC labels a ``fullTextUrl`` entry's access twice over: a display
+    /// string (``availability``) and a short controlled code (``availabilityCode``).
+    /// Both are read — the code decides when present, the string is the fallback
+    /// for an entry carrying none.
+    ///
+    /// An allow-list, never a deny-list on "Subscription required": an unknown
+    /// future value must under-credit, costing one retrieval, rather than send
+    /// the app to download a paywalled PDF.
+    ///
+    /// bmlib issue #79 measured this over 600 recent MEDLINE records — of 1,263
+    /// ``fullTextUrl`` entries, 326 were ``documentStyle=pdf``:
+    ///
+    /// | `availability` | code | entries | share |
+    /// | --- | --- | --- | --- |
+    /// | Open access | `OA` | 312 | 95.7% |
+    /// | Free | `F` | 14 | 4.3% |
+    /// | Subscription required | `S` | 0 | — |
+    ///
+    /// Both accepted labels are the identical `…?pdf=render` URL on the identical
+    /// host, so accepting only "Free" discarded 95.7% of the free PDFs this tier
+    /// exists to find.
+    public static let europePMCFreePDFAvailabilityCodes: Set<String> = ["OA", "F"]
+
+    /// Europe PMC ``availability`` display strings accepted for an entry with no code.
+    ///
+    /// Consulted only when ``availabilityCode`` is absent — a code that is present
+    /// but unrecognised is rejected without reading the label, so a future code
+    /// cannot be admitted on the strength of a display string.
+    public static let europePMCFreePDFAvailabilityLabels: Set<String> = ["Open access", "Free"]
+
+    /// Europe PMC ``availabilityCode`` values known to mean "not downloadable".
+    ///
+    /// Not consulted when deciding — ``europePMCFreePDFAvailabilityCodes`` is the
+    /// allow-list and remains the only thing that admits an entry. This exists so
+    /// the rejection can be *reported* accurately: a paywalled `S` entry is
+    /// routine and belongs at debug, while a code in neither set means Europe PMC
+    /// has published a value this build has never evaluated, which is how bmlib
+    /// issue #79 recurs and belongs at warning.
+    public static let europePMCKnownUnavailablePDFCodes: Set<String> = ["S"]
+
+    /// Europe PMC ``documentStyle`` marking a PDF entry.
+    public static let europePMCPDFDocumentStyle = "pdf"
+
     // MARK: - PubMed API
 
     /// NCBI E-utilities base URL.

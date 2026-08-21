@@ -172,10 +172,38 @@ its slice has landed; add a new section when handing off new work.
   `RegexHelper` compiles with `(?U)` so `\w\s\b\d` match Unicode like
   Python/Swift; **reused slices must keep this** or non-ASCII input diverges.
   Python `study_transparency_analyzer.py` is the canonical reference; Swift
-  `BioMedLit` and Android `domain.transparency` mirror it byte-for-byte.
+  `BioMedLit` and Android `domain.transparency` mirror it byte-for-byte —
+  **for the data-availability classifier**. This does *not* hold for funder
+  classification: Swift's calibrated `funderNameStems`/`funderNameWords` were
+  ported from **bmlib**, not from the canonical desktop Python, which still uses
+  `INDUSTRY_KEYWORDS[:6]` in `_classify_funder_by_name` and has never been
+  measured against the shared corpus. See #143 before assuming parity here.
 
 ## Potential follow-ups
 
+- **#143 — desktop Python funder classifier diverges from the parity corpus**:
+  the canonical implementation named in
+  `doc/cross_platform/transparency_parity/README.md` classifies funders with a
+  positional `INDUSTRY_KEYWORDS[:6]` slice and does not read `funder_names.json`.
+  Swift scores precision 0.909 / recall 0.333 on that corpus; the canonical Python
+  is unmeasured. Also: `tests/test_transparency_parity.py` loads only the two
+  data-availability fixtures, so the funder corpus is the one file in the parity
+  directory that nothing checks.
+- **#146 — no real PMC JATS fixtures**: every JATS test is hand-written synthetic
+  XML. The caption-host defect found reviewing #142 affected **86 of 386 real
+  articles (22.3%)** while every synthetic routing test passed, and a mutation
+  reducing `subArticleDepth` to a boolean flag passed all 59 JATS tests. The
+  network-gated integration tests now run nightly
+  (`.github/workflows/swift-integration-tests.yml`) but still never on a PR;
+  committing a handful of real articles as offline fixtures is the durable fix.
+- **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
+  dropped**: they no longer corrupt the enclosing section (fixed in #142 review),
+  but there is no model to capture them into. 258 + 144 + 15 occurrences across
+  386 real articles.
+- **#145 — stale transparency results still feed report aggregates and the
+  exported PDF**: `analyzerVersion` staleness reaches the two detail sheets and
+  the re-analysis filter, but `TransparencySummarySection` and
+  `PrintableReportView` still average v1 and v2 scores into one figure unlabelled.
 - **#123 — Android parse errors are swallowed (golden rule 8)**: `parseArticleXml`
   ends its catch with `printStackTrace()` — the only such call left in
   `app/src/main` — so a truncated EFetch batch silently under-reports articles and

@@ -99,11 +99,35 @@ public struct JATSFigureInfo: Sendable, Equatable {
     /// URL or path to the figure graphic.
     public let graphicURL: String?
 
-    public init(id: String, label: String, caption: String, graphicURL: String?) {
+    /// Footnote paragraphs from `<table-wrap-foot>` or a figure `<fn>`.
+    ///
+    /// Kept separate from ``caption`` because the two say different things: the
+    /// caption names the exhibit, while footnotes carry abbreviation expansions,
+    /// significance markers and per-table funding notes. The rendered table does
+    /// not reproduce them, so dropping them lost content the transparency
+    /// analysis reads.
+    public let footnotes: [String]
+
+    /// Creates parsed figure information.
+    ///
+    /// - Parameters:
+    ///   - id: Figure ID used for cross-references.
+    ///   - label: Figure label, for example "Figure 1".
+    ///   - caption: Caption text.
+    ///   - graphicURL: URL or path to the graphic, if the figure has one.
+    ///   - footnotes: Footnote paragraphs; defaults to none.
+    public init(
+        id: String,
+        label: String,
+        caption: String,
+        graphicURL: String?,
+        footnotes: [String] = []
+    ) {
         self.id = id
         self.label = label
         self.caption = caption
         self.graphicURL = graphicURL
+        self.footnotes = footnotes
     }
 }
 
@@ -121,11 +145,35 @@ public struct JATSTableInfo: Sendable, Equatable {
     /// Table content as markdown table format.
     public let markdownContent: String
 
-    public init(id: String, label: String, caption: String, markdownContent: String) {
+    /// Footnote paragraphs from `<table-wrap-foot>` or a figure `<fn>`.
+    ///
+    /// Kept separate from ``caption`` because the two say different things: the
+    /// caption names the exhibit, while footnotes carry abbreviation expansions,
+    /// significance markers and per-table funding notes. The rendered table does
+    /// not reproduce them, so dropping them lost content the transparency
+    /// analysis reads.
+    public let footnotes: [String]
+
+    /// Creates parsed table information.
+    ///
+    /// - Parameters:
+    ///   - id: Table ID used for cross-references.
+    ///   - label: Table label, for example "Table 1".
+    ///   - caption: Caption text.
+    ///   - markdownContent: The table body rendered as a markdown table.
+    ///   - footnotes: Footnote paragraphs; defaults to none.
+    public init(
+        id: String,
+        label: String,
+        caption: String,
+        markdownContent: String,
+        footnotes: [String] = []
+    ) {
         self.id = id
         self.label = label
         self.caption = caption
         self.markdownContent = markdownContent
+        self.footnotes = footnotes
     }
 }
 
@@ -380,13 +428,15 @@ struct FigureBuilder {
     var label = ""
     var caption = ""
     var graphicHref = ""
+    var footnotes: [String] = []
 
     func build() -> JATSFigureInfo {
         JATSFigureInfo(
             id: id,
             label: label,
             caption: caption,
-            graphicURL: graphicHref.isEmpty ? nil : graphicHref
+            graphicURL: graphicHref.isEmpty ? nil : graphicHref,
+            footnotes: footnotes
         )
     }
 }
@@ -396,6 +446,7 @@ struct TableBuilder {
     var id = ""
     var label = ""
     var caption = ""
+    var footnotes: [String] = []
     var headerRows: [[String]] = []
     var bodyRows: [[String]] = []
     var currentRow: [String] = []
@@ -556,7 +607,8 @@ struct TableBuilder {
             id: id,
             label: label,
             caption: caption,
-            markdownContent: buildMarkdownTable()
+            markdownContent: buildMarkdownTable(),
+            footnotes: footnotes
         )
     }
 
