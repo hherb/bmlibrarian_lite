@@ -55,7 +55,31 @@ final class TransparencyParityTests: XCTestCase {
     }
 
     private struct SponsorPatternManifest: Decodable {
+        /// One funder name per classification layer, so both platforms probe the
+        /// same inputs rather than each choosing its own representative.
+        struct ConfidenceProbe: Decodable {
+            let layer: String
+            let name: String
+            let doi: String?
+            let isIndustry: Bool
+
+            enum CodingKeys: String, CodingKey {
+                case layer
+                case name
+                case doi
+                case isIndustry = "is_industry"
+            }
+        }
+
         let patterns: [String: [String]]
+        let confidences: [String: Double]
+        let confidenceProbes: [ConfidenceProbe]
+
+        enum CodingKeys: String, CodingKey {
+            case patterns
+            case confidences
+            case confidenceProbes = "confidence_probes"
+        }
     }
 
     private struct CaseFixture: Decodable {
@@ -252,6 +276,69 @@ final class TransparencyParityTests: XCTestCase {
             message += ":\n" + differences.joined(separator: "\n")
         }
         XCTFail(message, file: file, line: line)
+    }
+
+    // MARK: - Funder confidence parity (#152)
+
+    /// Every layer's representative funder must classify as the contract says.
+    ///
+    /// Asserted behaviourally rather than by reading constants: the confidence
+    /// values are `private` to `FundingAnalyzer`, and behaviour is what reaches a
+    /// user in any case. Python reported a flat 0.8 for both non-industry halves
+    /// until #152 while Swift reported 0.85 and 0.80 — a divergence invisible to
+    /// the funder corpus, which scores only the `isIndustry` boolean.
+    func testEveryProbeReportsTheContractConfidence() throws {
+        let manifest = try Self.sponsorManifest.get()
+        for probe in manifest.confidenceProbes {
+            let expected = try XCTUnwrap(
+                manifest.confidences[probe.layer],
+                "contract has no confidence for layer '\(probe.layer)'"
+            )
+            let (isIndustry, confidence) = FundingAnalyzer.classifyFunder(
+                name: probe.name,
+                doi: probe.doi
+            )
+            XCTAssertEqual(
+                isIndustry,
+                probe.isIndustry,
+                "'\(probe.name)' (\(probe.layer)) classified as isIndustry=\(isIndustry)"
+            )
+            XCTAssertEqual(
+                confidence,
+                expected,
+                accuracy: 1e-9,
+                "'\(probe.name)' reported \(confidence), contract says \(expected) "
+                    + "for layer '\(probe.layer)'"
+            )
+        }
+    }
+
+    /// A confidence nothing exercises is a value no test can defend.
+    func testEveryContractLayerHasAProbe() throws {
+        let manifest = try Self.sponsorManifest.get()
+        let probed = Set(manifest.confidenceProbes.map(\.layer))
+        XCTAssertEqual(probed, Set(manifest.confidences.keys))
+    }
+
+    /// The ladder must stay strictly descending, with no two layers tied.
+    ///
+    /// Order is the part that carries meaning: two layers reporting the same
+    /// confidence would be indistinguishable to a caller ranking funders by it,
+    /// which is the state #152 fixed on the Python side.
+    func testTheConfidenceLadderIsStrictlyDescending() throws {
+        let manifest = try Self.sponsorManifest.get()
+        let ladder = [
+            "known_industry_doi",
+            "government_pattern",
+            "academic_pattern",
+            "industry_name",
+            "unknown",
+        ]
+        let values = try ladder.map {
+            try XCTUnwrap(manifest.confidences[$0], "contract has no layer '\($0)'")
+        }
+        XCTAssertEqual(values, values.sorted(by: >))
+        XCTAssertEqual(Set(values).count, values.count, "two layers share a confidence")
     }
 
     // MARK: - Sponsor pattern manifest parity (#147)

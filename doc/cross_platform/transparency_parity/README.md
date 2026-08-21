@@ -156,6 +156,33 @@ Before #147 the government tier was selected by a positional
 so that no future edit can reintroduce a boundary that is implied by position
 rather than stated by name.
 
+### The confidence ladder (#152)
+
+The same file carries the confidence each classification layer reports:
+
+| Layer | Value |
+| --- | --- |
+| `known_industry_doi` | 1.00 |
+| `government_pattern` | 0.85 |
+| `academic_pattern` | 0.80 |
+| `industry_name` | 0.75 |
+| `unknown` | 0.30 |
+
+Asserted **behaviourally**, not by comparing constants: `confidence_probes` names
+one representative funder per layer, and each platform classifies it and checks
+the reported confidence. Swift's constants are `private`, so a constant
+comparison is not available there — and behaviour is what reaches a user anyway.
+
+Two invariants matter as much as the values. The ladder must stay **strictly
+descending** — two layers sharing a value are indistinguishable to a caller
+ranking funders by confidence — and every layer must have a probe, since a value
+nothing exercises is one no test can defend.
+
+Python returned a flat 0.80 for both non-industry halves until #152, where Swift
+had always reported 0.85 and 0.80. The funder corpus scores the `is_industry`
+boolean, which agreed throughout, so nothing caught it for as long as it existed.
+That is the reason the confidences are in the contract at all.
+
 ## Changing a pattern
 
 1. Edit `data_availability_patterns.json` (or `sponsor_patterns.json`).

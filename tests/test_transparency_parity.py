@@ -54,6 +54,7 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     STRONG_REFUSAL_PATTERNS,
     DataDisclosureLevel,
     analyze_data_availability,
+    classify_funder_name,
 )
 
 PARITY_FIXTURE_DIR = (
@@ -199,6 +200,66 @@ class TestSponsorPatternManifestParity:
         for half in ("government", "academic"):
             for pattern in sponsor_patterns[half]:
                 re.compile(pattern)
+
+
+class TestFunderConfidenceParity:
+    """The confidence each classification layer reports (#152).
+
+    Asserted **behaviourally** — classify a representative funder and compare the
+    confidence — rather than by reading constants. Swift's are `private`, so a
+    constant comparison is not available there, and behaviour is what reaches a
+    user in any case.
+
+    Python reported a flat 0.8 for both non-industry halves until #152, where
+    Swift had always reported 0.85 for a government match and 0.80 for an
+    academic one. The funder corpus scores the ``is_industry`` boolean, which
+    agreed throughout, so nothing caught it.
+    """
+
+    @pytest.fixture(scope="class")
+    def contract(self) -> dict[str, Any]:
+        """The sponsor/confidence contract."""
+        return _load_fixture(SPONSOR_PATTERNS_FIXTURE)
+
+    def test_every_probe_reports_the_contract_confidence(
+        self, contract: dict[str, Any]
+    ) -> None:
+        """Each layer's representative funder must classify as the contract says."""
+        confidences = cast(dict[str, float], contract["confidences"])
+        for probe in cast(list[dict[str, Any]], contract["confidence_probes"]):
+            is_industry, confidence = classify_funder_name(probe["name"], probe["doi"])
+            assert is_industry == probe["is_industry"], (
+                f"{probe['name']!r} ({probe['layer']}) classified as "
+                f"is_industry={is_industry}"
+            )
+            assert confidence == confidences[probe["layer"]], (
+                f"{probe['name']!r} reported {confidence}, contract says "
+                f"{confidences[probe['layer']]} for layer {probe['layer']!r}"
+            )
+
+    def test_every_layer_has_a_probe(self, contract: dict[str, Any]) -> None:
+        """A confidence nothing exercises is a value no test can defend."""
+        probed = {probe["layer"] for probe in contract["confidence_probes"]}
+        assert probed == set(contract["confidences"])
+
+    def test_the_ladder_is_strictly_descending(self, contract: dict[str, Any]) -> None:
+        """A registry DOI outranks a named agency, which outranks a generic word.
+
+        Order is the part that carries meaning: the absolute values are a
+        calibration choice, but two layers reporting the same confidence would
+        make them indistinguishable to a caller ranking funders by it — which is
+        exactly the state #152 fixed.
+        """
+        ladder = [
+            "known_industry_doi",
+            "government_pattern",
+            "academic_pattern",
+            "industry_name",
+            "unknown",
+        ]
+        values = [contract["confidences"][layer] for layer in ladder]
+        assert values == sorted(values, reverse=True)
+        assert len(set(values)) == len(values), f"two layers share a confidence: {values}"
 
 
 class TestManifestSelfConsistency:

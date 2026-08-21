@@ -318,10 +318,18 @@ FUNDER_NAME_WORDS = [
 #: funder. The registry is authoritative, so this layer short-circuits the rest.
 KNOWN_FUNDER_CONFIDENCE = 1.0
 
-#: Confidence reported when a government/academic pattern matches the name. Higher
-#: than the industry-name layer because that list names specific public bodies,
-#: while the industry lists are generic company forms.
-NON_INDUSTRY_NAME_CONFIDENCE = 0.8
+#: Confidence reported when a ``GOVERNMENT_PATTERNS`` entry matches the name.
+#: The highest of the name layers because that list names specific public bodies,
+#: where the academic list carries generic institutional words and the industry
+#: lists carry generic company forms.
+GOVERNMENT_PATTERN_CONFIDENCE = 0.85
+
+#: Confidence reported when an ``ACADEMIC_PATTERNS`` entry matches the name.
+#:
+#: Below the government tier because "university", "hospital" and "state" appear
+#: in far more names than they identify — a hospital's commercial subsidiary is
+#: still called a hospital. Mirrors Swift's ``academicPatternConfidence``.
+ACADEMIC_PATTERN_CONFIDENCE = 0.80
 
 #: Confidence reported when a funder-name stem or whole word matches.
 INDUSTRY_NAME_CONFIDENCE = 0.75
@@ -378,8 +386,9 @@ INSTITUTIONAL_INTERMEDIARY_PATTERNS = [
 # ``academicPatterns`` byte-for-byte. :func:`determine_sponsor_type` selects the
 # GOVERNMENT tier from the named list — never from a positional slice of it.
 #
-# Both halves mean "not industry", so :func:`classify_funder_name` matches their
-# concatenation and the split cannot move that boundary — see
+# Both halves mean "not industry". :func:`classify_funder_name` walks them in
+# order — government, then academic — which covers exactly the same patterns as
+# their concatenation, so the split cannot move the industry boundary. See
 # ``NON_INDUSTRY_PATTERNS``.
 
 #: Public funding bodies. Anything matching here makes the study government-
@@ -423,7 +432,7 @@ ACADEMIC_PATTERNS = [
 ]
 
 #: Every pattern that means "this funder is not industry", in the order
-#: :func:`classify_funder_name` matches them. Mirrors Swift's
+#: :func:`classify_funder_name` reaches them. Mirrors Swift's
 #: ``IndustryPatterns.nonIndustryPatterns``.
 #:
 #: This concatenation *is* the list that existed before the #147 split, so funder
@@ -431,10 +440,11 @@ ACADEMIC_PATTERNS = [
 #: HIGH-risk rule — is unchanged by it. ``TestThePatternSplitPreservesFunderClassification``
 #: pins that against a frozen copy of the pre-split list.
 #:
-#: Swift declares the same constant but its classifier does not use it:
-#: ``FundingAnalyzer.classifyFunder`` tests the two halves separately and returns
-#: a different confidence for each (0.85 government, 0.80 academic) where Python
-#: returns a flat ``NON_INDUSTRY_NAME_CONFIDENCE``. Tracked as #152.
+#: Not the matcher: since #152 the classifier walks the two halves separately so
+#: each can report its own confidence, exactly as Swift's ``classifyFunder`` does.
+#: This constant is the combined vocabulary — what the drift guard compares and
+#: what "non-industry" means as one list. Swift declares the same constant and
+#: likewise does not match against it.
 NON_INDUSTRY_PATTERNS = GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
 
 # Negated open-availability affirmations (issue #117).
@@ -680,9 +690,11 @@ def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool
 
     1. A known industry funder DOI from the CrossRef Funder Registry, which is
        authoritative and short-circuits the rest.
-    2. Government/academic name patterns, which take precedence even when a
-       corporate suffix is present in the same name — a university spin-out
-       naming convention must not flag its parent institution.
+    2. Government name patterns, then academic ones. Both take precedence even
+       when a corporate suffix is present in the same name — a university
+       spin-out naming convention must not flag its parent institution — and
+       each reports its own confidence, government being the more specific
+       signal.
     3. The calibrated funder-name stems and whole words.
 
     Layer 3 is measured against the shared labelled corpus at
@@ -705,9 +717,15 @@ def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool
 
     name_lower = name.lower()
 
-    for pattern in NON_INDUSTRY_PATTERNS:
-        if re.search(pattern, name_lower):
-            return False, NON_INDUSTRY_NAME_CONFIDENCE
+    # The two halves are walked separately rather than over NON_INDUSTRY_PATTERNS
+    # so each can report its own confidence, as Swift's classifyFunder does. The
+    # boolean is unaffected: government-then-academic covers exactly the same
+    # patterns in the same order as their concatenation (#152).
+    if any(re.search(pattern, name_lower) for pattern in GOVERNMENT_PATTERNS):
+        return False, GOVERNMENT_PATTERN_CONFIDENCE
+
+    if any(re.search(pattern, name_lower) for pattern in ACADEMIC_PATTERNS):
+        return False, ACADEMIC_PATTERN_CONFIDENCE
 
     if matches_industry_funder_name(name):
         return True, INDUSTRY_NAME_CONFIDENCE

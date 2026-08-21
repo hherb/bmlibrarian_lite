@@ -78,6 +78,22 @@ its slice has landed; add a new section when handing off new work.
   - `government`/`federal`/`state` sit in the *academic* half on both platforms,
     so "Federal Ministry of Health" tiers ACADEMIC. Known and left alone: moving
     them is a Swift behaviour change too.
+  - **Funder confidences now match Swift too** (#152, folded into the same PR).
+    Python reported a flat 0.8 for both non-industry halves; Swift had always
+    reported **0.85 government / 0.80 academic**. `classify_funder_name` now walks
+    the halves separately, as Swift's `classifyFunder` does. Differential over
+    70,417 names (the 417-name corpus plus 70k synthetic): **0** `is_industry`
+    changes, and the only confidence transition is `0.8 -> 0.85` for government
+    matches — the boundary the corpus measures is provably untouched.
+    - The ladder (1.0 DOI > 0.85 gov > 0.80 academic > 0.75 industry-name > 0.3
+      none) lives in `sponsor_patterns.json` and is asserted **behaviourally** on
+      both platforms via `confidence_probes`, because Swift's constants are
+      `private`. Strict descent and probe coverage are pinned too.
+    - **Half order is now load-bearing.** While both halves returned 0.8 it was
+      inert; it now decides the reported value for a name matching both, e.g.
+      "Veterans Affairs Medical Center". Pinned — reversing the checks fails.
+    - `NON_INDUSTRY_PATTERNS` is no longer the matcher on either platform; it is
+      the combined vocabulary the drift guard compares.
   - `\bva\b` is two letters and also the USPS abbreviation for Virginia, so
     "…, Richmond VA" now tiers GOVERNMENT — outranking the university pattern.
     #147 made it tier-deciding where it previously only suppressed industry
@@ -279,16 +295,6 @@ its slice has landed; add a new section when handing off new work.
   `\bnational institutes? of\b` reaches
   non-US bodies ("National Institute of Development Administration"), so measure
   first — and change both platforms together.
-- **#152 — Python collapses Swift's two non-industry funder confidences**: Swift
-  returns 0.85 for a government-pattern match and 0.80 for an academic one;
-  Python returns a flat `NON_INDUSTRY_NAME_CONFIDENCE = 0.8` for both, because it
-  matches the concatenation rather than the halves. The `is_industry` boolean
-  agrees, which is why the corpus measurement does not catch it. #147 removed the
-  only obstacle (there is now a government half to test separately) but left the
-  fix out of scope: it belongs to `classify_funder_name` (#143/#149 territory)
-  and changes an exported CSV value. Note Swift's `nonIndustryPatterns` constant
-  is dead code — nothing references it — which is how the divergence stayed
-  invisible.
 - **#146 — no real PMC JATS fixtures**: every JATS test is hand-written synthetic
   XML. The caption-host defect found reviewing #142 affected **86 of 386 real
   articles (22.3%)** while every synthetic routing test passed, and a mutation

@@ -309,11 +309,24 @@ Two entries in each half are worth knowing before you edit either:
   **academic** half, so "Federal Ministry of Health" tiers `ACADEMIC`. Wrong on
   both platforms; left alone because moving them is a Swift behaviour change too.
 
-The two halves exist for `determine_sponsor_type()` (see below), not for this
-layer — funder classification matches their concatenation and is indifferent to
-where the split falls. (Swift's classifier is *not* indifferent: it tests the
-halves separately and returns 0.85 for a government match against 0.80 for an
-academic one, where Python returns a flat `NON_INDUSTRY_NAME_CONFIDENCE` — #152.)
+`classify_funder_name()` walks the two halves **in order**, government first,
+which covers exactly the same patterns as their concatenation — so the split does
+not move the industry/non-industry boundary. What it does decide is the
+**confidence** each layer reports:
+
+| Layer | Confidence |
+| --- | --- |
+| known CrossRef industry-funder DOI | 1.00 |
+| `GOVERNMENT_PATTERNS` match | 0.85 |
+| `ACADEMIC_PATTERNS` match | 0.80 |
+| industry stem or whole word | 0.75 |
+| nothing matched | 0.30 |
+
+Government outranks academic because that list names specific public bodies,
+where "university", "hospital" and "state" appear in far more names than they
+identify. Python reported a flat 0.80 for both halves until #152, where Swift had
+always distinguished them; the ladder is now asserted from the shared contract on
+both platforms, and a name matching both halves reports the government value.
 
 Industry matching then uses two lists that are **different kinds of thing**. A
 stem must match *inside* a longer word ("pharmaceutic" reaching
