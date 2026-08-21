@@ -1,0 +1,111 @@
+{
+  "_readme": [
+    "Canonical cross-platform contract for the sponsor-type pattern lists (issue #147)",
+    "and the funder-classification confidence ladder (issue #152).",
+    "",
+    "This file is the single source of truth. Python and Swift (BioMedLit) each carry",
+    "their own transcription of these values, and each platform's test suite asserts",
+    "its behaviour equals this file exactly. Editing one platform without editing this",
+    "file fails that platform's parity test; editing this file without updating the",
+    "other fails theirs. That is the point: silent divergence becomes impossible.",
+    "",
+    "Android carries no funder or sponsor classifier, so it is not a party to this",
+    "contract — unlike data_availability_patterns.json, which binds all three.",
+    "",
+    "PATTERNS. The split into two halves is significant and is NOT presentational:",
+    "  - determine_sponsor_type() / FundingAnalyzer.determineSponsorType tests the",
+    "    government half first, so one public agency outranks any number of",
+    "    universities alongside it.",
+    "  - classify_funder_name() / FundingAnalyzer.classifyFunder walks government",
+    "    then academic, which covers exactly their concatenation in order. Adding or",
+    "    removing a pattern changes the industry boundary, which is measured against",
+    "    funder_names.json; moving one between halves changes the sponsor tier and",
+    "    the reported confidence, but not the boundary.",
+    "",
+    "CONFIDENCES. The value each classification layer reports, asserted",
+    "behaviourally: a test classifies a representative funder and compares the",
+    "confidence, rather than reading the constant. Swift's constants are private, and",
+    "behaviour is what actually reaches a user in any case. Python reported a flat",
+    "0.8 for both non-industry halves until #152, where Swift had always reported",
+    "0.85 and 0.80 -- a divergence the boolean-scored funder corpus could not see.",
+    "The ladder must stay strictly descending: a known registry DOI outranks a named",
+    "public body, which outranks a generic institutional word, which outranks a",
+    "generic company form, which outranks no match at all.",
+    "",
+    "Do not regenerate this file mechanically from any one platform. Change it by hand,",
+    "deliberately, as part of a change that touches both.",
+    "",
+    "See doc/cross_platform/transparency_parity/README.md."
+  ],
+  "schema_version": 2,
+  "patterns": {
+    "government": [
+      "\\bnih\\b",
+      "\\bnational institutes? of health\\b",
+      "\\bniaid\\b",
+      "\\bnci\\b",
+      "\\bnhlbi\\b",
+      "\\bnimh\\b",
+      "\\bnsf\\b",
+      "\\bnational science foundation\\b",
+      "\\bcdc\\b",
+      "\\bcenters? for disease control\\b",
+      "\\bfda\\b",
+      "\\bfood and drug administration\\b",
+      "\\bva\\b",
+      "\\bveterans? (?:affairs|administration)\\b",
+      "\\bahrq\\b",
+      "\\bpcori\\b",
+      "\\bwellcome\\b",
+      "\\bmedical research council\\b"
+    ],
+    "academic": [
+      "\\buniversit(?:y|ies)\\b",
+      "\\bcollege\\b",
+      "\\bhospital\\b",
+      "\\bmedical (?:center|school)\\b",
+      "\\bgovernment\\b",
+      "\\bfederal\\b",
+      "\\bstate\\b"
+    ]
+  },
+  "confidences": {
+    "known_industry_doi": 1.0,
+    "government_pattern": 0.85,
+    "academic_pattern": 0.8,
+    "industry_name": 0.75,
+    "unknown": 0.3
+  },
+  "confidence_probes": [
+    {
+      "layer": "known_industry_doi",
+      "name": "Pfizer",
+      "doi": "10.13039/100004319",
+      "is_industry": true
+    },
+    {
+      "layer": "government_pattern",
+      "name": "National Institutes of Health",
+      "doi": null,
+      "is_industry": false
+    },
+    {
+      "layer": "academic_pattern",
+      "name": "University of Oxford",
+      "doi": null,
+      "is_industry": false
+    },
+    {
+      "layer": "industry_name",
+      "name": "Genentech Inc.",
+      "doi": null,
+      "is_industry": true
+    },
+    {
+      "layer": "unknown",
+      "name": "Fondation Zzyzx",
+      "doi": null,
+      "is_industry": false
+    }
+  ]
+}

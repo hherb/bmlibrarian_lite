@@ -318,10 +318,18 @@ FUNDER_NAME_WORDS = [
 #: funder. The registry is authoritative, so this layer short-circuits the rest.
 KNOWN_FUNDER_CONFIDENCE = 1.0
 
-#: Confidence reported when a government/academic pattern matches the name. Higher
-#: than the industry-name layer because that list names specific public bodies,
-#: while the industry lists are generic company forms.
-NON_INDUSTRY_NAME_CONFIDENCE = 0.8
+#: Confidence reported when a ``GOVERNMENT_PATTERNS`` entry matches the name.
+#: The highest of the name layers because that list names specific public bodies,
+#: where the academic list carries generic institutional words and the industry
+#: lists carry generic company forms.
+GOVERNMENT_PATTERN_CONFIDENCE = 0.85
+
+#: Confidence reported when an ``ACADEMIC_PATTERNS`` entry matches the name.
+#:
+#: Below the government tier because "university", "hospital" and "state" appear
+#: in far more names than they identify — a hospital's commercial subsidiary is
+#: still called a hospital. Mirrors Swift's ``academicPatternConfidence``.
+ACADEMIC_PATTERN_CONFIDENCE = 0.80
 
 #: Confidence reported when a funder-name stem or whole word matches.
 INDUSTRY_NAME_CONFIDENCE = 0.75
@@ -372,7 +380,33 @@ INSTITUTIONAL_INTERMEDIARY_PATTERNS = [
     r'salary\s+support\s+from\b',
 ]
 
-# Known government/academic funder patterns
+# Known government/academic funder patterns.
+#
+# Two halves mirroring Swift's ``IndustryPatterns.governmentPatterns`` /
+# ``academicPatterns`` byte-for-byte. :func:`determine_sponsor_type` selects the
+# GOVERNMENT tier from the named list — never from a positional slice of it.
+#
+# Both halves mean "not industry". :func:`classify_funder_name` walks them in
+# order — government, then academic — which covers exactly the same patterns as
+# their concatenation, so the split cannot move the industry boundary. See
+# ``NON_INDUSTRY_PATTERNS``.
+
+#: Public funding bodies. Anything matching here makes the study government-
+#: sponsored, which outranks the academic tier.
+#:
+#: Six funders reached this tier for the first time in #147, when the selection
+#: stopped being a positional slice: FDA, VA, AHRQ, PCORI and — less obviously —
+#: ``wellcome`` and ``medical research council``. Wellcome is a charitable
+#: foundation rather than a state body and the MRC is a UK research council, so
+#: neither is a government agency on its legal form; both are tiered here because
+#: Swift tiers them here, and keeping the platforms agreeing was preferred to
+#: each being separately defensible. Revisit on both sides or not at all.
+#:
+#: ``\bva\b`` is a two-letter token that also matches the USPS abbreviation for
+#: Virginia, so a funder name carrying a US postal address ("... , Richmond VA")
+#: tiers GOVERNMENT. Known collision, recorded in
+#: ``doc/cross_platform/ios_bmlib_alignment.md``; #147 made it tier-deciding
+#: rather than merely industry-suppressing. Pinned by test so the cost is visible.
 GOVERNMENT_PATTERNS = [
     r'\bnih\b', r'\bnational institutes? of health\b',
     r'\bniaid\b', r'\bnci\b', r'\bnhlbi\b', r'\bnimh\b',
@@ -382,10 +416,36 @@ GOVERNMENT_PATTERNS = [
     r'\bva\b', r'\bveterans? (?:affairs|administration)\b',
     r'\bahrq\b', r'\bpcori\b',
     r'\bwellcome\b', r'\bmedical research council\b',
+]
+
+#: Academic and institutional funders, checked only when no government pattern
+#: matched.
+#:
+#: ``government``, ``federal`` and ``state`` are government words sitting in the
+#: academic half, so "Federal Ministry of Health" tiers ACADEMIC. That is wrong
+#: on both platforms and is left alone here deliberately: moving them is a Swift
+#: behaviour change too, and this list must stay byte-identical to Swift's.
+ACADEMIC_PATTERNS = [
     r'\buniversit(?:y|ies)\b', r'\bcollege\b',
     r'\bhospital\b', r'\bmedical (?:center|school)\b',
     r'\bgovernment\b', r'\bfederal\b', r'\bstate\b',
 ]
+
+#: Every pattern that means "this funder is not industry", in the order
+#: :func:`classify_funder_name` reaches them. Mirrors Swift's
+#: ``IndustryPatterns.nonIndustryPatterns``.
+#:
+#: This concatenation *is* the list that existed before the #147 split, so funder
+#: classification — which is measured against the labelled corpus and feeds a
+#: HIGH-risk rule — is unchanged by it. ``TestThePatternSplitPreservesFunderClassification``
+#: pins that against a frozen copy of the pre-split list.
+#:
+#: Not the matcher: since #152 the classifier walks the two halves separately so
+#: each can report its own confidence, exactly as Swift's ``classifyFunder`` does.
+#: This constant is the combined vocabulary — what the drift guard compares and
+#: what "non-industry" means as one list. Swift declares the same constant and
+#: likewise does not match against it.
+NON_INDUSTRY_PATTERNS = GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
 
 # Negated open-availability affirmations (issue #117).
 #
@@ -630,9 +690,11 @@ def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool
 
     1. A known industry funder DOI from the CrossRef Funder Registry, which is
        authoritative and short-circuits the rest.
-    2. Government/academic name patterns, which take precedence even when a
-       corporate suffix is present in the same name — a university spin-out
-       naming convention must not flag its parent institution.
+    2. Government name patterns, then academic ones. Both take precedence even
+       when a corporate suffix is present in the same name — a university
+       spin-out naming convention must not flag its parent institution — and
+       each reports its own confidence, government being the more specific
+       signal.
     3. The calibrated funder-name stems and whole words.
 
     Layer 3 is measured against the shared labelled corpus at
@@ -655,14 +717,128 @@ def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool
 
     name_lower = name.lower()
 
-    for pattern in GOVERNMENT_PATTERNS:
-        if re.search(pattern, name_lower):
-            return False, NON_INDUSTRY_NAME_CONFIDENCE
+    # The two halves are walked separately rather than over NON_INDUSTRY_PATTERNS
+    # so each can report its own confidence, as Swift's classifyFunder does. The
+    # boolean is unaffected: government-then-academic covers exactly the same
+    # patterns in the same order as their concatenation (#152).
+    if any(re.search(pattern, name_lower) for pattern in GOVERNMENT_PATTERNS):
+        return False, GOVERNMENT_PATTERN_CONFIDENCE
+
+    if any(re.search(pattern, name_lower) for pattern in ACADEMIC_PATTERNS):
+        return False, ACADEMIC_PATTERN_CONFIDENCE
 
     if matches_industry_funder_name(name):
         return True, INDUSTRY_NAME_CONFIDENCE
 
     return False, UNKNOWN_FUNDER_CONFIDENCE
+
+
+def determine_sponsor_type(funders: list[FunderInfo]) -> SponsorType:
+    """Determine the overall sponsor type from a study's classified funders.
+
+    Mirrors Swift's ``FundingAnalyzer.determineSponsorType``, in this order:
+
+    * ``UNKNOWN`` when there are no funders at all — absence of funding data is
+      not evidence of any sponsor type. Checked first: every rule below would
+      otherwise be vacuously true of an empty list.
+    * ``INDUSTRY`` when every funder is industry, ``MIXED`` when only some are.
+    * Otherwise ``GOVERNMENT`` if any funder matches ``GOVERNMENT_PATTERNS`` —
+      one public agency decides the tier however many institutions sit alongside
+      it.
+    * Then ``ACADEMIC`` if any matches ``ACADEMIC_PATTERNS``.
+    * Otherwise ``NONPROFIT``: a non-industry funder nobody recognises is not the
+      same thing as a university. Note this makes NONPROFIT the tier for any
+      unrecognised funder, so callers should treat it as unverified — see the
+      warning raised in ``StudyTransparencyAnalyzer._fetch_funder_info``.
+
+    Args:
+        funders: The study's funders, already classified by
+            :func:`classify_funder_name`.
+
+    Returns:
+        The overall sponsor type.
+    """
+    if not funders:
+        return SponsorType.UNKNOWN
+
+    industry_funders = [funder for funder in funders if funder.is_industry]
+    non_industry_funders = [funder for funder in funders if not funder.is_industry]
+
+    if industry_funders and not non_industry_funders:
+        return SponsorType.INDUSTRY
+    if industry_funders:
+        return SponsorType.MIXED
+
+    def _any_match(patterns: list[str]) -> bool:
+        """Whether any non-industry funder name matches any of these patterns."""
+        return any(
+            re.search(pattern, funder.name.lower())
+            for funder in non_industry_funders
+            for pattern in patterns
+        )
+
+    if _any_match(GOVERNMENT_PATTERNS):
+        return SponsorType.GOVERNMENT
+    if _any_match(ACADEMIC_PATTERNS):
+        return SponsorType.ACADEMIC
+    return SponsorType.NONPROFIT
+
+
+#: ``lead_sponsor['class']`` value that marks a registered trial as industry-run.
+INDUSTRY_TRIAL_SPONSOR_CLASS = "INDUSTRY"
+
+#: Tiers that an industry trial sponsor upgrades to MIXED. Every non-industry
+#: tier belongs here: the registry is telling us about industry involvement the
+#: funder names did not carry, so the study is funded from both sides.
+#:
+#: Stated once, as a named set, for the same reason :func:`determine_sponsor_type`
+#: exists — the previous inline ``in [GOVERNMENT, ACADEMIC]`` list silently
+#: omitted NONPROFIT, which was unreachable when it was written.
+_TIERS_UPGRADED_BY_INDUSTRY_TRIAL = frozenset({
+    SponsorType.GOVERNMENT,
+    SponsorType.ACADEMIC,
+    SponsorType.NONPROFIT,
+})
+
+
+def update_sponsor_type(
+    current_type: SponsorType, trial_sponsor_class: str | None
+) -> SponsorType:
+    """Fold a registered trial's sponsor class into the funder-derived tier.
+
+    Mirrors Swift's ``FundingAnalyzer.updateSponsorType``. ClinicalTrials.gov
+    knows who ran the trial, which the funder names may not say. When the
+    registry reports an industry sponsor:
+
+    * ``UNKNOWN`` becomes ``INDUSTRY`` — the registry is the only evidence there is.
+    * Any non-industry tier becomes ``MIXED``, including ``NONPROFIT``.
+    * ``INDUSTRY`` and ``MIXED`` are already terminal and do not move.
+
+    A non-industry sponsor class never changes the tier: the funder names are the
+    better evidence, and the registry adds nothing they did not already carry.
+
+    Args:
+        current_type: Sponsor type derived from the funders by
+            :func:`determine_sponsor_type`.
+        trial_sponsor_class: ``lead_sponsor['class']`` from ClinicalTrials.gov
+            (for example ``"INDUSTRY"``, ``"NIH"``, ``"OTHER"``), or ``None``
+            when the study is not registered. Compared case-insensitively —
+            it is external data and its casing is not guaranteed.
+
+    Returns:
+        The sponsor type incorporating the trial registry.
+    """
+    if trial_sponsor_class is None:
+        return current_type
+
+    if trial_sponsor_class.upper() != INDUSTRY_TRIAL_SPONSOR_CLASS:
+        return current_type
+
+    if current_type is SponsorType.UNKNOWN:
+        return SponsorType.INDUSTRY
+    if current_type in _TIERS_UPGRADED_BY_INDUSTRY_TRIAL:
+        return SponsorType.MIXED
+    return current_type
 
 
 # =============================================================================
@@ -1905,24 +2081,32 @@ class StudyTransparencyAnalyzer:
                 ))
 
         # Determine overall sponsor type
-        industry_funders = [f for f in report.funders if f.is_industry]
-        gov_academic_funders = [f for f in report.funders if not f.is_industry]
+        report.sponsor_type = determine_sponsor_type(report.funders)
 
-        if industry_funders and not gov_academic_funders:
-            report.sponsor_type = SponsorType.INDUSTRY
-        elif industry_funders and gov_academic_funders:
-            report.sponsor_type = SponsorType.MIXED
-        elif gov_academic_funders:
-            # Check if academic or government
-            has_gov = any(
-                any(re.search(p, f.name.lower()) for p in GOVERNMENT_PATTERNS[:10])
-                for f in gov_academic_funders
+        # NONPROFIT is reached only by falling through both pattern lists, so it
+        # doubles as "none of these funder names was recognised". Say so rather
+        # than letting an unrecognised funder read as a confident classification:
+        # on the shared labelled corpus this is the majority outcome, not a corner.
+        #
+        # Worded as a statement about the *funder names*, not about the resulting
+        # tier: _fetch_trial_info may later upgrade NONPROFIT to MIXED on a
+        # registered industry trial, and a warning naming a tier the report no
+        # longer carries would be worse than no warning at all.
+        if report.sponsor_type is SponsorType.NONPROFIT:
+            unrecognised = [f.name for f in report.funders if not f.is_industry]
+            logger.warning(
+                "No funder name matched a government or academic pattern, so the "
+                "sponsor type falls back to NONPROFIT: %s",
+                ", ".join(unrecognised),
             )
-            report.sponsor_type = SponsorType.GOVERNMENT if has_gov else SponsorType.ACADEMIC
-        else:
-            report.sponsor_type = SponsorType.UNKNOWN
+            report.warnings.append(
+                f"Funder names not recognised ({', '.join(unrecognised)}): none "
+                "matched a known government or academic body, so a sponsor type "
+                "derived from them alone is unverified."
+            )
 
         # Set industry funding flags
+        industry_funders = [f for f in report.funders if f.is_industry]
         report.industry_funding_detected = len(industry_funders) > 0
         if industry_funders:
             report.industry_funding_confidence = max(f.confidence for f in industry_funders)
@@ -1949,12 +2133,11 @@ class StudyTransparencyAnalyzer:
                     report.trial_registrations.append(trial_info)
 
                     # Update sponsor type if industry
-                    if trial_info.sponsor_class == 'INDUSTRY':
+                    if (trial_info.sponsor_class or '').upper() == INDUSTRY_TRIAL_SPONSOR_CLASS:
                         report.industry_funding_detected = True
-                        if report.sponsor_type == SponsorType.UNKNOWN:
-                            report.sponsor_type = SponsorType.INDUSTRY
-                        elif report.sponsor_type in [SponsorType.GOVERNMENT, SponsorType.ACADEMIC]:
-                            report.sponsor_type = SponsorType.MIXED
+                    report.sponsor_type = update_sponsor_type(
+                        report.sponsor_type, trial_info.sponsor_class
+                    )
 
                     # Check results compliance
                     compliance = check_results_compliance(trial_info, report.publication_date)
