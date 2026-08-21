@@ -149,13 +149,28 @@ final class TransparencyParityTests: XCTestCase {
     /// would if this package were ever consumed outside the monorepo. Trapping
     /// there kills the whole test process; surfacing it as a thrown error lets the
     /// parity tests fail individually and leaves the rest of the suite readable.
+    ///
+    /// The walk stops at the checkout root. It used to climb to `/`, so a checkout
+    /// without its own copy of the contract bound to whichever ancestor had one —
+    /// and this repository keeps its worktrees under `.claude/worktrees/`, inside
+    /// the main checkout, so `swift test` in a worktree measured that branch's
+    /// analyzers against another branch's contract and reported success. Same fix
+    /// as `JATSRealCorpusTests.corpusDirectory`; the two must not drift.
     private static let fixtureDirectory: URL? = {
         var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while directory.path != "/" {
             let candidate = directory
                 .appendingPathComponent("doc/cross_platform/transparency_parity")
-            if FileManager.default.fileExists(atPath: candidate.path) {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
                 return candidate
+            }
+            // `.git` is a directory in a normal checkout and a file in a worktree;
+            // either way, this is as far up as this checkout goes.
+            let gitMarker = directory.appendingPathComponent(".git")
+            if FileManager.default.fileExists(atPath: gitMarker.path) {
+                return nil
             }
             directory = directory.deletingLastPathComponent()
         }

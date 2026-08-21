@@ -1,0 +1,83 @@
+{
+  "abstractSections" : [
+    {
+      "content" : "This viewpoint explores the role of conversational artificial intelligence (AI) in educating the public on breast self-examination, using an interaction with DeepSeek AI as an example, where 6 AI-generated responses to commonly asked questions were compared with guidelines published by organizations such as the World Health Organization. Although the AI provided clear, accessible, and evidence-aligned responses consistent with professional guidance, limitations included oversimplification and absence of multimedia resources. These findings suggest that AI can support public health education but should be complemented by physician oversight and evidence-based resources for responsible use.",
+      "title" : "Abstract"
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Shirish Nayyar"
+    }
+  ],
+  "bodySections" : [
+    {
+      "paragraphCount" : 10,
+      "scalarCount" : 4422,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "paragraphCount" : 5,
+      "scalarCount" : 450,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    }
+  ],
+  "doi" : "10.2196/82550",
+  "figures" : [
+
+  ],
+  "htmlScalarCount" : 15279,
+  "issue" : "",
+  "journal" : "JMIR Formative Research",
+  "markdownScalarCount" : 13772,
+  "pages" : "",
+  "pmcId" : "PMC12661592",
+  "pmid" : "41313195",
+  "references" : {
+    "count" : 10,
+    "identities" : [
+      "1.|2025|",
+      "2.||",
+      "3.|2023|",
+      "4.|2003|10.1002/14651858.CD003373",
+      "5.|2019|10.3389/fnbeh.2019.00086",
+      "6.||",
+      "7.|2021|10.18502/ijph.v50i11.7600",
+      "8.|2024|10.4337/9781802205657.ch07",
+      "9.|2024|10.1093/jamia/ocae060",
+      "10.|2025|10.2196/63058"
+    ],
+    "withArticleTitle" : 7,
+    "withAuthors" : 8,
+    "withCitation" : 10,
+    "withDOI" : 6,
+    "withFirstPage" : 3,
+    "withPMID" : 7,
+    "withSource" : 10,
+    "withVolume" : 5,
+    "withYear" : 8
+  },
+  "tables" : [
+    {
+      "caption" : "Commonly asked questions about breast self-examination and a summary of DeepSeek AI’s responses.",
+      "footnotes" : [
+        "AI: artificial intelligence."
+      ],
+      "label" : "a",
+      "markdownColumnCount" : 2,
+      "markdownDigest" : "42cd86baa13fa1fca0633ed8ef727368c02470411dad18b35fa96a2cd92169e3",
+      "markdownRowCount" : 8
+    }
+  ],
+  "title" : "Evaluating the Role of Artificial Intelligence in Breast Self-Examination",
+  "unmodelledCaptionDrops" : 0,
+  "volume" : "9",
+  "year" : "2025"
+}

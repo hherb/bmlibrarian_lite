@@ -99,9 +99,24 @@ final class JATSNestingTests: XCTestCase {
 
     // MARK: - Nested <sub-article>
 
-    /// eLife and PLOS nest the author reply inside the decision-letter
-    /// sub-article. A flag would be cleared by the inner `</sub-article>` and let
-    /// the tail of the outer one back in; a depth counter does not.
+    /// JATS permits a `<sub-article>` inside a `<sub-article>`, and a flag would
+    /// be cleared by the inner `</sub-article>` and let the tail of the outer one
+    /// back in; a depth counter does not.
+    ///
+    /// No real article was found doing it — eLife and PLOS emit the decision
+    /// letter and the author reply as *siblings*, not as parent and child. See the
+    /// note below on why the fixture is synthetic anyway.
+    ///
+    /// The tail must contain a `<sec>`, and that is the whole point of the
+    /// fixture. Loose `<p>` after the inner close is dropped for an unrelated
+    /// reason — the real article's `</body>` already cleared `inBody` — so a
+    /// prose-only tail passes under a 0/1 flag and this test claimed a guard it
+    /// did not provide. Verified: with `subArticleDepth` reduced to a flag, the
+    /// `<sec>` leaks in and this is the test that says so.
+    ///
+    /// Synthetic on purpose: nested `<sub-article>` did not occur in any of the
+    /// 225 real articles surveyed for the corpus in
+    /// `doc/cross_platform/jats_corpus/`, so no real fixture can cover it.
     func testNestedSubArticleTailIsStillExcluded() throws {
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -119,6 +134,7 @@ final class JATSNestingTests: XCTestCase {
                 <body><p>Inner author reply prose.</p></body>
               </sub-article>
               <p>Outer reviewer prose after the reply.</p>
+              <sec><title>Reviewer 2</title><p>Outer reviewer section after the reply.</p></sec>
             </body>
           </sub-article>
         </article>
@@ -126,6 +142,14 @@ final class JATSNestingTests: XCTestCase {
         let article = try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
 
         XCTAssertEqual(article.title, "Real article")
+        XCTAssertEqual(
+            article.bodySections.map(\.title), ["Methods"],
+            """
+            the outer <sub-article> resumed after its nested one closed, so its \
+            remaining sections leaked into the article body. This is what makes \
+            subArticleDepth a counter rather than a flag.
+            """
+        )
         let allProse = article.bodySections.flatMap(\.paragraphs)
         XCTAssertEqual(allProse, ["Real prose."])
         XCTAssertFalse(allProse.contains { $0.contains("reviewer prose") })

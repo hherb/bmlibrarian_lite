@@ -8,6 +8,81 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Real PMC JATS corpus** (#146 landed 2026-08-21): seven open-access Europe PMC
+  articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with
+  a stored structural digest, parsed offline by `JATSRealCorpusTests` on every
+  PR. Read that directory's `README.md` before touching it.
+  - **The digest is a characterisation, not a specification.** It records what
+    the parser does today, seven known-wrong behaviours included (#144 and #162
+    joined the five below during review). A digest change
+    is a prompt to read the diff, never by itself proof of a regression *or* of a
+    fix. Two tests put a floor under it:
+    `testEveryArticleClearsTheSpecificationFloor` asserts what must hold for any
+    real article whatever the digest says, and
+    `testTheManifestAgreesWithTheParsedArticle` checks identifiers against values
+    hand-transcribed into `corpus.json` — the one guard that survives a blind
+    regeneration.
+  - **Hand-checking the digests is the step that pays.** It found five real
+    defects — #154, #155, #156, #157, #161 — each then confirmed against a
+    225-article survey, and PR review found #162. Generating a digest and
+    committing it unread would have found none of them and frozen all six as
+    expectations. #161 was invisible until review replaced a `hasGraphic` boolean
+    with the resolved URL; #162 was invisible until it replaced a row count with a
+    hash of the rendered markdown.
+  - **A regeneration run always fails**, naming what it rewrote, and in CI fails
+    *without writing anything*. It previously asserted, then rewrote all seven
+    digests anyway — the assertion did not stop the loop, so the guard performed
+    the act it existed to prevent.
+  - **What a blind regeneration can still launder, and what it cannot.** It used
+    to turn all of these green: caption text leaking into section prose (the #142
+    defect), replaced titles, filler abstracts, wiped figure captions, a reversed
+    bibliography, reversed author surnames. `corpus.json` now carries `title`,
+    `volume`, `authorCount`, `figureCount`, `tableCount` and `referenceCount`
+    read off the XML **independently of `JATSXMLParser`**, and the specification
+    floor now asserts body prose, a DOI and non-empty figure/table captions. Those
+    close all six. Transcribe those values by hand for any new article — copied
+    from the parser they are worth nothing — and note that
+    `testEveryEntryRecordsItsProvenance` rejects an entry that leaves them empty,
+    because empty compares equal to an empty parse.
+  - **`testParsingReportsNoContentLoss` only hears what the logger records.** The
+    parser announces discarded captions at `debug`, and the recorder ignored
+    `debug` and `info`, so the corpus dropped 21 of its 62 captions on every run
+    under a green test of that name. It now records every level, asserts only the
+    problem levels empty, pins the drops per article as `unmodelledCaptionDrops`,
+    and ends with a positive control — without which the test passes just as
+    happily with the logger never installed.
+  - **The fixture walk stops at the checkout root**, in both
+    `JATSRealCorpusTests` and `TransparencyParityTests` — they must not drift.
+    Both used to climb to `/`, and worktrees live under `.claude/worktrees/`
+    *inside* the main checkout, so `swift test` in a worktree validated that
+    branch's code against the main checkout's fixtures and reported success.
+    Verified: a worktree with the corpus removed now fails all 10 corpus tests
+    with "could not locate doc/cross_platform/jats_corpus", where it previously
+    passed all of them.
+  - **Never edit the bytes.** `testCorpusBytesAreUnmodified` pins each file's
+    SHA-256 and `.gitattributes` keeps them out of line-ending translation.
+    `testTheCorpusHasNotShrunk` pins the article count: every other test loops
+    over the manifest, so an emptied one asserted nothing and passed in 2 ms.
+  - Open follow-ups from the review: **#163** (digest JSON key naming and a
+    schema version — settle before Android reads these files under #121; use
+    explicit `CodingKeys`, since `keyEncodingStrategy` does not round-trip
+    `withDOI`) and **#164** (the 225-article survey exists only as prose, so no
+    replacement article can be measured against it).
+  - **Count the caption's parent, not the element.** The first five articles were
+    chosen by counting `<media>`/`<boxed-text>` *elements*, so the corpus claimed
+    all five caption hosts while covering three. Two CC-BY articles were added in
+    review to make it true.
+  - **Nested `<sub-article>` does not occur in the wild** — 0 of 225 articles,
+    while 69 carry sub-articles at depth 1. So the `subArticleDepth` counter→flag
+    mutation passes the real corpus. That line is held by
+    `JATSNestingTests.testNestedSubArticleTailIsStillExcluded`, which claimed the
+    guard for months without providing it: its outer tail held only loose `<p>`,
+    dropped for an unrelated reason. It now carries a `<sec>` and is the sole
+    test that fails under the mutation.
+  - Verified load-bearing: reverting the caption-host fix fails the corpus on 3
+    of 7 articles; reversing body sections, reversing references, corrupting a
+    graphic URL and blanking abstract prose are each caught, and each passed
+    before review hardened the digest.
 - **Funder classifier parity** (#143 landed 2026-08-21): the canonical desktop
   Python now carries the calibrated `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS`
   ported from Swift, replacing the positional `INDUSTRY_KEYWORDS[:6]` slice, and
@@ -197,102 +272,32 @@ its slice has landed; add a new section when handing off new work.
     together and it would stay green. Migration verified finding-for-finding
     identical (2081 before and after).
 - **Cross-platform parity drift guard** (#105 landed 2026-07-19): parity between
-  the three data-availability classifiers is now enforced by test, not by
-  convention. The contract lives in `doc/cross_platform/transparency_parity/`
-  (see its `README.md`) and is loaded by all three suites —
-  `tests/test_transparency_parity.py`, `TransparencyParityTests.swift`,
-  `TransparencyParityTest.kt`.
-  - **Two fixtures, both load-bearing.** `data_availability_patterns.json` pins
-    the five tiers + label map string-for-string and order-sensitively;
-    `data_availability_cases.json` pins 65 worked
-    `statement -> (level, ordered restrictions)` cases behaviourally. Mutation
-    checks confirm neither subsumes the other: reordering two Kotlin patterns
-    fails **only** the string half, while dropping `RegexHelper`'s `(?U)` leaves
-    every pattern byte-identical and fails **only** the behavioural case with an
-    accented intervening word.
-  - **Changing a pattern now means editing four places** (contract + three
-    platforms) plus a covering case. That friction is the feature; do not
-    regenerate either fixture mechanically from one platform.
-  - Python's `_restriction_labels` was function-local and unassertable, so it was
-    hoisted to module-level `RESTRICTION_LABELS` beside `_label_for_pattern`.
-  - The structural traps previously documented only in prose are now executable
-    in `TestManifestSelfConsistency` (strong-refusal ⊆ restricted;
-    negated-openness an ordered **suffix** of restricted — the Kotlin
-    declaration-order trap; every unavailability-probe pattern reachable from a
-    later tier; every tier pattern labelled and every label tiered). Each was
-    mutation-verified to fire on exactly its own violation.
-  - Coverage guards keep the behavioural half from developing a blind spot:
-    every reachable disclosure level, every restriction label **and every
-    individual pattern** must be exercised by at least one case.
-    `AVAILABLE_ON_REQUEST` is excluded — the classifier never emits it on any
-    platform.
-  - **Per-pattern coverage is stricter than per-label, and that gap was real.**
-    All four negated-openness patterns emit the single label "Data not openly
-    available", so a label-keyed guard is satisfied by any one of them while the
-    other three go untested everywhere. The neither/nor *supplement* variant
-    shipped uncovered and only the per-pattern guard
-    (`test_every_contract_pattern_is_exercised`) found it. Adding a pattern under
-    an existing label therefore also needs a case matching that pattern
-    specifically.
-  - **Do not remove the `inputs.dir` declaration in `app/build.gradle.kts`.** The
-    fixtures live outside every Gradle source set, so without it Gradle sees no
-    changed input when only the contract is edited, reports `UP-TO-DATE`, and
-    skips the Android parity test — silently passing the exact incomplete-edit
-    case the guard exists to catch. Verified both ways: with the declaration
-    removed, a drifted contract gave `BUILD SUCCESSFUL`; with it, the same drift
-    fails. (Gradle hashes content, not mtime, so `touch` alone still will not
-    re-run the task — that is correct, not a regression.)
-- **Data-availability negated openness** (#117 landed 2026-07-19 via PR #124;
-  #125 residual fixed 2026-07-19): negators detached from an openness
-  affirmation no longer over-match FULL_OPEN. The guard is a *forward* match
-  (`NEGATED_OPENNESS_PATTERNS` / `negatedOpennessPatterns`): negator, bounded
-  window of intervening words, affirmation — Python's `re` forbids
-  variable-length lookbehind and the patterns must stay byte-identical
-  Python↔Swift↔Android, so widening the `(?<!not )` lookbehind was not an
-  option. #125 widened the negator alternation to
-  `(?:not|no|never|cannot|neither|nor)` and added two patterns for the
-  two-token "neither … nor" form ({0,3} words to "nor", {0,4} to the
-  affirmation), which a single-token alternation cannot express. Four patterns
-  total, all four mapped to the label "Data not openly available", all in the
-  **restricted** tier (escalation to NOT_AVAILABLE still requires an
-  independent strong refusal — keeps the #113-pinned tiers).
-  - **The `(?!and\b|but\b|or\b)` barrier and the window bounds are
-    load-bearing** in every pattern: they stop the scope reaching across a
-    conjunction into an affirmation the negator does not govern ("not
-    embargoed and openly shared", "neither embargoed nor restricted and
-    openly available" stay FULL_OPEN). All eight guards (three alternation
-    tokens, two-token patterns, both barriers, both windows) are
-    mutation-verified on Python, Swift *and* Kotlin — each guard removed or
-    widened in turn ⇒ exactly its pinned test fails.
-  - **The pins only work at specific sentence shapes — do not reword them**
-    (the #124-review lesson): a barrier pin needs the conjunction *inside*
-    the window immediately before the affirmation; a window pin needs a real
-    negator with **no punctuation** before the affirmation (`\w+` cannot
-    cross punctuation, which would otherwise hold the line), and its word
-    count must sit exactly **one past the bound** so the *first* widening
-    step fails it (the #127-review lesson: the original two-token pin had
-    six intervening words, leaving {0,4}→{0,5} undetected). The pinned
-    shapes are documented inline in the three analyzer test files.
-  - **Invariant at each `has_unavailability_signal` site:** every list joined
-    there must also be reachable from Step 2 or Step 3, else the statement
-    silently lands in UNKNOWN instead of FULL_OPEN. The four negated-openness
-    patterns satisfy it by also being appended to the restricted tier — and
-    their labels are keyed by **list index** on all three platforms, so a
-    fifth pattern needs a fifth label entry in all three label maps.
-  - **Kotlin gotcha:** `negatedOpennessPatterns` must stay declared *before*
-    `restrictedPatterns` (object properties initialise in declaration order;
-    a forward reference silently appends nothing). `DataRepositoryPatternsTest`
-    pins restricted size **27** + `containsAll` to catch that.
-  - Known accepted trade-off: a genuinely-open compound statement whose second
-    clause negates a *different* dataset within the window ("openly available
-    at Zenodo; no additional data available in the supplement") classifies
-    RESTRICTED — same family as the pre-existing `not`-negated supplement
-    behaviour, and errs in the safe (under-stating openness) direction. The
-    #127 review probed two more members of the family: "no doubt openly
-    available" (intensifier idiom) and "at no cost openly available"
-    (non-native phrasing) both classify RESTRICTED; the comma'd and
-    conjunction forms ("at no cost, openly…", "at no cost and openly…")
-    stay FULL_OPEN via punctuation and the barrier.
+  the three data-availability classifiers is enforced by test, not convention.
+  The contract is `doc/cross_platform/transparency_parity/` — **read its
+  `README.md` before touching a pattern**; it carries the full rationale, the
+  structural traps and the mutation evidence. In short: two fixtures, both
+  load-bearing (one pins the patterns string-for-string and order-sensitively,
+  one pins 65 worked cases behaviourally, and neither subsumes the other);
+  changing a pattern means editing the contract plus all three platforms plus a
+  covering case; coverage guards require every tier, every label **and every
+  individual pattern** to be exercised, per-pattern being strictly stronger than
+  per-label and having already caught a shipped blind spot. **Do not remove the
+  `inputs.dir` declaration in `app/build.gradle.kts`** — without it Gradle sees
+  no changed input for a contract-only edit, reports `UP-TO-DATE`, and silently
+  skips the Android parity test.
+- **Data-availability negated openness** (#117/#125 landed 2026-07-19): negators
+  detached from an openness affirmation no longer over-match FULL_OPEN. Four
+  forward-match patterns (negator, bounded window, affirmation) — a lookbehind
+  was not an option, since Python forbids the variable-length form and the
+  patterns must stay byte-identical across three platforms. All four map to one
+  label and live in the restricted tier; escalation to NOT_AVAILABLE still needs
+  an independent strong refusal. **The conjunction barriers and window bounds are
+  load-bearing and all eight guards are mutation-verified on all three
+  platforms** — and the pins only work at specific sentence shapes, so **do not
+  reword them**; the required shapes are documented inline in the three analyzer
+  test files. Kotlin gotcha: `negatedOpennessPatterns` must stay declared
+  *before* `restrictedPatterns`, since object properties initialise in
+  declaration order and a forward reference silently appends nothing.
 - **Android PubMed XML parsing** (2026-07-18, #119/PR #122): `parseArticleXml`
   moved off Android's `XmlPullParser` (which throws "not mocked" under plain
   JUnit, and whose exception the broad catch swallowed into an empty result) to
@@ -329,6 +334,36 @@ its slice has landed; add a new section when handing off new work.
   not on iOS/macOS. Nothing compares the two lists; the parity fixtures cover the
   data-availability classifier, and the funder lists are pinned by measurement
   instead. One-character fix, but wants a shared fixture or it recurs.
+- **#154, #155, #156, #157, #161, #162 — six JATS parser defects the corpus
+  found**, the first five confirmed against a 225-article survey, all still open. Fixing any of them
+  changes `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the
+  evidence — read it rather than regenerating past it. Each likely replicates in
+  Android's `util.jats.JATSXMLParser` and in bmlib, which share this parser's
+  ancestry; check all three before calling a fix complete.
+  - **#154 — author affiliations are never captured.** `currentAffiliations` is
+    written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
+    98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
+    inside `<contrib>`, which is the shape every synthetic test uses. Every
+    corpus author reports zero.
+  - **#155 — `<mixed-citation>` yields no structured reference metadata.** 80.9%
+    of articles, **74.6% of all real references**. The citation string survives,
+    so it degrades quietly.
+  - **#156 — a nested `<fig>` drops the parent figure.** 19.6% of articles;
+    `currentFigure` is a single slot where `subArticleDepth` and the
+    `contrib-group` role stack already learned otherwise in #142.
+  - **#157 — a `<table-wrap-foot><fn><label>` overwrites the table's label.**
+    13.2% of real tables. `figureFootnoteDepth` already guards the `<p>` branch
+    in the same switch; the `<label>` branch never got it.
+  - **#161 — a figure with several `<graphic>` resolves to the thumbnail.**
+    Last-write-wins, ignoring `content-type`, so **52.9% of real figures** point
+    at a `.gif` thumb instead of the image. A `hasGraphic` boolean hid it
+    completely; storing the URL exposed it on the first hand-check.
+  - **#162 — `rowspan` is never read.** `grep -rn rowspan Sources/` returns
+    nothing: a spanning cell contributes to its first row only, every later row is
+    a cell short, and `padRow` quietly pads the gap so the columns after it shift.
+    11 real cells in the corpus. `markdownRowCount` could never see it — a
+    rowspan misalignment does not change the row count — which is why the digest
+    now stores a `markdownDigest` hash of the rendering instead.
   (#147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.)
 - **#150 — spelled-out NIH institute names match no government pattern**, on
@@ -345,13 +380,6 @@ its slice has landed; add a new section when handing off new work.
   `\bnational institutes? of\b` reaches
   non-US bodies ("National Institute of Development Administration"), so measure
   first — and change both platforms together.
-- **#146 — no real PMC JATS fixtures**: every JATS test is hand-written synthetic
-  XML. The caption-host defect found reviewing #142 affected **86 of 386 real
-  articles (22.3%)** while every synthetic routing test passed, and a mutation
-  reducing `subArticleDepth` to a boolean flag passed all 59 JATS tests. The
-  network-gated integration tests now run nightly
-  (`.github/workflows/swift-integration-tests.yml`) but still never on a PR;
-  committing a handful of real articles as offline fixtures is the durable fix.
 - **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
   dropped**: they no longer corrupt the enclosing section (fixed in #142 review),
   but there is no model to capture them into. 258 + 144 + 15 occurrences across
@@ -414,6 +442,11 @@ its slice has landed; add a new section when handing off new work.
   missing. Cost an implementation once already this session.
 - `pytest tests/` → 0 failures (Python is the reference).
 - `cd Packages/BioMedLit && swift test` → 0 failures.
+- Changed the JATS parser? The corpus digests are expected to move. Regenerate
+  with `UPDATE_JATS_DIGESTS=1 swift test --filter JATSRealCorpusTests` **and read
+  every changed line** — regenerating unread converts a regression into a
+  committed expectation, which is the one failure the corpus cannot survive. The
+  regeneration run fails on purpose; re-run without the variable to verify.
 - `cd ios/MedicalFactChecker && swift test` → 0 failures.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination

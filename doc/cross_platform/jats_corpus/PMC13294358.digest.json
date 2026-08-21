@@ -1,0 +1,326 @@
+{
+  "abstractSections" : [
+    {
+      "content" : "Diagnosis of inflammatory disorders during canine pregnancy is complicated by changes caused by pregnancy. The total glycosylation pattern of body fluids reflects cellular status in health and disease. The aim of the present study was to evaluate the overall canine N-glycan pattern in dogs with infection compared to pregnant dogs. Serum samples from ten dogs with pyometra (bacterial disease), ten dogs with canine infectious respiratory disease, CIRD (primarily viral disease), ten pregnant dogs (day 24–30) and nine healthy non-pregnant dogs were included. A method optimised for N-glycan quantification in canine serum, based on RapiFluor-labelling and subsequent glycan mapping by HILIC-UPLC-FLR-MS was used. The levels of the two dominating glycans, A2G2S2 and FA2, and six glycan groups were evaluated. No significant differences between pregnant dogs and dogs with pyometra were observed. In dogs with CIRD and in healthy non-pregnant dogs, the levels of terminally galactosylated and high mannose glycans were higher, while the levels of glycan A2G2S2 were lower, than in pregnant dogs. The present study provides new insight into the canine N-glycan pattern during infection and pregnancy. Serum N-glycans and N-glycan groups do not seem suitable as biomarkers to differentiate inflammatory changes due to pregnancy from those caused by infections.",
+      "title" : "Abstract"
+    },
+    {
+      "content" : "The online version contains supplementary material available at 10.1038/s41598-026-59457-z. Subject terms: Biochemistry, Biomarkers, Diseases, Immunology",
+      "title" : "Supplementary Information"
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Margareta Ramström"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Martin Lavén"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Ragnvi Hagman"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Ida Hallberg"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Bodil S Holst"
+    }
+  ],
+  "bodySections" : [
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "paragraphCount" : 4,
+      "scalarCount" : 3834,
+      "subsections" : [
+
+      ],
+      "title" : "Introduction"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 3,
+          "scalarCount" : 1786,
+          "subsections" : [
+
+          ],
+          "title" : "N-glycans and N-glycan groups in canine serum"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 930,
+          "subsections" : [
+
+          ],
+          "title" : "Biochemical analysis of samples"
+        }
+      ],
+      "title" : "Results"
+    },
+    {
+      "paragraphCount" : 6,
+      "scalarCount" : 6997,
+      "subsections" : [
+
+      ],
+      "title" : "Discussion"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 442,
+          "subsections" : [
+
+          ],
+          "title" : "Materials"
+        },
+        {
+          "paragraphCount" : 2,
+          "scalarCount" : 2015,
+          "subsections" : [
+
+          ],
+          "title" : "Sampling of dogs"
+        },
+        {
+          "paragraphCount" : 2,
+          "scalarCount" : 1204,
+          "subsections" : [
+
+          ],
+          "title" : "Sample preparation and HILIC-UPLC-FLR-MS analysis"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 804,
+          "subsections" : [
+
+          ],
+          "title" : "Biochemical analyses"
+        },
+        {
+          "paragraphCount" : 2,
+          "scalarCount" : 1479,
+          "subsections" : [
+
+          ],
+          "title" : "Statistical analysis"
+        }
+      ],
+      "title" : "Methods"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 59,
+      "subsections" : [
+
+      ],
+      "title" : "Supplementary Information"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 290,
+      "subsections" : [
+
+      ],
+      "title" : "Acknowledgements"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 220,
+      "subsections" : [
+
+      ],
+      "title" : "Author contributions"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 76,
+      "subsections" : [
+
+      ],
+      "title" : "Funding"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 279,
+      "subsections" : [
+
+      ],
+      "title" : "Data availability"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 43,
+          "subsections" : [
+
+          ],
+          "title" : "Competing interests"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 708,
+          "subsections" : [
+
+          ],
+          "title" : "Ethical considerations"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 135,
+          "subsections" : [
+
+          ],
+          "title" : "Disclosure"
+        }
+      ],
+      "title" : "Declarations"
+    },
+    {
+      "paragraphCount" : 2,
+      "scalarCount" : 134,
+      "subsections" : [
+
+      ],
+      "title" : "Footnotes"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 0,
+          "scalarCount" : 0,
+          "subsections" : [
+
+          ],
+          "title" : ""
+        }
+      ],
+      "title" : "References"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 0,
+          "scalarCount" : 0,
+          "subsections" : [
+
+          ],
+          "title" : "Supplementary Materials"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 279,
+          "subsections" : [
+
+          ],
+          "title" : "Data Availability Statement"
+        }
+      ],
+      "title" : "Associated Data"
+    }
+  ],
+  "doi" : "10.1038/s41598-026-59457-z",
+  "figures" : [
+    {
+      "caption" : "Abundance of glycan ASG2S2 (A) and glycan FA2 (B) in serum from pregnant (n = 10), pyometra (n = 10), CIRD (n = 10) and healthy non-pregnant (n = 9) dogs. The data is visualized by individual value plots and a boxplot where the box corresponds to data from the first to the third quartile (IQR), the bars represent 1.5 × IQR, the median is represented by a black line and the mean as a circle. Differences between pregnant dogs and the other groups were evaluated by one-way ANOVA followed by Dunnett’s correction for multiple comparison and all p-values < 0.1 are indicated.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "41598_2026_59457_Fig1_HTML.gif",
+      "label" : "Fig. 1"
+    },
+    {
+      "caption" : "Abundance of (A) sialylated, (B) fucosylated, (C) high mannose, (D) galactosylated, (E) terminally galactosylated and (F) agalactosylated glycans in serum from pregnant, pyometra, CIRD and healthy non-pregnant dogs. The data is visualized by individual value plots and a boxplot where the box corresponds to data from the first to the third quartile (IQR), the bars represent 1.5 × IQR, the median is represented by a black line and the mean as a circle. Differences between pregnant dogs and the other groups were evaluated by one-way ANOVA followed by Dunnett’s correction for multiple comparison and all p-values < 0.1 are indicated.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "41598_2026_59457_Fig2_HTML.gif",
+      "label" : "Fig. 2"
+    }
+  ],
+  "htmlScalarCount" : 35507,
+  "issue" : "",
+  "journal" : "Scientific Reports",
+  "markdownScalarCount" : 32335,
+  "pages" : "19569",
+  "pmcId" : "PMC13294358",
+  "pmid" : "42342844",
+  "references" : {
+    "count" : 23,
+    "identities" : [
+      "1.||",
+      "2.||",
+      "3.||",
+      "4.||",
+      "5.||",
+      "6.||",
+      "7.||",
+      "8.||",
+      "9.||",
+      "10.||",
+      "11.||",
+      "12.||",
+      "13.||",
+      "14.||",
+      "15.||",
+      "16.||",
+      "17.||",
+      "18.||",
+      "19.||",
+      "20.||",
+      "21.||",
+      "22.||",
+      "23.||"
+    ],
+    "withArticleTitle" : 0,
+    "withAuthors" : 0,
+    "withCitation" : 23,
+    "withDOI" : 0,
+    "withFirstPage" : 0,
+    "withPMID" : 0,
+    "withSource" : 0,
+    "withVolume" : 0,
+    "withYear" : 0
+  },
+  "tables" : [
+    {
+      "caption" : "Total protein concentration and levels of biochemical serum analytes including albumin, C-reactive protein (CRP), total iron-binding capacity (TIBC), transferrin saturation and serum protein electrophoresis fractions for pregnant dogs, dogs with pyometra, dogs with CIRD and healthy non-pregnant dogs. For all analytes and categories, average values and range within brackets are provided. The corresponding reference range used in clinic is also shown. Statistical analysis was performed applying one-way ANOVA followed by Dunnett’s correction for multiple comparisons for normally distributed analytes and non-parametric Kruskal-Wallis test followed by Dunn’s test for non-normally distributed analytes. For all analytes, the other three groups were compared to healthy non-pregnant dogs; p-values < 0.1 are listed, NS denotes non-significant changes, # denotes non-normally distributed analytes.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 1",
+      "markdownColumnCount" : 7,
+      "markdownDigest" : "9e9f5a3babb7d94f8991e571c6e68450c6795427f34561e1364674bbd1360dda",
+      "markdownRowCount" : 13
+    }
+  ],
+  "title" : "Differences in canine serum N-glycosylation pattern during infection and pregnancy",
+  "unmodelledCaptionDrops" : 6,
+  "volume" : "16",
+  "year" : "2026"
+}

@@ -1,0 +1,325 @@
+{
+  "abstractSections" : [
+    {
+      "content" : "Most cellular ATP is made by rotary F1FO ATP synthases using proton translocation-generated clockwise torque on the FO c-ring rotor, while F1-ATP hydrolysis can force counterclockwise rotation and proton pumping. The FO torque-generating mechanism remains elusive even though the FO interface of stator subunit-a, which contains the transmembrane proton half-channels, and the c-ring is known from recent F1FO structures. Here, single-molecule F1FO rotation studies determined that the pKa values of the half-channels differ, show that mutations of residues in these channels change the pKa values of both half-channels, and reveal the ability of FO to undergo single c-subunit rotational stepping. These experiments provide evidence to support the hypothesis that proton translocation through FO operates via a Grotthuss mechanism involving a column of single water molecules in each half-channel linked by proton translocation-dependent c-ring rotation. We also observed pH-dependent 11° ATP synthase-direction sub-steps of the Escherichia coli c10-ring of F1FO against the torque of F1-ATPase-dependent rotation that result from H+ transfer events from FO subunit-a groups with a low pKa to one c-subunit in the c-ring, and from an adjacent c-subunit to stator groups with a high pKa. These results support a mechanism in which alternating proton translocation-dependent 11° and 25° synthase-direction rotational sub-steps of the c10-ring occur to sustain F1FO ATP synthesis.",
+      "title" : ""
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Seiga Yanagisawa"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Wayne D Frasch"
+    }
+  ],
+  "bodySections" : [
+    {
+      "paragraphCount" : 13,
+      "scalarCount" : 13905,
+      "subsections" : [
+
+      ],
+      "title" : "Introduction"
+    },
+    {
+      "paragraphCount" : 6,
+      "scalarCount" : 3801,
+      "subsections" : [
+        {
+          "paragraphCount" : 7,
+          "scalarCount" : 5708,
+          "subsections" : [
+
+          ],
+          "title" : "Subunit-a mutations alter pKas of TD formation"
+        },
+        {
+          "paragraphCount" : 2,
+          "scalarCount" : 1795,
+          "subsections" : [
+
+          ],
+          "title" : "Subunit-a mutations affect TD formation efficiency"
+        },
+        {
+          "paragraphCount" : 4,
+          "scalarCount" : 1835,
+          "subsections" : [
+
+          ],
+          "title" : "Synthase-direction steps rotate CW an average of ~11°"
+        },
+        {
+          "paragraphCount" : 7,
+          "scalarCount" : 4524,
+          "subsections" : [
+
+          ],
+          "title" : "Subunit-a mutations affect the proportion of TDs with synthase-direction steps"
+        }
+      ],
+      "title" : "Results"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 1203,
+      "subsections" : [
+        {
+          "paragraphCount" : 6,
+          "scalarCount" : 4136,
+          "subsections" : [
+
+          ],
+          "title" : "FO uses a Grotthuss mechanism to translocate protons through both half-channels"
+        },
+        {
+          "paragraphCount" : 12,
+          "scalarCount" : 10865,
+          "subsections" : [
+
+          ],
+          "title" : "FO undergoes H+ translocation-dependent 11° c-ring synthase-direction rotation steps"
+        }
+      ],
+      "title" : "Discussion"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 3,
+          "scalarCount" : 3145,
+          "subsections" : [
+
+          ],
+          "title" : "Mutagenesis and purification of nanodisc FOF1"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 1910,
+          "subsections" : [
+
+          ],
+          "title" : "Gold-nanorod single-molecule experiments"
+        }
+      ],
+      "title" : "Materials and methods"
+    },
+    {
+      "paragraphCount" : 3,
+      "scalarCount" : 255,
+      "subsections" : [
+
+      ],
+      "title" : "Funding Information"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 73,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "paragraphCount" : 3,
+      "scalarCount" : 311,
+      "subsections" : [
+
+      ],
+      "title" : "Author contributions"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+
+      ],
+      "title" : "Additional files"
+    },
+    {
+      "paragraphCount" : 3,
+      "scalarCount" : 263,
+      "subsections" : [
+
+      ],
+      "title" : "Data availability"
+    }
+  ],
+  "doi" : "10.7554/eLife.70016",
+  "figures" : [
+    {
+      "caption" : "Cryo-EM structures of F1FO ATP synthase inhibited by ADP in three rotary states, and measurement of changes in rotational position between catalytic dwells. (A) Rotational state-1, pdb-ID 6OQU (Sobti et al., 2020). (B) State-2, pdb-ID 6OQV, with rotor 120° counterclockwise (CCW) from (A) where subunit-α is not shown to reveal subunit-γ. (C) State-3, pdb-ID 6WNR, with rotor 240° CCW from (A) showing microscope slide assembly of F1FO embedded in a lipid bilayer nanodisc (LBN) for rotation measurements. His6-tags (HT) on β-subunit C-termini enabled attachment to slide, while the gold nanorod (AuNR) coated with streptavidin (SA) bound to the biotinylated subunit c-ring. (D) Rotational position of single F1FO molecules versus time was monitored by intensity changes of polarized red light scattered from the AuNR in the presence of 1 mM Mg2+ATP, which enabled F1-ATPase-dependent 120° CCW power strokes between catalytic dwells (green bars). Prior to data collection at 200 kHz, a polarizer in the scattered light path was rotated to minimize intensity during one of the three catalytic dwells. Light intensity increased to a maximum upon rotation by 90° during the subsequent CCW 120° power stroke. For each molecule the angular dependence of these power strokes versus time was analyzed.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig1.jpg",
+      "label" : "Figure 1."
+    },
+    {
+      "caption" : "Examples each of the first 90° of ATP hydrolysis-driven power strokes observed using FOF1 nanodiscs. In each mutant, examples 1–5 show power strokes without transient dwells (TDs). Examples 6–10 show power strokes with transient dwells where the FO motor either halts counterclockwise (CCW) rotation or caused clockwise (CW) rotation in the ATP synthase direction (synthase-direction steps). Brackets indicate Brownian-type oscillations during a TD.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig2-figsupp1.jpg",
+      "label" : "Figure 2—figure supplement 1."
+    },
+    {
+      "caption" : "Examples of how changes in the variables in Equation 1 affect the log-log plots that describe the F1-ATPase inhibition kinetics of [Figure 2C](#fig2).",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig2-figsupp2.jpg",
+      "label" : "Figure 2—figure supplement 2."
+    },
+    {
+      "caption" : "Distribution of power stroke data sets (each set containing ~300 power strokes) at each pH examined versus the percentage of the occurrence of transient dwells (TDs) per data set binned to each 10% (gray bars). The data were fit to the sum of three Gaussians (—) representing low (—), medium (—), and high (—) efficiencies of TD formation. Ten data sets were acquired from each molecule, and the number of molecules examined is shown for each condition.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig2-figsupp3.jpg",
+      "label" : "Figure 2—figure supplement 3."
+    },
+    {
+      "caption" : "Proportion of low (blue bar), medium (orange bar), and high (green bar) transient dwell (TD) formation efficiencies relative to WT low efficiency TD formation. Each was the average of all pH values examined ([Figure 2—figure supplement 3](#fig2s3)). All of the low, medium, and high efficiences of TD formation are shown in that supplementary figure from which the averages were taken to calculate Figure 3. Vertical bars represent standard error.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig3.jpg",
+      "label" : "Figure 3."
+    },
+    {
+      "caption" : "Distributions of the extent of clockwise (CW) rotation in the ATP synthesis direction during transient dwells for WT and subunit-a mutants versus pH.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig4-figsupp1.jpg",
+      "label" : "Figure 4—figure supplement 1."
+    },
+    {
+      "caption" : "Distributions of the difference in extent of clockwise (CW) synthase-direction step rotation between pH values when the percent of synthase-direction steps was maximum versus minimum, where (—) is the Gaussian fit.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig4-figsupp2.jpg",
+      "label" : "Figure 4—figure supplement 2."
+    },
+    {
+      "caption" : "Sequence comparisons of the subunit-a helices that contact the c-ring. Sequences were aligned relative to essential Escherichia coli residues aR210 (blue) in the penultimate helix (helix IV), and with highly conserved aQ252 in the ultimate helix (helix V). Residues associated with the input channel (green), the output channel (pink), and the vestibule (yellow). Sequences are from the following species with their names indicated on the left: ESCCO, Escherichia coli; HOMSA, Homo sapiens; BOSTA, Bos taurus; SUSSC, Sus scrofa; MYCPH, Mycobacterium phlei; TETTH, Tetrahymena thermophila mitochondrial; POLPR, Polytomella sp. Pringsheim 198.80 mitochondrial; PICAN, Pichia angusta mitochondrial; EUGGR-M, Euglena gracilis mitochondrial; EUGGR-C, Euglena gracilis chloroplast; YARLI, Yarrowia lipolytica mitochondrial; SACCE, Saccharomyces cerevisiae mitochondrial; TOXGO, Toxoplasma gondii; GEOST, Geobacillus stearothermophilus; ACEWO, Acetobacterium woodii (Na+); ILYTA, Ilyobacter tartaricus (Na+); FUSNU, Fusobacterium nucleatum; PARDE, Paracoccus denitrificans; HELMO, Heliobacter modesticaldum unicellular photosynthetic; ENTHI, Enterococcus hirae (V/A-type Na+); THETH, Thermus thermophilus (V/A-type); BACPS, Bacillus pseudofirmus OF4 (Alkalihalobacillus pseudofirmus); BACTA, Bacillus sp. Strain TA2.A1 (thermoalkalophilic); PISSA-C, Pisum sativum chloroplast; SPIOL-C, spinacia oleracea chloroplast, ART09.13F, Arthrospira sp. 09.13 F; BURPS, Burkholderia pseudomallei.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig5-figsupp1.jpg",
+      "label" : "Figure 5—figure supplement 1."
+    },
+    {
+      "caption" : "Alternating 11° and 25° sub-steps that power FO c-ring ATP synthase-direction rotation. (A) The pH-dependent 11° sub-step occurs when H+ transfer from aN214/aQ25-bound water to the unprotonated leading cD61-carboxyl (pink), and from the protonated lagging cD61-carboxyl (orange) to aS199/aE196-bound water. Upon displacement from aR210 by protonation, leading cD61 adopts the closed conformation to enable rotation into the lipid bilayer (yellow). Due to coherent H+ movement in the Grotthuss column, each H+ entering the input channel (green) from the funnel causes a H+ to exit the output channel (blue) to the cytoplasm. Rotation occurs when lagging cD61 is deprotonated because the negatively charged carboxyl moves in response to the decrease in hydrophobicity from the lipid bilayer to the water-containing vestibule (blue), and from the electrostatic attraction to aR210. This decreases the distance between the lagging cD61 carboxyl and the aR210-guanidinium from ~11.5 to ~7.5 Å. (B) The 25° sub-step occurs primarily from the electrostatic interaction between the lagging cD61 carboxy (orange) and the aR210-guanidinium. (C) Electrostatic attraction decreases the distance between orange cD61 and aR210 from ~7.5 to ~3.5 Å to complete a 36° stepwise c-ring rotation, which positions the orange cD61 to become the leading carboxyl for the next pH-dependent 11° sub-step. Escherichia coli F1FO cryo-EM structures of rotary sub-states pdb-IDs 5OQS (A and C), and 5OQR (B) are shown as cross-sections of FO with hydrophobic resides of subunit-a (brown) and the c-ring (gray) along the plane defined by cD61 groups as viewed from the periplasm. Protons are alternately colored black and white to show the progression of proton transfer events.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig6.jpg",
+      "label" : "Figure 6."
+    }
+  ],
+  "htmlScalarCount" : 83616,
+  "issue" : "",
+  "journal" : "eLife",
+  "markdownScalarCount" : 74852,
+  "pages" : "",
+  "pmcId" : "PMC8754430",
+  "pmid" : "34970963",
+  "references" : {
+    "count" : 50,
+    "identities" : [
+      "|2012|10.1038/ncomms2026",
+      "|2003|10.1074/jbc.M210199200",
+      "|2003|10.1073/pnas.2234364100",
+      "|1988|10.1016/S0021-9258(18)68684-3",
+      "|1989|10.1016/S0021-9258(18)94065-2",
+      "|2007|10.4324/9780203833575",
+      "|2006|10.1016/j.bbabio.2005.12.001",
+      "|1991|10.1016/0003-9861(91)90265-k",
+      "|2004|10.1529/biophysj.103.036962",
+      "|1994|10.1111/j.1432-1033.1994.00167.x",
+      "|2000|10.1074/jbc.275.39.30157",
+      "|2005|10.1016/j.cell.2005.10.001",
+      "|2021|10.1038/s41586-020-3004-3",
+      "|2018|10.1126/science.aat4318",
+      "|1994|10.1016/S0021-9258(18)31637-5",
+      "|1995|10.1074/jbc.270.49.29407",
+      "|2011|10.1007/978-1-61779-261-8_18",
+      "|1990|10.1016/0005-2728(90)90030-8",
+      "|2019|10.1073/pnas.1818589116",
+      "|2010|10.1038/emboj.2010.259",
+      "|2019|10.1146/annurev-biochem-013118-110903",
+      "|1987|10.1016/0005-2728(87)90118-6",
+      "|1988|10.1016/0005-2728(88)90031-x",
+      "|2014|10.1073/pnas.1317784111",
+      "|2015|10.1074/jbc.M115.646430",
+      "|2018|10.1073/pnas.1803147115",
+      "|2019|10.1126/science.aaw9128",
+      "|2000|10.1098/rstb.2000.0593",
+      "|2020|10.1038/s41594-020-0503-8",
+      "|2010|10.1038/nchembio.457",
+      "|2008|10.1073/pnas.0708746105",
+      "|2017|10.1074/jbc.M117.784959",
+      "|2020|10.1126/sciadv.abb9605",
+      "|2008|10.1073/pnas.0807683105",
+      "|2016|10.1074/jbc.M116.745240",
+      "|2019|10.3390/molecules24030504",
+      "|2016|10.7554/eLife.21598",
+      "|2020|10.1038/s41467-020-16387-2",
+      "|2006|10.1021/bi052363n",
+      "|2009|10.1021/bi9008215",
+      "|2012|10.1093/aob/mcs281",
+      "|2020|10.1073/pnas.2013998117",
+      "|2018|10.1126/science.aas9699",
+      "|2008|10.1073/pnas.0708356105",
+      "|1988|10.1016/S0021-9258(18)68683-1",
+      "|1999|10.1146/annurev.biophys.28.1.319",
+      "|2006|10.1016/j.bbabio.2006.06.017",
+      "|2017|10.1074/jbc.M117.799940",
+      "|2001|10.1038/35073513",
+      "|2015|10.7554/eLife.10180"
+    ],
+    "withArticleTitle" : 48,
+    "withAuthors" : 50,
+    "withCitation" : 11,
+    "withDOI" : 50,
+    "withFirstPage" : 41,
+    "withPMID" : 48,
+    "withSource" : 50,
+    "withVolume" : 48,
+    "withYear" : 50
+  },
+  "tables" : [
+    {
+      "caption" : "pKa values and inhibition constants for WT and subunit-a mutants. Values were derived from the fits to Equation 1 of the average percent of TDs per data set versus pH in [Figure 2C](#fig2).",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 1.",
+      "markdownColumnCount" : 6,
+      "markdownDigest" : "d5913c04d380d0f388467f072c0ba9d257c6a1ad9f34d088c79560ed57e4bac1",
+      "markdownRowCount" : 8
+    },
+    {
+      "caption" : "pKa values and probabilities of forming transient dwells (TDs) without synthase-direction steps for WT and subunit-a mutants. Values were derived from the fits of the data of [Figure 4C](#fig4) to Equation 2.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 2.",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "3d7cd539782adffbcbf269f2f86fe5d561ff4cb1d9f315f73c5f9a19af8bc0ce",
+      "markdownRowCount" : 8
+    }
+  ],
+  "title" : "pH-dependent 11° F1FO ATP synthase sub-steps reveal insight into the FO torque generating mechanism",
+  "unmodelledCaptionDrops" : 0,
+  "volume" : "10",
+  "year" : "2021"
+}

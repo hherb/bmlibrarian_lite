@@ -1,0 +1,9 @@
+
+# Real PMC articles kept byte-for-byte: testCorpusBytesAreUnmodified checks their
+# SHA-256, so line-ending translation on any platform would break the corpus.
+doc/cross_platform/jats_corpus/*.xml -text
+
+# The digests are rewritten by UPDATE_JATS_DIGESTS with a bare LF and reviewed
+# line by line. CRLF translation would turn a regeneration into a whole-file
+# diff, which is exactly the noise the trailing newline is there to avoid.
+doc/cross_platform/jats_corpus/*.json -text

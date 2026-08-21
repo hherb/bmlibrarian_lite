@@ -1,0 +1,254 @@
+{
+  "abstractSections" : [
+    {
+      "content" : "This study investigated the impact of heat on the risk of hospital admission due to a range of health conditions in England.",
+      "title" : "Objectives"
+    },
+    {
+      "content" : "We used records of over 4 million hospital admissions in the summer months between 2008 and 2019, to construct daily time series of admissions in 32 837 census areas. Coupled with high-resolution environmental data, we conducted a case time-series analysis using distributed-lag non-linear models to measure the lagged relationship between summertime temperature and risk of admission for a broad set of health conditions. We derived the relative risks of admission at the 99th compared with the 50th temperature percentile to understand the effect of extreme heat in each locality.",
+      "title" : "Design"
+    },
+    {
+      "content" : "The adult population of England (aged 18 years and older).",
+      "title" : "Setting"
+    },
+    {
+      "content" : "Unplanned National Health Service (NHS) in-patient hospital admissions for cardiovascular, respiratory, genitourinary, metabolic and infectious diseases, along with their subcategories.",
+      "title" : "Outcome measures"
+    },
+    {
+      "content" : "These conditions contributed more than 3.7 million admissions, of which over 1.5 million (42%) were for those aged 75 years and over. More than 80% of admissions were for respiratory, cardiovascular or genitourinary illness, which collectively contributed 3.1 million hospital admissions. There was clear evidence of an increased risk of hospital admission for many conditions, including acute renal failure (1.37, 95% CI 1.32 to 1.42), metabolic disorders (1.28, 95% CI 1.24 to 1.32), infectious and parasitic diseases (1.06, 95% CI 1.04 to 1.08), pneumonia (1.07, 95% CI 1.05 to 1.09) and chronic obstructive pulmonary disease (1.08, 95% CI 1.05 to 1.10). The evidence was less clear for asthma and diabetes, while there were negative associations for many cardiovascular conditions. There was a clear age gradient in heat-related admissions, with older people facing the greatest risk of admission.",
+      "title" : "Results"
+    },
+    {
+      "content" : "These findings highlight the widespread effect of extreme heat across a range of health conditions, in addition to mortality, and have implications for public health planning in our changing climate.",
+      "title" : "Conclusions"
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Gillian Flower"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Rebecca Cole"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Arturo De La Cruz Libardi"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Luis Mieiro"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Jennifer K Quint"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Antonio Gasparrini"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Pierre Masselot"
+    }
+  ],
+  "bodySections" : [
+    {
+      "paragraphCount" : 4,
+      "scalarCount" : 842,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "paragraphCount" : 4,
+      "scalarCount" : 2486,
+      "subsections" : [
+
+      ],
+      "title" : "Introduction"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 2,
+          "scalarCount" : 2308,
+          "subsections" : [
+
+          ],
+          "title" : "Hospital admissions data"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 608,
+          "subsections" : [
+
+          ],
+          "title" : "Environmental data"
+        },
+        {
+          "paragraphCount" : 5,
+          "scalarCount" : 2503,
+          "subsections" : [
+
+          ],
+          "title" : "Statistical methods"
+        },
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 151,
+          "subsections" : [
+
+          ],
+          "title" : "Patient and public involvement"
+        }
+      ],
+      "title" : "Methods"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+        {
+          "paragraphCount" : 1,
+          "scalarCount" : 1426,
+          "subsections" : [
+
+          ],
+          "title" : "Hospital admission burden"
+        },
+        {
+          "paragraphCount" : 4,
+          "scalarCount" : 2632,
+          "subsections" : [
+
+          ],
+          "title" : "Temperature-related risk of admission"
+        }
+      ],
+      "title" : "Results"
+    },
+    {
+      "paragraphCount" : 5,
+      "scalarCount" : 6206,
+      "subsections" : [
+
+      ],
+      "title" : "Discussion"
+    },
+    {
+      "paragraphCount" : 0,
+      "scalarCount" : 0,
+      "subsections" : [
+
+      ],
+      "title" : "Supplementary material"
+    },
+    {
+      "paragraphCount" : 8,
+      "scalarCount" : 1246,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 71,
+      "subsections" : [
+
+      ],
+      "title" : "Data availability statement"
+    }
+  ],
+  "doi" : "10.1136/bmjopen-2025-105321",
+  "figures" : [
+    {
+      "caption" : "Hospital admission burden by age group. The total number of unplanned hospital admissions in the summer months (June to August) across England, by the primary diagnosis and age at admission. COPD, chronic obstructive pulmonary disease.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "bmjopen-16-6-g001.jpg",
+      "label" : "Figure 1"
+    },
+    {
+      "caption" : "Relative risk (RR) of hospital admission risk of hospital admission at the 99th temperature percentile relative to the 50th percentile, by age group and cause of admission. COPD, chronic obstructive pulmonary disease.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "bmjopen-16-6-g002.jpg",
+      "label" : "Figure 2"
+    }
+  ],
+  "htmlScalarCount" : 35779,
+  "issue" : "6",
+  "journal" : "BMJ Open",
+  "markdownScalarCount" : 31019,
+  "pages" : "",
+  "pmcId" : "PMC13295835",
+  "pmid" : "42336790",
+  "references" : {
+    "count" : 28,
+    "identities" : [
+      "1|2011|10.1136/jech.2009.093161",
+      "2|2009|10.1186/1476-069X-8-40",
+      "3|2014|10.1038/nclimate2123",
+      "4|2022|10.1016/S2542-5196(22)00138-3",
+      "5|2015|10.1016/S0140-6736(14)62114-0",
+      "6|2012|10.1136/oem.2010.059782",
+      "7|2021|10.1016/j.scitotenv.2021.145656",
+      "8|2024|10.1016/j.envres.2024.119347",
+      "9|2019|10.1093/ije/dyz008",
+      "10|2024|10.1289/EHP13254",
+      "11|2023|10.1016/j.puhe.2023.10.013",
+      "12|2020|10.1016/S2542-5196(20)30251-5",
+      "13|2021|10.1016/j.envres.2020.110191",
+      "14|2024|10.2139/ssrn.4746805",
+      "15|2023|10.1136/thorax-2022-219901",
+      "16|2022|10.1136/thoraxjnl-2021-218374",
+      "17|2023|10.2105/AJPH.2023.307351",
+      "18|2020|10.3390/ijerph17061957",
+      "19|2022|10.1002/joc.7787",
+      "20|2017|",
+      "21|2019|10.1002/gdj3.78",
+      "22|2024|10.1016/j.apr.2024.102284",
+      "23|2022|10.1186/s12874-022-01612-x",
+      "24|2010|10.1002/sim.3940",
+      "25|2022|10.1016/j.socscimed.2022.115193",
+      "26|2019|10.1289/EHP3889",
+      "27|2014|10.1289/ehp.1206132",
+      "28|2004|10.1136/oem.2003.012047"
+    ],
+    "withArticleTitle" : 28,
+    "withAuthors" : 28,
+    "withCitation" : 0,
+    "withDOI" : 27,
+    "withFirstPage" : 25,
+    "withPMID" : 24,
+    "withSource" : 28,
+    "withVolume" : 26,
+    "withYear" : 28
+  },
+  "tables" : [
+    {
+      "caption" : "Hospital admissions by primary diagnosis the number of unplanned hospital admissions in the summer months (June to August) across England, by the primary diagnosis at admission",
+      "footnotes" : [
+        "COPD, chronic obstructive pulmonary disease; ICD-10, International Classification of Diseases, 10th revision ."
+      ],
+      "label" : "Table 1",
+      "markdownColumnCount" : 5,
+      "markdownDigest" : "12668ed40a6de43486ce07638890dc20c4778ec2839a466b42ee919d99ad0843",
+      "markdownRowCount" : 15
+    }
+  ],
+  "title" : "Extreme heat and cause-specific risk of hospital admission in the adult population in England: a case time series analysis",
+  "unmodelledCaptionDrops" : 1,
+  "volume" : "16",
+  "year" : "2026"
+}
