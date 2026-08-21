@@ -291,13 +291,16 @@ Government and academic patterns are checked **first** and win outright, so a
 university spin-out naming convention cannot flag its parent institution:
 
 ```python
-GOVERNMENT_PATTERNS = [
-    r'\bnih\b',
-    r'\bnational institutes? of health\b',
-    r'\buniversit(?:y|ies)\b',
-    # ...
-]
+GOVERNMENT_PATTERNS = [r'\bnih\b', r'\bfda\b', r'\bva\b', r'\bahrq\b', ...]
+ACADEMIC_PATTERNS = [r'\buniversit(?:y|ies)\b', r'\bcollege\b', ...]
+
+# What classify_funder_name() matches: both halves mean "not industry".
+NON_INDUSTRY_PATTERNS = GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
 ```
+
+The two halves exist for `determine_sponsor_type()` (see below), not for this
+layer — funder classification matches their concatenation and is indifferent to
+where the split falls.
 
 Industry matching then uses two lists that are **different kinds of thing**. A
 stem must match *inside* a longer word ("pharmaceutic" reaching
@@ -373,6 +376,36 @@ INSTITUTIONAL_INTERMEDIARY_PATTERNS = [
 **Purpose:** Many COI statements claim "no personal funding" while the same paragraph names pharmaceutical companies that fund the author's institution. This layer ensures such disclosures are correctly classified as industry ties.
 
 **Confidence Level:** HIGH (0.80-0.98) - When combined with pharma name detection
+
+### Overall Sponsor Type
+
+Once every funder is classified, `determine_sponsor_type()` reduces them to one
+tier, in this order:
+
+| Tier | When |
+| --- | --- |
+| `UNKNOWN` | no funders at all — absence of data is not evidence of a sponsor |
+| `INDUSTRY` | every funder is industry |
+| `MIXED` | some but not all are industry |
+| `GOVERNMENT` | any funder matches `GOVERNMENT_PATTERNS` |
+| `ACADEMIC` | otherwise, any funder matches `ACADEMIC_PATTERNS` |
+| `NONPROFIT` | otherwise |
+
+One public agency decides the tier however many institutions sit alongside it,
+which is why `GOVERNMENT` is tested before `ACADEMIC`.
+
+This mirrors Swift's `FundingAnalyzer.determineSponsorType` tier for tier, and
+both pattern lists are byte-identical across the two platforms — **edit them
+together or not at all.**
+
+Two things worth knowing about the tiers:
+
+- Before #147 the government tier was selected by a positional
+  `GOVERNMENT_PATTERNS[:10]` slice that cut through the middle of the agency
+  list, so FDA-, VA-, AHRQ- and PCORI-funded studies reported as `ACADEMIC`.
+- Individual NIH institutes are matched only by their abbreviations, so
+  "National Cancer Institute" spelled out still reports `NONPROFIT` rather than
+  `GOVERNMENT`. Tracked as #150, and pinned by test so the gap is visible.
 
 ### COI Statement Analysis (Multi-Pass)
 
@@ -536,7 +569,7 @@ class TransparencyReport:
     authors: List[str]
 
     # Sponsorship analysis
-    sponsor_type: SponsorType  # INDUSTRY, GOVERNMENT, ACADEMIC, MIXED, UNKNOWN
+    sponsor_type: SponsorType  # INDUSTRY, GOVERNMENT, ACADEMIC, NONPROFIT, MIXED, UNKNOWN
     funders: List[FunderInfo]
     industry_funding_detected: bool
     industry_funding_confidence: float  # 0.0 to 1.0
