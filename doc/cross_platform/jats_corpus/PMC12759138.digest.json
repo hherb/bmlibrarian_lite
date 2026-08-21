@@ -1,0 +1,353 @@
+{
+  "abstractSections" : [
+    {
+      "characterCount" : 414,
+      "title" : "Background"
+    },
+    {
+      "characterCount" : 290,
+      "title" : "Objective"
+    },
+    {
+      "characterCount" : 293,
+      "title" : "Methods"
+    },
+    {
+      "characterCount" : 511,
+      "title" : "Results"
+    },
+    {
+      "characterCount" : 447,
+      "title" : "Conclusion"
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Jingyu Zhou"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Wei Zhang"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Shichao Liu"
+    }
+  ],
+  "bodySections" : [
+    {
+      "characterCount" : 3361,
+      "paragraphCount" : 3,
+      "subsections" : [
+
+      ],
+      "title" : "Introduction"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+        {
+          "characterCount" : 1235,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Search strategy"
+        },
+        {
+          "characterCount" : 1223,
+          "paragraphCount" : 2,
+          "subsections" : [
+
+          ],
+          "title" : "Inclusion and exclusion criteria"
+        },
+        {
+          "characterCount" : 599,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Data extraction and cleaning"
+        },
+        {
+          "characterCount" : 4035,
+          "paragraphCount" : 4,
+          "subsections" : [
+
+          ],
+          "title" : "Bibliometric analysis"
+        }
+      ],
+      "title" : "Materials and methods"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+        {
+          "characterCount" : 1331,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Annual publication trends"
+        },
+        {
+          "characterCount" : 809,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Core authors and academic networks"
+        },
+        {
+          "characterCount" : 1888,
+          "paragraphCount" : 2,
+          "subsections" : [
+
+          ],
+          "title" : "Country and institutional distribution"
+        },
+        {
+          "characterCount" : 1278,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Journal and citation analysis"
+        },
+        {
+          "characterCount" : 1718,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Reference and knowledge base evolution"
+        },
+        {
+          "characterCount" : 1582,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Keyword and research hotspot evolution"
+        },
+        {
+          "characterCount" : 1643,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Thematic structure and evolutionary path"
+        }
+      ],
+      "title" : "Results"
+    },
+    {
+      "characterCount" : 402,
+      "paragraphCount" : 1,
+      "subsections" : [
+        {
+          "characterCount" : 3921,
+          "paragraphCount" : 2,
+          "subsections" : [
+
+          ],
+          "title" : "General trends and thematic evolution"
+        },
+        {
+          "characterCount" : 1575,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Global research landscape and collaboration networks"
+        },
+        {
+          "characterCount" : 2682,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Core authors and academic networks"
+        },
+        {
+          "characterCount" : 1715,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Knowledge base and interdisciplinary flow"
+        },
+        {
+          "characterCount" : 3448,
+          "paragraphCount" : 3,
+          "subsections" : [
+
+          ],
+          "title" : "Research hotspots and frontier trends"
+        },
+        {
+          "characterCount" : 1718,
+          "paragraphCount" : 3,
+          "subsections" : [
+
+          ],
+          "title" : "Contextualizing the field: distinctions from related domains"
+        },
+        {
+          "characterCount" : 2777,
+          "paragraphCount" : 5,
+          "subsections" : [
+
+          ],
+          "title" : "Connecting trends to theoretical frameworks"
+        },
+        {
+          "characterCount" : 2645,
+          "paragraphCount" : 2,
+          "subsections" : [
+
+          ],
+          "title" : "Strengths and limitations"
+        }
+      ],
+      "title" : "Discussion"
+    },
+    {
+      "characterCount" : 2239,
+      "paragraphCount" : 2,
+      "subsections" : [
+
+      ],
+      "title" : "Conclusion"
+    },
+    {
+      "characterCount" : 474,
+      "paragraphCount" : 2,
+      "subsections" : [
+
+      ],
+      "title" : "Supplemental Material"
+    },
+    {
+      "characterCount" : 1942,
+      "paragraphCount" : 23,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    }
+  ],
+  "doi" : "10.1177/20552076251406653",
+  "figures" : [
+    {
+      "caption" : "Flowchart of study identification and selection based on web of science core collection. SCIE: Science Citation Index Expanded; SSCI: Social Sciences Citation Index; WOSCC: web of science core collection.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Figure 1."
+    },
+    {
+      "caption" : "(a) Annual scientific production. (b) The annual number of publications in major countries. (c) RStudio–Three-fields plot left-countries, middle-keywords plus from the data records, right-authors affiliations.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Figure 2."
+    },
+    {
+      "caption" : "(a) The strategy map of identified topics clustered by keywords plus. (b) Thematic Evolution of artificial intelligence in patient education research from 2016 to 2025.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Figure 3."
+    }
+  ],
+  "issue" : "",
+  "journal" : "Digital Health",
+  "pages" : "",
+  "pmcId" : "PMC12759138",
+  "pmid" : "41488273",
+  "references" : {
+    "count" : 55,
+    "withAuthors" : 55,
+    "withDOI" : 50,
+    "withPMID" : 48,
+    "withYear" : 54
+  },
+  "tables" : [
+    {
+      "caption" : "The top 5 authors with the most publications.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 1.",
+      "markdownRowCount" : 7
+    },
+    {
+      "caption" : "The top 5 authors with the most citation accounts.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 2.",
+      "markdownRowCount" : 7
+    },
+    {
+      "caption" : "The top 5 countries with the most publications and centrality.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 3.",
+      "markdownRowCount" : 7
+    },
+    {
+      "caption" : "The top 5 institutions with the most publications and centrality.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 4.",
+      "markdownRowCount" : 7
+    },
+    {
+      "caption" : "The top 10 journals with the most publications.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 5.",
+      "markdownRowCount" : 12
+    },
+    {
+      "caption" : "The top 10 cited journals with the most citation counts and centrality.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 6.",
+      "markdownRowCount" : 12
+    },
+    {
+      "caption" : "The top 10 most cited seminal papers and their core contributions.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 7.",
+      "markdownRowCount" : 12
+    },
+    {
+      "caption" : "The top 10 keywords with the most citation count and centrality.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 8.",
+      "markdownRowCount" : 12
+    }
+  ],
+  "title" : "The evolving landscape of artificial intelligence in patient education: A bibliometric knowledge mapping study",
+  "volume" : "12",
+  "year" : "2026"
+}

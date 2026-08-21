@@ -1,0 +1,280 @@
+{
+  "abstractSections" : [
+    {
+      "characterCount" : 1939,
+      "title" : ""
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Gilberto Duarte-Medrano"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Natalia Nuño-Lámbarri"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Daniele Salvatore Paternò"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Luigi La Via"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Simona Tutino"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Guillermo Dominguez-Cherit"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Massimiliano Sorbello"
+    }
+  ],
+  "bodySections" : [
+    {
+      "characterCount" : 3984,
+      "paragraphCount" : 2,
+      "subsections" : [
+
+      ],
+      "title" : "1. Introduction"
+    },
+    {
+      "characterCount" : 1538,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "2. Materials and Methods"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+        {
+          "characterCount" : 1082,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.1. Perioperative Risk Prediction: ASA Classification and Postoperative Complications"
+        },
+        {
+          "characterCount" : 1499,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.2. AI-Assisted Patient Education in Anesthesiology"
+        },
+        {
+          "characterCount" : 882,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.3. Automated Analysis of Clinical Records and Medical Imaging"
+        },
+        {
+          "characterCount" : 1772,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.4. Artificial Intelligence in Airway Management"
+        },
+        {
+          "characterCount" : 1742,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.5. Predictive Models of Hemodynamic Instability"
+        },
+        {
+          "characterCount" : 694,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.6. Closed-Loop Systems for Drug Administration (TIVA/TCI)"
+        },
+        {
+          "characterCount" : 738,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "3.7. Algorithms for Real-Time Adverse Event Detection"
+        }
+      ],
+      "title" : "3. Clinical Applications of Artificial Intelligence in Anesthesiology"
+    },
+    {
+      "characterCount" : 1316,
+      "paragraphCount" : 1,
+      "subsections" : [
+        {
+          "characterCount" : 1414,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "4.1. Prediction of Chronic Postoperative Pain"
+        },
+        {
+          "characterCount" : 1439,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "4.2. Facial and Emotional Recognition for Pain Assessment in Non-Communicative Patients"
+        }
+      ],
+      "title" : "4. Pain Management and Analgesia"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+        {
+          "characterCount" : 2160,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "5.1. Computer Vision Assistance for Anatomical Structure Identification"
+        },
+        {
+          "characterCount" : 1634,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "5.2. Needle Navigation and Automated Positioning"
+        }
+      ],
+      "title" : "5. Regional Anesthesia and Ultrasonography"
+    },
+    {
+      "characterCount" : 1920,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "6. AI in Monitoring the Depth of Anesthesia"
+    },
+    {
+      "characterCount" : 1833,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "7. AI in Sedation for Endoscopy Procedures"
+    },
+    {
+      "characterCount" : 608,
+      "paragraphCount" : 1,
+      "subsections" : [
+        {
+          "characterCount" : 3430,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Intelligent Simulators for Anesthesiology Training"
+        }
+      ],
+      "title" : "8. Artificial Intelligence in Anesthesiology Research and Education"
+    },
+    {
+      "characterCount" : 4305,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "9. AI in Scientific Writing and Academic Productivity"
+    },
+    {
+      "characterCount" : 4858,
+      "paragraphCount" : 6,
+      "subsections" : [
+
+      ],
+      "title" : "10. Challenges, Limitations, and Ethical Considerations"
+    },
+    {
+      "characterCount" : 1772,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "11. Conclusions"
+    },
+    {
+      "characterCount" : 872,
+      "paragraphCount" : 6,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    }
+  ],
+  "doi" : "10.3390/healthcare14010097",
+  "figures" : [
+    {
+      "caption" : "Clinical and Operational Domains of Artificial Intelligence Applications in Anesthesiology.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Figure 1"
+    },
+    {
+      "caption" : "Current Benefits and Limitations of Artificial Intelligence in Anesthesiology.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Figure 2"
+    }
+  ],
+  "issue" : "1",
+  "journal" : "Healthcare",
+  "pages" : "",
+  "pmcId" : "PMC12785261",
+  "pmid" : "41517028",
+  "references" : {
+    "count" : 35,
+    "withAuthors" : 35,
+    "withDOI" : 35,
+    "withPMID" : 33,
+    "withYear" : 35
+  },
+  "tables" : [
+    {
+      "caption" : "Comparative Summary of Key Clinical Studies on AI in Anesthesiology.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 1",
+      "markdownRowCount" : 8
+    },
+    {
+      "caption" : "Systematic Comparison of AI Applications in Anesthesiology by Domain.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 2",
+      "markdownRowCount" : 12
+    }
+  ],
+  "title" : "Advancing a Hybrid Decision-Making Model in Anesthesiology: Applications of Artificial Intelligence in the Perioperative Setting",
+  "volume" : "14",
+  "year" : "2025"
+}

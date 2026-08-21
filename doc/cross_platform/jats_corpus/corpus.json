@@ -1,0 +1,77 @@
+{
+  "description": "Real open-access articles from Europe PMC, committed verbatim so the offline suite sees the shapes publishers actually emit rather than the shapes a test author already knew about.",
+  "retrieved": "2026-08-21",
+  "sourceEndpoint": "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcId}/fullTextXML",
+  "articles": [
+    {
+      "pmcId": "PMC12759138",
+      "file": "PMC12759138.xml",
+      "digest": "PMC12759138.digest.json",
+      "sha256": "9542d4eb19de5b8644c08a9ea04ba25c9510f7a044883cb520f939ce647cf20c",
+      "journal": "Digital Health",
+      "publisher": "SAGE Publications",
+      "doi": "10.1177/20552076251406653",
+      "pmid": "41488273",
+      "year": "2026",
+      "licence": "CC-BY-NC-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by-nc/4.0/",
+      "inCorpusBecause": "Its publisher-id is a DOI wearing an underscore (10.1177_20552076251406653), which is the shape that provoked the empty-typed-article-id and pattern-recovery defects; it also carries pmcid-ver, two supplementary-material captions, two media captions, eight table-wraps and three figures."
+    },
+    {
+      "pmcId": "PMC12785261",
+      "file": "PMC12785261.xml",
+      "digest": "PMC12785261.digest.json",
+      "sha256": "3471c05de67ba77a09d71c9a8d8d52fa606f5ab7e18853bdd1c2bd3cf4b636cf",
+      "journal": "Healthcare",
+      "publisher": "Multidisciplinary Digital Publishing Institute (MDPI)",
+      "doi": "10.3390/healthcare14010097",
+      "pmid": "41517028",
+      "year": "2025",
+      "licence": "CC-BY-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+      "inCorpusBecause": "A third publisher-id shape, the journal slug healthcare-14-00097, so the identifier tests are not all measuring one publisher's habits."
+    },
+    {
+      "pmcId": "PMC12661592",
+      "file": "PMC12661592.xml",
+      "digest": "PMC12661592.digest.json",
+      "sha256": "8abb2f73a34c0414cda944195c597f44736eb1f2077e9413d12f8ef837e5b379",
+      "journal": "JMIR Formative Research",
+      "publisher": "JMIR Publications Inc.",
+      "doi": "10.2196/82550",
+      "pmid": "41313195",
+      "year": "2025",
+      "licence": "CC-BY-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+      "inCorpusBecause": "The degenerate end of the range: 30 KB, one table, no figures, no supplementary material and no sub-articles. A corpus of only rich articles cannot tell an empty collection from a dropped one."
+    },
+    {
+      "pmcId": "PMC8754430",
+      "file": "PMC8754430.xml",
+      "digest": "PMC8754430.digest.json",
+      "sha256": "0b3c487afda6b59b409467e4f3e441014c53d5780d2f7ed50ed8d279b9405320",
+      "journal": "eLife",
+      "publisher": "eLife Sciences Publications, Ltd",
+      "doi": "10.7554/eLife.70016",
+      "pmid": "34970963",
+      "year": "2021",
+      "licence": "CC-BY-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+      "inCorpusBecause": "Peer-review sub-articles (editor-report, decision-letter, reply) whose prose must stay out of the article body, and the only boxed-text caption in the corpus. Boxed-text is the rarest caption host in the wild, 27 of the 2726 captions surveyed, and is one of the hosts the caption-host defect mis-routed."
+    },
+    {
+      "pmcId": "PMC12755737",
+      "file": "PMC12755737.xml",
+      "digest": "PMC12755737.digest.json",
+      "sha256": "15615b27e4104093b1b5e2ca58ae744c80d3e91766ef3f1539c0728887238863",
+      "journal": "PLOS One",
+      "publisher": "PLOS",
+      "doi": "10.1371/journal.pone.0338891",
+      "pmid": "41474770",
+      "year": "2025",
+      "licence": "CC-BY-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+      "inCorpusBecause": "Carries no publisher-id element at all, so identifier handling is exercised against absence and not only against three present spellings. Also the heaviest supplementary-material caption load in the corpus at twelve, the second commonest caption host in the wild."
+    }
+  ]
+}

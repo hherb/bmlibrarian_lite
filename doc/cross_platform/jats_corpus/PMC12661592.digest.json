@@ -1,0 +1,61 @@
+{
+  "abstractSections" : [
+    {
+      "characterCount" : 697,
+      "title" : "Abstract"
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Shirish Nayyar"
+    }
+  ],
+  "bodySections" : [
+    {
+      "characterCount" : 4422,
+      "paragraphCount" : 10,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "characterCount" : 450,
+      "paragraphCount" : 5,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    }
+  ],
+  "doi" : "10.2196/82550",
+  "figures" : [
+
+  ],
+  "issue" : "",
+  "journal" : "JMIR Formative Research",
+  "pages" : "",
+  "pmcId" : "PMC12661592",
+  "pmid" : "41313195",
+  "references" : {
+    "count" : 10,
+    "withAuthors" : 8,
+    "withDOI" : 6,
+    "withPMID" : 7,
+    "withYear" : 8
+  },
+  "tables" : [
+    {
+      "caption" : "Commonly asked questions about breast self-examination and a summary of DeepSeek AI’s responses.",
+      "footnotes" : [
+        "AI: artificial intelligence."
+      ],
+      "label" : "a",
+      "markdownRowCount" : 8
+    }
+  ],
+  "title" : "Evaluating the Role of Artificial Intelligence in Breast Self-Examination",
+  "volume" : "9",
+  "year" : "2025"
+}

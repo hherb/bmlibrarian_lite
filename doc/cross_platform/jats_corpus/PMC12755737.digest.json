@@ -1,0 +1,229 @@
+{
+  "abstractSections" : [
+    {
+      "characterCount" : 2259,
+      "title" : "Abstract"
+    }
+  ],
+  "authors" : [
+    {
+      "affiliationCount" : 0,
+      "name" : "Sheetalpreet K Maan"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Xuan Y Butzin"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Steven X Ge"
+    },
+    {
+      "affiliationCount" : 0,
+      "name" : "Nicholas C Butzin"
+    }
+  ],
+  "bodySections" : [
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+
+      ],
+      "title" : ""
+    },
+    {
+      "characterCount" : 2955,
+      "paragraphCount" : 8,
+      "subsections" : [
+
+      ],
+      "title" : "Introduction"
+    },
+    {
+      "characterCount" : 1889,
+      "paragraphCount" : 2,
+      "subsections" : [
+        {
+          "characterCount" : 656,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Step 1"
+        },
+        {
+          "characterCount" : 2208,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Step 2"
+        },
+        {
+          "characterCount" : 2605,
+          "paragraphCount" : 5,
+          "subsections" : [
+
+          ],
+          "title" : "Step 3"
+        },
+        {
+          "characterCount" : 1060,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Step 4"
+        },
+        {
+          "characterCount" : 28696,
+          "paragraphCount" : 36,
+          "subsections" : [
+
+          ],
+          "title" : "Steps 1–4"
+        }
+      ],
+      "title" : "Results and discussion"
+    },
+    {
+      "characterCount" : 753,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "Conclusion"
+    },
+    {
+      "characterCount" : 11615,
+      "paragraphCount" : 11,
+      "subsections" : [
+
+      ],
+      "title" : "Methods"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+
+      ],
+      "title" : "Supporting information"
+    },
+    {
+      "characterCount" : 76,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "Data Availability"
+    },
+    {
+      "characterCount" : 199,
+      "paragraphCount" : 1,
+      "subsections" : [
+
+      ],
+      "title" : "Funding Statement"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+        {
+          "characterCount" : 0,
+          "paragraphCount" : 0,
+          "subsections" : [
+
+          ],
+          "title" : ""
+        }
+      ],
+      "title" : "References"
+    },
+    {
+      "characterCount" : 0,
+      "paragraphCount" : 0,
+      "subsections" : [
+        {
+          "characterCount" : 0,
+          "paragraphCount" : 0,
+          "subsections" : [
+
+          ],
+          "title" : "Supplementary Materials"
+        },
+        {
+          "characterCount" : 76,
+          "paragraphCount" : 1,
+          "subsections" : [
+
+          ],
+          "title" : "Data Availability Statement"
+        }
+      ],
+      "title" : "Associated Data"
+    }
+  ],
+  "doi" : "10.1371/journal.pone.0338891",
+  "figures" : [
+    {
+      "caption" : "Classification and Genomic Topography of Orphan Genes. a. Distinguishing orphan genes from non-orphan genes. Orphan genes are characterized by their restricted taxonomic distribution. If a gene is present at the genus level but absent outside that genus, it is classified as a genus-specific orphan gene. Similarly, a species-specific orphan gene is identified only within a single species and not in other species. These genes exhibit no detectable homology outside their respective taxonomic levels. b. Genomic topography of orphan genes. Orphan genes can be found in various genomic locations: i. intergenic regions (between two genes), ii. overlapping a single gene, iii. overlapping two genes, iv. overlapping two overlapping genes, and v. located within a gene. Some of the genes were already annotated in the NCBI data, while others (the majority) were unannotated. The annotation status of each gene was determined by manually inspecting the genomes in Geneious after downloading them from NCBI.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Fig 1"
+    },
+    {
+      "caption" : "Stepwise BLASTp Screening Reveals Reduction of Orphan Genes Across Bacterial Species. a. Schematic Representation of the Screening Process. Step 1: BLASTp was performed on protein sequences obtained from TRGdb, excluding the target organism from the search. The maximum target sequences parameter was set to the default value of 100. Step 2: Protein sequences identified as orphan genes in Step 1 were reanalyzed using BLASTp with an increased maximum target sequence limit of 5000. Step 3 (Thresholding BLASTp): Sequences that remained orphan genes in Step 2 were searched again, this time including the target organism. A threshold of “3 genomes” was applied, meaning that proteins detected in more than 3 genomes of the same species were considered for further analysis. Step 4 (Reciprocal BLASTp): For sequences that were detected in more than 3 genomes in Step 3, the resulting protein hits were examined. Among these, the protein with the lowest sequence similarity to the query in Step 3 was selected and used as the query in a reciprocal BLASTp search against the database. E value was set to 1E-3 for all four steps. b. Reduction in orphan gene numbers across screening steps. The screening process resulted in a progressive decrease in the number of orphan genes across 10 bacterial species: E. coli, S. enterica, K. pneumoniae, P. aeruginosa, E. faecalis, B. subtilis, M. tuberculosis, H. pylori, L. pneumophila, and C. trachomatis. A marked reduction in orphan gene numbers was observed across all species within just two years, with the most remarkable decline occurring in Step 1.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Fig 2"
+    },
+    {
+      "caption" : "A Higher Number of Sequenced Genomes Generally Leads to a Reduction in Orphan Genes. The left panel demonstrates the number of orphan genes in 2023 and 2025, alongside the number of sequenced genomes available for each bacterial species in NCBI (S1 Table, individual data points without log transformation). Labels: xx: data points corresponding to a single orphan gene (Log 1 = 0); x: data point corresponding to zero orphan genes (Log 0 = undefined). The 10 bacterial species studied were divided into 2 groups and arranged in descending order based on the number of genomes available (NCBI). The right panel compares the top five High Genome Count species to the bottom five Low Genome Count species using a violin plot.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Fig 3"
+    },
+    {
+      "caption" : "Prioritizing Candidate Orphan Genes for Experimental Validation. a. Workflow for prioritizing candidate orphan genes based on predicted protein structure, promoter elements, mRNA expression, and ribosome-binding site (RBS) strength. b. AlphaFold structural predictions for 75 candidate orphan proteins. Shown are representative models from each confidence tier: one with a high average predicted Local Distance Difference Test (pLDDT) score (90.56) and one with a low average pLDDT score (30.22). 10 proteins from each category (high confidence, low confidence, and no prediction) were selected for downstream analyses. c. Promoter motif search using BPROM and BioCyc. Excluding Mycobacterium species, every candidate orphan protein across all confidence tiers contained at least one predicted promoter site. d. mRNA expression profiling based on RNA-seq datasets retrieved from the SRA, confirming transcript presence (but not expression level) for selected candidate orphan genes. e. Translation Initiation Rate (TIR) estimates. High-confidence candidate orphan genes exhibited the highest mean TIR, while the no-prediction group showed the lowest average TIR.",
+      "footnotes" : [
+
+      ],
+      "hasGraphic" : true,
+      "label" : "Fig 4"
+    }
+  ],
+  "issue" : "12",
+  "journal" : "PLOS One",
+  "pages" : "e0338891",
+  "pmcId" : "PMC12755737",
+  "pmid" : "41474770",
+  "references" : {
+    "count" : 72,
+    "withAuthors" : 0,
+    "withDOI" : 0,
+    "withPMID" : 0,
+    "withYear" : 0
+  },
+  "tables" : [
+    {
+      "caption" : "A list of bacterial species and genome accession numbers used in this study.",
+      "footnotes" : [
+
+      ],
+      "label" : "Table 1",
+      "markdownRowCount" : 12
+    }
+  ],
+  "title" : "Candidate orphan genes: Reassessing uniqueness",
+  "volume" : "20",
+  "year" : "2025"
+}

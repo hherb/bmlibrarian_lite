@@ -120,4 +120,77 @@ final class JATSSubArticleTests: XCTestCase {
 
         XCTAssertEqual(paragraphs, 1)
     }
+
+    // MARK: - Nesting
+
+    /// A `<sub-article>` inside a `<sub-article>`, with the outer one's prose
+    /// continuing after the inner one closes.
+    ///
+    /// JATS permits the nesting — an author reply carried inside the decision
+    /// letter it answers — and `subArticleDepth` is a counter rather than a flag
+    /// precisely so the inner `</sub-article>` does not read as "back in the real
+    /// article". Nothing pinned that: reducing the counter to a 0/1 flag passed
+    /// all 91 committed JATS tests, and it passes the real-article corpus too,
+    /// because nested sub-articles do not occur in the Europe PMC feed at all
+    /// (0 of 225 articles surveyed; eLife's decision-letter and reply are
+    /// siblings). So a synthetic case is the only thing that can hold this line,
+    /// and it has to be synthetic *because* the shape is absent from the wild.
+    private static let nestedXML = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <article>
+      <front>
+        <article-meta>
+          <article-id pub-id-type="doi">10.1371/journal.pgen.1012008</article-id>
+          <title-group><article-title>Polycystins and ciliary derepression</article-title></title-group>
+        </article-meta>
+      </front>
+      <body>
+        <sec><title>Introduction</title><p>Real article prose.</p></sec>
+      </body>
+      <sub-article article-type="decision-letter">
+        <body>
+          <p>Dear Dr Real, your manuscript requires revision.</p>
+          <sub-article article-type="reply">
+            <body>
+              <p>We thank the reviewers for their comments.</p>
+            </body>
+          </sub-article>
+          <p>We look forward to receiving your revision.</p>
+          <sec><title>Reviewer 2</title><p>The statistics need work.</p></sec>
+        </body>
+      </sub-article>
+    </article>
+    """
+
+    /// Parse the nested fixture.
+    ///
+    /// - Returns: The parsed outer article.
+    /// - Throws: Whatever the parser raised.
+    private func parseNested() throws -> JATSArticle {
+        try JATSXMLParser(data: Data(Self.nestedXML.utf8)).parseToArticle()
+    }
+
+    /// The assertion the counter actually holds up.
+    ///
+    /// Only the *sectioned* form leaks under a 0/1 flag. The loose `<p>` that
+    /// follows it does not, but for an unrelated reason — the real article's
+    /// `</body>` has already cleared `inBody`, and stray prose outside a body is
+    /// dropped anyway. So this test is written against `<sec>`, and the prose is
+    /// asserted alongside it only to record that the two travel differently.
+    func testASectionAfterANestedSubArticleClosesStaysOutOfTheBody() throws {
+        let article = try parseNested()
+
+        XCTAssertEqual(
+            article.bodySections.map(\.title), ["Introduction"],
+            """
+            the outer <sub-article> resumed after its nested one closed, so its \
+            remaining sections leaked into the article body. This is what makes \
+            subArticleDepth a counter rather than a flag.
+            """
+        )
+        XCTAssertEqual(
+            article.bodySections.flatMap(\.paragraphs), ["Real article prose."],
+            "no sub-article prose may reach the body either"
+        )
+    }
 }

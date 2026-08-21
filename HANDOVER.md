@@ -8,6 +8,32 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
+- **Real PMC JATS corpus** (#146 landed 2026-08-21): five open-access Europe PMC
+  articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with
+  a stored structural digest, parsed offline by `JATSRealCorpusTests` on every
+  PR. Read that directory's `README.md` before touching it.
+  - **The digest is a characterisation, not a specification.** It records what
+    the parser does today, four known-wrong behaviours included. A digest change
+    is a prompt to read the diff, never by itself proof of a regression *or* of a
+    fix. The README separates what was hand-verified against the source XML from
+    what is merely characterised.
+  - **Hand-checking the digests is the step that pays.** It found four real
+    defects on the first pass — #154, #155, #156, #157 — each then confirmed
+    against a 225-article survey. Generating a digest and committing it unread
+    would have found none of them, and would have frozen all four as expectations.
+  - **Never edit the bytes.** Trimming an article to save space turns a real
+    fixture into a synthetic one wearing a real article's name;
+    `testCorpusBytesAreUnmodified` pins each file's SHA-256.
+  - **Nested `<sub-article>` does not exist in the wild** — 0 of 225 articles,
+    while 69 carry sub-articles at depth 1. eLife's decision-letter and reply are
+    siblings. So the `subArticleDepth` counter→flag mutation passes the real
+    corpus exactly as it passed the 91 synthetic JATS tests; that line is held by
+    `JATSSubArticleTests.testASectionAfterANestedSubArticleClosesStaysOutOfTheBody`,
+    which is synthetic *because* the shape is absent from the wild. Real and
+    synthetic fixtures answer different questions; this corpus replaces neither
+    the synthetic suite nor the nightly integration run.
+  - Verified load-bearing: reverting the caption-host fix fails the corpus on 2 of
+    5 articles, naming the renamed section and the 12 injected caption paragraphs.
 - **Funder classifier parity** (#143 landed 2026-08-21): the canonical desktop
   Python now carries the calibrated `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS`
   ported from Swift, replacing the positional `INDUSTRY_KEYWORDS[:6]` slice, and
@@ -223,13 +249,26 @@ its slice has landed; add a new section when handing off new work.
   what the tier means before it can be a constant. Swift's
   `governmentPatterns`/`academicPatterns` split is a *different* cut, so aligning
   to it is a behaviour change.
-- **#146 — no real PMC JATS fixtures**: every JATS test is hand-written synthetic
-  XML. The caption-host defect found reviewing #142 affected **86 of 386 real
-  articles (22.3%)** while every synthetic routing test passed, and a mutation
-  reducing `subArticleDepth` to a boolean flag passed all 59 JATS tests. The
-  network-gated integration tests now run nightly
-  (`.github/workflows/swift-integration-tests.yml`) but still never on a PR;
-  committing a handful of real articles as offline fixtures is the durable fix.
+- **#154, #155, #156, #157 — four JATS parser defects the corpus found**, all
+  confirmed against a 225-article survey, all still open. Fixing any of them
+  changes `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the
+  evidence — read it rather than regenerating past it. Each likely replicates in
+  Android's `util.jats.JATSXMLParser` and in bmlib, which share this parser's
+  ancestry; check all three before calling a fix complete.
+  - **#154 — author affiliations are never captured.** `currentAffiliations` is
+    written at `JATSXMLParser.swift:1152` and read nowhere, and
+    `<xref ref-type="aff">` is unhandled. 98.7% of real articles link
+    affiliations that way; only 4.4% inline `<aff>` inside `<contrib>`, which is
+    the shape every synthetic test uses. All 17 corpus authors report zero.
+  - **#155 — `<mixed-citation>` yields no structured reference metadata.** 80.9%
+    of articles, **74.6% of all real references**. The citation string survives,
+    so it degrades quietly.
+  - **#156 — a nested `<fig>` drops the parent figure.** 19.6% of articles;
+    `currentFigure` is a single slot where `subArticleDepth` and the
+    `contrib-group` role stack already learned otherwise in #142.
+  - **#157 — a `<table-wrap-foot><fn><label>` overwrites the table's label.**
+    13.2% of real tables. `figureFootnoteDepth` already guards the `<p>` branch
+    four lines away; the `<label>` branch never got it.
 - **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
   dropped**: they no longer corrupt the enclosing section (fixed in #142 review),
   but there is no model to capture them into. 258 + 144 + 15 occurrences across
@@ -292,6 +331,10 @@ its slice has landed; add a new section when handing off new work.
   missing. Cost an implementation once already this session.
 - `pytest tests/` → 0 failures (Python is the reference).
 - `cd Packages/BioMedLit && swift test` → 0 failures.
+- Changed the JATS parser? The corpus digests are expected to move. Regenerate
+  with `UPDATE_JATS_DIGESTS=1 swift test --filter JATSRealCorpusTests` **and read
+  every changed line** — regenerating unread converts a regression into a
+  committed expectation, which is the one failure the corpus cannot survive.
 - `cd ios/MedicalFactChecker && swift test` → 0 failures.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
