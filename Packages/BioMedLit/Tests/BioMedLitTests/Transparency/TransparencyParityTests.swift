@@ -74,11 +74,15 @@ final class TransparencyParityTests: XCTestCase {
         let patterns: [String: [String]]
         let confidences: [String: Double]
         let confidenceProbes: [ConfidenceProbe]
+        /// One representative funder name per pattern, so a pattern that matches
+        /// nothing anywhere cannot hide behind a string-for-string pin.
+        let patternProbes: [String]
 
         enum CodingKeys: String, CodingKey {
             case patterns
             case confidences
             case confidenceProbes = "confidence_probes"
+            case patternProbes = "pattern_probes"
         }
     }
 
@@ -387,6 +391,56 @@ final class TransparencyParityTests: XCTestCase {
             government.intersection(academic).isEmpty,
             "a pattern appears in both sponsor halves: \(government.intersection(academic))"
         )
+    }
+
+    /// Neither half may be empty.
+    ///
+    /// `assertPatternsMatch` compares two arrays, so it passes when both sides are
+    /// empty — an emptied contract half would take the Swift suite green while
+    /// collapsing a whole sponsor tier. Python asserts the same invariant.
+    func testBothContractSponsorHalvesAreNonEmpty() throws {
+        XCTAssertFalse(try loadSponsorPatterns("government").isEmpty)
+        XCTAssertFalse(try loadSponsorPatterns("academic").isEmpty)
+        XCTAssertFalse(IndustryPatterns.governmentPatterns.isEmpty)
+        XCTAssertFalse(IndustryPatterns.academicPatterns.isEmpty)
+    }
+
+    /// Every contract pattern must match at least one probe name.
+    ///
+    /// The string-for-string assertions catch the platforms drifting apart. They
+    /// cannot catch a pattern that never matched anything on any platform, because
+    /// a typo transcribed faithfully into every copy agrees with itself. `\bniaid\b`,
+    /// `\bnhlbi\b` and `\bnimh\b` were in exactly that state.
+    func testEveryContractSponsorPatternIsExercised() throws {
+        let manifest = try Self.sponsorManifest.get()
+        let probes = manifest.patternProbes.map { $0.lowercased() }
+
+        for (tier, patterns) in manifest.patterns {
+            for pattern in patterns {
+                let regex = try NSRegularExpression(pattern: pattern, options: [])
+                let matched = probes.contains { probe in
+                    let range = NSRange(probe.startIndex..., in: probe)
+                    return regex.firstMatch(in: probe, options: [], range: range) != nil
+                }
+                XCTAssertTrue(
+                    matched,
+                    "'\(tier)' pattern \(pattern) is matched by no probe name in the contract"
+                )
+            }
+        }
+    }
+
+    /// A probe that classified as industry would exercise nothing.
+    ///
+    /// Both halves exist to mean "not industry", so an industry verdict would
+    /// satisfy the coverage test above while proving nothing about the pattern the
+    /// name was chosen for.
+    func testEverySponsorPatternProbeIsNonIndustry() throws {
+        let manifest = try Self.sponsorManifest.get()
+        for name in manifest.patternProbes {
+            let (isIndustry, _) = FundingAnalyzer.classifyFunder(name: name, doi: nil)
+            XCTAssertFalse(isIndustry, "'\(name)' classified as industry")
+        }
     }
 
     // MARK: - Pattern manifest parity

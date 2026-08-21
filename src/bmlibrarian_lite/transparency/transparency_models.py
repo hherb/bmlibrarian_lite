@@ -59,6 +59,10 @@ class TransparencyResult:
         trial_results_compliant: Whether trial results were posted as required
         outcome_switching_detected: Whether outcome switching was detected
         risk_indicators: List of human-readable risk indicators
+        warnings: Caveats about how reliable this analysis is, as opposed to
+            what it found — e.g. funder names that matched no known body. Kept
+            separate from risk_indicators because they qualify the result rather
+            than describing the study. Mirrors Swift's TransparencyResult.warnings.
         tier_downgrade_applied: Number of quality tiers downgraded
         analyzed_at: Timestamp of analysis
         analyzer_version: Version of the analyzer used
@@ -80,6 +84,9 @@ class TransparencyResult:
 
     # Risk indicators list (human-readable)
     risk_indicators: list[str] = field(default_factory=list)
+
+    # Caveats about the analysis itself (human-readable)
+    warnings: list[str] = field(default_factory=list)
 
     # Tier adjustment applied
     tier_downgrade_applied: int = 0
@@ -110,6 +117,7 @@ class TransparencyResult:
             "trial_results_compliant": self.trial_results_compliant,
             "outcome_switching_detected": self.outcome_switching_detected,
             "risk_indicators": self.risk_indicators,
+            "warnings": self.warnings,
             "tier_downgrade_applied": self.tier_downgrade_applied,
             "analyzed_at": self.analyzed_at.isoformat(),
             "analyzer_version": self.analyzer_version,
@@ -139,6 +147,7 @@ class TransparencyResult:
             trial_results_compliant=data.get("trial_results_compliant", False),
             outcome_switching_detected=data.get("outcome_switching_detected", False),
             risk_indicators=data.get("risk_indicators", []),
+            warnings=data.get("warnings", []),
             tier_downgrade_applied=data.get("tier_downgrade_applied", 0),
             analyzed_at=datetime.fromisoformat(data["analyzed_at"]),
             analyzer_version=data.get("analyzer_version", "1.0"),

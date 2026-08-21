@@ -28,7 +28,7 @@ Python and Swift only, because Android carries no funder or sponsor classifier.
 `funder_names.json` is a *measurement* corpus rather than a pattern contract —
 see [The funder-name corpus](#the-funder-name-corpus) below.
 
-## The two fixtures
+## The data-availability fixtures
 
 ### `data_availability_patterns.json` — the strings
 
@@ -172,6 +172,32 @@ Asserted **behaviourally**, not by comparing constants: `confidence_probes` name
 one representative funder per layer, and each platform classifies it and checks
 the reported confidence. Swift's constants are `private`, so a constant
 comparison is not available there — and behaviour is what reaches a user anyway.
+
+### `pattern_probes` — patterns that match nothing
+
+A string-for-string pin catches the platforms drifting apart. It cannot catch a
+pattern that never matched anything *on any platform*: a typo transcribed
+faithfully into every copy agrees with itself perfectly. `\bniaid\b`, `\bnhlbi\b`
+and `\bnimh\b` sat in exactly that state — pinned by the contract, exercised by
+no test on either platform.
+
+`pattern_probes` names one representative funder per pattern. Both suites assert
+that every pattern matches at least one probe, and that every probe classifies as
+non-industry (a probe reaching the industry layer would satisfy the coverage
+check while proving nothing). This mirrors `test_every_contract_pattern_is_exercised`
+in the data-availability contract.
+
+### Which artifact is canonical
+
+Both statements in this directory are true of different things, and the
+distinction matters when they disagree:
+
+- **The JSON is canonical for the values.** Change a pattern or a confidence here
+  first, then transcribe it to both platforms. Neither platform's literals are
+  the source.
+- **Python is canonical for the behaviour.** Where the two platforms compute
+  different answers from the same values — as they did on the confidences before
+  #152 — Python's is the one Swift moves to.
 
 Two invariants matter as much as the values. The ladder must stay **strictly
 descending** — two layers sharing a value are indistinguishable to a caller

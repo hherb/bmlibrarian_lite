@@ -19,9 +19,10 @@
 ``sponsor_type`` answers "who paid for this study?" once the individual funders
 have been classified. Until #147 the government tier was selected by a positional
 ``GOVERNMENT_PATTERNS[:10]`` slice, which cut through the middle of the agency
-list: the NIH, NSF and CDC patterns were inside it while the FDA, VA, AHRQ and
-PCORI patterns sat immediately outside, so a VA-funded study reported as
-``ACADEMIC``.
+list: the NIH, NSF and CDC patterns were inside it while six funders sat
+immediately outside — FDA, VA, AHRQ, PCORI and, less obviously, Wellcome and the
+Medical Research Council — so a VA-funded study reported as ``ACADEMIC``. Six,
+not the four that the abbreviations alone suggest.
 
 The lists are now split the way Swift splits them —
 ``IndustryPatterns.governmentPatterns`` and ``academicPatterns`` — and
@@ -111,12 +112,22 @@ class TestTheGovernmentTier:
         [
             "National Institutes of Health",
             "NCI",
+            "NIAID",
+            "NHLBI",
+            "NIMH",
             "National Science Foundation",
             "Centers for Disease Control and Prevention",
         ],
     )
     def test_agencies_inside_the_old_slice_are_still_government(self, name: str) -> None:
-        """The half that already worked must not regress."""
+        """The half that already worked must not regress.
+
+        NIAID, NHLBI and NIMH are here because the manifest pins their patterns
+        string-for-string but nothing used to exercise them: a string pin catches
+        drift between platforms, not a pattern that never matched anything on any
+        of them. These are the institute abbreviations #150 is about, so they are
+        the ones worth being sure of.
+        """
         assert determine_sponsor_type([_funder(name)]) == SponsorType.GOVERNMENT
 
     @pytest.mark.parametrize(
@@ -268,6 +279,68 @@ class TestTheAnalyzerUsesTheSharedFunction:
         assert report.sponsor_type == SponsorType.GOVERNMENT
         assert not any("not recognised" in w for w in report.warnings)
 
+    def test_an_unrecognised_funder_is_warned_about_even_when_the_tier_is_mixed(
+        self,
+    ) -> None:
+        """The caveat is about the funder name, so the tier must not gate it.
+
+        Keyed off the NONPROFIT tier, this case stayed silent: an unrecognised
+        name beside an industry one yields MIXED, which reads as a positive
+        finding of dual funding — the case where an unverified classification is
+        most consequential, not least.
+        """
+        analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [
+            {"agency": "Fondation Zzyzx", "grant_id": "G1"},
+            {"agency": "Pfizer Inc", "grant_id": "G2"},
+        ]
+
+        analyzer._fetch_funder_info(report)
+
+        assert report.sponsor_type == SponsorType.MIXED
+        assert any("Fondation Zzyzx" in w for w in report.warnings)
+
+    @pytest.mark.parametrize("agency", ["", "   ", None])
+    def test_a_nameless_funder_is_skipped_rather_than_classified(
+        self, agency: str | None
+    ) -> None:
+        """A funder with no name is no evidence, so it must not produce a tier.
+
+        PubMed grants and CrossRef entries both arrive without an agency name in
+        practice. Classifying one used to yield a confident-looking NONPROFIT
+        derived from nothing, plus a caveat reading "Funder names not recognised
+        ()" — an empty parenthetical.
+        """
+        analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": agency, "grant_id": "G1"}]
+
+        analyzer._fetch_funder_info(report)
+
+        assert report.funders == []
+        assert report.sponsor_type == SponsorType.UNKNOWN
+        assert report.warnings == []
+
+    def test_industry_confidence_is_the_strongest_funder_not_the_weakest(self) -> None:
+        """The reported confidence must be the best evidence, not the worst.
+
+        A registry DOI is authoritative where a name-stem match is a guess, so a
+        study carrying both must report the registry's confidence.
+        """
+        analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
+        report = TransparencyReport(pmid="1")
+        report._crossref_funders = [
+            {"name": "Pfizer", "DOI": "10.13039/100004319"},
+            {"name": "Genentech Inc."},
+        ]
+
+        analyzer._fetch_funder_info(report)
+
+        confidences = [f.confidence for f in report.funders]
+        assert report.industry_funding_confidence == max(confidences)
+        assert report.industry_funding_confidence > min(confidences)
+
 
 class _StubClinicalTrials:
     """Minimal stand-in for the ClinicalTrials.gov client.
@@ -277,11 +350,12 @@ class _StubClinicalTrials:
     network call.
     """
 
-    def __init__(self, sponsor_class: str) -> None:
+    def __init__(self, sponsor_class: str | None) -> None:
         """Store the sponsor class this stub will report.
 
         Args:
-            sponsor_class: Value to place on the returned registration.
+            sponsor_class: Value to place on the returned registration, or
+                ``None`` to model a registry that reported no sponsor class.
         """
         self._sponsor_class = sponsor_class
 
@@ -310,6 +384,26 @@ class _StubClinicalTrials:
             registration_id=study["id"],
             sponsor_class=self._sponsor_class,
         )
+
+
+class _UnreachableClinicalTrials:
+    """Stand-in for a ClinicalTrials.gov client that cannot reach the registry.
+
+    ``ClinicalTrialsClient.get_study`` catches ``RequestException``, logs it and
+    returns ``None``, so an outage is indistinguishable from an unregistered
+    study to everything downstream. This models that return.
+    """
+
+    def get_study(self, trial_id: str) -> None:
+        """Return nothing, as the real client does on a request failure.
+
+        Args:
+            trial_id: Ignored.
+
+        Returns:
+            ``None``, always.
+        """
+        return None
 
 
 class TestTheTrialRegistryUpgrade:
@@ -371,11 +465,14 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
 
     CONTACT_EMAIL = "tests@example.org"
 
-    def _analyzer_with_trial(self, sponsor_class: str) -> StudyTransparencyAnalyzer:
+    def _analyzer_with_trial(
+        self, sponsor_class: str | None
+    ) -> StudyTransparencyAnalyzer:
         """Build an analyzer whose trial client is stubbed.
 
         Args:
-            sponsor_class: Sponsor class the stubbed registry will report.
+            sponsor_class: Sponsor class the stubbed registry will report, or
+                ``None`` for a registry that reported none.
 
         Returns:
             An analyzer ready for ``_fetch_trial_info``.
@@ -445,6 +542,93 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         assert report.sponsor_type == SponsorType.MIXED
         assert report.industry_funding_detected
 
+    @pytest.mark.parametrize("sponsor_class", ["INDUSTRY", "industry", "InDuStRy"])
+    def test_the_analyzer_matches_the_sponsor_class_case_insensitively(
+        self, sponsor_class: str
+    ) -> None:
+        """Both the tier and the flag must survive registry casing.
+
+        ``_fetch_trial_info`` used to test for an industry sponsor with its own
+        inline comparison, so only ``update_sponsor_type``'s copy was covered by
+        a casing test. A lowercase class then produced MIXED with
+        ``industry_funding_detected`` false — the contradiction
+        ``test_an_industry_trial_with_unrecognised_funders_is_mixed`` exists to
+        prevent, reached by the one path it did not cover. Both now call
+        :func:`is_industry_trial_sponsor`.
+        """
+        analyzer = self._analyzer_with_trial(sponsor_class)
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_funder_info(report)
+        analyzer._fetch_trial_info(report)
+
+        assert report.sponsor_type == SponsorType.MIXED
+        assert report.industry_funding_detected
+
+    def test_a_registry_that_reports_no_sponsor_class_changes_nothing(self) -> None:
+        """A missing class must not read as one we read and chose not to act on.
+
+        ``extract_trial_info`` leaves ``sponsor_class`` as ``None`` when the
+        registry omits it, matching Swift's optional. It defaulted to ``''``,
+        which was indistinguishable from a well-formed ``'NIH'``.
+        """
+        analyzer = self._analyzer_with_trial(None)
+        report = TransparencyReport(pmid="1")
+        report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_funder_info(report)
+        analyzer._fetch_trial_info(report)
+
+        assert report.sponsor_type == SponsorType.GOVERNMENT
+        assert not report.industry_funding_detected
+
+    def test_an_unreachable_registry_is_reported_rather_than_read_as_unregistered(
+        self,
+    ) -> None:
+        """A failed fetch must not be indistinguishable from an unregistered study.
+
+        ``get_study`` returns ``None`` on a request failure, logging server-side.
+        The report then carried ``trial_registered=False`` and lost the
+        registration score, so a ClinicalTrials.gov outage silently made every
+        registered study look unregistered to the user.
+        """
+        analyzer = self._analyzer_with_trial("INDUSTRY")
+        analyzer.clinicaltrials = _UnreachableClinicalTrials()
+        report = TransparencyReport(pmid="1")
+        report._databanks = [
+            {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
+        ]
+
+        analyzer._fetch_trial_info(report)
+
+        assert report.trial_registrations == []
+        assert any("NCT01234567" in w for w in report.warnings)
+        assert any("not evidence" in w for w in report.warnings)
+
+    def test_a_non_clinicaltrials_registration_is_reported_rather_than_dropped(
+        self,
+    ) -> None:
+        """ISRCTN and EudraCT accessions are collected, then have no client.
+
+        They were dropped with no logging and no caveat, so a study registered
+        only in ISRCTN read as "Trial Registration: None found".
+        """
+        analyzer = self._analyzer_with_trial("INDUSTRY")
+        report = TransparencyReport(pmid="1")
+        report._databanks = [{"name": "ISRCTN", "accession_numbers": ["ISRCTN12345678"]}]
+
+        analyzer._fetch_trial_info(report)
+
+        assert report.trial_registrations == []
+        assert any("ISRCTN12345678" in w for w in report.warnings)
+
     def test_a_non_industry_trial_leaves_the_funder_tier_alone(self) -> None:
         """An NIH-sponsored registration must not flip anything to mixed."""
         analyzer = self._analyzer_with_trial("NIH")
@@ -500,18 +684,23 @@ class TestThePatternSplitPreservesFunderClassification:
     """Splitting the list must not move the industry/non-industry boundary.
 
     ``classify_funder_name`` matched a single 25-element ``GOVERNMENT_PATTERNS``
-    before #147. It now matches ``NON_INDUSTRY_PATTERNS``, and that has to be the
+    before #147. It now walks ``GOVERNMENT_PATTERNS`` then ``ACADEMIC_PATTERNS``,
+    which covers exactly their concatenation in order, and that has to remain the
     same 25 patterns in the same order — otherwise the split silently changes
     which funders are called industry, which is measured against the corpus in
     ``tests/test_funder_classification.py`` and feeds a HIGH-risk rule.
     """
 
-    #: The 25-element list exactly as it stood before the #147 split, frozen here
-    #: so a pattern cannot be added, dropped or reordered without this test
-    #: failing. Asserting against ``GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS``
-    #: instead would restate the production line and pass even if both halves
-    #: lost the same pattern.
-    PRE_SPLIT_PATTERNS = [
+    #: The 25 patterns as they stood before the #147 split, frozen here so one
+    #: cannot be added, dropped or reordered without this test failing. Asserting
+    #: against ``GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS`` instead would restate
+    #: the production line and pass even if both halves lost the same pattern.
+    #:
+    #: To change the vocabulary deliberately: edit ``sponsor_patterns.json``, both
+    #: platform sources, and this baseline in the same commit. Updating this
+    #: literal is meant to be the step that makes you confirm the corpus scores in
+    #: ``tests/test_funder_classification.py`` still hold.
+    FROZEN_PATTERN_BASELINE = [
         r'\bnih\b',
         r'\bnational institutes? of health\b',
         r'\bniaid\b',
@@ -547,11 +736,20 @@ class TestThePatternSplitPreservesFunderClassification:
         only for names carrying that one pattern, so it can move a long way
         before a precision or recall floor notices.
         """
-        assert NON_INDUSTRY_PATTERNS == self.PRE_SPLIT_PATTERNS
+        assert NON_INDUSTRY_PATTERNS == self.FROZEN_PATTERN_BASELINE
 
-    def test_the_union_is_the_two_halves_in_order(self) -> None:
-        """Neither half may carry a pattern that the union then omits."""
-        assert NON_INDUSTRY_PATTERNS == GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
+    def test_the_halves_together_are_the_frozen_baseline(self) -> None:
+        """Neither half may lose a pattern the baseline still expects.
+
+        Deliberately not ``NON_INDUSTRY_PATTERNS == GOVERNMENT_PATTERNS +
+        ACADEMIC_PATTERNS``: the production constant is *defined* as that
+        concatenation, so such an assertion restates the source and cannot fail.
+        Comparing each half against its slice of the frozen baseline is what
+        localises a drop to the half that caused it.
+        """
+        boundary = len(GOVERNMENT_PATTERNS)
+        assert GOVERNMENT_PATTERNS == self.FROZEN_PATTERN_BASELINE[:boundary]
+        assert ACADEMIC_PATTERNS == self.FROZEN_PATTERN_BASELINE[boundary:]
 
     def test_the_two_halves_are_disjoint(self) -> None:
         """A pattern in both lists would make the academic tier unreachable for it."""

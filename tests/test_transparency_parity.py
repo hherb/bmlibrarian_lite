@@ -154,8 +154,8 @@ class TestSponsorPatternManifestParity:
     """Python's sponsor lists must equal the shared contract string-for-string.
 
     #147 split one 25-element list into a government half and an academic half to
-    match Swift, and three separate places assert in prose that the two platforms
-    are byte-identical. Prose is not enforcement: before this fixture existed,
+    match Swift, and several places assert in prose that the two platforms are
+    byte-identical. Prose is not enforcement: before this fixture existed,
     either platform could edit its list and both suites stayed green. The lists
     decide the sponsor tier *and*, concatenated, the industry boundary that
     ``funder_names.json`` measures, so drift is expensive in both directions.
@@ -200,6 +200,42 @@ class TestSponsorPatternManifestParity:
         for half in ("government", "academic"):
             for pattern in sponsor_patterns[half]:
                 re.compile(pattern)
+
+    def test_every_manifest_sponsor_pattern_is_exercised(
+        self, sponsor_patterns: dict[str, list[str]]
+    ) -> None:
+        r"""Every pattern matches at least one probe name from the contract.
+
+        The string-for-string assertions above catch the platforms drifting
+        apart. They cannot catch a pattern that never matched anything on any
+        platform — a typo transcribed faithfully into all three copies agrees
+        with itself perfectly. ``\bniaid\b``, ``\bnhlbi\b`` and ``\bnimh\b``
+        were in exactly that state: pinned, and behaviourally untested
+        everywhere.
+        """
+        probes = [name.lower() for name in _load_fixture(SPONSOR_PATTERNS_FIXTURE)["pattern_probes"]]
+        unexercised = sorted(
+            {
+                pattern
+                for patterns in sponsor_patterns.values()
+                for pattern in patterns
+                if not any(re.search(pattern, probe) for probe in probes)
+            }
+        )
+        assert unexercised == [], "contract patterns with no covering probe:\n  " + "\n  ".join(
+            unexercised
+        )
+
+    def test_every_sponsor_pattern_probe_is_non_industry(self) -> None:
+        """A probe that classified as industry would not be exercising its half.
+
+        Both halves exist to mean "not industry", so a probe name reaching the
+        industry layer would satisfy the coverage test above while proving
+        nothing about the pattern it was chosen for.
+        """
+        for name in _load_fixture(SPONSOR_PATTERNS_FIXTURE)["pattern_probes"]:
+            is_industry, _ = classify_funder_name(name)
+            assert not is_industry, f"{name!r} classified as industry"
 
 
 class TestFunderConfidenceParity:

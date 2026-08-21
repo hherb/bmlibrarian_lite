@@ -296,7 +296,10 @@ university spin-out naming convention cannot flag its parent institution:
 GOVERNMENT_PATTERNS = [..., r'\bva\b', r'\bwellcome\b', r'\bmedical research council\b']
 ACADEMIC_PATTERNS = [r'\buniversit(?:y|ies)\b', ..., r'\bgovernment\b', r'\bfederal\b', r'\bstate\b']
 
-# What classify_funder_name() matches: both halves mean "not industry".
+# The combined vocabulary, NOT the matcher. classify_funder_name() walks the two
+# halves separately so each reports its own confidence (#152); that covers exactly
+# this concatenation, in this order. This constant is what the drift guard
+# compares and what "not industry" means as one list.
 NON_INDUSTRY_PATTERNS = GOVERNMENT_PATTERNS + ACADEMIC_PATTERNS
 ```
 
