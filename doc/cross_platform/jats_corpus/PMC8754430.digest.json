@@ -1,7 +1,7 @@
 {
   "abstractSections" : [
     {
-      "characterCount" : 1478,
+      "content" : "Most cellular ATP is made by rotary F1FO ATP synthases using proton translocation-generated clockwise torque on the FO c-ring rotor, while F1-ATP hydrolysis can force counterclockwise rotation and proton pumping. The FO torque-generating mechanism remains elusive even though the FO interface of stator subunit-a, which contains the transmembrane proton half-channels, and the c-ring is known from recent F1FO structures. Here, single-molecule F1FO rotation studies determined that the pKa values of the half-channels differ, show that mutations of residues in these channels change the pKa values of both half-channels, and reveal the ability of FO to undergo single c-subunit rotational stepping. These experiments provide evidence to support the hypothesis that proton translocation through FO operates via a Grotthuss mechanism involving a column of single water molecules in each half-channel linked by proton translocation-dependent c-ring rotation. We also observed pH-dependent 11° ATP synthase-direction sub-steps of the Escherichia coli c10-ring of F1FO against the torque of F1-ATPase-dependent rotation that result from H+ transfer events from FO subunit-a groups with a low pKa to one c-subunit in the c-ring, and from an adjacent c-subunit to stator groups with a high pKa. These results support a mechanism in which alternating proton translocation-dependent 11° and 25° synthase-direction rotational sub-steps of the c10-ring occur to sustain F1FO ATP synthesis.",
       "title" : ""
     }
   ],
@@ -17,44 +17,44 @@
   ],
   "bodySections" : [
     {
-      "characterCount" : 13905,
       "paragraphCount" : 13,
+      "scalarCount" : 13905,
       "subsections" : [
 
       ],
       "title" : "Introduction"
     },
     {
-      "characterCount" : 3801,
       "paragraphCount" : 6,
+      "scalarCount" : 3801,
       "subsections" : [
         {
-          "characterCount" : 5708,
           "paragraphCount" : 7,
+          "scalarCount" : 5708,
           "subsections" : [
 
           ],
           "title" : "Subunit-a mutations alter pKas of TD formation"
         },
         {
-          "characterCount" : 1795,
           "paragraphCount" : 2,
+          "scalarCount" : 1795,
           "subsections" : [
 
           ],
           "title" : "Subunit-a mutations affect TD formation efficiency"
         },
         {
-          "characterCount" : 1835,
           "paragraphCount" : 4,
+          "scalarCount" : 1835,
           "subsections" : [
 
           ],
           "title" : "Synthase-direction steps rotate CW an average of ~11°"
         },
         {
-          "characterCount" : 4524,
           "paragraphCount" : 7,
+          "scalarCount" : 4524,
           "subsections" : [
 
           ],
@@ -64,20 +64,20 @@
       "title" : "Results"
     },
     {
-      "characterCount" : 1203,
       "paragraphCount" : 1,
+      "scalarCount" : 1203,
       "subsections" : [
         {
-          "characterCount" : 4136,
           "paragraphCount" : 6,
+          "scalarCount" : 4136,
           "subsections" : [
 
           ],
           "title" : "FO uses a Grotthuss mechanism to translocate protons through both half-channels"
         },
         {
-          "characterCount" : 10865,
           "paragraphCount" : 12,
+          "scalarCount" : 10865,
           "subsections" : [
 
           ],
@@ -87,20 +87,20 @@
       "title" : "Discussion"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 3145,
           "paragraphCount" : 3,
+          "scalarCount" : 3145,
           "subsections" : [
 
           ],
           "title" : "Mutagenesis and purification of nanodisc FOF1"
         },
         {
-          "characterCount" : 1910,
           "paragraphCount" : 1,
+          "scalarCount" : 1910,
           "subsections" : [
 
           ],
@@ -110,40 +110,40 @@
       "title" : "Materials and methods"
     },
     {
-      "characterCount" : 255,
       "paragraphCount" : 3,
+      "scalarCount" : 255,
       "subsections" : [
 
       ],
       "title" : "Funding Information"
     },
     {
-      "characterCount" : 73,
       "paragraphCount" : 1,
+      "scalarCount" : 73,
       "subsections" : [
 
       ],
       "title" : ""
     },
     {
-      "characterCount" : 311,
       "paragraphCount" : 3,
+      "scalarCount" : 311,
       "subsections" : [
 
       ],
       "title" : "Author contributions"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
 
       ],
       "title" : "Additional files"
     },
     {
-      "characterCount" : 263,
       "paragraphCount" : 3,
+      "scalarCount" : 263,
       "subsections" : [
 
       ],
@@ -157,7 +157,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig1.jpg",
       "label" : "Figure 1."
     },
     {
@@ -165,7 +165,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig2-figsupp1.jpg",
       "label" : "Figure 2—figure supplement 1."
     },
     {
@@ -173,7 +173,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig2-figsupp2.jpg",
       "label" : "Figure 2—figure supplement 2."
     },
     {
@@ -181,7 +181,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig2-figsupp3.jpg",
       "label" : "Figure 2—figure supplement 3."
     },
     {
@@ -189,7 +189,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig3.jpg",
       "label" : "Figure 3."
     },
     {
@@ -197,7 +197,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig4-figsupp1.jpg",
       "label" : "Figure 4—figure supplement 1."
     },
     {
@@ -205,7 +205,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig4-figsupp2.jpg",
       "label" : "Figure 4—figure supplement 2."
     },
     {
@@ -213,7 +213,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig5-figsupp1.jpg",
       "label" : "Figure 5—figure supplement 1."
     },
     {
@@ -221,7 +221,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "elife-70016-fig6.jpg",
       "label" : "Figure 6."
     }
   ],
@@ -232,6 +232,58 @@
   "pmid" : "34970963",
   "references" : {
     "count" : 50,
+    "identities" : [
+      "|2012|10.1038/ncomms2026",
+      "|2003|10.1074/jbc.M210199200",
+      "|2003|10.1073/pnas.2234364100",
+      "|1988|10.1016/S0021-9258(18)68684-3",
+      "|1989|10.1016/S0021-9258(18)94065-2",
+      "|2007|10.4324/9780203833575",
+      "|2006|10.1016/j.bbabio.2005.12.001",
+      "|1991|10.1016/0003-9861(91)90265-k",
+      "|2004|10.1529/biophysj.103.036962",
+      "|1994|10.1111/j.1432-1033.1994.00167.x",
+      "|2000|10.1074/jbc.275.39.30157",
+      "|2005|10.1016/j.cell.2005.10.001",
+      "|2021|10.1038/s41586-020-3004-3",
+      "|2018|10.1126/science.aat4318",
+      "|1994|10.1016/S0021-9258(18)31637-5",
+      "|1995|10.1074/jbc.270.49.29407",
+      "|2011|10.1007/978-1-61779-261-8_18",
+      "|1990|10.1016/0005-2728(90)90030-8",
+      "|2019|10.1073/pnas.1818589116",
+      "|2010|10.1038/emboj.2010.259",
+      "|2019|10.1146/annurev-biochem-013118-110903",
+      "|1987|10.1016/0005-2728(87)90118-6",
+      "|1988|10.1016/0005-2728(88)90031-x",
+      "|2014|10.1073/pnas.1317784111",
+      "|2015|10.1074/jbc.M115.646430",
+      "|2018|10.1073/pnas.1803147115",
+      "|2019|10.1126/science.aaw9128",
+      "|2000|10.1098/rstb.2000.0593",
+      "|2020|10.1038/s41594-020-0503-8",
+      "|2010|10.1038/nchembio.457",
+      "|2008|10.1073/pnas.0708746105",
+      "|2017|10.1074/jbc.M117.784959",
+      "|2020|10.1126/sciadv.abb9605",
+      "|2008|10.1073/pnas.0807683105",
+      "|2016|10.1074/jbc.M116.745240",
+      "|2019|10.3390/molecules24030504",
+      "|2016|10.7554/eLife.21598",
+      "|2020|10.1038/s41467-020-16387-2",
+      "|2006|10.1021/bi052363n",
+      "|2009|10.1021/bi9008215",
+      "|2012|10.1093/aob/mcs281",
+      "|2020|10.1073/pnas.2013998117",
+      "|2018|10.1126/science.aas9699",
+      "|2008|10.1073/pnas.0708356105",
+      "|1988|10.1016/S0021-9258(18)68683-1",
+      "|1999|10.1146/annurev.biophys.28.1.319",
+      "|2006|10.1016/j.bbabio.2006.06.017",
+      "|2017|10.1074/jbc.M117.799940",
+      "|2001|10.1038/35073513",
+      "|2015|10.7554/eLife.10180"
+    ],
     "withAuthors" : 50,
     "withDOI" : 50,
     "withPMID" : 48,

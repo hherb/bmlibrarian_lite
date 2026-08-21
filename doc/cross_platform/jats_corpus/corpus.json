@@ -15,7 +15,7 @@
       "year": "2026",
       "licence": "CC-BY-NC-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by-nc/4.0/",
-      "inCorpusBecause": "Its publisher-id is a DOI wearing an underscore (10.1177_20552076251406653), which is the shape that provoked the empty-typed-article-id and pattern-recovery defects; it also carries pmcid-ver, two supplementary-material captions, two media captions, eight table-wraps and three figures."
+      "inCorpusBecause": "Its publisher-id is a DOI wearing an underscore (10.1177_20552076251406653), which is the shape that provoked the empty-typed-article-id and pattern-recovery defects; it also carries pmcid-ver and the corpus's heaviest table load at eight table-wrap captions, alongside three figure and two supplementary-material captions."
     },
     {
       "pmcId": "PMC12785261",
@@ -29,7 +29,7 @@
       "year": "2025",
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
-      "inCorpusBecause": "A third publisher-id shape, the journal slug healthcare-14-00097, so the identifier tests are not all measuring one publisher's habits."
+      "inCorpusBecause": "A publisher-id that is a bare journal slug, healthcare-14-00097, unlike the DOI-with-underscore and the bare numeric forms elsewhere in the corpus. Also the deepest numbered section hierarchy, which is what the recursive section digest is measured against."
     },
     {
       "pmcId": "PMC12661592",
@@ -43,7 +43,7 @@
       "year": "2025",
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
-      "inCorpusBecause": "The degenerate end of the range: 30 KB, one table, no figures, no supplementary material and no sub-articles. A corpus of only rich articles cannot tell an empty collection from a dropped one."
+      "inCorpusBecause": "The degenerate end of the range: 29 KB, one table, no figures, no supplementary material, no sub-articles, and a body with no <sec> at all. A corpus of only rich articles cannot tell an empty collection from a dropped one. Its single table also carries the labelled <table-wrap-foot><fn> that #157 is about."
     },
     {
       "pmcId": "PMC8754430",
@@ -57,7 +57,7 @@
       "year": "2021",
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
-      "inCorpusBecause": "Peer-review sub-articles (editor-report, decision-letter, reply) whose prose must stay out of the article body, and the only boxed-text caption in the corpus. Boxed-text is the rarest caption host in the wild, 27 of the 2726 captions surveyed, and is one of the hosts the caption-host defect mis-routed."
+      "inCorpusBecause": "Peer-review sub-articles (editor-report, decision-letter, reply) whose prose must stay out of the article body, and figure supplements nested inside their parent <fig> — the shape #156 is about, where the parent figure is dropped. Twelve figure captions, the most in the corpus."
     },
     {
       "pmcId": "PMC12755737",
@@ -71,7 +71,35 @@
       "year": "2025",
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
-      "inCorpusBecause": "Carries no publisher-id element at all, so identifier handling is exercised against absence and not only against three present spellings. Also the heaviest supplementary-material caption load in the corpus at twelve, the second commonest caption host in the wild."
+      "inCorpusBecause": "Carries no publisher-id element at all, so identifier handling is exercised against absence and not only against three present spellings. Twelve supplementary-material captions, the heaviest load in the corpus of the second commonest caption host in the wild, and all 72 references are <mixed-citation> — the shape #155 is about."
+    },
+    {
+      "pmcId": "PMC13294358",
+      "file": "PMC13294358.xml",
+      "digest": "PMC13294358.digest.json",
+      "sha256": "ba49173bcbd5ad0248664e86ad8ed74a439d13458daad1fc2d4ac0a2ad7cb864",
+      "journal": "Scientific Reports",
+      "publisher": "Nature Publishing Group",
+      "doi": "10.1038/s41598-026-59457-z",
+      "pmid": "42342844",
+      "year": "2026",
+      "licence": "CC-BY-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+      "inCorpusBecause": "The only <media> captions in the corpus, six of them. Media is the fourth commonest caption host in the wild and one of the hosts the caption-host defect mis-routed, and it was absent from the corpus until this article was added."
+    },
+    {
+      "pmcId": "PMC13295835",
+      "file": "PMC13295835.xml",
+      "digest": "PMC13295835.digest.json",
+      "sha256": "a870e4d9527498402f8097396ff62d581fa12bae7a998309dda5d4b7f971384f",
+      "journal": "BMJ Open",
+      "publisher": "BMJ Publishing Group",
+      "doi": "10.1136/bmjopen-2025-105321",
+      "pmid": "42336790",
+      "year": "2026",
+      "licence": "CC-BY-4.0",
+      "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+      "inCorpusBecause": "The only <boxed-text> caption in the corpus, the rarest caption host in the wild at 27 of 2726. It is BMJ Open's STRENGTHS AND LIMITATIONS OF THIS STUDY block, which that journal puts on essentially every article, and its caption title is exactly what the caption-host defect used to rename the enclosing section to. Also carries a <media> nested inside a <fig>."
     }
   ]
 }

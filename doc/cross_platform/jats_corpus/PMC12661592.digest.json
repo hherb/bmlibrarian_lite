@@ -1,7 +1,7 @@
 {
   "abstractSections" : [
     {
-      "characterCount" : 697,
+      "content" : "This viewpoint explores the role of conversational artificial intelligence (AI) in educating the public on breast self-examination, using an interaction with DeepSeek AI as an example, where 6 AI-generated responses to commonly asked questions were compared with guidelines published by organizations such as the World Health Organization. Although the AI provided clear, accessible, and evidence-aligned responses consistent with professional guidance, limitations included oversimplification and absence of multimedia resources. These findings suggest that AI can support public health education but should be complemented by physician oversight and evidence-based resources for responsible use.",
       "title" : "Abstract"
     }
   ],
@@ -13,16 +13,16 @@
   ],
   "bodySections" : [
     {
-      "characterCount" : 4422,
       "paragraphCount" : 10,
+      "scalarCount" : 4422,
       "subsections" : [
 
       ],
       "title" : ""
     },
     {
-      "characterCount" : 450,
       "paragraphCount" : 5,
+      "scalarCount" : 450,
       "subsections" : [
 
       ],
@@ -40,6 +40,18 @@
   "pmid" : "41313195",
   "references" : {
     "count" : 10,
+    "identities" : [
+      "1.|2025|",
+      "2.||",
+      "3.|2023|",
+      "4.|2003|10.1002/14651858.CD003373",
+      "5.|2019|10.3389/fnbeh.2019.00086",
+      "6.||",
+      "7.|2021|10.18502/ijph.v50i11.7600",
+      "8.|2024|10.4337/9781802205657.ch07",
+      "9.|2024|10.1093/jamia/ocae060",
+      "10.|2025|10.2196/63058"
+    ],
     "withAuthors" : 8,
     "withDOI" : 6,
     "withPMID" : 7,

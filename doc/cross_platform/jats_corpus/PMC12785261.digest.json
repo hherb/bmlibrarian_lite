@@ -1,7 +1,7 @@
 {
   "abstractSections" : [
     {
-      "characterCount" : 1939,
+      "content" : "Artificial intelligence (AI) is rapidly transforming anesthesiology practice across perioperative settings. This review explores the evolution and implementation of hybrid decision-making models that integrate AI capabilities with human clinical expertise. From historical foundations to current applications, we examine how machine learning algorithms, deep learning networks, and big data analytics are enhancing anesthetic care. Key applications include perioperative risk prediction, AI-assisted patient education, automated analysis of clinical records, airway management support, predictive hemodynamic monitoring, closed-loop anesthetic delivery systems, and pain management optimization. In procedural contexts, AI demonstrates promising utility in regional anesthesia through anatomical structure identification and needle navigation, monitoring anesthetic depth via EEG analysis, and improving quality control in endoscopic sedation. Educational applications include intelligent simulators for procedural training and academic productivity tools. Despite significant advances, implementation challenges persist, including algorithmic bias, data security concerns, clinical validation requirements, and ethical considerations regarding AI-generated content. The optimal integration model emphasizes a complementary approach where AI augments rather than replaces clinical judgment—combining computational efficiency with the irreplaceable contextual understanding and ethical reasoning of the anesthesiologist. This hybrid paradigm reinforces the anesthesiologist’s leadership role in perioperative care while enhancing safety, precision, and efficiency through technological innovation. As AI integration advances, continued emphasis on algorithmic transparency, rigorous clinical validation, and human oversight remains essential to ensure that these technologies enhance rather than compromise patient-centered anesthetic care.",
       "title" : ""
     }
   ],
@@ -37,76 +37,76 @@
   ],
   "bodySections" : [
     {
-      "characterCount" : 3984,
       "paragraphCount" : 2,
+      "scalarCount" : 3984,
       "subsections" : [
 
       ],
       "title" : "1. Introduction"
     },
     {
-      "characterCount" : 1538,
       "paragraphCount" : 1,
+      "scalarCount" : 1538,
       "subsections" : [
 
       ],
       "title" : "2. Materials and Methods"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 1082,
           "paragraphCount" : 1,
+          "scalarCount" : 1082,
           "subsections" : [
 
           ],
           "title" : "3.1. Perioperative Risk Prediction: ASA Classification and Postoperative Complications"
         },
         {
-          "characterCount" : 1499,
           "paragraphCount" : 1,
+          "scalarCount" : 1499,
           "subsections" : [
 
           ],
           "title" : "3.2. AI-Assisted Patient Education in Anesthesiology"
         },
         {
-          "characterCount" : 882,
           "paragraphCount" : 1,
+          "scalarCount" : 882,
           "subsections" : [
 
           ],
           "title" : "3.3. Automated Analysis of Clinical Records and Medical Imaging"
         },
         {
-          "characterCount" : 1772,
           "paragraphCount" : 1,
+          "scalarCount" : 1772,
           "subsections" : [
 
           ],
           "title" : "3.4. Artificial Intelligence in Airway Management"
         },
         {
-          "characterCount" : 1742,
           "paragraphCount" : 1,
+          "scalarCount" : 1742,
           "subsections" : [
 
           ],
           "title" : "3.5. Predictive Models of Hemodynamic Instability"
         },
         {
-          "characterCount" : 694,
           "paragraphCount" : 1,
+          "scalarCount" : 694,
           "subsections" : [
 
           ],
           "title" : "3.6. Closed-Loop Systems for Drug Administration (TIVA/TCI)"
         },
         {
-          "characterCount" : 738,
           "paragraphCount" : 1,
+          "scalarCount" : 738,
           "subsections" : [
 
           ],
@@ -116,20 +116,20 @@
       "title" : "3. Clinical Applications of Artificial Intelligence in Anesthesiology"
     },
     {
-      "characterCount" : 1316,
       "paragraphCount" : 1,
+      "scalarCount" : 1316,
       "subsections" : [
         {
-          "characterCount" : 1414,
           "paragraphCount" : 1,
+          "scalarCount" : 1414,
           "subsections" : [
 
           ],
           "title" : "4.1. Prediction of Chronic Postoperative Pain"
         },
         {
-          "characterCount" : 1439,
           "paragraphCount" : 1,
+          "scalarCount" : 1439,
           "subsections" : [
 
           ],
@@ -139,20 +139,20 @@
       "title" : "4. Pain Management and Analgesia"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 2160,
           "paragraphCount" : 1,
+          "scalarCount" : 2160,
           "subsections" : [
 
           ],
           "title" : "5.1. Computer Vision Assistance for Anatomical Structure Identification"
         },
         {
-          "characterCount" : 1634,
           "paragraphCount" : 1,
+          "scalarCount" : 1634,
           "subsections" : [
 
           ],
@@ -162,28 +162,28 @@
       "title" : "5. Regional Anesthesia and Ultrasonography"
     },
     {
-      "characterCount" : 1920,
       "paragraphCount" : 1,
+      "scalarCount" : 1920,
       "subsections" : [
 
       ],
       "title" : "6. AI in Monitoring the Depth of Anesthesia"
     },
     {
-      "characterCount" : 1833,
       "paragraphCount" : 1,
+      "scalarCount" : 1833,
       "subsections" : [
 
       ],
       "title" : "7. AI in Sedation for Endoscopy Procedures"
     },
     {
-      "characterCount" : 608,
       "paragraphCount" : 1,
+      "scalarCount" : 608,
       "subsections" : [
         {
-          "characterCount" : 3430,
           "paragraphCount" : 1,
+          "scalarCount" : 3430,
           "subsections" : [
 
           ],
@@ -193,32 +193,32 @@
       "title" : "8. Artificial Intelligence in Anesthesiology Research and Education"
     },
     {
-      "characterCount" : 4305,
       "paragraphCount" : 1,
+      "scalarCount" : 4305,
       "subsections" : [
 
       ],
       "title" : "9. AI in Scientific Writing and Academic Productivity"
     },
     {
-      "characterCount" : 4858,
       "paragraphCount" : 6,
+      "scalarCount" : 4858,
       "subsections" : [
 
       ],
       "title" : "10. Challenges, Limitations, and Ethical Considerations"
     },
     {
-      "characterCount" : 1772,
       "paragraphCount" : 1,
+      "scalarCount" : 1772,
       "subsections" : [
 
       ],
       "title" : "11. Conclusions"
     },
     {
-      "characterCount" : 872,
       "paragraphCount" : 6,
+      "scalarCount" : 872,
       "subsections" : [
 
       ],
@@ -232,7 +232,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "healthcare-14-00097-g001.jpg",
       "label" : "Figure 1"
     },
     {
@@ -240,7 +240,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "healthcare-14-00097-g002.jpg",
       "label" : "Figure 2"
     }
   ],
@@ -251,6 +251,43 @@
   "pmid" : "41517028",
   "references" : {
     "count" : 35,
+    "identities" : [
+      "1.|2024|10.3390/life14050557",
+      "2.|2022|10.21037/atm-21-7031",
+      "3.|2025|10.1016/j.giec.2024.09.003",
+      "4.|2024|10.1016/j.clindermatol.2023.12.016",
+      "5.|2021|10.7861/fhj.2021-0095",
+      "6.|2022|10.11604/pamj.2022.43.3.33384",
+      "7.|2023|10.7759/cureus.45038",
+      "8.|2025|10.1186/s12911-025-02930-y",
+      "9.|2025|10.1186/s12871-024-02882-2",
+      "10.|2024|10.1016/j.jopan.2023.12.005",
+      "11.|2024|10.1186/s12871-024-02699-z",
+      "12.|2025|10.1016/j.ijoa.2024.104288",
+      "13.|2024|10.1016/j.tacc.2024.101512",
+      "14.|2021|10.1186/s40560-021-00551-x",
+      "15.|2024|10.4103/ija.ija_1274_23",
+      "16.|2022|10.1186/s12871-022-01937-6",
+      "17.|2020|10.1001/jama.2020.0592",
+      "18.|2025|10.1186/s12911-025-02986-w",
+      "19.|2025|10.1186/s12871-025-02987-2",
+      "20.|2021|10.1186/s12871-021-01466-8",
+      "21.|2025|10.1016/j.ijoa.2024.104293",
+      "22.|2019|10.3390/s19112499",
+      "23.|2015|10.1155/2015/343478",
+      "24.|2022|10.1186/s12871-022-01796-1",
+      "25.|2025|10.2196/68272",
+      "26.|2020|10.2196/17425",
+      "27.|2024|10.1093/nar/gkae235",
+      "28.|2024|10.2196/54345",
+      "29.|2025|10.1590/0103-644020256471",
+      "30.|2024|10.1213/ANE.0000000000006892",
+      "31.|2023|10.2147/NSS.S455765",
+      "32.|2024|10.1590/1516-3180.2024.1425.26062024",
+      "33.|2024|10.1016/j.cmpbup.2024.100145",
+      "34.|2023|10.12659/MSM.938835",
+      "35.|2024|10.3389/fdgth.2024.1316931"
+    ],
     "withAuthors" : 35,
     "withDOI" : 35,
     "withPMID" : 33,

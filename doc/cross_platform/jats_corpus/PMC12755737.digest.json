@@ -1,7 +1,7 @@
 {
   "abstractSections" : [
     {
-      "characterCount" : 2259,
+      "content" : "Orphan genes lack recognizable homologues outside a given taxonomic unit; thus, they have uncertain evolutionary origins. This presents a profound challenge to traditional models of gene evolution. Their presence has fueled ongoing debate, and they have long been implicated in driving lineage-specific traits in medicine and evolutionary biology. These genes are often linked to species-specific traits and pathogenic mechanisms, including virulence and environmental adaptation, and their study provides critical insights into the origins and evolution of novel genes. Intrigued by their enigmatic nature, we re-analyzed a comprehensive 2023 dataset of orphan genes compiled from over 80,000 bacterial species. Using homology-based analyses, we reassessed the taxonomic distribution of each gene across a broader genomic landscape. Many “orphan genes” identified in 2023 now align with homologs in other bacterial taxa (as of 2025), demonstrating that limited database sampling had previously inflated the number of genes. This reassessment revealed an approximately 81% decrease in the number of orphan genes within just two years. These results challenged the long-held view that bacterial species truly harbor large numbers of orphan genes, instead demonstrating that their prevalence has been overestimated. To better reflect these findings, we propose that orphan genes be annotated using descriptors such as ‘candidate’ or ‘putative’, which more accurately convey the provisional and potentially temporary nature of their apparent uniqueness. Although our analysis greatly reduced false-positive classifications, it cannot determine whether a given candidate truly encodes a functional gene or is an artifact of bioinformatic analysis. To prioritize the most promising targets for biochemical or genetic validation, we applied additional computational filters and identified a subset of candidates most likely to encode bona fide proteins. This study redefines current understanding of orphan gene prevalence, establishes that such genes should be annotated with descriptors such as candidate or putative, much like we label “candidate bacterial species,” and provides a refined, high-confidence dataset for future in vitro and in vivo investigations.",
       "title" : "Abstract"
     }
   ],
@@ -25,60 +25,60 @@
   ],
   "bodySections" : [
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
 
       ],
       "title" : ""
     },
     {
-      "characterCount" : 2955,
       "paragraphCount" : 8,
+      "scalarCount" : 2955,
       "subsections" : [
 
       ],
       "title" : "Introduction"
     },
     {
-      "characterCount" : 1889,
       "paragraphCount" : 2,
+      "scalarCount" : 1889,
       "subsections" : [
         {
-          "characterCount" : 656,
           "paragraphCount" : 1,
+          "scalarCount" : 656,
           "subsections" : [
 
           ],
           "title" : "Step 1"
         },
         {
-          "characterCount" : 2208,
           "paragraphCount" : 1,
+          "scalarCount" : 2208,
           "subsections" : [
 
           ],
           "title" : "Step 2"
         },
         {
-          "characterCount" : 2605,
           "paragraphCount" : 5,
+          "scalarCount" : 2605,
           "subsections" : [
 
           ],
           "title" : "Step 3"
         },
         {
-          "characterCount" : 1060,
           "paragraphCount" : 1,
+          "scalarCount" : 1060,
           "subsections" : [
 
           ],
           "title" : "Step 4"
         },
         {
-          "characterCount" : 28696,
           "paragraphCount" : 36,
+          "scalarCount" : 28696,
           "subsections" : [
 
           ],
@@ -88,52 +88,52 @@
       "title" : "Results and discussion"
     },
     {
-      "characterCount" : 753,
       "paragraphCount" : 1,
+      "scalarCount" : 753,
       "subsections" : [
 
       ],
       "title" : "Conclusion"
     },
     {
-      "characterCount" : 11615,
       "paragraphCount" : 11,
+      "scalarCount" : 11615,
       "subsections" : [
 
       ],
       "title" : "Methods"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
 
       ],
       "title" : "Supporting information"
     },
     {
-      "characterCount" : 76,
       "paragraphCount" : 1,
+      "scalarCount" : 76,
       "subsections" : [
 
       ],
       "title" : "Data Availability"
     },
     {
-      "characterCount" : 199,
       "paragraphCount" : 1,
+      "scalarCount" : 199,
       "subsections" : [
 
       ],
       "title" : "Funding Statement"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 0,
           "paragraphCount" : 0,
+          "scalarCount" : 0,
           "subsections" : [
 
           ],
@@ -143,20 +143,20 @@
       "title" : "References"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 0,
           "paragraphCount" : 0,
+          "scalarCount" : 0,
           "subsections" : [
 
           ],
           "title" : "Supplementary Materials"
         },
         {
-          "characterCount" : 76,
           "paragraphCount" : 1,
+          "scalarCount" : 76,
           "subsections" : [
 
           ],
@@ -173,7 +173,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "pone.0338891.g001.gif",
       "label" : "Fig 1"
     },
     {
@@ -181,7 +181,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "pone.0338891.g002.gif",
       "label" : "Fig 2"
     },
     {
@@ -189,7 +189,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "pone.0338891.g003.gif",
       "label" : "Fig 3"
     },
     {
@@ -197,7 +197,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "pone.0338891.g004.gif",
       "label" : "Fig 4"
     }
   ],
@@ -208,6 +208,80 @@
   "pmid" : "41474770",
   "references" : {
     "count" : 72,
+    "identities" : [
+      "1.||",
+      "2.||",
+      "3.||",
+      "4.||",
+      "5.||",
+      "6.||",
+      "7.||",
+      "8.||",
+      "9.||",
+      "10.||",
+      "11.||",
+      "12.||",
+      "13.||",
+      "14.||",
+      "15.||",
+      "16.||",
+      "17.||",
+      "18.||",
+      "19.||",
+      "20.||",
+      "21.||",
+      "22.||",
+      "23.||",
+      "24.||",
+      "25.||",
+      "26.||",
+      "27.||",
+      "28.||",
+      "29.||",
+      "30.||",
+      "31.||",
+      "32.||",
+      "33.||",
+      "34.||",
+      "35.||",
+      "36.||",
+      "37.||",
+      "38.||",
+      "39.||",
+      "40.||",
+      "41.||",
+      "42.||",
+      "43.||",
+      "44.||",
+      "45.||",
+      "46.||",
+      "47.||",
+      "48.||",
+      "49.||",
+      "50.||",
+      "51.||",
+      "52.||",
+      "53.||",
+      "54.||",
+      "55.||",
+      "56.||",
+      "57.||",
+      "58.||",
+      "59.||",
+      "60.||",
+      "61.||",
+      "62.||",
+      "63.||",
+      "64.||",
+      "65.||",
+      "66.||",
+      "67.||",
+      "68.||",
+      "69.||",
+      "70.||",
+      "71.||",
+      "72.||"
+    ],
     "withAuthors" : 0,
     "withDOI" : 0,
     "withPMID" : 0,

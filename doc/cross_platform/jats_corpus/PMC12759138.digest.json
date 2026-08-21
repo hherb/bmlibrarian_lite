@@ -1,23 +1,23 @@
 {
   "abstractSections" : [
     {
-      "characterCount" : 414,
+      "content" : "Artificial intelligence (AI) is emerging as a transformative force in digital health, offering novel solutions to overcome traditional barriers in patient education, such as the low readability of materials and the high cost of personalization. The rapid integration of Large Language Models (LLMs) necessitates a clear understanding of the current research landscape to guide effective and ethical implementation.",
       "title" : "Background"
     },
     {
-      "characterCount" : 290,
+      "content" : "This study aims to systematically map the global research landscape of AI in patient education. This bibliometric analysis identifies the knowledge structure, research hotspots, key contributors, and evolutionary trends to guide future research and practice in this rapidly emerging domain.",
       "title" : "Objective"
     },
     {
-      "characterCount" : 293,
+      "content" : "We retrieved 837 relevant documents published between 2016 and 2025 from the Web of Science Core Collection. Bibliometric data were analyzed using CiteSpace and RStudio to conduct visual analyses of publication trends, international collaborations, co-citation networks, and keyword evolution.",
       "title" : "Methods"
     },
     {
-      "characterCount" : 511,
+      "content" : "The analysis revealed an exponential increase in publications since 2021, a trend that strongly coincides with the advent of LLMs. The USA and China are the primary research contributors, with Harvard University leading institutional output. Research hotspots have evolved from foundational concepts like machine learning to application-focused themes such as health literacy, readability, and adherence. The intellectual base is highly interdisciplinary, drawing from medicine, computer science, and education.",
       "title" : "Results"
     },
     {
-      "characterCount" : 447,
+      "content" : "AI is rapidly transforming patient education, with a clear trajectory from technology-focused validation to patient-centered outcomes. While LLMs show immense potential, significant challenges persist regarding accuracy, ethical implementation, and systematic integration into clinical workflows. Future efforts must prioritize developing robust validation frameworks and strengthening international collaboration to enhance digital health equity.",
       "title" : "Conclusion"
     }
   ],
@@ -37,44 +37,44 @@
   ],
   "bodySections" : [
     {
-      "characterCount" : 3361,
       "paragraphCount" : 3,
+      "scalarCount" : 3361,
       "subsections" : [
 
       ],
       "title" : "Introduction"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 1235,
           "paragraphCount" : 1,
+          "scalarCount" : 1235,
           "subsections" : [
 
           ],
           "title" : "Search strategy"
         },
         {
-          "characterCount" : 1223,
           "paragraphCount" : 2,
+          "scalarCount" : 1223,
           "subsections" : [
 
           ],
           "title" : "Inclusion and exclusion criteria"
         },
         {
-          "characterCount" : 599,
           "paragraphCount" : 1,
+          "scalarCount" : 599,
           "subsections" : [
 
           ],
           "title" : "Data extraction and cleaning"
         },
         {
-          "characterCount" : 4035,
           "paragraphCount" : 4,
+          "scalarCount" : 4035,
           "subsections" : [
 
           ],
@@ -84,60 +84,60 @@
       "title" : "Materials and methods"
     },
     {
-      "characterCount" : 0,
       "paragraphCount" : 0,
+      "scalarCount" : 0,
       "subsections" : [
         {
-          "characterCount" : 1331,
           "paragraphCount" : 1,
+          "scalarCount" : 1331,
           "subsections" : [
 
           ],
           "title" : "Annual publication trends"
         },
         {
-          "characterCount" : 809,
           "paragraphCount" : 1,
+          "scalarCount" : 809,
           "subsections" : [
 
           ],
           "title" : "Core authors and academic networks"
         },
         {
-          "characterCount" : 1888,
           "paragraphCount" : 2,
+          "scalarCount" : 1888,
           "subsections" : [
 
           ],
           "title" : "Country and institutional distribution"
         },
         {
-          "characterCount" : 1278,
           "paragraphCount" : 1,
+          "scalarCount" : 1278,
           "subsections" : [
 
           ],
           "title" : "Journal and citation analysis"
         },
         {
-          "characterCount" : 1718,
           "paragraphCount" : 1,
+          "scalarCount" : 1718,
           "subsections" : [
 
           ],
           "title" : "Reference and knowledge base evolution"
         },
         {
-          "characterCount" : 1582,
           "paragraphCount" : 1,
+          "scalarCount" : 1582,
           "subsections" : [
 
           ],
           "title" : "Keyword and research hotspot evolution"
         },
         {
-          "characterCount" : 1643,
           "paragraphCount" : 1,
+          "scalarCount" : 1643,
           "subsections" : [
 
           ],
@@ -147,68 +147,68 @@
       "title" : "Results"
     },
     {
-      "characterCount" : 402,
       "paragraphCount" : 1,
+      "scalarCount" : 402,
       "subsections" : [
         {
-          "characterCount" : 3921,
           "paragraphCount" : 2,
+          "scalarCount" : 3921,
           "subsections" : [
 
           ],
           "title" : "General trends and thematic evolution"
         },
         {
-          "characterCount" : 1575,
           "paragraphCount" : 1,
+          "scalarCount" : 1575,
           "subsections" : [
 
           ],
           "title" : "Global research landscape and collaboration networks"
         },
         {
-          "characterCount" : 2682,
           "paragraphCount" : 1,
+          "scalarCount" : 2682,
           "subsections" : [
 
           ],
           "title" : "Core authors and academic networks"
         },
         {
-          "characterCount" : 1715,
           "paragraphCount" : 1,
+          "scalarCount" : 1715,
           "subsections" : [
 
           ],
           "title" : "Knowledge base and interdisciplinary flow"
         },
         {
-          "characterCount" : 3448,
           "paragraphCount" : 3,
+          "scalarCount" : 3448,
           "subsections" : [
 
           ],
           "title" : "Research hotspots and frontier trends"
         },
         {
-          "characterCount" : 1718,
           "paragraphCount" : 3,
+          "scalarCount" : 1718,
           "subsections" : [
 
           ],
           "title" : "Contextualizing the field: distinctions from related domains"
         },
         {
-          "characterCount" : 2777,
           "paragraphCount" : 5,
+          "scalarCount" : 2777,
           "subsections" : [
 
           ],
           "title" : "Connecting trends to theoretical frameworks"
         },
         {
-          "characterCount" : 2645,
           "paragraphCount" : 2,
+          "scalarCount" : 2645,
           "subsections" : [
 
           ],
@@ -218,24 +218,24 @@
       "title" : "Discussion"
     },
     {
-      "characterCount" : 2239,
       "paragraphCount" : 2,
+      "scalarCount" : 2239,
       "subsections" : [
 
       ],
       "title" : "Conclusion"
     },
     {
-      "characterCount" : 474,
       "paragraphCount" : 2,
+      "scalarCount" : 474,
       "subsections" : [
 
       ],
       "title" : "Supplemental Material"
     },
     {
-      "characterCount" : 1942,
       "paragraphCount" : 23,
+      "scalarCount" : 1942,
       "subsections" : [
 
       ],
@@ -249,7 +249,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "10.1177_20552076251406653-fig1.jpg",
       "label" : "Figure 1."
     },
     {
@@ -257,7 +257,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "10.1177_20552076251406653-fig2.jpg",
       "label" : "Figure 2."
     },
     {
@@ -265,7 +265,7 @@
       "footnotes" : [
 
       ],
-      "hasGraphic" : true,
+      "graphicURL" : "10.1177_20552076251406653-fig3.jpg",
       "label" : "Figure 3."
     }
   ],
@@ -276,6 +276,63 @@
   "pmid" : "41488273",
   "references" : {
     "count" : 55,
+    "identities" : [
+      "1|2023|10.1161/CIR.0000000000001162",
+      "2|2025|10.1111/imj.16607",
+      "3|2023|10.2196/43333",
+      "4|2024|10.2196/53787",
+      "5|2023|10.3390/healthcare11060887",
+      "6|2024|10.1038/s41598-024-52853-3",
+      "7|2024|10.3389/fmed.2024.1477898",
+      "8|2022|10.1038/s41591-021-01614-0",
+      "9|2023|10.3350/cmh.2023.0089",
+      "10|2023|10.2196/47479",
+      "11|2023|10.1186/s12967-023-04123-5",
+      "12|2025|10.1177/02601060241244563",
+      "13|2023|10.1177/20552076231173304",
+      "14|2022|10.1093/geront/gnab167",
+      "15|2025|10.3389/frai.2025.1525937",
+      "16|2025|10.3389/fpubh.2025.1484790",
+      "17|2024|10.1159/000543350",
+      "18|2022|10.3389/fphar.2021.817364",
+      "19|2021|",
+      "20|2004|10.1073/pnas.0307513100",
+      "21|2023|10.3389/fimmu.2023.1182411",
+      "22|2005|",
+      "23|2022|10.1016/j.neubiorev.2022.104769",
+      "24|2016|",
+      "25|2023|10.1038/d41586-023-00288-7",
+      "26|2023|10.1111/aos.15661",
+      "27|2023|10.1016/S2589-7500(23)00021-3",
+      "28|2023|10.1016/S2589-7500(23)00019-5",
+      "29|2023|10.1038/s41591-023-02448-8",
+      "30|2023|10.1007/s11042-022-13428-4",
+      "31|2023|10.2196/46599",
+      "32|2023|10.1371/journal.pdig.0000198",
+      "33|2023|10.1001/jamainternmed.2023.1838",
+      "34|2025|10.1002/hsr2.70312",
+      "35|2025|10.1377/hlthaff.2024.01003",
+      "36||10.1080/1369118X.2025.2531165",
+      "37|2025|10.3390/healthcare13080892",
+      "38|2021|10.3390/ijerph181910329",
+      "39|2021|10.2196/30115",
+      "40|2021|10.2196/25110",
+      "41|2021|10.1016/j.jbi.2020.103658",
+      "42|2021|10.1111/1475-6773.13560",
+      "43|2019|10.1371/journal.pone.0212488",
+      "44|2025|10.1038/s41391-024-00826-y",
+      "45|2025|10.1371/journal.pone.0324175",
+      "46|2024|10.1097/MD.0000000000039305",
+      "47|2024|10.1097/MD.0000000000038352",
+      "48|2025|10.1038/s41746-025-01489-2",
+      "49|2024|10.3390/healthcare12232322",
+      "50|2024|10.3390/healthcare13010057",
+      "51|2025|10.12669/pjms.41.3.10639",
+      "52|2000|",
+      "53|2012|10.1186/1471-2458-12-80",
+      "54|1989|",
+      "55|2015|10.4018/978-1-4666-8156-9.ch016"
+    ],
     "withAuthors" : 55,
     "withDOI" : 50,
     "withPMID" : 48,

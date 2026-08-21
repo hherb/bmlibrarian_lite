@@ -8,59 +8,45 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
-- **Real PMC JATS corpus** (#146 landed 2026-08-21): five open-access Europe PMC
+- **Real PMC JATS corpus** (#146 landed 2026-08-21): seven open-access Europe PMC
   articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with
   a stored structural digest, parsed offline by `JATSRealCorpusTests` on every
   PR. Read that directory's `README.md` before touching it.
   - **The digest is a characterisation, not a specification.** It records what
-    the parser does today, four known-wrong behaviours included. A digest change
+    the parser does today, five known-wrong behaviours included. A digest change
     is a prompt to read the diff, never by itself proof of a regression *or* of a
-    fix. The README separates what was hand-verified against the source XML from
-    what is merely characterised.
-  - **Hand-checking the digests is the step that pays.** It found four real
-    defects on the first pass — #154, #155, #156, #157 — each then confirmed
-    against a 225-article survey. Generating a digest and committing it unread
-    would have found none of them, and would have frozen all four as expectations.
-  - **Never edit the bytes.** Trimming an article to save space turns a real
-    fixture into a synthetic one wearing a real article's name;
-    `testCorpusBytesAreUnmodified` pins each file's SHA-256.
-  - **Nested `<sub-article>` does not exist in the wild** — 0 of 225 articles,
-    while 69 carry sub-articles at depth 1. eLife's decision-letter and reply are
-    siblings. So the `subArticleDepth` counter→flag mutation passes the real
-    corpus exactly as it passed the 91 synthetic JATS tests; that line is held by
-    `JATSSubArticleTests.testASectionAfterANestedSubArticleClosesStaysOutOfTheBody`,
-    which is synthetic *because* the shape is absent from the wild. Real and
-    synthetic fixtures answer different questions; this corpus replaces neither
-    the synthetic suite nor the nightly integration run.
-  - Verified load-bearing: reverting the caption-host fix fails the corpus on 2 of
-    5 articles, naming the renamed section and the 12 injected caption paragraphs.
-- **Funder classifier parity** (#143 landed 2026-08-21): the canonical desktop
-  Python now carries the calibrated `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS`
-  ported from Swift, replacing the positional `INDUSTRY_KEYWORDS[:6]` slice, and
-  `tests/test_funder_classification.py` measures it against the shared corpus.
-  Both platforms now score **precision 0.909 / recall 0.333** with the *same* ten
-  true positives, one false positive and twenty misses, pinned by name on each
-  side. The Python it replaced scored 0.444 / 0.133 and flagged four public
-  research bodies (India's Department of Biotechnology in three spellings, the UK
-  BBSRC) as industry, which fed the HIGH-risk rule and downgraded every paper
-  they fund.
-  - **Never merge the funder lists into `INDUSTRY_KEYWORDS`.** That list is COI
-    *prose*; the corporate suffixes match far too freely in running text and the
-    disclosure phrases never occur in an org name. Pinned by
-    `test_coi_prose_phrases_stay_out_of_the_funder_lists`.
-  - **A stem and a whole word are different kinds of thing.** A stem must match
-    inside a longer word ("pharmaceutic" → "Pharmaceuticals"); a whole word must
-    not ("inc" reaches "Lincoln", "province"). Structure tests pin the anchoring,
-    the lowercasing and that no stem is a regex source — the two failure modes
-    that are otherwise *silent*, since a pattern matching nothing moves no metric.
-  - **Zero-metric entries are real entries.** `plc` scores 0 TP / 0 FP, so
-    dropping it moves neither figure nor the composition; only its own unit test
-    catches it. Mutation-verified, along with dropping a stem, unanchoring
-    `\binc\b` and uppercasing a stem.
-  - `TestFunderCorpusContract` in `tests/test_transparency_parity.py` now checks
-    `funder_names.json` itself (counts, label/source vocabularies, ambiguous
-    entries carrying a reason, name uniqueness) — it was the one fixture in the
-    parity directory that nothing read. All eight assertions mutation-verified.
+    fix. Two tests put a floor under it:
+    `testEveryArticleClearsTheSpecificationFloor` asserts what must hold for any
+    real article whatever the digest says, and
+    `testTheManifestAgreesWithTheParsedArticle` checks identifiers against values
+    hand-transcribed into `corpus.json` — the one guard that survives a blind
+    regeneration.
+  - **Hand-checking the digests is the step that pays.** It found five real
+    defects — #154, #155, #156, #157, #161 — each then confirmed against a
+    225-article survey. Generating a digest and committing it unread would have
+    found none of them and frozen all five as expectations. #161 was invisible
+    until review replaced a `hasGraphic` boolean with the resolved URL.
+  - **A regeneration run always fails**, naming what it rewrote, and refuses to
+    run in CI. It previously reported success while asserting nothing.
+  - **Never edit the bytes.** `testCorpusBytesAreUnmodified` pins each file's
+    SHA-256 and `.gitattributes` keeps them out of line-ending translation.
+    `testTheCorpusHasNotShrunk` pins the article count: every other test loops
+    over the manifest, so an emptied one asserted nothing and passed in 2 ms.
+  - **Count the caption's parent, not the element.** The first five articles were
+    chosen by counting `<media>`/`<boxed-text>` *elements*, so the corpus claimed
+    all five caption hosts while covering three. Two CC-BY articles were added in
+    review to make it true.
+  - **Nested `<sub-article>` does not occur in the wild** — 0 of 225 articles,
+    while 69 carry sub-articles at depth 1. So the `subArticleDepth` counter→flag
+    mutation passes the real corpus. That line is held by
+    `JATSNestingTests.testNestedSubArticleTailIsStillExcluded`, which claimed the
+    guard for months without providing it: its outer tail held only loose `<p>`,
+    dropped for an unrelated reason. It now carries a `<sec>` and is the sole
+    test that fails under the mutation.
+  - Verified load-bearing: reverting the caption-host fix fails the corpus on 3
+    of 7 articles; reversing body sections, reversing references, corrupting a
+    graphic URL and blanking abstract prose are each caught, and each passed
+    before review hardened the digest.
 - **Python CI** (#129 landed 2026-07-20, issue closed 2026-08-21):
   `.github/workflows/python-tests.yml`
   runs `pytest -m "not integration" --strict-markers` (557 tests, ~1 min) on every
@@ -249,17 +235,17 @@ its slice has landed; add a new section when handing off new work.
   what the tier means before it can be a constant. Swift's
   `governmentPatterns`/`academicPatterns` split is a *different* cut, so aligning
   to it is a behaviour change.
-- **#154, #155, #156, #157 — four JATS parser defects the corpus found**, all
-  confirmed against a 225-article survey, all still open. Fixing any of them
+- **#154, #155, #156, #157, #161 — five JATS parser defects the corpus found**,
+  all confirmed against a 225-article survey, all still open. Fixing any of them
   changes `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the
   evidence — read it rather than regenerating past it. Each likely replicates in
   Android's `util.jats.JATSXMLParser` and in bmlib, which share this parser's
   ancestry; check all three before calling a fix complete.
   - **#154 — author affiliations are never captured.** `currentAffiliations` is
-    written at `JATSXMLParser.swift:1152` and read nowhere, and
-    `<xref ref-type="aff">` is unhandled. 98.7% of real articles link
-    affiliations that way; only 4.4% inline `<aff>` inside `<contrib>`, which is
-    the shape every synthetic test uses. All 17 corpus authors report zero.
+    written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
+    98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
+    inside `<contrib>`, which is the shape every synthetic test uses. Every
+    corpus author reports zero.
   - **#155 — `<mixed-citation>` yields no structured reference metadata.** 80.9%
     of articles, **74.6% of all real references**. The citation string survives,
     so it degrades quietly.
@@ -268,30 +254,11 @@ its slice has landed; add a new section when handing off new work.
     `contrib-group` role stack already learned otherwise in #142.
   - **#157 — a `<table-wrap-foot><fn><label>` overwrites the table's label.**
     13.2% of real tables. `figureFootnoteDepth` already guards the `<p>` branch
-    four lines away; the `<label>` branch never got it.
-- **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
-  dropped**: they no longer corrupt the enclosing section (fixed in #142 review),
-  but there is no model to capture them into. 258 + 144 + 15 occurrences across
-  386 real articles.
-- **#145 — stale transparency results still feed report aggregates and the
-  exported PDF**: `analyzerVersion` staleness reaches the two detail sheets and
-  the re-analysis filter, but `TransparencySummarySection` and
-  `PrintableReportView` still average v1 and v2 scores into one figure unlabelled.
-- **#123 — Android parse errors are swallowed (golden rule 8)**: `parseArticleXml`
-  ends its catch with `printStackTrace()` — the only such call left in
-  `app/src/main` — so a truncated EFetch batch silently under-reports articles and
-  a genuine parser defect looks identical to malformed input. Blocked on a
-  JVM-portable logging seam: a plain `Log.e` would reintroduce the untestable
-  Android dependency #119 was about (no `testOptions` ⇒ `Log` throws "not mocked"
-  under JUnit). Overlaps #121.
-- **#121 — JATS parser untestable like PubMed was**: `util.jats.JATSXMLParser`
-  also uses Android `XmlPullParser`, so its only coverage is a network-gated
-  integration test (`Assume.assumeTrue(INTEGRATION_TESTS==1)`). Migrating it to
-  the JAXP SAX approach used for `PubMedService` would make it unit-testable
-  offline — see the two traps noted above.
-- **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
-  indicators, funding/trial (network), JATS statement extraction, Room
-  persistence + `DocumentCard` UI.
+    in the same switch; the `<label>` branch never got it.
+  - **#161 — a figure with several `<graphic>` resolves to the thumbnail.**
+    Last-write-wins, ignoring `content-type`, so **52.9% of real figures** point
+    at a `.gif` thumb instead of the image. A `hasGraphic` boolean hid it
+    completely; storing the URL exposed it on the first hand-check.
 - **#126 — redundant "Data not openly available" label** (cosmetic): emitted
   alongside a more specific label for the same clause ("Data cannot be shared",
   "Requires IRB approval"). Tiers are correct; presentation noise only.
@@ -334,7 +301,8 @@ its slice has landed; add a new section when handing off new work.
 - Changed the JATS parser? The corpus digests are expected to move. Regenerate
   with `UPDATE_JATS_DIGESTS=1 swift test --filter JATSRealCorpusTests` **and read
   every changed line** — regenerating unread converts a regression into a
-  committed expectation, which is the one failure the corpus cannot survive.
+  committed expectation, which is the one failure the corpus cannot survive. The
+  regeneration run fails on purpose; re-run without the variable to verify.
 - `cd ios/MedicalFactChecker && swift test` → 0 failures.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
