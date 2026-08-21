@@ -80,6 +80,12 @@ COMPACT_BADGE_FONT_SIZE = 8
 SMALL_BADGE_SIZE = 18
 SMALL_BADGE_FONT_SIZE = 9
 
+# Cap on risk indicators listed in the tooltip, with a "... and N more" line for
+# the remainder. Long-standing behaviour, named here rather than left inline.
+# Golden rule 13 forbids introducing new truncation, so the analysis caveats
+# below are listed in full.
+MAX_TOOLTIP_RISK_INDICATORS = 5
+
 
 class TransparencyBadge(QFrame):
     """
@@ -209,10 +215,21 @@ class TransparencyBadge(QFrame):
         if r.risk_indicators:
             lines.append("")
             lines.append("<b>Risk Indicators:</b>")
-            for indicator in r.risk_indicators[:5]:  # Limit to 5
+            for indicator in r.risk_indicators[:MAX_TOOLTIP_RISK_INDICATORS]:
                 lines.append(f"  • {indicator}")
-            if len(r.risk_indicators) > 5:
-                lines.append(f"  ... and {len(r.risk_indicators) - 5} more")
+            if len(r.risk_indicators) > MAX_TOOLTIP_RISK_INDICATORS:
+                extra = len(r.risk_indicators) - MAX_TOOLTIP_RISK_INDICATORS
+                lines.append(f"  ... and {extra} more")
+
+        # Analysis caveats. Rendered separately from the risk indicators above:
+        # these qualify how far the result can be trusted rather than describing
+        # the study, and an unrecognised funder is common enough that letting it
+        # pass silently would overstate the analysis.
+        if r.warnings:
+            lines.append("")
+            lines.append("<b>Analysis Caveats:</b>")
+            for warning in r.warnings:
+                lines.append(f"  • {warning}")
 
         # Tier adjustment
         if r.tier_downgrade_applied > 0:

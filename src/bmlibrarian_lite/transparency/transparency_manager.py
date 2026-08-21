@@ -256,6 +256,7 @@ class TransparencyManager(QObject):
             trial_results_compliant=results_compliant,
             outcome_switching_detected=report.outcome_switching_detected,
             risk_indicators=report.risk_of_bias_indicators,
+            warnings=report.warnings,
             tier_downgrade_applied=(
                 self.settings.tier_downgrade_amount
                 if risk_level == TransparencyRisk.HIGH

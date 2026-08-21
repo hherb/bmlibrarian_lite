@@ -39,12 +39,13 @@ from typing import Any
 import pytest
 
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
+    ACADEMIC_PATTERN_CONFIDENCE,
     FUNDER_NAME_STEMS,
     FUNDER_NAME_WORDS,
+    GOVERNMENT_PATTERN_CONFIDENCE,
     INDUSTRY_KEYWORDS,
     INDUSTRY_NAME_CONFIDENCE,
     KNOWN_FUNDER_CONFIDENCE,
-    NON_INDUSTRY_NAME_CONFIDENCE,
     UNKNOWN_FUNDER_CONFIDENCE,
     CrossRefClient,
     StudyTransparencyAnalyzer,
@@ -275,7 +276,12 @@ class TestPublicSectorPrecedence:
 
 
 class TestConfidences:
-    """The confidence each layer reports, mirroring Swift's four constants."""
+    """The confidence each layer reports, mirroring Swift's five constants.
+
+    Cross-platform equality is asserted from the shared contract in
+    ``tests/test_transparency_parity.py``; these pin the Python side's own
+    behaviour and the ordering the ladder depends on.
+    """
 
     def test_known_industry_funder_doi_wins(self) -> None:
         """A registry DOI is the highest-confidence signal and short-circuits."""
@@ -291,22 +297,58 @@ class TestConfidences:
             INDUSTRY_NAME_CONFIDENCE,
         )
 
-    def test_a_public_sector_name(self) -> None:
-        """The non-industry layer reports its own confidence."""
+    def test_a_government_name(self) -> None:
+        """The government half reports the highest of the name-layer confidences."""
         assert classify_funder_name("National Institutes of Health") == (
             False,
-            NON_INDUSTRY_NAME_CONFIDENCE,
+            GOVERNMENT_PATTERN_CONFIDENCE,
+        )
+
+    def test_an_academic_name(self) -> None:
+        """The academic half reports its own, lower confidence (#152).
+
+        Python returned a flat value for both halves until #152, where Swift had
+        always distinguished them. The ``is_industry`` boolean agreed throughout,
+        which is why the corpus measurement never caught it.
+        """
+        assert classify_funder_name("University of Oxford") == (
+            False,
+            ACADEMIC_PATTERN_CONFIDENCE,
         )
 
     def test_an_unrecognised_name(self) -> None:
         """No layer matched, so the classification is a low-confidence "not industry"."""
         assert classify_funder_name("Fondation Zzyzx") == (False, UNKNOWN_FUNDER_CONFIDENCE)
 
+    def test_a_name_matching_both_halves_reports_the_government_confidence(self) -> None:
+        r"""Government is checked first, and that ordering is now observable.
+
+        "Veterans Affairs Medical Center" carries a government pattern
+        (``\bveterans? (?:affairs|administration)\b``) and an academic one
+        (``\bmedical (?:center|school)\b``). While both halves returned the same
+        confidence the order was inert; since #152 it decides the reported value,
+        so reversing the two checks is a behaviour change rather than a tidy-up.
+        """
+        assert classify_funder_name("Veterans Affairs Medical Center") == (
+            False,
+            GOVERNMENT_PATTERN_CONFIDENCE,
+        )
+
     def test_the_confidences_are_ordered(self) -> None:
-        """A known DOI must outrank a pattern, and any match must outrank none."""
-        assert KNOWN_FUNDER_CONFIDENCE > NON_INDUSTRY_NAME_CONFIDENCE
-        assert NON_INDUSTRY_NAME_CONFIDENCE > INDUSTRY_NAME_CONFIDENCE
-        assert INDUSTRY_NAME_CONFIDENCE > UNKNOWN_FUNDER_CONFIDENCE
+        """The ladder descends from registry DOI to no match at all.
+
+        A known DOI outranks a named public body, which outranks a generic
+        institutional word ("university", "hospital"), which outranks a generic
+        company form, which outranks nothing matching. Two layers sharing a value
+        would be indistinguishable to a caller ranking funders by confidence.
+        """
+        assert (
+            KNOWN_FUNDER_CONFIDENCE
+            > GOVERNMENT_PATTERN_CONFIDENCE
+            > ACADEMIC_PATTERN_CONFIDENCE
+            > INDUSTRY_NAME_CONFIDENCE
+            > UNKNOWN_FUNDER_CONFIDENCE
+        )
 
 
 class TestTheAlignmentTable:
