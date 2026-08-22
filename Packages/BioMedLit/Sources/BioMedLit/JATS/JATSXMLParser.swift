@@ -1868,13 +1868,21 @@ extension JATSXMLParser: XMLParserDelegate {
                 // `inRef`, so it caught these too — and got them wrong: in a
                 // grouped citation each child carries its own `(a)`, `(b)`, `(c)`
                 // sub-marker, and last-sibling-wins wrote `(g)` into the field
-                // that holds the reference *number*. Of 88 such labels across 161
-                // live articles every one was a parenthesised letter and not one
-                // was a reference number, and none of the 23 enclosing `<ref>`s
-                // carried a direct `<label>` a first-wins rule could have
-                // preferred. A blank label the renderer can see beats a
-                // confidently wrong number. (3 articles, one publisher toolchain
-                // — measured, not a general claim about JATS.)
+                // that holds the reference *number*. Across 150 surveyed
+                // articles, 631 such labels in 158 refs were every one a
+                // parenthesised letter — `(a)`, `(b)`, or the digit-suffixed
+                // `(b1)` that subdivides one — and not one was a reference
+                // number; no enclosing `<ref>` carried a direct `<label>` that a
+                // first-wins rule could have preferred. A blank label the
+                // renderer can see beats a confidently wrong number.
+                //
+                // Grouped citations are an RSC chemistry convention, and they
+                // occur in `review-article` and `brief-report` rather than
+                // research articles — which is why a generic sample finds none
+                // and says so. Re-derive with
+                // `scripts/jats_survey.py --measure grouped-citations`; the
+                // survey names what would falsify this, and every observation so
+                // far is RSC-family, so publisher spread is the open weakness.
                 //
                 // Neither behaviour captures the marker, and the members after
                 // the first are lost either way: one `JATSReference` per

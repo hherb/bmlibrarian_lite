@@ -63,6 +63,11 @@ the rest.
     Routing by parent drops them instead — a blank the renderer can see beats a
     confidently wrong number — and #177 tracks capturing them properly, along
     with the 2nd–10th citations a grouped `<ref>` has always discarded.
+    Re-measured since with `scripts/jats_survey.py` (#178): **631 labels across
+    158 refs in 150 articles, zero counterexamples**. Grouped citations are an
+    RSC chemistry convention living in `review-article`/`brief-report`, so a
+    generic sample finds none — publisher spread, not sample size, is what is
+    still thin.
   - **Corpus evidence, all six:** `PMC8754430` 9 figures → 12 and its section
     title `"Author contributions"` → `"Additional information"`; `PMC12661592`
     table label `"a"` → `"Table 1."`; `PMC12755737` + `PMC13294358` `.gif` →
