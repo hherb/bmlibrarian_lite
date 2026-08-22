@@ -70,17 +70,21 @@ class JATSParser:
     current_abstract_text: list[string] = []
 
     # Figure/Table state
-    # A <fig> may contain another <fig> (eLife wraps every figure supplement
-    # this way, in 19.6% of surveyed articles), so the figure side is a stack,
-    # not a slot, and `in_figure` is derived from it rather than stored. A
-    # stored flag is cleared by the inner </fig> while the parent is still
-    # open, which discards the parent and reads the rest of its content as
-    # article prose (#156).
-    figure_slots: list[Figure | null] = []   # one per <fig>, in *open* order
-    figure_stack: list[FigureFrame] = []     # innermost last
-    in_figure: bool = (figure_stack is not empty)
-    in_table_wrap: bool = false
-    current_table: TableBuilder | null
+    # Both exhibits nest, in both directions: a <fig> may contain another <fig>
+    # (eLife wraps every figure supplement this way, in 19.6% of surveyed
+    # articles) and %fn-model admits a <table-wrap> inside another table's
+    # <table-wrap-foot>. So each is a *stack*, not a slot, and in_figure /
+    # in_table_wrap / current_figure / current_table are derived from it rather
+    # than stored. A stored flag is cleared by the inner close while the parent
+    # is still open, which discards the parent and reads the rest of its
+    # content as though no exhibit were open (#156 for figures, #173 for
+    # tables). Use one type for both: the table side kept a single slot for two
+    # releases after the figure side got a stack, and having one type is what
+    # stops that happening again (#170).
+    figures: ExhibitCollector[FigureBuilder]
+    tables: ExhibitCollector[TableBuilder]
+    in_figure: bool = figures.is_open
+    in_table_wrap: bool = tables.is_open
 
     # How deep the parser is inside a <fn> or <table-wrap-foot> belonging to
     # an exhibit. Decides only whether *prose* is footnote prose; labels are
@@ -98,9 +102,48 @@ class JATSParser:
     element_stack: list[str] = []
     footnote_depth: int = 0
 
-class FigureFrame:
-    slot: int                  # index into figure_slots, reserved at <fig>
-    builder: FigureBuilder
+# One kind of exhibit's open and finished elements, in document order.
+#
+# An exhibit is *built* at its end tag but has to be *listed* at its start, so
+# appending on close lists every nested supplement ahead of the exhibit it
+# belongs to. Two equivalent shapes satisfy that, and both are in use:
+#
+#   - Reserve a slot on open and fill it on close (bmlib, and Swift before
+#     #170): a `slots` list beside the stack, with the frame holding its index.
+#     Correct, but five invariants ride on the pair with nothing checking them,
+#     and a `null` slot means "still open" during the parse and "never closed"
+#     after it.
+#   - Let the stack be the tree (Swift since #170): each frame holds the
+#     exhibits that closed inside it, and a closing exhibit hands itself plus
+#     that run up to its parent — or to `completed` if it has none. No index,
+#     no second list, and "never closed" is simply "still on the stack".
+class ExhibitCollector[Builder]:
+    stack: list[Frame] = []        # open exhibits, innermost last
+    completed: list[Built] = []    # in the order their start tags arrived
+
+    is_open: bool = (stack is not empty)
+    open_count: int = len(stack)
+
+    def begin(builder):
+        stack.append(Frame(builder))
+
+    # Innermost, not most-recently-opened: the parent becomes current again as
+    # soon as its child closes. Returns whether anything was open, so the
+    # caller can report a disagreement with element_stack instead of absorbing
+    # it — the symptom is exhibit content quietly going missing.
+    def with_current(mutate) -> bool:
+        if stack is empty: return false
+        mutate(stack[-1].builder)
+        return true
+
+    def end():
+        frame = stack.pop()
+        run = [frame.builder.build()] + frame.nested
+        (stack[-1].nested if stack else completed).extend(run)
+
+class Frame:
+    builder: Builder
+    nested: list[Built] = []   # exhibits that opened *and closed* inside this
 
     # Reference state
     in_ref_list: bool = false
@@ -500,6 +543,13 @@ JATS tables can have several structural variations that need special handling.
 2. **Colspan attributes** - Merged cells need empty placeholders
 3. **Nested lists in cells** - Lists inside table cells need proper formatting
 4. **Tables without `<thead>`** - First row with `<th>` cells should be detected as header
+5. **`<table-wrap>` inside `<table-wrap>`** - Legal via `%fn-model`, and a single
+   builder slot loses the outer table outright: the inner open overwrites it, the
+   inner close clears the slot while the outer table is still open so its
+   footnote prose lands nowhere, and the outer end tag finds nothing to build
+   (#173). Collect tables the way figures are collected — see `ExhibitCollector`
+   above. No surveyed article nests one, so a corpus digest cannot catch a
+   regression here; a hand-written fixture is required.
 
 ### TableBuilder Implementation
 
@@ -991,6 +1041,34 @@ const MIN_PMID_LENGTH = 7
 const EUROPEPMC_FIGURE_BASE_URL = "https://europepmc.org/articles"
 # NOT: https://www.ncbi.nlm.nih.gov/pmc/articles (returns 403)
 ```
+
+### End-of-parse audit
+
+Every stack and counter above must be back to zero when the document ends. While
+any of them is not, content is being filed somewhere other than the article body,
+so an imbalance is never cosmetic — a stranded footnote depth drains every later
+`<p>` in the document into the footnote branch and discards it, one paragraph at
+a time, in silence (#173).
+
+Audit them all — sub-article depth, open figures, open tables, exhibit footnote
+depth, open captions, open sections — and report each imbalance on its own line
+at error level, naming what it cost.
+
+Run the audit **in the function every entry point funnels through**, not in the
+structured-data path. Production renders HTML and markdown; it does not ask for
+`JATSArticle`. Swift's audit sat in `parseToArticle` for three releases with zero
+production call sites, which is to say the safety net for the whole class of
+unbalanced-stack defects was installed only in the test harness — where a defect
+is least likely to go unnoticed (#175). The same applies to the zero-author
+warning, which reports content loss rather than a stack imbalance but is only
+useful in the same place; suppress it when the parse produced nothing at all,
+since that is already reported as an empty result.
+
+Nothing that can be expressed in well-formed XML trips this audit: a mismatched
+tag is refused by the XML reader first, and each guard tests the same predicate
+at both ends of the range it brackets. That is what makes it a net, and it is
+also why it needs a unit test of its own — hand it the state a defect would
+leave, and check it says so.
 
 ## Common Pitfalls
 
