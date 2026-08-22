@@ -416,6 +416,24 @@ class TestSampleComposition:
         assert sample.full_text_share == 0.25
         assert sample.by_article_type == {"abstract": 3, "research-article": 1}
 
+    def test_the_journal_mix_is_reported_because_it_explains_the_numbers(self) -> None:
+        """Several figures are publisher conventions, not JATS properties.
+
+        Nested `<fig>` is eLife's figure-supplement convention and grouped
+        citations are an RSC chemistry one, so the same measurement over two
+        samples can differ by two orders of magnitude without either being
+        wrong. The mix is the only thing that makes a number readable.
+        """
+        elife = self._article(
+            '<?xml version="1.0"?><article article-type="research-article"><front>'
+            "<journal-meta><journal-title>eLife</journal-title></journal-meta>"
+            "</front><body><p>Prose.</p></body></article>"
+        )
+        sample = jats_survey.describe_sample([elife, elife, self._article(self.FULL_TEXT)])
+
+        assert sample.by_journal == {"eLife": 2, "(unnamed)": 1}
+        assert "eLife (2)" in jats_survey.render_markdown([], [elife, elife], [])
+
     def test_a_mostly_abstract_sample_is_flagged_in_the_output(self) -> None:
         """The warning is what stops a junk sample reading as a finding."""
         report = jats_survey.render_markdown(

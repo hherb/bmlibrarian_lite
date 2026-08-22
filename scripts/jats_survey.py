@@ -121,6 +121,12 @@ class Article:
         return self.root.get("article-type", "")
 
     @property
+    def journal(self) -> str:
+        """The journal title, or `""` if the article names none."""
+        title = self.root.find(".//journal-title")
+        return (title.text or "").strip() if title is not None and title.text else ""
+
+    @property
     def has_full_text(self) -> bool:
         """Whether the article carries a `<body>` with any prose in it.
 
@@ -843,15 +849,24 @@ def search(query: str, limit: int) -> list[str]:
 class SampleComposition:
     """What a sample actually contains, as opposed to what was asked for.
 
+    Several of the figures this script reports are properties of a publisher
+    rather than of JATS — nested `<fig>` is eLife's figure-supplement
+    convention, grouped citations are an RSC chemistry one — so a number is
+    only readable against the mix that produced it. A 300-article sample of
+    MDPI and Cureus reports nested figures at 0.3% where the curated
+    10-journal survey behind the corpus README reports 19.6%. Neither is wrong.
+
     Attributes:
         articles: How many articles were surveyed.
         with_full_text: How many carry a `<body>` with prose in it.
         by_article_type: Counts keyed by the `article-type` attribute.
+        by_journal: Counts keyed by journal title, most frequent first.
     """
 
     articles: int
     with_full_text: int
     by_article_type: dict[str, int]
+    by_journal: dict[str, int]
 
     @property
     def full_text_share(self) -> float:
@@ -865,6 +880,7 @@ class SampleComposition:
             "withFullText": self.with_full_text,
             "fullTextShare": self.full_text_share,
             "byArticleType": self.by_article_type,
+            "byJournal": self.by_journal,
         }
 
 
@@ -888,8 +904,12 @@ def describe_sample(articles: Sequence[Article]) -> SampleComposition:
         by_article_type=dict(
             Counter(a.article_type or "(unset)" for a in articles).most_common()
         ),
+        by_journal=dict(Counter(a.journal or "(unnamed)" for a in articles).most_common()),
     )
 
+
+# Enough journals to see the shape of the mix without burying the report.
+_JOURNALS_SHOWN = 8
 
 # Below this share of full-text articles, the structural counts describe the
 # sample's front matter rather than JATS, and the run says so.
@@ -912,6 +932,18 @@ def render_markdown(
         f"carry a `<body>` with prose ({share:.1%}). By `article-type`: "
         + ", ".join(f"`{t}` {n}" for t, n in sample.by_article_type.items())
         + ".",
+        "",
+        f"**Journals:** {len(sample.by_journal)} — "
+        + ", ".join(
+            f"{name} ({n})" for name, n in list(sample.by_journal.items())[:_JOURNALS_SHOWN]
+        )
+        + (
+            f", and {len(sample.by_journal) - _JOURNALS_SHOWN} more"
+            if len(sample.by_journal) > _JOURNALS_SHOWN
+            else ""
+        )
+        + ". Several figures below are publisher conventions rather than JATS "
+        "properties, so read them against this mix.",
         "",
     ]
     if share < _FULL_TEXT_WARNING_THRESHOLD:

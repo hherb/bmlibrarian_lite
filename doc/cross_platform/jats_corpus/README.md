@@ -323,6 +323,36 @@ be repeated over exactly the same articles with `--fetch-ids`. That manifest is
 the half of #164 the prose lacked: **a number nobody can re-derive is a number
 nobody can challenge.**
 
+### Several of these figures are publisher conventions, not JATS properties
+
+Measured, by running the script over two samples:
+
+| Measurement | Curated 10-journal survey (225) | 300 open-access research articles |
+|---|---|---|
+| labelled `<table-wrap-foot><fn>` | 12.0% | **12.7%** |
+| figures whose last `<graphic>` is a thumbnail | 52.9% | **50.7%** |
+| articles using `<mixed-citation>` | 80.9% | **76.3%** |
+| affiliations linked by `<xref>` | 98.7% | **96.0%** |
+| articles with a nested `<fig>` | 19.6% | **0.3%** |
+
+The first four reproduce. The last does not, and neither figure is wrong:
+nested `<fig>` is eLife's figure-supplement convention, the 225-article survey
+was a curated list with eLife prominent, and the 300-article sample was mostly
+MDPI and Cureus. `supplementary-material` and `media` captions move the same way
+and for the same reason.
+
+So the survey prints its **journal mix** alongside every run. A prevalence
+figure without the mix that produced it is not reproducible, only repeatable.
+
+**Two sampling traps, both found by running this script rather than by reading
+it.** `PUB_TYPE:"research-article"` is what keeps conference abstracts out — but
+it also excludes `review-article` and `brief-report`, and *that* is where the
+grouped citations behind #177 live: all three known articles are RSC chemistry
+journals (`Chemical Communications`, `Physical Chemistry Chemical Physics`), and
+none is a research article. A 300-article research-article sample found zero,
+which says nothing about #177 because it could not have found any. Sample for
+the shape you are measuring.
+
 **Read a zero as a finding.** `nested-exhibits` reports `table-wrap in fig` as 0
 across the corpus; that is the #169 shape, and its absence is why the fix needed
 a hand-written fixture and why no digest would ever have caught the regression.
