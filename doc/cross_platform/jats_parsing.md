@@ -1087,6 +1087,13 @@ const EUROPEPMC_FIGURE_BASE_URL = "https://europepmc.org/articles"
 
 ### End-of-parse audit
 
+Implemented in Swift only, as of this writing. bmlib (hherb/bmlib#134) and the
+Kotlin port (#165) have no end-of-parse audit at all, so this section and the two
+that follow it describe work still to be done there rather than shared behaviour
+to match. Given the common JATS ancestry, the misrouting defects the audit exists
+to catch — #156, #157, #169, #171, #173 — are presumably reachable on both and
+silent on both.
+
 Every stack and counter above must be back to zero when the document ends. While
 any of them is not, content is being filed somewhere other than the article body,
 so an imbalance is never cosmetic — a stranded footnote depth drains every later
@@ -1114,9 +1121,24 @@ increment a separate underflow counter when the value was already zero. It canno
 false-positive: the XML reader refuses a document with an unmatched end tag, so
 only a parser defect can produce one.
 
-The counters this applies to are the *depths*. A stack-backed count (open figures,
-open captions) cannot underflow — popping an empty stack is a no-op — so it needs
-no equivalent.
+This applies to **every** counter the audit reads, not only the depths. A
+stack-backed count cannot go negative, but that is not the property that matters:
+popping an empty stack is a no-op, and a no-op destroys the evidence exactly as
+the clamp does. "Cannot underflow" and "cannot hide an over-pop" are different
+statements, and only the first is true of a stack.
+
+So count the underflow at each site: when a depth is decremented at zero, when a
+stack is popped empty, and when an exhibit collector refuses a close because
+nothing was open. That last one is worth stating separately — a collector that
+already detects the condition and only writes it to the log is the shape #181
+exists to correct, and it is easy to leave that way because it looks handled.
+
+The defect this guards against is a start-side guard drifting from its end-side
+twin, so that an end tag closes a frame that was never opened. That is what #171
+and #173 were, and it is reachable on a stack-backed counter as readily as on a
+depth: Swift's `</sec>` push and pop are both guarded by `!inAbstract`, and if
+those two ever see different state the pop closes the *parent's* section early
+and `openSections` still ends at 0.
 
 Run the audit **in the function every entry point funnels through**, not in the
 structured-data path. Production renders HTML and markdown; it does not ask for
@@ -1133,8 +1155,9 @@ an article stripped to its own accession number is returned without a word.
 
 Two limits worth stating rather than discovering. The audit runs after a
 successful parse, so a document the XML reader rejects is never audited — every
-counter is non-zero there by construction, and reporting six guaranteed
-imbalances on every malformed feed trains readers to ignore the category. And
+counter left open at the point it gave up stays open, and reporting a fistful of
+guaranteed imbalances on every malformed feed trains readers to ignore the
+category. And
 every diagnostic must name the article: the full-text path builds a parser per
 output format over the same document, so each line appears more than once, and
 unattributed duplicates cannot be told from two genuinely broken articles.
@@ -1169,8 +1192,9 @@ Three rules make the difference between a channel and a decoration:
 - **Persist it with the cached text.** Full text is normally cached and
   re-rendered from the cache, so warnings held only on the in-flight result are
   shown once and lost on reopen — and a viewer that renders *only* from the cache
-  never shows them at all. Write and clear them in the same statement as the
-  content they describe, or they will outlive it and label the next article with
+  never shows them at all. Write and clear them through the *same routine* as the
+  content they describe — one method that writes every cached field — or they
+  will outlive it and label the next article with
   the last one's losses. A record written before the field existed must read back
   as "nothing known", not as a truncation.
 

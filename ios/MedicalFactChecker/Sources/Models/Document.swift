@@ -450,8 +450,13 @@ final class Document {
             fullTextHTML = htmlContent
             fullTextContent = markdownContent
             fullTextPDFPath = nil
-        case .pdfURL:
-            // PDF path will be set after download
+        case .pdfURL(let url):
+            // The remote URL, so the document reads as retrieved before any
+            // download. macOS overwrites this with the cached local path in
+            // `downloadAndCachePDF`; iOS has no such step, and leaving it unset
+            // left `hasFullText` false for every PDF-sourced article — cached
+            // as "fetched" yet indistinguishable from never-fetched on relaunch.
+            fullTextPDFPath = url.absoluteString
             fullTextContent = nil
             fullTextHTML = nil
         case .webURL:
@@ -488,10 +493,15 @@ final class Document {
 
     /// The cached full text, rebuilt as a result the viewers can render.
     ///
-    /// One place rather than three. `FullTextTab` reconstructed this inline twice
-    /// and `MacFullTextViewer` read the stored fields directly, so a field added
-    /// to the cache had to be remembered at each — which is exactly how the parse
-    /// warnings would have gone missing on the path that needs them most.
+    /// One place rather than four: `FullTextTab`, `ScoredDocumentsView` and
+    /// `ReportView` each rebuilt this inline, and every copy defaulted the
+    /// warnings to clean, so a truncated article reopened from the cache
+    /// rendered exactly like a complete one.
+    ///
+    /// `MacFullTextViewer` still selects its *view* from the stored fields
+    /// directly — it also has loading, error and empty states to place, and it
+    /// hands `MacPDFView` a filesystem path rather than a URL — so this is the
+    /// source of its banner's warnings, not of its content branch.
     ///
     /// `nil` when nothing displayable is cached.
     var cachedFullTextResult: AppFullTextResult? {
@@ -512,23 +522,54 @@ final class Document {
     }
 
     /// What the cached parse lost, or clean when nothing was recorded.
+    ///
+    /// An undecodable field is *not* clean. The field is only ever written when
+    /// a parse lost something, so "we cannot read it" and "nothing was lost" are
+    /// opposite answers, and collapsing them presents a truncated article as
+    /// complete — the one failure this whole channel exists to prevent. It
+    /// reports an unspecified loss instead, and says so in the log.
     private var storedParseWarnings: JATSParseWarnings {
-        guard let json = fullTextParseWarningsJSON,
-              let diagnostics = try? JSONDecoder().decode([String].self, from: Data(json.utf8))
-        else {
-            return JATSParseWarnings()
+        guard let json = fullTextParseWarningsJSON else { return JATSParseWarnings() }
+        do {
+            let diagnostics = try JSONDecoder().decode([String].self, from: Data(json.utf8))
+            return JATSParseWarnings(diagnostics: diagnostics)
+        } catch {
+            documentLog.error(
+                """
+                Stored parse warnings failed to decode for PMID \
+                \(self.pmid, privacy: .public): \(String(describing: error), privacy: .public). \
+                Reporting an unspecified loss rather than a clean parse.
+                """
+            )
+            return JATSParseWarnings(diagnostics: [
+                "This article's parse diagnostics could not be read back — "
+                    + "some content may be missing."
+            ])
         }
-        return JATSParseWarnings(diagnostics: diagnostics)
     }
 
     /// Record what a parse lost, clearing the field when it lost nothing.
     ///
+    /// A clean parse and a failed encode are kept apart: the first is the reason
+    /// the field is cleared, the second is a loss that could not be written down
+    /// and is logged rather than silently downgraded to "clean".
+    ///
     /// - Parameter warnings: The warnings from the parse being cached.
     private func storeParseWarnings(_ warnings: JATSParseWarnings) {
-        guard !warnings.isClean,
-              let data = try? JSONEncoder().encode(warnings.diagnostics),
+        guard !warnings.isClean else {
+            fullTextParseWarningsJSON = nil
+            return
+        }
+        guard let data = try? JSONEncoder().encode(warnings.diagnostics),
               let json = String(data: data, encoding: .utf8)
         else {
+            documentLog.error(
+                """
+                Parse warnings for PMID \(self.pmid, privacy: .public) could not be encoded; \
+                \(warnings.diagnostics.count, privacy: .public) diagnostic(s) \
+                will not survive the cache
+                """
+            )
             fullTextParseWarningsJSON = nil
             return
         }

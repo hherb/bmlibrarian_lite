@@ -26,10 +26,12 @@ import Foundation
 /// parser defect can only be tested by handing it the state a defect would
 /// leave.
 ///
-/// Every field counts one stack or counter that decides *routing*: while it is
-/// non-zero, content is being filed somewhere other than the article body, so
-/// an imbalance is never cosmetic. Every field defaults to zero — the shape a
-/// correct parse ends in — so a test names only the one imbalance it is about.
+/// The first six count a stack or counter that decides *routing*: while one is
+/// non-zero, content is being filed somewhere other than the article body, so an
+/// imbalance is never cosmetic. ``depthUnderflows`` is the exception and is
+/// documented as one — a tally of end tags that closed nothing, which is how the
+/// other six are kept honest. Every field defaults to zero — the shape a correct
+/// parse ends in — so a test names only the one imbalance it is about.
 struct JATSParseUnwindState: Equatable {
     /// Depth of unclosed `<sub-article>`/`<response>` nesting.
     let subArticleDepth: Int
@@ -59,12 +61,24 @@ struct JATSParseUnwindState: Equatable {
 
     /// End tags that arrived with nothing to close.
     ///
-    /// The opposite imbalance to the six above, and the only one the audit could
-    /// not see (#180). Every decrement site clamps with `max(0, n - 1)`, and the
-    /// clamp erases the evidence before the audit reads it. Worse than blind:
-    /// with a depth of 2 and three decrements, the third clamps to 0 and the
-    /// counter reads "balanced" for the rest of the document, so the audit
-    /// certifies a defective parse as clean.
+    /// The opposite imbalance to the six above, and the one the audit could not
+    /// see (#180).
+    ///
+    /// Unlike them it is an event tally, not a live depth: a non-zero value says
+    /// an end tag arrived that closed nothing, not that anything is still open
+    /// when the document ends. It is on this type because it is read at the same
+    /// moment and answers the same question — did this parse route content where
+    /// it belonged — and because leaving it off is what let the other six lie.
+    ///
+    /// Every counter erases its own over-pop, in one of two ways. The two `Int`
+    /// depths clamp with `max(0, n - 1)`; the four stack-backed counts pop an
+    /// empty stack, which is a no-op. Both destroy the evidence before the audit
+    /// reads it, and the clamped case is worse than blind: with a depth of 2 and
+    /// three decrements, the third clamps to 0 and the counter reads "balanced"
+    /// for the rest of the document, so the audit certifies a defective parse as
+    /// clean. ``JATSXMLParser/decrementDepth(_:)`` and
+    /// ``JATSXMLParser/popTrackingUnderflow(_:)`` are the two places that count
+    /// it; `</fig>` and `</table-wrap>` count it at their collectors.
     ///
     /// The clamp still has to stay, because for `subArticleDepth` it is
     /// load-bearing: `inSubArticle` is `subArticleDepth > 0`, so an unclamped -1
@@ -78,15 +92,32 @@ struct JATSParseUnwindState: Equatable {
 
     /// Whether the parse ended in the only shape a correct one can.
     ///
-    /// Agrees with ``JATSXMLParser/unwindDiagnostics(_:)`` by construction — both
-    /// are pinned to the same set of fields by test, so a field added to one and
-    /// not the other is a failure rather than a silent disagreement.
+    /// Agrees with ``JATSXMLParser/unwindDiagnostics(_:)`` on every state the
+    /// parser can produce, because the clamp below puts both on the same footing:
+    /// "no field is non-zero" and "no field is positive" are the same statement
+    /// once nothing can be negative.
+    ///
+    /// That the two cover the same *fields* is enforced by test rather than by
+    /// the type — `testIsBalancedAgreesWithTheDiagnostics` builds a state per
+    /// field from a `Mirror` of this struct, so a field added here and forgotten
+    /// in `unwindDiagnostics` fails rather than diverging in silence.
     var isBalanced: Bool { self == JATSParseUnwindState() }
 
+    /// Create an end-of-parse state, clamping every count at zero.
+    ///
+    /// - Parameters:
+    ///   - subArticleDepth: Unclosed `<sub-article>`/`<response>` nesting.
+    ///   - openFigures: `<fig>` elements that opened and never closed.
+    ///   - openTables: `<table-wrap>` elements that opened and never closed.
+    ///   - exhibitFootnoteDepth: Unclosed exhibit-footnote nesting.
+    ///   - openCaptions: `<caption>` elements that opened and never closed.
+    ///   - openSections: `<sec>` elements that opened and never closed.
+    ///   - depthUnderflows: End tags that arrived with nothing to close.
+    ///
     /// - Note: Every count is clamped at zero. The parser cannot produce a
-    ///   negative — each source is either a `max(0, ...)` counter or a `.count` —
-    ///   and reporting one as "still open" would be worse than saying nothing, so
-    ///   the type declines to represent it at all.
+    ///   negative — each source is a `max(0, ...)` counter, a `.count`, or a
+    ///   monotonic tally — and reporting one as "still open" would be worse than
+    ///   saying nothing, so the type declines to represent it at all.
     init(
         subArticleDepth: Int = 0,
         openFigures: Int = 0,
@@ -131,6 +162,10 @@ public struct JATSParseWarnings: Sendable, Equatable {
     /// Whether the parse lost nothing a reader would want to know about.
     public var isClean: Bool { diagnostics.isEmpty }
 
+    /// Create a set of warnings for a completed parse.
+    ///
+    /// - Parameter diagnostics: One line per loss, each naming what it cost.
+    ///   Empty — the default — is a parse that lost nothing.
     public init(diagnostics: [String] = []) {
         self.diagnostics = diagnostics
     }
@@ -381,9 +416,14 @@ public final class JATSXMLParser: NSObject {
 
     /// End tags that arrived with nothing to close.
     ///
-    /// Every depth counter above is decremented as `max(0, n - 1)`, and that
-    /// clamp discards the one observation the audit needs — so the audit was
-    /// left certifying a defective parse as clean (#180).
+    /// Every counter the audit reads discards its own over-pop. The two depths
+    /// above are decremented as `max(0, n - 1)`; the caption and section stacks
+    /// pop an empty array, and the figure and table collectors refuse the close
+    /// and carry on. All four throw away the one observation the audit needs, so
+    /// the audit was left certifying a defective parse as clean (#180). Every
+    /// one of them now routes through here — the two depths via
+    /// ``decrementDepth(_:)``, the two stacks via ``popTrackingUnderflow(_:)``,
+    /// and the collectors at their own call sites.
     ///
     /// The clamp stays anyway, because for `subArticleDepth` it decides routing:
     /// `inSubArticle` is `subArticleDepth > 0`, so an unclamped -1 would be
@@ -407,6 +447,31 @@ public final class JATSXMLParser: NSObject {
     private func decrementDepth(_ depth: inout Int) {
         if depth == 0 { depthUnderflows += 1 }
         depth = max(0, depth - 1)
+    }
+
+    /// Pop a routing stack, keeping the evidence if it had nothing to drop.
+    ///
+    /// The stack twin of ``decrementDepth(_:)``. `popLast()` on an empty stack
+    /// returns `nil` and changes nothing, which reads to the audit as "balanced"
+    /// for precisely the reason the clamp did (#180) — a `.count` cannot go
+    /// negative, so the over-pop leaves no trace behind it. "Cannot underflow"
+    /// and "cannot hide an over-pop" are different properties, and only the
+    /// first one is true of a stack.
+    ///
+    /// Counting it here is what makes the end-tag-with-nothing-to-close
+    /// diagnostic true of every counter rather than only of the two `Int`
+    /// depths. The defect shape it guards against is the one #171 and #173
+    /// actually were: a start-side guard drifting from its end-side twin, so
+    /// that the pop closes a frame that was never opened.
+    ///
+    /// - Parameter stack: The stack to pop.
+    /// - Returns: The popped element, or `nil` when there was nothing to pop.
+    private func popTrackingUnderflow<Element>(_ stack: inout [Element]) -> Element? {
+        guard let popped = stack.popLast() else {
+            depthUnderflows += 1
+            return nil
+        }
+        return popped
     }
 
     /// The element that most closely encloses the one being handled.
@@ -664,16 +729,22 @@ public final class JATSXMLParser: NSObject {
 
     /// What this parse lost, for a caller that wants to tell the reader.
     ///
-    /// Empty until the parse completes. Populated by ``reportParseCompletion()``
-    /// from the same audit that writes the log, so the two cannot disagree.
+    /// Empty until the parse completes. Populated by `reportParseCompletion()`
+    /// from the same audit that writes the log, so on the lines they share the
+    /// two cannot silently diverge. The log is deliberately the wider of the
+    /// two: the zero-author warning goes only there, and this carries the
+    /// no-content line, which is not an unwind diagnostic at all.
     public private(set) var parseWarnings = JATSParseWarnings()
 
-    /// What the parser still had open when the document ended.
+    /// What the parser still had open when the document ended, and what it saw
+    /// close something that was never opened.
     ///
-    /// Every field counts one stack or counter that decides *routing*: while it
-    /// is non-zero, content is being filed somewhere other than the article
-    /// body, so an imbalance is never cosmetic. Zero across the board is the
-    /// only shape a correct parse can end in.
+    /// The first six fields each count a stack or counter that decides
+    /// *routing*: while one is non-zero, content is being filed somewhere other
+    /// than the article body, so an imbalance is never cosmetic.
+    /// `depthUnderflows` is the tally that stops the other six from reading
+    /// clean after an over-pop. Zero across the board is the only shape a
+    /// correct parse can end in.
     var unwindState: JATSParseUnwindState {
         JATSParseUnwindState(
             subArticleDepth: subArticleDepth,
@@ -717,14 +788,17 @@ public final class JATSXMLParser: NSObject {
     /// #173 all came from — was installed only in the test harness, which is
     /// where a defect is least likely to go unnoticed (#175).
     ///
-    /// Deliberately not reached when `XMLParser` rejects the document: every
-    /// counter is non-zero there by construction, so auditing would emit six
-    /// guaranteed imbalances on every malformed feed and train the reader to
-    /// ignore the category. The parse error already says the document died.
+    /// Deliberately not reached when `XMLParser` rejects the document: whatever
+    /// was open at the point it gave up stays open, so auditing would emit a
+    /// fistful of guaranteed imbalances on every malformed feed and train the
+    /// reader to ignore the category. The parse error already says the document
+    /// died.
     private func reportParseCompletion() {
-        // Collected, not just logged. The same lines become `parseWarnings`, so
-        // what the caller can act on and what a developer reads in the log cannot
-        // drift apart (#181).
+        // Collected, not just logged. The unwind lines become `parseWarnings`
+        // verbatim, so on the lines they share, what the caller can act on and
+        // what a developer reads in the log cannot drift apart (#181). The two
+        // are not equal: the zero-author warning below is logged only, and the
+        // no-content line is added to both.
         var readerFacing = Self.unwindDiagnostics(unwindState)
         for line in readerFacing {
             BioMedLitLib.logger?.error("\(articleIdentifier): \(line)", category: .parsing)
@@ -812,8 +886,8 @@ public final class JATSXMLParser: NSObject {
         if state.depthUnderflows > 0 {
             lines.append(
                 "JATS parse saw \(state.depthUnderflows) end tag(s) with nothing to close — "
-                    + "a depth counter under-decremented, so the counts above understate "
-                    + "what was misrouted"
+                    + "a counter closed an element it never opened, so any other "
+                    + "imbalance reported here understates what was misrouted"
             )
         }
 
@@ -2128,7 +2202,7 @@ extension JATSXMLParser: XMLParserDelegate {
             // Guarded to match the push in didStartElement — see the comment there.
             // `</sec>` inside an abstract fires before `</abstract>` clears the flag,
             // so the two guards see the same state.
-            if !inAbstract, let builder = sectionStack.popLast() {
+            if !inAbstract, let builder = popTrackingUnderflow(&sectionStack) {
                 let section = builder.build()
                 if sectionStack.isEmpty {
                     bodySections.append(section)
@@ -2140,6 +2214,10 @@ extension JATSXMLParser: XMLParserDelegate {
         // Figures
         case "fig":
             if !figureCollector.end() {
+                // Counted, not only logged. This is the same event as an
+                // over-decrement, and reaching the log alone is what #181 exists
+                // to stop: a loss the parser noticed and the reader never heard.
+                depthUnderflows += 1
                 BioMedLitLib.logger?.error(
                     "JATS </fig> with no open <fig> for \(articleIdentifier) — "
                         + "the figure and its content were discarded",
@@ -2213,7 +2291,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 )
             }
         case "caption":
-            _ = captionStack.popLast()
+            _ = popTrackingUnderflow(&captionStack)
         case "table-wrap-foot":
             decrementDepth(&exhibitFootnoteDepth)
         case "fn":
@@ -2262,6 +2340,8 @@ extension JATSXMLParser: XMLParserDelegate {
             }
         case "table-wrap":
             if !tableCollector.end() {
+                // Counted, not only logged — see the `</fig>` twin above.
+                depthUnderflows += 1
                 BioMedLitLib.logger?.error(
                     "JATS </table-wrap> with no open <table-wrap> for \(articleIdentifier) — "
                         + "the table and its content were discarded",

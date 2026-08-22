@@ -181,6 +181,13 @@ struct MacFullTextViewer: View {
         }
     }
 
+    /// The view for whichever form of full text the document has cached.
+    ///
+    /// Selected from the stored fields rather than from
+    /// `Document.cachedFullTextResult`, because this also has to place the
+    /// loading, error and empty states, and because `MacPDFView` opens a
+    /// filesystem path rather than a URL. The cache rebuild supplies the
+    /// banner's warnings above; this supplies the content.
     @ViewBuilder
     private var renderedContent: some View {
         // Prefer HTML for better table rendering, fall back to markdown

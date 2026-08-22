@@ -163,6 +163,17 @@ struct AppFullTextResult: Equatable, Sendable {
     /// parsed at all.
     let warnings: JATSParseWarnings
 
+    /// Create a full-text result.
+    ///
+    /// Replaces the synthesised memberwise initialiser so `warnings` can default:
+    /// only a parsed source can have any, and every other source would otherwise
+    /// have to pass an empty set at each call site.
+    ///
+    /// - Parameters:
+    ///   - content: The retrieved content, in whichever form the source gave it.
+    ///   - source: Where the content came from.
+    ///   - warnings: What the JATS parse of this content lost. Empty — the
+    ///     default — for PDFs, publisher links and any source that was not parsed.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,

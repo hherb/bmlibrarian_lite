@@ -334,16 +334,11 @@ struct DocumentScoreRow: View {
     /// Sheet content for displaying full text.
     @ViewBuilder
     private var fullTextViewerSheet: some View {
-        if let result = fullTextResult {
+        // The cache rebuild carries the parse warnings; reconstructing it here
+        // by hand defaulted them to clean, so a truncated article reopened from
+        // the cache rendered exactly like a complete one (#181).
+        if let result = fullTextResult ?? document.cachedFullTextResult {
             FullTextViewer(document: document, result: result)
-        } else if let content = document.fullTextContent {
-            FullTextViewer(
-                document: document,
-                result: AppFullTextResult(
-                    content: .markdown(content),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            )
         }
     }
 
@@ -583,11 +578,18 @@ struct DocumentScoreRow: View {
                     try FileManager.default.copyItem(at: url, to: destURL)
 
                     await MainActor.run {
+                        // Through the one writer, so the warnings from an earlier
+                        // fetch go with the content they described. Assigning by
+                        // hand here left them behind to label the reader's own
+                        // upload as truncated, and left the superseded HTML in
+                        // place to shadow the PDF they had just chosen.
+                        let result = AppFullTextResult.uploaded(content: .pdfURL(destURL))
+                        document.applyFullTextResult(result)
+                        // The cached file, not the URL: `MacPDFView` opens this
+                        // as a filesystem path. Same follow-up as the macOS
+                        // download path.
                         document.fullTextPDFPath = destURL.path
-                        document.fullTextSource = AppFullTextSource.uploaded.rawValue
-                        document.fullTextFetchedAt = Date()
-                        document.fullTextUnavailable = false
-                        fullTextResult = AppFullTextResult.uploaded(content: .pdfURL(destURL))
+                        fullTextResult = result
                         isProcessingUpload = false
                         showFullTextViewer = true
                     }
@@ -595,14 +597,11 @@ struct DocumentScoreRow: View {
                 case "html", "htm":
                     let htmlContent = try String(contentsOf: url, encoding: .utf8)
                     await MainActor.run {
-                        document.fullTextHTML = htmlContent
-                        document.fullTextContent = htmlContent // Also store as fallback
-                        document.fullTextSource = AppFullTextSource.uploaded.rawValue
-                        document.fullTextFetchedAt = Date()
-                        document.fullTextUnavailable = false
-                        fullTextResult = AppFullTextResult.uploaded(
+                        let result = AppFullTextResult.uploaded(
                             content: .html(content: htmlContent, markdown: htmlContent)
                         )
+                        document.applyFullTextResult(result)
+                        fullTextResult = result
                         isProcessingUpload = false
                         showFullTextViewer = true
                     }
@@ -610,11 +609,9 @@ struct DocumentScoreRow: View {
                 case "md", "markdown", "txt":
                     let markdownContent = try String(contentsOf: url, encoding: .utf8)
                     await MainActor.run {
-                        document.fullTextContent = markdownContent
-                        document.fullTextSource = AppFullTextSource.uploaded.rawValue
-                        document.fullTextFetchedAt = Date()
-                        document.fullTextUnavailable = false
-                        fullTextResult = AppFullTextResult.uploaded(content: .markdown(markdownContent))
+                        let result = AppFullTextResult.uploaded(content: .markdown(markdownContent))
+                        document.applyFullTextResult(result)
+                        fullTextResult = result
                         isProcessingUpload = false
                         showFullTextViewer = true
                     }

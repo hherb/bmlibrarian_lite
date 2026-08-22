@@ -140,14 +140,13 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// PDF download failed.
     case pdfDownloadFailed(String)
 
-    /// XML parsing failed, with the reason flattened to a string.
-    ///
-    /// Retained only for failures that carry no ``JATSParseError`` — prefer
-    /// ``jatsParseFailure(_:)``, which keeps `.noContent`, `.alreadyParsed` and
-    /// `.parsingFailed` distinguishable to a caller.
-    case xmlParseError(String)
-
     /// JATS parsing failed, with the parser's own error preserved.
+    ///
+    /// Keeps `.noContent`, `.alreadyParsed` and `.parsingFailed` distinguishable
+    /// rather than flattening them to one string. There is deliberately no
+    /// string-carrying twin: a second case that rendered identically only gave a
+    /// future edit somewhere to put an error it had not classified, and silently
+    /// stole the pattern matches aimed at this one.
     case jatsParseFailure(JATSParseError)
 
     /// PDF caching failed.
@@ -169,8 +168,6 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             return "No full text available from any source"
         case .pdfDownloadFailed(let reason):
             return "Failed to download PDF: \(reason)"
-        case .xmlParseError(let reason):
-            return "Failed to parse XML: \(reason)"
         case .jatsParseFailure(let error):
             return "Failed to parse XML: \(error.localizedDescription)"
         case .cachingFailed(let reason):
@@ -188,7 +185,7 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
         case .networkError, .serverError:
             return true
         case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
-             .xmlParseError, .jatsParseFailure, .cachingFailed, .invalidResponse:
+             .jatsParseFailure, .cachingFailed, .invalidResponse:
             // A parse failure is deterministic: retrying spends the network
             // budget to reach the same result.
             return false

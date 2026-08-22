@@ -354,29 +354,50 @@ final class JATSParseGuardTests: XCTestCase {
     /// single-field state plus the all-fields state has to agree, which is what
     /// makes "clean" mean the same thing to a caller as it does to the log.
     func testIsBalancedAgreesWithTheDiagnostics() {
-        let states: [JATSParseUnwindState] = [
-            JATSParseUnwindState(),
-            JATSParseUnwindState(subArticleDepth: 1),
-            JATSParseUnwindState(openFigures: 1),
-            JATSParseUnwindState(openTables: 1),
-            JATSParseUnwindState(exhibitFootnoteDepth: 1),
-            JATSParseUnwindState(openCaptions: 1),
-            JATSParseUnwindState(openSections: 1),
-            JATSParseUnwindState(depthUnderflows: 1),
-            JATSParseUnwindState(
-                subArticleDepth: 1, openFigures: 1, openTables: 1,
-                exhibitFootnoteDepth: 1, openCaptions: 1, openSections: 1,
-                depthUnderflows: 1
-            ),
+        // Keyed by field name so `Mirror` can prove the list is complete. A
+        // hand-written array cannot: a field added to the struct and forgotten
+        // in both `unwindDiagnostics` and the array leaves the test green, which
+        // is the silent disagreement this exists to make impossible.
+        let singleFieldStates: [String: JATSParseUnwindState] = [
+            "subArticleDepth": JATSParseUnwindState(subArticleDepth: 1),
+            "openFigures": JATSParseUnwindState(openFigures: 1),
+            "openTables": JATSParseUnwindState(openTables: 1),
+            "exhibitFootnoteDepth": JATSParseUnwindState(exhibitFootnoteDepth: 1),
+            "openCaptions": JATSParseUnwindState(openCaptions: 1),
+            "openSections": JATSParseUnwindState(openSections: 1),
+            "depthUnderflows": JATSParseUnwindState(depthUnderflows: 1),
         ]
 
-        for state in states {
+        let declaredFields = Set(
+            Mirror(reflecting: JATSParseUnwindState()).children.compactMap(\.label)
+        )
+        XCTAssertEqual(
+            declaredFields,
+            Set(singleFieldStates.keys),
+            "JATSParseUnwindState gained or lost a field without updating this test"
+        )
+
+        for (field, state) in singleFieldStates {
+            XCTAssertFalse(state.isBalanced, field)
             XCTAssertEqual(
-                state.isBalanced,
-                JATSXMLParser.unwindDiagnostics(state).isEmpty,
-                "\(state)"
+                JATSXMLParser.unwindDiagnostics(state).count, 1,
+                "\(field) is not balanced but has no line in unwindDiagnostics"
             )
         }
+
+        let clean = JATSParseUnwindState()
+        XCTAssertTrue(clean.isBalanced)
+        XCTAssertTrue(JATSXMLParser.unwindDiagnostics(clean).isEmpty)
+
+        let everyField = JATSParseUnwindState(
+            subArticleDepth: 1, openFigures: 1, openTables: 1,
+            exhibitFootnoteDepth: 1, openCaptions: 1, openSections: 1,
+            depthUnderflows: 1
+        )
+        XCTAssertFalse(everyField.isBalanced)
+        XCTAssertEqual(
+            JATSXMLParser.unwindDiagnostics(everyField).count, declaredFields.count
+        )
     }
 
     // MARK: - The audit sees what the parser has open (#175)
@@ -525,6 +546,54 @@ final class JATSParseGuardTests: XCTestCase {
         )
     }
 
+    // MARK: - The stack-backed counters hide an over-pop too (#182 review)
+
+    /// A `</caption>` with nothing open used to vanish entirely.
+    ///
+    /// `popLast()` on an empty stack returns `nil` and changes nothing, so
+    /// `openCaptions` still read 0 and the audit called the parse clean — the
+    /// #180 failure exactly, on a counter the clamp argument never covered.
+    func testACaptionEndWithNothingOpenIsCountedAsAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["caption"]),
+            JATSParseUnwindState(depthUnderflows: 1)
+        )
+    }
+
+    /// The same for `</sec>`, whose pop is guarded by `!inAbstract` at both ends
+    /// — the start/end-guard pairing whose drift was #171 and #173.
+    func testASectionEndWithNothingOpenIsCountedAsAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["sec"]),
+            JATSParseUnwindState(depthUnderflows: 1)
+        )
+    }
+
+    /// `</fig>` and `</table-wrap>` detected this all along and told only the log
+    /// — a loss the parser noticed and the reader never heard (#181).
+    func testAnExhibitEndWithNothingOpenIsCountedAsAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["fig"]),
+            JATSParseUnwindState(depthUnderflows: 1)
+        )
+        XCTAssertEqual(
+            stateAfterClosing(["table-wrap"]),
+            JATSParseUnwindState(depthUnderflows: 1)
+        )
+    }
+
+    /// The negative control for all four: matched pairs must stay silent, or the
+    /// counter fires on every well-formed article in the corpus.
+    func testMatchedStackPairsAreNotUnderflows() {
+        XCTAssertEqual(
+            stateAfterClosing(
+                ["caption", "fig", "sec"],
+                opening: ["sec", "fig", "caption"]
+            ),
+            JATSParseUnwindState()
+        )
+    }
+
     /// Why the clamp stays rather than being removed, and the only site where
     /// that is more than uniformity.
     ///
@@ -571,13 +640,13 @@ final class JATSParseGuardTests: XCTestCase {
     /// it means "how many are open, or fewer". Every other element here balances,
     /// so the spurious `</table-wrap-foot>` is the only thing wrong with this
     /// parse — and without the underflow count the audit certifies it clean.
-    func testAnOverDecrementLeavesTheParseCertifiedClean() {
+    func testAnOverDecrementIsNoLongerCertifiedClean() {
         let state = stateAfterClosing(
             ["table-wrap-foot", "table-wrap-foot", "table-wrap"],
             opening: ["table-wrap", "table-wrap-foot"]
         )
 
-        XCTAssertFalse(state.isBalanced, "\(state)")
+        XCTAssertEqual(state, JATSParseUnwindState(depthUnderflows: 1), "\(state)")
     }
 
     // MARK: - The audit runs on every entry point (#175)

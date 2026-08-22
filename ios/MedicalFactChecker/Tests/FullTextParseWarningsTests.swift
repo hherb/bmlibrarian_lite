@@ -141,4 +141,92 @@ final class FullTextParseWarningsTests: XCTestCase {
 
         XCTAssertTrue(document.cachedFullTextResult?.warnings.isClean ?? false)
     }
+
+    /// An undecodable field is not a clean parse.
+    ///
+    /// The field is only ever written when something *was* lost, so reading back
+    /// "clean" from corruption is the one answer that cannot be right: it renders
+    /// a truncated article as complete, which is what this channel exists to stop.
+    func testCorruptWarningsJSONIsNotReportedAsACleanParse() {
+        let document = makeDocument()
+        document.fullTextHTML = "<p>x</p>"
+        document.fullTextSource = AppFullTextSource.europePMC.rawValue
+        document.fullTextParseWarningsJSON = "{not json"
+
+        let warnings = document.cachedFullTextResult?.warnings
+        XCTAssertEqual(warnings?.isClean, false)
+    }
+
+    // MARK: - The cache reads as retrieved (#182 review)
+
+    /// A PDF-only result has to leave the document looking retrieved.
+    ///
+    /// `applyFullTextResult` replaced three inline assignments that each stored
+    /// the PDF URL. Without it `hasFullText` stayed false, so every Europe PMC
+    /// PDF and Unpaywall hit read as never-fetched on the next launch and was
+    /// re-fetched forever.
+    func testAPDFResultIsCachedAsRetrieved() {
+        let document = makeDocument()
+        let url = URL(string: "https://example.org/a.pdf")!
+
+        document.applyFullTextResult(
+            AppFullTextResult(content: .pdfURL(url), source: .unpaywall)
+        )
+
+        XCTAssertEqual(document.fullTextPDFPath, url.absoluteString)
+        XCTAssertTrue(document.hasFullText)
+        XCTAssertNotNil(document.cachedFullTextResult)
+    }
+
+    /// Content the reader supplied replaces the warnings along with the text.
+    ///
+    /// The upload path assigned the cache fields by hand and never cleared the
+    /// warnings, so a reader who uploaded a complete copy *because* the fetched
+    /// parse was truncated was told their own upload was missing content.
+    func testUploadedContentDoesNotInheritTheEarlierParsesWarnings() {
+        for uploaded in [
+            AppFullTextResult.uploaded(content: .html(content: "<p>whole</p>", markdown: "whole")),
+            AppFullTextResult.uploaded(content: .markdown("whole")),
+            AppFullTextResult.uploaded(content: .pdfURL(URL(string: "file:///tmp/a.pdf")!)),
+        ] {
+            let document = makeDocument()
+            document.applyFullTextResult(
+                AppFullTextResult(
+                    content: .html(content: "<p>x</p>", markdown: "x"),
+                    source: .europePMC,
+                    warnings: Self.truncated
+                )
+            )
+
+            document.applyFullTextResult(uploaded)
+
+            XCTAssertNil(document.fullTextParseWarningsJSON, "\(uploaded.content)")
+            XCTAssertTrue(
+                document.cachedFullTextResult?.warnings.isClean ?? false,
+                "\(uploaded.content)"
+            )
+        }
+    }
+
+    /// Uploading a PDF must not leave the superseded HTML behind to shadow it.
+    ///
+    /// `cachedFullTextResult` prefers HTML, so the stale text was what the viewer
+    /// rendered — under a badge reading "Uploaded".
+    func testUploadingAPDFClearsTheSupersededText() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .html(content: "<p>stale</p>", markdown: "stale"),
+                source: .europePMC,
+                warnings: Self.truncated
+            )
+        )
+
+        document.applyFullTextResult(
+            .uploaded(content: .pdfURL(URL(string: "file:///tmp/a.pdf")!))
+        )
+
+        XCTAssertNil(document.fullTextHTML)
+        XCTAssertNil(document.fullTextContent)
+    }
 }

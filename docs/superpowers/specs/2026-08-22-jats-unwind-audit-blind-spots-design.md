@@ -3,7 +3,7 @@
 **Date:** 2026-08-22
 **Issues:** [#180](https://github.com/hherb/bmlibrarian_lite/issues/180), [#181](https://github.com/hherb/bmlibrarian_lite/issues/181)
 **Platform:** Swift — `Packages/BioMedLit` and the `ios/MedicalFactChecker` app target
-**Status:** approved, pending implementation
+**Status:** implemented in PR #182
 
 ## Problem
 

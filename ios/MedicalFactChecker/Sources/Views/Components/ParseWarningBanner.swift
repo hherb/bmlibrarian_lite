@@ -17,11 +17,22 @@
 import SwiftUI
 import BioMedLit
 
+/// Layout and tint values for ``ParseWarningBanner``.
 private enum ParseWarningBannerConstants {
+    /// Vertical gap between the banner's own rows.
     static let spacing: CGFloat = 8
+
+    /// Inset around the banner content, and its margin from the content below.
     static let padding: CGFloat = 12
+
+    /// Corner radius of the banner's outline.
     static let cornerRadius: CGFloat = 8
+
+    /// Vertical gap between individual diagnostic lines in the disclosure.
     static let detailSpacing: CGFloat = 4
+
+    /// Tint strength of the warning fill, kept light enough to read over.
+    static let backgroundOpacity: Double = 0.15
 }
 
 /// Tells the reader that what they are looking at is not the whole article.
@@ -70,7 +81,7 @@ struct ParseWarningBanner: View {
             }
             .padding(ParseWarningBannerConstants.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.yellow.opacity(0.15))
+            .background(.yellow.opacity(ParseWarningBannerConstants.backgroundOpacity))
             .clipShape(
                 RoundedRectangle(cornerRadius: ParseWarningBannerConstants.cornerRadius)
             )
