@@ -87,20 +87,59 @@ class JATSParser:
     in_table_wrap: bool = tables.is_open
 
     # How deep the parser is inside a <fn> or <table-wrap-foot> belonging to
-    # an exhibit. Decides only whether *prose* is footnote prose; labels are
-    # routed by their parent element instead — see "Label routing" below.
+    # an exhibit.
     #
     # A counter and not a flag: <table-wrap-foot> and the <fn> inside it both
     # increment, so a flag cleared on the inner </fn> strands the general note
-    # publishers put after the last footnote. Both ends must test the same
-    # predicate as the routing, or a <table-wrap> opening and closing inside a
-    # footnote skips the decrement and every later <p> in the document drains
-    # into the footnote branch and is discarded (#173).
-
-    # The element stack, maintained for every element. Exhibit furniture is
-    # routed from this, not from the ambient in_* flags — see "Label routing".
-    element_stack: list[str] = []
+    # publishers put after the last footnote.
+    #
+    # It does NOT decide routing. One parser-wide counter cannot answer a
+    # question about the *innermost* exhibit once exhibits nest: while a
+    # <table-wrap> inside another table's <table-wrap-foot> is being parsed the
+    # counter still stands at the outer table's depth, so the inner table's own
+    # cell <p> takes the footnote branch and is filed as the inner table's
+    # footnote — rendered twice, once in the cell and once below it (#173).
+    # Derive the predicate instead; see in_innermost_exhibit_footnote below.
+    # What the counter is still for is the end-of-parse audit: it is the only
+    # thing that notices an increment and its decrement drifting apart.
     footnote_depth: int = 0
+
+    # The element stack, maintained for every element, including inside
+    # <sub-article> where the exhibit collectors deliberately stop recording.
+    # Exhibit furniture is routed from this, not from the ambient in_* flags —
+    # see "Label routing".
+    element_stack: list[str] = []
+
+    # Reference state
+    in_ref_list: bool = false
+    in_ref: bool = false
+    in_ref_citation: bool = false
+    in_person_group: bool = false
+    current_reference: ReferenceBuilder | null
+
+    # Author state
+    in_contrib: bool = false
+    current_author: AuthorBuilder | null
+
+    # Text accumulation
+    text_stack: list[string] = [""]
+
+    # Whether the markup being handled is footnote matter of the *innermost*
+    # open exhibit. Walk outward from the current element and answer with
+    # whichever is met first.
+    #
+    # Both halves are load-bearing. Stopping at the exhibit keeps a
+    # <back><fn-group><fn> — prose belonging to no exhibit — from being routed
+    # into one. Requiring the footnote *before* the exhibit keeps an exhibit
+    # nested inside another's footnote from inheriting that footnote (#173).
+    def in_innermost_exhibit_footnote() -> bool:
+        saw_footnote = false
+        for element in reversed(element_stack):
+            if element in ("table-wrap-foot", "fn"):
+                saw_footnote = true
+            elif element in ("fig", "table-wrap"):
+                return saw_footnote
+        return false
 
 # One kind of exhibit's open and finished elements, in document order.
 #
@@ -136,29 +175,21 @@ class ExhibitCollector[Builder]:
         mutate(stack[-1].builder)
         return true
 
-    def end():
+    # Returns whether anything was open, for the same reason with_current does.
+    # A well-formed document cannot reach the false branch — but neither can it
+    # reach with_current's, and answering one impossible condition with a
+    # diagnostic and its twin with silence is how the quieter one ends up being
+    # the one that loses more: this end drops a whole exhibit.
+    def end() -> bool:
+        if stack is empty: return false
         frame = stack.pop()
         run = [frame.builder.build()] + frame.nested
         (stack[-1].nested if stack else completed).extend(run)
+        return true
 
 class Frame:
     builder: Builder
     nested: list[Built] = []   # exhibits that opened *and closed* inside this
-
-    # Reference state
-    in_ref_list: bool = false
-    in_ref: bool = false
-    in_ref_citation: bool = false
-    in_person_group: bool = false
-    current_reference: ReferenceBuilder | null
-
-    # Author state
-    in_contrib: bool = false
-    current_author: AuthorBuilder | null
-
-    # Text accumulation
-    text_stack: list[string] = [""]
-    element_stack: list[string] = []
 ```
 
 ### Text Accumulation Strategy
@@ -543,13 +574,25 @@ JATS tables can have several structural variations that need special handling.
 2. **Colspan attributes** - Merged cells need empty placeholders
 3. **Nested lists in cells** - Lists inside table cells need proper formatting
 4. **Tables without `<thead>`** - First row with `<th>` cells should be detected as header
-5. **`<table-wrap>` inside `<table-wrap>`** - Legal via `%fn-model`, and a single
-   builder slot loses the outer table outright: the inner open overwrites it, the
-   inner close clears the slot while the outer table is still open so its
-   footnote prose lands nowhere, and the outer end tag finds nothing to build
-   (#173). Collect tables the way figures are collected — see `ExhibitCollector`
-   above. No surveyed article nests one, so a corpus digest cannot catch a
-   regression here; a hand-written fixture is required.
+5. **`<table-wrap>` inside `<table-wrap>`** - Legal via `%fn-model`, and it
+   breaks two things, not one (#173).
+
+   A single builder slot loses the outer table outright: the inner open
+   overwrites it, the inner close clears the slot while the outer table is still
+   open so its footnote prose lands nowhere, and the outer end tag finds nothing
+   to build. Collect tables the way figures are collected — see
+   `ExhibitCollector` above.
+
+   A stack alone does not finish it. The footnote depth is one parser-wide
+   counter, so it still stands at the *outer* table's depth while the inner
+   table is parsed, and the inner table's own cell `<p>` takes the footnote
+   branch — filed as the inner table's footnote and rendered twice. Route prose
+   on `in_innermost_exhibit_footnote` instead of on the counter.
+
+   No surveyed article nests one, so a corpus digest cannot catch a regression
+   here; a hand-written fixture is required — and its cells must contain `<p>`,
+   because bare `<td>` text never reaches the branch that carries the second
+   half.
 
 ### TableBuilder Implementation
 
@@ -1056,13 +1099,24 @@ at error level, naming what it cost.
 
 Run the audit **in the function every entry point funnels through**, not in the
 structured-data path. Production renders HTML and markdown; it does not ask for
-`JATSArticle`. Swift's audit sat in `parseToArticle` for three releases with zero
+`JATSArticle`. Swift's audit sat in `parseToArticle` from the day it was written, with zero
 production call sites, which is to say the safety net for the whole class of
 unbalanced-stack defects was installed only in the test harness — where a defect
 is least likely to go unnoticed (#175). The same applies to the zero-author
 warning, which reports content loss rather than a stack imbalance but is only
-useful in the same place; suppress it when the parse produced nothing at all,
-since that is already reported as an empty result.
+useful in the same place; suppress it when the parse produced nothing at all —
+but report *that* instead, and unconditionally. Only the structured-data path
+turns an empty parse into an error; a renderer measures its own output, and if
+it emits an identifiers line before anything else that output is never empty, so
+an article stripped to its own accession number is returned without a word.
+
+Two limits worth stating rather than discovering. The audit runs after a
+successful parse, so a document the XML reader rejects is never audited — every
+counter is non-zero there by construction, and reporting six guaranteed
+imbalances on every malformed feed trains readers to ignore the category. And
+every diagnostic must name the article: the full-text path builds a parser per
+output format over the same document, so each line appears more than once, and
+unattributed duplicates cannot be told from two genuinely broken articles.
 
 Nothing that can be expressed in well-formed XML trips this audit: a mismatched
 tag is refused by the XML reader first, and each guard tests the same predicate

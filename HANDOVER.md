@@ -6,15 +6,11 @@ its slice has landed; add a new section when handing off new work.
 
 ---
 
-## Recently landed (context)
-
-Compressed once a slice is merged: what remains is the rule that still binds,
-not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
-the rest.
+## In flight
 
 - **One exhibit collector for figures and tables** (#170/#173/#175, PR #179,
-  2026-08-22). `<fig>` got a stack in #156; `<table-wrap>` kept a single builder
-  slot for two more releases, so a table nested in another table's
+  open). `<fig>` got a stack in #156; `<table-wrap>` kept a single builder
+  slot until #173 was filed, so a table nested in another table's
   `<table-wrap-foot>` still lost the outer table outright — its label, its
   caption and every cell, at the instant the inner one opened, with no log. Both
   exhibits now share one `ExhibitCollector<Builder>`, and `inFigure`,
@@ -23,6 +19,15 @@ the rest.
     `inTableWrap` is exactly what the inner `</table-wrap>` cleared while the
     outer table was still open. Every stored-flag bug in this file — #156, #169,
     the `</fn>` counter — is that same sentence with a different noun.
+  - **The stack alone did not finish #173**, which a review caught: the same
+    sentence applies to `exhibitFootnoteDepth`, one parser-wide counter that
+    still stands at the *outer* table's depth while the inner table is parsed. So
+    the inner table's own cell `<p>` took the footnote branch and was filed as
+    the inner table's footnote — rendered twice. Prose now routes on
+    `inInnermostExhibitFootnote`, derived from `elementStack`; the counter is
+    kept only so the audit can notice its two ends drifting apart. The fixture
+    hid it because bare `<td>` text never reaches the `<p>` branch — it holds a
+    `<p>` now, which is what publishers deposit.
   - **The stack is the tree, so the slot list goes away.** #156 kept
     `[JATSFigureInfo?]` reserved slots beside the stack; a closing exhibit now
     hands itself *plus the run that closed inside it* up to its parent — same
@@ -42,21 +47,42 @@ the rest.
       tests hand it the state a defect would leave.
     - **Wiring it needs a check a document *can* trip**, or a mutation deleting
       the call survives. The zero-author warning is that check: it moved to
-      `runParser()` too, which is where it was always needed. Suppressed when the
-      parse produced nothing, since that is already reported as `.noContent`.
+      `runParser()` too, which is where it was always needed. It is suppressed
+      when the parse produced nothing — but the *emptiness* is then reported
+      instead, and unconditionally: only `parseToArticle` turns that into
+      `.noContent`, while `parseToHTML` measures its own output and `buildHTML`
+      emits the identifiers line first, so in production — where the PMC ID is
+      always known — it is never empty and never throws. An article stripped to
+      its own accession number came back without a word.
     - **Nothing connected a counter to the field it is reported under**, so
       swapping two changed no behaviour any test could see. Pinned by driving the
       `XMLParserDelegate` callbacks directly — open an element and never deliver
       its end tag, the one thing well-formed XML cannot do.
   - Corpus digests **did not move**, as expected: no corpus article nests a
-    `<table-wrap>`, so hand-written fixtures are the only guard here. Seventeen
-    mutations, no survivors; one equivalent mutant (dropping an error log at a
-    site `inTableWrap` already guards) correctly survived.
+    `<table-wrap>`, so hand-written fixtures are the only guard here — and their
+    cells must hold `<p>`, since bare `<td>` text never reaches the branch that
+    carries the second half of #173. Mutation-tested; the only survivors are
+    equivalent mutants at sites `inTableWrap` already guards.
   - **bmlib was measured, not assumed** — running its parser over the same
     fixture keeps both tables with the right labels and cells, so it never had
-    #173. It has no end-of-parse audit at all, which is #175 one step worse:
-    lodged as bmlib **#134**. Kotlin has the single-slot shape for *both*
-    exhibits and no audit either; added to **#165**.
+    the first half of #173. It cannot have the second half either, but only
+    because it drops exhibit footnote prose outright rather than routing it —
+    already lodged as bmlib **#124**, and a larger content loss than the bug it
+    happens to sidestep. It has no end-of-parse audit at all, which is #175 one
+    step worse: lodged as bmlib **#134**. Kotlin has the single-slot shape for
+    *both* exhibits and no audit either; added to **#165**.
+  - **Left open, lodged**: #180 (a counter that under-decremented is clamped to
+    zero, so the audit certifies the parse clean) and #181 (the audit only logs;
+    no caller can tell a truncated parse from a thin one).
+
+---
+
+## Recently landed (context)
+
+Compressed once a slice is merged: what remains is the rule that still binds,
+not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
+the rest.
+
 - **JATS routing by the owning element** (#156/#157/#161 in PR #166, #167/#169
   in PR #171, both 2026-08-22). Six defects, one mistake: a piece of markup
   routed on *ambient* parser state — `inFigure`, `inTableWrap`, "is a section
@@ -347,7 +373,7 @@ the rest.
   #147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
 - **#172, #174, #176, #177 — what is left of the #171 review round** (#173 and
-  #175 landed; see above). All four are independent of each other. **#172 and
+  #175 are in flight in PR #179; see above). All four are independent of each other. **#172 and
   #174 go together**, since both are about a table or figure the renderer cannot
   honestly describe: #172 drops a table deposited as a `<graphic>` entirely — all
   8 tables in `PMC12759138` — and #174 gives an unlabelled exhibit a fabricated

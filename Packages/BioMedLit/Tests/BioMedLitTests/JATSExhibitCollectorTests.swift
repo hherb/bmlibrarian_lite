@@ -140,6 +140,26 @@ final class JATSExhibitCollectorTests: XCTestCase {
         XCTAssertFalse(ran)
     }
 
+    /// `end()`'s twin of the above. Answering one impossible condition with a
+    /// diagnostic and the other with silence is how the quieter one ends up being
+    /// the one that loses more — this end drops a whole exhibit, not one write.
+    func testEndSaysSoWhenNothingIsOpen() {
+        var collector = ExhibitCollector<FigureBuilder>()
+
+        XCTAssertFalse(collector.end())
+        XCTAssertEqual(ids(collector), [])
+        XCTAssertEqual(collector.openCount, 0)
+    }
+
+    /// And says nothing when there was something to close, or the caller's log
+    /// would fire on every well-formed exhibit in the document.
+    func testEndSaysNothingWhenAnExhibitWasOpen() {
+        var collector = ExhibitCollector<FigureBuilder>()
+        collector.begin(opened("a"))
+
+        XCTAssertTrue(collector.end())
+    }
+
     // MARK: - What is still open
 
     func testOpenCountReportsTheExhibitsThatNeverClosed() {
@@ -174,7 +194,7 @@ final class JATSExhibitCollectorTests: XCTestCase {
     }
 
     /// The same type serves tables, which is the point of it being generic:
-    /// `<table-wrap>` nests too, and kept a single slot until #173.
+    /// `<table-wrap>` nests too, and kept a single slot until #173 was fixed.
     func testTheCollectorServesTablesToo() {
         var collector = ExhibitCollector<TableBuilder>()
         var outer = TableBuilder()
@@ -196,6 +216,11 @@ final class JATSExhibitCollectorTests: XCTestCase {
     /// admits `<table-wrap>`, so a table can open inside another table's
     /// footnote. Zero corpus articles nest one, so the digests cannot catch a
     /// regression here and this fixture is the only guard.
+    ///
+    /// The inner cell holds a `<p>` rather than bare text on purpose. Bare text
+    /// never reaches the `<p>` routing branch, so it sidesteps the second half of
+    /// #173 entirely — and `<td><p>` is what publishers actually deposit
+    /// (PMC13294358 uses it for 41 of its 61 cells).
     private static let nestedTables = """
     <sec>
       <title>Methods</title>
@@ -207,7 +232,7 @@ final class JATSExhibitCollectorTests: XCTestCase {
           <fn id="fn1"><label>a</label>
             <table-wrap id="tblInner">
               <label>Table 1a.</label>
-              <table><tbody><tr><td>inner cell</td></tr></tbody></table>
+              <table><tbody><tr><td><p>inner cell</p></td></tr></tbody></table>
             </table-wrap>
             <p>Outer footnote prose.</p>
           </fn>
@@ -291,6 +316,27 @@ final class JATSExhibitCollectorTests: XCTestCase {
         XCTAssertTrue(
             article.tables.last?.markdownContent.contains("inner cell") ?? false,
             "inner table rendered as: \(article.tables.last?.markdownContent ?? "nothing")"
+        )
+    }
+
+    /// The other half of #173, and the half a table stack alone does not fix.
+    ///
+    /// `exhibitFootnoteDepth` is one parser-wide counter, so while the inner
+    /// table is being parsed it is still standing at the *outer* table's footnote
+    /// depth. Every `<p>` in the inner table therefore took the footnote branch
+    /// before reaching the exhibit-internals branch, and `appendFootnoteText`
+    /// routes to the innermost exhibit — so the inner table's own cell prose was
+    /// filed as the inner table's footnote, and rendered twice.
+    ///
+    /// `JATSContentRetentionTests.testCellParagraphsAreStillNotTreatedAsProse`
+    /// already asserts exactly this for a flat table. Nesting must not suspend
+    /// the rule.
+    func testTheInnerTablesCellProseIsNotFiledAsItsFootnote() throws {
+        let article = try parse(body: Self.nestedTables)
+
+        XCTAssertEqual(
+            article.tables.last?.footnotes, [],
+            "the inner table's cells were filed under the outer table's footnote depth"
         )
     }
 

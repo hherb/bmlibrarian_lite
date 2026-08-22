@@ -29,13 +29,25 @@ protocol ExhibitBuilder {
     func build() -> Built
 }
 
-extension FigureBuilder: ExhibitBuilder {}
-extension TableBuilder: ExhibitBuilder {}
+// `Built` is pinned rather than inferred. Left to inference, changing
+// `build()` to return an optional silently re-infers `Built` as that optional
+// and `completed` becomes `[JATSFigureInfo?]` — the parallel-array shape #170
+// exists to delete, reintroduced without a word at the conformance. Named, the
+// same edit fails here instead.
+extension FigureBuilder: ExhibitBuilder {
+    typealias Built = JATSFigureInfo
+}
+
+extension TableBuilder: ExhibitBuilder {
+    typealias Built = JATSTableInfo
+}
 
 /// The open and finished exhibits of one kind, in document order.
 ///
 /// JATS exhibits nest, in both directions: eLife wraps every figure supplement
-/// in the figure it belongs to — 44 of 225 surveyed articles (19.6%) — and
+/// in the figure it belongs to — 44 of 225 articles (19.6%) in the 2026-08
+/// eLife-heavy draw, though a differently-mixed draw measured 0.3%, so
+/// re-derive with `scripts/jats_survey.py` before quoting it — and
 /// `%fn-model` admits a `<table-wrap>` inside another table's
 /// `<table-wrap-foot>`. Held as a single builder slot, the inner open overwrote
 /// the parent, the inner close cleared the slot while the parent was still
@@ -45,12 +57,13 @@ extension TableBuilder: ExhibitBuilder {}
 ///
 /// ## Why a type rather than two arrays
 ///
-/// The fix #156 shipped kept a `[JATSFigureInfo?]` of reserved slots beside a
+/// The fix for #156 kept a `[JATSFigureInfo?]` of reserved slots beside a
 /// stack of `(slot:, builder:)` frames. That is correct, but five invariants
 /// rode on the pair with nothing checking them — every frame's index is in
 /// range, the slot it names is still empty, slots increase up the stack, each is
 /// filled exactly once, the arrays grow in lockstep — maintained by two adjacent
-/// lines at one end of an 800-line file and one line at the other. `nil` also
+/// lines in `didStartElement` and one about 375 lines away in `didEndElement`,
+/// with nothing in between naming the contract they keep. `nil` also
 /// meant two different things: "reserved, still open" during the parse and
 /// "opened and never closed" after it, with `compactMap` — the canonical silent
 /// drop — between them and the result (#170).
@@ -58,7 +71,8 @@ extension TableBuilder: ExhibitBuilder {}
 /// Here the stack *is* the tree. A closing exhibit hands itself and everything
 /// that closed inside it up as one run, so document order falls out of the
 /// nesting rather than out of an index, and an exhibit that never closed simply
-/// never leaves ``openCount`` — where the end-of-parse audit can see it (#175).
+/// stays on the stack, where ``openCount`` shows it to the end-of-parse audit
+/// (#175) instead of a `compactMap` dropping it on the way out.
 struct ExhibitCollector<Builder: ExhibitBuilder> {
 
     /// One open exhibit, with whatever has already closed inside it.
@@ -115,15 +129,21 @@ struct ExhibitCollector<Builder: ExhibitBuilder> {
 
     /// Finish the innermost open exhibit, listing it ahead of its children.
     ///
-    /// A no-op when nothing is open, which `XMLParser` cannot deliver: it
-    /// refuses an unbalanced document before the parse returns.
-    mutating func end() {
-        guard let frame = stack.popLast() else { return }
+    /// - Returns: `false` if nothing was open, so the caller can report it.
+    ///   `XMLParser` cannot deliver that for a well-formed document — but it
+    ///   cannot deliver ``withCurrent(_:)``'s empty case either, and that one
+    ///   says so out loud. Answering one impossible condition with a diagnostic
+    ///   and its twin with silence is how the louder of the two ends up being
+    ///   the one that loses less: this end drops a whole exhibit.
+    @discardableResult
+    mutating func end() -> Bool {
+        guard let frame = stack.popLast() else { return false }
         let run = [frame.builder.build()] + frame.nested
         if stack.isEmpty {
             completed.append(contentsOf: run)
         } else {
             stack[stack.count - 1].nested.append(contentsOf: run)
         }
+        return true
     }
 }

@@ -429,7 +429,7 @@ def measure_nested_exhibits(articles: Sequence[Article]) -> Measurement:
 
     `<fig>` inside `<fig>` is eLife's figure-supplement convention and common.
     A `<table-wrap>` inside a `<fig>` is the #169 shape, and a `<table-wrap>`
-    inside a `<table-wrap>` was #173; both are rare enough that a small corpus
+    inside a `<table-wrap>` is #173; both are rare enough that a small corpus
     will report zero, which is exactly why they need synthetic fixtures.
     """
     shapes = {
