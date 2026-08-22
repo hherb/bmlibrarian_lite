@@ -233,6 +233,32 @@ class TestGroupedCitations:
         assert result.data["singleCitationLabels"] == 1
         assert result.data["labelParents"] == {"element-citation": 1}
 
+    def test_a_suffixed_sub_marker_is_not_a_counterexample(self) -> None:
+        """`(b1)` subdivides `(b)`; it is not a reference number.
+
+        A 147-article RSC sample carries 3 of these among 543 labels, always in
+        sequence beside plain letters — `(a)`, `(b)`, `(c)`, `(d)`, `(e1)`. The
+        first version of this detector reported all 3 as counterexamples, which
+        would have argued for reopening #177 on false evidence.
+        """
+        result = jats_survey.measure_grouped_citations(
+            [
+                article(
+                    back="""
+                    <ref-list>
+                      <ref id="cit42">
+                        <element-citation><label>(a)</label></element-citation>
+                        <element-citation><label>(b1)</label></element-citation>
+                      </ref>
+                    </ref-list>
+                    """
+                )
+            ]
+        )
+
+        assert result.data["nonSubMarkerExamples"] == []
+        assert "No counterexamples" in result.headline
+
     def test_an_empty_sample_says_so_rather_than_reporting_a_clean_result(self) -> None:
         """A vacuous pass must not read as evidence.
 

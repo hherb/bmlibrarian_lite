@@ -66,10 +66,17 @@ _SEARCH_PAGE_SIZE = 100
 # The two elements a <ref> may wrap around one bibliographic entry.
 _CITATION_TAGS = ("element-citation", "mixed-citation")
 
-# A grouped citation numbers its members "(a)", "(b)", "(c)". A <label> on a
-# citation that does NOT look like this is the counterexample to the #177 drop:
-# it would be a real reference number, and dropping it would lose data.
-_SUB_MARKER = re.compile(r"^\(\s*[a-z]\s*\)$", re.IGNORECASE)
+# A grouped citation numbers its members "(a)", "(b)", "(c)", and subdivides them
+# as "(b1)", "(b2)" — 3 of 543 labels in a 147-article RSC sample take the
+# suffixed form, always in sequence beside plain letters. A <label> on a citation
+# that does NOT look like either is the counterexample to the #177 drop: it would
+# be a real reference number, and dropping it would lose data.
+#
+# The digit suffix is deliberately part of the *accepted* shape. Without it the
+# detector reported those 3 as counterexamples, which is a false alarm on the one
+# question this script exists to answer honestly — and a detector that cries wolf
+# is one nobody reads.
+_SUB_MARKER = re.compile(r"^\(\s*[a-z]\d*\s*\)$", re.IGNORECASE)
 
 # Two publisher conventions mark a thumbnail; neither is the file extension.
 # Kept in step with `graphicSuitability` in JATSXMLParser.swift.
@@ -324,8 +331,9 @@ def measure_grouped_citations(articles: Sequence[Article]) -> Measurement:
         )
     else:
         verdict = (
-            "No counterexamples: every label is a parenthesised letter, so "
-            "dropping them loses no reference number."
+            "No counterexamples: every label is a parenthesised letter, "
+            "optionally digit-suffixed, so dropping them loses no reference "
+            "number."
         )
     return Measurement(
         name="grouped-citations",
