@@ -696,6 +696,77 @@ final class JATSParseGuardTests: XCTestCase {
         )
     }
 
+    // MARK: - The unwind audit reaches the caller (#181)
+
+    /// #175 put the audit on the path production uses. It still only *logged*,
+    /// so `FullTextService` had no channel to say "this article came back
+    /// truncated" and the UI rendered a gutted article exactly as it rendered a
+    /// complete one — the reader cannot tell a parser defect from a publisher who
+    /// deposited little. These pin the channel that carries it out.
+    func testACleanParseReportsNoWarnings() throws {
+        let parser = JATSXMLParser(data: Data(Self.wellFormedArticleWithAuthor.utf8))
+
+        _ = try parser.parseToHTML()
+
+        XCTAssertTrue(parser.parseWarnings.isClean, "\(parser.parseWarnings.diagnostics)")
+    }
+
+    /// The same imbalance the log already carried, now reachable by a caller.
+    func testAnUnclosedFigureReachesTheCaller() throws {
+        let parser = JATSXMLParser(data: Data(Self.wellFormedArticleWithAuthor.utf8))
+        parser.parser(
+            XMLParser(data: Data()), didStartElement: "fig",
+            namespaceURI: nil, qualifiedName: nil, attributes: [:]
+        )
+
+        _ = try parser.parseToHTML()
+
+        XCTAssertFalse(parser.parseWarnings.isClean)
+        XCTAssertTrue(
+            parser.parseWarnings.diagnostics.contains { $0.contains("open <fig>") },
+            "\(parser.parseWarnings.diagnostics)"
+        )
+    }
+
+    /// The other loss a reader can act on: an article rendered as its own
+    /// accession number and nothing else.
+    func testAContentlessParseReachesTheCaller() throws {
+        let parser = JATSXMLParser(
+            data: Data(Self.contentlessArticle.utf8), knownPMCId: "PMC12759138"
+        )
+
+        _ = try parser.parseToHTML()
+
+        XCTAssertTrue(
+            parser.parseWarnings.diagnostics.contains { $0.contains("no title, abstract or body") },
+            "\(parser.parseWarnings.diagnostics)"
+        )
+    }
+
+    /// The cry-wolf guard, and the reason `parseWarnings` is not simply "every
+    /// line `reportParseCompletion` emits".
+    ///
+    /// Zero authors is a metadata gap, not a truncation: editorials, corrections
+    /// and errata legitimately carry none. A banner that fires on those trains
+    /// the reader to dismiss it, and the banner is then worth nothing on the
+    /// article where content really was discarded. It stays in the log, where a
+    /// developer can still see it.
+    func testZeroAuthorsIsLoggedButNotReportedToTheCaller() throws {
+        let parser = JATSXMLParser(data: Data(Self.authorlessArticle.utf8))
+
+        _ = try parser.parseToHTML()
+
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains("zero authors") },
+            "the warning must still reach the log; recorded: \(logger.recorded)"
+        )
+        XCTAssertTrue(
+            parser.parseWarnings.isClean,
+            "a metadata gap must not read as a truncated rendering: "
+                + "\(parser.parseWarnings.diagnostics)"
+        )
+    }
+
     // MARK: - The unwind audit reaches the log (#175)
 
     /// Everything above tests `unwindDiagnostics` as a pure function and

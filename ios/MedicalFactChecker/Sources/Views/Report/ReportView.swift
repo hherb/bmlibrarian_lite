@@ -1486,21 +1486,10 @@ struct DocumentDetailSheet: View {
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {
-                    // Update document model
-                    switch result.content {
-                    case .html(let htmlContent, let markdownContent):
-                        document.fullTextHTML = htmlContent
-                        document.fullTextContent = markdownContent
-                    case .markdown(let content):
-                        document.fullTextContent = content
-                    case .pdfURL(let url):
-                        document.fullTextPDFPath = url.absoluteString
-                    case .webURL:
-                        // Don't store - just open
-                        break
-                    }
-                    document.fullTextSource = result.source.rawValue
-                    document.fullTextFetchedAt = Date()
+                    // One statement writes every cached field, warnings
+                    // included. Assigning them by hand is what let the
+                    // cache and the live result drift apart (#181).
+                    document.applyFullTextResult(result)
 
                     fullTextResult = result
                     isLoadingFullText = false

@@ -106,6 +106,36 @@ struct JATSParseUnwindState: Equatable {
     }
 }
 
+/// What a parse lost, in a form a caller can act on.
+///
+/// The audit that produces these has run on the production path since #175 and
+/// still only reached the logger, so `FullTextService` had no way to say "this
+/// article came back truncated" and the UI rendered a gutted article exactly as
+/// it rendered a complete one (#181). A reader cannot tell a parser defect from a
+/// publisher who deposited little; this is the channel that lets them.
+///
+/// Carries **facts, not copy**. The diagnostics are the lines written for a
+/// developer reading a log; the sentence shown to a reader is composed by the
+/// app, which is where user-facing wording can be localised with the rest of the
+/// UI.
+///
+/// Deliberately narrower than everything `reportParseCompletion` emits: only
+/// losses a reader can act on. A zero-author parse is a metadata gap, not a
+/// truncation — editorials and corrections legitimately carry none — and a banner
+/// that fires on those is worth nothing on the article where content really was
+/// discarded. That warning stays in the log.
+public struct JATSParseWarnings: Sendable, Equatable {
+    /// One line per loss, each naming what it cost.
+    public let diagnostics: [String]
+
+    /// Whether the parse lost nothing a reader would want to know about.
+    public var isClean: Bool { diagnostics.isEmpty }
+
+    public init(diagnostics: [String] = []) {
+        self.diagnostics = diagnostics
+    }
+}
+
 /// Parser for converting JATS (Journal Article Tag Suite) XML to markdown and HTML.
 ///
 /// JATS is the standard XML format used by Europe PMC and many other
@@ -632,6 +662,12 @@ public final class JATSXMLParser: NSObject {
 
     // MARK: - Parsing
 
+    /// What this parse lost, for a caller that wants to tell the reader.
+    ///
+    /// Empty until the parse completes. Populated by ``reportParseCompletion()``
+    /// from the same audit that writes the log, so the two cannot disagree.
+    public private(set) var parseWarnings = JATSParseWarnings()
+
     /// What the parser still had open when the document ended.
     ///
     /// Every field counts one stack or counter that decides *routing*: while it
@@ -686,11 +722,15 @@ public final class JATSXMLParser: NSObject {
     /// guaranteed imbalances on every malformed feed and train the reader to
     /// ignore the category. The parse error already says the document died.
     private func reportParseCompletion() {
-        for line in Self.unwindDiagnostics(unwindState) {
+        // Collected, not just logged. The same lines become `parseWarnings`, so
+        // what the caller can act on and what a developer reads in the log cannot
+        // drift apart (#181).
+        var readerFacing = Self.unwindDiagnostics(unwindState)
+        for line in readerFacing {
             BioMedLitLib.logger?.error("\(articleIdentifier): \(line)", category: .parsing)
         }
 
-        guard producedContent else {
+        if !producedContent {
             // Reported here rather than left to the caller because only
             // `parseToArticle` turns this into `.noContent`. `parseToHTML` and
             // `parseToMarkdown` measure their own output, and `buildHTML` emits
@@ -700,20 +740,23 @@ public final class JATSXMLParser: NSObject {
             // accession number without a word, which is the shape #175 exists to
             // stop. The author warning is suppressed in the same breath: a parse
             // that produced nothing is one defect, not two.
-            BioMedLitLib.logger?.error(
-                "JATS parse extracted no title, abstract or body for \(articleIdentifier) — "
-                    + "any rendered full text carries only its identifiers",
+            let line = "JATS parse extracted no title, abstract or body — "
+                + "any rendered full text carries only its identifiers"
+            BioMedLitLib.logger?.error("\(articleIdentifier): \(line)", category: .parsing)
+            readerFacing.append(line)
+        } else if authors.isEmpty {
+            // Log only, and deliberately not in `parseWarnings`. A metadata gap
+            // is not a truncation: editorials, corrections and errata carry no
+            // authors legitimately, and a reader-facing banner that fires on
+            // those is worth nothing on the article where content really was
+            // discarded.
+            BioMedLitLib.logger?.warning(
+                "\(articleIdentifier): JATS parse produced zero authors",
                 category: .parsing
             )
-            return
         }
 
-        if authors.isEmpty {
-            BioMedLitLib.logger?.warning(
-                "JATS parse produced zero authors for \(articleIdentifier)",
-                category: .parsing
-            )
-        }
+        parseWarnings = JATSParseWarnings(diagnostics: readerFacing)
     }
 
     /// One line per stack or counter that did not unwind, naming what it cost.

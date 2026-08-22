@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import BioMedLit
 
 /// Source from which full text was retrieved.
 ///
@@ -152,6 +153,25 @@ struct AppFullTextResult: Equatable, Sendable {
 
     /// The source from which the content was retrieved.
     let source: AppFullTextSource
+
+    /// What the JATS parse lost, for the sources that involve one.
+    ///
+    /// Sits beside `content` rather than inside `.html` because it describes the
+    /// *retrieval*, not the content type — and because burying it in the enum
+    /// case would make every `case .html(let content, let markdown)` in the views
+    /// change for no benefit. Empty for PDFs and publisher links, which are not
+    /// parsed at all.
+    let warnings: JATSParseWarnings
+
+    init(
+        content: AppFullTextContentType,
+        source: AppFullTextSource,
+        warnings: JATSParseWarnings = JATSParseWarnings()
+    ) {
+        self.content = content
+        self.source = source
+        self.warnings = warnings
+    }
 
     /// Whether this result can be displayed within the app.
     var canDisplayInApp: Bool {

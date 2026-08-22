@@ -231,26 +231,9 @@ struct FullTextTab: View {
 
     @ViewBuilder
     private var fullTextViewerSheet: some View {
-        if let document = selectedDocument {
-            if let result = fullTextResult {
-                FullTextViewer(document: document, result: result)
-            } else if let content = document.fullTextContent {
-                FullTextViewer(
-                    document: document,
-                    result: AppFullTextResult(
-                        content: .markdown(content),
-                        source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                    )
-                )
-            } else if let html = document.fullTextHTML {
-                FullTextViewer(
-                    document: document,
-                    result: AppFullTextResult(
-                        content: .html(content: html, markdown: document.fullTextContent ?? ""),
-                        source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                    )
-                )
-            }
+        if let document = selectedDocument,
+           let result = fullTextResult ?? document.cachedFullTextResult {
+            FullTextViewer(document: document, result: result)
         }
     }
 
@@ -260,18 +243,10 @@ struct FullTextTab: View {
     private func selectDocument(_ document: Document) {
         selectedDocument = document
         if document.hasFullText {
-            // Create result from stored content
-            if let html = document.fullTextHTML {
-                fullTextResult = AppFullTextResult(
-                    content: .html(content: html, markdown: document.fullTextContent ?? ""),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            } else if let content = document.fullTextContent {
-                fullTextResult = AppFullTextResult(
-                    content: .markdown(content),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            }
+            // Rebuilt in one place, so the cache cannot lose a field the live
+            // result carries — which is how the parse warnings would go missing
+            // on reopen (#181).
+            fullTextResult = document.cachedFullTextResult
             showingFullTextViewer = true
         }
     }
@@ -292,21 +267,10 @@ struct FullTextTab: View {
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {
-                    // Update document model
-                    switch result.content {
-                    case .html(let htmlContent, let markdownContent):
-                        document.fullTextHTML = htmlContent
-                        document.fullTextContent = markdownContent
-                    case .markdown(let content):
-                        document.fullTextContent = content
-                    case .pdfURL(let url):
-                        document.fullTextPDFPath = url.absoluteString
-                    case .webURL:
-                        // Don't store - just for viewing
-                        break
-                    }
-                    document.fullTextSource = result.source.rawValue
-                    document.fullTextFetchedAt = Date()
+                    // One statement writes every cached field, warnings included.
+                    // Assigning them by hand here is what let the cache and the
+                    // live result drift apart.
+                    document.applyFullTextResult(result)
                     try? modelContext.save()
 
                     fullTextResult = result

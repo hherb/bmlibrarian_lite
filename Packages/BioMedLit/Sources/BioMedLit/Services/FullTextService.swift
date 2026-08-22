@@ -51,16 +51,24 @@ public actor FullTextService {
 
     /// Initialize the full-text service.
     ///
-    /// - Parameter email: Email address for API identification.
-    public init(email: String) {
+    /// - Parameters:
+    ///   - email: Email address for API identification.
+    ///   - session: Transport to use. Defaults to the configured session below;
+    ///     the parameter exists so tests can serve a canned response, without
+    ///     which `fetchEuropePMCXML` has no offline coverage at all.
+    public init(email: String, session: URLSession = FullTextService.makeSession()) {
         self.email = email
         self.europePMCService = EuropePMCService()
+        self.session = session
+    }
 
+    /// The transport production uses.
+    public static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = BioMedLitConstants.defaultRequestTimeout
         config.timeoutIntervalForResource = BioMedLitConstants.pdfDownloadTimeout
         config.waitsForConnectivity = true
-        self.session = URLSession(configuration: config)
+        return URLSession(configuration: config)
     }
 
     // MARK: - Main Entry Point
@@ -103,7 +111,9 @@ public actor FullTextService {
                     "Successfully retrieved Europe PMC full text for \(pmcId)",
                     category: .fullText
                 )
-                return .europePMC(html: content.html, markdown: content.markdown)
+                return .europePMC(
+                    html: content.html, markdown: content.markdown, warnings: content.warnings
+                )
             } catch {
                 BioMedLitLib.logger?.warning(
                     "Europe PMC XML failed for \(pmcId): \(error.localizedDescription)",
@@ -158,7 +168,9 @@ public actor FullTextService {
     // MARK: - Europe PMC
 
     /// Fetch full-text XML from Europe PMC with retry logic.
-    private func fetchEuropePMCWithRetry(pmcId: String) async throws -> (html: String, markdown: String) {
+    private func fetchEuropePMCWithRetry(
+        pmcId: String
+    ) async throws -> (html: String, markdown: String, warnings: JATSParseWarnings) {
         try await RetryHelper.retry(
             config: .serverError,
             shouldRetry: RetryHelper.retryOnlyTransient
@@ -169,10 +181,17 @@ public actor FullTextService {
 
     /// Fetch full-text XML from Europe PMC and convert to HTML and markdown.
     ///
+    /// Internal rather than private so the parse-to-caller channel can be tested
+    /// directly: `fetchFullText` catches everything this throws and falls through
+    /// to the PDF and DOI sources, so a parse failure never reaches a caller
+    /// through it.
+    ///
     /// - Parameter pmcId: PubMed Central ID (with or without "PMC" prefix).
-    /// - Returns: Tuple of HTML and markdown formatted article text.
+    /// - Returns: The HTML and markdown renderings, and what the parse lost.
     /// - Throws: `FullTextError` on failure.
-    private func fetchEuropePMCXML(pmcId: String) async throws -> (html: String, markdown: String) {
+    func fetchEuropePMCXML(
+        pmcId: String
+    ) async throws -> (html: String, markdown: String, warnings: JATSParseWarnings) {
         // Normalize PMC ID (ensure it has the PMC prefix)
         let normalizedId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
 
@@ -218,10 +237,21 @@ public actor FullTextService {
             // Create a second parser for markdown (XML parser is consumed after first parse)
             let markdownParser = JATSXMLParser(data: data, knownPMCId: normalizedId)
             let markdown = try markdownParser.parseToMarkdown()
-            return (html: html, markdown: markdown)
+            // Both parsers read the same bytes and so produce the same warnings.
+            // The HTML parser's are taken because that is the rendering the
+            // reader is shown.
+            return (html: html, markdown: markdown, warnings: parser.parseWarnings)
         } catch let parseError as JATSParseError {
-            throw FullTextError.xmlParseError(parseError.localizedDescription)
+            // Kept typed. Flattening it to a string left `.noContent`,
+            // `.alreadyParsed` and `.parsingFailed` indistinguishable to every
+            // caller and to the log.
+            throw FullTextError.jatsParseFailure(parseError)
         } catch {
+            // Unreachable today: the `do` block wraps only the two synchronous
+            // parse calls, and `JATSParseError` is the only thing they throw.
+            // Kept against an edit that makes this block asynchronous, where an
+            // unrelated failure — a cancelled task, say — must not be relabelled
+            // as malformed publisher XML.
             throw FullTextError.xmlParseError(error.localizedDescription)
         }
     }

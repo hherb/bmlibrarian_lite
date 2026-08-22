@@ -1145,6 +1145,42 @@ at both ends of the range it brackets. That is what makes it a net, and it is
 also why it needs a unit test of its own — hand it the state a defect would
 leave, and check it says so.
 
+### Reporting the audit to the caller
+
+Logging is not reporting. An audit that reaches only the logger leaves the UI
+rendering a gutted article exactly as it renders a complete one, so a reader who
+cannot find the table they came for cannot tell whether the publisher never
+deposited it or the parser discarded it (#181). In a medical-literature tool
+those are opposite conclusions, and the wrong one is a reader deciding the
+evidence is absent.
+
+Expose the losses as a value on the parser, carry it out through whatever the
+full-text service returns, and show the reader that the rendering is incomplete.
+Three rules make the difference between a channel and a decoration:
+
+- **Carry facts, not copy.** The parser emits the diagnostics written for a log;
+  the sentence a reader sees is composed in the UI layer, where it can be
+  localised with the rest of the interface.
+- **Narrower than the log.** Only losses a reader can act on: a stack that did
+  not unwind, and a parse that produced no title, abstract or body. A zero-author
+  parse is a metadata gap, not a truncation — editorials, corrections and errata
+  legitimately carry none — and a banner that fires on those is worth nothing on
+  the article where content really was discarded. Keep that one in the log.
+- **Persist it with the cached text.** Full text is normally cached and
+  re-rendered from the cache, so warnings held only on the in-flight result are
+  shown once and lost on reopen — and a viewer that renders *only* from the cache
+  never shows them at all. Write and clear them in the same statement as the
+  content they describe, or they will outlive it and label the next article with
+  the last one's losses. A record written before the field existed must read back
+  as "nothing known", not as a truncation.
+
+Keep the parser's own error **typed** where it crosses the service boundary.
+Flattening it to a string leaves "already parsed", "no content" and "malformed
+XML" indistinguishable to every caller and to the log. And a parse failure is
+deterministic, so it must not be marked retryable.
+
+### The audited state as a type
+
 Make the audited state a type that **cannot hold a negative count**, clamping in
 its initialiser, and give it a single `isBalanced` predicate. Then pin by test
 that `isBalanced` and the diagnostics agree across every single-field state: they

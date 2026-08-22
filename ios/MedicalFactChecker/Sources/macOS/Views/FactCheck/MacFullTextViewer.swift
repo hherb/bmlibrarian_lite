@@ -16,6 +16,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import SwiftUI
+import BioMedLit
 import PDFKit
 import WebKit
 
@@ -168,6 +169,20 @@ struct MacFullTextViewer: View {
 
     @ViewBuilder
     private var content: some View {
+        VStack(spacing: 0) {
+            // This viewer renders from the cached `Document` and never sees the
+            // in-flight result, which is why the warnings are persisted rather
+            // than carried alongside the text (#181). Without that, macOS would
+            // never show this banner at all.
+            ParseWarningBanner(
+                warnings: document.cachedFullTextResult?.warnings ?? JATSParseWarnings()
+            )
+            renderedContent
+        }
+    }
+
+    @ViewBuilder
+    private var renderedContent: some View {
         // Prefer HTML for better table rendering, fall back to markdown
         if let htmlContent = document.fullTextHTML {
             HTMLContentView(htmlContent: htmlContent, searchText: searchText)
