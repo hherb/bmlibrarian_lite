@@ -27,7 +27,11 @@ final class JATSSectionRoutingTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func parse(body: String) throws -> JATSArticle {
+    /// Sections from `body` and from `back` both land in `bodySections`, so
+    /// leaving one empty makes the other's the only entries. Back matter is where
+    /// `<fn-group>` and `<ref-list>` actually live. The article title carries the
+    /// parse past the empty-result guard either way.
+    private func parse(body: String = "", back: String = "") throws -> JATSArticle {
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <article>
@@ -42,31 +46,7 @@ final class JATSSectionRoutingTests: XCTestCase {
           <body>
         \(body)
           </body>
-        </article>
-        """
-        return try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
-    }
-
-    /// Back matter is where `<fn-group>` and `<ref-list>` actually live, and its
-    /// sections land in `bodySections` alongside the body's. The `<body>` is left
-    /// empty so those are the only entries; the article title carries the parse
-    /// past the empty-result guard.
-    private func parse(back: String) throws -> JATSArticle {
-        let xml = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <article>
-          <front>
-            <article-meta>
-              <article-id pub-id-type="pmc">PMC1234567</article-id>
-              <title-group>
-                <article-title>T</article-title>
-              </title-group>
-            </article-meta>
-          </front>
-          <body></body>
-          <back>
-        \(back)
-          </back>
+        \(back.isEmpty ? "" : "  <back>\n\(back)\n  </back>")
         </article>
         """
         return try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
@@ -333,7 +313,7 @@ final class JATSSectionRoutingTests: XCTestCase {
         )
     }
 
-    /// `figureFootnoteDepth` is zero in back matter, so the #157 guard cannot
+    /// `exhibitFootnoteDepth` is zero in back matter, so the #157 guard cannot
     /// reach the case above. It is reachable inside a table, though — where the
     /// depth guard *is* in force and still does not cover `<title>`.
     func testATableFootnoteGroupTitleDoesNotRenameTheEnclosingSection() throws {
@@ -375,6 +355,34 @@ final class JATSSectionRoutingTests: XCTestCase {
         XCTAssertEqual(
             article.bodySections.map(\.title), ["Additional files"],
             "the reference list's title was written over the section's"
+        )
+    }
+
+    /// `<glossary>`, `<app>` and `<ack>` carry titles too, and the comment on the
+    /// fix names them — but naming them is not pinning them: broadening the
+    /// accepted parent set to include all three passes every other test in this
+    /// suite and the real-corpus digest alike, because no corpus article puts one
+    /// inside a titled section.
+    func testGlossaryAppendixAndAcknowledgementTitlesDoNotRenameTheirSections() throws {
+        let article = try parse(back: """
+        <sec id="s6">
+          <title>Additional files</title>
+          <glossary><title>Abbreviations</title><p>AI: artificial intelligence.</p></glossary>
+        </sec>
+        <sec id="s7">
+          <title>Appendices</title>
+          <app><title>Appendix 1</title><p>Derivation of the estimator.</p></app>
+        </sec>
+        <sec id="s8">
+          <title>Notes</title>
+          <ack><title>Acknowledgements</title><p>We thank the reviewers.</p></ack>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.title),
+            ["Additional files", "Appendices", "Notes"],
+            "a child element's own title was written over its section's"
         )
     }
 

@@ -32,9 +32,11 @@ public enum JATSParseError: LocalizedError, Sendable {
     /// The parser instance had already been used.
     ///
     /// `JATSXMLParser` holds one `XMLParser` built from the data it was given, so
-    /// it parses once. Without this case the second call reported
-    /// `parsingFailed("Unknown parsing error")` — a consumed `XMLParser` exposes
-    /// no error of its own — which named neither the cause nor the remedy.
+    /// it parses once. Without this case the second call named neither the cause
+    /// nor the remedy: after a successful first parse a consumed `XMLParser`
+    /// exposes no error of its own, so it reported
+    /// `parsingFailed("Unknown parsing error")`, and after a failed one it
+    /// reported that first failure a second time.
     case alreadyParsed
 
     public var errorDescription: String? {

@@ -21,13 +21,48 @@ the rest.
   `innermostExhibit` for "which of a nested `<fig>`/`<table-wrap>` pair is
   nearer?".
   - **Prefer the parent test to a depth counter where both would work.** #157
-    guarded a footnote's `<label>` with `figureFootnoteDepth` compared against
+    guarded a footnote's `<label>` with `exhibitFootnoteDepth` compared against
     the depth its exhibit opened at, which then needed a special case for each
     way an exhibit can open *inside* a footnote. `enclosingElement == "fn"`
     subsumes all of them, and deleting the comparison took
     `tableFootnoteDepthAtOpen` and the figure stack's `footnoteDepthAtOpen` with
-    it. `figureFootnoteDepth` survives for footnote *prose*, where the nesting
+    it. `exhibitFootnoteDepth` survives for footnote *prose*, where the nesting
     really is unbounded.
+  - **Fix every site the question is asked at, not the two the bug report
+    names.** The #171 review found `<graphic>` still routing on ambient
+    `inFigure` after `<label>` and the footnotes had been fixed for the same
+    nesting — a `<table-wrap>` inside a `<fig>` handed the figure its picture.
+    Grep for the *predicate*, not the symptom.
+  - **`<graphic>` needs a third accessor, not one of the other two.** Ownership
+    passes through `<alternatives>` (a "choose one encoding" wrapper) and stops
+    at everything else, so `enclosingElement` would drop the multi-deposit case
+    #161 exists to serve and `innermostExhibit` would hand a
+    `<supplementary-material>`'s image to the figure around it. `graphicOwner`
+    is a port of bmlib's `_graphic_owner`.
+  - **A counter's two ends must test the same predicate as the routing.** `</fn>`
+    was guarded on the ambient flags while the prose it bracketed routed off the
+    element stack. A `<table-wrap>` opening *and closing* inside a footnote
+    cleared `inTableWrap`, so the decrement was skipped, the counter stayed above
+    zero, and **every later paragraph in the document drained into the footnote
+    branch and was discarded** — the whole body after a nested table, silently.
+    Pre-existing and not corpus-visible; found by review, fixed here, pinned by
+    `testANestedTableWrapDoesNotSwallowTheRestOfTheArticle`. The outer *table* is
+    still lost (#173).
+  - **`doc/cross_platform/jats_parsing.md` is the port contract, and a routing
+    change that leaves it stale re-introduces the defect downstream.** It still
+    specified the deleted depth-comparison algorithm — including the ambient
+    `in_ref` test — so a faithful Kotlin port would have rebuilt #169 from the
+    spec while the Swift fix sat next to it. It now carries label routing, title
+    routing, the graphic-ownership walk, the counter's two ends and the
+    parse-once contract.
+  - **Neither behaviour captured the grouped-citation marker.** The ambient
+    `inRef` test caught a `<label>` on an `<element-citation>` inside the `<ref>`
+    and wrote the last of `(a)`, `(b)`, `(c)` into the field holding the
+    reference *number*. 88 such labels across 161 live articles, not one a
+    reference number, none of the 23 `<ref>`s carrying a direct label of its own.
+    Routing by parent drops them instead — a blank the renderer can see beats a
+    confidently wrong number — and #177 tracks capturing them properly, along
+    with the 2nd–10th citations a grouped `<ref>` has always discarded.
   - **Corpus evidence, all six:** `PMC8754430` 9 figures → 12 and its section
     title `"Author contributions"` → `"Additional information"`; `PMC12661592`
     table label `"a"` → `"Table 1."`; `PMC12755737` + `PMC13294358` `.gif` →
@@ -56,7 +91,13 @@ the rest.
     that Kotlin's caption routing is still the pre-#142 shape and that Kotlin
     pops `elementStack` *before* its `when`, so its `lastOrNull()` is already the
     parent.
-  - Twenty-two mutations across the two PRs, no survivors. Two would otherwise
+  - **`bmlib` is ahead of Swift on exhibit modelling — port from it rather than
+    reinventing.** It already had `_innermost_exhibit()` (so never had #169),
+    `_graphic_owner()` with its transparent-wrapper set, and `table_stack`/
+    `table_slots` beside the figure pair with `in_figure`/`current_table`
+    *derived* and never stored — which is exactly what #173 needs.
+  - Twenty-nine mutations across the two PRs and the #171 review round, no
+    survivors. Two would otherwise
     have shipped uncovered: `specific-use` (above) and pop-and-append ordering.
     Two more exposed a *pre-existing* gap — nothing covered prose sitting
     directly in `<table-wrap-foot>`, outside any `<fn>`, so both the
@@ -241,6 +282,18 @@ the rest.
   instead. One-character fix, but wants a shared fixture or it recurs.
   #147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
+- **#172–#177 — the #171 review round's findings, lodged rather than fixed
+  there.** #173 first: a `<table-wrap>` nested inside a `<table-wrap>` still
+  destroys the outer table, because `currentTable` is a single slot where figures
+  got a stack in #156. The prose-loss half is fixed; the table half needs the
+  #156 treatment, and bmlib's `table_stack` is the shape to port. #175 is cheap
+  and high-leverage: the parser's end-of-parse unwind audit lives in
+  `parseToArticle`, which **production never calls** — moving it into
+  `runParser()` would have surfaced #173 immediately. #172 (a table deposited as
+  a `<graphic>` is never captured — all 8 tables in `PMC12759138`), #174 (an
+  unlabelled figure gets a fabricated `"Figure N"`, in `alt` text too), #176
+  (`FullTextTab` swallows full-text errors with no message and no log) and #177
+  (grouped citations) are independent.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
   open** (#156, #157, #161, #167 and #169 landed; see above). Fixing any of them changes
   `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the evidence —
