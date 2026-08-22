@@ -58,8 +58,8 @@ the rest.
   - **Neither behaviour captured the grouped-citation marker.** The ambient
     `inRef` test caught a `<label>` on an `<element-citation>` inside the `<ref>`
     and wrote the last of `(a)`, `(b)`, `(c)` into the field holding the
-    reference *number*. 88 such labels across 161 live articles, not one a
-    reference number, none of the 23 `<ref>`s carrying a direct label of its own.
+    reference *number*. 631 such labels across 158 refs in 150 articles, not one
+    a reference number, none of those refs carrying a direct label of its own.
     Routing by parent drops them instead — a blank the renderer can see beats a
     confidently wrong number — and #177 tracks capturing them properly, along
     with the 2nd–10th citations a grouped `<ref>` has always discarded.

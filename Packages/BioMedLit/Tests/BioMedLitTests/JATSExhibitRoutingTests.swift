@@ -564,10 +564,12 @@ final class JATSExhibitRoutingTests: XCTestCase {
     /// sub-markers a grouped citation gives its members. Last-sibling-wins then
     /// wrote `(c)` into the field that holds the reference *number*.
     ///
-    /// Of 88 such labels across 161 live articles, every one was a parenthesised
-    /// letter and none was a reference number; no enclosing `<ref>` carried a
-    /// direct `<label>` of its own. So the parent test drops them, deliberately:
-    /// a blank the renderer can see beats a confidently wrong number.
+    /// Of 631 such labels across 158 refs in 150 surveyed articles, every one was
+    /// a parenthesised letter — including the digit-suffixed `(b1)` that
+    /// subdivides one — and none was a reference number; no enclosing `<ref>`
+    /// carried a direct `<label>` of its own. So the parent test drops them,
+    /// deliberately: a blank the renderer can see beats a confidently wrong
+    /// number.
     func testAGroupedCitationsSubMarkerIsNotTheReferencesNumber() throws {
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>

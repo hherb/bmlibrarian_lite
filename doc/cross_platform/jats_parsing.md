@@ -425,8 +425,12 @@ The `default:` arm drops labels on hosts with no model — `<aff>`, `<corresp>`,
 and `<element-citation>`/`<mixed-citation>`. That last pair is deliberate: in a
 grouped citation each member carries its own `(a)`, `(b)`, `(c)` sub-marker, and
 an ambient `in_ref` test wrote the last of them into the field holding the
-reference *number*. Of 88 such labels across 161 live articles, not one was a
-reference number.
+reference *number*. Of 631 such labels across 158 refs in 150 surveyed
+articles, not one was a reference number, and no enclosing `<ref>` carried a
+direct `<label>` a first-wins rule could have preferred. The shape is an RSC
+chemistry convention appearing in `review-article`/`brief-report`, so a generic
+sample finds none — a structural zero, not an empirical one. Re-derive with
+`scripts/jats_survey.py --measure grouped-citations`.
 
 ### Title routing
 
