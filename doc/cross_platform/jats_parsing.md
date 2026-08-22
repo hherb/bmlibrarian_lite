@@ -1097,6 +1097,27 @@ Audit them all — sub-article depth, open figures, open tables, exhibit footnot
 depth, open captions, open sections — and report each imbalance on its own line
 at error level, naming what it cost.
 
+**Count the end tags that had nothing to close, and audit that too** (#180). Every
+decrement clamps at zero, and a `> 0` audit therefore cannot see an
+over-decrement: the evidence is destroyed before it is read. This is worse than a
+blind spot. With a depth of 2 and three decrements the third clamps to 0, the
+counter reads "balanced" for the rest of the document while a real element is
+still open, and the audit **certifies a defective parse as clean** — the opposite
+of what a net is for.
+
+Do not fix this by removing the clamp. For sub-article depth the clamp decides
+routing: "am I inside a sub-article?" is `depth > 0`, so an unclamped -1 is
+brought back to 0 by the next `<sub-article>`, the test reads false while the
+parser is inside one, and a reviewer report is emitted as the article's own body.
+That is a live content defect traded for a diagnostic. Clamp as before, and
+increment a separate underflow counter when the value was already zero. It cannot
+false-positive: the XML reader refuses a document with an unmatched end tag, so
+only a parser defect can produce one.
+
+The counters this applies to are the *depths*. A stack-backed count (open figures,
+open captions) cannot underflow — popping an empty stack is a no-op — so it needs
+no equivalent.
+
 Run the audit **in the function every entry point funnels through**, not in the
 structured-data path. Production renders HTML and markdown; it does not ask for
 `JATSArticle`. Swift's audit sat in `parseToArticle` from the day it was written, with zero
@@ -1123,6 +1144,12 @@ tag is refused by the XML reader first, and each guard tests the same predicate
 at both ends of the range it brackets. That is what makes it a net, and it is
 also why it needs a unit test of its own — hand it the state a defect would
 leave, and check it says so.
+
+Make the audited state a type that **cannot hold a negative count**, clamping in
+its initialiser, and give it a single `isBalanced` predicate. Then pin by test
+that `isBalanced` and the diagnostics agree across every single-field state: they
+answer the same question two ways, and a field added to one and not the other is
+otherwise a silent disagreement about what "clean" means.
 
 ## Common Pitfalls
 

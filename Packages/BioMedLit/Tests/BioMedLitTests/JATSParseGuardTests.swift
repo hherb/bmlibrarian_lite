@@ -315,20 +315,68 @@ final class JATSParseGuardTests: XCTestCase {
             openTables: 1,
             exhibitFootnoteDepth: 1,
             openCaptions: 1,
-            openSections: 1
+            openSections: 1,
+            depthUnderflows: 1
         ))
 
-        XCTAssertEqual(lines.count, 6, "\(lines)")
+        XCTAssertEqual(lines.count, 7, "\(lines)")
+    }
+
+    /// An end tag that arrived with nothing to close (#180).
+    ///
+    /// The counts above are all "still open at the end". This one is the
+    /// opposite imbalance, and it is the only one the audit could not see: every
+    /// decrement site clamps at zero, so an over-decrement was erased before the
+    /// audit read it.
+    func testAnUnderflowIsReported() {
+        let line = diagnostic(JATSParseUnwindState(depthUnderflows: 8))
+
+        XCTAssertTrue(line.contains("nothing to close"), line)
+        XCTAssertTrue(line.contains("8"), line)
     }
 
     /// A negative count is not a thing the parser can produce — every counter is
-    /// clamped at zero — but reporting one as "still open" would be worse than
-    /// saying nothing.
-    func testANegativeCountIsNotReportedAsAnImbalance() {
+    /// clamped at zero — and the type now refuses to represent one, which is
+    /// stronger than tolerating it in the audit. Reporting one as "still open"
+    /// would be worse than saying nothing; being unable to *construct* one means
+    /// no future caller has to remember that.
+    func testANegativeCountIsClampedAtConstruction() {
+        XCTAssertEqual(JATSParseUnwindState(subArticleDepth: -1), JATSParseUnwindState())
+        XCTAssertEqual(JATSParseUnwindState(depthUnderflows: -3), JATSParseUnwindState())
         XCTAssertEqual(
             JATSXMLParser.unwindDiagnostics(JATSParseUnwindState(subArticleDepth: -1)),
             []
         )
+    }
+
+    /// `isBalanced` and `unwindDiagnostics` answer the same question two ways,
+    /// so a field added to one and not the other is a silent disagreement. Every
+    /// single-field state plus the all-fields state has to agree, which is what
+    /// makes "clean" mean the same thing to a caller as it does to the log.
+    func testIsBalancedAgreesWithTheDiagnostics() {
+        let states: [JATSParseUnwindState] = [
+            JATSParseUnwindState(),
+            JATSParseUnwindState(subArticleDepth: 1),
+            JATSParseUnwindState(openFigures: 1),
+            JATSParseUnwindState(openTables: 1),
+            JATSParseUnwindState(exhibitFootnoteDepth: 1),
+            JATSParseUnwindState(openCaptions: 1),
+            JATSParseUnwindState(openSections: 1),
+            JATSParseUnwindState(depthUnderflows: 1),
+            JATSParseUnwindState(
+                subArticleDepth: 1, openFigures: 1, openTables: 1,
+                exhibitFootnoteDepth: 1, openCaptions: 1, openSections: 1,
+                depthUnderflows: 1
+            ),
+        ]
+
+        for state in states {
+            XCTAssertEqual(
+                state.isBalanced,
+                JATSXMLParser.unwindDiagnostics(state).isEmpty,
+                "\(state)"
+            )
+        }
     }
 
     // MARK: - The audit sees what the parser has open (#175)
@@ -392,6 +440,144 @@ final class JATSParseGuardTests: XCTestCase {
     /// measured against: an untouched parser has nothing open.
     func testAParserThatHasSeenNothingHasNothingOpen() {
         XCTAssertEqual(stateAfterOpening([]), JATSParseUnwindState())
+    }
+
+    // MARK: - An end tag with nothing to close (#180)
+
+    /// The mirror of `stateAfterOpening`: deliver end tags through the same real
+    /// delegate callbacks, declining to send the matching start.
+    ///
+    /// `opening` runs first so a test can put the parser in the state its defect
+    /// needs before the unmatched end tag arrives — `</fn>` only decrements
+    /// while an exhibit is open, so it cannot underflow in a vacuum.
+    private func stateAfterClosing(
+        _ closing: [String],
+        opening: [String] = []
+    ) -> JATSParseUnwindState {
+        let parser = JATSXMLParser(data: Data())
+        for element in opening {
+            parser.parser(
+                XMLParser(data: Data()), didStartElement: element,
+                namespaceURI: nil, qualifiedName: nil, attributes: [:]
+            )
+        }
+        for element in closing {
+            parser.parser(
+                XMLParser(data: Data()), didEndElement: element,
+                namespaceURI: nil, qualifiedName: nil
+            )
+        }
+        return parser.unwindState
+    }
+
+    /// The clamp at each decrement site is correct for *routing* and wrong for
+    /// the audit, so #180 keeps it and counts beside it.
+    ///
+    /// Correct for routing: a negative `exhibitFootnoteDepth` would let the next
+    /// legitimate `<table-wrap-foot>` bring the counter back to 0, switching
+    /// footnote routing off while a real footnote is open — a live content-loss
+    /// bug strictly worse than the clamp. Wrong for the audit: with a depth of 2
+    /// and three decrements, the third clamps to 0 and the counter then reads
+    /// "balanced" for the rest of the document while a real element is still
+    /// open, so the audit certifies a defective parse as clean — the opposite of
+    /// what a net is for.
+    func testAnUnmatchedSubArticleEndTagIsCountedAsAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["sub-article"]),
+            JATSParseUnwindState(depthUnderflows: 1)
+        )
+    }
+
+    func testAnUnmatchedTableFootEndTagIsCountedAsAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["table-wrap-foot"]),
+            JATSParseUnwindState(depthUnderflows: 1)
+        )
+    }
+
+    /// `</fn>` decrements only while an exhibit is open, so the underflow needs
+    /// a `<table-wrap>` around it — which is also the only shape in which the
+    /// defect can occur at all.
+    func testAnUnmatchedFootnoteEndTagInsideAnExhibitIsCountedAsAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["fn"], opening: ["table-wrap"]),
+            JATSParseUnwindState(openTables: 1, depthUnderflows: 1)
+        )
+    }
+
+    /// The count, not just the fact. A diagnostic reporting "1" when three end
+    /// tags arrived unmatched understates the damage in exactly the way the clamp
+    /// did, so the increment has to accumulate rather than latch.
+    func testEveryUnmatchedEndTagIsCounted() {
+        XCTAssertEqual(
+            stateAfterClosing(["table-wrap-foot", "table-wrap-foot", "sub-article"]),
+            JATSParseUnwindState(depthUnderflows: 3)
+        )
+    }
+
+    /// The negative control the three above need. Without it they pass just as
+    /// happily against a counter that increments on every end tag, which would
+    /// report an underflow for every well-formed document in the corpus.
+    func testAMatchedFootnotePairIsNotAnUnderflow() {
+        XCTAssertEqual(
+            stateAfterClosing(["table-wrap-foot"], opening: ["table-wrap", "table-wrap-foot"]),
+            JATSParseUnwindState(openTables: 1)
+        )
+    }
+
+    /// Why the clamp stays rather than being removed, and the only site where
+    /// that is more than uniformity.
+    ///
+    /// `inSubArticle` is `subArticleDepth > 0`, so an unclamped over-decrement to
+    /// -1 is not merely unreported: the *next* `<sub-article>` brings the counter
+    /// back to 0, `inSubArticle` reads false while the parser is inside one, and
+    /// the reviewer report is emitted as the article's own body. Removing the
+    /// clamp to "let the audit see the negative" would trade a missing diagnostic
+    /// for live content corruption, which is why #180 counts beside it instead.
+    ///
+    /// (`exhibitFootnoteDepth` has no such stake — routing moved to
+    /// `inInnermostExhibitFootnote` in #173 — so only this counter can be pinned
+    /// this way.)
+    func testAnOverDecrementedSubArticleDepthStillExcludesTheNextSubArticle() throws {
+        let parser = JATSXMLParser(data: Data(Self.articleWithSubArticle.utf8))
+        parser.parser(
+            XMLParser(data: Data()), didEndElement: "sub-article",
+            namespaceURI: nil, qualifiedName: nil
+        )
+
+        let article = try parser.parseToArticle()
+
+        XCTAssertEqual(
+            article.bodySections.flatMap(\.paragraphs), ["Real prose."],
+            "the reviewer report was emitted as the article's own body"
+        )
+    }
+
+    private static let articleWithSubArticle = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <article>
+      <front><article-meta>
+        <title-group><article-title>Real article</article-title></title-group>
+      </article-meta></front>
+      <body><sec><title>Methods</title><p>Real prose.</p></sec></body>
+      <sub-article article-type="reviewer-report">
+        <body><p>Reviewer prose.</p></body>
+      </sub-article>
+    </article>
+    """
+
+    /// The second half of #180's cost, and the half a `> 0` test cannot express:
+    /// after an over-decrement the counter no longer means "how many are open",
+    /// it means "how many are open, or fewer". Every other element here balances,
+    /// so the spurious `</table-wrap-foot>` is the only thing wrong with this
+    /// parse — and without the underflow count the audit certifies it clean.
+    func testAnOverDecrementLeavesTheParseCertifiedClean() {
+        let state = stateAfterClosing(
+            ["table-wrap-foot", "table-wrap-foot", "table-wrap"],
+            opening: ["table-wrap", "table-wrap-foot"]
+        )
+
+        XCTAssertFalse(state.isBalanced, "\(state)")
     }
 
     // MARK: - The audit runs on every entry point (#175)

@@ -32,13 +32,13 @@ import Foundation
 /// correct parse ends in — so a test names only the one imbalance it is about.
 struct JATSParseUnwindState: Equatable {
     /// Depth of unclosed `<sub-article>`/`<response>` nesting.
-    var subArticleDepth = 0
+    let subArticleDepth: Int
 
     /// `<fig>` elements that opened and never closed.
-    var openFigures = 0
+    let openFigures: Int
 
     /// `<table-wrap>` elements that opened and never closed.
-    var openTables = 0
+    let openTables: Int
 
     /// Depth of unclosed `<table-wrap-foot>`/`<fn>` nesting inside an exhibit.
     ///
@@ -49,13 +49,61 @@ struct JATSParseUnwindState: Equatable {
     /// PR #171, before any release carried it; the table half is #173, fixed
     /// here. An assertion here would have surfaced either on the spot instead of
     /// leaving both for a review to find.
-    var exhibitFootnoteDepth = 0
+    let exhibitFootnoteDepth: Int
 
     /// `<caption>` elements that opened and never closed.
-    var openCaptions = 0
+    let openCaptions: Int
 
     /// `<sec>` elements that opened and never closed.
-    var openSections = 0
+    let openSections: Int
+
+    /// End tags that arrived with nothing to close.
+    ///
+    /// The opposite imbalance to the six above, and the only one the audit could
+    /// not see (#180). Every decrement site clamps with `max(0, n - 1)`, and the
+    /// clamp erases the evidence before the audit reads it. Worse than blind:
+    /// with a depth of 2 and three decrements, the third clamps to 0 and the
+    /// counter reads "balanced" for the rest of the document, so the audit
+    /// certifies a defective parse as clean.
+    ///
+    /// The clamp still has to stay, because for `subArticleDepth` it is
+    /// load-bearing: `inSubArticle` is `subArticleDepth > 0`, so an unclamped -1
+    /// would be brought back to 0 by the next `<sub-article>` and a reviewer
+    /// report would be emitted as the article's own body. Counting the underflow
+    /// beside the clamp keeps both properties.
+    ///
+    /// It cannot false-positive: `XMLParser` refuses a document that delivers an
+    /// unmatched end tag, so only a parser defect can produce one.
+    let depthUnderflows: Int
+
+    /// Whether the parse ended in the only shape a correct one can.
+    ///
+    /// Agrees with ``JATSXMLParser/unwindDiagnostics(_:)`` by construction — both
+    /// are pinned to the same set of fields by test, so a field added to one and
+    /// not the other is a failure rather than a silent disagreement.
+    var isBalanced: Bool { self == JATSParseUnwindState() }
+
+    /// - Note: Every count is clamped at zero. The parser cannot produce a
+    ///   negative — each source is either a `max(0, ...)` counter or a `.count` —
+    ///   and reporting one as "still open" would be worse than saying nothing, so
+    ///   the type declines to represent it at all.
+    init(
+        subArticleDepth: Int = 0,
+        openFigures: Int = 0,
+        openTables: Int = 0,
+        exhibitFootnoteDepth: Int = 0,
+        openCaptions: Int = 0,
+        openSections: Int = 0,
+        depthUnderflows: Int = 0
+    ) {
+        self.subArticleDepth = max(0, subArticleDepth)
+        self.openFigures = max(0, openFigures)
+        self.openTables = max(0, openTables)
+        self.exhibitFootnoteDepth = max(0, exhibitFootnoteDepth)
+        self.openCaptions = max(0, openCaptions)
+        self.openSections = max(0, openSections)
+        self.depthUnderflows = max(0, depthUnderflows)
+    }
 }
 
 /// Parser for converting JATS (Journal Article Tag Suite) XML to markdown and HTML.
@@ -300,6 +348,36 @@ public final class JATSXMLParser: NSObject {
     /// non-zero result means an increment and its decrement stopped testing the
     /// same predicate — the defect shape this file has now produced twice.
     private var exhibitFootnoteDepth = 0
+
+    /// End tags that arrived with nothing to close.
+    ///
+    /// Every depth counter above is decremented as `max(0, n - 1)`, and that
+    /// clamp discards the one observation the audit needs — so the audit was
+    /// left certifying a defective parse as clean (#180).
+    ///
+    /// The clamp stays anyway, because for `subArticleDepth` it decides routing:
+    /// `inSubArticle` is `subArticleDepth > 0`, so an unclamped -1 would be
+    /// brought back to 0 by the *next* `<sub-article>`, and a reviewer report
+    /// would be emitted as the article's own body — a live content defect,
+    /// strictly worse than a missing diagnostic. Pinned by
+    /// `testAnOverDecrementedSubArticleDepthStillExcludesTheNextSubArticle`.
+    /// `exhibitFootnoteDepth` no longer routes anything (that moved to
+    /// `inInnermostExhibitFootnote` in #173), so its clamp is uniformity, not
+    /// necessity.
+    ///
+    /// Counting the underflow beside the clamp keeps both properties. It cannot
+    /// false-positive — `XMLParser` refuses a document with an unmatched end tag,
+    /// so only a parser defect reaches here — which is why it is counted rather
+    /// than asserted on.
+    private var depthUnderflows = 0
+
+    /// Decrement a depth counter, keeping the evidence if it had nothing to drop.
+    ///
+    /// - Parameter depth: The counter to decrement, clamped at zero.
+    private func decrementDepth(_ depth: inout Int) {
+        if depth == 0 { depthUnderflows += 1 }
+        depth = max(0, depth - 1)
+    }
 
     /// The element that most closely encloses the one being handled.
     ///
@@ -567,7 +645,8 @@ public final class JATSXMLParser: NSObject {
             openTables: tableCollector.openCount,
             exhibitFootnoteDepth: exhibitFootnoteDepth,
             openCaptions: captionStack.count,
-            openSections: sectionStack.count
+            openSections: sectionStack.count,
+            depthUnderflows: depthUnderflows
         )
     }
 
@@ -685,6 +764,13 @@ public final class JATSXMLParser: NSObject {
             lines.append(
                 "JATS parse ended with \(state.openSections) open <sec> — "
                     + "those sections and their prose were never emitted"
+            )
+        }
+        if state.depthUnderflows > 0 {
+            lines.append(
+                "JATS parse saw \(state.depthUnderflows) end tag(s) with nothing to close — "
+                    + "a depth counter under-decremented, so the counts above understate "
+                    + "what was misrouted"
             )
         }
 
@@ -1818,7 +1904,7 @@ extension JATSXMLParser: XMLParserDelegate {
         // See didStartElement. Handled before the guard, or `</sub-article>` would
         // be skipped by the very depth it is supposed to clear.
         if elementName == "sub-article" || elementName == "response" {
-            subArticleDepth = max(0, subArticleDepth - 1)
+            decrementDepth(&subArticleDepth)
             return
         }
         guard !inSubArticle else { return }
@@ -2086,7 +2172,7 @@ extension JATSXMLParser: XMLParserDelegate {
         case "caption":
             _ = captionStack.popLast()
         case "table-wrap-foot":
-            exhibitFootnoteDepth = max(0, exhibitFootnoteDepth - 1)
+            decrementDepth(&exhibitFootnoteDepth)
         case "fn":
             // The element stack, not the ambient flags. When `inTableWrap` was a
             // stored flag, a `<table-wrap>` opening and closing *inside* this
@@ -2103,7 +2189,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 // disambiguate; clearing it here stops it prefixing the *next*
                 // footnote instead.
                 setPendingFootnoteLabel("")
-                exhibitFootnoteDepth = max(0, exhibitFootnoteDepth - 1)
+                decrementDepth(&exhibitFootnoteDepth)
             }
 
         // Tables
