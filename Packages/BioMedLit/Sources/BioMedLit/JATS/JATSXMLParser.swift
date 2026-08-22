@@ -16,6 +16,48 @@
 
 import Foundation
 
+/// What a `JATSXMLParser` still had open when the document ended.
+///
+/// A parameter object for the audit that reads it, so that audit can be a pure
+/// function (``JATSXMLParser/unwindDiagnostics(_:)``). Nothing else can
+/// exercise it: a well-formed document cannot trip the audit, since `XMLParser`
+/// refuses an unbalanced one and each guard in the parser tests the same
+/// predicate at both ends of the range it brackets. A net that fires only on a
+/// parser defect can only be tested by handing it the state a defect would
+/// leave.
+///
+/// Every field counts one stack or counter that decides *routing*: while it is
+/// non-zero, content is being filed somewhere other than the article body, so
+/// an imbalance is never cosmetic. Every field defaults to zero — the shape a
+/// correct parse ends in — so a test names only the one imbalance it is about.
+struct JATSParseUnwindState: Equatable {
+    /// Depth of unclosed `<sub-article>`/`<response>` nesting.
+    var subArticleDepth = 0
+
+    /// `<fig>` elements that opened and never closed.
+    var openFigures = 0
+
+    /// `<table-wrap>` elements that opened and never closed.
+    var openTables = 0
+
+    /// Depth of unclosed `<table-wrap-foot>`/`<fn>` nesting inside an exhibit.
+    ///
+    /// The one imbalance that has actually occurred on master: a nested
+    /// `<table-wrap>` cleared the then-stored `inTableWrap` while the outer table
+    /// was still open, so `</fn>` skipped its decrement and every later `<p>`
+    /// drained into the footnote branch and was discarded. That half was fixed in
+    /// PR #171, before any release carried it; the table half is #173, fixed
+    /// here. An assertion here would have surfaced either on the spot instead of
+    /// leaving both for a review to find.
+    var exhibitFootnoteDepth = 0
+
+    /// `<caption>` elements that opened and never closed.
+    var openCaptions = 0
+
+    /// `<sec>` elements that opened and never closed.
+    var openSections = 0
+}
+
 /// Parser for converting JATS (Journal Article Tag Suite) XML to markdown and HTML.
 ///
 /// JATS is the standard XML format used by Europe PMC and many other
@@ -81,25 +123,12 @@ public final class JATSXMLParser: NSObject {
     private var abstractSections: [JATSAbstractSection] = []
     private var bodySections: [JATSBodySection] = []
 
-    /// One slot per `<fig>` opened outside a `<sub-article>`, in the order the
-    /// figures *opened*.
-    ///
-    /// A figure is built at its end tag but has to be listed at its start. Build
-    /// order is innermost-first, so a plain pop-and-append would emit each eLife
-    /// supplement ahead of the parent it belongs to. Reserving the slot when the
-    /// element opens and filling it when it closes keeps `figures` in document
-    /// order however deeply the article nests (#156).
-    ///
-    /// A slot still `nil` after the parse is a `<fig>` that never closed. That
-    /// cannot survive `XMLParser`, which rejects the document first, so the
-    /// `compactMap` below is a formality — `parseToArticle` says so out loud if it
-    /// ever stops being one.
-    private var figureSlots: [JATSFigureInfo?] = []
-
     /// Figures in document order.
-    private var figures: [JATSFigureInfo] { figureSlots.compactMap { $0 } }
+    private var figures: [JATSFigureInfo] { figureCollector.completed }
 
-    private var tables: [JATSTableInfo] = []
+    /// Tables in document order.
+    private var tables: [JATSTableInfo] { tableCollector.completed }
+
     private var references: [JATSReferenceInfo] = []
 
     // MARK: - Parsing State
@@ -164,7 +193,29 @@ public final class JATSXMLParser: NSObject {
     private var implicitBodySection: SectionBuilder?
 
     // Figure/Table state
-    private var inTableWrap = false
+
+    /// Open and finished `<fig>` elements, in document order.
+    ///
+    /// A stack rather than a single slot for the reason `subArticleDepth` is a
+    /// counter: JATS permits a `<fig>` inside a `<fig>` and eLife uses it for
+    /// every figure supplement, in a fifth of one surveyed draw — see
+    /// ``ExhibitCollector`` for the figure and its caveat. A
+    /// single slot was overwritten when the inner figure opened and cleared when
+    /// it closed, so the parent was discarded and the rest of its content was
+    /// read as though no figure were open at all (#156).
+    private var figureCollector = ExhibitCollector<FigureBuilder>()
+
+    /// Open and finished `<table-wrap>` elements, in document order.
+    ///
+    /// The same type for the same reason one element over: `%fn-model` admits a
+    /// `<table-wrap>`, so a table opens inside another table's footnote, and a
+    /// single slot lost the outer table outright (#173). Figures got the stack
+    /// in #156 and tables kept the slot until #173 was filed, which is what
+    /// having one type for both is meant to prevent.
+    private var tableCollector = ExhibitCollector<TableBuilder>()
+
+    /// Whether the parser is inside a `<table-wrap>` at any depth.
+    private var inTableWrap: Bool { tableCollector.isOpen }
 
     /// How deep the parser is inside `<sub-article>` / `<response>` elements.
     ///
@@ -186,10 +237,10 @@ public final class JATSXMLParser: NSObject {
 
     /// What the innermost open `<caption>` belongs to.
     ///
-    /// Read from the caption's own parent element rather than from the ambient
-    /// `inFigure`/`inTableWrap` flags: a `<media>` inside a `<fig>` carries a
-    /// caption of its own, and the flags are still set for the enclosing figure,
-    /// so reading them concatenated the inner caption onto the outer one.
+    /// Read from the caption's own parent element rather than from an ambient
+    /// "a figure is open" test: a `<media>` inside a `<fig>` carries a caption of
+    /// its own, and the enclosing figure is still open, so reading that
+    /// concatenated the inner caption onto the outer one.
     private enum CaptionOwner {
         /// A `<fig>` caption; the text belongs to that figure.
         case figure
@@ -209,11 +260,10 @@ public final class JATSXMLParser: NSObject {
     /// fall through to the enclosing section. A `<label>` or a footnote has no
     /// such hazard, so two cases are enough here.
     ///
-    /// The two arms are not symmetric behind the scenes, and a reader should know
-    /// it: `.figure` addresses the innermost open `<fig>` through `figureStack`,
-    /// while `.table` addresses the single `currentTable` slot. A `<table-wrap>`
-    /// inside a `<table-wrap>` therefore still loses the outer table — the
-    /// table-side twin of #156, tracked as #173.
+    /// Both arms address the innermost open exhibit of their kind, through an
+    /// `ExhibitCollector` apiece. They were asymmetric until #173 was fixed —
+    /// the table side kept a single builder slot, so a `<table-wrap>` inside a
+    /// `<table-wrap>` lost the outer table outright.
     private enum Exhibit {
         case figure
         case table
@@ -222,8 +272,9 @@ public final class JATSXMLParser: NSObject {
     /// Open `<caption>` owners, innermost last.
     ///
     /// `<caption>` carries `<title>` and `<p>` — the same element names a section
-    /// uses. Routing them on `inFigure`/`sectionStack` alone renamed the enclosing
-    /// `<sec>` after the figure and spilled caption prose into the article text.
+    /// uses. Routing them on "a figure is open" plus `sectionStack` alone renamed
+    /// the enclosing `<sec>` after the figure and spilled caption prose into the
+    /// article text.
     /// Any open caption now decides, whatever element it hangs off, and it is a
     /// stack because JATS permits a captioned element inside a caption.
     private var captionStack: [CaptionOwner] = []
@@ -241,25 +292,14 @@ public final class JATSXMLParser: NSObject {
     /// are mean (SD)" note — outside the footnotes, where it is dropped as cell
     /// furniture. Pinned by `JATSContentRetentionTests`.
     ///
-    /// Not derivable from `elementStack`: a bare `elementStack.contains("fn")`
-    /// would fire for `<back><fn-group><fn>` and route back-matter competing-
-    /// interest and funding prose into an exhibit that is not there. The scoping
-    /// to an open exhibit is the point.
+    /// It no longer decides routing — `inInnermostExhibitFootnote` does, because
+    /// one parser-wide counter cannot answer a question about the *innermost*
+    /// exhibit once exhibits nest (#173). What it still does is measure whether
+    /// the parser's own footnote bookkeeping balances, which is the one thing a
+    /// derived predicate cannot check: the end-of-parse audit reads it, and a
+    /// non-zero result means an increment and its decrement stopped testing the
+    /// same predicate — the defect shape this file has now produced twice.
     private var exhibitFootnoteDepth = 0
-
-    /// Open `<fig>` builders, innermost last, each paired with the `figureSlots`
-    /// entry it will fill.
-    ///
-    /// A stack rather than a single slot for the reason `subArticleDepth` is a
-    /// counter: JATS permits a `<fig>` inside a `<fig>` and eLife uses it for
-    /// every figure supplement — 44 of 225 surveyed articles (19.6%) nest one. A
-    /// single slot was overwritten when the inner figure opened and cleared when
-    /// it closed, so the parent was discarded and the rest of its content was
-    /// read as though no figure were open at all (#156).
-    private var figureStack: [(slot: Int, builder: FigureBuilder)] = []
-
-    /// Whether the parser is inside a `<fig>` at any depth.
-    private var inFigure: Bool { !figureStack.isEmpty }
 
     /// The element that most closely encloses the one being handled.
     ///
@@ -279,18 +319,19 @@ public final class JATSXMLParser: NSObject {
 
     /// The exhibit that most closely encloses the markup being handled.
     ///
-    /// `inFigure` and `inTableWrap` are both true for a `<table-wrap>` inside a
-    /// `<fig>`, so asking them in a fixed order answered with whichever was asked
-    /// first rather than with the nearer one: the table's `<label>` and its
-    /// `<table-wrap-foot>` were both filed under the enclosing figure (#169).
+    /// Both collectors are open for a `<table-wrap>` inside a `<fig>`, so asking
+    /// them in a fixed order — as the `inFigure`/`inTableWrap` flags invited —
+    /// answered with whichever was asked first rather than with the nearer one:
+    /// the table's `<label>` and its `<table-wrap-foot>` were both filed under the
+    /// enclosing figure (#169).
     /// The element stack knows which is nearer, and it is the same question
     /// `enclosingElement` answers one step out.
     ///
-    /// It reads a stack that keeps recording inside `<sub-article>`, where
-    /// `figureStack` and `inTableWrap` deliberately do not, so the two can
-    /// disagree there. Every call site sits below the `guard !inSubArticle` in
-    /// `didEndElement`, which is what keeps that harmless — moving one above it
-    /// would route excluded content into the enclosing article.
+    /// It reads a stack that keeps recording inside `<sub-article>`, where the
+    /// two exhibit collectors deliberately do not, so they can disagree there.
+    /// Every call site sits below the `guard !inSubArticle` in `didEndElement`,
+    /// which is what keeps that harmless — moving one above it would route
+    /// excluded content into the enclosing article.
     private var innermostExhibit: Exhibit? {
         for element in elementStack.reversed() {
             switch element {
@@ -302,45 +343,76 @@ public final class JATSXMLParser: NSObject {
         return nil
     }
 
+    /// Whether the markup being handled is footnote matter of the *innermost*
+    /// open exhibit.
+    ///
+    /// Walks outward from the current element and answers with whichever it
+    /// meets first: a `<table-wrap-foot>`/`<fn>` on the way to an enclosing
+    /// `<fig>` or `<table-wrap>` means yes; reaching the exhibit without one, or
+    /// reaching the bottom of the stack, means no.
+    ///
+    /// Both halves of that walk are load-bearing. Stopping at the exhibit is
+    /// what keeps a `<back><fn-group><fn>` — competing-interest and funding
+    /// prose that belongs to no exhibit — from being routed into one. Requiring
+    /// the footnote to be met *before* the exhibit is what keeps an exhibit
+    /// nested inside another's footnote from inheriting that footnote: a
+    /// `<table-wrap>` inside a `<table-wrap-foot>` is exhibit internals of its
+    /// own, so its cells belong to its own rendered table and nowhere else.
+    ///
+    /// Derived rather than read off `exhibitFootnoteDepth`, which is a single
+    /// parser-wide counter and therefore still standing at the outer exhibit's
+    /// depth while an inner one is being parsed. That is the same sentence as
+    /// every other stored-flag defect in this file, one noun over (#173).
+    private var inInnermostExhibitFootnote: Bool {
+        var sawFootnote = false
+        for element in elementStack.reversed() {
+            switch element {
+            case "table-wrap-foot", "fn":
+                sawFootnote = true
+            case "fig", "table-wrap":
+                return sawFootnote
+            default:
+                continue
+            }
+        }
+        return false
+    }
+
     /// Mutate the innermost open figure, if there is one.
     ///
     /// Every `<graphic>`, `<label>` and caption belongs to the figure that
     /// encloses it most closely, never to whichever figure happens to be last.
     private func withCurrentFigure(_ mutate: (inout FigureBuilder) -> Void) {
-        guard !figureStack.isEmpty else {
+        if !figureCollector.withCurrent(mutate) {
             // The callers all test `enclosingElement`, `innermostExhibit` or a
             // `captionStack` entry first — all three read `elementStack` — so
-            // reaching here means the element stack and `figureStack` disagree
+            // reaching here means the element stack and the collector disagree
             // about whether a figure is open. Logged rather than ignored: the
             // symptom is figure content quietly going missing, with nothing else
             // to go on.
             BioMedLitLib.logger?.error(
-                "JATS figure content routed with no open <fig>",
+                "JATS figure content routed with no open <fig> for \(articleIdentifier)",
                 category: .parsing
             )
-            return
         }
-        mutate(&figureStack[figureStack.count - 1].builder)
     }
 
     /// Mutate the open table, if there is one.
     ///
     /// The table-side counterpart of `withCurrentFigure`, and it earns its place
     /// for the same reason: the routing answers from `elementStack` while the
-    /// write lands on `currentTable`, so the two can disagree. They do, in one
-    /// shape — a `<table-wrap>` nested inside a `<table-wrap>` clears the slot
-    /// while the outer one is still open (#173) — and a bare `currentTable?.`
-    /// swallowed the lost content without trace where the figure side logged it.
+    /// write lands on the collector, so the two can disagree. Where they used to
+    /// — a `<table-wrap>` nested inside a `<table-wrap>` cleared the single slot
+    /// while the outer one was still open (#173) — the collector now keeps the
+    /// outer table addressable, so this branch is the same formality the figure
+    /// side already was.
     private func withCurrentTable(_ mutate: (inout TableBuilder) -> Void) {
-        guard var table = currentTable else {
+        if !tableCollector.withCurrent(mutate) {
             BioMedLitLib.logger?.error(
-                "JATS table content routed with no open <table-wrap> (#173)",
+                "JATS table content routed with no open <table-wrap> for \(articleIdentifier)",
                 category: .parsing
             )
-            return
         }
-        mutate(&table)
-        currentTable = table
     }
 
     /// Elements a `<graphic>` may sit inside without ceasing to be the enclosing
@@ -402,8 +474,6 @@ public final class JATSXMLParser: NSObject {
         }
         return .full
     }
-
-    private var currentTable: TableBuilder?
 
     // Reference state
     private var inRefList = false
@@ -484,6 +554,143 @@ public final class JATSXMLParser: NSObject {
 
     // MARK: - Parsing
 
+    /// What the parser still had open when the document ended.
+    ///
+    /// Every field counts one stack or counter that decides *routing*: while it
+    /// is non-zero, content is being filed somewhere other than the article
+    /// body, so an imbalance is never cosmetic. Zero across the board is the
+    /// only shape a correct parse can end in.
+    var unwindState: JATSParseUnwindState {
+        JATSParseUnwindState(
+            subArticleDepth: subArticleDepth,
+            openFigures: figureCollector.openCount,
+            openTables: tableCollector.openCount,
+            exhibitFootnoteDepth: exhibitFootnoteDepth,
+            openCaptions: captionStack.count,
+            openSections: sectionStack.count
+        )
+    }
+
+    /// Whether the parse produced anything at all.
+    ///
+    /// The predicate `parseToArticle` refuses on, shared with the audit so that
+    /// a parse which produced nothing is reported once — as `.noContent` — and
+    /// not also as an article that happens to have no authors.
+    private var producedContent: Bool {
+        !title.isEmpty || !abstractSections.isEmpty || !bodySections.isEmpty
+    }
+
+    /// The best name this parse can put on itself, for diagnostics.
+    ///
+    /// Every line `reportParseCompletion` emits carries it. Without one the
+    /// diagnostics are unactionable in the place they are meant to be read: the
+    /// full-text path builds two parsers over the same document — `XMLParser` is
+    /// consumed by its first parse — so each line appears twice per article, and
+    /// two identical lines with no identifier cannot be told from two genuinely
+    /// broken articles.
+    private var articleIdentifier: String {
+        if !pmcId.isEmpty { return pmcId }
+        return doi.isEmpty ? "an unidentified article" : doi
+    }
+
+    /// Report anything the parse left open, and any content it lost.
+    ///
+    /// Runs from ``runParser()`` so that every entry point audits: it used to
+    /// live in `parseToArticle`, which **production never calls**. The full-text
+    /// path is `parseToHTML` then `parseToMarkdown`, so the safety net for the
+    /// whole class of unbalanced-stack defects — the class #156, #157, #169 and
+    /// #173 all came from — was installed only in the test harness, which is
+    /// where a defect is least likely to go unnoticed (#175).
+    ///
+    /// Deliberately not reached when `XMLParser` rejects the document: every
+    /// counter is non-zero there by construction, so auditing would emit six
+    /// guaranteed imbalances on every malformed feed and train the reader to
+    /// ignore the category. The parse error already says the document died.
+    private func reportParseCompletion() {
+        for line in Self.unwindDiagnostics(unwindState) {
+            BioMedLitLib.logger?.error("\(articleIdentifier): \(line)", category: .parsing)
+        }
+
+        guard producedContent else {
+            // Reported here rather than left to the caller because only
+            // `parseToArticle` turns this into `.noContent`. `parseToHTML` and
+            // `parseToMarkdown` measure their own output, and `buildHTML` emits
+            // the identifiers line before anything else — which is never empty
+            // in production, where `FullTextService` always supplies a known PMC
+            // ID. Both paths therefore returned an article stripped to its own
+            // accession number without a word, which is the shape #175 exists to
+            // stop. The author warning is suppressed in the same breath: a parse
+            // that produced nothing is one defect, not two.
+            BioMedLitLib.logger?.error(
+                "JATS parse extracted no title, abstract or body for \(articleIdentifier) — "
+                    + "any rendered full text carries only its identifiers",
+                category: .parsing
+            )
+            return
+        }
+
+        if authors.isEmpty {
+            BioMedLitLib.logger?.warning(
+                "JATS parse produced zero authors for \(articleIdentifier)",
+                category: .parsing
+            )
+        }
+    }
+
+    /// One line per stack or counter that did not unwind, naming what it cost.
+    ///
+    /// A pure function of the end state, and a static one, because that is the
+    /// only way to exercise it: no well-formed document can trip it. `XMLParser`
+    /// refuses an unbalanced document before the parse returns, and every guard
+    /// inside the parser now tests the same predicate at both ends of the range
+    /// it brackets — which is exactly the property this exists to notice the
+    /// loss of.
+    ///
+    /// - Parameter state: What was still open when the document ended.
+    /// - Returns: A diagnostic per imbalance, empty for a clean parse.
+    static func unwindDiagnostics(_ state: JATSParseUnwindState) -> [String] {
+        var lines: [String] = []
+
+        if state.subArticleDepth > 0 {
+            lines.append(
+                "JATS sub-article depth ended at \(state.subArticleDepth), not 0 — "
+                    + "content after the imbalance was discarded"
+            )
+        }
+        if state.openFigures > 0 {
+            lines.append(
+                "JATS parse ended with \(state.openFigures) open <fig> — "
+                    + "those figures and their content were discarded"
+            )
+        }
+        if state.openTables > 0 {
+            lines.append(
+                "JATS parse ended with \(state.openTables) open <table-wrap> — "
+                    + "those tables and their content were discarded"
+            )
+        }
+        if state.exhibitFootnoteDepth > 0 {
+            lines.append(
+                "JATS exhibit footnote depth ended at \(state.exhibitFootnoteDepth), not 0 — "
+                    + "prose after the imbalance was routed into a footnote and discarded"
+            )
+        }
+        if state.openCaptions > 0 {
+            lines.append(
+                "JATS parse ended with \(state.openCaptions) open <caption> — "
+                    + "prose after the imbalance was read as caption text"
+            )
+        }
+        if state.openSections > 0 {
+            lines.append(
+                "JATS parse ended with \(state.openSections) open <sec> — "
+                    + "those sections and their prose were never emitted"
+            )
+        }
+
+        return lines
+    }
+
     /// Run the underlying `XMLParser` exactly once.
     ///
     /// - Throws: ``JATSParseError/alreadyParsed`` if this instance has already
@@ -505,6 +712,8 @@ public final class JATSXMLParser: NSObject {
                 ?? "Unknown parsing error"
             throw JATSParseError.parsingFailed(errorMessage)
         }
+
+        reportParseCompletion()
     }
 
     // MARK: - Public API
@@ -555,42 +764,15 @@ public final class JATSXMLParser: NSObject {
     public func parseToArticle() throws -> JATSArticle {
         try runParser()
 
-        // The stacks must have unwound. A non-zero depth means an unbalanced
-        // <sub-article>, and everything after the imbalance was excluded as
-        // sub-article content — a truncated parse that would otherwise look like
-        // a thin article.
-        if subArticleDepth != 0 {
-            BioMedLitLib.logger?.error(
-                "JATS sub-article depth ended at \(subArticleDepth), not 0 — "
-                    + "content after the imbalance was discarded",
-                category: .parsing
-            )
-        }
-
-        // Same reasoning one element down: an open <fig> at this point left its
-        // slot empty, and the compactMap in `figures` drops it without a word.
-        // XMLParser should have refused the document long before here.
-        if !figureStack.isEmpty {
-            BioMedLitLib.logger?.error(
-                "JATS figure stack ended with \(figureStack.count) open <fig> — "
-                    + "those figures and their content were discarded",
-                category: .parsing
-            )
-        }
-
         // parseToMarkdown and parseToHTML both refuse an empty result; without the
         // same guard here a failed parse returned an empty-but-well-formed article,
         // indistinguishable from one the publisher deposited as a stub.
-        guard !title.isEmpty || !abstractSections.isEmpty || !bodySections.isEmpty else {
+        //
+        // The unwind audit and the zero-author warning that used to sit here run
+        // from `runParser` now, so the two output paths production actually uses
+        // hear them too — see `reportParseCompletion`.
+        guard producedContent else {
             throw JATSParseError.noContent
-        }
-
-        if authors.isEmpty {
-            BioMedLitLib.logger?.warning(
-                "JATS parse produced zero authors for "
-                    + "\(pmcId.isEmpty ? (doi.isEmpty ? "an unidentified article" : doi) : pmcId)",
-                category: .parsing
-            )
         }
 
         return JATSArticle(
@@ -1305,11 +1487,12 @@ extension JATSXMLParser: XMLParserDelegate {
                 figure.caption += text
             }
         case .table:
-            guard currentTable != nil else { return }
-            if !(currentTable?.caption.isEmpty ?? true) {
-                currentTable?.caption += " "
+            withCurrentTable { table in
+                if !table.caption.isEmpty {
+                    table.caption += " "
+                }
+                table.caption += text
             }
-            currentTable?.caption += text
         case .unmodelled:
             // No model to put it in, but it is emphatically not section prose.
             // Logged so the omission is discoverable rather than silent.
@@ -1446,12 +1629,11 @@ extension JATSXMLParser: XMLParserDelegate {
                 captionStack.append(.unmodelled)
             }
         case "fig":
-            // The slot is reserved now and filled at the end tag, so a nested
-            // figure cannot be listed ahead of the one containing it.
+            // The collector lists a figure from where it opened, not from where
+            // it closed, so a nested figure cannot precede the one containing it.
             var builder = FigureBuilder()
             builder.id = attributeDict["id"] ?? ""
-            figureSlots.append(nil)
-            figureStack.append((slot: figureSlots.count - 1, builder: builder))
+            figureCollector.begin(builder)
         case "graphic":
             // The image belongs to the element that holds it, not to whichever
             // exhibit happens to be open. `<graphic>` is a child of `<table-wrap>`
@@ -1497,9 +1679,13 @@ extension JATSXMLParser: XMLParserDelegate {
                 }
             }
         case "table-wrap":
-            inTableWrap = true
-            currentTable = TableBuilder()
-            currentTable?.id = attributeDict["id"] ?? ""
+            // A stack, for the reason `<fig>` has one: a `<table-wrap>` inside
+            // another table's `<table-wrap-foot>` used to overwrite the outer
+            // table's builder, and the outer end tag then found nothing to
+            // build (#173).
+            var builder = TableBuilder()
+            builder.id = attributeDict["id"] ?? ""
+            tableCollector.begin(builder)
         case "table-wrap-foot":
             exhibitFootnoteDepth += 1
         case "fn":
@@ -1517,36 +1703,36 @@ extension JATSXMLParser: XMLParserDelegate {
             }
         case "thead":
             if inTableWrap {
-                currentTable?.startHeader()
+                withCurrentTable { $0.startHeader() }
             }
         case "tbody":
             if inTableWrap {
-                currentTable?.startBody()
+                withCurrentTable { $0.startBody() }
             }
         case "tr":
             if inTableWrap {
-                currentTable?.startRow()
+                withCurrentTable { $0.startRow() }
             }
         case "th":
             if inTableWrap {
                 let colspan = Int(attributeDict["colspan"] ?? "1") ?? 1
-                currentTable?.startCell(isHeader: true, colspan: colspan)
+                withCurrentTable { $0.startCell(isHeader: true, colspan: colspan) }
             }
         case "td":
             if inTableWrap {
                 let colspan = Int(attributeDict["colspan"] ?? "1") ?? 1
-                currentTable?.startCell(isHeader: false, colspan: colspan)
+                withCurrentTable { $0.startCell(isHeader: false, colspan: colspan) }
             }
         case "list":
             if inTableWrap {
                 // Check if ordered list (list-type="order" or "ordered")
                 let listTypeAttr = attributeDict["list-type"] ?? ""
                 let isOrdered = listTypeAttr.hasPrefix("order")
-                currentTable?.startList(ordered: isOrdered)
+                withCurrentTable { $0.startList(ordered: isOrdered) }
             }
         case "list-item":
             if inTableWrap {
-                currentTable?.startListItem()
+                withCurrentTable { $0.startListItem() }
             }
         case "ref-list":
             inRefList = true
@@ -1598,7 +1784,7 @@ extension JATSXMLParser: XMLParserDelegate {
         appendText(string)
         // Also append to table cell if we're in a table cell
         if inTableWrap {
-            currentTable?.appendCellText(string)
+            withCurrentTable { $0.appendCellText(string) }
         }
     }
 
@@ -1765,7 +1951,7 @@ extension JATSXMLParser: XMLParserDelegate {
             if let owner = captionStack.last {
                 // See case "title": any open <caption> owns its prose.
                 appendCaptionText(normalizedText, to: owner)
-            } else if exhibitFootnoteDepth > 0 {
+            } else if inInnermostExhibitFootnote {
                 // <table-wrap-foot> is not reproduced by the rendered table, so it
                 // is captured rather than dropped with the cell furniture below.
                 // Tested ahead of the exhibit-internals branch below for the
@@ -1824,8 +2010,12 @@ extension JATSXMLParser: XMLParserDelegate {
 
         // Figures
         case "fig":
-            if let open = figureStack.popLast() {
-                figureSlots[open.slot] = open.builder.build()
+            if !figureCollector.end() {
+                BioMedLitLib.logger?.error(
+                    "JATS </fig> with no open <fig> for \(articleIdentifier) — "
+                        + "the figure and its content were discarded",
+                    category: .parsing
+                )
             }
         case "label":
             // Routed by the element it hangs off, never by which exhibit happens
@@ -1898,13 +2088,16 @@ extension JATSXMLParser: XMLParserDelegate {
         case "table-wrap-foot":
             exhibitFootnoteDepth = max(0, exhibitFootnoteDepth - 1)
         case "fn":
-            // The element stack, not the ambient flags: `inTableWrap` is a single
-            // flag, so a `<table-wrap>` opening and closing *inside* this footnote
-            // cleared it while the outer table was still open. The decrement was
-            // then skipped, the counter stayed above zero for the rest of the
-            // document, and every later `<p>` drained into the footnote branch and
-            // was discarded — the whole body after a nested table, silently. The
-            // outer table itself is still lost (#173); its prose is not.
+            // The element stack, not the ambient flags. When `inTableWrap` was a
+            // stored flag, a `<table-wrap>` opening and closing *inside* this
+            // footnote cleared it while the outer table was still open: the
+            // decrement was skipped, the counter stayed above zero for the rest of
+            // the document, and every later `<p>` drained into the footnote branch
+            // and was discarded — the whole body after a nested table, silently.
+            // The flag is derived from `tableCollector` now (#173), so it no longer
+            // lies; the element-stack test still earns its place, because a counter
+            // whose two ends test a different predicate from the routing between
+            // them is a defect waiting for a shape that separates them.
             if innermostExhibit != nil {
                 // A marker whose <fn> deposited no prose has nothing left to
                 // disambiguate; clearing it here stops it prefixing the *next*
@@ -1916,34 +2109,36 @@ extension JATSXMLParser: XMLParserDelegate {
         // Tables
         case "thead":
             if inTableWrap {
-                currentTable?.endHeader()
+                withCurrentTable { $0.endHeader() }
             }
         case "tbody":
             if inTableWrap {
-                currentTable?.endBody()
+                withCurrentTable { $0.endBody() }
             }
         case "tr":
             if inTableWrap {
-                currentTable?.endRow()
+                withCurrentTable { $0.endRow() }
             }
         case "th", "td":
             if inTableWrap {
-                currentTable?.endCell()
+                withCurrentTable { $0.endCell() }
             }
         case "list":
             if inTableWrap {
-                currentTable?.endList()
+                withCurrentTable { $0.endList() }
             }
         case "list-item":
             if inTableWrap {
-                currentTable?.endListItem()
+                withCurrentTable { $0.endListItem() }
             }
         case "table-wrap":
-            if let table = currentTable?.build() {
-                tables.append(table)
+            if !tableCollector.end() {
+                BioMedLitLib.logger?.error(
+                    "JATS </table-wrap> with no open <table-wrap> for \(articleIdentifier) — "
+                        + "the table and its content were discarded",
+                    category: .parsing
+                )
             }
-            inTableWrap = false
-            currentTable = nil
 
         // References
         case "ref-list":

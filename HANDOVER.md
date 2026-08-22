@@ -6,6 +6,77 @@ its slice has landed; add a new section when handing off new work.
 
 ---
 
+## In flight
+
+- **One exhibit collector for figures and tables** (#170/#173/#175, PR #179,
+  open). `<fig>` got a stack in #156; `<table-wrap>` kept a single builder
+  slot until #173 was filed, so a table nested in another table's
+  `<table-wrap-foot>` still lost the outer table outright — its label, its
+  caption and every cell, at the instant the inner one opened, with no log. Both
+  exhibits now share one `ExhibitCollector<Builder>`, and `inFigure`,
+  `inTableWrap`, `figures` and `tables` are **derived from it and never stored**.
+  - **Deriving the flag is the load-bearing half, not the tidying.** A stored
+    `inTableWrap` is exactly what the inner `</table-wrap>` cleared while the
+    outer table was still open. Every stored-flag bug in this file — #156, #169,
+    the `</fn>` counter — is that same sentence with a different noun.
+  - **The stack alone did not finish #173**, which a review caught: the same
+    sentence applies to `exhibitFootnoteDepth`, one parser-wide counter that
+    still stands at the *outer* table's depth while the inner table is parsed. So
+    the inner table's own cell `<p>` took the footnote branch and was filed as
+    the inner table's footnote — rendered twice. Prose now routes on
+    `inInnermostExhibitFootnote`, derived from `elementStack`; the counter is
+    kept only so the audit can notice its two ends drifting apart. The fixture
+    hid it because bare `<td>` text never reaches the `<p>` branch — it holds a
+    `<p>` now, which is what publishers deposit.
+  - **The stack is the tree, so the slot list goes away.** #156 kept
+    `[JATSFigureInfo?]` reserved slots beside the stack; a closing exhibit now
+    hands itself *plus the run that closed inside it* up to its parent — same
+    document order, no index, no second array, and no `nil` meaning two different
+    things (#170). bmlib keeps the slot-list shape and is equally correct;
+    `doc/cross_platform/jats_parsing.md` now carries both.
+  - **A net nobody can trip still needs a test.** The end-of-parse unwind audit
+    lived in `parseToArticle`, which **production never calls** — the full-text
+    path is `parseToHTML` then `parseToMarkdown` — so the safety net for the
+    whole class of unbalanced-stack defects was installed only in the test
+    harness (#175). It runs from `runParser()` now, over six counters rather than
+    two: sub-article depth, open figures, open tables, exhibit footnote depth,
+    open captions, open sections.
+    - Nothing well-formed can trip it, by design — `XMLParser` refuses an
+      unbalanced document and every guard tests the same predicate at both ends —
+      so it is a **pure static function** over a `JATSParseUnwindState`, and the
+      tests hand it the state a defect would leave.
+    - **Wiring it needs a check a document *can* trip**, or a mutation deleting
+      the call survives. The zero-author warning is that check: it moved to
+      `runParser()` too, which is where it was always needed. It is suppressed
+      when the parse produced nothing — but the *emptiness* is then reported
+      instead, and unconditionally: only `parseToArticle` turns that into
+      `.noContent`, while `parseToHTML` measures its own output and `buildHTML`
+      emits the identifiers line first, so in production — where the PMC ID is
+      always known — it is never empty and never throws. An article stripped to
+      its own accession number came back without a word.
+    - **Nothing connected a counter to the field it is reported under**, so
+      swapping two changed no behaviour any test could see. Pinned by driving the
+      `XMLParserDelegate` callbacks directly — open an element and never deliver
+      its end tag, the one thing well-formed XML cannot do.
+  - Corpus digests **did not move**, as expected: no corpus article nests a
+    `<table-wrap>`, so hand-written fixtures are the only guard here — and their
+    cells must hold `<p>`, since bare `<td>` text never reaches the branch that
+    carries the second half of #173. Mutation-tested; the only survivors are
+    equivalent mutants at sites `inTableWrap` already guards.
+  - **bmlib was measured, not assumed** — running its parser over the same
+    fixture keeps both tables with the right labels and cells, so it never had
+    the first half of #173. It cannot have the second half either, but only
+    because it drops exhibit footnote prose outright rather than routing it —
+    already lodged as bmlib **#124**, and a larger content loss than the bug it
+    happens to sidestep. It has no end-of-parse audit at all, which is #175 one
+    step worse: lodged as bmlib **#134**. Kotlin has the single-slot shape for
+    *both* exhibits and no audit either; added to **#165**.
+  - **Left open, lodged**: #180 (a counter that under-decremented is clamped to
+    zero, so the audit certifies the parse clean) and #181 (the audit only logs;
+    no caller can tell a truncated parse from a thin one).
+
+---
+
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
@@ -109,6 +180,28 @@ the rest.
     `<table-wrap-foot>` depth increment and the counter-vs-flag distinction on
     `</fn>` could be deleted with the suite still green. Closed by
     `testTableFootProse{Outside,After}AFootnote*`.
+- **JATS structural survey** (#164, PR #178, landed 2026-08-22):
+  `scripts/jats_survey.py` counts the prevalence figures every JATS issue rests
+  on, from the XML and **never through `JATSXMLParser`** — a survey that asked
+  the parser what a document contains would agree with the parser's bugs, which
+  is how #161 and #162 survived a green suite. Re-derive a figure before quoting
+  it; `--list` says what it can measure.
+  - **A prevalence figure without its journal mix is repeatable, not
+    reproducible.** It reproduces the old 225-article survey where the
+    measurement is publisher-neutral — labelled `<table-wrap-foot><fn>` 12.7% vs
+    12.0%, `<mixed-citation>` 76.3% vs 80.9% — and diverges where it is not:
+    nested `<fig>` **0.3% vs 19.6%**, eLife's house style against a different
+    draw. Neither is wrong, so every run prints its journal mix.
+  - **Sample the population you are measuring.** Europe PMC serves `fullTextXML`
+    for abstract-only deposits and the newest open-access records are mostly
+    conference abstracts, so a 400-article draw came back 390 abstracts and
+    reported "0 nested figures". `PUB_TYPE:"research-article"` excludes them —
+    and excludes the `review-article`/`brief-report` where #177's grouped
+    citations live. Every run prints its sample composition.
+  - **Check a flagged counterexample by hand before believing it.** Two bugs in
+    the detectors, both the survey manufacturing the evidence it exists to look
+    for, reported 3 false counterexamples that would have argued for reopening
+    #177. #177 now rests on 631 labels across 150 articles with none.
 - **Real PMC JATS corpus** (#146 landed 2026-08-21): seven open-access Europe PMC
   articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with a
   stored structural digest, parsed offline by `JATSRealCorpusTests` on every PR.
@@ -236,24 +329,29 @@ the rest.
   `inputs.dir` declaration in `app/build.gradle.kts`** — without it Gradle sees
   no changed input for a contract-only edit, reports `UP-TO-DATE`, and silently
   skips the Android parity test.
-- **Data-availability negated openness** (#117/#125 landed 2026-07-19): negators
-  detached from an openness affirmation no longer over-match FULL_OPEN. Four
-  forward-match patterns (negator, bounded window, affirmation) — a lookbehind
-  was not an option, since Python forbids the variable-length form and the
-  patterns must stay byte-identical across three platforms. All four map to one
-  label and live in the restricted tier; escalation to NOT_AVAILABLE still needs
-  an independent strong refusal. **The conjunction barriers and window bounds are
-  load-bearing and all eight guards are mutation-verified on all three
-  platforms** — and the pins only work at specific sentence shapes, so **do not
-  reword them**; the required shapes are documented inline in the three analyzer
-  test files. Kotlin gotcha: `negatedOpennessPatterns` must stay declared
-  *before* `restrictedPatterns`, since object properties initialise in
-  declaration order and a forward reference silently appends nothing.
+- **Data-availability classifier, July slices** (#101/#103/#104/#106/#107/#113/
+  #114/#116/#117/#125, all merged 2026-07-16/19). Python
+  `study_transparency_analyzer.py` is canonical; Swift `BioMedLit` and Android
+  `domain.transparency` mirror it byte-for-byte — **for this classifier**, and
+  since #143 for the funder-name classifier too, but *not* for
+  `INDUSTRY_KEYWORDS` (#148). Three rules survive the archaeology:
+  - **Do not reword the pattern test fixtures.** Negated openness is matched
+    forward (negator, bounded window, affirmation) because Python forbids a
+    variable-length lookbehind and the patterns must stay byte-identical across
+    three platforms. The conjunction barriers and window bounds are load-bearing,
+    all eight guards are mutation-verified on all three platforms, and the pins
+    only work at specific sentence shapes — documented inline in the three
+    analyzer test files.
+  - **Kotlin: `negatedOpennessPatterns` must stay declared *before*
+    `restrictedPatterns`.** Object properties initialise in declaration order, so
+    a forward reference silently appends nothing.
+  - **Kotlin `RegexHelper` compiles with `(?U)`** so `\w\s\b\d` match Unicode
+    the way Python and Swift do; a slice that reuses it must keep the flag or
+    non-ASCII input diverges.
 - **Android PubMed XML parsing** (2026-07-18, #119/PR #122): `parseArticleXml`
-  moved off Android's `XmlPullParser` (which throws "not mocked" under plain
-  JUnit, and whose exception the broad catch swallowed into an empty result) to
-  a pure-JVM JAXP SAX parser, so it runs in unit tests *and* on-device. Two
-  traps worth preserving if this is touched again:
+  runs on a pure-JVM JAXP SAX parser, not Android's `XmlPullParser` (which throws
+  "not mocked" under plain JUnit, and whose exception the broad catch swallowed
+  into an empty result), so it is testable offline *and* on-device. Two traps:
   - **`setXIncludeAware` is deliberately not called** — JAXP's base
     implementation throws `UnsupportedOperationException`, which the outer catch
     would swallow into an empty result on-device while JVM tests stayed green:
@@ -262,52 +360,6 @@ the rest.
     (`http://127.0.0.1:1/…`), not the real `dtd.nlm.nih.gov` URL.** An
     unhardened parser *fetches* the real NLM systemId successfully (11.2s vs
     1ms), so a realistic systemId passes either way and guards nothing.
-- **Transparency parity, earlier slices** (2026-07-16/18, all merged): Swift↔Python
-  data-availability parity (#101/#103); full-open over-match + refusal precedence
-  (#106, #107); GDPR/HIPAA/privacy/patient-consent restore (#104); Python Step-3
-  label dedup (#114); privacy/legal open-data false-positive + negation guards
-  (#113); Android data-availability classifier port (#116 slice 1, PR #120) —
-  `RegexHelper` compiles with `(?U)` so `\w\s\b\d` match Unicode like
-  Python/Swift; **reused slices must keep this** or non-ASCII input diverges.
-  Python `study_transparency_analyzer.py` is the canonical reference; Swift
-  `BioMedLit` and Android `domain.transparency` mirror it byte-for-byte —
-  **for the data-availability classifier**, and since #143 for the funder-name
-  classifier too. It still does *not* hold for `INDUSTRY_KEYWORDS` (COI prose),
-  which is transcribed on both platforms with nothing comparing the copies — see
-  #148.
-
-## In flight
-
-- **JATS structural survey** (`scripts/jats_survey.py`, PR #178, closes #164).
-  The prevalence figures behind every JATS issue existed only as prose; this
-  counts them from the XML, and **never through `JATSXMLParser`** — a survey
-  that asked the parser what a document contains would agree with the parser's
-  bugs, which is how #161 and #162 survived a green suite.
-  - **It validates against the old survey where the measurement is
-    publisher-neutral, and diverges where it is not.** Labelled
-    `<table-wrap-foot><fn>` 12.7% vs 12.0%, thumbnail-last 50.7% vs 52.9%,
-    `<mixed-citation>` 76.3% vs 80.9%, `<xref>` affiliations 96.0% vs 98.7% —
-    but nested `<fig>` **0.3% vs 19.6%**, because that is eLife's
-    figure-supplement convention and the samples have different publishers.
-    Neither number is wrong. **A prevalence figure without its journal mix is
-    repeatable, not reproducible**, so every run prints the mix.
-  - **Two sampling traps, both found by running it rather than reading it.**
-    Europe PMC serves `fullTextXML` for abstract-only deposits, and the newest
-    open-access records are overwhelmingly conference abstracts: a 400-article
-    sample came back 390 abstracts and reported "0 nested figures across 400
-    articles". `HAS_FT:Y` does not exclude them; `PUB_TYPE:"research-article"`
-    does — **but it also excludes `review-article` and `brief-report`, which is
-    exactly where the #177 grouped citations live.** Every run now prints its
-    sample composition and warns below 50% full text.
-  - **A detector that cries wolf is one nobody reads.** Two bugs, both the same
-    class — the survey manufacturing the evidence it exists to look for.
-    `element.text` reads `<label>(<italic>a</italic>)</label>` as `"("`; and the
-    sub-marker pattern had no room for the digit suffix in `(b1)`, so it
-    reported 3 false counterexamples that would have argued for reopening #177.
-    Check a flagged counterexample by hand before believing it.
-  - **#177 now rests on 631 labels across 150 articles, not 88 across 3**, with
-    zero counterexamples. The remaining weakness is publisher spread, not sample
-    size: every observation is RSC-family.
 
 ## Potential follow-ups
 
@@ -320,25 +372,21 @@ the rest.
   instead. One-character fix, but wants a shared fixture or it recurs.
   #147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
-- **#172–#177 — the #171 review round's findings, lodged rather than fixed
-  there.** #173 first: a `<table-wrap>` nested inside a `<table-wrap>` still
-  destroys the outer table, because `currentTable` is a single slot where figures
-  got a stack in #156. The prose-loss half is fixed; the table half needs the
-  #156 treatment, and bmlib's `table_stack` is the shape to port. #175 is cheap
-  and high-leverage: the parser's end-of-parse unwind audit lives in
-  `parseToArticle`, which **production never calls** — moving it into
-  `runParser()` would have surfaced #173 immediately. #172 (a table deposited as
-  a `<graphic>` is never captured — all 8 tables in `PMC12759138`), #174 (an
-  unlabelled figure gets a fabricated `"Figure N"`, in `alt` text too), #176
-  (`FullTextTab` swallows full-text errors with no message and no log) and #177
-  (grouped citations) are independent.
+- **#172, #174, #176, #177 — what is left of the #171 review round** (#173 and
+  #175 are in flight in PR #179; see above). All four are independent of each other. **#172 and
+  #174 go together**, since both are about a table or figure the renderer cannot
+  honestly describe: #172 drops a table deposited as a `<graphic>` entirely — all
+  8 tables in `PMC12759138` — and #174 gives an unlabelled exhibit a fabricated
+  `"Figure N"` from its array position, in `alt` text too, which in a
+  medical-literature tool is a number a citation may carry. bmlib already models
+  a table's `graphic_url`, so #172 is a port. #176 (`FullTextTab` swallows
+  full-text errors with no message and no log) is a UI fix in Python; #177
+  (grouped citations) now rests on 631 labels across 150 articles and wants
+  publisher spread before the model changes.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
-  open** (#156, #157, #161, #167 and #169 landed; see above). Fixing any of them changes
-  `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the evidence —
-  read it rather than regenerating past it. Each replicates in Android's
-  `util.jats.JATSXMLParser` and in bmlib, which share this parser's ancestry;
-  check all three before calling a fix complete, and prefer *running* the sibling
-  parser over the corpus to reading its source where you can.
+  open** (#156, #157, #161, #167, #169 landed; see above). Fixing any of them
+  moves the corpus digests and needs the sibling parsers checked — see **Verify**
+  for both workflows.
   - **#154 — author affiliations are never captured.** `currentAffiliations` is
     written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
     98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
@@ -353,15 +401,6 @@ the rest.
     11 real cells in the corpus. `markdownRowCount` could never see it — a
     rowspan misalignment does not change the row count — which is why the digest
     now stores a `markdownDigest` hash of the rendering instead.
-- **#170 — `figureSlots` and `figureStack` are a parallel-array pair** held in
-  sync by two adjacent lines in `didStartElement` and one ~330 lines away in
-  `didEndElement`. Five invariants ride on that pair with nothing checking them,
-  and `[JATSFigureInfo?]` conflates "reserved, still open" with "opened and never
-  closed". The issue proposes a `FigureCollector` that owns the ordering, so the
-  index and the second array disappear; `inFigure` and `figures` keep their names,
-  so the readers elsewhere in the file do not move. `inTableWrap`/`currentTable`
-  are the identical unfixed pair and the same type would serve both — worth doing
-  together, since #169 showed exhibits nest in both directions.
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry `\bnci\b`, `\bniaid\b`, `\bnhlbi\b`,
   `\bnimh\b` but no singular "National Institute of X" form, while CrossRef

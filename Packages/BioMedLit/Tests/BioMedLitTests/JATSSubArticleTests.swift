@@ -57,7 +57,14 @@ final class JATSSubArticleTests: XCTestCase {
         <body>
           <p>13 Oct 2025</p>
           <p>Dear Dr Real, your manuscript requires revision.</p>
-          <sec><title>Reviewer 1</title><p>The methods are unclear.</p></sec>
+          <sec><title>Reviewer 1</title><p>The methods are unclear.</p>
+            <fig id="rev-f1"><label>Review image 1.</label>
+              <caption><title>Reviewer's reanalysis.</title></caption>
+            </fig>
+            <table-wrap id="rev-t1"><label>Review table 1.</label>
+              <table><tbody><tr><td><p>reviewer cell</p></td></tr></tbody></table>
+            </table-wrap>
+          </sec>
         </body>
       </sub-article>
       <sub-article article-type="reply">
@@ -113,6 +120,18 @@ final class JATSSubArticleTests: XCTestCase {
         let titles = try parse().bodySections.map(\.title)
 
         XCTAssertFalse(titles.contains("Reviewer 1"), "got: \(titles)")
+    }
+
+    /// Both exhibit collectors are the sole source of `figures` and `tables`
+    /// since #170, and both `begin` calls sit below the `guard !inSubArticle`.
+    /// Real decision letters carry reviewer figures, so a leak here would put a
+    /// reviewer's reanalysis in the published article's figure list.
+    func testSubArticleFiguresDoNotReachTheArticle() throws {
+        XCTAssertEqual(try parse().figures.map(\.id), [])
+    }
+
+    func testSubArticleTablesDoNotReachTheArticle() throws {
+        XCTAssertEqual(try parse().tables.map(\.id), [])
     }
 
     func testTotalBodyProseIsOnlyTheArticlesOwn() throws {

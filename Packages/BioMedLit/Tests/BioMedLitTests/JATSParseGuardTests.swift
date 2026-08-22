@@ -21,6 +21,67 @@ import XCTest
 /// article, and that an empty typed identifier does not latch.
 final class JATSParseGuardTests: XCTestCase {
 
+    // MARK: - Capturing what the parser reports
+
+    /// Records the library's diagnostics so a test can assert on them.
+    ///
+    /// `@unchecked Sendable` with a lock because `BioMedLitLogger` requires
+    /// `Sendable` and this is mutable; the lock is what makes that claim true.
+    private final class RecordingLogger: BioMedLitLogger, @unchecked Sendable {
+        private let lock = NSLock()
+        private var messages: [String] = []
+
+        private func record(_ level: String, _ message: String) {
+            lock.lock(); defer { lock.unlock() }
+            messages.append("\(level): \(message)")
+        }
+
+        func debug(_ message: String, category: BioMedLitLogCategory) {
+            record("DEBUG", message)
+        }
+
+        func info(_ message: String, category: BioMedLitLogCategory) {
+            record("INFO", message)
+        }
+
+        func warning(_ message: String, category: BioMedLitLogCategory) {
+            record("WARNING", message)
+        }
+
+        func error(_ message: String, category: BioMedLitLogCategory) {
+            record("ERROR", message)
+        }
+
+        var recorded: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return messages
+        }
+
+        func reset() {
+            lock.lock(); defer { lock.unlock() }
+            messages.removeAll()
+        }
+    }
+
+    private let logger = RecordingLogger()
+
+    override func setUp() {
+        super.setUp()
+        logger.reset()
+        BioMedLitLib.configure(with: BioMedLitConfiguration(
+            ncbiEmail: "tests@example.com", logger: logger
+        ))
+    }
+
+    /// Restore the configuration the rest of the package's tests expect: the
+    /// library cannot be un-configured, so put back "configured, no logger".
+    override func tearDown() {
+        BioMedLitLib.configure(with: BioMedLitConfiguration(
+            ncbiEmail: "tests@example.com", logger: nil
+        ))
+        super.tearDown()
+    }
+
     // MARK: - Empty result
 
     /// `parseToMarkdown` and `parseToHTML` both refuse an empty result. Without
@@ -168,5 +229,383 @@ final class JATSParseGuardTests: XCTestCase {
 
         XCTAssertEqual(article.title, "Metadata only")
         XCTAssertTrue(markdown.contains("Prose."), "markdown was: \(markdown)")
+    }
+
+    // MARK: - What the unwind audit reports (#175)
+
+    /// The audit is a pure function of the end-of-parse state, which is the only
+    /// way to exercise it: no well-formed document leaves a stack open, because
+    /// `XMLParser` refuses an unbalanced one and every guard in the parser tests
+    /// the same predicate at both ends. That is the point of a net — it fires
+    /// only when the parser itself is wrong — and it is also why the net sat in
+    /// `parseToArticle` from the day it was written, with no production call
+    /// site, and nobody noticed.
+    func testABalancedParseReportsNothing() {
+        XCTAssertEqual(JATSXMLParser.unwindDiagnostics(JATSParseUnwindState()), [])
+    }
+
+    private func diagnostic(
+        _ state: JATSParseUnwindState,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> String {
+        let lines = JATSXMLParser.unwindDiagnostics(state)
+        guard lines.count == 1 else {
+            XCTFail("expected one diagnostic, got \(lines)", file: file, line: line)
+            return ""
+        }
+        return lines[0]
+    }
+
+    func testAnUnbalancedSubArticleIsReported() {
+        let line = diagnostic(JATSParseUnwindState(subArticleDepth: 2))
+
+        XCTAssertTrue(line.contains("sub-article"), line)
+        XCTAssertTrue(line.contains("2"), line)
+    }
+
+    func testAnOpenFigureIsReported() {
+        let line = diagnostic(JATSParseUnwindState(openFigures: 3))
+
+        XCTAssertTrue(line.contains("<fig>"), line)
+        XCTAssertTrue(line.contains("3"), line)
+    }
+
+    /// The check #175 says would have surfaced #173 on the spot. It had no
+    /// table-side counterpart at all: `currentTable` was a single slot, so there
+    /// was nothing for an audit to look at.
+    func testAnOpenTableIsReported() {
+        let line = diagnostic(JATSParseUnwindState(openTables: 4))
+
+        XCTAssertTrue(line.contains("<table-wrap>"), line)
+        XCTAssertTrue(line.contains("4"), line)
+    }
+
+    /// A stranded footnote depth is the one imbalance that has actually occurred
+    /// on master: every `<p>` after it drained into `appendFootnoteText` and was
+    /// discarded, one paragraph at a time, in silence. Fixed in PR #171, before
+    /// any release carried it.
+    func testAStrandedExhibitFootnoteDepthIsReported() {
+        let line = diagnostic(JATSParseUnwindState(exhibitFootnoteDepth: 5))
+
+        XCTAssertTrue(line.contains("footnote"), line)
+        XCTAssertTrue(line.contains("5"), line)
+    }
+
+    func testAnOpenCaptionIsReported() {
+        let line = diagnostic(JATSParseUnwindState(openCaptions: 6))
+
+        XCTAssertTrue(line.contains("<caption>"), line)
+        XCTAssertTrue(line.contains("6"), line)
+    }
+
+    func testAnOpenSectionIsReported() {
+        let line = diagnostic(JATSParseUnwindState(openSections: 7))
+
+        XCTAssertTrue(line.contains("<sec>"), line)
+        XCTAssertTrue(line.contains("7"), line)
+    }
+
+    /// One line each, so a parse that went wrong in two places says so twice
+    /// rather than reporting whichever check is written first.
+    func testEveryImbalanceGetsItsOwnLine() {
+        let lines = JATSXMLParser.unwindDiagnostics(JATSParseUnwindState(
+            subArticleDepth: 1,
+            openFigures: 2,
+            openTables: 1,
+            exhibitFootnoteDepth: 1,
+            openCaptions: 1,
+            openSections: 1
+        ))
+
+        XCTAssertEqual(lines.count, 6, "\(lines)")
+    }
+
+    /// A negative count is not a thing the parser can produce — every counter is
+    /// clamped at zero — but reporting one as "still open" would be worse than
+    /// saying nothing.
+    func testANegativeCountIsNotReportedAsAnImbalance() {
+        XCTAssertEqual(
+            JATSXMLParser.unwindDiagnostics(JATSParseUnwindState(subArticleDepth: -1)),
+            []
+        )
+    }
+
+    // MARK: - The audit sees what the parser has open (#175)
+
+    /// Open one element through the delegate callback and stop there.
+    ///
+    /// `XMLParserDelegate` conformance is the parser's public surface, so this
+    /// drives the real object through its real interface — it simply declines to
+    /// deliver the end tag, which is the one thing a well-formed document can
+    /// never do. Without it nothing connects a counter to the field the audit
+    /// reports it under, and swapping two of those fields changes no behaviour
+    /// any other test can see.
+    private func stateAfterOpening(_ elements: [String]) -> JATSParseUnwindState {
+        let parser = JATSXMLParser(data: Data())
+        for element in elements {
+            parser.parser(
+                XMLParser(data: Data()),
+                didStartElement: element,
+                namespaceURI: nil,
+                qualifiedName: nil,
+                attributes: [:]
+            )
+        }
+        return parser.unwindState
+    }
+
+    func testAnOpenFigureIsCountedAsAFigure() {
+        XCTAssertEqual(stateAfterOpening(["fig"]), JATSParseUnwindState(openFigures: 1))
+    }
+
+    func testAnOpenTableIsCountedAsATable() {
+        XCTAssertEqual(stateAfterOpening(["table-wrap"]), JATSParseUnwindState(openTables: 1))
+    }
+
+    func testAnOpenSubArticleIsCountedAsASubArticle() {
+        XCTAssertEqual(stateAfterOpening(["sub-article"]), JATSParseUnwindState(subArticleDepth: 1))
+    }
+
+    func testAnOpenExhibitFootnoteIsCountedAsAFootnote() {
+        XCTAssertEqual(
+            stateAfterOpening(["table-wrap", "table-wrap-foot"]),
+            JATSParseUnwindState(openTables: 1, exhibitFootnoteDepth: 1)
+        )
+    }
+
+    func testAnOpenCaptionIsCountedAsACaption() {
+        XCTAssertEqual(
+            stateAfterOpening(["fig", "caption"]),
+            JATSParseUnwindState(openFigures: 1, openCaptions: 1)
+        )
+    }
+
+    func testAnOpenSectionIsCountedAsASection() {
+        XCTAssertEqual(
+            stateAfterOpening(["body", "sec"]),
+            JATSParseUnwindState(openSections: 1)
+        )
+    }
+
+    /// The shape a balanced parse ends in, and the baseline the six above are
+    /// measured against: an untouched parser has nothing open.
+    func testAParserThatHasSeenNothingHasNothingOpen() {
+        XCTAssertEqual(stateAfterOpening([]), JATSParseUnwindState())
+    }
+
+    // MARK: - The audit runs on every entry point (#175)
+
+    /// A well-formed article with no `<contrib>` at all. The zero-author warning
+    /// is the one end-of-parse check a document *can* trip, so it is what proves
+    /// the audit is wired into the production path rather than into
+    /// `parseToArticle` alone — which is where it sat, unreachable from
+    /// `FullTextService`, from the day it was written.
+    private static let authorlessArticle = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <article><front><article-meta>
+      <title-group><article-title>Nobody wrote this</article-title></title-group>
+    </article-meta></front><body><sec><title>Results</title><p>Prose.</p></sec></body></article>
+    """
+
+    private func assertReportsZeroAuthors(
+        _ parse: (JATSXMLParser) throws -> Any,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) rethrows {
+        logger.reset()
+        _ = try parse(JATSXMLParser(data: Data(Self.authorlessArticle.utf8)))
+
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains("zero authors") },
+            "nothing reported the authorless parse; recorded: \(logger.recorded)",
+            file: file, line: line
+        )
+    }
+
+    func testAnAuthorlessParseIsReportedOnTheArticlePath() throws {
+        try assertReportsZeroAuthors { try $0.parseToArticle() }
+    }
+
+    /// `FullTextService.fetchEuropePMCXML` calls this one, and nothing else.
+    func testAnAuthorlessParseIsReportedOnTheMarkdownPath() throws {
+        try assertReportsZeroAuthors { try $0.parseToMarkdown() }
+    }
+
+    /// And this one.
+    func testAnAuthorlessParseIsReportedOnTheHTMLPath() throws {
+        try assertReportsZeroAuthors { try $0.parseToHTML() }
+    }
+
+    /// The negative control the three above need: a warning that fires whatever
+    /// the document says proves nothing.
+    func testAnArticleWithAuthorsIsNotReported() throws {
+        _ = try JATSXMLParser(data: Data(Self.wellFormedArticleWithAuthor.utf8)).parseToMarkdown()
+
+        XCTAssertFalse(
+            logger.recorded.contains { $0.contains("zero authors") },
+            "recorded: \(logger.recorded)"
+        )
+    }
+
+    private static let wellFormedArticleWithAuthor = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <article><front><article-meta>
+      <title-group><article-title>Somebody wrote this</article-title></title-group>
+      <contrib-group><contrib contrib-type="author">
+        <name><surname>Doe</surname><given-names>J</given-names></name>
+      </contrib></contrib-group>
+    </article-meta></front><body><sec><title>Results</title><p>Prose.</p></sec></body></article>
+    """
+
+    private static let contentlessArticle = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <article><front><article-meta></article-meta></front><body></body></article>
+    """
+
+    /// A parse that produced nothing is one defect, not two: "it also had no
+    /// authors" is noise on top of the emptiness reported below it.
+    func testAnEmptyParseDoesNotAlsoComplainAboutAuthors() {
+        XCTAssertThrowsError(
+            try JATSXMLParser(data: Data(Self.contentlessArticle.utf8)).parseToArticle()
+        )
+
+        XCTAssertFalse(
+            logger.recorded.contains { $0.contains("zero authors") },
+            "recorded: \(logger.recorded)"
+        )
+    }
+
+    /// ...but the emptiness itself must still be reported, and on the paths
+    /// production uses. Only `parseToArticle` turns it into `.noContent`;
+    /// `parseToHTML` measures its own output, and `buildHTML` emits the
+    /// identifiers line first, so with a known PMC ID — which `FullTextService`
+    /// always supplies — the result is never empty and never throws. The article
+    /// came back stripped to its own accession number, in silence, which is the
+    /// shape #175 exists to stop.
+    func testAContentlessParseIsReportedOnTheHTMLPath() throws {
+        let html = try JATSXMLParser(
+            data: Data(Self.contentlessArticle.utf8), knownPMCId: "PMC12759138"
+        ).parseToHTML()
+
+        XCTAssertFalse(html.isEmpty, "the identifiers line is why this cannot throw")
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains("no title, abstract or body") },
+            "recorded: \(logger.recorded)"
+        )
+    }
+
+    /// The identifier every diagnostic carries. Without it the two parsers
+    /// `FullTextService` builds over one document — `XMLParser` is consumed by
+    /// its first parse — report twice, and two identical unattributed lines
+    /// cannot be told from two genuinely broken articles.
+    func testDiagnosticsNameTheArticle() throws {
+        _ = try? JATSXMLParser(
+            data: Data(Self.contentlessArticle.utf8), knownPMCId: "PMC12759138"
+        ).parseToHTML()
+
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains("PMC12759138") },
+            "recorded: \(logger.recorded)"
+        )
+    }
+
+    // MARK: - The unwind audit reaches the log (#175)
+
+    /// Everything above tests `unwindDiagnostics` as a pure function and
+    /// `unwindState` as a producer. Nothing joined them: deleting the loop that
+    /// emits the lines, or pointing it at a blank state, changed no behaviour any
+    /// test could see. That is #175 one layer in — a net that is unit-tested and
+    /// not connected — so these drive a real parse with a stack left open.
+    ///
+    /// - Parameters:
+    ///   - element: The element to open and never close.
+    ///   - parse: The entry point to run afterwards.
+    ///   - expected: A fragment the emitted diagnostic must contain.
+    private func assertReportsUnwind(
+        opening element: String,
+        _ parse: (JATSXMLParser) throws -> Any,
+        expecting expected: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) rethrows {
+        logger.reset()
+        let parser = JATSXMLParser(data: Data(Self.wellFormedArticleWithAuthor.utf8))
+        parser.parser(
+            XMLParser(data: Data()), didStartElement: element,
+            namespaceURI: nil, qualifiedName: nil, attributes: [:]
+        )
+        _ = try parse(parser)
+
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains(expected) },
+            "the audit never reached the log; recorded: \(logger.recorded)",
+            file: file, line: line
+        )
+    }
+
+    func testAnUnclosedFigureIsReportedOnTheMarkdownPath() throws {
+        try assertReportsUnwind(
+            opening: "fig", { try $0.parseToMarkdown() }, expecting: "1 open <fig>"
+        )
+    }
+
+    func testAnUnclosedTableIsReportedOnTheHTMLPath() throws {
+        try assertReportsUnwind(
+            opening: "table-wrap", { try $0.parseToHTML() }, expecting: "1 open <table-wrap>"
+        )
+    }
+
+    func testAnUnclosedSectionIsReportedOnTheArticlePath() throws {
+        try assertReportsUnwind(
+            opening: "sec", { try $0.parseToArticle() }, expecting: "1 open <sec>"
+        )
+    }
+
+    /// The negative control the three above need: an audit that fires on a clean
+    /// parse would prove nothing about the ones that fire on a dirty one.
+    func testABalancedParseEmitsNoUnwindDiagnostics() throws {
+        _ = try JATSXMLParser(data: Data(Self.wellFormedArticleWithAuthor.utf8)).parseToMarkdown()
+
+        XCTAssertFalse(
+            logger.recorded.contains { $0.contains("JATS parse ended with") },
+            "recorded: \(logger.recorded)"
+        )
+    }
+
+    // MARK: - The routing-disagreement canaries (#170)
+
+    /// `withCurrentFigure` and `withCurrentTable` log when the element stack says
+    /// an exhibit is open and the collector disagrees, because the symptom is
+    /// content quietly going missing with nothing else to go on. Nothing tested
+    /// the logs, so both could be deleted by a future refactor without a red
+    /// test — and this PR silently changed one of the two messages.
+    ///
+    /// Driven through the delegate: deliver a `</fig>` the collector never saw an
+    /// opening for, which is the one thing well-formed XML cannot produce.
+    func testAFigureEndWithNothingOpenIsReported() {
+        let parser = JATSXMLParser(data: Data())
+        parser.parser(
+            XMLParser(data: Data()), didEndElement: "fig",
+            namespaceURI: nil, qualifiedName: nil
+        )
+
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains("</fig> with no open <fig>") },
+            "recorded: \(logger.recorded)"
+        )
+    }
+
+    func testATableEndWithNothingOpenIsReported() {
+        let parser = JATSXMLParser(data: Data())
+        parser.parser(
+            XMLParser(data: Data()), didEndElement: "table-wrap",
+            namespaceURI: nil, qualifiedName: nil
+        )
+
+        XCTAssertTrue(
+            logger.recorded.contains { $0.contains("</table-wrap> with no open <table-wrap>") },
+            "recorded: \(logger.recorded)"
+        )
     }
 }
