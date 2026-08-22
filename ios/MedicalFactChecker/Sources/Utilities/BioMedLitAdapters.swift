@@ -393,9 +393,13 @@ enum BioMedLitAdapters {
     /// - Returns: App-compatible AppFullTextResult.
     static func toAppFullTextResult(_ result: BMLFullTextResult) -> AppFullTextResult {
         switch result {
-        case .europePMC(let html, let markdown):
+        case .europePMC(let html, let markdown, let warnings):
             // Store both HTML (for rendering) and markdown (for search/export fallback)
-            return AppFullTextResult(content: .html(content: html, markdown: markdown), source: .europePMC)
+            return AppFullTextResult(
+                content: .html(content: html, markdown: markdown),
+                source: .europePMC,
+                warnings: warnings
+            )
         case .europePMCPDF(let pdfURL):
             return AppFullTextResult(content: .pdfURL(pdfURL), source: .europePMCPDF)
         case .unpaywall(let pdfURL):
@@ -404,42 +408,6 @@ enum BioMedLitAdapters {
             return AppFullTextResult(content: .webURL(webURL), source: .doi)
         case .cached(let filePath):
             return AppFullTextResult(content: .pdfURL(URL(fileURLWithPath: filePath)), source: .cached)
-        }
-    }
-
-    /// Convert BioMedLit FullTextResult to rich content format (with HTML).
-    ///
-    /// - Parameter result: The BioMedLit FullTextResult.
-    /// - Returns: Tuple with content and source information.
-    static func toFullTextContent(
-        _ result: BMLFullTextResult
-    ) -> (content: FullTextContent, source: AppFullTextSource) {
-        switch result {
-        case .europePMC(let html, let markdown):
-            return (
-                content: .jatsContent(html: html, markdown: markdown),
-                source: .europePMC
-            )
-        case .europePMCPDF(let pdfURL):
-            return (
-                content: .pdfURL(pdfURL),
-                source: .europePMCPDF
-            )
-        case .unpaywall(let pdfURL):
-            return (
-                content: .pdfURL(pdfURL),
-                source: .unpaywall
-            )
-        case .doi(let webURL):
-            return (
-                content: .webURL(webURL),
-                source: .doi
-            )
-        case .cached(let filePath):
-            return (
-                content: .cachedPDF(URL(fileURLWithPath: filePath)),
-                source: .cached
-            )
         }
     }
 
@@ -458,49 +426,6 @@ enum BioMedLitAdapters {
         // BioMedLit uses "LastName, FirstName" format joined by ", "
         // We need to split properly
         return cleanedString.components(separatedBy: ", ")
-    }
-}
-
-// MARK: - Full Text Content
-
-/// App-specific full text content representation.
-enum FullTextContent: Sendable {
-    /// JATS XML converted to HTML and markdown.
-    case jatsContent(html: String, markdown: String)
-
-    /// Direct PDF URL.
-    case pdfURL(URL)
-
-    /// Web URL (publisher page).
-    case webURL(URL)
-
-    /// Cached PDF file.
-    case cachedPDF(URL)
-
-    /// Get markdown content if available.
-    var markdown: String? {
-        if case .jatsContent(_, let markdown) = self {
-            return markdown
-        }
-        return nil
-    }
-
-    /// Get HTML content if available.
-    var html: String? {
-        if case .jatsContent(let html, _) = self {
-            return html
-        }
-        return nil
-    }
-
-    /// Get URL if this is a URL-based content.
-    var url: URL? {
-        switch self {
-        case .pdfURL(let url), .webURL(let url), .cachedPDF(let url):
-            return url
-        case .jatsContent:
-            return nil
-        }
     }
 }
 

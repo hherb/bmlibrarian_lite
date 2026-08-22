@@ -1087,6 +1087,13 @@ const EUROPEPMC_FIGURE_BASE_URL = "https://europepmc.org/articles"
 
 ### End-of-parse audit
 
+Implemented in Swift only, as of this writing. bmlib (hherb/bmlib#134) and the
+Kotlin port (#165) have no end-of-parse audit at all, so this section and the two
+that follow it describe work still to be done there rather than shared behaviour
+to match. Given the common JATS ancestry, the misrouting defects the audit exists
+to catch — #156, #157, #169, #171, #173 — are presumably reachable on both and
+silent on both.
+
 Every stack and counter above must be back to zero when the document ends. While
 any of them is not, content is being filed somewhere other than the article body,
 so an imbalance is never cosmetic — a stranded footnote depth drains every later
@@ -1096,6 +1103,42 @@ a time, in silence (#173).
 Audit them all — sub-article depth, open figures, open tables, exhibit footnote
 depth, open captions, open sections — and report each imbalance on its own line
 at error level, naming what it cost.
+
+**Count the end tags that had nothing to close, and audit that too** (#180). Every
+decrement clamps at zero, and a `> 0` audit therefore cannot see an
+over-decrement: the evidence is destroyed before it is read. This is worse than a
+blind spot. With a depth of 2 and three decrements the third clamps to 0, the
+counter reads "balanced" for the rest of the document while a real element is
+still open, and the audit **certifies a defective parse as clean** — the opposite
+of what a net is for.
+
+Do not fix this by removing the clamp. For sub-article depth the clamp decides
+routing: "am I inside a sub-article?" is `depth > 0`, so an unclamped -1 is
+brought back to 0 by the next `<sub-article>`, the test reads false while the
+parser is inside one, and a reviewer report is emitted as the article's own body.
+That is a live content defect traded for a diagnostic. Clamp as before, and
+increment a separate underflow counter when the value was already zero. It cannot
+false-positive: the XML reader refuses a document with an unmatched end tag, so
+only a parser defect can produce one.
+
+This applies to **every** counter the audit reads, not only the depths. A
+stack-backed count cannot go negative, but that is not the property that matters:
+popping an empty stack is a no-op, and a no-op destroys the evidence exactly as
+the clamp does. "Cannot underflow" and "cannot hide an over-pop" are different
+statements, and only the first is true of a stack.
+
+So count the underflow at each site: when a depth is decremented at zero, when a
+stack is popped empty, and when an exhibit collector refuses a close because
+nothing was open. That last one is worth stating separately — a collector that
+already detects the condition and only writes it to the log is the shape #181
+exists to correct, and it is easy to leave that way because it looks handled.
+
+The defect this guards against is a start-side guard drifting from its end-side
+twin, so that an end tag closes a frame that was never opened. That is what #171
+and #173 were, and it is reachable on a stack-backed counter as readily as on a
+depth: Swift's `</sec>` push and pop are both guarded by `!inAbstract`, and if
+those two ever see different state the pop closes the *parent's* section early
+and `openSections` still ends at 0.
 
 Run the audit **in the function every entry point funnels through**, not in the
 structured-data path. Production renders HTML and markdown; it does not ask for
@@ -1112,8 +1155,9 @@ an article stripped to its own accession number is returned without a word.
 
 Two limits worth stating rather than discovering. The audit runs after a
 successful parse, so a document the XML reader rejects is never audited — every
-counter is non-zero there by construction, and reporting six guaranteed
-imbalances on every malformed feed trains readers to ignore the category. And
+counter left open at the point it gave up stays open, and reporting a fistful of
+guaranteed imbalances on every malformed feed trains readers to ignore the
+category. And
 every diagnostic must name the article: the full-text path builds a parser per
 output format over the same document, so each line appears more than once, and
 unattributed duplicates cannot be told from two genuinely broken articles.
@@ -1123,6 +1167,49 @@ tag is refused by the XML reader first, and each guard tests the same predicate
 at both ends of the range it brackets. That is what makes it a net, and it is
 also why it needs a unit test of its own — hand it the state a defect would
 leave, and check it says so.
+
+### Reporting the audit to the caller
+
+Logging is not reporting. An audit that reaches only the logger leaves the UI
+rendering a gutted article exactly as it renders a complete one, so a reader who
+cannot find the table they came for cannot tell whether the publisher never
+deposited it or the parser discarded it (#181). In a medical-literature tool
+those are opposite conclusions, and the wrong one is a reader deciding the
+evidence is absent.
+
+Expose the losses as a value on the parser, carry it out through whatever the
+full-text service returns, and show the reader that the rendering is incomplete.
+Three rules make the difference between a channel and a decoration:
+
+- **Carry facts, not copy.** The parser emits the diagnostics written for a log;
+  the sentence a reader sees is composed in the UI layer, where it can be
+  localised with the rest of the interface.
+- **Narrower than the log.** Only losses a reader can act on: a stack that did
+  not unwind, and a parse that produced no title, abstract or body. A zero-author
+  parse is a metadata gap, not a truncation — editorials, corrections and errata
+  legitimately carry none — and a banner that fires on those is worth nothing on
+  the article where content really was discarded. Keep that one in the log.
+- **Persist it with the cached text.** Full text is normally cached and
+  re-rendered from the cache, so warnings held only on the in-flight result are
+  shown once and lost on reopen — and a viewer that renders *only* from the cache
+  never shows them at all. Write and clear them through the *same routine* as the
+  content they describe — one method that writes every cached field — or they
+  will outlive it and label the next article with
+  the last one's losses. A record written before the field existed must read back
+  as "nothing known", not as a truncation.
+
+Keep the parser's own error **typed** where it crosses the service boundary.
+Flattening it to a string leaves "already parsed", "no content" and "malformed
+XML" indistinguishable to every caller and to the log. And a parse failure is
+deterministic, so it must not be marked retryable.
+
+### The audited state as a type
+
+Make the audited state a type that **cannot hold a negative count**, clamping in
+its initialiser, and give it a single `isBalanced` predicate. Then pin by test
+that `isBalanced` and the diagnostics agree across every single-field state: they
+answer the same question two ways, and a field added to one and not the other is
+otherwise a silent disagreement about what "clean" means.
 
 ## Common Pitfalls
 

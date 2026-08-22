@@ -63,6 +63,13 @@ struct FullTextTab: View {
     @State private var fullTextResult: AppFullTextResult?
     @State private var isLoadingFullText = false
 
+    /// The message shown when a fetch fails for a reason other than "no source".
+    ///
+    /// Without it every other failure — network, server, a parse this build
+    /// cannot read — stopped the spinner and left the screen exactly as it was,
+    /// so the reader could not tell a failure from a no-op.
+    @State private var fullTextError: String?
+
     // MARK: - Computed Properties
 
     /// Documents available for full-text viewing based on filter.
@@ -104,6 +111,18 @@ struct FullTextTab: View {
             }
             .sheet(isPresented: $showingFullTextViewer) {
                 fullTextViewerSheet
+            }
+            .alert(
+                "Could not retrieve full text",
+                isPresented: .init(
+                    get: { fullTextError != nil },
+                    set: { if !$0 { fullTextError = nil } }
+                ),
+                presenting: fullTextError
+            ) { _ in
+                Button("OK", role: .cancel) { fullTextError = nil }
+            } message: { message in
+                Text(message)
             }
         }
     }
@@ -231,26 +250,9 @@ struct FullTextTab: View {
 
     @ViewBuilder
     private var fullTextViewerSheet: some View {
-        if let document = selectedDocument {
-            if let result = fullTextResult {
-                FullTextViewer(document: document, result: result)
-            } else if let content = document.fullTextContent {
-                FullTextViewer(
-                    document: document,
-                    result: AppFullTextResult(
-                        content: .markdown(content),
-                        source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                    )
-                )
-            } else if let html = document.fullTextHTML {
-                FullTextViewer(
-                    document: document,
-                    result: AppFullTextResult(
-                        content: .html(content: html, markdown: document.fullTextContent ?? ""),
-                        source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                    )
-                )
-            }
+        if let document = selectedDocument,
+           let result = fullTextResult ?? document.cachedFullTextResult {
+            FullTextViewer(document: document, result: result)
         }
     }
 
@@ -260,18 +262,10 @@ struct FullTextTab: View {
     private func selectDocument(_ document: Document) {
         selectedDocument = document
         if document.hasFullText {
-            // Create result from stored content
-            if let html = document.fullTextHTML {
-                fullTextResult = AppFullTextResult(
-                    content: .html(content: html, markdown: document.fullTextContent ?? ""),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            } else if let content = document.fullTextContent {
-                fullTextResult = AppFullTextResult(
-                    content: .markdown(content),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            }
+            // Rebuilt in one place, so the cache cannot lose a field the live
+            // result carries — which is how the parse warnings would go missing
+            // on reopen (#181).
+            fullTextResult = document.cachedFullTextResult
             showingFullTextViewer = true
         }
     }
@@ -292,22 +286,11 @@ struct FullTextTab: View {
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {
-                    // Update document model
-                    switch result.content {
-                    case .html(let htmlContent, let markdownContent):
-                        document.fullTextHTML = htmlContent
-                        document.fullTextContent = markdownContent
-                    case .markdown(let content):
-                        document.fullTextContent = content
-                    case .pdfURL(let url):
-                        document.fullTextPDFPath = url.absoluteString
-                    case .webURL:
-                        // Don't store - just for viewing
-                        break
-                    }
-                    document.fullTextSource = result.source.rawValue
-                    document.fullTextFetchedAt = Date()
-                    try? modelContext.save()
+                    // One statement writes every cached field, warnings included.
+                    // Assigning them by hand here is what let the cache and the
+                    // live result drift apart.
+                    document.applyFullTextResult(result)
+                    save(document, "full text")
 
                     fullTextResult = result
                     isLoadingFullText = false
@@ -316,12 +299,46 @@ struct FullTextTab: View {
             } catch {
                 await MainActor.run {
                     if case FullTextError.noFullTextAvailable = error {
+                        // The one expected outcome: recorded on the document so
+                        // the list can show it, and not an error to report.
                         document.fullTextUnavailable = true
-                        try? modelContext.save()
+                        save(document, "full text availability")
+                    } else {
+                        AppLogger.fullText.error(
+                            """
+                            Full text fetch failed for PMID \(document.pmid, privacy: .public): \
+                            \(error.localizedDescription, privacy: .public)
+                            """
+                        )
+                        fullTextError = error.localizedDescription
                     }
                     isLoadingFullText = false
                 }
             }
+        }
+    }
+
+    /// Persist the context, reporting a failure rather than discarding it.
+    ///
+    /// The warnings banner on macOS renders only from the stored `Document`, so
+    /// a save that fails silently means a truncated article opens there with no
+    /// banner at all while iOS shows one from the in-flight result.
+    ///
+    /// - Parameters:
+    ///   - document: The document being saved, for the log line.
+    ///   - what: What was being recorded, for the log line.
+    private func save(_ document: Document, _ what: String) {
+        do {
+            try modelContext.save()
+        } catch {
+            AppLogger.fullText.error(
+                """
+                Failed to save \(what, privacy: .public) for PMID \
+                \(document.pmid, privacy: .public): \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+            fullTextError = "Could not save the retrieved full text."
         }
     }
 }

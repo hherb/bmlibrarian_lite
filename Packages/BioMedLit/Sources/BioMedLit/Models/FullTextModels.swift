@@ -53,7 +53,11 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
 /// Result of a full-text retrieval operation.
 public enum FullTextResult: Sendable {
     /// Europe PMC XML converted to HTML and markdown.
-    case europePMC(html: String, markdown: String)
+    ///
+    /// `warnings` is what the parse lost. It travels with the text because the
+    /// audit that produces it only reached the logger, so the UI rendered a
+    /// gutted article exactly as it rendered a complete one (#181).
+    case europePMC(html: String, markdown: String, warnings: JATSParseWarnings)
 
     /// Europe PMC PDF URL (when XML is unavailable but free PDF exists).
     case europePMCPDF(pdfURL: URL)
@@ -85,7 +89,7 @@ public enum FullTextResult: Sendable {
 
     /// HTML content if available (only for Europe PMC).
     public var html: String? {
-        if case .europePMC(let html, _) = self {
+        if case .europePMC(let html, _, _) = self {
             return html
         }
         return nil
@@ -93,7 +97,7 @@ public enum FullTextResult: Sendable {
 
     /// Markdown content if available (only for Europe PMC).
     public var markdown: String? {
-        if case .europePMC(_, let markdown) = self {
+        if case .europePMC(_, let markdown, _) = self {
             return markdown
         }
         return nil
@@ -136,8 +140,14 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// PDF download failed.
     case pdfDownloadFailed(String)
 
-    /// XML parsing failed.
-    case xmlParseError(String)
+    /// JATS parsing failed, with the parser's own error preserved.
+    ///
+    /// Keeps `.noContent`, `.alreadyParsed` and `.parsingFailed` distinguishable
+    /// rather than flattening them to one string. There is deliberately no
+    /// string-carrying twin: a second case that rendered identically only gave a
+    /// future edit somewhere to put an error it had not classified, and silently
+    /// stole the pattern matches aimed at this one.
+    case jatsParseFailure(JATSParseError)
 
     /// PDF caching failed.
     case cachingFailed(String)
@@ -158,8 +168,8 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             return "No full text available from any source"
         case .pdfDownloadFailed(let reason):
             return "Failed to download PDF: \(reason)"
-        case .xmlParseError(let reason):
-            return "Failed to parse XML: \(reason)"
+        case .jatsParseFailure(let error):
+            return "Failed to parse XML: \(error.localizedDescription)"
         case .cachingFailed(let reason):
             return "Failed to cache PDF: \(reason)"
         case .invalidResponse(let reason):
@@ -175,7 +185,9 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
         case .networkError, .serverError:
             return true
         case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
-             .xmlParseError, .cachingFailed, .invalidResponse:
+             .jatsParseFailure, .cachingFailed, .invalidResponse:
+            // A parse failure is deterministic: retrying spends the network
+            // budget to reach the same result.
             return false
         }
     }

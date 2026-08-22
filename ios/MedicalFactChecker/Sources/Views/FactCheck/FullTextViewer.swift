@@ -51,7 +51,13 @@ struct FullTextViewer: View {
 
     var body: some View {
         NavigationStack {
-            content
+            VStack(spacing: 0) {
+                // Above the content, not inside it: a reader who cannot find the
+                // table they came for must learn the rendering is incomplete
+                // before concluding the evidence is absent (#181).
+                ParseWarningBanner(warnings: result.warnings)
+                content
+            }
                 .navigationTitle(document.displayTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

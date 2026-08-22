@@ -1446,25 +1446,11 @@ struct DocumentDetailSheet: View {
     /// Sheet content for displaying full text.
     @ViewBuilder
     private var fullTextViewerSheet: some View {
-        if let result = fullTextResult {
+        // The cache rebuild carries the parse warnings; reconstructing it here
+        // by hand defaulted them to clean, so a truncated article reopened from
+        // the cache rendered exactly like a complete one (#181).
+        if let result = fullTextResult ?? document.cachedFullTextResult {
             FullTextViewer(document: document, result: result)
-        } else if let content = document.fullTextContent {
-            FullTextViewer(
-                document: document,
-                result: AppFullTextResult(
-                    content: .markdown(content),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            )
-        } else if let pdfPath = document.fullTextPDFPath,
-                  let url = URL(string: pdfPath) {
-            FullTextViewer(
-                document: document,
-                result: AppFullTextResult(
-                    content: .pdfURL(url),
-                    source: AppFullTextSource(rawValue: document.fullTextSource ?? "cached") ?? .cached
-                )
-            )
         }
     }
 
@@ -1486,21 +1472,10 @@ struct DocumentDetailSheet: View {
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {
-                    // Update document model
-                    switch result.content {
-                    case .html(let htmlContent, let markdownContent):
-                        document.fullTextHTML = htmlContent
-                        document.fullTextContent = markdownContent
-                    case .markdown(let content):
-                        document.fullTextContent = content
-                    case .pdfURL(let url):
-                        document.fullTextPDFPath = url.absoluteString
-                    case .webURL:
-                        // Don't store - just open
-                        break
-                    }
-                    document.fullTextSource = result.source.rawValue
-                    document.fullTextFetchedAt = Date()
+                    // One statement writes every cached field, warnings
+                    // included. Assigning them by hand is what let the
+                    // cache and the live result drift apart (#181).
+                    document.applyFullTextResult(result)
 
                     fullTextResult = result
                     isLoadingFullText = false
