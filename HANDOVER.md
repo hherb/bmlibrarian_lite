@@ -8,72 +8,8 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-- **One exhibit collector for figures and tables** (#170/#173/#175, PR #179,
-  open). `<fig>` got a stack in #156; `<table-wrap>` kept a single builder
-  slot until #173 was filed, so a table nested in another table's
-  `<table-wrap-foot>` still lost the outer table outright — its label, its
-  caption and every cell, at the instant the inner one opened, with no log. Both
-  exhibits now share one `ExhibitCollector<Builder>`, and `inFigure`,
-  `inTableWrap`, `figures` and `tables` are **derived from it and never stored**.
-  - **Deriving the flag is the load-bearing half, not the tidying.** A stored
-    `inTableWrap` is exactly what the inner `</table-wrap>` cleared while the
-    outer table was still open. Every stored-flag bug in this file — #156, #169,
-    the `</fn>` counter — is that same sentence with a different noun.
-  - **The stack alone did not finish #173**, which a review caught: the same
-    sentence applies to `exhibitFootnoteDepth`, one parser-wide counter that
-    still stands at the *outer* table's depth while the inner table is parsed. So
-    the inner table's own cell `<p>` took the footnote branch and was filed as
-    the inner table's footnote — rendered twice. Prose now routes on
-    `inInnermostExhibitFootnote`, derived from `elementStack`; the counter is
-    kept only so the audit can notice its two ends drifting apart. The fixture
-    hid it because bare `<td>` text never reaches the `<p>` branch — it holds a
-    `<p>` now, which is what publishers deposit.
-  - **The stack is the tree, so the slot list goes away.** #156 kept
-    `[JATSFigureInfo?]` reserved slots beside the stack; a closing exhibit now
-    hands itself *plus the run that closed inside it* up to its parent — same
-    document order, no index, no second array, and no `nil` meaning two different
-    things (#170). bmlib keeps the slot-list shape and is equally correct;
-    `doc/cross_platform/jats_parsing.md` now carries both.
-  - **A net nobody can trip still needs a test.** The end-of-parse unwind audit
-    lived in `parseToArticle`, which **production never calls** — the full-text
-    path is `parseToHTML` then `parseToMarkdown` — so the safety net for the
-    whole class of unbalanced-stack defects was installed only in the test
-    harness (#175). It runs from `runParser()` now, over six counters rather than
-    two: sub-article depth, open figures, open tables, exhibit footnote depth,
-    open captions, open sections.
-    - Nothing well-formed can trip it, by design — `XMLParser` refuses an
-      unbalanced document and every guard tests the same predicate at both ends —
-      so it is a **pure static function** over a `JATSParseUnwindState`, and the
-      tests hand it the state a defect would leave.
-    - **Wiring it needs a check a document *can* trip**, or a mutation deleting
-      the call survives. The zero-author warning is that check: it moved to
-      `runParser()` too, which is where it was always needed. It is suppressed
-      when the parse produced nothing — but the *emptiness* is then reported
-      instead, and unconditionally: only `parseToArticle` turns that into
-      `.noContent`, while `parseToHTML` measures its own output and `buildHTML`
-      emits the identifiers line first, so in production — where the PMC ID is
-      always known — it is never empty and never throws. An article stripped to
-      its own accession number came back without a word.
-    - **Nothing connected a counter to the field it is reported under**, so
-      swapping two changed no behaviour any test could see. Pinned by driving the
-      `XMLParserDelegate` callbacks directly — open an element and never deliver
-      its end tag, the one thing well-formed XML cannot do.
-  - Corpus digests **did not move**, as expected: no corpus article nests a
-    `<table-wrap>`, so hand-written fixtures are the only guard here — and their
-    cells must hold `<p>`, since bare `<td>` text never reaches the branch that
-    carries the second half of #173. Mutation-tested; the only survivors are
-    equivalent mutants at sites `inTableWrap` already guards.
-  - **bmlib was measured, not assumed** — running its parser over the same
-    fixture keeps both tables with the right labels and cells, so it never had
-    the first half of #173. It cannot have the second half either, but only
-    because it drops exhibit footnote prose outright rather than routing it —
-    already lodged as bmlib **#124**, and a larger content loss than the bug it
-    happens to sidestep. It has no end-of-parse audit at all, which is #175 one
-    step worse: lodged as bmlib **#134**. Kotlin has the single-slot shape for
-    *both* exhibits and no audit either; added to **#165**.
-  - **Left open, lodged**: #180 (a counter that under-decremented is clamped to
-    zero, so the audit certifies the parse clean) and #181 (the audit only logs;
-    no caller can tell a truncated parse from a thin one).
+Nothing. Master is green on all three platforms and no PR is open; pick the next
+slice from **Potential follow-ups** below.
 
 ---
 
@@ -82,6 +18,48 @@ its slice has landed; add a new section when handing off new work.
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
 the rest.
+
+- **One exhibit collector for figures and tables** (#170/#173/#175 in PR #179,
+  2026-08-22). `<fig>` and `<table-wrap>` now share one `ExhibitCollector`, and
+  `inFigure`, `inTableWrap`, `figures` and `tables` are **derived from it and
+  never stored** — a stored flag is exactly what an inner exhibit's close tag
+  clears while the outer one is still open, which is #156, #169, the `</fn>`
+  counter and both halves of #173 in one sentence.
+  - **The stack alone did not finish #173.** The same sentence applies to a
+    parser-wide *counter*: `exhibitFootnoteDepth` still stood at the outer
+    table's depth while the inner table parsed, so the inner table's own cell
+    `<p>` was filed as its footnote and rendered twice. Prose routes on
+    `inInnermostExhibitFootnote`, derived from `elementStack`; the counter
+    survives only so the audit can notice its two ends drifting apart.
+  - **A fixture's table cells must hold `<p>`.** Bare `<td>` text never reaches
+    the `<p>` branch, so it hides every defect that lives there. No corpus
+    article nests a `<table-wrap>` — hand-written fixtures are the only guard.
+  - **A closing exhibit hands itself plus the run that closed inside it up to
+    its parent**, so #156's reserved-slot array goes away: same document order,
+    no index, no `nil` meaning two things (#170). bmlib keeps the slot-list
+    shape and is equally correct; `doc/cross_platform/jats_parsing.md` carries
+    both.
+  - **A safety net installed where production never runs is not installed**
+    (#175). The end-of-parse unwind audit lived in `parseToArticle`; the
+    full-text path is `parseToHTML`/`parseToMarkdown`. It runs from
+    `runParser()` now, over six counters, as a pure static function on
+    `JATSParseUnwindState` — nothing well-formed can trip it, so the tests hand
+    it the state a defect would leave.
+    - **Wiring such a net needs a check a document *can* trip**, or a mutation
+      deleting the call survives. The zero-author warning is that check, moved
+      to `runParser()` where it was always needed.
+    - **Nothing connected a counter to the field it is reported under**, so
+      swapping two changed no observable behaviour. Pinned by driving the
+      `XMLParserDelegate` callbacks directly — open an element and never deliver
+      its end tag, the one thing well-formed XML cannot do.
+  - **bmlib was measured, not assumed**: it never had the first half of #173,
+    and sidesteps the second only by dropping exhibit-footnote prose outright —
+    a larger content loss, lodged as bmlib **#124**. It has no end-of-parse
+    audit at all (bmlib **#134**). Kotlin has the single-slot shape for *both*
+    exhibits and no audit either; added to **#165**.
+  - **Left open, lodged**: #180 (a counter that under-decremented is clamped to
+    zero, so the audit certifies the parse clean) and #181 (the audit only logs;
+    no caller can tell a truncated parse from a thin one).
 
 - **JATS routing by the owning element** (#156/#157/#161 in PR #166, #167/#169
   in PR #171, both 2026-08-22). Six defects, one mistake: a piece of markup
@@ -372,9 +350,16 @@ the rest.
   instead. One-character fix, but wants a shared fixture or it recurs.
   #147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
+- **#180, #181 — the unwind audit's two blind spots**, both from the PR #179
+  review. #180: a counter that under-decremented is clamped at zero, so the
+  audit certifies as clean the very parse it exists to catch. #181: the audit
+  only logs — no caller can tell a truncated parse from a genuinely thin
+  article, which is the same shape as #176 one layer down. Fix #180 first; #181
+  is a model change (a parse result that can carry a warning) and touches the
+  callers.
 - **#172, #174, #176, #177 — what is left of the #171 review round** (#173 and
-  #175 are in flight in PR #179; see above). All four are independent of each other. **#172 and
-  #174 go together**, since both are about a table or figure the renderer cannot
+  #175 landed in PR #179; see above). All four are independent of each other.
+  **#172 and #174 go together**, since both are about a table or figure the renderer cannot
   honestly describe: #172 drops a table deposited as a `<graphic>` entirely — all
   8 tables in `PMC12759138` — and #174 gives an unlabelled exhibit a fabricated
   `"Figure N"` from its array position, in `alt` text too, which in a
