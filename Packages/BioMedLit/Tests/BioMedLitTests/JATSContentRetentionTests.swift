@@ -159,9 +159,9 @@ final class JATSContentRetentionTests: XCTestCase {
     /// stack instead — which still knows the outer `<table-wrap>` is open — unwinds
     /// it correctly.
     ///
-    /// The outer *table* is still lost here (a single `currentTable` slot, #173);
-    /// what this pins is that the loss stays inside the table and does not take the
-    /// article's prose with it.
+    /// The outer table itself survives since #173; `JATSExhibitCollectorTests`
+    /// covers that half. What this pins is the prose: the two are separate
+    /// failures, and this one was live before the exhibit ever got its stack.
     func testANestedTableWrapDoesNotSwallowTheRestOfTheArticle() throws {
         let article = try article(body: """
         <sec>
