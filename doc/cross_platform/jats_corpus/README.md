@@ -281,7 +281,42 @@ from the separate, earlier survey conducted during the #142 review.
 The 959 denominator on the last row is figures carrying a `<graphic>`, not the
 1 118 figures surveyed.
 
-**These numbers cannot be re-derived from this repository.** The survey exists
-only as the prose above: there is no article list and no counting script here, so
-a maintainer deciding whether a replacement article covers the same ground has
-nothing to measure against. Issue #164 tracks committing both.
+### Re-deriving these numbers
+
+`scripts/jats_survey.py` counts all of them, and counts them **straight from the
+XML** rather than through `JATSXMLParser` — a survey that asked the parser what a
+document contains would agree with the parser's bugs, which is exactly how
+several of these defects survived a green suite.
+
+```bash
+python scripts/jats_survey.py                          # the seven committed articles
+python scripts/jats_survey.py --measure caption-hosts  # one measurement
+python scripts/jats_survey.py --list                   # what it can measure
+```
+
+Over the committed corpus it reproduces the caption-host row above exactly
+(`fig` 25, `table-wrap` 16, `supplementary-material` 14, `media` 6,
+`boxed-text` 1), which is the check that it is measuring the same thing the
+225-article survey measured.
+
+Seven articles cannot reproduce a prevalence figure, so a wider sample is
+fetched rather than committed — these are third-party works, and the licence
+position above is the reason the corpus is seven and not seven hundred:
+
+```bash
+python scripts/jats_survey.py --fetch-query 'SRC:PMC AND OPEN_ACCESS:Y' \
+    --limit 300 --cache tmp/jats-survey
+python scripts/jats_survey.py --corpus tmp/jats-survey
+```
+
+The fetch writes `manifest.json` — the PMC ids and their SHA-256 — so a run can
+be repeated over exactly the same articles with `--fetch-ids`. That manifest is
+the half of #164 the prose lacked: **a number nobody can re-derive is a number
+nobody can challenge.**
+
+**Read a zero as a finding.** `nested-exhibits` reports `table-wrap in fig` as 0
+across the corpus; that is the #169 shape, and its absence is why the fix needed
+a hand-written fixture and why no digest would ever have caught the regression.
+The `grouped-citations` measurement says outright that the committed corpus is
+uninformative about #177 rather than reporting a clean bill of health, because
+the shape occurs in roughly 2% of articles.
