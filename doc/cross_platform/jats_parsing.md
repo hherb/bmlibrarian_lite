@@ -70,10 +70,27 @@ class JATSParser:
     current_abstract_text: list[string] = []
 
     # Figure/Table state
-    in_figure: bool = false
+    # A <fig> may contain another <fig> (eLife wraps every figure supplement
+    # this way, in 19.6% of surveyed articles), so the figure side is a stack,
+    # not a slot, and `in_figure` is derived from it rather than stored. A
+    # stored flag is cleared by the inner </fig> while the parent is still
+    # open, which discards the parent and reads the rest of its content as
+    # article prose (#156).
+    figure_slots: list[Figure | null] = []   # one per <fig>, in *open* order
+    figure_stack: list[FigureFrame] = []     # innermost last
+    in_figure: bool = (figure_stack is not empty)
     in_table_wrap: bool = false
-    current_figure: FigureBuilder | null
     current_table: TableBuilder | null
+
+    # How deep the parser is inside a <fn> or <table-wrap-foot> belonging to
+    # an exhibit. Compared against the depth each exhibit opened at, never
+    # against zero — see "Label routing" below.
+    footnote_depth: int = 0
+
+class FigureFrame:
+    slot: int                  # index into figure_slots, reserved at <fig>
+    builder: FigureBuilder
+    footnote_depth_at_open: int
 
     # Reference state
     in_ref_list: bool = false
@@ -292,15 +309,90 @@ class FigureBuilder:
     label: string = ""
     caption: string = ""
     graphic_href: string | null = null
+    graphic_rank: GraphicSuitability | null = null
+    footnotes: list[string] = []
+    pending_footnote_label: string = ""
+
+    # A figure commonly deposits the same image more than once, and only one
+    # href fits in the model. Accept a deposit only when it is *strictly*
+    # better, so the first wins among equals (#161).
+    function offer_graphic(href, rank):
+        if href is empty: return
+        if graphic_rank is null or rank > graphic_rank:
+            graphic_href = href
+            graphic_rank = rank
+
+    function append_footnote(text):
+        footnotes.append(join_marker(pending_footnote_label, text))
+        pending_footnote_label = ""
 
     function build() -> Figure:
         return Figure(
             id=id,
             label=label or f"Figure {index + 1}",
             caption=caption,
-            graphic_url=graphic_href
+            graphic_url=graphic_href,
+            footnotes=footnotes
         )
 ```
+
+### Choosing among several `<graphic>`
+
+Of the 959 survey figures carrying a `<graphic>` at all, 507 (52.9%) end on a
+thumbnail, so "keep the last one" resolves the majority of figures to a
+thumbnail. "Keep the first" is no better on its own: the two multi-graphic
+conventions disagree about order.
+
+```pseudocode
+enum GraphicSuitability:   # worst to best
+    ARCHIVAL  = 0   # mime-subtype tiff/tif/eps/postscript — will not render
+    THUMBNAIL = 1   # content-type~"thumb" or specific-use~"thumb"
+    FULL      = 2   # everything else
+
+function graphic_suitability(attributes) -> GraphicSuitability:
+    # Substring, lowercased: neither attribute is case-controlled, and both
+    # are open-valued in JATS, so a third spelling is possible.
+    if "thumb" in lower(attributes["content-type"] or "")
+       or "thumb" in lower(attributes["specific-use"] or ""):
+        return THUMBNAIL
+    if lower(attributes["mime-subtype"] or "") in {tiff, tif, eps, postscript}:
+        return ARCHIVAL
+    return FULL
+```
+
+A thumbnail is deposited **last** (PLOS, Springer); an `<alternatives>`
+archival master is deposited **first**. Ranking settles both without caring
+which end it is. Never infer a thumbnail from the file extension: every corpus
+thumbnail is a `.gif`, but a `.gif` elsewhere may be the only image a figure
+has.
+
+### Label routing
+
+A `<fn>` carries its own marker — "a", "b", "*" — as a `<label>`, so routing
+every `<label>` on the ambient "am I in a figure/table?" flags wrote that
+marker over the exhibit's own number (#157). 27 of 225 surveyed articles
+(12.0%) carry a labelled `<table-wrap-foot><fn>`.
+
+```pseudocode
+on </label>:
+    # NOT `footnote_depth > 0`: JATS lets a <fig> or <table-wrap> open *inside*
+    # a footnote, and testing against zero eats that exhibit's own label.
+    exhibit_depth = figure_stack.last.footnote_depth_at_open if in_figure
+                    else table_footnote_depth_at_open if in_table_wrap
+                    else 0
+    if footnote_depth > exhibit_depth:
+        current_exhibit.pending_footnote_label = text   # held, not dropped
+    else if in_figure:    current_figure.label = text
+    else if in_table_wrap: current_table.label = text
+    else if in_ref:        current_reference.label = text
+```
+
+Hold the marker rather than dropping it: `<sup>` is an inline element flattened
+into the surrounding cell, so the rendered table body still reads `12.3a` and
+the footnote has to say which one it is. Emit it as `"a — text"`.
+
+An empty label is not inert — renderers substitute `f"Figure {index + 1}"`, so
+a swallowed label becomes an invented figure number rather than a blank.
 
 ## Table Handling
 

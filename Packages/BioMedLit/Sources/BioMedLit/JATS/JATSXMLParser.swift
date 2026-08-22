@@ -70,13 +70,19 @@ public final class JATSXMLParser: NSObject {
     private var abstractSections: [JATSAbstractSection] = []
     private var bodySections: [JATSBodySection] = []
 
-    /// One slot per `<fig>` seen, in the order the figures *opened*.
+    /// One slot per `<fig>` opened outside a `<sub-article>`, in the order the
+    /// figures *opened*.
     ///
-    /// A figure is built at its end tag but has to be listed at its start, or a
-    /// nested one would be emitted ahead of the figure it belongs to: eLife's
-    /// supplements would precede their own parent. The slot is reserved when the
-    /// element opens and filled when it closes, which keeps `figures` in document
+    /// A figure is built at its end tag but has to be listed at its start. Build
+    /// order is innermost-first, so a plain pop-and-append would emit each eLife
+    /// supplement ahead of the parent it belongs to. Reserving the slot when the
+    /// element opens and filling it when it closes keeps `figures` in document
     /// order however deeply the article nests (#156).
+    ///
+    /// A slot still `nil` after the parse is a `<fig>` that never closed. That
+    /// cannot survive `XMLParser`, which rejects the document first, so the
+    /// `compactMap` below is a formality — `parseToArticle` says so out loud if it
+    /// ever stops being one.
     private var figureSlots: [JATSFigureInfo?] = []
 
     /// Figures in document order.
@@ -203,45 +209,97 @@ public final class JATSXMLParser: NSObject {
     private var figureFootnoteDepth = 0
 
     /// Open `<fig>` builders, innermost last, each paired with the `figureSlots`
-    /// entry it will fill.
+    /// entry it will fill and the footnote depth in force when it opened.
     ///
     /// A stack rather than a single slot for the reason `subArticleDepth` is a
     /// counter: JATS permits a `<fig>` inside a `<fig>` and eLife uses it for
-    /// every figure supplement — 19.6% of surveyed articles nest one. A single
-    /// slot was overwritten when the inner figure opened and cleared when it
-    /// closed, so the parent was discarded and the rest of its content was read
-    /// as though no figure were open at all (#156).
-    private var figureStack: [(slot: Int, builder: FigureBuilder)] = []
+    /// every figure supplement — 44 of 225 surveyed articles (19.6%) nest one. A
+    /// single slot was overwritten when the inner figure opened and cleared when
+    /// it closed, so the parent was discarded and the rest of its content was
+    /// read as though no figure were open at all (#156).
+    private var figureStack: [(slot: Int, builder: FigureBuilder, footnoteDepthAtOpen: Int)] = []
 
     /// Whether the parser is inside a `<fig>` at any depth.
     private var inFigure: Bool { !figureStack.isEmpty }
+
+    /// The footnote depth in force when the open `<table-wrap>` opened.
+    ///
+    /// The figure equivalent rides on `figureStack`; a table cannot nest, so one
+    /// slot is enough.
+    private var tableFootnoteDepthAtOpen = 0
+
+    /// The footnote depth in force when the exhibit that owns the current markup
+    /// opened.
+    ///
+    /// `figureFootnoteDepth` counts footnotes anywhere in the document, so on its
+    /// own it cannot say whether a `<label>` belongs to a footnote or to an
+    /// exhibit that merely *opened inside* one — a `<fig>` in a
+    /// `<table-wrap-foot>`, say. Comparing against the depth the exhibit itself
+    /// opened at answers exactly that. Figure before table to match how `<label>`
+    /// and `appendFootnoteText` route.
+    private var currentExhibitFootnoteDepth: Int {
+        if let open = figureStack.last { return open.footnoteDepthAtOpen }
+        if inTableWrap { return tableFootnoteDepthAtOpen }
+        return 0
+    }
+
+    /// Whether the markup being closed is a footnote's own, rather than its
+    /// enclosing exhibit's.
+    private var inExhibitFootnote: Bool {
+        figureFootnoteDepth > currentExhibitFootnoteDepth
+    }
 
     /// Mutate the innermost open figure, if there is one.
     ///
     /// Every `<graphic>`, `<label>` and caption belongs to the figure that
     /// encloses it most closely, never to whichever figure happens to be last.
     private func withCurrentFigure(_ mutate: (inout FigureBuilder) -> Void) {
-        guard !figureStack.isEmpty else { return }
+        guard !figureStack.isEmpty else {
+            // The callers all test `inFigure` or a `captionStack` entry first, so
+            // reaching here means those two disagree about whether a figure is
+            // open. Logged rather than ignored: the symptom is figure content
+            // quietly going missing, with nothing else to go on.
+            BioMedLitLib.logger?.error(
+                "JATS figure content routed with no open <fig>",
+                category: .parsing
+            )
+            return
+        }
         mutate(&figureStack[figureStack.count - 1].builder)
     }
 
-    /// Whether a `<graphic>`'s attributes mark it as a thumbnail of another one.
+    /// `mime-subtype` values naming an archival master rather than a web image.
+    private static let archivalMimeSubtypes: Set<String> = ["tiff", "tif", "eps", "postscript"]
+
+    /// How suitable a `<graphic>` is as the image shown for its figure.
     ///
-    /// JATS sanctions two spellings and publishers use both: PLOS and Springer
-    /// deposit `content-type="thumb"`, others `specific-use="thumbnail"`. Read as
-    /// a substring so `thumb`, `thumbnail` and the hyphenated compounds a deposit
-    /// may carry all count, and lowercased because neither attribute is
-    /// case-controlled.
+    /// Two publisher conventions mark a thumbnail and both appear in the wild:
+    /// `content-type="thumb"`, which PLOS and Springer deposit and which is the
+    /// only spelling in `doc/cross_platform/jats_corpus/`, and
+    /// `specific-use="thumbnail"`, covered here only by hand-written fixtures.
+    /// Read as a substring so `thumb`, `thumbnail` and the hyphenated compounds a
+    /// deposit may carry all count, and lowercased because neither attribute is
+    /// case-controlled. Both are open-valued in JATS — the tag set defines no
+    /// vocabulary for them — so a third spelling is possible.
     ///
-    /// Nothing is inferred from the file extension: a `.gif` is a thumbnail at
-    /// PLOS and the only image at other publishers.
+    /// Nothing is inferred from the file extension, which carries no rank of its
+    /// own: PLOS and Springer both deposit their thumbnail as `.gif`, but a `.gif`
+    /// elsewhere may be the only image the figure has.
     ///
     /// - Parameter attributes: The element's attributes as reported by the parser.
-    /// - Returns: `true` when the graphic is a thumbnail.
-    private static func graphicIsThumbnail(_ attributes: [String: String]) -> Bool {
-        ["content-type", "specific-use"].contains { key in
+    /// - Returns: How good a fit the graphic is.
+    private static func graphicSuitability(_ attributes: [String: String]) -> GraphicSuitability {
+        let isThumbnail = ["content-type", "specific-use"].contains { key in
             attributes[key]?.lowercased().contains("thumb") ?? false
         }
+        if isThumbnail {
+            return .thumbnail
+        }
+        if let subtype = attributes["mime-subtype"]?.lowercased(),
+           archivalMimeSubtypes.contains(subtype) {
+            return .archival
+        }
+        return .full
     }
 
     private var currentTable: TableBuilder?
@@ -388,6 +446,17 @@ public final class JATSXMLParser: NSObject {
             BioMedLitLib.logger?.error(
                 "JATS sub-article depth ended at \(subArticleDepth), not 0 — "
                     + "content after the imbalance was discarded",
+                category: .parsing
+            )
+        }
+
+        // Same reasoning one element down: an open <fig> at this point left its
+        // slot empty, and the compactMap in `figures` drops it without a word.
+        // XMLParser should have refused the document long before here.
+        if !figureStack.isEmpty {
+            BioMedLitLib.logger?.error(
+                "JATS figure stack ended with \(figureStack.count) open <fig> — "
+                    + "those figures and their content were discarded",
                 category: .parsing
             )
         }
@@ -1146,9 +1215,9 @@ extension JATSXMLParser: XMLParserDelegate {
         guard !text.isEmpty else { return }
 
         if inFigure {
-            withCurrentFigure { $0.footnotes.append(text) }
+            withCurrentFigure { $0.appendFootnote(text) }
         } else if inTableWrap {
-            currentTable?.footnotes.append(text)
+            currentTable?.appendFootnote(text)
         }
     }
 
@@ -1241,11 +1310,17 @@ extension JATSXMLParser: XMLParserDelegate {
             }
         case "fig":
             // The slot is reserved now and filled at the end tag, so a nested
-            // figure cannot be listed ahead of the one containing it.
+            // figure cannot be listed ahead of the one containing it. The
+            // footnote depth rides along so this figure's own <label> is still
+            // recognised when the figure opened inside somebody's footnote.
             var builder = FigureBuilder()
             builder.id = attributeDict["id"] ?? ""
             figureSlots.append(nil)
-            figureStack.append((slot: figureSlots.count - 1, builder: builder))
+            figureStack.append((
+                slot: figureSlots.count - 1,
+                builder: builder,
+                footnoteDepthAtOpen: figureFootnoteDepth
+            ))
         case "graphic":
             // Extract graphic URL from xlink:href attribute
             if inFigure {
@@ -1253,23 +1328,35 @@ extension JATSXMLParser: XMLParserDelegate {
                     ?? attributeDict["href"]
                     ?? attributeDict["xlink-href"]
                 if let href = href {
-                    let isThumbnail = Self.graphicIsThumbnail(attributeDict)
+                    // A figure commonly deposits the same image more than once —
+                    // a thumbnail beside the full picture, or an archival master
+                    // ahead of the web derivative in <alternatives>. Assigning
+                    // unconditionally kept whichever came last, which is the
+                    // thumbnail at PLOS and Springer (#161). Ranking them keeps
+                    // the best deposit whatever order they arrive in, since the
+                    // two conventions disagree about which end is which.
+                    let suitability = Self.graphicSuitability(attributeDict)
                     withCurrentFigure { figure in
-                        // A figure commonly deposits its full image and a
-                        // thumbnail of it as two <graphic>. Assigning
-                        // unconditionally kept whichever came last, which is the
-                        // thumbnail for PLOS and Springer — so the first
-                        // non-thumbnail wins, and a thumbnail is held only until
-                        // a better one arrives (#161).
-                        guard figure.graphicHref.isEmpty
-                            || (figure.graphicIsThumbnail && !isThumbnail) else { return }
-                        figure.graphicHref = href
-                        figure.graphicIsThumbnail = isThumbnail
+                        let held = figure.graphicHref
+                        figure.offerGraphic(href, suitability: suitability)
+                        if figure.graphicHref != href, !held.isEmpty {
+                            // Only one href fits in JATSFigureInfo, so a genuine
+                            // second image — a multi-panel figure deposited panel
+                            // by panel — is lost here. Logged for the reason the
+                            // unmodelled caption host is: the omission should be
+                            // discoverable rather than silent.
+                            BioMedLitLib.logger?.debug(
+                                "Figure \(figure.id.isEmpty ? "(unidentified)" : figure.id) "
+                                    + "has another <graphic>; kept \(held), dropped \(href)",
+                                category: .parsing
+                            )
+                        }
                     }
                 }
             }
         case "table-wrap":
             inTableWrap = true
+            tableFootnoteDepthAtOpen = figureFootnoteDepth
             currentTable = TableBuilder()
             currentTable?.id = attributeDict["id"] ?? ""
         case "table-wrap-foot":
@@ -1517,6 +1604,10 @@ extension JATSXMLParser: XMLParserDelegate {
             } else if figureFootnoteDepth > 0 {
                 // <table-wrap-foot> is not reproduced by the rendered table, so it
                 // is captured rather than dropped with the cell furniture below.
+                // Tested ahead of the ambient inFigure/inTableWrap flags for the
+                // reason the "label" case is, though to the opposite end: this
+                // branch keeps the footnote's prose where that one keeps the
+                // footnote's marker away from the exhibit's own label.
                 appendFootnoteText(normalizedText)
             } else if inFigure || inTableWrap {
                 // Remaining figure and table internals — cell <p>, mostly — tested
@@ -1573,15 +1664,27 @@ extension JATSXMLParser: XMLParserDelegate {
                 figureSlots[open.slot] = open.builder.build()
             }
         case "label":
-            if figureFootnoteDepth > 0 {
+            if inExhibitFootnote {
                 // A `<fn>` carries its own marker — "a", "b", "*" — as a
                 // `<label>`, and routing on the ambient flags alone wrote that
-                // marker over the exhibit's own number: 13.2% of surveyed tables
-                // carry a labelled footnote and reported "a" as their label
-                // (#157). The `<p>` branch already consults this depth for the
-                // same reason. There is nowhere to put the marker itself — the
-                // footnotes are plain strings — so it is dropped rather than
-                // misfiled.
+                // marker over the exhibit's own number: 27 of 225 surveyed
+                // articles (12.0%) carry a labelled `<table-wrap-foot><fn>`, and
+                // `PMC12661592`'s only table reported "a" as its label (#157).
+                //
+                // Compared against the depth the exhibit opened at, not against
+                // zero: JATS lets a `<fig>` or `<table-wrap>` open *inside* a
+                // footnote, and testing `> 0` took that exhibit's own `<label>`
+                // for a marker and left it unlabelled — which the renderer then
+                // replaced with a figure number it made up.
+                //
+                // The marker is held rather than dropped: `<sup>` is flattened
+                // into the cell text around it, so the table body still reads
+                // `12.3a` and the footnote has to say which one it is.
+                if inFigure {
+                    withCurrentFigure { $0.pendingFootnoteLabel = text }
+                } else if inTableWrap {
+                    currentTable?.pendingFootnoteLabel = text
+                }
                 break
             }
             if inFigure {
@@ -1597,6 +1700,14 @@ extension JATSXMLParser: XMLParserDelegate {
             figureFootnoteDepth = max(0, figureFootnoteDepth - 1)
         case "fn":
             if inFigure || inTableWrap {
+                // A marker whose <fn> deposited no prose has nothing left to
+                // disambiguate; clearing it here stops it prefixing the *next*
+                // footnote instead.
+                if inFigure {
+                    withCurrentFigure { $0.pendingFootnoteLabel = "" }
+                } else {
+                    currentTable?.pendingFootnoteLabel = ""
+                }
                 figureFootnoteDepth = max(0, figureFootnoteDepth - 1)
             }
 

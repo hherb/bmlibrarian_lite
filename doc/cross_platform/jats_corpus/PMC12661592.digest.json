@@ -33,10 +33,10 @@
   "figures" : [
 
   ],
-  "htmlScalarCount" : 15286,
+  "htmlScalarCount" : 15290,
   "issue" : "",
   "journal" : "JMIR Formative Research",
-  "markdownScalarCount" : 13779,
+  "markdownScalarCount" : 13783,
   "pages" : "",
   "pmcId" : "PMC12661592",
   "pmid" : "41313195",
@@ -68,7 +68,7 @@
     {
       "caption" : "Commonly asked questions about breast self-examination and a summary of DeepSeek AI’s responses.",
       "footnotes" : [
-        "AI: artificial intelligence."
+        "a — AI: artificial intelligence."
       ],
       "label" : "Table 1.",
       "markdownColumnCount" : 2,

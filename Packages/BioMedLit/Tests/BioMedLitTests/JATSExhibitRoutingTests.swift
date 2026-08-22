@@ -78,10 +78,10 @@ final class JATSExhibitRoutingTests: XCTestCase {
     /// footnote, so the table lost its identity wherever it is rendered or
     /// cross-referenced.
     ///
-    /// 13.2% of the tables in the 225-article survey behind
-    /// `doc/cross_platform/jats_corpus/` carry a labelled footnote.
+    /// 27 of the 225 articles (12.0%) in the survey behind
+    /// `doc/cross_platform/jats_corpus/` carry a labelled `<table-wrap-foot><fn>`.
     /// `figureFootnoteDepth` was already tracked and already consulted by the
-    /// `<p>` branch four lines below; the `<label>` branch never got the guard.
+    /// `"p"` case in `didEndElement`; the `"label"` case never got the guard.
     func testTableFootnoteLabelDoesNotOverwriteTheTableLabel() throws {
         let article = try parse(body: tableWithFootnote(
             #"<fn id="T1_FN1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
@@ -94,14 +94,66 @@ final class JATSExhibitRoutingTests: XCTestCase {
     }
 
     /// The guard must not be paid for by dropping the footnote prose, which is
-    /// where abbreviation expansions and per-table funding notes live — the
-    /// transparency analysis reads them.
+    /// where abbreviation expansions and per-table funding notes live.
     func testTheFootnoteProseIsStillCaptured() throws {
         let article = try parse(body: tableWithFootnote(
             #"<fn id="T1_FN1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
         ))
 
-        XCTAssertEqual(article.tables.first?.footnotes, ["AI: artificial intelligence."])
+        XCTAssertEqual(
+            article.tables.first?.footnotes, ["a — AI: artificial intelligence."],
+            "the footnote lost the marker its cell text still points at"
+        )
+    }
+
+    /// Keeping the marker out of the table's `<label>` must not mean parking it on
+    /// the table's caption instead.
+    func testTheFootnoteMarkerDoesNotReachTheCaption() throws {
+        let article = try parse(body: tableWithFootnote(
+            #"<fn id="T1_FN1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
+        ))
+
+        XCTAssertEqual(article.tables.first?.caption, "Commonly asked questions.")
+    }
+
+    /// The marker is not decoration. `<sup>` is an inline element the parser
+    /// flattens into the surrounding cell, so the rendered table body still reads
+    /// `12.3a` — and with two footnotes and no markers, nothing says which of them
+    /// `a` is. `PMC12661592` deposits exactly this shape.
+    func testTheMarkerSurvivesSoCellTextStillResolves() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <table-wrap position="float" id="T1">
+                <label>Table 1.</label>
+                <table><tbody>
+                  <tr><td>Drug</td><td>12.3<xref rid="T1_FN1" ref-type="table-fn"><sup>a</sup></xref></td></tr>
+                  <tr><td>Placebo</td><td>4.5<xref rid="T1_FN2" ref-type="table-fn"><sup>b</sup></xref></td></tr>
+                </tbody></table>
+                <table-wrap-foot>
+                  <fn id="T1_FN1"><label>a</label><p>Adjusted for age.</p></fn>
+                  <fn id="T1_FN2"><label>b</label><p>Unadjusted.</p></fn>
+                </table-wrap-foot>
+              </table-wrap>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.tables.first?.footnotes,
+            ["a — Adjusted for age.", "b — Unadjusted."],
+            "the cells read 12.3a and 4.5b, so the footnotes must say which is which"
+        )
+    }
+
+    /// A `<fn>` that deposits a marker and no prose has nothing to attach it to.
+    /// The marker must not survive to prefix the *next* footnote.
+    func testAMarkerWithoutProseDoesNotLeakOntoTheNextFootnote() throws {
+        let article = try parse(body: tableWithFootnote("""
+            <fn id="T1_FN1"><label>a</label></fn>
+            <fn id="T1_FN2"><label>b</label><p>CI: confidence interval.</p></fn>
+            """))
+
+        XCTAssertEqual(article.tables.first?.footnotes, ["b — CI: confidence interval."])
     }
 
     /// Several labelled footnotes are the common case, and the *last* marker was
@@ -116,8 +168,50 @@ final class JATSExhibitRoutingTests: XCTestCase {
         XCTAssertEqual(article.tables.first?.label, "Table 1.")
         XCTAssertEqual(
             article.tables.first?.footnotes,
-            ["AI: artificial intelligence.", "CI: confidence interval."]
+            ["a — AI: artificial intelligence.", "b — CI: confidence interval."]
         )
+    }
+
+    /// With no `<label>` of its own the table has nothing for the marker to
+    /// overwrite, which is the one shape that tells the depth guard apart from
+    /// plain first-write-wins: that weaker rule reports "a" here, and reported it
+    /// before #157 too.
+    func testAnUnlabelledTableDoesNotBorrowItsFootnoteMarker() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <table-wrap position="float" id="T1">
+                <caption><title>Commonly asked questions.</title></caption>
+                <table><tbody><tr><td>Why?</td><td>Because.</td></tr></tbody></table>
+                <table-wrap-foot>
+                  <fn id="T1_FN1"><label>a</label><p>AI: artificial intelligence.</p></fn>
+                </table-wrap-foot>
+              </table-wrap>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.tables.first?.label, "",
+            "an unlabelled table took its footnote's marker as its own label"
+        )
+        XCTAssertEqual(article.tables.first?.footnotes, ["a — AI: artificial intelligence."])
+    }
+
+    /// The figure twin of the case above.
+    func testAnUnlabelledFigureDoesNotBorrowItsFootnoteMarker() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="F1">
+                <caption><title>Survival by arm.</title></caption>
+                <graphic xlink:href="fig1.jpg"/>
+                <fn id="F1_FN1"><label>*</label><p>p &lt; 0.05.</p></fn>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(article.figures.first?.label, "")
+        XCTAssertEqual(article.figures.first?.footnotes, ["* — p < 0.05."])
     }
 
     /// `inFigure` has the identical hole, and JATS allows `<fn>` inside `<fig>`.
@@ -135,7 +229,61 @@ final class JATSExhibitRoutingTests: XCTestCase {
             """)
 
         XCTAssertEqual(article.figures.first?.label, "Figure 1.")
-        XCTAssertEqual(article.figures.first?.footnotes, ["p < 0.05."])
+        XCTAssertEqual(article.figures.first?.footnotes, ["* — p < 0.05."])
+    }
+
+    /// JATS lets an exhibit open *inside* somebody's footnote, and a guard that
+    /// compares the footnote depth against zero cannot tell that exhibit's own
+    /// `<label>` from a marker — so it ate it. An empty label is not inert: the
+    /// renderer substitutes `"Figure \(index + 1)"`, turning "Figure 9." into a
+    /// plausible, invented "Figure 2".
+    func testAFigureOpenedInsideATableFootnoteKeepsItsOwnLabel() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <table-wrap position="float" id="T1">
+                <label>Table 1.</label>
+                <table><tbody><tr><td>Why?</td><td>Because.</td></tr></tbody></table>
+                <table-wrap-foot>
+                  <fn id="T1_FN1"><label>a</label><p>See the figure.</p>
+                    <fig id="F9"><label>Figure 9.</label><graphic xlink:href="f9.jpg"/></fig>
+                  </fn>
+                </table-wrap-foot>
+              </table-wrap>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.first?.label, "Figure 9.",
+            "a figure inside a table footnote lost its own label to the depth guard"
+        )
+        XCTAssertEqual(article.tables.first?.label, "Table 1.")
+    }
+
+    /// The same hole one element over, and this one sits on the eLife supplement
+    /// path the nesting fix exists to serve.
+    func testAFigureOpenedInsideAFigureFootnoteKeepsItsOwnLabel() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="F1">
+                <label>Figure 1.</label>
+                <graphic xlink:href="f1.jpg"/>
+                <fn id="F1_FN1"><label>*</label><p>p &lt; 0.05.</p>
+                  <fig id="F1S1">
+                    <label>Figure 1—figure supplement 1.</label>
+                    <graphic xlink:href="s1.jpg"/>
+                  </fig>
+                </fn>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.map(\.label),
+            ["Figure 1.", "Figure 1—figure supplement 1."],
+            "the nested figure lost its own label to the depth guard"
+        )
     }
 
     /// A `<ref>` label is routed by the same `case "label"`, so the guard must not
@@ -180,9 +328,9 @@ final class JATSExhibitRoutingTests: XCTestCase {
     /// full image first, a thumbnail second. The assignment was unconditional, so
     /// the thumbnail won and every figure resolved to a `.gif` thumb.
     ///
-    /// 58.0% of the 959 figures in the 225-article survey carry more than one
-    /// `<graphic>`. A `hasGraphic` boolean hid this completely — it was `true`
-    /// either way.
+    /// Of the 959 figures in the 225-article survey that carry a `<graphic>` at
+    /// all, 507 (52.9%) end on a thumbnail. A `hasGraphic` boolean hid this
+    /// completely — it was `true` either way.
     func testImageThenThumbnailResolvesTheImage() throws {
         let article = try parse(body: figureWithGraphics("""
                 <graphic content-type="image" xlink:href="pone.0338891.g001.jpg"/>
@@ -204,9 +352,12 @@ final class JATSExhibitRoutingTests: XCTestCase {
         XCTAssertEqual(article.figures.first?.graphicURL, "pone.0338891.g001.jpg")
     }
 
-    /// `specific-use="thumbnail"` is the other spelling JATS sanctions for the
-    /// same thing. Deposited last, as `content-type="thumb"` is, so the assertion
-    /// fails under last-write-wins rather than passing on position.
+    /// `specific-use="thumbnail"` is the other publisher convention for the same
+    /// thing. Both attributes are open-valued in JATS, which defines no
+    /// vocabulary for either, and no deposit in the corpus uses this one — it is
+    /// covered here and nowhere else. Deposited last, as `content-type="thumb"`
+    /// is, so the assertion fails under last-write-wins rather than passing on
+    /// position.
     func testThumbnailBySpecificUseIsAlsoSkipped() throws {
         let article = try parse(body: figureWithGraphics("""
                 <graphic xlink:href="fig1.jpg"/>
@@ -233,8 +384,8 @@ final class JATSExhibitRoutingTests: XCTestCase {
         XCTAssertEqual(article.figures.first?.graphicURL, "fig1.jpg")
     }
 
-    /// Most publishers type no graphic at all — 11 of the 12 eLife figures and
-    /// every SAGE and MDPI figure in the corpus. With nothing to choose on, the
+    /// Most publishers type no graphic at all — all 12 eLife figures, and every
+    /// SAGE, MDPI and BMJ figure in the corpus. With nothing to choose on, the
     /// first is the one the article leads with.
     func testUntypedGraphicsResolveTheFirst() throws {
         let article = try parse(body: figureWithGraphics("""
@@ -243,6 +394,131 @@ final class JATSExhibitRoutingTests: XCTestCase {
             """))
 
         XCTAssertEqual(article.figures.first?.graphicURL, "fig1-panel-a.jpg")
+    }
+
+    /// Two thumbnails and nothing else: the first still wins. Ranking accepts a
+    /// deposit only when it is *strictly* better, and a rule that accepted an
+    /// equal one would swap in the last thumbnail here — the #161 shape again,
+    /// one tier down.
+    func testASecondThumbnailDoesNotDisplaceTheFirst() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic content-type="thumb" xlink:href="fig1-thumb-a.gif"/>
+                <graphic content-type="thumb" xlink:href="fig1-thumb-b.gif"/>
+            """))
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, "fig1-thumb-a.gif",
+            "an equally-ranked deposit displaced the one already held"
+        )
+    }
+
+    /// Thumbnail, then image, then image. Once the thumbnail has been given up
+    /// the figure is holding a full image, and the third deposit must not
+    /// displace it — the case that catches a "have I seen a thumbnail?" flag
+    /// that is set but never cleared.
+    func testAThirdGraphicDoesNotDisplaceThePromotedImage() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic content-type="thumb" xlink:href="fig1-thumb.gif"/>
+                <graphic xlink:href="fig1-a.jpg"/>
+                <graphic xlink:href="fig1-b.jpg"/>
+            """))
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, "fig1-a.jpg",
+            "the figure gave up a full image it had already accepted"
+        )
+    }
+
+    /// Neither attribute is case-controlled, so both are lowercased before the
+    /// substring test. Every corpus deposit is lowercase, which leaves the
+    /// lowercasing unexercised unless a test spells it otherwise — and the
+    /// thumbnail has to come first, or first-wins resolves the image regardless.
+    func testAnUppercaseContentTypeIsStillAThumbnail() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic content-type="THUMB" xlink:href="fig1-thumb.gif"/>
+                <graphic xlink:href="fig1.jpg"/>
+            """))
+
+        XCTAssertEqual(article.figures.first?.graphicURL, "fig1.jpg")
+    }
+
+    /// The `specific-use` half of the same claim.
+    func testAMixedCaseSpecificUseIsStillAThumbnail() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic specific-use="Thumbnail" xlink:href="fig1-thumb.gif"/>
+                <graphic xlink:href="fig1.jpg"/>
+            """))
+
+        XCTAssertEqual(article.figures.first?.graphicURL, "fig1.jpg")
+    }
+
+    /// A thumbnail is recognised by what the deposit says, never by the file
+    /// extension. PLOS and Springer both happen to deposit `.gif` thumbnails, so
+    /// every corpus thumbnail is a `.gif` and a parser that keyed on the suffix
+    /// would pass the corpus — and then discard the only image a figure has
+    /// wherever `.gif` is the image itself.
+    func testAGifIsNotAThumbnailByVirtueOfBeingAGif() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic xlink:href="fig1.gif"/>
+                <graphic xlink:href="fig1-alt.jpg"/>
+            """))
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, "fig1.gif",
+            "an untyped .gif was taken for a thumbnail on its extension alone"
+        )
+    }
+
+    /// `<alternatives>` deposits the archival master *first* and the web
+    /// derivative second — the opposite order to a thumbnail pair. Choosing the
+    /// first non-thumbnail therefore picked a TIFF no WebKit view can render,
+    /// where the older last-wins rule had happened to pick the JPEG. Rank rather
+    /// than position settles both conventions at once.
+    func testAnArchivalMasterLosesToTheWebDerivative() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <alternatives>
+                  <graphic xlink:href="fig1.tif" mimetype="image" mime-subtype="tiff"/>
+                  <graphic xlink:href="fig1.jpg" mimetype="image" mime-subtype="jpeg"/>
+                </alternatives>
+            """))
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, "fig1.jpg",
+            "the figure resolved to an archival master the renderer cannot display"
+        )
+    }
+
+    /// The same pair the other way round, so the rule is order-independent here
+    /// too rather than merely preferring the last deposit again.
+    func testTheWebDerivativeSurvivesAFollowingArchivalMaster() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <alternatives>
+                  <graphic xlink:href="fig1.jpg" mimetype="image" mime-subtype="jpeg"/>
+                  <graphic xlink:href="fig1.tif" mimetype="image" mime-subtype="tiff"/>
+                </alternatives>
+            """))
+
+        XCTAssertEqual(article.figures.first?.graphicURL, "fig1.jpg")
+    }
+
+    /// An archival master is still better than nothing, the way a thumbnail is.
+    func testAFigureWithOnlyAnArchivalMasterStillResolvesIt() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic xlink:href="fig1.tif" mimetype="image" mime-subtype="tiff"/>
+            """))
+
+        XCTAssertEqual(article.figures.first?.graphicURL, "fig1.tif")
+    }
+
+    /// And a thumbnail that renders beats an archival master that does not,
+    /// whichever order they arrive in.
+    func testAThumbnailBeatsAnArchivalMaster() throws {
+        let article = try parse(body: figureWithGraphics("""
+                <graphic xlink:href="fig1.tif" mimetype="image" mime-subtype="tiff"/>
+                <graphic content-type="thumb" xlink:href="fig1-thumb.gif"/>
+            """))
+
+        XCTAssertEqual(article.figures.first?.graphicURL, "fig1-thumb.gif")
     }
 
     /// A thumbnail is better than nothing: skipping thumbs must not leave a

@@ -269,6 +269,68 @@ final class JATSNestingTests: XCTestCase {
         )
     }
 
+    /// The positive counterpart to the leak test above: the parent must be
+    /// *current* again once its supplement closes, not merely open.
+    ///
+    /// Every other nesting test loads the parent before the child opens, so they
+    /// pass whether the pop restores the parent or leaves the child current.
+    /// Depositing the parent's own label, caption and graphic *after* the child
+    /// closes is the order that tells those apart — and it is the order in which
+    /// a mis-scoped pop sends the parent's content to its own supplement.
+    func testTheParentFigureIsCurrentAgainAfterItsSupplementCloses() throws {
+        let article = try parseBody("""
+            <sec>
+              <title>Results</title>
+              <fig id="fig2">
+                <p>
+                  <fig id="fig2s1">
+                    <label>Figure 2—figure supplement 1.</label>
+                    <caption><title>Supplement caption.</title></caption>
+                    <graphic xlink:href="supplement.jpg"/>
+                  </fig>
+                </p>
+                <label>Figure 2.</label>
+                <caption><title>Parent figure caption.</title></caption>
+                <graphic xlink:href="parent.jpg"/>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.map(\.label),
+            ["Figure 2.", "Figure 2—figure supplement 1."],
+            "the parent's own label arrived after its supplement closed and was misfiled"
+        )
+        XCTAssertEqual(
+            article.figures.map(\.caption),
+            ["Parent figure caption.", "Supplement caption."]
+        )
+        XCTAssertEqual(
+            article.figures.map(\.graphicURL), ["parent.jpg", "supplement.jpg"]
+        )
+    }
+
+    /// Depth three. The corpus tops out at two, so this pins the invariant rather
+    /// than a shape any publisher currently deposits: the slot reservation and the
+    /// stack are uniform in depth, and nothing about either should start caring at
+    /// three.
+    func testFiguresNestedThreeDeepStayInDocumentOrder() throws {
+        let article = try parseBody("""
+            <sec>
+              <title>Results</title>
+              <fig id="a">
+                <label>A.</label>
+                <p><fig id="b">
+                  <label>B.</label>
+                  <p><fig id="c"><label>C.</label></fig></p>
+                </fig></p>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(article.figures.map(\.label), ["A.", "B.", "C."])
+    }
+
     // MARK: - Nested <caption>
 
     /// A caption owner is a stack for the same reason: a captioned element may

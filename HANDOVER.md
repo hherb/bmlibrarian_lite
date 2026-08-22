@@ -28,15 +28,33 @@ its slice has landed; add a new section when handing off new work.
   - **#157, a `<fn>`'s own `<label>` overwrote the exhibit's.** A footnote marker
     — "a", "b", "*" — is indistinguishable from a table number when `<label>` is
     routed on `inTableWrap` alone, and the *last* marker won. `figureFootnoteDepth`
-    was already tracked and already consulted by the `<p>` branch four lines below;
-    the `<label>` branch simply never got it. `PMC12661592`: label `"a"` →
-    `"Table 1."`. The marker itself is dropped — the footnotes are plain strings,
-    so there is nowhere to put it — rather than misfiled.
-  - **#161, the first non-thumbnail `<graphic>` wins.** Assignment was
-    unconditional, so PLOS and Springer's thumbnail-last deposits resolved to a
-    `.gif` thumb. A thumbnail is now held provisionally and given up when a full
-    image arrives, so **both deposit orders** work. `PMC12755737` (4 figures) and
-    `PMC13294358` (2): `.gif` → `.jpg`.
+    was already tracked and already consulted by the `"p"` case in
+    `didEndElement`; the `"label"` case simply never got it. `PMC12661592`: label
+    `"a"` → `"Table 1."`.
+    - **Compare the depth against the exhibit, not against zero.** The first cut
+      tested `figureFootnoteDepth > 0`, which is its own bug: JATS lets a `<fig>`
+      or `<table-wrap>` open *inside* a footnote, and that test ate the nested
+      exhibit's own label. Each exhibit now records the depth it opened at. An
+      empty label is not inert — the renderer substitutes `"Figure N"` — so the
+      symptom was an invented figure number rather than a blank.
+    - **The marker is kept, not dropped.** The first cut dropped it, reasoning
+      that footnotes are plain strings so there was nowhere to put it. Wrong on
+      both counts: `<sup>` is flattened into the surrounding cell, so the table
+      body still reads `The AIa` while the footnote said only "AI: artificial
+      intelligence." — and a plain string holds `"a — AI: artificial
+      intelligence."` perfectly well. With two footnotes the mapping was
+      unrecoverable.
+  - **#161, `<graphic>` deposits are ranked and the best one wins.** Assignment
+    was unconditional, so PLOS and Springer's thumbnail-last deposits resolved to
+    a `.gif` thumb. `PMC12755737` (4 figures) and `PMC13294358` (2): `.gif` →
+    `.jpg`.
+    - **Position cannot settle it, because the two conventions disagree about
+      which end is which.** A thumbnail is deposited *last*; an `<alternatives>`
+      archival master is deposited *first*. "First non-thumbnail wins" — the
+      first cut — traded the thumbnail for a TIFF no WebKit view can render.
+      Three tiers now: `archival` (`mime-subtype` tiff/eps) < `thumbnail` <
+      `full`, accepted only when **strictly** better so the first wins among
+      equals.
     - **Each attribute needs a test in both orders**, and this is not obvious:
       with the thumbnail last, plain first-wins already resolves the image, so
       that test passes with the attribute dropped from the predicate entirely.

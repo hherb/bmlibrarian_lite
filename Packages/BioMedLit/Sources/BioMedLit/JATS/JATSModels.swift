@@ -422,22 +422,90 @@ struct SectionBuilder {
     }
 }
 
+/// How suitable a `<graphic>` is as the one image shown for its figure.
+///
+/// A figure commonly carries several `<graphic>` — of the 959 survey figures
+/// carrying one at all, 507 (52.9%) end on a thumbnail — and `graphicURL` holds
+/// exactly one, so the parser has to choose. Ranking them lets the best deposit
+/// win whatever order the publisher wrote them in (#161), which matters because
+/// the two multi-graphic conventions disagree about order: a thumbnail is
+/// deposited last, an archival master first.
+enum GraphicSuitability: Int, Comparable {
+    /// An archival master — TIFF or EPS. `<alternatives>` deposits one ahead of
+    /// the web derivative, and no WebKit view can render it.
+    case archival = 0
+
+    /// A reduced-size copy of another `<graphic>` in the same figure. Renders,
+    /// but is not the image the figure is about.
+    case thumbnail = 1
+
+    /// A full-size, web-renderable image, or one the deposit says nothing about.
+    case full = 2
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+/// Assembly of a footnote from its `<fn>` marker and its prose.
+enum JATSFootnote {
+    /// Separates a footnote's marker from its prose.
+    ///
+    /// An em dash rather than ". " because a marker is as often a symbol as a
+    /// letter, and `"*. "` reads as a typo where `"* — "` does not.
+    static let markerSeparator = " — "
+
+    /// Join a footnote's `<fn>` marker to its prose.
+    ///
+    /// - Parameters:
+    ///   - marker: The `<fn>`'s own `<label>` — "a", "b", "*" — or empty.
+    ///   - text: The footnote prose.
+    /// - Returns: The prose, prefixed by the marker when there is one.
+    static func join(_ marker: String, to text: String) -> String {
+        marker.isEmpty ? text : "\(marker)\(markerSeparator)\(text)"
+    }
+}
+
 /// Builder for figure information during parsing.
 struct FigureBuilder {
     var id = ""
     var label = ""
     var caption = ""
     var graphicHref = ""
-    /// Whether `graphicHref` came from a `<graphic>` the deposit marks as a
-    /// thumbnail.
+    /// How good a fit `graphicHref` is, or `nil` while no `<graphic>` has been
+    /// accepted.
     ///
-    /// A figure commonly carries several `<graphic>` — 58.0% of the 959 figures
-    /// in the survey behind `doc/cross_platform/jats_corpus/` — and the parser
-    /// has to choose one. Recorded so a thumbnail can be held provisionally and
-    /// given up the moment a full image arrives, whichever order the publisher
-    /// deposited them in (#161).
-    var graphicIsThumbnail = false
+    /// Held so a lesser deposit can be given up the moment a better one arrives,
+    /// whichever order the publisher wrote them in (#161).
+    var graphicSuitability: GraphicSuitability?
     var footnotes: [String] = []
+    /// The `<label>` of the `<fn>` currently open, held until its prose arrives.
+    ///
+    /// The marker is not decoration: `<sup>` is flattened into the surrounding
+    /// cell text, so a table body reads `12.3a` and the footnote it points at has
+    /// to say which one it is (#157).
+    var pendingFootnoteLabel = ""
+
+    /// Accept a `<graphic>` if it beats the one already held.
+    ///
+    /// Strictly better, so the *first* deposit wins among equals — the rule the
+    /// publishers that deposit two full images rely on.
+    ///
+    /// - Parameters:
+    ///   - href: The graphic's href.
+    ///   - suitability: How good a fit it is.
+    mutating func offerGraphic(_ href: String, suitability: GraphicSuitability) {
+        guard !href.isEmpty else { return }
+        if let held = graphicSuitability, suitability <= held { return }
+        graphicHref = href
+        graphicSuitability = suitability
+    }
+
+    /// Append footnote prose, carrying any pending `<fn>` marker onto it.
+    ///
+    /// - Parameter text: Whitespace-normalised text of the footnote paragraph.
+    mutating func appendFootnote(_ text: String) {
+        footnotes.append(JATSFootnote.join(pendingFootnoteLabel, to: text))
+        pendingFootnoteLabel = ""
+    }
 
     func build() -> JATSFigureInfo {
         JATSFigureInfo(
@@ -456,6 +524,12 @@ struct TableBuilder {
     var label = ""
     var caption = ""
     var footnotes: [String] = []
+    /// The `<label>` of the `<fn>` currently open, held until its prose arrives.
+    ///
+    /// See `FigureBuilder.pendingFootnoteLabel`: the marker is referenced by cell
+    /// text that survives into the rendered table, so dropping it leaves the
+    /// reader with `12.3a` and no way to tell which footnote `a` is (#157).
+    var pendingFootnoteLabel = ""
     var headerRows: [[String]] = []
     var bodyRows: [[String]] = []
     var currentRow: [String] = []
@@ -480,6 +554,14 @@ struct TableBuilder {
     enum ListType {
         case ordered
         case unordered
+    }
+
+    /// Append footnote prose, carrying any pending `<fn>` marker onto it.
+    ///
+    /// - Parameter text: Whitespace-normalised text of the footnote paragraph.
+    mutating func appendFootnote(_ text: String) {
+        footnotes.append(JATSFootnote.join(pendingFootnoteLabel, to: text))
+        pendingFootnoteLabel = ""
     }
 
     mutating func startHeader() {

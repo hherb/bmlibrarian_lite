@@ -230,8 +230,23 @@ final class JATSRealCorpusTests: XCTestCase {
         /// and an upper bound cannot tell a parser that misses figures from one
         /// that finds them all, which is the whole of what this number is for.
         let figureCount: Int
+        /// The `<graphic>` the first `<fig>` outside any `<sub-article>` should
+        /// resolve to, or `nil` where the article has no figure.
+        ///
+        /// Hand-transcribed, and the only record in the corpus that a blind
+        /// digest regeneration cannot move: #161's fix lives in the digests as a
+        /// `.gif` that became a `.jpg`, and a digest is regenerable by design, so
+        /// without this the fix launders straight back out with the suite green.
+        let firstFigureGraphic: String?
         /// `<table-wrap>` elements outside any `<sub-article>`.
         let tableCount: Int
+        /// The `<label>` of each `<table-wrap>` outside any `<sub-article>`, in
+        /// document order.
+        ///
+        /// Hand-transcribed, for #157 the reason ``firstFigureGraphic`` is for
+        /// #161: `PMC12661592`'s table reported `"a"` — its footnote's marker —
+        /// and nothing outside its digest recorded that it should say `"Table 1."`.
+        let tableLabels: [String]
         /// `<ref>` elements outside any `<sub-article>`.
         let referenceCount: Int
         /// SPDX-style licence code, for example `CC-BY-4.0`.
@@ -1332,6 +1347,18 @@ final class JATSRealCorpusTests: XCTestCase {
                     \(entry.pmcId): parsed \(article.figures.count) figures where the XML \
                     has \(entry.figureCount) <fig> elements outside any <sub-article>
                     """
+                )
+                // The other two hand-transcribed anchors, holding #157 and #161
+                // to the XML rather than to a digest that regenerates with the
+                // parser. A label read off a footnote, or a graphic that fell
+                // back to the thumbnail, fails here whatever the digests say.
+                XCTAssertEqual(
+                    article.tables.map(\.label), entry.tableLabels,
+                    "\(entry.pmcId): table labels"
+                )
+                XCTAssertEqual(
+                    article.figures.first?.graphicURL, entry.firstFigureGraphic,
+                    "\(entry.pmcId): the first figure's graphic"
                 )
             } catch {
                 XCTFail("\(entry.pmcId): \(error)")

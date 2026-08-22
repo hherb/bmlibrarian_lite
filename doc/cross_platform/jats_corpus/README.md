@@ -20,9 +20,9 @@ measured, not hypothetical:
 
 The corpus paid for itself before it landed: hand-checking the digests against
 their source XML found five defects, all confirmed against a 225-article survey,
-and reviewing the pull request that added it found a sixth. Three of the six —
-#156, #157 and #161 — have since been fixed, and the digests moved to prove it.
-Both lists are under
+and reviewing the pull request that added it found a sixth. Three of the six
+(#154, #155, #156, #157, #161, #162) — #156, #157 and #161 — have since been
+fixed, and the digests moved to prove it. Both lists are under
 [The digest is a characterisation, not a specification](#the-digest-is-a-characterisation-not-a-specification).
 
 ## What is here
@@ -86,9 +86,10 @@ sections, references, and a recovered PMC ID. Without it, a collapse to zero
 could be regenerated into the expectations and would read as correct forever.
 `testTheManifestAgreesWithTheParsedArticle` does the same job for the values
 recorded in `corpus.json`, which were read off the XML independently of
-`JATSXMLParser` — DOI, PMID, journal, year, volume, title, and the author, table
-and reference counts. Those are checked against the parse rather than against the
-digest, so they survive a blind regeneration.
+`JATSXMLParser` — DOI, PMID, journal, year, volume, title, the author, figure,
+table and reference counts, every `<table-wrap>` label, and the graphic the first
+figure should resolve to. Those are checked against the parse rather than against
+the digest, so they survive a blind regeneration.
 
 Being concrete about how much that covers, because it was previously overstated:
 before those values were recorded, a regenerate turned *all* of these green —
@@ -119,12 +120,15 @@ would land in exactly these values again:
 | Issue | Fixed by | Moved |
 |---|---|---|
 | #156 | a nested `<fig>` no longer drops its parent | `PMC8754430`: 9 figures → 12, with `Figure 2.`, `Figure 4.` and `Figure 5.` restored in document order ahead of their own supplements; six empty paragraphs left three body sections, which is the `<p>` eLife wraps each supplement in, previously read as article prose once the inner `</fig>` cleared the figure flag |
-| #157 | a `<fn>`'s own `<label>` no longer overwrites the exhibit's | `PMC12661592`: the table's label `"a"` → `"Table 1."` |
-| #161 | the first non-thumbnail `<graphic>` wins | `PMC12755737` (4 figures) and `PMC13294358` (2): `graphicURL` `.gif` → `.jpg` |
+| #157 | a `<fn>`'s own `<label>` no longer overwrites the exhibit's | `PMC12661592`: the table's label `"a"` → `"Table 1."`, and the footnote `"AI: artificial intelligence."` → `"a — AI: artificial intelligence."` — the marker is kept rather than dropped, because `<sup>` is flattened into the cell text around it and the body still reads `The AIa` |
+| #161 | `<graphic>` deposits are ranked, and the best one wins | `PMC12755737` (4 figures) and `PMC13294358` (2): `graphicURL` `.gif` → `.jpg`. Rank rather than position because the two multi-graphic conventions disagree about order — a thumbnail is deposited last, an `<alternatives>` archival master first |
 
 `corpus.json`'s `figureCount` is compared as an **equality** since #156. It was an
 upper bound while the defect stood, and an upper bound is satisfied by any parser
-that loses figures.
+that loses figures. `tableLabels` and `firstFigureGraphic` were added to
+`corpus.json` for #157 and #161 for the same reason: both fixes otherwise lived
+only in the digests, which regenerate with the parser, so a regression would have
+rewritten its own evidence and left the suite green.
 
 **Characterised and believed correct, but worth knowing:**
 
@@ -194,9 +198,9 @@ variable to actually verify.
 2. Check the licence in its `<license>` element and record it in `corpus.json`,
    along with the SHA-256 and a real reason under `inCorpusBecause`. An article
    nobody can justify is one nobody will know how to replace.
-3. Read `title`, `volume`, `authorCount`, `figureCount`, `tableCount` and
-   `referenceCount` off the XML **without using `JATSXMLParser`** and record them
-   in `corpus.json`. They are the only values a blind regeneration cannot rewrite,
+3. Read `title`, `volume`, `authorCount`, `figureCount`, `tableCount`,
+   `referenceCount`, `tableLabels` and `firstFigureGraphic` off the XML
+   **without using `JATSXMLParser`** and record them in `corpus.json`. They are the only values a blind regeneration cannot rewrite,
    and they are worth nothing if they are copied from the parser's own output.
    `testEveryEntryRecordsItsProvenance` refuses an entry that leaves them empty,
    because an empty value compares equal to an empty parse.
@@ -234,7 +238,7 @@ Other blind spots worth knowing, all deliberate:
   same-length filler substituted for real prose would pass. Storing the prose
   would make this a golden snapshot nobody reviews and everybody regenerates.
   Abstracts and captions *are* stored in full, being short.
-- Figure footnotes are stored but pin nothing: all 22 figures in the corpus have
+- Figure footnotes are stored but pin nothing: all 25 figures in the corpus have
   none, so deleting the branch that collects them changes no stored value. The
   field stays because an empty collection is worth characterising — it is a real
   fixture for "no footnotes", and it moves the day a figure gains one.
