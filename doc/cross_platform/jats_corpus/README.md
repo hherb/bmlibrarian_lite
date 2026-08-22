@@ -281,7 +281,107 @@ from the separate, earlier survey conducted during the #142 review.
 The 959 denominator on the last row is figures carrying a `<graphic>`, not the
 1 118 figures surveyed.
 
-**These numbers cannot be re-derived from this repository.** The survey exists
-only as the prose above: there is no article list and no counting script here, so
-a maintainer deciding whether a replacement article covers the same ground has
-nothing to measure against. Issue #164 tracks committing both.
+### Re-deriving these numbers
+
+`scripts/jats_survey.py` counts all of them, and counts them **straight from the
+XML** rather than through `JATSXMLParser` — a survey that asked the parser what a
+document contains would agree with the parser's bugs, which is exactly how
+several of these defects survived a green suite.
+
+```bash
+python scripts/jats_survey.py                          # the seven committed articles
+python scripts/jats_survey.py --measure caption-hosts  # one measurement
+python scripts/jats_survey.py --list                   # what it can measure
+```
+
+Over the committed corpus it reproduces the caption-host row above exactly
+(`fig` 25, `table-wrap` 16, `supplementary-material` 14, `media` 6,
+`boxed-text` 1), which is the check that it is measuring the same thing the
+225-article survey measured.
+
+Seven articles cannot reproduce a prevalence figure, so a wider sample is
+fetched rather than committed — these are third-party works, and the licence
+position above is the reason the corpus is seven and not seven hundred:
+
+```bash
+python scripts/jats_survey.py \
+    --fetch-query 'SRC:PMC AND OPEN_ACCESS:Y AND HAS_FT:Y AND PUB_TYPE:"research-article"' \
+    --limit 300 --cache tmp/jats-survey
+python scripts/jats_survey.py --corpus tmp/jats-survey --full-text-only
+```
+
+**`PUB_TYPE` is load-bearing, and `HAS_FT:Y` does not replace it.** Europe PMC
+serves a `fullTextXML` document for abstract-only deposits as well, and the
+newest open-access records are overwhelmingly conference abstracts. A
+400-article sample drawn without `PUB_TYPE` came back **390 abstracts**, and
+reported "0 nested figures across 400 articles" — a zero that looks like strong
+evidence and is nothing but front matter. Every run therefore prints its sample
+composition, and warns when fewer than half the articles carry a `<body>`.
+
+The fetch writes `manifest.json` — the PMC ids and their SHA-256 — so a run can
+be repeated over exactly the same articles with `--fetch-ids`. That manifest is
+the half of #164 the prose lacked: **a number nobody can re-derive is a number
+nobody can challenge.**
+
+### Several of these figures are publisher conventions, not JATS properties
+
+Measured, by running the script over two samples:
+
+| Measurement | Curated 10-journal survey (225) | 300 open-access research articles |
+|---|---|---|
+| labelled `<table-wrap-foot><fn>` | 12.0% | **12.7%** |
+| figures whose last `<graphic>` is a thumbnail | 52.9% | **50.7%** |
+| articles using `<mixed-citation>` | 80.9% | **76.3%** |
+| affiliations linked by `<xref>` | 98.7% | **96.0%** |
+| articles with a nested `<fig>` | 19.6% | **0.3%** |
+
+The first four reproduce. The last does not, and neither figure is wrong:
+nested `<fig>` is eLife's figure-supplement convention, the 225-article survey
+was a curated list with eLife prominent, and the 300-article sample was mostly
+MDPI and Cureus. `supplementary-material` and `media` captions move the same way
+and for the same reason.
+
+So the survey prints its **journal mix** alongside every run. A prevalence
+figure without the mix that produced it is not reproducible, only repeatable.
+
+**Two sampling traps, both found by running this script rather than by reading
+it.** `PUB_TYPE:"research-article"` is what keeps conference abstracts out — but
+it also excludes `review-article` and `brief-report`, and *that* is where the
+grouped citations behind #177 live: all three known articles are RSC chemistry
+journals (`Chemical Communications`, `Physical Chemistry Chemical Physics`), and
+none is a research article. A 300-article research-article sample found zero,
+which says nothing about #177 because it could not have found any. Sample for
+the shape you are measuring.
+
+### What re-running it actually changed
+
+The script was written to make the #177 decision checkable. Running it changed
+the evidence behind that decision by two orders of magnitude, and corrected the
+script twice on the way:
+
+- **The original measurement reproduces exactly** — 88 labels in 23 refs across
+  the three known articles, 76 `<element-citation>` + 12 `<mixed-citation>`,
+  0 refs with a direct `<label>`. That is the number #177 was opened on, now
+  re-derivable from an article list rather than quoted from a commit message.
+- **A targeted RSC sample added 543 more** across 147 articles. Total: **631
+  citation-level labels across 158 refs in 150 articles, zero counterexamples**,
+  and no enclosing `<ref>` carrying a direct `<label>` that a first-wins rule
+  could have preferred.
+- **The detector cried wolf three times before it was right.** It flagged
+  `(b1)`, `(a1)`, `(e1)` as reference numbers. In context they sit in sequence
+  beside plain letters — `(a) (b) (c) (d) (e1)` — subdividing a grouped citation.
+  The sub-marker pattern had no room for a digit suffix, so the survey was
+  manufacturing the evidence it exists to look for. The same failure had already
+  appeared once from a different cause: `element.text` reads
+  `<label>(<italic>a</italic>)</label>` as `"("`.
+
+What has *not* improved is publisher spread. Every observation is RSC-family, so
+this may be an RSC house style rather than a chemistry-wide one. `#177` records
+what would falsify it.
+
+**Read a zero as a finding.** `nested-exhibits` reports `table-wrap in fig` as 0
+across the corpus; that is the #169 shape, and its absence is why the fix needed
+a hand-written fixture and why no digest would ever have caught the regression.
+The `grouped-citations` measurement says outright that the committed corpus is
+uninformative about #177 rather than reporting a clean bill of health, because
+the shape occurs in roughly 2% of articles.
