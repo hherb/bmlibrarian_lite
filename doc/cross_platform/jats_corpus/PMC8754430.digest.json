@@ -131,7 +131,7 @@
       "subsections" : [
 
       ],
-      "title" : "Author contributions"
+      "title" : "Additional information"
     },
     {
       "paragraphCount" : 0,
@@ -249,10 +249,10 @@
       "label" : "Figure 6."
     }
   ],
-  "htmlScalarCount" : 88644,
+  "htmlScalarCount" : 88646,
   "issue" : "",
   "journal" : "eLife",
-  "markdownScalarCount" : 79406,
+  "markdownScalarCount" : 79408,
   "pages" : "",
   "pmcId" : "PMC8754430",
   "pmid" : "34970963",

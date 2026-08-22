@@ -82,6 +82,49 @@ final class JATSContentRetentionTests: XCTestCase {
         ])
     }
 
+    /// `<table-wrap-foot>` may hold `<p>` directly — a general note about the
+    /// table, with no marker to hang an `<fn>` off. It is `</table-wrap-foot>`'s
+    /// own depth that keeps such a paragraph out of the cell furniture, and until
+    /// this test nothing covered it: every case went through an `<fn>`, which
+    /// raises the depth by itself, so dropping the `<table-wrap-foot>` increment
+    /// entirely left the suite green.
+    func testTableFootProseOutsideAFootnoteIsStillCaptured() throws {
+        let article = try article(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <table><tbody><tr><td>Age</td><td>54</td></tr></tbody></table>
+            <table-wrap-foot><p>Values are mean (SD).</p></table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.tables.first?.footnotes, ["Values are mean (SD)."])
+    }
+
+    /// The same paragraph after an `<fn>`, which is where publishers usually put
+    /// it. `</fn>` must decrement the depth rather than clear it, or the note
+    /// falls out of the footnotes and is dropped as cell furniture.
+    func testTableFootProseAfterAFootnoteIsStillCaptured() throws {
+        let article = try article(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <table><tbody><tr><td>Age</td><td>54<sup>a</sup></td></tr></tbody></table>
+            <table-wrap-foot>
+              <fn id="t1fn1"><label>a</label><p>Adjusted for sex.</p></fn>
+              <p>Values are mean (SD).</p>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.tables.first?.footnotes,
+            ["a — Adjusted for sex.", "Values are mean (SD)."]
+        )
+    }
+
     func testTableFootnotesReachTheMarkdown() throws {
         let text = try markdown(body: """
         <sec>

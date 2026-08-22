@@ -8,72 +8,61 @@ its slice has landed; add a new section when handing off new work.
 
 ## Recently landed (context)
 
-- **JATS exhibit routing** (#156/#157/#161 landed 2026-08-21): the first three of
-  the six defects the corpus found. All three were the same mistake — a piece of
-  markup routed on *ambient* parser state rather than on the element it actually
-  belongs to — and the corpus digests moved to prove each fix.
-  - **#156, a nested `<fig>` dropped its parent.** `currentFigure` was a single
-    slot, so eLife's figure supplements overwrote the figure they belong to and
-    the outer `</fig>` found nothing to build; `inFigure` was cleared by the inner
-    close too, so the parent's remaining content was read as article prose. Now a
-    stack, with `inFigure` derived from it — the `subArticleDepth` lesson, third
-    time. `PMC8754430`: **9 figures → 12**, and six empty paragraphs left three
-    body sections (the `<p>` eLife wraps each supplement in; scalar counts did not
-    move, which is how you can tell nothing real was dropped).
-    - **Slot reservation is the load-bearing half.** A figure is built at its end
-      tag but must be *listed* at its start, or every supplement precedes its own
-      parent. `figureSlots` reserves the entry on open and fills it on close;
-      pop-and-append passes "the parent survives" and fails document order.
-      Mutation-verified separately from the stack itself.
-  - **#157, a `<fn>`'s own `<label>` overwrote the exhibit's.** A footnote marker
-    — "a", "b", "*" — is indistinguishable from a table number when `<label>` is
-    routed on `inTableWrap` alone, and the *last* marker won. `figureFootnoteDepth`
-    was already tracked and already consulted by the `"p"` case in
-    `didEndElement`; the `"label"` case simply never got it. `PMC12661592`: label
-    `"a"` → `"Table 1."`.
-    - **Compare the depth against the exhibit, not against zero.** The first cut
-      tested `figureFootnoteDepth > 0`, which is its own bug: JATS lets a `<fig>`
-      or `<table-wrap>` open *inside* a footnote, and that test ate the nested
-      exhibit's own label. Each exhibit now records the depth it opened at. An
-      empty label is not inert — the renderer substitutes `"Figure N"` — so the
-      symptom was an invented figure number rather than a blank.
-    - **The marker is kept, not dropped.** The first cut dropped it, reasoning
-      that footnotes are plain strings so there was nowhere to put it. Wrong on
-      both counts: `<sup>` is flattened into the surrounding cell, so the table
-      body still reads `The AIa` while the footnote said only "AI: artificial
-      intelligence." — and a plain string holds `"a — AI: artificial
-      intelligence."` perfectly well. With two footnotes the mapping was
-      unrecoverable.
-  - **#161, `<graphic>` deposits are ranked and the best one wins.** Assignment
-    was unconditional, so PLOS and Springer's thumbnail-last deposits resolved to
-    a `.gif` thumb. `PMC12755737` (4 figures) and `PMC13294358` (2): `.gif` →
-    `.jpg`.
-    - **Position cannot settle it, because the two conventions disagree about
-      which end is which.** A thumbnail is deposited *last*; an `<alternatives>`
-      archival master is deposited *first*. "First non-thumbnail wins" — the
-      first cut — traded the thumbnail for a TIFF no WebKit view can render.
-      Three tiers now: `archival` (`mime-subtype` tiff/eps) < `thumbnail` <
-      `full`, accepted only when **strictly** better so the first wins among
-      equals.
-    - **Each attribute needs a test in both orders**, and this is not obvious:
-      with the thumbnail last, plain first-wins already resolves the image, so
-      that test passes with the attribute dropped from the predicate entirely.
-      Mutation caught exactly that — `specific-use` was uncovered until a
-      thumbnail-first case was added. Thumbnail-ness reads `content-type` **or**
-      `specific-use` containing `thumb`; never the file extension, since a `.gif`
-      is a thumbnail at PLOS and the only image elsewhere.
-  - **`corpus.json`'s `figureCount` is now compared as an equality.** It was an
-    upper bound while #156 stood — a bound every figure-losing parser satisfies.
-    Tighten the accommodation when you fix the defect it accommodates.
-  - Eight mutations, each failing exactly its own test. The two that would
-    otherwise have shipped uncovered: `specific-use` (above) and pop-and-append
-    ordering.
-  - **Both sibling parsers replicate all three, and bmlib was measured, not
-    assumed** — running its parser over the same corpus files reproduced Swift's
-    numbers exactly (9/12, `"a"`, four + two `.gif`). Lodged as bmlib #115/#116/#117.
-    Android is a source read only, because #121 makes it unrunnable offline —
-    lodged as **#165**, which also notes that Kotlin's caption routing is still the
-    pre-#142 shape.
+Compressed once a slice is merged: what remains is the rule that still binds,
+not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
+the rest.
+
+- **JATS routing by the owning element** (#156/#157/#161 in PR #166, #167/#169
+  in PR #171, both 2026-08-22). Six defects, one mistake: a piece of markup
+  routed on *ambient* parser state — `inFigure`, `inTableWrap`, "is a section
+  open?" — rather than on the element it actually belongs to. The general
+  remedy, now used by `<caption>`, `<title>` and `<label>` alike, is to read
+  `elementStack`: `enclosingElement` for "whose child am I?" and
+  `innermostExhibit` for "which of a nested `<fig>`/`<table-wrap>` pair is
+  nearer?".
+  - **Prefer the parent test to a depth counter where both would work.** #157
+    guarded a footnote's `<label>` with `figureFootnoteDepth` compared against
+    the depth its exhibit opened at, which then needed a special case for each
+    way an exhibit can open *inside* a footnote. `enclosingElement == "fn"`
+    subsumes all of them, and deleting the comparison took
+    `tableFootnoteDepthAtOpen` and the figure stack's `footnoteDepthAtOpen` with
+    it. `figureFootnoteDepth` survives for footnote *prose*, where the nesting
+    really is unbounded.
+  - **Corpus evidence, all six:** `PMC8754430` 9 figures → 12 and its section
+    title `"Author contributions"` → `"Additional information"`; `PMC12661592`
+    table label `"a"` → `"Table 1."`; `PMC12755737` + `PMC13294358` `.gif` →
+    `.jpg`. #169's shape (a `<table-wrap>` inside a `<fig>`) has no corpus
+    occurrence, which is why the corpus is a floor and not the whole test suite.
+  - **A slot is reserved when a figure opens and filled when it closes.**
+    Pop-and-append passes "the parent survives" and fails document order, so
+    eLife's supplements precede the figure they belong to. Mutation-verified
+    separately from the stack itself.
+  - **`<graphic>` deposits are ranked, not positional** — `archival` (tiff/eps)
+    < `thumbnail` < `full`, accepted only when strictly better. Position cannot
+    settle it: a thumbnail is deposited last, an `<alternatives>` archival master
+    first. Thumbnail-ness reads `content-type` **or** `specific-use`, never the
+    file extension. **Each attribute needs a test in both deposit orders** —
+    with the thumbnail last, plain first-wins already resolves the image, so
+    `specific-use` was uncovered until a thumbnail-first case was added.
+  - **One parse per `JATSXMLParser` instance** (#168), now `JATSParseError
+    .alreadyParsed` instead of `"Unknown parsing error"`. The flag is set
+    *before* `parser.parse()`, so a failed first parse consumes the instance too.
+  - **Both sibling parsers were measured, not assumed.** bmlib's parser runs over
+    the same corpus files, which beats reading it: it replicates #156/#157/#161
+    (bmlib #115/#116/#117) and #167 (bmlib #125), but **not** #169 — its
+    `_innermost_exhibit()` already answers with the nearer exhibit — and not
+    #168. Android is a source read only (#121 makes it unrunnable offline) and
+    replicates all five routing defects; lodged as **#165**, which also notes
+    that Kotlin's caption routing is still the pre-#142 shape and that Kotlin
+    pops `elementStack` *before* its `when`, so its `lastOrNull()` is already the
+    parent.
+  - Twenty-two mutations across the two PRs, no survivors. Two would otherwise
+    have shipped uncovered: `specific-use` (above) and pop-and-append ordering.
+    Two more exposed a *pre-existing* gap — nothing covered prose sitting
+    directly in `<table-wrap-foot>`, outside any `<fn>`, so both the
+    `<table-wrap-foot>` depth increment and the counter-vs-flag distinction on
+    `</fn>` could be deleted with the suite still green. Closed by
+    `testTableFootProse{Outside,After}AFootnote*`.
 - **Real PMC JATS corpus** (#146 landed 2026-08-21): seven open-access Europe PMC
   articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with a
   stored structural digest, parsed offline by `JATSRealCorpusTests` on every PR.
@@ -86,11 +75,16 @@ its slice has landed; add a new section when handing off new work.
   launder; regeneration always fails, names what it rewrote, and writes nothing in
   CI; the bytes are never edited.
   - **Hand-checking the digests is the step that pays.** It found five defects —
-    #154, #155, #156, #157, #161 — and PR review found #162. Generating a digest
-    and committing it unread would have found none of them and frozen all six as
-    expectations. #161 was invisible until review replaced a `hasGraphic` boolean
-    with the resolved URL; #162 until it replaced a row count with a hash of the
-    rendered markdown. Neither figure moved under the value it replaced.
+    #154, #155, #156, #157, #161 — PR review found #162, and reviewing the review
+    found #167 and #169. Generating a digest and committing it unread would have
+    found none of them and frozen all of them as expectations. #161 was invisible
+    until review replaced a `hasGraphic` boolean with the resolved URL; #162 until
+    it replaced a row count with a hash of the rendered markdown. Neither figure
+    moved under the value it replaced.
+  - **A digest field only catches what it is shaped to see.** #167 moved the
+    section-title field and the two scalar counts by exactly the two characters
+    the longer title adds — a three-line diff. That is the shape a surgical fix
+    makes; anything wider is a prompt to look harder.
   - **Two traps that live only here, because the README does not carry them:**
     - **The fixture walk stops at the checkout root**, in both `JATSRealCorpusTests`
       and `TransparencyParityTests` — they must not drift. Both used to climb to
@@ -113,194 +107,75 @@ its slice has landed; add a new section when handing off new work.
     `CodingKeys`, since `keyEncodingStrategy` does not round-trip `withDOI`) and
     **#164** (the 225-article survey exists only as prose, so no replacement
     article can be measured against it).
-- **Funder classifier parity** (#143 landed 2026-08-21): the canonical desktop
-  Python now carries the calibrated `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS`
-  ported from Swift, replacing the positional `INDUSTRY_KEYWORDS[:6]` slice, and
-  `tests/test_funder_classification.py` measures it against the shared corpus.
-  Both platforms now score **precision 0.909 / recall 0.333** with the *same* ten
-  true positives, one false positive and twenty misses, pinned by name on each
-  side. The Python it replaced scored 0.444 / 0.133 and flagged four public
-  research bodies (India's Department of Biotechnology in three spellings, the UK
-  BBSRC) as industry, which fed the HIGH-risk rule and downgraded every paper
-  they fund.
+- **Funder classification and sponsor tiers, Python↔Swift** (#143/#147/#152 and
+  the PR #153 review, all landed 2026-08-21). Python now carries Swift's
+  calibrated `FUNDER_NAME_STEMS`/`FUNDER_NAME_WORDS` and its split
+  `GOVERNMENT_PATTERNS` (18) + `ACADEMIC_PATTERNS` (7); both platforms score
+  **precision 0.909 / recall 0.333** on the shared corpus with the same ten true
+  positives. What still binds:
   - **Never merge the funder lists into `INDUSTRY_KEYWORDS`.** That list is COI
-    *prose*; the corporate suffixes match far too freely in running text and the
-    disclosure phrases never occur in an org name. Pinned by
-    `test_coi_prose_phrases_stay_out_of_the_funder_lists`.
+    *prose*; the corporate suffixes match far too freely in running text. Pinned
+    by `test_coi_prose_phrases_stay_out_of_the_funder_lists`.
   - **A stem and a whole word are different kinds of thing.** A stem must match
     inside a longer word ("pharmaceutic" → "Pharmaceuticals"); a whole word must
-    not ("inc" reaches "Lincoln", "province"). Structure tests pin the anchoring,
-    the lowercasing and that no stem is a regex source — the two failure modes
-    that are otherwise *silent*, since a pattern matching nothing moves no metric.
-  - **Zero-metric entries are real entries.** `plc` scores 0 TP / 0 FP, so
-    dropping it moves neither figure nor the composition; only its own unit test
-    catches it. Mutation-verified, along with dropping a stem, unanchoring
-    `\binc\b` and uppercasing a stem.
-  - `TestFunderCorpusContract` in `tests/test_transparency_parity.py` now checks
-    `funder_names.json` itself (counts, label/source vocabularies, ambiguous
-    entries carrying a reason, name uniqueness) — it was the one fixture in the
-    parity directory that nothing read. All eight assertions mutation-verified.
-- **Government sponsor tier** (#147 landed 2026-08-21, stacked on #143): the
-  `GOVERNMENT_PATTERNS[:10]` slice cut through the middle of the agency list —
-  NIH/NSF/CDC inside it, **FDA, VA, AHRQ, PCORI, Wellcome and the MRC
-  immediately outside** — so a VA-funded study reported `ACADEMIC`. Split into
-  `GOVERNMENT_PATTERNS` (18) + `ACADEMIC_PATTERNS` (7), byte-identical to Swift's
-  two lists, with `NON_INDUSTRY_PATTERNS` as their concatenation;
-  `determine_sponsor_type` now mirrors `FundingAnalyzer.determineSponsorType`
-  tier for tier, including the `NONPROFIT` fallback that was previously
-  unreachable. **Six funders change tier, not four** — Wellcome and the MRC move
-  too, which is easy to miss because they read as a pre-existing parity choice.
-  - **The concatenation is load-bearing.** `classify_funder_name` walks
-    `GOVERNMENT_PATTERNS` then `ACADEMIC_PATTERNS`, which covers exactly their
-    concatenation in order — i.e. the pre-split list in the pre-split order — so
-    funder classification (measured against the corpus, feeds the HIGH-risk rule)
-    is untouched by the split. Pinned by
-    `TestThePatternSplitPreservesFunderClassification` against a **frozen copy**
-    of the 25-element list: asserting it equals `GOVERNMENT + ACADEMIC` was a
-    tautology that passed even when both halves lost the same pattern.
-  - **Parity is now enforced, not asserted in prose.**
-    `doc/cross_platform/transparency_parity/sponsor_patterns.json` is the shared
-    contract; `TestSponsorPatternManifestParity` (Python) and
-    `TransparencyParityTests` (Swift) assert their lists against it. Binds Python
-    and Swift only — Android has no funder classifier. Verified by mutation: move
-    one pattern across the boundary in the JSON and both suites fail.
-  - **`NONPROFIT` means "not recognised".** It is reached only by falling through
-    both halves, so it is exactly the confidence-0.3 bucket. On the labelled
-    corpus that is **325 of 417 names (78%)** — academic drops 396 → 68 — so it
-    is the modal outcome, not a corner. `_fetch_funder_info` now logs and attaches
-    a report warning naming the unrecognised funders whenever the tier is reached.
-  - **`update_sponsor_type` was extracted** to mirror Swift's
-    `FundingAnalyzer.updateSponsorType`. The inline chain in `_fetch_trial_info`
-    tested `sponsor_type in [GOVERNMENT, ACADEMIC]` and **omitted NONPROFIT** —
-    dead code until #147 made NONPROFIT reachable, then a live regression: an
-    industry-sponsored registered trial with unrecognised funders reported
-    `NONPROFIT` while `industry_funding_detected` was true, a self-contradictory
-    row in the batch CSV. Swift never had it because its `switch` is exhaustive;
-    Python has no such check, so it is pinned by test instead. The sponsor class
-    is now compared case-insensitively, as Swift already did.
-  - **Wellcome (a charity) and the MRC tier as GOVERNMENT** because Swift tiers
-    them there. Deliberate parity choice over separate defensibility — revisit on
-    both platforms or neither.
-  - `government`/`federal`/`state` sit in the *academic* half on both platforms,
-    so "Federal Ministry of Health" tiers ACADEMIC. Known and left alone: moving
-    them is a Swift behaviour change too.
-  - **Funder confidences now match Swift too** (#152, folded into the same PR).
-    Python reported a flat 0.8 for both non-industry halves; Swift had always
-    reported **0.85 government / 0.80 academic**. `classify_funder_name` now walks
-    the halves separately, as Swift's `classifyFunder` does. Differential over
-    70,417 names (the 417-name corpus plus 70k synthetic): **0** `is_industry`
-    changes, and the only confidence transition is `0.8 -> 0.85` for government
-    matches — the boundary the corpus measures is provably untouched.
-    - The ladder (1.0 DOI > 0.85 gov > 0.80 academic > 0.75 industry-name > 0.3
-      none) lives in `sponsor_patterns.json` and is asserted **behaviourally** on
-      both platforms via `confidence_probes`, because Swift's constants are
-      `private`. Strict descent and probe coverage are pinned too.
-    - **Half order is now load-bearing.** While both halves returned 0.8 it was
-      inert; it now decides the reported value for a name matching both, e.g.
-      "Veterans Affairs Medical Center". Pinned — reversing the checks fails.
-    - `NON_INDUSTRY_PATTERNS` is no longer the matcher on either platform; it is
-      the combined vocabulary the drift guard compares.
-  - `\bva\b` is two letters and also the USPS abbreviation for Virginia, so
-    "…, Richmond VA" now tiers GOVERNMENT — outranking the university pattern.
-    #147 made it tier-deciding where it previously only suppressed industry
-    classification. Pinned by `TestKnownPatternCollisions` so the cost stays
-    visible; not marked xfail, because the pattern is Swift's too.
-  - **PR #153 review fixes** (2026-08-21). Six of these were user-visible:
-    - **`report.warnings` reached nobody.** The unrecognised-funder caveat was
-      appended to a field that `TransparencyResult` did not carry, so it was
-      dropped in `transparency_manager` before storage. `warnings` is now a
-      field on `TransparencyResult` (with `to_dict`/`from_dict`, defaulting to
-      `[]` so stored results predating it still load) and is rendered in the
-      badge tooltip under "Analysis Caveats". Swift already rendered its
-      equivalent — this was a Python gap, not a Swift one.
-    - **The caveat is keyed off the funder, not the tier.** It fired only on
-      NONPROFIT, so it stayed silent on the MIXED that an unrecognised name plus
-      an industry funder produces — the case where an unverified classification
-      matters *most*, since MIXED reads as a positive finding of dual funding.
-      Now triggered by any funder at `UNKNOWN_FUNDER_CONFIDENCE`.
-    - **Log level dropped to INFO.** It fires on 78% of corpus funder names; a
-      WARNING on the modal path stops carrying signal in `batch_analyzer` runs.
-    - **`is_industry_trial_sponsor()` extracted.** `_fetch_trial_info` tested for
-      an industry sponsor class with its own inline copy, so only
-      `update_sponsor_type`'s copy was covered by a casing test — a lowercase
-      `"industry"` produced MIXED with `industry_funding_detected` false.
-      Mirrors Swift's `TrialComplianceAnalyzer.isIndustrySponsor`.
-    - **`sponsor_class` is `None` when the registry omits it**, not `''`. It
-      defaulted to `''`, which made "registered but unreadable" indistinguishable
-      from a well-formed `'NIH'` and left `update_sponsor_type`'s `None` guard
-      unreachable. Swift's `leadSponsor["class"] as? String` was already nil —
-      **Python was the divergent side.**
-    - **Nameless funders are skipped.** A CrossRef entry or PubMed `<Grant>` with
-      no agency name produced a confident-looking tier from zero data plus a
-      caveat reading `Funder names not recognised ()`.
-    - Two further silent failures now raise caveats: a trial registered only in
-      ISRCTN/EudraCT (collected, then dropped — no client for those registries),
-      and a failed ClinicalTrials.gov fetch (which otherwise made a registry
-      outage read as `trial_registered=False`).
-    - **`pattern_probes` added to `sponsor_patterns.json`** (schema_version 3).
-      A string-for-string pin cannot catch a pattern that matches nothing *on
-      any platform* — a typo transcribed faithfully into every copy agrees with
-      itself. `\bniaid\b`, `\bnhlbi\b` and `\bnimh\b` were in exactly that state.
-      Both suites now assert every pattern matches ≥1 probe and every probe is
-      non-industry. Swift also gained the non-emptiness guard Python had:
-      `assertPatternsMatch` passes on two empty arrays.
-    - `PRE_SPLIT_PATTERNS` renamed `FROZEN_PATTERN_BASELINE`, since its "as it
-      stood before #147" identity expires the first time a pattern is
-      legitimately added. Its update protocol is in the docstring. The
-      tautological `NON_INDUSTRY_PATTERNS == GOVERNMENT_PATTERNS +
-      ACADEMIC_PATTERNS` assertion — which restated the production line and
-      could not fail — is replaced by a per-half comparison against the baseline.
-    - **Deferred, both lodged:** #159 (`industry_funding_confidence` stays 0.0
-      when only the registry says industry — identical on both platforms, so
-      fixing Python alone would create a new divergence) and #160 (Swift does not
-      raise the unrecognised-funder caveat Python now does).
-- **Python CI** (#129 landed 2026-07-20, issue closed 2026-08-21):
-  `.github/workflows/python-tests.yml`
-  runs `pytest -m "not integration" --strict-markers` (557 tests, ~1 min) on every
-  PR and every push to master, plus a `lint-delta` job on PRs.
-- **Swift and Android CI** (#129 completed, 2026-08-20):
-  `.github/workflows/swift-tests.yml` runs `swift test` for both
-  `Packages/BioMedLit` and `ios/MedicalFactChecker` on a `macos-15` runner
-  (matrix, `fail-fast: false`); `.github/workflows/android-tests.yml` runs
-  `./gradlew testDebugUnitTest` on ubuntu with JDK 17 (matching
-  `jvmTarget = "17"`). Neither has a `paths:` filter, for the same parity-fixture
-  reason as the Python job. All three platforms of the parity guard are now
-  enforced on PRs.
-  - **The Android job needs no SDK install step.** The unit tests are JVM-only;
-    the Gradle Android plugin resolves what it needs from the wrapper.
-- **Model fetch failures are errors, not fallbacks** (PR #135 review follow-up):
-  `ModelFetchService.fetchModels` now *throws* on both Swift and Kotlin instead of
-  returning the hardcoded catalogue. Kotlin raises `ModelFetchException`. The rule
-  behind it: a caller that cannot tell a live line-up from a hardcoded one cannot
-  tell a retired model ID from a current one either — which is exactly how the
-  DeepSeek V3 retirement went unnoticed. **Do not reintroduce a fallback inside the
-  service.** Callers may show the hardcoded list, but must not treat it as
-  authoritative — in particular `dropRetiredModelSelection` /
-  `LLMModel.resolveSelection` must only ever see a list that really came from the
-  provider, or they will rewrite a valid stored selection whenever the network is
-  down.
-  - **The test job has no `paths:` filter, on purpose.** The parity fixtures live
-    in `doc/cross_platform/transparency_parity/`, outside `src/` and `tests/`, so
-    any plausible filter would skip the run for a contract-only edit — the exact
-    silent pass the Android `inputs.dir` declaration exists to prevent. Do not add
-    one.
+    not ("inc" reaches "Lincoln"). Anchoring, lowercasing and "no stem is a regex
+    source" are pinned — the failure modes that are otherwise *silent*, since a
+    pattern matching nothing moves no metric.
+  - **`sponsor_patterns.json` is the contract** (schema_version 3), asserted from
+    both sides, and it carries `confidence_probes` (the 1.0 DOI > 0.85 gov > 0.80
+    academic > 0.75 industry-name > 0.3 none ladder, checked *behaviourally*
+    because Swift's constants are private) and `pattern_probes` (every pattern
+    must match ≥1 probe — a typo transcribed faithfully into every copy agrees
+    with itself; `\bniaid\b`, `\bnhlbi\b` and `\bnimh\b` were in exactly that
+    state). Binds Python and Swift only; Android has no funder classifier.
+  - **`NONPROFIT` means "not recognised"** — the confidence-0.3 bucket, and the
+    modal outcome at **325 of 417 corpus names (78%)**. Any funder at that
+    confidence raises a report caveat, keyed off the *funder* and not the tier,
+    since the MIXED it can produce reads as a positive finding of dual funding.
+  - **A frozen baseline, not a self-comparison.** `FROZEN_PATTERN_BASELINE` pins
+    the pre-split list per half; `NON_INDUSTRY_PATTERNS == GOVERNMENT + ACADEMIC`
+    was a tautology that passed even when both halves lost the same pattern.
+  - Known and deliberate: Wellcome and the MRC tier GOVERNMENT because Swift
+    tiers them there; `government`/`federal`/`state` sit in the *academic* half
+    on both platforms; and `\bva\b` is also the USPS abbreviation for Virginia,
+    so "…, Richmond VA" tiers GOVERNMENT — pinned by `TestKnownPatternCollisions`
+    so the cost stays visible. Revisit on both platforms or neither.
+  - Deferred, both lodged: **#159** (`industry_funding_confidence` stays 0.0 when
+    only the registry says industry — identical on both platforms) and **#160**
+    (Swift does not raise the unrecognised-funder caveat Python now does).
+- **CI on all three platforms** (#129, completed 2026-08-20): `python-tests.yml`
+  (pytest + a `lint-delta` job), `swift-tests.yml` (a `macos-15` matrix over
+  `Packages/BioMedLit` and `ios/MedicalFactChecker`), `android-tests.yml`
+  (`./gradlew testDebugUnitTest`, JDK 17). What still binds:
+  - **No job may gain a `paths:` filter.** The parity fixtures live in
+    `doc/cross_platform/transparency_parity/`, outside `src/` and `tests/`, so any
+    plausible filter would skip the run for a contract-only edit — the exact
+    silent pass the Android `inputs.dir` declaration exists to prevent.
   - **A Qt preflight constructs a `QApplication` before pytest.** The widget
     suites open with `pytest.importorskip("PySide6")`, so a broken Qt install
     would skip ~100 tests and leave the job green. Verified load-bearing: with a
     bogus `QT_QPA_PLATFORM` the preflight aborts (exit 134).
   - **`lint_delta.py` compares findings against the merge base**, measured in a
-    throwaway worktree outside the repo (so ruff's `.` target cannot walk into it).
-    Identity is `(tool, path, code, message)` — no line/column — so a pure line
-    shift reports nothing while an added finding is caught. Both halves verified
-    end-to-end against the real tree; four mutations of the delta logic each fail
-    exactly their own test. Renaming a file makes its findings look new; that is
-    the accepted cost of keeping the path in the identity.
-  - **Ruff config moved to `[tool.ruff.lint]`.** The top-level spelling still
-    worked but was deprecated; once ruff drops it, `select` would be ignored and
-    the rule set would collapse to ruff's small default — and because the gate
-    compares head against base with the *same* ruff, both sides would shrink
-    together and it would stay green. Migration verified finding-for-finding
-    identical (2081 before and after).
+    throwaway worktree outside the repo (so ruff's `.` target cannot walk into
+    it). Identity is `(tool, path, code, message)` — no line/column — so a pure
+    line shift reports nothing while an added finding is caught. Renaming a file
+    makes its findings look new; that is the accepted cost of keeping the path in
+    the identity.
+  - **Ruff config lives in `[tool.ruff.lint]`.** Under the deprecated top-level
+    spelling, once ruff drops it `select` would be ignored and the rule set would
+    collapse to ruff's small default — and because the gate compares head against
+    base with the *same* ruff, both sides would shrink together and it would stay
+    green.
+- **Model fetch failures are errors, not fallbacks** (PR #135 review follow-up):
+  `ModelFetchService.fetchModels` *throws* on both Swift and Kotlin instead of
+  returning the hardcoded catalogue. The rule behind it: a caller that cannot tell
+  a live line-up from a hardcoded one cannot tell a retired model ID from a
+  current one either — which is how the DeepSeek V3 retirement went unnoticed.
+  **Do not reintroduce a fallback inside the service.** Callers may show the
+  hardcoded list but must not treat it as authoritative — in particular
+  `dropRetiredModelSelection` / `LLMModel.resolveSelection` must only ever see a
+  list that really came from the provider, or they will rewrite a valid stored
+  selection whenever the network is down.
 - **Cross-platform parity drift guard** (#105 landed 2026-07-19): parity between
   the three data-availability classifiers is enforced by test, not convention.
   The contract is `doc/cross_platform/transparency_parity/` — **read its
@@ -367,7 +242,7 @@ its slice has landed; add a new section when handing off new work.
   #147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
-  open** (#156, #157 and #161 landed; see above). Fixing any of them changes
+  open** (#156, #157, #161, #167 and #169 landed; see above). Fixing any of them changes
   `doc/cross_platform/jats_corpus/*.digest.json`, and that diff is the evidence —
   read it rather than regenerating past it. Each replicates in Android's
   `util.jats.JATSXMLParser` and in bmlib, which share this parser's ancestry;
@@ -387,6 +262,15 @@ its slice has landed; add a new section when handing off new work.
     11 real cells in the corpus. `markdownRowCount` could never see it — a
     rowspan misalignment does not change the row count — which is why the digest
     now stores a `markdownDigest` hash of the rendering instead.
+- **#170 — `figureSlots` and `figureStack` are a parallel-array pair** held in
+  sync by two adjacent lines in `didStartElement` and one ~330 lines away in
+  `didEndElement`. Five invariants ride on that pair with nothing checking them,
+  and `[JATSFigureInfo?]` conflates "reserved, still open" with "opened and never
+  closed". The issue proposes a `FigureCollector` that owns the ordering, so the
+  index and the second array disappear; `inFigure` and `figures` keep their names,
+  so the readers elsewhere in the file do not move. `inTableWrap`/`currentTable`
+  are the identical unfixed pair and the same type would serve both — worth doing
+  together, since #169 showed exhibits nest in both directions.
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry `\bnci\b`, `\bniaid\b`, `\bnhlbi\b`,
   `\bnimh\b` but no singular "National Institute of X" form, while CrossRef
@@ -461,20 +345,17 @@ its slice has landed; add a new section when handing off new work.
   `cd Packages/BioMedLit && swift test --filter JATSRealCorpusTests`, read what it
   names, then regenerate with `UPDATE_JATS_DIGESTS=1` and read
   `git diff doc/cross_platform/jats_corpus/` line by line — that diff is the
-  evidence a fix worked, and regenerating past it is how a regression becomes a
-  committed expectation. Then check the sibling parsers: bmlib's is Python and can
-  be **run** over the same corpus files, which beats reading it.
-- Mutation-testing a Python source file? **Back it up with `cp`, not
-  `git checkout`** — the restore step wipes every uncommitted change in the file,
-  and the runs after the first then silently measure a tree with the feature
-  missing. Cost an implementation once already this session.
+  evidence a fix worked, and regenerating unread is how a regression becomes a
+  committed expectation, the one failure the corpus cannot survive. The
+  regeneration run fails on purpose; re-run without the variable to verify. Then
+  check the sibling parsers: bmlib's is Python and can be **run** over the same
+  corpus files, which beats reading it; Android's needs a source read until #121.
+- Mutation-testing a source file? **Back it up with `cp`, not `git checkout`** —
+  the restore step wipes every uncommitted change in the file, and the runs after
+  the first then silently measure a tree with the feature missing. Cost an
+  implementation once already.
 - `pytest tests/` → 0 failures (Python is the reference).
 - `cd Packages/BioMedLit && swift test` → 0 failures.
-- Changed the JATS parser? The corpus digests are expected to move. Regenerate
-  with `UPDATE_JATS_DIGESTS=1 swift test --filter JATSRealCorpusTests` **and read
-  every changed line** — regenerating unread converts a regression into a
-  committed expectation, which is the one failure the corpus cannot survive. The
-  regeneration run fails on purpose; re-run without the variable to verify.
 - `cd ios/MedicalFactChecker && swift test` → 0 failures.
 - Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
 - macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination

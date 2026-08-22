@@ -28,18 +28,27 @@ import Foundation
 /// - Inline formatting (bold, italic, subscript, superscript)
 /// - Lists (ordered and unordered)
 ///
-/// Usage:
+/// An instance parses once: it holds a single `XMLParser` built from the data it
+/// was given, and that parser cannot be re-pointed. A second call throws
+/// ``JATSParseError/alreadyParsed``, so construct one parser per output:
+///
 /// ```swift
-/// let parser = JATSXMLParser(data: xmlData)
-/// let markdown = try parser.parseToMarkdown()
-/// // or
-/// let html = try parser.parseToHTML()
+/// let markdown = try JATSXMLParser(data: xmlData).parseToMarkdown()
+/// let html = try JATSXMLParser(data: xmlData).parseToHTML()
 /// ```
 public final class JATSXMLParser: NSObject {
     // MARK: - Properties
 
     private let parser: XMLParser
     private var parseError: Error?
+
+    /// Whether ``runParser()`` has already been called on this instance.
+    ///
+    /// A consumed `XMLParser` returns `false` from `parse()` with no error of its
+    /// own, so the second call used to bottom out on "Unknown parsing error" —
+    /// and the accumulated state from the first parse was still in place. The
+    /// flag makes the rule explicit and the failure self-explaining (#168).
+    private var hasParsed = false
 
     // MARK: - Parsed Content
 
@@ -209,7 +218,7 @@ public final class JATSXMLParser: NSObject {
     private var figureFootnoteDepth = 0
 
     /// Open `<fig>` builders, innermost last, each paired with the `figureSlots`
-    /// entry it will fill and the footnote depth in force when it opened.
+    /// entry it will fill.
     ///
     /// A stack rather than a single slot for the reason `subArticleDepth` is a
     /// counter: JATS permits a `<fig>` inside a `<fig>` and eLife uses it for
@@ -217,36 +226,47 @@ public final class JATSXMLParser: NSObject {
     /// single slot was overwritten when the inner figure opened and cleared when
     /// it closed, so the parent was discarded and the rest of its content was
     /// read as though no figure were open at all (#156).
-    private var figureStack: [(slot: Int, builder: FigureBuilder, footnoteDepthAtOpen: Int)] = []
+    private var figureStack: [(slot: Int, builder: FigureBuilder)] = []
 
     /// Whether the parser is inside a `<fig>` at any depth.
     private var inFigure: Bool { !figureStack.isEmpty }
 
-    /// The footnote depth in force when the open `<table-wrap>` opened.
+    /// The element that most closely encloses the one being handled.
     ///
-    /// The figure equivalent rides on `figureStack`; a table cannot nest, so one
-    /// slot is enough.
-    private var tableFootnoteDepthAtOpen = 0
-
-    /// The footnote depth in force when the exhibit that owns the current markup
-    /// opened.
-    ///
-    /// `figureFootnoteDepth` counts footnotes anywhere in the document, so on its
-    /// own it cannot say whether a `<label>` belongs to a footnote or to an
-    /// exhibit that merely *opened inside* one — a `<fig>` in a
-    /// `<table-wrap-foot>`, say. Comparing against the depth the exhibit itself
-    /// opened at answers exactly that. Figure before table to match how `<label>`
-    /// and `appendFootnoteText` route.
-    private var currentExhibitFootnoteDepth: Int {
-        if let open = figureStack.last { return open.footnoteDepthAtOpen }
-        if inTableWrap { return tableFootnoteDepthAtOpen }
-        return 0
+    /// `elementStack` holds the current element itself in both delegate
+    /// callbacks — `didStartElement` appends before it dispatches, and
+    /// `didEndElement` pops in a `defer` — so the enclosing element is the entry
+    /// below it. This is the question every piece of exhibit furniture has to
+    /// answer: `<label>`, `<title>` and `<caption>` all appear on more than one
+    /// kind of parent, and the ambient `in*` flags cannot tell them apart.
+    private var enclosingElement: String? {
+        elementStack.dropLast().last
     }
 
-    /// Whether the markup being closed is a footnote's own, rather than its
-    /// enclosing exhibit's.
-    private var inExhibitFootnote: Bool {
-        figureFootnoteDepth > currentExhibitFootnoteDepth
+    /// A figure or a table — the two exhibits that own a label, a caption and
+    /// footnotes.
+    private enum Exhibit {
+        case figure
+        case table
+    }
+
+    /// The exhibit that most closely encloses the markup being handled.
+    ///
+    /// `inFigure` and `inTableWrap` are both true for a `<table-wrap>` inside a
+    /// `<fig>`, so asking them in a fixed order answered with whichever was asked
+    /// first rather than with the nearer one: the table's `<label>` and its
+    /// `<table-wrap-foot>` were both filed under the enclosing figure (#169).
+    /// The element stack knows which is nearer, and it is the same question
+    /// `enclosingElement` answers one step out.
+    private var innermostExhibit: Exhibit? {
+        for element in elementStack.reversed() {
+            switch element {
+            case "fig": return .figure
+            case "table-wrap": return .table
+            default: continue
+            }
+        }
+        return nil
     }
 
     /// Mutate the innermost open figure, if there is one.
@@ -381,6 +401,28 @@ public final class JATSXMLParser: NSObject {
         return text
     }
 
+    // MARK: - Parsing
+
+    /// Run the underlying `XMLParser` exactly once.
+    ///
+    /// - Throws: ``JATSParseError/alreadyParsed`` if this instance has already
+    ///   parsed, or ``JATSParseError/parsingFailed(_:)`` if the XML is not
+    ///   well-formed.
+    private func runParser() throws {
+        guard !hasParsed else { throw JATSParseError.alreadyParsed }
+        // Set before the parse, not after: a failed parse leaves the same
+        // consumed XMLParser and the same half-filled state behind, so retrying
+        // it would report the fallback message rather than the real reason.
+        hasParsed = true
+
+        guard parser.parse() else {
+            let errorMessage = parseError?.localizedDescription
+                ?? parser.parserError?.localizedDescription
+                ?? "Unknown parsing error"
+            throw JATSParseError.parsingFailed(errorMessage)
+        }
+    }
+
     // MARK: - Public API
 
     /// Parse the XML and return markdown-formatted content.
@@ -388,12 +430,7 @@ public final class JATSXMLParser: NSObject {
     /// - Returns: Markdown string representation of the article.
     /// - Throws: `JATSParseError` if parsing fails.
     public func parseToMarkdown() throws -> String {
-        guard parser.parse() else {
-            let errorMessage = parseError?.localizedDescription
-                ?? parser.parserError?.localizedDescription
-                ?? "Unknown parsing error"
-            throw JATSParseError.parsingFailed(errorMessage)
-        }
+        try runParser()
 
         let markdown = buildMarkdown()
         if markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -411,12 +448,7 @@ public final class JATSXMLParser: NSObject {
     /// - Returns: HTML string representation of the article (body content only, no wrapper).
     /// - Throws: `JATSParseError` if parsing fails.
     public func parseToHTML() throws -> String {
-        guard parser.parse() else {
-            let errorMessage = parseError?.localizedDescription
-                ?? parser.parserError?.localizedDescription
-                ?? "Unknown parsing error"
-            throw JATSParseError.parsingFailed(errorMessage)
-        }
+        try runParser()
 
         let html = buildHTML()
         if html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -431,12 +463,7 @@ public final class JATSXMLParser: NSObject {
     /// - Returns: `JATSArticle` containing all parsed data.
     /// - Throws: `JATSParseError` if parsing fails.
     public func parseToArticle() throws -> JATSArticle {
-        guard parser.parse() else {
-            let errorMessage = parseError?.localizedDescription
-                ?? parser.parserError?.localizedDescription
-                ?? "Unknown parsing error"
-            throw JATSParseError.parsingFailed(errorMessage)
-        }
+        try runParser()
 
         // The stacks must have unwound. A non-zero depth means an unbalanced
         // <sub-article>, and everything after the imbalance was excluded as
@@ -1214,10 +1241,31 @@ extension JATSXMLParser: XMLParserDelegate {
     private func appendFootnoteText(_ text: String) {
         guard !text.isEmpty else { return }
 
-        if inFigure {
+        switch innermostExhibit {
+        case .figure:
             withCurrentFigure { $0.appendFootnote(text) }
-        } else if inTableWrap {
+        case .table:
             currentTable?.appendFootnote(text)
+        case nil:
+            break
+        }
+    }
+
+    /// Hold a `<fn>`'s own marker on the exhibit that owns the footnote.
+    ///
+    /// The marker is written when `</label>` closes and consumed by the first
+    /// footnote paragraph after it; `</fn>` clears any that went unused by
+    /// passing an empty string.
+    ///
+    /// - Parameter marker: The footnote's `<label>` text, or `""` to clear.
+    private func setPendingFootnoteLabel(_ marker: String) {
+        switch innermostExhibit {
+        case .figure:
+            withCurrentFigure { $0.pendingFootnoteLabel = marker }
+        case .table:
+            currentTable?.pendingFootnoteLabel = marker
+        case nil:
+            break
         }
     }
 
@@ -1310,17 +1358,11 @@ extension JATSXMLParser: XMLParserDelegate {
             }
         case "fig":
             // The slot is reserved now and filled at the end tag, so a nested
-            // figure cannot be listed ahead of the one containing it. The
-            // footnote depth rides along so this figure's own <label> is still
-            // recognised when the figure opened inside somebody's footnote.
+            // figure cannot be listed ahead of the one containing it.
             var builder = FigureBuilder()
             builder.id = attributeDict["id"] ?? ""
             figureSlots.append(nil)
-            figureStack.append((
-                slot: figureSlots.count - 1,
-                builder: builder,
-                footnoteDepthAtOpen: figureFootnoteDepth
-            ))
+            figureStack.append((slot: figureSlots.count - 1, builder: builder))
         case "graphic":
             // Extract graphic URL from xlink:href attribute
             if inFigure {
@@ -1356,7 +1398,6 @@ extension JATSXMLParser: XMLParserDelegate {
             }
         case "table-wrap":
             inTableWrap = true
-            tableFootnoteDepthAtOpen = figureFootnoteDepth
             currentTable = TableBuilder()
             currentTable?.id = attributeDict["id"] ?? ""
         case "table-wrap-foot":
@@ -1594,7 +1635,18 @@ extension JATSXMLParser: XMLParserDelegate {
                     currentAbstractText = []
                 }
                 currentAbstractTitle = text
-            } else if !sectionStack.isEmpty {
+            } else if enclosingElement == "sec", !sectionStack.isEmpty {
+                // A section is named by its own <title>, not by any title that
+                // happens to close while it is open. `<fn-group>`, `<ref-list>`,
+                // `<glossary>` and `<app>` all carry one, and asking nothing but
+                // "is a section open?" let an eLife back-matter section report
+                // "Author contributions" — the last of the two `<fn-group>`
+                // titles inside it — instead of "Additional information" (#167,
+                // live in `doc/cross_platform/jats_corpus/PMC8754430.xml`).
+                //
+                // `<sec>` is the only element that pushes a builder, so the
+                // parent test *is* the "does this title own that builder?" test;
+                // the emptiness check guards the subscript.
                 sectionStack[sectionStack.count - 1].title = normalizedText
             }
         case "p":
@@ -1664,35 +1716,39 @@ extension JATSXMLParser: XMLParserDelegate {
                 figureSlots[open.slot] = open.builder.build()
             }
         case "label":
-            if inExhibitFootnote {
-                // A `<fn>` carries its own marker — "a", "b", "*" — as a
-                // `<label>`, and routing on the ambient flags alone wrote that
-                // marker over the exhibit's own number: 27 of 225 surveyed
-                // articles (12.0%) carry a labelled `<table-wrap-foot><fn>`, and
-                // `PMC12661592`'s only table reported "a" as its label (#157).
-                //
-                // Compared against the depth the exhibit opened at, not against
-                // zero: JATS lets a `<fig>` or `<table-wrap>` open *inside* a
-                // footnote, and testing `> 0` took that exhibit's own `<label>`
-                // for a marker and left it unlabelled — which the renderer then
-                // replaced with a figure number it made up.
-                //
-                // The marker is held rather than dropped: `<sup>` is flattened
-                // into the cell text around it, so the table body still reads
-                // `12.3a` and the footnote has to say which one it is.
-                if inFigure {
-                    withCurrentFigure { $0.pendingFootnoteLabel = text }
-                } else if inTableWrap {
-                    currentTable?.pendingFootnoteLabel = text
-                }
-                break
-            }
-            if inFigure {
+            // Routed by the element it hangs off, never by which exhibit happens
+            // to be open. `<label>` appears on `<fn>`, `<fig>`, `<table-wrap>`
+            // and `<ref>` alike, and the ambient flags cannot tell those apart:
+            // a footnote marker — "a", "b", "*" — overwrote its exhibit's own
+            // number (#157, 27 of 225 surveyed articles carry a labelled
+            // `<table-wrap-foot><fn>`; `PMC12661592`'s only table reported "a"),
+            // and a `<table-wrap>` inside a `<fig>` handed the figure its number
+            // (#169). Reading the parent settles both, and settles them for the
+            // nested cases the depth guard it replaces had to enumerate: a
+            // `<fig>` opened *inside* a footnote is a `<fig>`, whatever the
+            // depth.
+            switch enclosingElement {
+            case "fn":
+                // Held rather than dropped: `<sup>` is flattened into the cell
+                // text around it, so the table body still reads `12.3a` and the
+                // footnote has to say which one it is.
+                setPendingFootnoteLabel(text)
+            case "fig":
                 withCurrentFigure { $0.label = text }
-            } else if inTableWrap {
+            case "table-wrap":
                 currentTable?.label = text
-            } else if inRef {
+            case "ref":
                 currentReference?.label = text
+            default:
+                // `<aff>`, `<corresp>`, `<disp-formula>` and
+                // `<supplementary-material>` carry labels the parser has no model
+                // for — 43 of them across the committed corpus. They were dropped
+                // before this switch too, whenever they fell outside an exhibit,
+                // which is everywhere they occur in the corpus; the parent test
+                // adds that a `<supplementary-material>` label *inside* a `<fig>`
+                // no longer becomes the figure's. Capturing them is #144 (the
+                // supplement's own furniture) and #154 (affiliation markers).
+                break
             }
         case "caption":
             _ = captionStack.popLast()
@@ -1703,11 +1759,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 // A marker whose <fn> deposited no prose has nothing left to
                 // disambiguate; clearing it here stops it prefixing the *next*
                 // footnote instead.
-                if inFigure {
-                    withCurrentFigure { $0.pendingFootnoteLabel = "" }
-                } else {
-                    currentTable?.pendingFootnoteLabel = ""
-                }
+                setPendingFootnoteLabel("")
                 figureFootnoteDepth = max(0, figureFootnoteDepth - 1)
             }
 

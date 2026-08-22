@@ -105,4 +105,68 @@ final class JATSParseGuardTests: XCTestCase {
 
         XCTAssertEqual(article.pmcId, "PMC12759138")
     }
+
+    // MARK: - One parse per instance (#168)
+
+    private static let wellFormedArticle = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <article><front><article-meta>
+      <title-group><article-title>Metadata only</article-title></title-group>
+    </article-meta></front><body><sec><title>Results</title><p>Prose.</p></sec></body></article>
+    """
+
+    private func assertAlreadyParsed(
+        _ parse: () throws -> Any,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertThrowsError(try parse(), file: file, line: line) { error in
+            guard case JATSParseError.alreadyParsed = error else {
+                return XCTFail("expected .alreadyParsed, got \(error)", file: file, line: line)
+            }
+        }
+    }
+
+    /// `XMLParser` is built once from the data and cannot be re-pointed, so an
+    /// instance parses once. A second call used to reach the `??` chain with both
+    /// `parseError` and `parser.parserError` nil on the consumed parser and report
+    /// `"Unknown parsing error"` — a message with no route back to the cause, on a
+    /// class whose own documentation reads as "either method on this instance".
+    func testASecondParseOnTheSameInstanceSaysTheParserWasConsumed() throws {
+        let parser = JATSXMLParser(data: Data(Self.wellFormedArticle.utf8))
+        _ = try parser.parseToArticle()
+
+        assertAlreadyParsed { try parser.parseToMarkdown() }
+    }
+
+    /// The guard belongs to the instance, not to one entry point: all three
+    /// consume the same `XMLParser`.
+    func testEveryEntryPointRefusesAConsumedParser() throws {
+        let parser = JATSXMLParser(data: Data(Self.wellFormedArticle.utf8))
+        _ = try parser.parseToMarkdown()
+
+        assertAlreadyParsed { try parser.parseToMarkdown() }
+        assertAlreadyParsed { try parser.parseToHTML() }
+        assertAlreadyParsed { try parser.parseToArticle() }
+    }
+
+    /// A failed first parse consumes the instance just as a successful one does,
+    /// and the second call must not report the first call's cause as its own.
+    func testAFailedFirstParseAlsoConsumesTheInstance() {
+        let parser = JATSXMLParser(data: Data("<article><body>".utf8))
+        XCTAssertThrowsError(try parser.parseToArticle())
+
+        assertAlreadyParsed { try parser.parseToArticle() }
+    }
+
+    /// The rule is one parse per *instance*, not one parse per document: the
+    /// two-instance form the class documentation now shows must keep working.
+    func testASecondInstanceOverTheSameDataParsesNormally() throws {
+        let data = Data(Self.wellFormedArticle.utf8)
+        let article = try JATSXMLParser(data: data).parseToArticle()
+        let markdown = try JATSXMLParser(data: data).parseToMarkdown()
+
+        XCTAssertEqual(article.title, "Metadata only")
+        XCTAssertTrue(markdown.contains("Prose."), "markdown was: \(markdown)")
+    }
 }

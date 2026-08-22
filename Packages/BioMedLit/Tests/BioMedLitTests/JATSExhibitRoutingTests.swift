@@ -309,6 +309,116 @@ final class JATSExhibitRoutingTests: XCTestCase {
         XCTAssertEqual(article.references.first?.label, "1.")
     }
 
+    // MARK: - <label> belongs to the exhibit that encloses it most closely (#169)
+
+    /// `<fig>` and `<table-wrap>` can be open at the same time, and the branch
+    /// asked `inFigure` first, so the figure took every `<label>` in reach —
+    /// including the table's own. `PMC13295835` nests a `<media>` in a `<fig>`,
+    /// so an exhibit inside an exhibit is not a contrived shape.
+    private func tableInsideFigure(footnote: String = "") -> String {
+        """
+        <sec>
+          <title>Results</title>
+          <fig id="f1">
+            <label>Figure 1.</label>
+            <graphic xlink:href="f1.jpg"/>
+            <table-wrap id="t1">
+              <label>Table 1.</label>
+              <table><tbody><tr><td>12.3a</td></tr></tbody></table>
+              \(footnote.isEmpty ? "" : "<table-wrap-foot>\(footnote)</table-wrap-foot>")
+            </table-wrap>
+          </fig>
+        </sec>
+        """
+    }
+
+    func testATableInsideAFigureKeepsItsOwnLabel() throws {
+        let article = try parse(body: tableInsideFigure())
+
+        XCTAssertEqual(
+            article.tables.first?.label, "Table 1.",
+            "the enclosing figure took the table's label"
+        )
+    }
+
+    func testTheFigureAroundATableKeepsItsOwnLabelToo() throws {
+        let article = try parse(body: tableInsideFigure())
+
+        XCTAssertEqual(
+            article.figures.first?.label, "Figure 1.",
+            "the nested table's label was written over the figure's"
+        )
+    }
+
+    /// The footnote marker routes through the same first-`inFigure`-wins chain,
+    /// one layer down: `<table-wrap-foot>` belongs to the table it hangs off,
+    /// whatever encloses that table.
+    func testATableFootnoteMarkerStaysWithTheTableInsideAFigure() throws {
+        let article = try parse(body: tableInsideFigure(
+            footnote: #"<fn id="t1fn1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
+        ))
+
+        XCTAssertEqual(
+            article.tables.first?.footnotes, ["a — AI: artificial intelligence."],
+            "the table's footnote was filed under the enclosing figure"
+        )
+    }
+
+    func testAFigureAroundAFootnotedTableCollectsNoFootnotes() throws {
+        let article = try parse(body: tableInsideFigure(
+            footnote: #"<fn id="t1fn1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
+        ))
+
+        XCTAssertEqual(
+            article.figures.first?.footnotes, [],
+            "the figure collected the nested table's footnote"
+        )
+    }
+
+    /// `<supplementary-material>` is the other thing eLife nests inside a `<fig>`,
+    /// and it carries a label of its own: 14 occur in the committed corpus, none
+    /// of them inside an exhibit, so this is the shape that was one deposit away
+    /// from silently renaming a figure. The parser has no model for the
+    /// supplement itself (#144); the point here is only that the figure keeps its
+    /// own number.
+    func testASupplementaryMaterialLabelInsideAFigureIsNotTheFiguresLabel() throws {
+        let article = try parse(body: """
+        <sec>
+          <title>Results</title>
+          <fig id="f1">
+            <label>Figure 1.</label>
+            <graphic xlink:href="f1.jpg"/>
+            <supplementary-material id="f1sd1">
+              <label>Figure 1—source data 1.</label>
+              <media xlink:href="elife-f1-data1.xlsx"/>
+            </supplementary-material>
+          </fig>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.figures.first?.label, "Figure 1.")
+    }
+
+    /// The reverse nesting is the shape #156 exists to serve, so the label must
+    /// keep travelling in the other direction too.
+    func testAFigureInsideATableKeepsItsOwnLabel() throws {
+        let article = try parse(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <label>Table 1.</label>
+            <table><tbody><tr><td>See below</td></tr></tbody></table>
+            <table-wrap-foot>
+              <fig id="f9"><label>Figure 9.</label><graphic xlink:href="f9.jpg"/></fig>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.figures.first?.label, "Figure 9.")
+        XCTAssertEqual(article.tables.first?.label, "Table 1.")
+    }
+
     // MARK: - <graphic> resolution (#161)
 
     private func figureWithGraphics(_ graphics: String) -> String {

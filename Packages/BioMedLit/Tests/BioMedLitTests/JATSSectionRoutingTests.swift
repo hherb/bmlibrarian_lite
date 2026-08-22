@@ -47,6 +47,31 @@ final class JATSSectionRoutingTests: XCTestCase {
         return try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
     }
 
+    /// Back matter is where `<fn-group>` and `<ref-list>` actually live, and its
+    /// sections land in `bodySections` alongside the body's. The `<body>` is left
+    /// empty so those are the only entries; the article title carries the parse
+    /// past the empty-result guard.
+    private func parse(back: String) throws -> JATSArticle {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <article>
+          <front>
+            <article-meta>
+              <article-id pub-id-type="pmc">PMC1234567</article-id>
+              <title-group>
+                <article-title>T</article-title>
+              </title-group>
+            </article-meta>
+          </front>
+          <body></body>
+          <back>
+        \(back)
+          </back>
+        </article>
+        """
+        return try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
+    }
+
     // MARK: - Caption inside a section (bmlib 0.6.0)
 
     /// The ordinary PMC layout: `<fig>` nested inside `<sec>`.
@@ -255,5 +280,118 @@ final class JATSSectionRoutingTests: XCTestCase {
 
         XCTAssertEqual(article.bodySections.count, 0)
         XCTAssertEqual(article.figures[0].caption, "Flow Caption prose.")
+    }
+
+    // MARK: - <title> belongs to its own parent (#167)
+
+    /// `<caption>` was taught to read its own parent; `<title>` was not, and
+    /// `<caption>` is not the only element that carries one. JATS models
+    /// `<fn-group>` as `(label?, title?, (fn|p)+)`, so a footnote group has a
+    /// title of its own, and the section branch asked nothing but "is a section
+    /// open?".
+    ///
+    /// The eLife shape from `doc/cross_platform/jats_corpus/PMC8754430.xml`: two
+    /// `<fn-group>`s inside one back-matter section, so the section was renamed
+    /// twice and reported the last one.
+    func testAFootnoteGroupTitleDoesNotRenameTheEnclosingSection() throws {
+        let article = try parse(back: """
+        <sec sec-type="additional-information" id="s5">
+          <title>Additional information</title>
+          <fn-group content-type="competing-interest">
+            <title>Competing interests</title>
+            <fn fn-type="COI-statement"><p>No competing interests declared.</p></fn>
+          </fn-group>
+          <fn-group content-type="author-contribution">
+            <title>Author contributions</title>
+            <fn fn-type="con"><p>Conceptualization, data curation.</p></fn>
+          </fn-group>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.title), ["Additional information"],
+            "the footnote group's own title was written over the section's"
+        )
+    }
+
+    /// The same defect with nothing to overwrite: a section whose only `<title>`
+    /// belongs to a child reports a heading the publisher never gave it, which is
+    /// worse than the blank, since a made-up heading is not recognisable as one.
+    func testAFootnoteGroupTitleDoesNotInventASectionTitle() throws {
+        let article = try parse(back: """
+        <sec id="s5">
+          <fn-group content-type="competing-interest">
+            <title>Competing interests</title>
+            <fn fn-type="COI-statement"><p>No competing interests declared.</p></fn>
+          </fn-group>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.title), [""],
+            "an untitled section borrowed its footnote group's title"
+        )
+    }
+
+    /// `figureFootnoteDepth` is zero in back matter, so the #157 guard cannot
+    /// reach the case above. It is reachable inside a table, though — where the
+    /// depth guard *is* in force and still does not cover `<title>`.
+    func testATableFootnoteGroupTitleDoesNotRenameTheEnclosingSection() throws {
+        let article = try parse(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="T1">
+            <label>Table 1.</label>
+            <table><tbody><tr><td>12.3a</td></tr></tbody></table>
+            <table-wrap-foot>
+              <fn-group>
+                <title>Abbreviations</title>
+                <fn id="T1_FN1"><label>a</label><p>AI: artificial intelligence.</p></fn>
+              </fn-group>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.title), ["Results"],
+            "the table footnote group's title was written over the section's"
+        )
+    }
+
+    /// A `<ref-list>` carries a title too, and its usual home — loose in `<back>`
+    /// with no section open — hid the defect: there was nothing to rename.
+    func testAReferenceListTitleDoesNotRenameTheSectionItSitsIn() throws {
+        let article = try parse(back: """
+        <sec id="s6">
+          <title>Additional files</title>
+          <ref-list>
+            <title>References</title>
+            <ref id="R1"><label>1.</label><element-citation><article-title>A study</article-title></element-citation></ref>
+          </ref-list>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.title), ["Additional files"],
+            "the reference list's title was written over the section's"
+        )
+    }
+
+    /// Positive control for the narrowing: `<sec>` is the only element that opens
+    /// a section, and the *innermost* one owns the title. Passes before the fix —
+    /// it is here so that routing `<title>` by its parent cannot silently trade
+    /// this defect for the opposite one.
+    func testANestedSectionTitleStillNamesItsOwnSubsection() throws {
+        let article = try parse(body: """
+        <sec>
+          <title>Methods</title>
+          <p>Outer prose.</p>
+          <sec><title>Participants</title><p>Inner prose.</p></sec>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.bodySections.map(\.title), ["Methods"])
+        XCTAssertEqual(article.bodySections[0].subsections.map(\.title), ["Participants"])
     }
 }
