@@ -304,10 +304,19 @@ fetched rather than committed — these are third-party works, and the licence
 position above is the reason the corpus is seven and not seven hundred:
 
 ```bash
-python scripts/jats_survey.py --fetch-query 'SRC:PMC AND OPEN_ACCESS:Y' \
+python scripts/jats_survey.py \
+    --fetch-query 'SRC:PMC AND OPEN_ACCESS:Y AND HAS_FT:Y AND PUB_TYPE:"research-article"' \
     --limit 300 --cache tmp/jats-survey
-python scripts/jats_survey.py --corpus tmp/jats-survey
+python scripts/jats_survey.py --corpus tmp/jats-survey --full-text-only
 ```
+
+**`PUB_TYPE` is load-bearing, and `HAS_FT:Y` does not replace it.** Europe PMC
+serves a `fullTextXML` document for abstract-only deposits as well, and the
+newest open-access records are overwhelmingly conference abstracts. A
+400-article sample drawn without `PUB_TYPE` came back **390 abstracts**, and
+reported "0 nested figures across 400 articles" — a zero that looks like strong
+evidence and is nothing but front matter. Every run therefore prints its sample
+composition, and warns when fewer than half the articles carry a `<body>`.
 
 The fetch writes `manifest.json` — the PMC ids and their SHA-256 — so a run can
 be repeated over exactly the same articles with `--fetch-ids`. That manifest is

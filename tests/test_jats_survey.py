@@ -363,6 +363,76 @@ class TestGraphicOwners:
         assert result.data["tableWrapsWithGraphic"] == 1
 
 
+class TestSampleComposition:
+    """The guard against measuring a sample that has nothing to measure.
+
+    Europe PMC serves a `fullTextXML` document for abstract-only deposits, and
+    the newest open-access records are overwhelmingly conference abstracts. A
+    400-article sample drawn without `PUB_TYPE` came back 390 abstracts and
+    reported "0 nested figures across 400 articles" — a zero that reads as
+    strong evidence and is pure front matter.
+    """
+
+    ABSTRACT_ONLY = '<?xml version="1.0"?><article article-type="abstract"><front/></article>'
+    FULL_TEXT = (
+        '<?xml version="1.0"?><article article-type="research-article">'
+        "<front/><body><sec><p>Prose.</p></sec></body></article>"
+    )
+
+    def _article(self, xml_text: str) -> Any:
+        """Parse a raw article string into an Article."""
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml_text)
+        return jats_survey.Article(
+            pmc_id="PMC1",
+            path=Path("memory.xml"),
+            root=root,
+            parents={c: p for p in root.iter() for c in p},
+        )
+
+    def test_an_abstract_deposit_is_not_full_text(self) -> None:
+        """A `<body>`-less record cannot answer a structural question."""
+        assert self._article(self.ABSTRACT_ONLY).has_full_text is False
+        assert self._article(self.ABSTRACT_ONLY).article_type == "abstract"
+
+    def test_a_body_with_prose_is_full_text(self) -> None:
+        """The positive control for the guard."""
+        assert self._article(self.FULL_TEXT).has_full_text is True
+
+    def test_an_empty_body_does_not_count_as_full_text(self) -> None:
+        """`<body/>` with no prose is the same nothing, differently spelled."""
+        empty = '<?xml version="1.0"?><article><front/><body/></article>'
+        assert self._article(empty).has_full_text is False
+
+    def test_composition_reports_the_full_text_share(self) -> None:
+        """The share is what the warning threshold reads."""
+        sample = jats_survey.describe_sample(
+            [self._article(self.ABSTRACT_ONLY)] * 3 + [self._article(self.FULL_TEXT)]
+        )
+
+        assert sample.articles == 4
+        assert sample.with_full_text == 1
+        assert sample.full_text_share == 0.25
+        assert sample.by_article_type == {"abstract": 3, "research-article": 1}
+
+    def test_a_mostly_abstract_sample_is_flagged_in_the_output(self) -> None:
+        """The warning is what stops a junk sample reading as a finding."""
+        report = jats_survey.render_markdown(
+            [], [self._article(self.ABSTRACT_ONLY)] * 9 + [self._article(self.FULL_TEXT)], []
+        )
+
+        assert "describe front matter, not JATS structure" in report
+        assert "--full-text-only" in report
+
+    def test_a_full_text_sample_is_not_flagged(self) -> None:
+        """The warning must stay rare enough to mean something."""
+        report = jats_survey.render_markdown([], [self._article(self.FULL_TEXT)] * 10, [])
+
+        assert "describe front matter" not in report
+        assert "100.0%" in report
+
+
 class TestArticleLoading:
     """A malformed article must not cost the run its other 399 results."""
 

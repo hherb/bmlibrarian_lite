@@ -20,9 +20,15 @@ Usage:
     python scripts/jats_survey.py --measure grouped-citations
 
     # A wider sample. Writes the article list so the run can be repeated.
-    python scripts/jats_survey.py --fetch-query 'SRC:PMC AND OPEN_ACCESS:Y' \\
-        --limit 200 --cache tmp/jats-survey
-    python scripts/jats_survey.py --corpus tmp/jats-survey
+    #
+    # PUB_TYPE is load-bearing: the newest open-access deposits are dominated by
+    # conference abstracts, and Europe PMC serves a fullTextXML document for
+    # those too. HAS_FT:Y does NOT exclude them — a 400-article sample drawn
+    # without PUB_TYPE came back 390 abstracts and reported "no nested figures
+    # in 400 articles". Every run prints its sample composition for this reason.
+    python scripts/jats_survey.py --limit 300 --cache tmp/jats-survey \\
+        --fetch-query 'SRC:PMC AND OPEN_ACCESS:Y AND HAS_FT:Y AND PUB_TYPE:"research-article"'
+    python scripts/jats_survey.py --corpus tmp/jats-survey --full-text-only
 
     # Re-fetch exactly the articles a previous run used.
     python scripts/jats_survey.py --fetch-ids tmp/jats-survey/manifest.json \\
@@ -108,6 +114,24 @@ class Article:
         parents = {child: parent for parent in root.iter() for child in parent}
         pmc_id = _read_pmc_id(root) or path.stem
         return cls(pmc_id=pmc_id, path=path, root=root, parents=parents)
+
+    @property
+    def article_type(self) -> str:
+        """The `article-type` attribute, e.g. `research-article`, `abstract`."""
+        return self.root.get("article-type", "")
+
+    @property
+    def has_full_text(self) -> bool:
+        """Whether the article carries a `<body>` with any prose in it.
+
+        Europe PMC serves a `fullTextXML` document for records that have no
+        full text — a conference abstract deposit is front matter and nothing
+        else. Measuring structure across those reports zeroes that look like
+        findings: a sample of 400 newest-first open-access deposits was 390
+        abstracts, and reported "no nested figures in 400 articles".
+        """
+        body = self.root.find("body")
+        return body is not None and any(True for _ in body.iter("p"))
 
     def parent_tag(self, element: ET.Element) -> str:
         """The tag of an element's parent, or `""` at the root."""
@@ -815,17 +839,91 @@ def search(query: str, limit: int) -> list[str]:
     return found[:limit]
 
 
+@dataclass(frozen=True)
+class SampleComposition:
+    """What a sample actually contains, as opposed to what was asked for.
+
+    Attributes:
+        articles: How many articles were surveyed.
+        with_full_text: How many carry a `<body>` with prose in it.
+        by_article_type: Counts keyed by the `article-type` attribute.
+    """
+
+    articles: int
+    with_full_text: int
+    by_article_type: dict[str, int]
+
+    @property
+    def full_text_share(self) -> float:
+        """The fraction of the sample that can answer a structural question."""
+        return self.with_full_text / self.articles if self.articles else 0.0
+
+    def as_json(self) -> dict[str, object]:
+        """The same values under the JSON output's key style."""
+        return {
+            "articles": self.articles,
+            "withFullText": self.with_full_text,
+            "fullTextShare": self.full_text_share,
+            "byArticleType": self.by_article_type,
+        }
+
+
+def describe_sample(articles: Sequence[Article]) -> SampleComposition:
+    """Summarise what the sample actually contains.
+
+    Every structural measurement is meaningless on a record with no `<body>`,
+    and a sample of those reports zeroes that read like findings. So the
+    composition is computed on every run rather than being a measurement a
+    caller can forget to ask for.
+
+    Args:
+        articles: The parsed sample.
+
+    Returns:
+        Its composition.
+    """
+    return SampleComposition(
+        articles=len(articles),
+        with_full_text=sum(1 for a in articles if a.has_full_text),
+        by_article_type=dict(
+            Counter(a.article_type or "(unset)" for a in articles).most_common()
+        ),
+    )
+
+
+# Below this share of full-text articles, the structural counts describe the
+# sample's front matter rather than JATS, and the run says so.
+_FULL_TEXT_WARNING_THRESHOLD = 0.5
+
+
 def render_markdown(
     measurements: Sequence[Measurement], articles: Sequence[Article], problems: Sequence[str]
 ) -> str:
     """Format survey results as markdown."""
+    sample = describe_sample(articles)
+    share = sample.full_text_share
     lines = [
         "# JATS structural survey",
         "",
         f"{len(articles)} articles, read straight from the XML — "
         "not through `JATSXMLParser`.",
         "",
+        f"**Sample composition:** {sample.with_full_text} of {len(articles)} "
+        f"carry a `<body>` with prose ({share:.1%}). By `article-type`: "
+        + ", ".join(f"`{t}` {n}" for t, n in sample.by_article_type.items())
+        + ".",
+        "",
     ]
+    if share < _FULL_TEXT_WARNING_THRESHOLD:
+        lines += [
+            f"> **These counts describe front matter, not JATS structure.** Only "
+            f"{share:.1%} of this sample has a body. Europe PMC serves a "
+            f"`fullTextXML` document for abstract-only deposits too, and the "
+            f"newest open-access records are dominated by conference abstracts, "
+            f"so a naive query returns them by the hundred. Re-run with "
+            f"`--full-text-only`, or narrow the query.",
+            "",
+        ]
     if problems:
         lines += ["**Unparseable files:**", ""] + [f"- {p}" for p in problems] + [""]
     for measurement in measurements:
@@ -864,6 +962,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="run only this measurement; repeatable. Use --list to see the names",
     )
     parser.add_argument("--list", action="store_true", help="list measurement names and exit")
+    parser.add_argument(
+        "--full-text-only",
+        action="store_true",
+        help="drop articles with no <body> prose before measuring",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of markdown")
     parser.add_argument(
         "--fetch-query", metavar="QUERY", help="Europe PMC query naming articles to fetch"
@@ -909,6 +1012,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not articles:
         print(f"no parseable article XML under {corpus}", file=sys.stderr)
         return 1
+    if args.full_text_only:
+        kept = [a for a in articles if a.has_full_text]
+        print(
+            f"keeping {len(kept)} of {len(articles)} articles that carry body prose",
+            file=sys.stderr,
+        )
+        articles = kept
+        if not articles:
+            print("no article in the sample has a <body> with prose", file=sys.stderr)
+            return 1
 
     if args.measure:
         unknown = [name for name in args.measure if name not in MEASUREMENTS]
@@ -927,6 +1040,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "articlesSurveyed": len(articles),
+                    "sample": describe_sample(articles).as_json(),
                     "articles": [a.pmc_id for a in articles],
                     "unparseable": list(problems),
                     "measurements": {r.name: r.data for r in results},
