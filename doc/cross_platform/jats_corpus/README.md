@@ -353,6 +353,32 @@ none is a research article. A 300-article research-article sample found zero,
 which says nothing about #177 because it could not have found any. Sample for
 the shape you are measuring.
 
+### What re-running it actually changed
+
+The script was written to make the #177 decision checkable. Running it changed
+the evidence behind that decision by two orders of magnitude, and corrected the
+script twice on the way:
+
+- **The original measurement reproduces exactly** — 88 labels in 23 refs across
+  the three known articles, 76 `<element-citation>` + 12 `<mixed-citation>`,
+  0 refs with a direct `<label>`. That is the number #177 was opened on, now
+  re-derivable from an article list rather than quoted from a commit message.
+- **A targeted RSC sample added 543 more** across 147 articles. Total: **631
+  citation-level labels across 158 refs in 150 articles, zero counterexamples**,
+  and no enclosing `<ref>` carrying a direct `<label>` that a first-wins rule
+  could have preferred.
+- **The detector cried wolf three times before it was right.** It flagged
+  `(b1)`, `(a1)`, `(e1)` as reference numbers. In context they sit in sequence
+  beside plain letters — `(a) (b) (c) (d) (e1)` — subdividing a grouped citation.
+  The sub-marker pattern had no room for a digit suffix, so the survey was
+  manufacturing the evidence it exists to look for. The same failure had already
+  appeared once from a different cause: `element.text` reads
+  `<label>(<italic>a</italic>)</label>` as `"("`.
+
+What has *not* improved is publisher spread. Every observation is RSC-family, so
+this may be an RSC house style rather than a chemistry-wide one. `#177` records
+what would falsify it.
+
 **Read a zero as a finding.** `nested-exhibits` reports `table-wrap in fig` as 0
 across the corpus; that is the #169 shape, and its absence is why the fix needed
 a hand-written fixture and why no digest would ever have caught the regression.

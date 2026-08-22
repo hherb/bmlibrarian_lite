@@ -355,6 +355,39 @@ its slice has landed; add a new section when handing off new work.
   which is transcribed on both platforms with nothing comparing the copies — see
   #148.
 
+## In flight
+
+- **JATS structural survey** (`scripts/jats_survey.py`, PR #178, closes #164).
+  The prevalence figures behind every JATS issue existed only as prose; this
+  counts them from the XML, and **never through `JATSXMLParser`** — a survey
+  that asked the parser what a document contains would agree with the parser's
+  bugs, which is how #161 and #162 survived a green suite.
+  - **It validates against the old survey where the measurement is
+    publisher-neutral, and diverges where it is not.** Labelled
+    `<table-wrap-foot><fn>` 12.7% vs 12.0%, thumbnail-last 50.7% vs 52.9%,
+    `<mixed-citation>` 76.3% vs 80.9%, `<xref>` affiliations 96.0% vs 98.7% —
+    but nested `<fig>` **0.3% vs 19.6%**, because that is eLife's
+    figure-supplement convention and the samples have different publishers.
+    Neither number is wrong. **A prevalence figure without its journal mix is
+    repeatable, not reproducible**, so every run prints the mix.
+  - **Two sampling traps, both found by running it rather than reading it.**
+    Europe PMC serves `fullTextXML` for abstract-only deposits, and the newest
+    open-access records are overwhelmingly conference abstracts: a 400-article
+    sample came back 390 abstracts and reported "0 nested figures across 400
+    articles". `HAS_FT:Y` does not exclude them; `PUB_TYPE:"research-article"`
+    does — **but it also excludes `review-article` and `brief-report`, which is
+    exactly where the #177 grouped citations live.** Every run now prints its
+    sample composition and warns below 50% full text.
+  - **A detector that cries wolf is one nobody reads.** Two bugs, both the same
+    class — the survey manufacturing the evidence it exists to look for.
+    `element.text` reads `<label>(<italic>a</italic>)</label>` as `"("`; and the
+    sub-marker pattern had no room for the digit suffix in `(b1)`, so it
+    reported 3 false counterexamples that would have argued for reopening #177.
+    Check a flagged counterexample by hand before believing it.
+  - **#177 now rests on 631 labels across 150 articles, not 88 across 3**, with
+    zero counterexamples. The remaining weakness is publisher spread, not sample
+    size: every observation is RSC-family.
+
 ## Potential follow-ups
 
 - **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
