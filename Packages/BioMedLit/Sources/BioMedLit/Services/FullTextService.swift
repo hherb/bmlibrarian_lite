@@ -109,6 +109,10 @@ public actor FullTextService {
             pdfRenderURL = resolved.pdfRenderURL
         }
 
+        // Set when Europe PMC served XML this parser could not read, and
+        // attached to whichever fallback the chain returns instead (#183).
+        var degradation: FullTextDegradation?
+
         // Try Europe PMC first (best quality - machine readable XML)
         if let pmcId = resolvedPmcId, !pmcId.isEmpty {
             do {
@@ -117,8 +121,9 @@ public actor FullTextService {
                     "Successfully retrieved Europe PMC full text for \(pmcId)",
                     category: .fullText
                 )
-                return .europePMC(
-                    html: content.html, markdown: content.markdown, warnings: content.warnings
+                return FullTextResult(
+                    content: .europePMC(html: content.html, markdown: content.markdown),
+                    warnings: content.warnings
                 )
             } catch is CancellationError {
                 // A cancelled fetch is not a dead source. Falling through would
@@ -134,6 +139,10 @@ public actor FullTextService {
                 // this parser could not read it — that is a defect in us, not an
                 // absent source, and the two read identically in a log otherwise.
                 if case FullTextError.jatsParseFailure(let parseError) = error {
+                    // Recorded on every result the chain goes on to return, so
+                    // the reader is told that a better source existed and we
+                    // could not use it — the half of #183 the log cannot do.
+                    degradation = .jatsParseFailed
                     BioMedLitLib.logger?.error(
                         "Europe PMC XML for \(pmcId) was retrieved but could not be parsed "
                             + "(\(parseError)); falling back to a PDF or publisher link",
@@ -154,7 +163,9 @@ public actor FullTextService {
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
-            return .europePMCPDF(pdfURL: pdfURL)
+            return FullTextResult(
+                content: .europePMCPDF(pdfURL: pdfURL), degradation: degradation
+            )
         }
 
         // Try Unpaywall (open access PDFs)
@@ -165,7 +176,9 @@ public actor FullTextService {
                     "Successfully found Unpaywall PDF for DOI \(doi)",
                     category: .fullText
                 )
-                return .unpaywall(pdfURL: pdfURL)
+                return FullTextResult(
+                    content: .unpaywall(pdfURL: pdfURL), degradation: degradation
+                )
             } catch {
                 BioMedLitLib.logger?.warning(
                     "Unpaywall failed for DOI \(doi): \(error.localizedDescription)",
@@ -178,13 +191,13 @@ public actor FullTextService {
         if let doi = doi, !doi.isEmpty,
            let url = URL(string: "\(BioMedLitConstants.doiBaseURL)/\(doi)") {
             BioMedLitLib.logger?.info("Falling back to DOI URL for \(doi)", category: .fullText)
-            return .doi(webURL: url)
+            return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
         // Final fallback: PubMed page
         if let url = URL(string: "\(BioMedLitConstants.pubmedWebBaseURL)/\(pmid)/") {
             BioMedLitLib.logger?.info("Falling back to PubMed URL for PMID \(pmid)", category: .fullText)
-            return .doi(webURL: url)
+            return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
         BioMedLitLib.logger?.error("No full text available for PMID \(pmid)", category: .fullText)

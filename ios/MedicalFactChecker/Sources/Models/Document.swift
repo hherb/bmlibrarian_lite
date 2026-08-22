@@ -153,6 +153,19 @@ final class Document {
     /// their content would label the next article with the last one's losses.
     var fullTextParseWarningsJSON: String?
 
+    /// Why the cached full text is not the best source that existed, if it is not.
+    ///
+    /// The raw value of ``FullTextDegradation``. Persisted for the same reason as
+    /// the warnings above: `MacFullTextViewer` renders only from this model, so a
+    /// note held on the in-flight result alone would never be shown there, and on
+    /// iOS would be lost on reopen.
+    ///
+    /// `nil` means "this is the best source we had", which is also what a record
+    /// written before the field existed reads back as — correct, because the
+    /// fallback chain was already preferred by then and only a failed parse sets
+    /// this (#183).
+    var fullTextDegradedReasonRaw: String?
+
     /// URL to the locally cached PDF file, if available.
     var fullTextPDFPath: String?
 
@@ -440,6 +453,10 @@ final class Document {
         fullTextFetchedAt = Date()
         fullTextUnavailable = false
         storeParseWarnings(result.warnings)
+        // Cleared, not merely set: an upload or a re-fetch that succeeded must
+        // not inherit the previous attempt's note. Assigning these by hand at
+        // each call site is what let the cache and the live result drift apart.
+        fullTextDegradedReasonRaw = result.degradation?.rawValue
 
         switch result.content {
         case .markdown(let content):
@@ -476,6 +493,7 @@ final class Document {
         fullTextPDFPath = nil
         fullTextSource = nil
         fullTextParseWarningsJSON = nil
+        fullTextDegradedReasonRaw = nil
     }
 
     /// Clear cached full text data to allow re-fetching.
@@ -487,6 +505,7 @@ final class Document {
         fullTextFetchedAt = nil
         fullTextUnavailable = false
         fullTextParseWarningsJSON = nil
+        fullTextDegradedReasonRaw = nil
     }
 
     // MARK: - Cached Full Text
@@ -517,7 +536,10 @@ final class Document {
             return nil
         }
         return AppFullTextResult(
-            content: content, source: source, warnings: storedParseWarnings
+            content: content,
+            source: source,
+            warnings: storedParseWarnings,
+            degradation: storedDegradation
         )
     }
 
@@ -531,9 +553,14 @@ final class Document {
     private var storedParseWarnings: JATSParseWarnings {
         guard let json = fullTextParseWarningsJSON else { return JATSParseWarnings() }
         do {
-            let diagnostics = try JSONDecoder().decode([String].self, from: Data(json.utf8))
-            return JATSParseWarnings(diagnostics: diagnostics)
+            return try JSONDecoder().decode(JATSParseWarnings.self, from: Data(json.utf8))
         } catch {
+            // Also the path a record written before the losses were typed takes:
+            // it holds a bare array of the old English lines, which has no
+            // schema version and so cannot decode. Mapping those sentences back
+            // to cases would re-create, in a persisted format, exactly the
+            // wording coupling #184 removed. The record is rewritten from the
+            // parser on the next fetch.
             documentLog.error(
                 """
                 Stored parse warnings failed to decode for PMID \
@@ -541,11 +568,27 @@ final class Document {
                 Reporting an unspecified loss rather than a clean parse.
                 """
             )
-            return JATSParseWarnings(diagnostics: [
-                "This article's parse diagnostics could not be read back — "
-                    + "some content may be missing."
-            ])
+            return JATSParseWarnings(losses: [.unspecified])
         }
+    }
+
+    /// Why the cached source is not the best one that existed, or `nil`.
+    ///
+    /// An unrecognised value is *not* "no degradation". The field is only ever
+    /// written when a better source was lost, so a raw value this build does not
+    /// know — one written by a newer build — still means something was lost, and
+    /// reporting none would tell the reader the publisher had no machine-readable
+    /// text when we know otherwise. It reports the one reason there is and logs.
+    private var storedDegradation: FullTextDegradation? {
+        guard let raw = fullTextDegradedReasonRaw else { return nil }
+        if let known = FullTextDegradation(rawValue: raw) { return known }
+        documentLog.error(
+            """
+            Unrecognised full-text degradation \(raw, privacy: .public) stored for PMID \
+            \(self.pmid, privacy: .public); reporting a failed parse rather than none.
+            """
+        )
+        return .jatsParseFailed
     }
 
     /// Record what a parse lost, clearing the field when it lost nothing.
@@ -560,13 +603,13 @@ final class Document {
             fullTextParseWarningsJSON = nil
             return
         }
-        guard let data = try? JSONEncoder().encode(warnings.diagnostics),
+        guard let data = try? JSONEncoder().encode(warnings),
               let json = String(data: data, encoding: .utf8)
         else {
             documentLog.error(
                 """
                 Parse warnings for PMID \(self.pmid, privacy: .public) could not be encoded; \
-                \(warnings.diagnostics.count, privacy: .public) diagnostic(s) \
+                \(warnings.losses.count, privacy: .public) loss(es) \
                 will not survive the cache
                 """
             )

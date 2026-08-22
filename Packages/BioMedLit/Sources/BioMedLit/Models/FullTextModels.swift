@@ -50,14 +50,89 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     }
 }
 
-/// Result of a full-text retrieval operation.
-public enum FullTextResult: Sendable {
-    /// Europe PMC XML converted to HTML and markdown.
+/// Why a result is not the best source that existed for the article.
+///
+/// `fetchFullText` tries Europe PMC's machine-readable XML first and falls
+/// through to a PDF or a publisher link when it cannot use it. That chain is
+/// right — a reader who can be handed the publisher's PDF should get it rather
+/// than an error — but without this the reader cannot tell the two outcomes
+/// apart: "Europe PMC had no machine-readable text for this article" and
+/// "Europe PMC had it and this parser choked on it" present identically (#183).
+/// In a medical-literature tool the wrong conclusion is a reader attributing our
+/// defect to the evidence base.
+///
+/// One case, no payload, on purpose. The parser's typed ``JATSParseError`` is
+/// already logged at error level with its own message, which is where a bug
+/// report gets its detail; persisting that error's `String` payloads would
+/// repeat the mistake ``JATSParseWarnings`` exists to correct (#184). An
+/// optional enum rather than a `Bool` because the field names a *reason* from a
+/// set that happens to have one member today.
+public enum FullTextDegradation: String, Sendable, Codable, Equatable {
+    /// Europe PMC served machine-readable XML and this parser could not read it.
+    case jatsParseFailed
+}
+
+/// What a full-text retrieval produced, and what it cost.
+///
+/// A struct rather than an enum of cases each carrying their own extras. The
+/// content is the enum; the two facts *about the retrieval* sit beside it,
+/// because that is what they describe. Burying them in the cases would make
+/// every `case .europePMC(let html, let markdown, ...)` in a caller change
+/// whenever a new fact is learned about a fetch — which is the reasoning the
+/// app's own `AppFullTextResult` was already written down with, and which the
+/// enum form of this type contradicted.
+public struct FullTextResult: Sendable, Equatable {
+    /// The content retrieved, in whichever form its source gave it.
+    public let content: FullTextContent
+
+    /// What the JATS parse of this content lost.
     ///
-    /// `warnings` is what the parse lost. It travels with the text because the
-    /// audit that produces it only reached the logger, so the UI rendered a
-    /// gutted article exactly as it rendered a complete one (#181).
-    case europePMC(html: String, markdown: String, warnings: JATSParseWarnings)
+    /// Travels with the text because the audit that produces it only reached the
+    /// logger, so the UI rendered a gutted article exactly as it rendered a
+    /// complete one (#181). Clean for every source that involves no parse.
+    public let warnings: JATSParseWarnings
+
+    /// Why this is not the best source that existed, or `nil` when it is.
+    public let degradation: FullTextDegradation?
+
+    /// Create a retrieval result.
+    ///
+    /// - Parameters:
+    ///   - content: The content retrieved.
+    ///   - warnings: What the JATS parse lost. Clean — the default — for PDFs,
+    ///     publisher links and anything else that was not parsed.
+    ///   - degradation: Why this is not the best source that existed for the
+    ///     article. `nil` — the default — when it is.
+    public init(
+        content: FullTextContent,
+        warnings: JATSParseWarnings = JATSParseWarnings(),
+        degradation: FullTextDegradation? = nil
+    ) {
+        self.content = content
+        self.warnings = warnings
+        self.degradation = degradation
+    }
+
+    /// The source of this full-text content.
+    public var source: FullTextSource { content.source }
+
+    /// HTML content if available (only for Europe PMC).
+    public var html: String? { content.html }
+
+    /// Markdown content if available (only for Europe PMC).
+    public var markdown: String? { content.markdown }
+
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
+    public var pdfURL: URL? { content.pdfURL }
+
+    /// Web URL if available (DOI resolution).
+    public var webURL: URL? { content.webURL }
+}
+
+/// The content a full-text retrieval produced, by the source that gave it.
+public enum FullTextContent: Sendable, Equatable {
+    /// Europe PMC XML converted to HTML and markdown.
+    case europePMC(html: String, markdown: String)
 
     /// Europe PMC PDF URL (when XML is unavailable but free PDF exists).
     case europePMCPDF(pdfURL: URL)
@@ -71,7 +146,7 @@ public enum FullTextResult: Sendable {
     /// Cached PDF file path.
     case cached(filePath: String)
 
-    /// The source of this full-text content.
+    /// The source this content came from.
     public var source: FullTextSource {
         switch self {
         case .europePMC:
@@ -89,7 +164,7 @@ public enum FullTextResult: Sendable {
 
     /// HTML content if available (only for Europe PMC).
     public var html: String? {
-        if case .europePMC(let html, _, _) = self {
+        if case .europePMC(let html, _) = self {
             return html
         }
         return nil
@@ -97,7 +172,7 @@ public enum FullTextResult: Sendable {
 
     /// Markdown content if available (only for Europe PMC).
     public var markdown: String? {
-        if case .europePMC(_, let markdown, _) = self {
+        if case .europePMC(_, let markdown) = self {
             return markdown
         }
         return nil

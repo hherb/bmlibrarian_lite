@@ -24,9 +24,7 @@ import BioMedLit
 /// in-flight result vanish the moment the viewer is reopened — and on macOS,
 /// which renders only from the `Document`, they would never be seen at all.
 final class FullTextParseWarningsTests: XCTestCase {
-    private static let truncated = JATSParseWarnings(diagnostics: [
-        "JATS parse ended with 2 open <table-wrap> — those tables and their content were discarded"
-    ])
+    private static let truncated = JATSParseWarnings(losses: [.openTables(2)])
 
     private func makeDocument() -> Document {
         Document(pmid: "12345678", title: "A Study", abstract: "")
@@ -36,7 +34,10 @@ final class FullTextParseWarningsTests: XCTestCase {
 
     func testTheAdapterCarriesWarningsOntoTheAppResult() {
         let result = BioMedLitAdapters.toAppFullTextResult(
-            .europePMC(html: "<p>x</p>", markdown: "x", warnings: Self.truncated)
+            BMLFullTextResult(
+                content: .europePMC(html: "<p>x</p>", markdown: "x"),
+                warnings: Self.truncated
+            )
         )
 
         XCTAssertEqual(result.warnings, Self.truncated)
@@ -45,16 +46,17 @@ final class FullTextParseWarningsTests: XCTestCase {
     /// The negative control: a complete article must not raise the banner.
     func testACleanParseCarriesNoWarnings() {
         let result = BioMedLitAdapters.toAppFullTextResult(
-            .europePMC(html: "<p>x</p>", markdown: "x", warnings: JATSParseWarnings())
+            BMLFullTextResult(content: .europePMC(html: "<p>x</p>", markdown: "x"))
         )
 
         XCTAssertTrue(result.warnings.isClean)
+        XCTAssertNil(result.degradation)
     }
 
     /// A PDF or a publisher link is not a parse, so it has nothing to warn about.
     func testANonParsedSourceCarriesNoWarnings() {
         let result = BioMedLitAdapters.toAppFullTextResult(
-            .unpaywall(pdfURL: URL(string: "https://example.org/a.pdf")!)
+            BMLFullTextResult(content: .unpaywall(pdfURL: URL(string: "https://example.org/a.pdf")!))
         )
 
         XCTAssertTrue(result.warnings.isClean)
@@ -155,6 +157,156 @@ final class FullTextParseWarningsTests: XCTestCase {
 
         let warnings = document.cachedFullTextResult?.warnings
         XCTAssertEqual(warnings?.isClean, false)
+    }
+
+    /// A record written before the losses were typed holds a bare array of the
+    /// old English lines, which no longer decodes — and must therefore report an
+    /// unspecified loss rather than a clean parse (#184).
+    ///
+    /// Deliberately not migrated. Mapping those sentences back to cases would
+    /// re-create, in a persisted format, the very wording coupling that typing
+    /// the losses removed; the record is rewritten from the parser on the next
+    /// fetch.
+    func testALegacyStringWarningsPayloadIsNotReportedAsClean() {
+        let document = makeDocument()
+        document.fullTextHTML = "<p>x</p>"
+        document.fullTextSource = AppFullTextSource.europePMC.rawValue
+        document.fullTextParseWarningsJSON = """
+        ["JATS parse ended with 2 open <table-wrap> — those tables and their content were discarded"]
+        """
+
+        let warnings = document.cachedFullTextResult?.warnings
+        XCTAssertEqual(warnings?.isClean, false)
+        XCTAssertEqual(warnings?.losses, [.unspecified])
+    }
+
+    // MARK: - The fallback's own note (#183)
+
+    /// A degradation reaches the app result the same way warnings do.
+    func testTheAdapterCarriesTheDegradationOntoTheAppResult() {
+        let result = BioMedLitAdapters.toAppFullTextResult(
+            BMLFullTextResult(
+                content: .unpaywall(pdfURL: URL(string: "https://example.org/a.pdf")!),
+                degradation: .jatsParseFailed
+            )
+        )
+
+        XCTAssertEqual(result.degradation, .jatsParseFailed)
+    }
+
+    /// And survives the cache, which is the hop that matters most: macOS renders
+    /// the banner from the stored `Document` and never sees the in-flight result.
+    func testTheDegradationSurvivesTheDocumentRoundTrip() {
+        let document = makeDocument()
+
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+                source: .unpaywall,
+                degradation: .jatsParseFailed
+            )
+        )
+
+        XCTAssertEqual(document.cachedFullTextResult?.degradation, .jatsParseFailed)
+    }
+
+    /// A later result that was not degraded clears the note.
+    ///
+    /// The same trap the warnings had: a value that outlives the content it
+    /// describes labels the next article with the last one's problem.
+    func testASubsequentGoodParseClearsTheDegradation() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+                source: .unpaywall,
+                degradation: .jatsParseFailed
+            )
+        )
+
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .html(content: "<p>whole</p>", markdown: "whole"),
+                source: .europePMC
+            )
+        )
+
+        XCTAssertNil(document.cachedFullTextResult?.degradation)
+    }
+
+    /// Including when the reader supplies the content themselves — the path that
+    /// already once told an uploader their own upload was missing content.
+    func testUploadedContentDoesNotInheritTheDegradation() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+                source: .unpaywall,
+                degradation: .jatsParseFailed
+            )
+        )
+
+        document.applyFullTextResult(
+            .uploaded(content: .pdfURL(URL(string: "file:///tmp/a.pdf")!))
+        )
+
+        XCTAssertNil(document.fullTextDegradedReasonRaw)
+        XCTAssertNil(document.cachedFullTextResult?.degradation)
+    }
+
+    func testClearingTheCacheClearsTheDegradation() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+                source: .unpaywall,
+                degradation: .jatsParseFailed
+            )
+        )
+
+        document.clearFullTextCache()
+
+        XCTAssertNil(document.fullTextDegradedReasonRaw)
+    }
+
+    func testMarkingUnavailableClearsTheDegradation() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+                source: .unpaywall,
+                degradation: .jatsParseFailed
+            )
+        )
+
+        document.markFullTextUnavailable()
+
+        XCTAssertNil(document.fullTextDegradedReasonRaw)
+    }
+
+    /// A stored reason this build does not recognise still means a better source
+    /// was lost.
+    ///
+    /// Same reasoning as an undecodable warnings payload: the field is only ever
+    /// written when something *was* lost, so reporting "no degradation" would
+    /// tell the reader the publisher had no machine-readable text when we know
+    /// otherwise.
+    func testAnUnknownStoredDegradationIsNotReportedAsNone() {
+        let document = makeDocument()
+        document.fullTextPDFPath = "https://example.org/a.pdf"
+        document.fullTextSource = AppFullTextSource.unpaywall.rawValue
+        document.fullTextDegradedReasonRaw = "somethingANewerBuildKnowsAbout"
+
+        XCTAssertEqual(document.cachedFullTextResult?.degradation, .jatsParseFailed)
+    }
+
+    /// The negative control: an ordinary cached result carries no note.
+    func testANormalCachedResultHasNoDegradation() {
+        let document = makeDocument()
+        document.fullTextHTML = "<p>x</p>"
+        document.fullTextSource = AppFullTextSource.europePMC.rawValue
+
+        XCTAssertNil(document.cachedFullTextResult?.degradation)
     }
 
     // MARK: - The cache reads as retrieved (#182 review)

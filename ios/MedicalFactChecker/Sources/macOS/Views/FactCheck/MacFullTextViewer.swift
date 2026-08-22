@@ -175,7 +175,8 @@ struct MacFullTextViewer: View {
             // than carried alongside the text (#181). Without that, macOS would
             // never show this banner at all.
             ParseWarningBanner(
-                warnings: document.cachedFullTextResult?.warnings ?? JATSParseWarnings()
+                warnings: document.cachedFullTextResult?.warnings ?? JATSParseWarnings(),
+                degradation: document.cachedFullTextResult?.degradation
             )
             renderedContent
         }

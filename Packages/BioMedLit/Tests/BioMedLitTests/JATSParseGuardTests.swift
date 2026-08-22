@@ -241,44 +241,39 @@ final class JATSParseGuardTests: XCTestCase {
     /// `parseToArticle` from the day it was written, with no production call
     /// site, and nobody noticed.
     func testABalancedParseReportsNothing() {
-        XCTAssertEqual(JATSXMLParser.unwindDiagnostics(JATSParseUnwindState()), [])
+        XCTAssertEqual(JATSXMLParser.unwindLosses(JATSParseUnwindState()), [])
     }
 
-    private func diagnostic(
+    /// The single loss a one-field state should produce.
+    ///
+    /// Returns `.unspecified` on failure so the caller's `XCTAssertEqual` fails
+    /// too rather than trapping — no counted case can equal it.
+    private func loss(
         _ state: JATSParseUnwindState,
         file: StaticString = #filePath,
         line: UInt = #line
-    ) -> String {
-        let lines = JATSXMLParser.unwindDiagnostics(state)
-        guard lines.count == 1 else {
-            XCTFail("expected one diagnostic, got \(lines)", file: file, line: line)
-            return ""
+    ) -> JATSParseWarnings.Loss {
+        let losses = JATSXMLParser.unwindLosses(state)
+        guard losses.count == 1 else {
+            XCTFail("expected one loss, got \(losses)", file: file, line: line)
+            return .unspecified
         }
-        return lines[0]
+        return losses[0]
     }
 
     func testAnUnbalancedSubArticleIsReported() {
-        let line = diagnostic(JATSParseUnwindState(subArticleDepth: 2))
-
-        XCTAssertTrue(line.contains("sub-article"), line)
-        XCTAssertTrue(line.contains("2"), line)
+        XCTAssertEqual(loss(JATSParseUnwindState(subArticleDepth: 2)), .subArticleDepth(2))
     }
 
     func testAnOpenFigureIsReported() {
-        let line = diagnostic(JATSParseUnwindState(openFigures: 3))
-
-        XCTAssertTrue(line.contains("<fig>"), line)
-        XCTAssertTrue(line.contains("3"), line)
+        XCTAssertEqual(loss(JATSParseUnwindState(openFigures: 3)), .openFigures(3))
     }
 
     /// The check #175 says would have surfaced #173 on the spot. It had no
     /// table-side counterpart at all: `currentTable` was a single slot, so there
     /// was nothing for an audit to look at.
     func testAnOpenTableIsReported() {
-        let line = diagnostic(JATSParseUnwindState(openTables: 4))
-
-        XCTAssertTrue(line.contains("<table-wrap>"), line)
-        XCTAssertTrue(line.contains("4"), line)
+        XCTAssertEqual(loss(JATSParseUnwindState(openTables: 4)), .openTables(4))
     }
 
     /// A stranded footnote depth is the one imbalance that has actually occurred
@@ -286,30 +281,23 @@ final class JATSParseGuardTests: XCTestCase {
     /// discarded, one paragraph at a time, in silence. Fixed in PR #171, before
     /// any release carried it.
     func testAStrandedExhibitFootnoteDepthIsReported() {
-        let line = diagnostic(JATSParseUnwindState(exhibitFootnoteDepth: 5))
-
-        XCTAssertTrue(line.contains("footnote"), line)
-        XCTAssertTrue(line.contains("5"), line)
+        XCTAssertEqual(
+            loss(JATSParseUnwindState(exhibitFootnoteDepth: 5)), .exhibitFootnoteDepth(5)
+        )
     }
 
     func testAnOpenCaptionIsReported() {
-        let line = diagnostic(JATSParseUnwindState(openCaptions: 6))
-
-        XCTAssertTrue(line.contains("<caption>"), line)
-        XCTAssertTrue(line.contains("6"), line)
+        XCTAssertEqual(loss(JATSParseUnwindState(openCaptions: 6)), .openCaptions(6))
     }
 
     func testAnOpenSectionIsReported() {
-        let line = diagnostic(JATSParseUnwindState(openSections: 7))
-
-        XCTAssertTrue(line.contains("<sec>"), line)
-        XCTAssertTrue(line.contains("7"), line)
+        XCTAssertEqual(loss(JATSParseUnwindState(openSections: 7)), .openSections(7))
     }
 
     /// One line each, so a parse that went wrong in two places says so twice
     /// rather than reporting whichever check is written first.
     func testEveryImbalanceGetsItsOwnLine() {
-        let lines = JATSXMLParser.unwindDiagnostics(JATSParseUnwindState(
+        let losses = JATSXMLParser.unwindLosses(JATSParseUnwindState(
             subArticleDepth: 1,
             openFigures: 2,
             openTables: 1,
@@ -319,7 +307,11 @@ final class JATSParseGuardTests: XCTestCase {
             depthUnderflows: 1
         ))
 
-        XCTAssertEqual(lines.count, 7, "\(lines)")
+        XCTAssertEqual(
+            losses,
+            [.subArticleDepth(1), .openFigures(2), .openTables(1), .exhibitFootnoteDepth(1),
+             .openCaptions(1), .openSections(1), .depthUnderflows(1)]
+        )
     }
 
     /// An end tag that arrived with nothing to close (#180).
@@ -329,10 +321,7 @@ final class JATSParseGuardTests: XCTestCase {
     /// decrement site clamps at zero, so an over-decrement was erased before the
     /// audit read it.
     func testAnUnderflowIsReported() {
-        let line = diagnostic(JATSParseUnwindState(depthUnderflows: 8))
-
-        XCTAssertTrue(line.contains("nothing to close"), line)
-        XCTAssertTrue(line.contains("8"), line)
+        XCTAssertEqual(loss(JATSParseUnwindState(depthUnderflows: 8)), .depthUnderflows(8))
     }
 
     /// A negative count is not a thing the parser can produce — every counter is
@@ -344,19 +333,19 @@ final class JATSParseGuardTests: XCTestCase {
         XCTAssertEqual(JATSParseUnwindState(subArticleDepth: -1), JATSParseUnwindState())
         XCTAssertEqual(JATSParseUnwindState(depthUnderflows: -3), JATSParseUnwindState())
         XCTAssertEqual(
-            JATSXMLParser.unwindDiagnostics(JATSParseUnwindState(subArticleDepth: -1)),
+            JATSXMLParser.unwindLosses(JATSParseUnwindState(subArticleDepth: -1)),
             []
         )
     }
 
-    /// `isBalanced` and `unwindDiagnostics` answer the same question two ways,
+    /// `isBalanced` and `unwindLosses` answer the same question two ways,
     /// so a field added to one and not the other is a silent disagreement. Every
     /// single-field state plus the all-fields state has to agree, which is what
     /// makes "clean" mean the same thing to a caller as it does to the log.
     func testIsBalancedAgreesWithTheDiagnostics() {
         // Keyed by field name so `Mirror` can prove the list is complete. A
         // hand-written array cannot: a field added to the struct and forgotten
-        // in both `unwindDiagnostics` and the array leaves the test green, which
+        // in both `unwindLosses` and the array leaves the test green, which
         // is the silent disagreement this exists to make impossible.
         let singleFieldStates: [String: JATSParseUnwindState] = [
             "subArticleDepth": JATSParseUnwindState(subArticleDepth: 1),
@@ -380,14 +369,14 @@ final class JATSParseGuardTests: XCTestCase {
         for (field, state) in singleFieldStates {
             XCTAssertFalse(state.isBalanced, field)
             XCTAssertEqual(
-                JATSXMLParser.unwindDiagnostics(state).count, 1,
-                "\(field) is not balanced but has no line in unwindDiagnostics"
+                JATSXMLParser.unwindLosses(state).count, 1,
+                "\(field) is not balanced but has no loss in unwindLosses"
             )
         }
 
         let clean = JATSParseUnwindState()
         XCTAssertTrue(clean.isBalanced)
-        XCTAssertTrue(JATSXMLParser.unwindDiagnostics(clean).isEmpty)
+        XCTAssertTrue(JATSXMLParser.unwindLosses(clean).isEmpty)
 
         let everyField = JATSParseUnwindState(
             subArticleDepth: 1, openFigures: 1, openTables: 1,
@@ -396,7 +385,7 @@ final class JATSParseGuardTests: XCTestCase {
         )
         XCTAssertFalse(everyField.isBalanced)
         XCTAssertEqual(
-            JATSXMLParser.unwindDiagnostics(everyField).count, declaredFields.count
+            JATSXMLParser.unwindLosses(everyField).count, declaredFields.count
         )
     }
 
@@ -838,7 +827,7 @@ final class JATSParseGuardTests: XCTestCase {
 
     // MARK: - The unwind audit reaches the log (#175)
 
-    /// Everything above tests `unwindDiagnostics` as a pure function and
+    /// Everything above tests `unwindLosses` as a pure function and
     /// `unwindState` as a producer. Nothing joined them: deleting the loop that
     /// emits the lines, or pointing it at a blank state, changed no behaviour any
     /// test could see. That is #175 one layer in — a net that is unit-tested and

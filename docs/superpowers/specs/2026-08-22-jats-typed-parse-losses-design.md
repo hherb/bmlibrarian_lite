@@ -3,7 +3,7 @@
 **Date:** 2026-08-22
 **Issues:** [#184](https://github.com/hherb/bmlibrarian_lite/issues/184), [#183](https://github.com/hherb/bmlibrarian_lite/issues/183)
 **Platform:** Swift — `Packages/BioMedLit` and the `ios/MedicalFactChecker` app target
-**Status:** design approved, implementation in progress
+**Status:** implemented
 
 ## Problem
 
@@ -202,8 +202,13 @@ currently one — and because `degradation: FullTextDegradation?` reads as what 
 is at every call site, which `didFailToParseBetterSource: Bool` does not.
 
 `fetchFullText` records the degradation in the parse-failure catch it already
-has, and attaches it to whichever fallback it goes on to return. The early
-cached-content return carries none: nothing was attempted, so nothing was lost.
+has, and attaches it to whichever fallback it goes on to return.
+
+Two outcomes must not set it, and both are covered by tests. A Europe PMC 404 is
+an *absent* source, not a lost one — marking that degraded would fire the note on
+every article never deposited as full text, which is exactly what would make it
+worthless on the articles where it is true. And a cancelled fetch already
+rethrows rather than falling through, so it never reaches a fallback at all.
 
 ### 5. One writer, on the app side
 

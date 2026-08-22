@@ -19,7 +19,7 @@ import Foundation
 /// What a `JATSXMLParser` still had open when the document ended.
 ///
 /// A parameter object for the audit that reads it, so that audit can be a pure
-/// function (``JATSXMLParser/unwindDiagnostics(_:)``). Nothing else can
+/// function (``JATSXMLParser/unwindLosses(_:)``). Nothing else can
 /// exercise it: a well-formed document cannot trip the audit, since `XMLParser`
 /// refuses an unbalanced one and each guard in the parser tests the same
 /// predicate at both ends of the range it brackets. A net that fires only on a
@@ -92,7 +92,7 @@ struct JATSParseUnwindState: Equatable {
 
     /// Whether the parse ended in the only shape a correct one can.
     ///
-    /// Agrees with ``JATSXMLParser/unwindDiagnostics(_:)`` on every state the
+    /// Agrees with ``JATSXMLParser/unwindLosses(_:)`` on every state the
     /// parser can produce, because the clamp below puts both on the same footing:
     /// "no field is non-zero" and "no field is positive" are the same statement
     /// once nothing can be negative.
@@ -100,7 +100,7 @@ struct JATSParseUnwindState: Equatable {
     /// That the two cover the same *fields* is enforced by test rather than by
     /// the type — `testIsBalancedAgreesWithTheDiagnostics` builds a state per
     /// field from a `Mirror` of this struct, so a field added here and forgotten
-    /// in `unwindDiagnostics` fails rather than diverging in silence.
+    /// in `unwindLosses` fails rather than diverging in silence.
     var isBalanced: Bool { self == JATSParseUnwindState() }
 
     /// Create an end-of-parse state, clamping every count at zero.
@@ -134,40 +134,6 @@ struct JATSParseUnwindState: Equatable {
         self.openCaptions = max(0, openCaptions)
         self.openSections = max(0, openSections)
         self.depthUnderflows = max(0, depthUnderflows)
-    }
-}
-
-/// What a parse lost, in a form a caller can act on.
-///
-/// The audit that produces these has run on the production path since #175 and
-/// still only reached the logger, so `FullTextService` had no way to say "this
-/// article came back truncated" and the UI rendered a gutted article exactly as
-/// it rendered a complete one (#181). A reader cannot tell a parser defect from a
-/// publisher who deposited little; this is the channel that lets them.
-///
-/// Carries **facts, not copy**. The diagnostics are the lines written for a
-/// developer reading a log; the sentence shown to a reader is composed by the
-/// app, which is where user-facing wording can be localised with the rest of the
-/// UI.
-///
-/// Deliberately narrower than everything `reportParseCompletion` emits: only
-/// losses a reader can act on. A zero-author parse is a metadata gap, not a
-/// truncation — editorials and corrections legitimately carry none — and a banner
-/// that fires on those is worth nothing on the article where content really was
-/// discarded. That warning stays in the log.
-public struct JATSParseWarnings: Sendable, Equatable {
-    /// One line per loss, each naming what it cost.
-    public let diagnostics: [String]
-
-    /// Whether the parse lost nothing a reader would want to know about.
-    public var isClean: Bool { diagnostics.isEmpty }
-
-    /// Create a set of warnings for a completed parse.
-    ///
-    /// - Parameter diagnostics: One line per loss, each naming what it cost.
-    ///   Empty — the default — is a parse that lost nothing.
-    public init(diagnostics: [String] = []) {
-        self.diagnostics = diagnostics
     }
 }
 
@@ -794,14 +760,15 @@ public final class JATSXMLParser: NSObject {
     /// reader to ignore the category. The parse error already says the document
     /// died.
     private func reportParseCompletion() {
-        // Collected, not just logged. The unwind lines become `parseWarnings`
-        // verbatim, so on the lines they share, what the caller can act on and
-        // what a developer reads in the log cannot drift apart (#181). The two
-        // are not equal: the zero-author warning below is logged only, and the
-        // no-content line is added to both.
-        var readerFacing = Self.unwindDiagnostics(unwindState)
-        for line in readerFacing {
-            BioMedLitLib.logger?.error("\(articleIdentifier): \(line)", category: .parsing)
+        // Collected, not just logged. The losses the caller receives and the
+        // lines a developer reads are the same values rendered once, so they
+        // cannot drift apart (#181, #184). The two sets are not equal: the
+        // zero-author warning below is logged only, and `.noContent` is in both.
+        var losses = Self.unwindLosses(unwindState)
+        for loss in losses {
+            BioMedLitLib.logger?.error(
+                "\(articleIdentifier): \(loss.logLine)", category: .parsing
+            )
         }
 
         if !producedContent {
@@ -814,10 +781,11 @@ public final class JATSXMLParser: NSObject {
             // accession number without a word, which is the shape #175 exists to
             // stop. The author warning is suppressed in the same breath: a parse
             // that produced nothing is one defect, not two.
-            let line = "JATS parse extracted no title, abstract or body — "
-                + "any rendered full text carries only its identifiers"
-            BioMedLitLib.logger?.error("\(articleIdentifier): \(line)", category: .parsing)
-            readerFacing.append(line)
+            BioMedLitLib.logger?.error(
+                "\(articleIdentifier): \(JATSParseWarnings.Loss.noContent.logLine)",
+                category: .parsing
+            )
+            losses.append(.noContent)
         } else if authors.isEmpty {
             // Log only, and deliberately not in `parseWarnings`. A metadata gap
             // is not a truncation: editorials, corrections and errata carry no
@@ -830,10 +798,10 @@ public final class JATSXMLParser: NSObject {
             )
         }
 
-        parseWarnings = JATSParseWarnings(diagnostics: readerFacing)
+        parseWarnings = JATSParseWarnings(losses: losses)
     }
 
-    /// One line per stack or counter that did not unwind, naming what it cost.
+    /// One loss per stack or counter that did not unwind.
     ///
     /// A pure function of the end state, and a static one, because that is the
     /// only way to exercise it: no well-formed document can trip it. `XMLParser`
@@ -842,56 +810,39 @@ public final class JATSXMLParser: NSObject {
     /// it brackets — which is exactly the property this exists to notice the
     /// loss of.
     ///
+    /// Returns values rather than the log sentences it used to build (#184).
+    /// The sentences live on ``JATSParseWarnings/Loss/logLine`` and are
+    /// unchanged, so what reaches the log is identical; what changed is that a
+    /// caller can now count, filter and localise instead of replaying prose.
+    ///
     /// - Parameter state: What was still open when the document ended.
-    /// - Returns: A diagnostic per imbalance, empty for a clean parse.
-    static func unwindDiagnostics(_ state: JATSParseUnwindState) -> [String] {
-        var lines: [String] = []
+    /// - Returns: A loss per imbalance, empty for a clean parse.
+    static func unwindLosses(_ state: JATSParseUnwindState) -> [JATSParseWarnings.Loss] {
+        var losses: [JATSParseWarnings.Loss] = []
 
         if state.subArticleDepth > 0 {
-            lines.append(
-                "JATS sub-article depth ended at \(state.subArticleDepth), not 0 — "
-                    + "content after the imbalance was discarded"
-            )
+            losses.append(.subArticleDepth(state.subArticleDepth))
         }
         if state.openFigures > 0 {
-            lines.append(
-                "JATS parse ended with \(state.openFigures) open <fig> — "
-                    + "those figures and their content were discarded"
-            )
+            losses.append(.openFigures(state.openFigures))
         }
         if state.openTables > 0 {
-            lines.append(
-                "JATS parse ended with \(state.openTables) open <table-wrap> — "
-                    + "those tables and their content were discarded"
-            )
+            losses.append(.openTables(state.openTables))
         }
         if state.exhibitFootnoteDepth > 0 {
-            lines.append(
-                "JATS exhibit footnote depth ended at \(state.exhibitFootnoteDepth), not 0 — "
-                    + "prose after the imbalance was routed into a footnote and discarded"
-            )
+            losses.append(.exhibitFootnoteDepth(state.exhibitFootnoteDepth))
         }
         if state.openCaptions > 0 {
-            lines.append(
-                "JATS parse ended with \(state.openCaptions) open <caption> — "
-                    + "prose after the imbalance was read as caption text"
-            )
+            losses.append(.openCaptions(state.openCaptions))
         }
         if state.openSections > 0 {
-            lines.append(
-                "JATS parse ended with \(state.openSections) open <sec> — "
-                    + "those sections and their prose were never emitted"
-            )
+            losses.append(.openSections(state.openSections))
         }
         if state.depthUnderflows > 0 {
-            lines.append(
-                "JATS parse saw \(state.depthUnderflows) end tag(s) with nothing to close — "
-                    + "a counter closed an element it never opened, so any other "
-                    + "imbalance reported here understates what was misrouted"
-            )
+            losses.append(.depthUnderflows(state.depthUnderflows))
         }
 
-        return lines
+        return losses
     }
 
     /// Run the underlying `XMLParser` exactly once.

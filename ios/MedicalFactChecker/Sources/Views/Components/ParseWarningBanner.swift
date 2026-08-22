@@ -35,7 +35,8 @@ private enum ParseWarningBannerConstants {
     static let backgroundOpacity: Double = 0.15
 }
 
-/// Tells the reader that what they are looking at is not the whole article.
+/// Tells the reader when what they are looking at is not the whole article, or
+/// not the copy we would have preferred to give them.
 ///
 /// Without this the app renders a gutted article exactly as it renders a
 /// complete one, so a reader who cannot find the table they came for has no way
@@ -43,45 +44,135 @@ private enum ParseWarningBannerConstants {
 /// (#181). Those are opposite conclusions, and in a medical-literature tool the
 /// wrong one is a reader deciding the evidence is absent.
 ///
-/// The sentence is composed here rather than in `BioMedLit` because it is
-/// clinician-facing copy: the package emits developer diagnostics, and those are
-/// offered as expandable detail for a bug report rather than shown by default.
+/// Three states, one component, so the two facts cannot drift apart in wording
+/// or styling:
+///
+/// - nothing lost and the best source used — renders nothing;
+/// - the rendering is incomplete — a warning;
+/// - a better source existed and could not be read — an informational note.
+///
+/// The last is deliberately *not* a warning. A fallback PDF is complete, and a
+/// warning triangle over content that is fine is the false alarm that trains a
+/// reader to dismiss the banner on the article where text really was discarded
+/// (#183).
+///
+/// The sentences are composed here rather than in `BioMedLit` because they are
+/// clinician-facing copy: the package emits typed losses and developer
+/// diagnostics, and those are offered as expandable detail for a bug report
+/// rather than shown by default.
+/// What a ``ParseWarningBanner`` has to say about a retrieval, if anything.
+///
+/// A pure value rather than a computation inside the view, so the choice between
+/// the three states — the part with actual logic in it — can be tested without
+/// rendering anything.
+enum ParseWarningMessage: Equatable {
+    /// Parts of the rendering are missing.
+    case incomplete
+
+    /// The rendering carries no article text at all.
+    ///
+    /// Distinguished from ``incomplete`` because "some of this article" badly
+    /// understates a document reduced to its own accession number. Telling the
+    /// two apart is what typing the losses made possible (#184).
+    case noContent
+
+    /// A better source existed and could not be read (#183).
+    case degraded
+
+    /// What to tell the reader about a retrieval, or `nil` when there is nothing
+    /// to say.
+    ///
+    /// Warnings win over a degradation on a result that somehow carries both: an
+    /// incomplete rendering the reader is actually looking at outranks a note
+    /// about the source it came from.
+    ///
+    /// - Parameters:
+    ///   - warnings: What the parse of this content lost.
+    ///   - degradation: Why this is not the best source that existed, if it is not.
+    init?(warnings: JATSParseWarnings, degradation: FullTextDegradation?) {
+        if !warnings.isClean {
+            self = warnings.losses.contains(.noContent) ? .noContent : .incomplete
+        } else if degradation != nil {
+            self = .degraded
+        } else {
+            return nil
+        }
+    }
+
+    /// Whether this is a problem with the text shown, or a note about its source.
+    ///
+    /// A degradation is deliberately not a warning: the fallback PDF is
+    /// complete, and a warning over content that is fine is the false alarm that
+    /// trains a reader to dismiss the banner on the article where text really was
+    /// discarded.
+    var isWarning: Bool { self != .degraded }
+
+    /// The sentence the reader sees.
+    var headline: LocalizedStringKey {
+        switch self {
+        case .incomplete:
+            return "Some of this article could not be displayed. Parts of the text may be missing."
+        case .noContent:
+            return "None of this article's text could be displayed. Only its reference details are shown."
+        case .degraded:
+            return "This article's machine-readable copy could not be read, so a substitute is shown here."
+        }
+    }
+
+    /// The SF Symbol beside the headline.
+    var iconName: String {
+        isWarning ? "exclamationmark.triangle.fill" : "info.circle.fill"
+    }
+}
+
 struct ParseWarningBanner: View {
     /// What the parse lost. Renders nothing when it lost nothing.
     let warnings: JATSParseWarnings
 
+    /// Why this is not the best source that existed, or `nil` when it is.
+    ///
+    /// Defaulted so the callers that render a parsed article need not name it,
+    /// which is also what keeps the memberwise initialiser usable with either
+    /// fact alone.
+    var degradation: FullTextDegradation? = nil
+
     @State private var showingDetail = false
 
     var body: some View {
-        if !warnings.isClean {
+        if let message = ParseWarningMessage(warnings: warnings, degradation: degradation) {
             VStack(alignment: .leading, spacing: ParseWarningBannerConstants.spacing) {
-                Label(
-                    "Some of this article could not be displayed. Parts of the text may be missing.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.footnote)
-                .foregroundStyle(.primary)
+                Label(message.headline, systemImage: message.iconName)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
 
-                DisclosureGroup("Technical details", isExpanded: $showingDetail) {
-                    VStack(
-                        alignment: .leading,
-                        spacing: ParseWarningBannerConstants.detailSpacing
-                    ) {
-                        ForEach(warnings.diagnostics, id: \.self) { diagnostic in
-                            Text(diagnostic)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                // The package's developer diagnostics, for a bug report. A
+                // degradation has none — the parser's own error went to the log —
+                // so the disclosure is omitted rather than padded.
+                if !warnings.diagnostics.isEmpty {
+                    DisclosureGroup("Technical details", isExpanded: $showingDetail) {
+                        VStack(
+                            alignment: .leading,
+                            spacing: ParseWarningBannerConstants.detailSpacing
+                        ) {
+                            ForEach(warnings.diagnostics, id: \.self) { diagnostic in
+                                Text(diagnostic)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
+                        .padding(.top, ParseWarningBannerConstants.detailSpacing)
                     }
-                    .padding(.top, ParseWarningBannerConstants.detailSpacing)
+                    .font(.caption)
                 }
-                .font(.caption)
             }
             .padding(ParseWarningBannerConstants.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.yellow.opacity(ParseWarningBannerConstants.backgroundOpacity))
+            .background(
+                (message.isWarning ? Color.yellow : Color.accentColor)
+                    .opacity(ParseWarningBannerConstants.backgroundOpacity)
+            )
             .clipShape(
                 RoundedRectangle(cornerRadius: ParseWarningBannerConstants.cornerRadius)
             )
@@ -94,9 +185,9 @@ struct ParseWarningBanner: View {
 
 #Preview {
     VStack {
-        ParseWarningBanner(warnings: JATSParseWarnings(diagnostics: [
-            "JATS parse ended with 2 open <table-wrap> — those tables and their content were discarded"
-        ]))
+        ParseWarningBanner(warnings: JATSParseWarnings(losses: [.openTables(2)]))
+        ParseWarningBanner(warnings: JATSParseWarnings(losses: [.noContent]))
+        ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .jatsParseFailed)
         ParseWarningBanner(warnings: JATSParseWarnings())
         Spacer()
     }

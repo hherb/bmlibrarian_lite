@@ -359,7 +359,7 @@ final class JATSXMLParserIntegrationTests: XCTestCase {
             doi: article.doi,
             pmid: article.pmid
         )
-        switch result {
+        switch result.content {
         case .europePMCPDF(let pdfURL):
             XCTAssertTrue(
                 pdfURL.absoluteString.contains("pdf=render"),

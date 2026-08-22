@@ -163,25 +163,39 @@ struct AppFullTextResult: Equatable, Sendable {
     /// parsed at all.
     let warnings: JATSParseWarnings
 
+    /// Why this is not the best source that existed for the article, or `nil`
+    /// when it is.
+    ///
+    /// Set when Europe PMC served machine-readable XML that the parser could not
+    /// read, so the reader was handed a PDF or a publisher link instead. Without
+    /// it the reader cannot tell that outcome from an article that was simply
+    /// never deposited as full text (#183).
+    let degradation: FullTextDegradation?
+
     /// Create a full-text result.
     ///
-    /// Replaces the synthesised memberwise initialiser so `warnings` can default:
-    /// only a parsed source can have any, and every other source would otherwise
-    /// have to pass an empty set at each call site.
+    /// Replaces the synthesised memberwise initialiser so `warnings` and
+    /// `degradation` can default: only a parsed source can have warnings, only a
+    /// fallback can be degraded, and every other source would otherwise have to
+    /// pass an empty value at each call site.
     ///
     /// - Parameters:
     ///   - content: The retrieved content, in whichever form the source gave it.
     ///   - source: Where the content came from.
     ///   - warnings: What the JATS parse of this content lost. Empty — the
     ///     default — for PDFs, publisher links and any source that was not parsed.
+    ///   - degradation: Why this is not the best source that existed. `nil` —
+    ///     the default — when it is.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,
-        warnings: JATSParseWarnings = JATSParseWarnings()
+        warnings: JATSParseWarnings = JATSParseWarnings(),
+        degradation: FullTextDegradation? = nil
     ) {
         self.content = content
         self.source = source
         self.warnings = warnings
+        self.degradation = degradation
     }
 
     /// Whether this result can be displayed within the app.
