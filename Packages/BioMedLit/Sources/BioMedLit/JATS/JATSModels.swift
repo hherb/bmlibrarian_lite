@@ -29,6 +29,16 @@ public enum JATSParseError: LocalizedError, Sendable {
     /// Invalid or unsupported XML structure.
     case invalidStructure(String)
 
+    /// The parser instance had already been used.
+    ///
+    /// `JATSXMLParser` holds one `XMLParser` built from the data it was given, so
+    /// it parses once. Without this case the second call named neither the cause
+    /// nor the remedy: after a successful first parse a consumed `XMLParser`
+    /// exposes no error of its own, so it reported
+    /// `parsingFailed("Unknown parsing error")`, and after a failed one it
+    /// reported that first failure a second time.
+    case alreadyParsed
+
     public var errorDescription: String? {
         switch self {
         case .parsingFailed(let reason):
@@ -37,6 +47,9 @@ public enum JATSParseError: LocalizedError, Sendable {
             return "No content found in JATS XML"
         case .invalidStructure(let reason):
             return "Invalid JATS XML structure: \(reason)"
+        case .alreadyParsed:
+            return "This JATSXMLParser has already parsed its data; "
+                + "construct a new one for each parse"
         }
     }
 }

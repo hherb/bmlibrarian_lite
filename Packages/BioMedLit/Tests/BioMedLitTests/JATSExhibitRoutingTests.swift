@@ -80,7 +80,7 @@ final class JATSExhibitRoutingTests: XCTestCase {
     ///
     /// 27 of the 225 articles (12.0%) in the survey behind
     /// `doc/cross_platform/jats_corpus/` carry a labelled `<table-wrap-foot><fn>`.
-    /// `figureFootnoteDepth` was already tracked and already consulted by the
+    /// `exhibitFootnoteDepth` was already tracked and already consulted by the
     /// `"p"` case in `didEndElement`; the `"label"` case never got the guard.
     func testTableFootnoteLabelDoesNotOverwriteTheTableLabel() throws {
         let article = try parse(body: tableWithFootnote(
@@ -307,6 +307,295 @@ final class JATSExhibitRoutingTests: XCTestCase {
         let article = try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
 
         XCTAssertEqual(article.references.first?.label, "1.")
+    }
+
+    // MARK: - <label> belongs to the exhibit that encloses it most closely (#169)
+
+    /// `<fig>` and `<table-wrap>` can be open at the same time, and the branch
+    /// asked `inFigure` first, so the figure took every `<label>` in reach —
+    /// including the table's own. No corpus article nests one exhibit in another,
+    /// so this fixture is synthetic — but JATS's `<fig>` model admits
+    /// `<table-wrap>` directly, and the `<supplementary-material>` case below is
+    /// the same nesting one deposit away from happening for real.
+    private func tableInsideFigure(footnote: String = "") -> String {
+        """
+        <sec>
+          <title>Results</title>
+          <fig id="f1">
+            <label>Figure 1.</label>
+            <graphic xlink:href="f1.jpg"/>
+            <table-wrap id="t1">
+              <label>Table 1.</label>
+              <table><tbody><tr><td>12.3a</td></tr></tbody></table>
+              \(footnote.isEmpty ? "" : "<table-wrap-foot>\(footnote)</table-wrap-foot>")
+            </table-wrap>
+          </fig>
+        </sec>
+        """
+    }
+
+    func testATableInsideAFigureKeepsItsOwnLabel() throws {
+        let article = try parse(body: tableInsideFigure())
+
+        XCTAssertEqual(
+            article.tables.first?.label, "Table 1.",
+            "the enclosing figure took the table's label"
+        )
+    }
+
+    func testTheFigureAroundATableKeepsItsOwnLabelToo() throws {
+        let article = try parse(body: tableInsideFigure())
+
+        XCTAssertEqual(
+            article.figures.first?.label, "Figure 1.",
+            "the nested table's label was written over the figure's"
+        )
+    }
+
+    /// The footnote marker routes through the same first-`inFigure`-wins chain,
+    /// one layer down: `<table-wrap-foot>` belongs to the table it hangs off,
+    /// whatever encloses that table.
+    func testATableFootnoteMarkerStaysWithTheTableInsideAFigure() throws {
+        let article = try parse(body: tableInsideFigure(
+            footnote: #"<fn id="t1fn1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
+        ))
+
+        XCTAssertEqual(
+            article.tables.first?.footnotes, ["a — AI: artificial intelligence."],
+            "the table's footnote was filed under the enclosing figure"
+        )
+    }
+
+    func testAFigureAroundAFootnotedTableCollectsNoFootnotes() throws {
+        let article = try parse(body: tableInsideFigure(
+            footnote: #"<fn id="t1fn1"><label>a</label><p>AI: artificial intelligence.</p></fn>"#
+        ))
+
+        XCTAssertEqual(
+            article.figures.first?.footnotes, [],
+            "the figure collected the nested table's footnote"
+        )
+    }
+
+    /// `<supplementary-material>` is the other thing eLife nests inside a `<fig>`,
+    /// and it carries a label of its own: 22 occur in the committed corpus and 14
+    /// carry a `<label>`, none of them inside an exhibit, so this is the shape
+    /// that was one deposit away
+    /// from silently renaming a figure. The parser has no model for the
+    /// supplement itself (#144); the point here is only that the figure keeps its
+    /// own number.
+    func testASupplementaryMaterialLabelInsideAFigureIsNotTheFiguresLabel() throws {
+        let article = try parse(body: """
+        <sec>
+          <title>Results</title>
+          <fig id="f1">
+            <label>Figure 1.</label>
+            <graphic xlink:href="f1.jpg"/>
+            <supplementary-material id="f1sd1">
+              <label>Figure 1—source data 1.</label>
+              <media xlink:href="elife-f1-data1.xlsx"/>
+            </supplementary-material>
+          </fig>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.figures.first?.label, "Figure 1.")
+    }
+
+    /// The reverse nesting: a `<fig>` inside a `<table-wrap-foot>`, which is one
+    /// of the shapes the #157 depth guard had to enumerate and this fix subsumes.
+    /// The label must keep travelling in that direction too.
+    func testAFigureInsideATableKeepsItsOwnLabel() throws {
+        let article = try parse(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <label>Table 1.</label>
+            <table><tbody><tr><td>See below</td></tr></tbody></table>
+            <table-wrap-foot>
+              <fig id="f9"><label>Figure 9.</label><graphic xlink:href="f9.jpg"/></fig>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.figures.first?.label, "Figure 9.")
+        XCTAssertEqual(article.tables.first?.label, "Table 1.")
+    }
+
+    /// The table-side mirror of `testAFigureOpenedInsideAFigureFootnoteKeepsItsOwnLabel`.
+    /// The depth guard this fix deletes kept a dedicated variable —
+    /// `tableFootnoteDepthAtOpen` — for exactly this case, so its removal needs a
+    /// test of its own: broadening `innermostExhibit` back towards "a footnote is
+    /// open, so this is a marker" passes every other case in the suite.
+    func testATableOpenedInsideAFigureFootnoteKeepsItsOwnLabel() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="F1">
+                <label>Figure 1.</label>
+                <graphic xlink:href="f1.jpg"/>
+                <fn id="F1_FN1"><label>*</label><p>Derived from:</p>
+                  <table-wrap id="T5">
+                    <label>Table 5.</label>
+                    <table><tbody><tr><td>x</td></tr></tbody></table>
+                  </table-wrap>
+                </fn>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.tables.first?.label, "Table 5.",
+            "a table inside a figure footnote lost its own label to the marker branch"
+        )
+        XCTAssertEqual(article.figures.first?.label, "Figure 1.")
+    }
+
+    /// The `default:` branch drops an unmodelled host's label, and "dropped" has
+    /// to mean dropped. Routing it to `setPendingFootnoteLabel` instead would look
+    /// harmless — the exhibit keeps its own number — but the marker is consumed by
+    /// the next footnote paragraph, so the supplement's title would be prefixed
+    /// onto the figure's footnote prose. That prose is what the transparency
+    /// regexes read.
+    func testASupplementaryMaterialLabelDoesNotBecomeAFootnoteMarker() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="f1">
+                <label>Figure 1.</label>
+                <graphic xlink:href="f1.jpg"/>
+                <supplementary-material id="f1sd1">
+                  <label>Figure 1—source data 1.</label>
+                  <media xlink:href="elife-f1-data1.xlsx"/>
+                </supplementary-material>
+                <fn id="f1fn1"><p>p &lt; 0.05.</p></fn>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.first?.footnotes, ["p < 0.05."],
+            "the supplement's label was prefixed onto the figure's footnote"
+        )
+    }
+
+    // MARK: - <graphic> belongs to the nearer exhibit too (#169)
+
+    /// `<graphic>` is a child of `<table-wrap>` as well — all 8 tables in
+    /// `doc/cross_platform/jats_corpus/PMC12759138.xml` are deposited as images
+    /// that way — and it was routed on the ambient `inFigure`, so a table inside a
+    /// figure handed the figure its picture. `<label>` and the footnotes were
+    /// fixed for this nesting; `<graphic>` was left asking the old question.
+    ///
+    /// The table's own image is still not captured (#172). What is pinned here is
+    /// only that it does not become the figure's.
+    func testATableInsideAFigureDoesNotGiveItsGraphicToTheFigure() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="f1">
+                <label>Figure 1.</label>
+                <table-wrap id="t1">
+                  <label>Table 1.</label>
+                  <graphic xlink:href="the-table.jpg"/>
+                </table-wrap>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, nil,
+            "the nested table's image was adopted as the figure's"
+        )
+    }
+
+    /// The sharper form: the figure has a deposit of its own, but only a
+    /// thumbnail, so the table's full-size image outranks it (#161) and *replaces*
+    /// it. The reader is then shown a table where the figure should be.
+    func testANestedTablesGraphicDoesNotOutrankTheFiguresOwnThumbnail() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="f1">
+                <label>Figure 1.</label>
+                <graphic content-type="thumb" xlink:href="figure-thumb.jpg"/>
+                <table-wrap id="t1">
+                  <graphic xlink:href="table-full.jpg"/>
+                </table-wrap>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, "figure-thumb.jpg",
+            "the nested table's image displaced the figure's own deposit"
+        )
+    }
+
+    /// A `<supplementary-material>` owns the image it holds, so its `<graphic>`
+    /// is not the enclosing figure's either — the same reasoning as its `<label>`
+    /// two tests up. `<alternatives>` is the one wrapper that stays transparent,
+    /// which the `#161` ranking tests below rely on.
+    func testASupplementaryMaterialsGraphicInsideAFigureIsNotTheFiguresImage() throws {
+        let article = try parse(body: """
+            <sec>
+              <title>Results</title>
+              <fig id="f1">
+                <label>Figure 1.</label>
+                <supplementary-material id="f1sd1">
+                  <label>Figure 1—source data 1.</label>
+                  <graphic xlink:href="source-data-preview.jpg"/>
+                </supplementary-material>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.first?.graphicURL, nil,
+            "the supplement's image was adopted as the figure's"
+        )
+    }
+
+    // MARK: - A grouped citation's sub-marker is not the reference number
+
+    /// The old branch asked the ambient `inRef`, so it also caught a `<label>` on
+    /// an `<element-citation>` *inside* the `<ref>`: the `(a)`, `(b)`, `(c)`
+    /// sub-markers a grouped citation gives its members. Last-sibling-wins then
+    /// wrote `(c)` into the field that holds the reference *number*.
+    ///
+    /// Of 631 such labels across 158 refs in 150 surveyed articles, every one was
+    /// a parenthesised letter — including the digit-suffixed `(b1)` that
+    /// subdivides one — and none was a reference number; no enclosing `<ref>`
+    /// carried a direct `<label>` of its own. So the parent test drops them,
+    /// deliberately: a blank the renderer can see beats a confidently wrong
+    /// number.
+    func testAGroupedCitationsSubMarkerIsNotTheReferencesNumber() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <article>
+          <front><article-meta>
+            <article-id pub-id-type="pmc">PMC1234567</article-id>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Results</title><p>Prose.</p></sec></body>
+          <back>
+            <ref-list>
+              <ref id="cit1">
+                <element-citation><label>(a)</label><article-title>First</article-title></element-citation>
+                <element-citation><label>(b)</label><article-title>Second</article-title></element-citation>
+                <element-citation><label>(c)</label><article-title>Third</article-title></element-citation>
+              </ref>
+            </ref-list>
+          </back>
+        </article>
+        """
+        let article = try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
+
+        XCTAssertEqual(
+            article.references.first?.label, "",
+            "a grouped citation's sub-marker was reported as the reference's number"
+        )
     }
 
     // MARK: - <graphic> resolution (#161)

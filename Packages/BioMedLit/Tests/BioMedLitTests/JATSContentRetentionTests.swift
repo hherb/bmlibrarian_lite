@@ -82,6 +82,115 @@ final class JATSContentRetentionTests: XCTestCase {
         ])
     }
 
+    /// `<table-wrap-foot>` may hold `<p>` directly — a general note about the
+    /// table, with no marker to hang an `<fn>` off. It is `</table-wrap-foot>`'s
+    /// own depth that keeps such a paragraph out of the cell furniture, and until
+    /// this test nothing covered it: every case went through an `<fn>`, which
+    /// raises the depth by itself, so dropping the `<table-wrap-foot>` increment
+    /// entirely left the suite green.
+    func testTableFootProseOutsideAFootnoteIsStillCaptured() throws {
+        let article = try article(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <table><tbody><tr><td>Age</td><td>54</td></tr></tbody></table>
+            <table-wrap-foot><p>Values are mean (SD).</p></table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(article.tables.first?.footnotes, ["Values are mean (SD)."])
+    }
+
+    /// The same paragraph after an `<fn>`, which is where publishers usually put
+    /// it. `</fn>` must decrement the depth rather than clear it, or the note
+    /// falls out of the footnotes and is dropped as cell furniture.
+    func testTableFootProseAfterAFootnoteIsStillCaptured() throws {
+        let article = try article(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <table><tbody><tr><td>Age</td><td>54<sup>a</sup></td></tr></tbody></table>
+            <table-wrap-foot>
+              <fn id="t1fn1"><label>a</label><p>Adjusted for sex.</p></fn>
+              <p>Values are mean (SD).</p>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec>
+        """)
+
+        XCTAssertEqual(
+            article.tables.first?.footnotes,
+            ["a — Adjusted for sex.", "Values are mean (SD)."]
+        )
+    }
+
+    /// `</table-wrap-foot>` must give its increment back, or the counter never
+    /// falls and every later `<p>` in the document routes to the footnote branch —
+    /// where, with no exhibit open, it is discarded. Only the real-corpus digest
+    /// caught this before, and it reports a byte-length change rather than a lost
+    /// section.
+    func testSectionProseAfterAFootnotedTableIsStillSectionProse() throws {
+        let article = try article(body: """
+        <sec>
+          <title>Results</title>
+          <table-wrap id="t1">
+            <table><tbody><tr><td>Age</td><td>54<sup>a</sup></td></tr></tbody></table>
+            <table-wrap-foot>
+              <fn id="t1fn1"><label>a</label><p>Adjusted for sex.</p></fn>
+            </table-wrap-foot>
+          </table-wrap>
+          <p>The table shows the adjusted estimates.</p>
+        </sec>
+        <sec><title>Discussion</title><p>These findings suggest a link.</p></sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.paragraphs),
+            [["The table shows the adjusted estimates."], ["These findings suggest a link."]],
+            "prose after a footnoted table was swallowed by the footnote branch"
+        )
+    }
+
+    /// A `<table-wrap>` nested inside another one used to strand the footnote
+    /// counter above zero: the inner `</table-wrap>` cleared `inTableWrap`, so the
+    /// enclosing `</fn>` skipped its decrement and every remaining paragraph in the
+    /// article drained into the footnote branch and was dropped. Asking the element
+    /// stack instead — which still knows the outer `<table-wrap>` is open — unwinds
+    /// it correctly.
+    ///
+    /// The outer *table* is still lost here (a single `currentTable` slot, #173);
+    /// what this pins is that the loss stays inside the table and does not take the
+    /// article's prose with it.
+    func testANestedTableWrapDoesNotSwallowTheRestOfTheArticle() throws {
+        let article = try article(body: """
+        <sec>
+          <title>Methods</title>
+          <table-wrap id="tblOuter">
+            <label>Table 1.</label>
+            <table><tbody><tr><td>outer</td></tr></tbody></table>
+            <table-wrap-foot>
+              <fn id="fn1"><label>a</label>
+                <table-wrap id="tblInner">
+                  <label>Table 1a.</label>
+                  <table><tbody><tr><td>inner</td></tr></tbody></table>
+                </table-wrap>
+                <p>Outer footnote prose.</p>
+              </fn>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec>
+        <sec><title>Results</title><p>Real article prose.</p></sec>
+        <sec><title>Discussion</title><p>Discussion prose.</p></sec>
+        """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.paragraphs),
+            [[], ["Real article prose."], ["Discussion prose."]],
+            "a nested table stranded the footnote counter and ate the rest of the body"
+        )
+    }
+
     func testTableFootnotesReachTheMarkdown() throws {
         let text = try markdown(body: """
         <sec>

@@ -83,14 +83,24 @@ class JATSParser:
     current_table: TableBuilder | null
 
     # How deep the parser is inside a <fn> or <table-wrap-foot> belonging to
-    # an exhibit. Compared against the depth each exhibit opened at, never
-    # against zero — see "Label routing" below.
+    # an exhibit. Decides only whether *prose* is footnote prose; labels are
+    # routed by their parent element instead — see "Label routing" below.
+    #
+    # A counter and not a flag: <table-wrap-foot> and the <fn> inside it both
+    # increment, so a flag cleared on the inner </fn> strands the general note
+    # publishers put after the last footnote. Both ends must test the same
+    # predicate as the routing, or a <table-wrap> opening and closing inside a
+    # footnote skips the decrement and every later <p> in the document drains
+    # into the footnote branch and is discarded (#173).
+
+    # The element stack, maintained for every element. Exhibit furniture is
+    # routed from this, not from the ambient in_* flags — see "Label routing".
+    element_stack: list[str] = []
     footnote_depth: int = 0
 
 class FigureFrame:
     slot: int                  # index into figure_slots, reserved at <fig>
     builder: FigureBuilder
-    footnote_depth_at_open: int
 
     # Reference state
     in_ref_list: bool = false
@@ -373,19 +383,88 @@ every `<label>` on the ambient "am I in a figure/table?" flags wrote that
 marker over the exhibit's own number (#157). 27 of 225 surveyed articles
 (12.0%) carry a labelled `<table-wrap-foot><fn>`.
 
+**Route a `<label>` by the element it hangs off, never by which exhibit happens
+to be open.** The same applies to `<title>` (#167) and `<caption>` (#142), and
+it replaces the footnote-depth comparison an earlier revision of this document
+specified: a `<fig>` opened inside a footnote is a `<fig>`, whatever the depth,
+so the parent test settles the nested cases the depth guard had to enumerate
+one by one (#169).
+
 ```pseudocode
+# The element being handled is on element_stack in both callbacks. Where the
+# end-tag callback pops *before* dispatching — the Kotlin port, and this
+# pseudocode — the parent is element_stack.last; where it pops after, as Swift
+# does, it is the entry below the last. Get this off-by-one wrong and every
+# rule here reads one level too high.
+enclosing_element = element_stack.last
+
 on </label>:
-    # NOT `footnote_depth > 0`: JATS lets a <fig> or <table-wrap> open *inside*
-    # a footnote, and testing against zero eats that exhibit's own label.
-    exhibit_depth = figure_stack.last.footnote_depth_at_open if in_figure
-                    else table_footnote_depth_at_open if in_table_wrap
-                    else 0
-    if footnote_depth > exhibit_depth:
-        current_exhibit.pending_footnote_label = text   # held, not dropped
-    else if in_figure:    current_figure.label = text
-    else if in_table_wrap: current_table.label = text
-    else if in_ref:        current_reference.label = text
+    switch enclosing_element:
+        case "fn":          current_exhibit.pending_footnote_label = text
+        case "fig":         current_figure.label = text
+        case "table-wrap":  current_table.label = text
+        case "ref":         current_reference.label = text
+        default:            drop, and log it
 ```
+
+`current_figure` and `current_table` must mean the *innermost* open exhibit,
+which the element stack also answers: scan it from the end and take the first
+`fig` or `table-wrap`. Both `in_figure` and `in_table_wrap` are true for a
+`<table-wrap>` inside a `<fig>`, so asking them in a fixed order answers with
+whichever was asked first and hands the table's number to the figure (#169).
+`<graphic>` needs the parent test rather than the innermost-exhibit one, with a
+single exception. It is a child of `<table-wrap>` as well — all 8 tables in
+`PMC12759138` are deposited as images that way — and of
+`<supplementary-material>`, and both own the image they hold. `<alternatives>`
+alone is transparent: it wraps several encodings of one image, so ownership
+passes through it to the element outside. Walk up from the `<graphic>`, skip
+only the transparent wrappers, and take the first element left.
+
+The `default:` arm drops labels on hosts with no model — `<aff>`, `<corresp>`,
+`<disp-formula>`, `<supplementary-material>` (43 across the committed corpus),
+and `<element-citation>`/`<mixed-citation>`. That last pair is deliberate: in a
+grouped citation each member carries its own `(a)`, `(b)`, `(c)` sub-marker, and
+an ambient `in_ref` test wrote the last of them into the field holding the
+reference *number*. Of 631 such labels across 158 refs in 150 surveyed
+articles, not one was a reference number, and no enclosing `<ref>` carried a
+direct `<label>` a first-wins rule could have preferred. The shape is an RSC
+chemistry convention appearing in `review-article`/`brief-report`, so a generic
+sample finds none — a structural zero, not an empirical one. Re-derive with
+`scripts/jats_survey.py --measure grouped-citations`.
+
+### Title routing
+
+`<title>` is not the section's alone. JATS models `<fn-group>` as
+`(label?, title?, (fn|p)+)`, and `<ref-list>`, `<glossary>` and `<app>` each
+carry one too. A branch that asks only "is a section open?" lets a child's title
+rename the enclosing `<sec>` — in `PMC8754430` two `<fn-group>` titles inside one
+back-matter section overwrote "Additional information" twice (#167). Section
+titles are what the transparency analysis anchors its heading regexes on.
+
+```pseudocode
+on </title>:
+    if caption_stack is not empty:  route to the caption's owner
+    else if in_abstract:            abstract title
+    else if enclosing_element == "sec" and section_stack is not empty:
+        section_stack.last.title = text
+    # otherwise the title belongs to an element with no model: drop it
+```
+
+`<sec>` is the only element that opens a section, so the parent test *is* the
+"does this title own that builder?" test — provided the abstract branch above
+claims its own titles first, since a `<sec>` inside an `<abstract>` opens no
+builder.
+
+### One parse per instance
+
+A parser built around a single underlying XML reader cannot be re-pointed at its
+data, and its accumulators are append-only. Refuse a second parse with a named
+error rather than letting it return a doubled or empty result (#168). Set the
+consumed flag *before* running the parse, so a failed attempt consumes the
+instance too — otherwise a retry re-reports the first attempt's failure as its
+own. Python rebuilds its handler per call instead, which is the better shape
+where the language makes it cheap; either is acceptable, but the contract —
+"one parse per instance, single-threaded" — must be stated.
 
 Hold the marker rather than dropping it: `<sup>` is an inline element flattened
 into the surrounding cell, so the rendered table body still reads `12.3a` and
