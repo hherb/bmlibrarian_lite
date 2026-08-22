@@ -25,7 +25,7 @@
       "title" : "Introduction"
     },
     {
-      "paragraphCount" : 6,
+      "paragraphCount" : 3,
       "scalarCount" : 3801,
       "subsections" : [
         {
@@ -45,7 +45,7 @@
           "title" : "Subunit-a mutations affect TD formation efficiency"
         },
         {
-          "paragraphCount" : 4,
+          "paragraphCount" : 2,
           "scalarCount" : 1835,
           "subsections" : [
 
@@ -68,7 +68,7 @@
       "scalarCount" : 1203,
       "subsections" : [
         {
-          "paragraphCount" : 6,
+          "paragraphCount" : 5,
           "scalarCount" : 4136,
           "subsections" : [
 
@@ -161,6 +161,14 @@
       "label" : "Figure 1."
     },
     {
+      "caption" : "Effects of subunit-a mutations on transient dwells (TDs). (A) Examples of power strokes without TDs (blue), and of power strokes with TDs that lacked (green), or contained clockwise (CW) synthase-direction c-ring rotation relative to subunit-a (red) plotted as degrees of rotation after the catalytic dwell versus time where 40° (dotted line) is the optimal position for binding of ATP or inhibitory ADP (Yasuda et al., 2001; Martin et al., 2014). Brackets indicate Brownian-type oscillations during a TD. (B) Average percent TDs per data set versus pH from which pKa values were derived via intercepts of the slope and plateaus (solid line) of each curve based on the fit of the data to Equation 1 for WT (black line) and subunit-a mutants (red line). (C) Distributions at pH 6.0 of the percent of TDs per data set of power strokes (gray bars) where multiple data sets that each contained ~300 power strokes were collected from each of the total number of the F1FO indicated, and data were binned in 10% increments. The data were fit to the sum of three Gaussians (black line) representing low (blue), medium (orange), and high (green) efficiencies of TD formation.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig2.jpg",
+      "label" : "Figure 2."
+    },
+    {
       "caption" : "Examples each of the first 90° of ATP hydrolysis-driven power strokes observed using FOF1 nanodiscs. In each mutant, examples 1–5 show power strokes without transient dwells (TDs). Examples 6–10 show power strokes with transient dwells where the FO motor either halts counterclockwise (CCW) rotation or caused clockwise (CW) rotation in the ATP synthase direction (synthase-direction steps). Brackets indicate Brownian-type oscillations during a TD.",
       "footnotes" : [
 
@@ -193,6 +201,14 @@
       "label" : "Figure 3."
     },
     {
+      "caption" : "Effects of subunit-a mutations on the pH dependence of the extent of clockwise (CW) synthase-direction step rotation and fraction of transient dwells (TDs) containing synthase-direction steps. (A) Distributions of the extent of CW rotation in the ATP synthesis direction during transient dwells for WT and subunit-a mutants at the low (black) and high (red) pH values indicated. (B) Mean (black) and median (red) extents of CW rotation during a synthase-direction step versus pH. (C) Distributions of the difference in extent of CW synthase-direction step rotation between pH values in [Figure 2D](#fig2) when the percent of synthase-direction steps was maximum versus minimum where the blue line is the Gaussian fit. (D) Percent of TDs containing CW synthase-direction steps versus pH, where the data were fit to Equation 3 (black line). The fit for WT is shown as a gray line in the mutant plots. The fraction of protonated groups with pKa1 (blue line), and unprotonated groups with pKa2 (red line) versus pH was calculated from the pKa values of [Table 2](#table2). (E) Percent of TDs that lack synthase-direction steps versus pH where the probability of forming a TD without a synthase-direction step (black line) was determined by Equation 2 from the fraction of protonated groups with pKa1 (blue line), and unprotonated groups with pKa2 (red line) versus pH calculated using pKa values from [Table 2](#table2). The fit for WT is shown as a gray line in the mutant plots.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig4.jpg",
+      "label" : "Figure 4."
+    },
+    {
       "caption" : "Distributions of the extent of clockwise (CW) rotation in the ATP synthesis direction during transient dwells for WT and subunit-a mutants versus pH.",
       "footnotes" : [
 
@@ -207,6 +223,14 @@
       ],
       "graphicURL" : "elife-70016-fig4-figsupp2.jpg",
       "label" : "Figure 4—figure supplement 2."
+    },
+    {
+      "caption" : "Aqueous funnel of charged and polar groups can serve as an antenna to supply protons to the input channel. (A) Transmembrane view of Escherichia coli FO (pdb-ID 6OQR) showing the path of charged and polar residues across the membrane. Outlines indicate space occupied by hydrophobic residues in subunit-a (black line), subunit-b1 (blue line), and subunit-b2 (orange line). The inner surface of the funnel, which is lined with polar residues and loop regions (green), acidic groups (red), and histidines (blue) from subunit-a and the subunit-b1 N-terminus, is exposed to the periplasm at its wide end that narrows to aE219 (yellow) at the bottom. The input channel (yellow) extends from aE219 to aN214 and aQ252, which are proximal to aR210. Between aR210 and the output channel (dark blue) the leading (pink) and lagging (orange) cD61 groups rotate through a vestibule lined above and below the cD61 rotation plane by polar sidechains (light blue) that decrease the dielectric constant of the vestibule from that of the lipid bilayer. A protonated cD61 exposed to the lipid bilayer (yellow) is also visible. (B) Periplasmic surface of FO showing the interior surface of the funnel (orange oval) lined with charged and polar groups from subunit-a and subunit-b1 as in A that narrows to aE219 (yellow) at the bottom where the input channel begins. Hydrophobic residues are shown of subunit-a (gray), subunits-b1 and -b2 (black), and the c-ring (white). The cY3 sidechains (orange) are shown to indicate the orientation of the periplasmic surface of the c-ring.",
+      "footnotes" : [
+
+      ],
+      "graphicURL" : "elife-70016-fig5.jpg",
+      "label" : "Figure 5."
     },
     {
       "caption" : "Sequence comparisons of the subunit-a helices that contact the c-ring. Sequences were aligned relative to essential Escherichia coli residues aR210 (blue) in the penultimate helix (helix IV), and with highly conserved aQ252 in the ultimate helix (helix V). Residues associated with the input channel (green), the output channel (pink), and the vestibule (yellow). Sequences are from the following species with their names indicated on the left: ESCCO, Escherichia coli; HOMSA, Homo sapiens; BOSTA, Bos taurus; SUSSC, Sus scrofa; MYCPH, Mycobacterium phlei; TETTH, Tetrahymena thermophila mitochondrial; POLPR, Polytomella sp. Pringsheim 198.80 mitochondrial; PICAN, Pichia angusta mitochondrial; EUGGR-M, Euglena gracilis mitochondrial; EUGGR-C, Euglena gracilis chloroplast; YARLI, Yarrowia lipolytica mitochondrial; SACCE, Saccharomyces cerevisiae mitochondrial; TOXGO, Toxoplasma gondii; GEOST, Geobacillus stearothermophilus; ACEWO, Acetobacterium woodii (Na+); ILYTA, Ilyobacter tartaricus (Na+); FUSNU, Fusobacterium nucleatum; PARDE, Paracoccus denitrificans; HELMO, Heliobacter modesticaldum unicellular photosynthetic; ENTHI, Enterococcus hirae (V/A-type Na+); THETH, Thermus thermophilus (V/A-type); BACPS, Bacillus pseudofirmus OF4 (Alkalihalobacillus pseudofirmus); BACTA, Bacillus sp. Strain TA2.A1 (thermoalkalophilic); PISSA-C, Pisum sativum chloroplast; SPIOL-C, spinacia oleracea chloroplast, ART09.13F, Arthrospira sp. 09.13 F; BURPS, Burkholderia pseudomallei.",
@@ -225,10 +249,10 @@
       "label" : "Figure 6."
     }
   ],
-  "htmlScalarCount" : 83616,
+  "htmlScalarCount" : 88644,
   "issue" : "",
   "journal" : "eLife",
-  "markdownScalarCount" : 74852,
+  "markdownScalarCount" : 79406,
   "pages" : "",
   "pmcId" : "PMC8754430",
   "pmid" : "34970963",

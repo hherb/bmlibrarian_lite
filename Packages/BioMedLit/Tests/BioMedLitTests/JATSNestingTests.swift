@@ -46,6 +46,24 @@ final class JATSNestingTests: XCTestCase {
         return try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
     }
 
+    private func parseBody(_ body: String) throws -> JATSArticle {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <article>
+          <front>
+            <article-meta>
+              <article-id pub-id-type="pmc">PMC1234567</article-id>
+              <title-group><article-title>Real article</article-title></title-group>
+            </article-meta>
+          </front>
+          <body>
+        \(body)
+          </body>
+        </article>
+        """
+        return try JATSXMLParser(data: Data(xml.utf8)).parseToArticle()
+    }
+
     // MARK: - Nested <contrib-group>
 
     /// JATS permits a `<contrib-group>` inside `<collab>` for consortium
@@ -176,6 +194,141 @@ final class JATSNestingTests: XCTestCase {
 
         XCTAssertEqual(article.title, "Real article")
         XCTAssertEqual(article.bodySections.flatMap(\.paragraphs), ["Real prose."])
+    }
+
+    // MARK: - Nested <fig>
+
+    /// eLife nests each figure supplement inside the figure it belongs to, and
+    /// `currentFigure` was a single slot: opening the inner `<fig>` overwrote the
+    /// parent's builder, the inner `</fig>` appended the child and cleared the
+    /// slot, and the outer `</fig>` then found nothing to build. The parent
+    /// figure — its label, caption and graphic — was lost outright.
+    ///
+    /// 19.6% of the 225 real articles surveyed for
+    /// `doc/cross_platform/jats_corpus/` nest a `<fig>`; the eLife corpus article
+    /// carries 12 and the parser returned 9. This is the same shape as
+    /// `subArticleDepth` and the `<contrib-group>` role stack (#156).
+    func testNestedFigureDoesNotDropItsParent() throws {
+        let article = try parseBody("""
+            <sec>
+              <title>Results</title>
+              <p>Section prose.</p>
+              <fig id="fig2">
+                <label>Figure 2.</label>
+                <caption><title>Parent figure caption.</title></caption>
+                <graphic xlink:href="parent.jpg"/>
+                <p>
+                  <fig id="fig2s1">
+                    <label>Figure 2—figure supplement 1.</label>
+                    <caption><title>Supplement caption.</title></caption>
+                    <graphic xlink:href="supplement.jpg"/>
+                  </fig>
+                </p>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.map(\.label),
+            ["Figure 2.", "Figure 2—figure supplement 1."],
+            """
+            the parent figure was discarded when its supplement closed, and the \
+            order is document order: the parent opens first, so it is listed \
+            first even though it closes last.
+            """
+        )
+        XCTAssertEqual(article.figures.map(\.caption), ["Parent figure caption.", "Supplement caption."])
+        XCTAssertEqual(
+            article.figures.map(\.graphicURL), ["parent.jpg", "supplement.jpg"],
+            "each <graphic> belongs to the innermost open <fig>, not to whichever one is current"
+        )
+    }
+
+    /// The tail of the parent figure, after its supplement closes.
+    ///
+    /// The inner `</fig>` cleared `inFigure`, so everything left in the parent was
+    /// read under the enclosing section's rules — the `subArticleDepth` failure
+    /// exactly. A `<fig>` almost always sits inside a `<sec>`, so the leak lands
+    /// in article prose, which is what the transparency regexes read.
+    func testFigureInternalsAfterANestedFigureDoNotLeakIntoTheSection() throws {
+        let article = try parseBody("""
+            <sec>
+              <title>Results</title>
+              <p>Section prose.</p>
+              <fig id="fig2">
+                <label>Figure 2.</label>
+                <p><fig id="fig2s1"><label>Figure 2—figure supplement 1.</label></fig></p>
+                <p>Parent figure internals after the supplement.</p>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.bodySections.map(\.paragraphs), [["Section prose."]],
+            "the parent figure resumed under the section's rules and reprinted its internals as prose"
+        )
+    }
+
+    /// The positive counterpart to the leak test above: the parent must be
+    /// *current* again once its supplement closes, not merely open.
+    ///
+    /// Every other nesting test loads the parent before the child opens, so they
+    /// pass whether the pop restores the parent or leaves the child current.
+    /// Depositing the parent's own label, caption and graphic *after* the child
+    /// closes is the order that tells those apart — and it is the order in which
+    /// a mis-scoped pop sends the parent's content to its own supplement.
+    func testTheParentFigureIsCurrentAgainAfterItsSupplementCloses() throws {
+        let article = try parseBody("""
+            <sec>
+              <title>Results</title>
+              <fig id="fig2">
+                <p>
+                  <fig id="fig2s1">
+                    <label>Figure 2—figure supplement 1.</label>
+                    <caption><title>Supplement caption.</title></caption>
+                    <graphic xlink:href="supplement.jpg"/>
+                  </fig>
+                </p>
+                <label>Figure 2.</label>
+                <caption><title>Parent figure caption.</title></caption>
+                <graphic xlink:href="parent.jpg"/>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(
+            article.figures.map(\.label),
+            ["Figure 2.", "Figure 2—figure supplement 1."],
+            "the parent's own label arrived after its supplement closed and was misfiled"
+        )
+        XCTAssertEqual(
+            article.figures.map(\.caption),
+            ["Parent figure caption.", "Supplement caption."]
+        )
+        XCTAssertEqual(
+            article.figures.map(\.graphicURL), ["parent.jpg", "supplement.jpg"]
+        )
+    }
+
+    /// Depth three. The corpus tops out at two, so this pins the invariant rather
+    /// than a shape any publisher currently deposits: the slot reservation and the
+    /// stack are uniform in depth, and nothing about either should start caring at
+    /// three.
+    func testFiguresNestedThreeDeepStayInDocumentOrder() throws {
+        let article = try parseBody("""
+            <sec>
+              <title>Results</title>
+              <fig id="a">
+                <label>A.</label>
+                <p><fig id="b">
+                  <label>B.</label>
+                  <p><fig id="c"><label>C.</label></fig></p>
+                </fig></p>
+              </fig>
+            </sec>
+            """)
+
+        XCTAssertEqual(article.figures.map(\.label), ["A.", "B.", "C."])
     }
 
     // MARK: - Nested <caption>

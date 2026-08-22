@@ -17,7 +17,18 @@
       "title": "The evolving landscape of artificial intelligence in patient education: A bibliometric knowledge mapping study",
       "authorCount": 3,
       "figureCount": 3,
+      "firstFigureGraphic": "10.1177_20552076251406653-fig1.jpg",
       "tableCount": 8,
+      "tableLabels": [
+        "Table 1.",
+        "Table 2.",
+        "Table 3.",
+        "Table 4.",
+        "Table 5.",
+        "Table 6.",
+        "Table 7.",
+        "Table 8."
+      ],
       "referenceCount": 55,
       "licence": "CC-BY-NC-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by-nc/4.0/",
@@ -37,7 +48,12 @@
       "title": "Advancing a Hybrid Decision-Making Model in Anesthesiology: Applications of Artificial Intelligence in the Perioperative Setting",
       "authorCount": 7,
       "figureCount": 2,
+      "firstFigureGraphic": "healthcare-14-00097-g001.jpg",
       "tableCount": 2,
+      "tableLabels": [
+        "Table 1",
+        "Table 2"
+      ],
       "referenceCount": 35,
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
@@ -57,7 +73,11 @@
       "title": "Evaluating the Role of Artificial Intelligence in Breast Self-Examination",
       "authorCount": 1,
       "figureCount": 0,
+      "firstFigureGraphic": null,
       "tableCount": 1,
+      "tableLabels": [
+        "Table 1."
+      ],
       "referenceCount": 10,
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
@@ -77,7 +97,12 @@
       "title": "pH-dependent 11° F1FO ATP synthase sub-steps reveal insight into the FO torque generating mechanism",
       "authorCount": 2,
       "figureCount": 12,
+      "firstFigureGraphic": "elife-70016-fig1.jpg",
       "tableCount": 2,
+      "tableLabels": [
+        "Table 1.",
+        "Table 2."
+      ],
       "referenceCount": 50,
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
@@ -97,7 +122,11 @@
       "title": "Candidate orphan genes: Reassessing uniqueness",
       "authorCount": 4,
       "figureCount": 4,
+      "firstFigureGraphic": "pone.0338891.g001.jpg",
       "tableCount": 1,
+      "tableLabels": [
+        "Table 1"
+      ],
       "referenceCount": 72,
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
@@ -117,7 +146,11 @@
       "title": "Differences in canine serum N-glycosylation pattern during infection and pregnancy",
       "authorCount": 5,
       "figureCount": 2,
+      "firstFigureGraphic": "41598_2026_59457_Fig1_HTML.jpg",
       "tableCount": 1,
+      "tableLabels": [
+        "Table 1"
+      ],
       "referenceCount": 23,
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
@@ -137,7 +170,11 @@
       "title": "Extreme heat and cause-specific risk of hospital admission in the adult population in England: a case time series analysis",
       "authorCount": 7,
       "figureCount": 2,
+      "firstFigureGraphic": "bmjopen-16-6-g001.jpg",
       "tableCount": 1,
+      "tableLabels": [
+        "Table 1"
+      ],
       "referenceCount": 28,
       "licence": "CC-BY-4.0",
       "licenceURL": "https://creativecommons.org/licenses/by/4.0/",

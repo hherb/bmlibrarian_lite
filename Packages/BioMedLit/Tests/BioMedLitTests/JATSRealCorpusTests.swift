@@ -225,12 +225,28 @@ final class JATSRealCorpusTests: XCTestCase {
         let authorCount: Int
         /// `<fig>` elements outside any `<sub-article>`.
         ///
-        /// Compared as an upper bound, not an equality: #156 drops the parent of a
-        /// nested figure, so `PMC8754430` legitimately parses 9 of its 12 today.
-        /// When #156 lands this becomes an equality for every article.
+        /// Compared as an equality since #156 landed. It was an upper bound while
+        /// a nested `<fig>` dropped its parent — `PMC8754430` parsed 9 of its 12 —
+        /// and an upper bound cannot tell a parser that misses figures from one
+        /// that finds them all, which is the whole of what this number is for.
         let figureCount: Int
+        /// The `<graphic>` the first `<fig>` outside any `<sub-article>` should
+        /// resolve to, or `nil` where the article has no figure.
+        ///
+        /// Hand-transcribed, and the only record in the corpus that a blind
+        /// digest regeneration cannot move: #161's fix lives in the digests as a
+        /// `.gif` that became a `.jpg`, and a digest is regenerable by design, so
+        /// without this the fix launders straight back out with the suite green.
+        let firstFigureGraphic: String?
         /// `<table-wrap>` elements outside any `<sub-article>`.
         let tableCount: Int
+        /// The `<label>` of each `<table-wrap>` outside any `<sub-article>`, in
+        /// document order.
+        ///
+        /// Hand-transcribed, for #157 the reason ``firstFigureGraphic`` is for
+        /// #161: `PMC12661592`'s table reported `"a"` — its footnote's marker —
+        /// and nothing outside its digest recorded that it should say `"Table 1."`.
+        let tableLabels: [String]
         /// `<ref>` elements outside any `<sub-article>`.
         let referenceCount: Int
         /// SPDX-style licence code, for example `CC-BY-4.0`.
@@ -1320,15 +1336,29 @@ final class JATSRealCorpusTests: XCTestCase {
                     article.references.count, entry.referenceCount,
                     "\(entry.pmcId): reference count"
                 )
-                // An upper bound while #156 stands: a nested `<fig>` drops its
-                // parent, so eLife parses 9 of its 12. The floor test asserts the
-                // other end — that an article with figures parses some.
-                XCTAssertLessThanOrEqual(
+                // Hand-transcribed from the XML, so this is the one figure count
+                // in the corpus that a blind digest regeneration cannot move.
+                // Equality since #156: while a nested `<fig>` dropped its parent
+                // this had to be an upper bound, which every figure-losing parser
+                // satisfies.
+                XCTAssertEqual(
                     article.figures.count, entry.figureCount,
                     """
-                    \(entry.pmcId): parsed more figures than the XML has <fig> elements, \
-                    so something is being counted twice
+                    \(entry.pmcId): parsed \(article.figures.count) figures where the XML \
+                    has \(entry.figureCount) <fig> elements outside any <sub-article>
                     """
+                )
+                // The other two hand-transcribed anchors, holding #157 and #161
+                // to the XML rather than to a digest that regenerates with the
+                // parser. A label read off a footnote, or a graphic that fell
+                // back to the thumbnail, fails here whatever the digests say.
+                XCTAssertEqual(
+                    article.tables.map(\.label), entry.tableLabels,
+                    "\(entry.pmcId): table labels"
+                )
+                XCTAssertEqual(
+                    article.figures.first?.graphicURL, entry.firstFigureGraphic,
+                    "\(entry.pmcId): the first figure's graphic"
                 )
             } catch {
                 XCTFail("\(entry.pmcId): \(error)")
