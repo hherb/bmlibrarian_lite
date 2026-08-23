@@ -8,72 +8,53 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-- **Typed parse losses, and a fallback that admits its cost** (#184/#183, PR open
-  on `fix/jats-typed-parse-losses-184-183`). Design spec:
-  `docs/superpowers/specs/2026-08-22-jats-typed-parse-losses-design.md`.
-  - **#184 — the payload was rendered English.** `JATSParseWarnings.diagnostics`
-    was `[String]` of log lines, and those strings reached the reader, SwiftData
-    and `Equatable` — so the UI could not be localised, the banner could only
-    replay sentences, a rewording invalidated every stored record, and tests could
-    only substring-match. Now one `Loss` per audited counter plus `.noContent` and
-    `.unspecified`, with `diagnostics` kept as a derived property so the log and
-    the banner's technical disclosure render the same English they always did.
-    Persistence goes through `losses` via `Codable` and never touches
-    `diagnostics`.
-    - **The eight parser-produced lines moved byte-for-byte**, because
-      `testParsingReportsNoContentLoss` reads the log's text and the corpus
-      digests hang off it; a rewording later is now visibly a rewording.
-      `.unspecified` is the exception and has to be: no parse produces it, so it
-      has no parser-side predecessor.
-    - **The persisted form is versioned with named keys** —
-      `{"schemaVersion":1,"losses":[{"kind":"openFigures","count":2}]}`. Never lean
-      on synthesised `Codable` for a tagged union: Swift emits `{"_0":2}`, and `_0`
-      is a compiler detail you are then stuck reading forever. This is #163's
-      complaint answered before it accrues history.
-    - **Legacy records need a test, not a migration.** The old bare `[String]` has
-      no `schemaVersion`, so it fails to decode, and the reader already turns a
-      decode failure into `.unspecified` rather than clean. Mapping old sentences
-      back to cases was rejected: that re-creates the wording coupling in the one
-      place wording is hardest to change.
-  - **#183 — the fallback could not say what it cost.** Only `.europePMC` carried
-    warnings, so "Europe PMC had no machine-readable text" and "it had it and we
-    choked" reached the reader identically — a reader attributing our defect to
-    the evidence base. `FullTextResult` is now a struct of `content` + `warnings`
-    + `degradation`, the shape `AppFullTextResult`'s own doc comment already
-    argued for and the package's enum contradicted.
-    - **A 404 is not a degradation.** An absent source was never lost, and a note
-      that fires on every article never deposited as full text is worthless on the
-      ones where it is true. Pinned by test, and a mutant that sets it in the
-      `else` branch dies there.
-    - **The reader sees information, not a warning.** The fallback PDF is
-      *complete*; a warning triangle over content that is fine is what trains a
-      reader to dismiss the banner on the article that really lost text.
-    - Typing the losses is also what let `.noContent` stop hiding behind "some of
-      this article could not be displayed" — it is a rendering stripped to an
-      accession number, and now says so.
-  - **A view's private computed state cannot be tested.** The banner's
-    three-way choice moved into `ParseWarningMessage`, a pure value — which is
-    where the only real judgement in that file lives. Do not nest it in the view
-    and call it `State`: that silently shadows SwiftUI's `@State`.
-  - **A mutation run only proves what its assertions reach.** Review found four
-    survivors. `schemaVersion = 1 -> 2` and a renamed persisted key both left 788
-    green, because every literal-JSON test asserted a *throw* — nothing decoded a
-    literal successfully, so nothing pinned the version those literals embed. Two
-    `degradation` sites were unreachable: the test naming the doi.org branch
-    landed on the PubMed fallback (both return `.doi(webURL:)`), and the PDF
-    branch needed an `EuropePMCService` the initialiser hard-coded. Assert the
-    host, inject the seam, pin the contract with a literal past the encoder.
-  - **The degradation was written and then unreadable.** A `.webURL` fallback
-    caches no content, so `cachedFullTextResult` returned `nil` and took the note
-    with it — macOS said "No full text available" for an article we had and lost.
-    Read a retrieval note from the stored fields, never through a rebuild of the
-    content.
+Nothing. `master` is at PR #185; the working tree is clean. Pick the next slice
+from **Potential follow-ups** below — **#186** and **#187** are the live ones,
+both split out of the #185 review.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
 the rest.
+
+- **Typed parse losses, and a fallback that admits its cost** (#184/#183 in
+  PR #185, 2026-08-23). Rules that still bind:
+  - **A reader-facing payload must not be rendered English.** `JATSParseWarnings`
+    carries one `Loss` per audited counter plus `.noContent`/`.unspecified`, and
+    `diagnostics` is *derived* — so the log and the banner's technical disclosure
+    render the same English they always did, while persistence, `Equatable` and
+    the tests key off `losses`.
+  - **A tagged union's persisted form needs named keys and a `schemaVersion`.**
+    Synthesised `Codable` emits `{"_0":2}`, and `_0` is a compiler detail you are
+    then stuck reading forever (#163's complaint, answered before it accrued
+    history). Legacy bare-`[String]` records have no `schemaVersion`, so they fail
+    to decode and the reader lands them on `.unspecified` — that *is* the
+    migration, and it is pinned by test. Mapping old sentences back to cases was
+    rejected: it re-creates the wording coupling where wording is hardest to change.
+  - **The eight parser-produced log lines moved byte-for-byte**, because
+    `testParsingReportsNoContentLoss` reads the log's text and the corpus digests
+    hang off it. A rewording later is now visibly a rewording.
+  - **A 404 is not a degradation.** An absent source was never lost, and a note
+    that fires on every article never deposited as full text is worthless on the
+    ones where it is true. The fallback PDF is *complete*, so the reader sees
+    information, not a warning triangle — a triangle over content that is fine is
+    what trains a reader to dismiss the banner on the article that really lost text.
+  - **A view's private computed state cannot be tested.** The banner's three-way
+    choice is `ParseWarningMessage`, a pure value. Do not nest such a type in the
+    view and call it `State` — it silently shadows SwiftUI's `@State`.
+  - **A mutation run only proves what its assertions reach.** Four survivors:
+    every literal-JSON test asserted a *throw*, so nothing decoded a literal
+    successfully and nothing pinned the `schemaVersion` or the key names those
+    literals embed; and two `degradation` sites were unreachable — the test naming
+    the doi.org branch landed on the PubMed fallback (both return `.doi(webURL:)`)
+    and the PDF branch needed an `EuropePMCService` the initialiser hard-coded.
+    Assert the host, inject the seam, pin the contract with a literal past the encoder.
+  - **Read a retrieval note from the stored fields, never through a rebuild of the
+    content.** A `.webURL` fallback caches nothing, so `cachedFullTextResult`
+    returned `nil` and took the note with it — macOS said "No full text available"
+    for an article we had and lost.
+  - Both its own follow-ups, **#186** and **#187**, are open below.
 
 - **The unwind audit's two blind spots** (#180/#181 in PR #182, 2026-08-22).
   **#180 — the clamp erased the evidence.** Every counter decremented as
@@ -343,6 +324,28 @@ the rest.
 
 ## Potential follow-ups
 
+- **#186 — an unreachable Europe PMC is reported as an absent one.**
+  `FullTextService` sets `.jatsParseFailed` only when Europe PMC served XML we
+  could not read; a 503 through all retries, a timeout, or a 403 from Unpaywall
+  takes the `else` branch and sets nothing, so "never existed" and "we could not
+  reach it" reach the reader identically — the same collapse #183 fixed one level
+  up. Wants a `case europePMCUnreachable` with its own banner sentence, one that
+  invites a retry rather than implying a defect. Deferred out of #185 because it
+  adds a persisted enum case, new clinician-facing copy, and a change to the
+  `doc/cross_platform/jats_parsing.md` contract that the Kotlin (#165) and bmlib
+  (hherb/bmlib#134) ports follow. `searchForPMCIdAndPDFUrl` is a second site: it
+  now logs at `.warning` and propagates cancellation, but a transient failure
+  there still skips the whole Europe PMC branch silently.
+- **#187 — iOS has nowhere to show why a record is link-only.** #185 fixed the
+  model layer and macOS (`Document.cachedRetrievalNotice` reads the stored fields,
+  and `MacFullTextTab.noFullTextView` renders the banner). On iOS a `.webURL`
+  fallback caches no content, so `hasFullText` is `false`, `FullTextTab`'s row
+  shows a download button and reads as *unfetched*, and `ScoredDocumentsView`
+  opens the browser directly, bypassing `FullTextViewer` and its banner. Not
+  actively wrong the way the macOS bug was, but the note never arrives and a
+  re-tap re-runs the whole chain. The data source is in place and
+  platform-agnostic; what is undecided is the surface — badge, row subtitle, or a
+  detail sheet for documents with no full text — which is a UI design call.
 - **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
   entry is `\bpharma(?:ceutical)?s?\b`, Swift's is `\bpharma(?:ceutical)?\b`. All
   17 other entries are byte-identical. `\b` lands before the "s", so a COI
