@@ -465,4 +465,65 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
         XCTAssertNil(absent.degradation)
         XCTAssertEqual(unreachable.degradation, .europePMCUnreachable)
     }
+
+    /// A search that *failed* is not a search that found nothing.
+    ///
+    /// The sharper half of #186: this collapse skips the machine-readable
+    /// branch entirely, so the article reports as having no full text because
+    /// we could not ask. HTTP 400 makes `EuropePMCService` throw `httpError`,
+    /// which is not retryable and so fails on the first attempt.
+    func testAFailedIdentifierResolutionIsReportedAsUnreachable() async throws {
+        StubURLProtocol.routes = [
+            "search": (400, Data()),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        XCTAssertEqual(result.degradation, .europePMCUnreachable)
+    }
+
+    /// The negative control it needs. Europe PMC answering "no record" is an
+    /// absent source, and marking it degraded would fire the note on every
+    /// article that has no PMC record at all — most of PubMed.
+    func testAResolutionThatFoundNothingIsNotADegradation() async throws {
+        StubURLProtocol.routes = [
+            "search": (200, Data(#"{"resultList": {"result": []}}"#.utf8)),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        XCTAssertNil(result.degradation)
+    }
+
+    /// A failed first search that the second recovers from costs the reader
+    /// nothing.
+    ///
+    /// The mutation-sensitive one: weakening `searchFailed && pmcId == nil` to
+    /// `searchFailed` marks a wholly successful retrieval as degraded, and no
+    /// other test in this file would notice. Routed by query substring — the
+    /// PMID attempt's URL carries `ext_id`, the DOI attempt's carries `DOI`.
+    func testAFailedPMIDSearchTheDOISearchRecoversFromIsNotADegradation() async throws {
+        let searchResponse = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1", "pmcid": "PMC12759138", "inPMC": "Y"
+        }]}}
+        """#
+        StubURLProtocol.routes = [
+            "ext_id": (400, Data()),
+            "DOI": (200, Data(searchResponse.utf8)),
+            "fullTextXML": (200, Data(Self.completeArticle.utf8)),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        guard case .europePMC = result.content else {
+            return XCTFail("expected the Europe PMC parse to succeed, got \(result.content)")
+        }
+        XCTAssertNil(result.degradation)
+    }
 }

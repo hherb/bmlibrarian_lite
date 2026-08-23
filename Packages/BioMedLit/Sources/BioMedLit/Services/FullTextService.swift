@@ -116,6 +116,10 @@ public actor FullTextService {
             category: .fullText
         )
 
+        // Set when a better source existed and was lost, and attached to
+        // whichever fallback the chain returns instead (#183, #186).
+        var degradation: FullTextDegradation?
+
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
         var pdfRenderURL: String?
@@ -123,11 +127,13 @@ public actor FullTextService {
             let resolved = try await resolvePMCIdAndPDFUrl(pmid: pmid, doi: doi)
             resolvedPmcId = resolved.pmcId
             pdfRenderURL = resolved.pdfRenderURL
+            // Only when the failure actually cost us the source. A failed PMID
+            // search that the DOI search then recovered from cost the reader
+            // nothing, and the XML branch's own outcome decides from here.
+            if resolved.searchFailed && resolved.pmcId == nil {
+                degradation = .europePMCUnreachable
+            }
         }
-
-        // Set when Europe PMC served XML this parser could not read, and
-        // attached to whichever fallback the chain returns instead (#183).
-        var degradation: FullTextDegradation?
 
         // Try Europe PMC first (best quality - machine readable XML)
         if let pmcId = resolvedPmcId, !pmcId.isEmpty {
@@ -347,6 +353,32 @@ public actor FullTextService {
 
     // MARK: - Identifier Resolution
 
+    /// What an identifier resolution learned, including whether it failed.
+    ///
+    /// A bare `(pmcId:pdfRenderURL:)` tuple could not tell "Europe PMC has no
+    /// record for this article" from "we could not ask Europe PMC" — opposite
+    /// answers, the second of which skips the machine-readable source entirely
+    /// (#186). It is the same collapse #183 corrected one layer up.
+    private struct PMCResolution {
+        /// The PMC ID, when one was found.
+        let pmcId: String?
+
+        /// The free PDF render URL from the search result, when one was offered.
+        let pdfRenderURL: String?
+
+        /// Whether any attempted search threw rather than answering.
+        ///
+        /// OR-ed across the PMID and DOI attempts: either one failing leaves us
+        /// unable to say the article has no PMC record.
+        let searchFailed: Bool
+
+        /// The answer when a search completed and matched nothing.
+        static let noMatch = PMCResolution(pmcId: nil, pdfRenderURL: nil, searchFailed: false)
+
+        /// The answer when a search threw.
+        static let failed = PMCResolution(pmcId: nil, pdfRenderURL: nil, searchFailed: true)
+    }
+
     /// Resolve a PMC ID and PDF render URL from a PMID or DOI via Europe PMC search.
     ///
     /// Tries PMID first (more specific), then DOI. Also extracts the free PDF
@@ -355,19 +387,21 @@ public actor FullTextService {
     /// - Parameters:
     ///   - pmid: PubMed ID to resolve.
     ///   - doi: DOI to resolve.
-    /// - Returns: Tuple of PMC ID and PDF render URL (both optional).
-    /// - Throws: `CancellationError` if the caller cancelled. A resolution that
-    ///   merely fails returns `(nil, nil)`; only cancellation propagates, so the
-    ///   chain never reads "the caller stopped us" as "this article has no PMC
-    ///   record".
+    /// - Returns: What was found, and whether any attempted search failed. A
+    ///   resolution that merely matched nothing reports `searchFailed == false`.
+    /// - Throws: `CancellationError` if the caller cancelled. Only cancellation
+    ///   propagates, so the chain never reads "the caller stopped us" as "this
+    ///   article has no PMC record".
     private func resolvePMCIdAndPDFUrl(
         pmid: String?,
         doi: String?
-    ) async throws -> (pmcId: String?, pdfRenderURL: String?) {
+    ) async throws -> PMCResolution {
+        var searchFailed = false
+
         // Try resolving by PMID first
         if let pmid = pmid, !pmid.isEmpty {
-            let query = "ext_id:\(pmid) src:med"
-            let resolved = try await searchForPMCIdAndPDFUrl(query: query)
+            let resolved = try await searchForPMCIdAndPDFUrl(query: "ext_id:\(pmid) src:med")
+            searchFailed = resolved.searchFailed
             if let pmcId = resolved.pmcId {
                 BioMedLitLib.logger?.info(
                     "Resolved PMID \(pmid) to \(pmcId)",
@@ -379,8 +413,8 @@ public actor FullTextService {
 
         // Try resolving by DOI
         if let doi = doi, !doi.isEmpty {
-            let query = "DOI:\"\(doi)\""
-            let resolved = try await searchForPMCIdAndPDFUrl(query: query)
+            let resolved = try await searchForPMCIdAndPDFUrl(query: "DOI:\"\(doi)\"")
+            searchFailed = searchFailed || resolved.searchFailed
             if let pmcId = resolved.pmcId {
                 BioMedLitLib.logger?.info(
                     "Resolved DOI \(doi) to \(pmcId)",
@@ -390,18 +424,16 @@ public actor FullTextService {
             }
         }
 
-        return (nil, nil)
+        return PMCResolution(pmcId: nil, pdfRenderURL: nil, searchFailed: searchFailed)
     }
 
     /// Search Europe PMC and extract PMC ID and PDF render URL from the first result.
     ///
     /// - Parameter query: The Europe PMC query to run.
-    /// - Returns: Tuple of PMC ID and PDF render URL (both optional), and
-    ///   `(nil, nil)` when the search fails or matches nothing.
+    /// - Returns: What the first result carried, ``PMCResolution/noMatch`` when
+    ///   the search matched nothing, and ``PMCResolution/failed`` when it threw.
     /// - Throws: `CancellationError` if the caller cancelled.
-    private func searchForPMCIdAndPDFUrl(
-        query: String
-    ) async throws -> (pmcId: String?, pdfRenderURL: String?) {
+    private func searchForPMCIdAndPDFUrl(query: String) async throws -> PMCResolution {
         do {
             let result = try await europePMCService.search(
                 query: query,
@@ -410,7 +442,11 @@ public actor FullTextService {
             )
             if let firstArticle = result.articles.first {
                 let pmcId = firstArticle.pmcId?.isEmpty == false ? firstArticle.pmcId : nil
-                return (pmcId, firstArticle.pdfRenderURL)
+                return PMCResolution(
+                    pmcId: pmcId,
+                    pdfRenderURL: firstArticle.pdfRenderURL,
+                    searchFailed: false
+                )
             }
         } catch where error.isCancellation {
             // As above: cancelling the search must not be read as "this article
@@ -419,15 +455,16 @@ public actor FullTextService {
         } catch {
             // Warning rather than debug: "Europe PMC has nothing for this
             // article" and "we could not ask Europe PMC" are opposite answers,
-            // and this one skips the machine-readable source entirely. At debug
-            // it is invisible at production log levels, so the article reports
-            // as having no full text with nothing in the log to say why.
+            // and this one skips the machine-readable source entirely. The
+            // returned flag is what carries that distinction to the reader; the
+            // log line only ever carried it to us.
             BioMedLitLib.logger?.warning(
                 "PMC ID resolution failed for query '\(query)': \(error.localizedDescription)",
                 category: .fullText
             )
+            return .failed
         }
-        return (nil, nil)
+        return .noMatch
     }
 
     // MARK: - Unpaywall
