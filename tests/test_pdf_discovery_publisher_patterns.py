@@ -69,3 +69,95 @@ def test_a_string_merely_containing_the_host_is_not_a_frontiers_article(
     into a Frontiers article path, producing a URL that could never resolve.
     """
     assert discovery._discover_publisher_specific(doi) == []
+
+
+@pytest.mark.parametrize(
+    "doi",
+    [
+        "10.3389/fnins.2020.00123",
+        "https://doi.org/10.3389/fnins.2020.00123",
+        "http://doi.org/10.3389/fnins.2020.00123",
+        "https://dx.doi.org/10.3389/fnins.2020.00123",
+        "http://dx.doi.org/10.3389/fnins.2020.00123",
+        "doi:10.3389/fnins.2020.00123",
+        "DOI:10.3389/fnins.2020.00123",
+        "  10.3389/fnins.2020.00123  ",
+    ],
+    ids=[
+        "bare",
+        "https-doi-org",
+        "http-doi-org",
+        "https-dx-doi-org",
+        "http-dx-doi-org",
+        "doi-prefix",
+        "uppercase-doi-prefix",
+        "surrounding-whitespace",
+    ],
+)
+def test_every_accepted_doi_form_reaches_the_same_branch(
+    discovery: PDFDiscoverer, doi: str
+) -> None:
+    """Prefix matching runs on the normalised DOI, so every input form matches.
+
+    ``dx.doi.org`` is the form Crossref still emits; it used to survive
+    normalisation intact and so matched no publisher branch at all.
+    """
+    assert [s.url for s in discovery._discover_publisher_specific(doi)] == [
+        "https://www.frontiersin.org/articles/10.3389/fnins.2020.00123/pdf"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("doi", "expected_slug"),
+    [
+        ("10.7717/peerj.1234", "1234"),
+        ("10.7717/peerj-cs.1234", "cs-1234"),
+        ("10.7717/peerj-pchem.99", "pchem-99"),
+    ],
+    ids=["flagship", "computer-science", "physical-chemistry"],
+)
+def test_peerj_series_is_kept_in_the_article_slug(
+    discovery: PDFDiscoverer, doi: str, expected_slug: str
+) -> None:
+    """PeerJ numbers each series separately, so the series identifies the article.
+
+    Taking the text after the last ``.`` dropped it, so every PeerJ Computer
+    Science DOI produced the URL of an unrelated article in the flagship
+    journal -- a wrong PDF rather than a missing one.
+    """
+    assert [s.url for s in discovery._discover_publisher_specific(doi)] == [
+        f"https://peerj.com/articles/{expected_slug}.pdf"
+    ]
+
+
+def test_a_peerj_doi_with_no_article_number_yields_nothing(
+    discovery: PDFDiscoverer,
+) -> None:
+    """Better no source than a URL built from a DOI we could not parse."""
+    assert discovery._discover_publisher_specific("10.7717/peerj-bogus") == []
+
+
+def test_plos_doi_yields_the_journal_specific_pdf_url(discovery: PDFDiscoverer) -> None:
+    """The PLOS branch maps the journal code into the host path."""
+    doi = "10.1371/journal.pntd.0008943"
+
+    assert [s.url for s in discovery._discover_publisher_specific(doi)] == [
+        f"https://journals.plos.org/plosntds/article/file?id={doi}&type=printable"
+    ]
+
+
+@pytest.mark.parametrize(
+    "doi",
+    ["10.3390/nu12103065", "10.1186/s12916-020-01808-2", "10.1038/nature12373"],
+    ids=["mdpi-unimplemented", "bmc-unimplemented", "no-branch-at-all"],
+)
+def test_registrants_without_a_url_pattern_yield_nothing(
+    discovery: PDFDiscoverer, doi: str
+) -> None:
+    """A registrant we cannot build a URL for must produce no source, not a guess.
+
+    MDPI and BMC need landing-page scraping and are deliberately unimplemented;
+    this pins that they stay silent rather than start emitting a plausible but
+    wrong URL.
+    """
+    assert discovery._discover_publisher_specific(doi) == []

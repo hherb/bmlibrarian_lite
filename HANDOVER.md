@@ -8,67 +8,60 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-- **An unreachable source is not an absent one** (#186/#187, PR open on
-  `fix/fulltext-unreachable-source-186-187`). Design spec:
-  `docs/superpowers/specs/2026-08-23-fulltext-unreachable-source-design.md`.
-  - **#186 — the channel modelled two of three honest states.** A source that
-    answered "nothing" and a source we could not reach are opposite answers, and
-    only the first is the evidence base's fault. `FullTextDegradation` now has
-    `europePMCUnreachable` beside `jatsParseFailed`, plus `unspecified` for a raw
-    value a newer build wrote — never produced here, asserted against, and the
-    only honest answer to "a loss whose reason this build cannot name". **Raw
-    values are explicit**, because a compiler-derived case name is a detail a
-    rename silently changes; pinned against literals, not round-tripped through
-    `init(rawValue:)`, which would agree with a rename and pin nothing.
-  - **The identifier search was the sharper half.** It answered `(nil, nil)` for
-    both "no PMC record" and "the search failed", so the machine-readable source
-    was skipped whole and the article reported as having no full text because we
-    could not ask. `PMCResolution` now carries **two** accumulated facts, and
-    `lostTheSource` — the rule, kept on the value — is `searchFailed &&
-    !matchedARecord`. The second fact matters: a query that *answered* with a
-    record naming no PMC ID is the absent-source answer, and without it a
-    transient failure on an earlier query reported an article that simply is not
-    deposited in PMC as one we could not reach. No `pmcId == nil` conjunct: only
-    a matched record can carry an ID, so it would be a check no test could fail.
-  - **Accumulate as a fold, never per branch.** The hand-written version had the
-    PMID attempt assign where the DOI attempt OR-ed — correct only because the
-    first ran first, and a third query above it would have silently discarded its
-    failure. `resolvePMCIdAndPDFUrl` is now a loop over `identifierQueries` with
-    `merging`, which carries *every* field: that also recovered a free PDF URL
-    offered by a query that found no PMC ID, which the old early-return dropped
-    before the `europePMCPDF` branch could see it.
-  - **#187 — iOS could not speak for a link-only record.** A `.webURL` fallback
-    caches nothing, so `hasFullText` is false: the list row offered a download
-    button for a record already fetched, and the card jumped straight to Safari.
-    The row now shows **Link only**, and the card shows the banner plus an Open
-    Publisher link — the automatic jump fires only when there is nothing to
-    explain. All of it keys off `Document.isLinkOnly`, a tested model predicate
-    rather than private view state.
-  - **All four fetch surfaces, not one.** `ScoredDocumentsView`, `ReportView`,
-    `MacScoredDocumentsView` and `MacReportView` run the same retrieval and had
-    drifted four ways; the first fix landed on one of them. They now agree, and
-    the destination comes from `Document.fullTextLinkDestination` (DOI, else
-    PubMed) rather than the DOI alone — gating on the DOI left a DOI-less record
-    with the jump suppressed *and* no link, which is a worse dead end than the
-    silent jump it replaced. `handleTap` grew a link-only arm too: removing the
-    download button had left the whole row still re-running the chain.
-  - **A mutant that dies on the success path proves nothing.** The test meant to
-    pin "a failed first search the second recovers from" ended in a *successful*
-    parse — and that `return` omits `degradation` by construction, since a parse
-    that worked cannot be degraded from itself. It has to end in a **fallback**.
-    The companion case — the second search matching *nothing*, so the flag has to
-    survive — was missing entirely, and a mutant that turned the fold's `||` back
-    into `=` passed all 810 tests.
-  - **The iOS app target had not compiled for some time, and nothing could see
-    it.** `Sources/Utilities/Logger.swift` was the one file on disk absent from
-    `project.pbxproj`, so `AppLogger` did not exist in that target. Fixed here;
-    the CI gap is **#190**. See **Verify**.
+- **Four CodeQL alerts, and what fixing them turned up** (PR #195 on
+  `fix/codeql-secret-exposure-and-url-matching`). CodeQL now reports
+  `results=0` on the PR ref for both python and swift, against 3 and 1 on
+  master, so all four are closed. Review of the fix found more than the alerts
+  did, and the branch carries those too:
+  - **A redaction placeholder is only as good as the load path.** `--json` now
+    prints `<redacted>`, which is a *truthy string*: saved back as config.json it
+    would shadow `NCBI_API_KEY`, claim the rate limit reserved for real keys, and
+    go to NCBI as a credential. `_reject_redaction_placeholder` discards it on
+    load, which is what makes the constant's stated rationale true rather than
+    aspirational.
+  - **`bmll config` without `--json` had been dead since `config.llm` became
+    `config.models`** — it raised `AttributeError` before reaching the `*****`
+    masking that the alert write-up cited as the safe precedent. So `--json` was
+    the only working view of the configuration, and it was the leaking one. Both
+    surfaces are now tested, parametrized over the two unsynchronised copies.
+  - **Swift: every guard named the wrong cause.** A non-https base URL reported
+    "Invalid DOI format" — the DOI cannot influence the scheme — and the one
+    message naming the address was unreachable, because `addingPercentEncoding`
+    is total. Guards split, causes named, logged at `.error`, and an empty
+    address is now rejected before the request instead of arriving as a 422 that
+    reads as "no full text available".
+  - **Prefix-anchoring the Frontiers branch was right, and its neighbours were
+    not all fine.** PeerJ's `doi.split(".")[-1]` dropped the series, so every
+    `peerj-cs` DOI resolved to an unrelated article in the flagship journal — a
+    wrong PDF, not a missing one. `dx.doi.org` was never stripped either.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
 the rest.
+
+- **An unreachable source is not an absent one** (#186/#187 in PR #191,
+  2026-08-23). Design spec:
+  `docs/superpowers/specs/2026-08-23-fulltext-unreachable-source-design.md`.
+  Rules that still bind:
+  - **A source that answered "nothing" and a source we could not reach are
+    opposite answers**, and only the first is the evidence base's fault. Hence
+    `europePMCUnreachable` beside `jatsParseFailed`, and `unspecified` as the
+    only honest answer to a loss this build cannot name. **Raw values stay
+    explicit** — a compiler-derived case name is a detail a rename changes
+    silently, so they are pinned against literals, never round-tripped through
+    `init(rawValue:)`, which would agree with a rename and pin nothing.
+  - **`lostTheSource` is `searchFailed && !matchedARecord`.** The second fact is
+    what separates "not deposited in PMC" from "we could not ask"; without it a
+    transient failure on an earlier query condemned an article that simply is
+    not there.
+  - **Accumulate as a fold, never per branch.** The hand-written version had one
+    attempt assign where another OR-ed — correct only because of ordering, and a
+    third query would have silently dropped its failure.
+  - **Fix all four fetch surfaces.** `ScoredDocumentsView`, `ReportView`,
+    `MacScoredDocumentsView` and `MacReportView` run the same retrieval and had
+    drifted four ways; the first attempt landed on one of them.
 
 - **Typed parse losses, and a fallback that admits its cost** (#184/#183 in
   PR #185, 2026-08-23). Rules that still bind:
@@ -315,6 +308,14 @@ the rest.
 
 ## Potential follow-ups
 
+- **#196 — the NCBI key still reaches a user file in clear text.** The route PR
+  #195 did not close: `study_transparency_analyzer.py:929` puts the key in a GET
+  query, and `requests.HTTPError.__str__` embeds the whole URL — which
+  `batch_analyzer.py:194` stores in `result.errors` and `export_to_json` writes
+  into a **user-chosen file with default permissions**. The config file is 0600
+  for exactly this reason; the export is not.
+  `pubmed/search_client.py:_make_request` models the fix: log `status_code`,
+  never the URL.
 - **#190 — CI never builds either app target.** `swift test` compiles the
   iOS-only sources to nothing on a macOS host, the SPM target excludes
   `Sources/macOS`, and no workflow runs `xcodebuild` at all — so the union of the

@@ -189,6 +189,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         Exit code (0 for success)
     """
     from bmlibrarian_lite import LiteConfig
+    from bmlibrarian_lite.constants import REDACTED_SECRET_PLACEHOLDER
 
     config = LiteConfig.load()
 
@@ -198,16 +199,16 @@ def cmd_config(args: argparse.Namespace) -> int:
         print("=== BMLibrarian Lite Configuration ===")
         print(f"\nConfig file: {config.storage.data_dir / 'config.json'}")
         print(f"\n[LLM]")
-        print(f"  Provider: {config.llm.provider}")
-        print(f"  Model: {config.llm.model}")
-        print(f"  Temperature: {config.llm.temperature}")
-        print(f"  Max tokens: {config.llm.max_tokens}")
+        print(f"  Provider: {config.models.default_provider}")
+        print(f"  Model: {config.models.default_model}")
+        print(f"  Temperature: {config.models.default_temperature}")
+        print(f"  Max tokens: {config.models.default_max_tokens}")
         print(f"\n[Embeddings]")
         print(f"  Model: {config.embeddings.model}")
         print(f"  Cache dir: {config.embeddings.cache_dir or '(auto)'}")
         print(f"\n[PubMed]")
         print(f"  Email: {config.pubmed.email or '(not set)'}")
-        print(f"  API key: {'*****' if config.pubmed.api_key else '(not set)'}")
+        print(f"  API key: {REDACTED_SECRET_PLACEHOLDER if config.pubmed.api_key else '(not set)'}")
         print(f"\n[Search]")
         print(f"  Chunk size: {config.search.chunk_size}")
         print(f"  Chunk overlap: {config.search.chunk_overlap}")

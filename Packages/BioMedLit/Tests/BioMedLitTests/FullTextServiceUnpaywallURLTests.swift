@@ -94,17 +94,61 @@ final class FullTextServiceUnpaywallURLTests: XCTestCase {
         )
     }
 
-    /// A `+` in an address is a real, common form (`name+tag@host`) and the one
-    /// character URLComponents will not save you from: `URLQueryItem` leaves it
-    /// alone, and raw in a query it decodes to a space. Unencoded, Unpaywall is
-    /// told the caller is `name tag@example.org` -- someone else.
-    func testAPlusInTheAddressIsPercentEncoded() async throws {
-        let requested = await unpaywallRequest(email: "name+tag@example.org")
-        let url = try XCTUnwrap(requested)
+    /// Every character `queryValueAllowed` exists to escape, and what goes wrong
+    /// if it does not.
+    ///
+    /// `+` is the one URLComponents will not save you from: `URLQueryItem`
+    /// leaves it alone and raw in a query it decodes to a space, so Unpaywall is
+    /// told the caller is `name tag@example.org` -- someone else. `&` and `=`
+    /// are worse: they let the value split itself into query items nobody asked
+    /// for. The rest are here so the set cannot quietly shrink.
+    func testDelimitersInTheAddressAreEscapedAndSurviveTheRoundTrip() async throws {
+        let addresses = [
+            "name+tag@example.org",
+            "a&b=c@example.org",
+            "x#y@example.org",
+            "100%pure@example.org",
+            "a b@example.org",
+            "wär@exämple.org",
+        ]
 
-        XCTAssertTrue(
-            url.absoluteString.contains("email=name%2Btag@example.org"),
-            "the + must be escaped, got \(url.absoluteString)"
+        for address in addresses {
+            RecordingURLProtocol.reset()
+            let requested = await unpaywallRequest(email: address)
+            let url = try XCTUnwrap(requested, "no request for \(address)")
+            let rawQuery = try XCTUnwrap(url.query(percentEncoded: true))
+            // Drop the "email=" separator so only the value is inspected.
+            let rawValue = rawQuery.dropFirst("email=".count)
+
+            // On the wire: nothing that could be read as a delimiter or a space.
+            for delimiter in ["+", "&", "=", "#", " "] {
+                XCTAssertFalse(
+                    rawValue.contains(delimiter),
+                    "\(delimiter) left bare for \(address): \(rawQuery)"
+                )
+            }
+
+            // And after decoding: exactly the address that was configured.
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            XCTAssertEqual(
+                components.queryItems?.first { $0.name == "email" }?.value,
+                address,
+                "round trip changed the address"
+            )
+        }
+    }
+
+    /// An unset address must be named as such, not left to Unpaywall.
+    ///
+    /// Unpaywall answers 422 for a missing email, which the caller renders as
+    /// "no full text available" -- an outage dressed up as an absent PDF.
+    func testAnEmptyAddressIsRejectedBeforeTheRequest() async {
+        _ = try? await service(email: "   ")
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        XCTAssertNil(
+            RecordingURLProtocol.requested.first { $0.host == "api.unpaywall.org" },
+            "an empty address must not reach Unpaywall"
         )
     }
 

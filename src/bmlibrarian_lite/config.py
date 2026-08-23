@@ -65,6 +65,35 @@ from .transparency import TransparencySettings, get_default_settings
 logger = logging.getLogger(__name__)
 
 
+def _reject_redaction_placeholder(value: str | None) -> str | None:
+    """Discard a secret that is really the redaction placeholder, not a secret.
+
+    ``bmll config --json`` prints :data:`REDACTED_SECRET_PLACEHOLDER` where the
+    key would be. Saving that output back as ``config.json`` is an easy mistake
+    to make, and the placeholder is a truthy string, so without this guard it
+    would be loaded as a live credential: it would shadow ``NCBI_API_KEY``,
+    win the rate limit reserved for real keys, and be sent to NCBI as if it
+    authenticated anything.
+
+    Args:
+        value: Candidate secret as read from the configuration file
+
+    Returns:
+        ``value`` unchanged, or ``None`` if it is the redaction placeholder
+    """
+    if value == REDACTED_SECRET_PLACEHOLDER:
+        logger.warning(
+            "Ignoring pubmed.api_key: the config file holds the redaction "
+            "placeholder %r rather than a key. This happens when the output of "
+            "`bmll config --json` is saved back as config.json. Put the real "
+            "key in the config file, or remove the entry to fall back to the "
+            "NCBI_API_KEY environment variable.",
+            REDACTED_SECRET_PLACEHOLDER,
+        )
+        return None
+    return value
+
+
 @dataclass
 class TaskModelConfig:
     """
@@ -707,7 +736,7 @@ class LiteConfig:
             pubmed_data = data["pubmed"]
             config.pubmed = PubMedConfig(
                 email=pubmed_data.get("email", ""),
-                api_key=pubmed_data.get("api_key"),
+                api_key=_reject_redaction_placeholder(pubmed_data.get("api_key")),
             )
 
         if "discovery" in data:
@@ -776,9 +805,10 @@ class LiteConfig:
         """
         Convert configuration to dictionary for serialization.
 
-        The result carries the PubMed API key in clear text, so it is only fit
-        for writing to the 0600 config file. Anything a human or a log can see
-        must use :meth:`to_redacted_dict` instead.
+        The result carries the PubMed API key in clear text, so it is fit only
+        for the 0600 config file and for in-process hashing
+        (:meth:`_compute_config_hash`). Anything a human or a log can see must
+        use :meth:`to_redacted_dict` instead.
 
         Returns:
             Configuration dictionary, secrets included
@@ -805,11 +835,17 @@ class LiteConfig:
         return data
 
     def _to_dict_without_secrets(self) -> dict[str, Any]:
-        """Build the configuration dictionary minus every sensitive value.
+        """Build the configuration dictionary without the PubMed API key.
 
         The shared body of :meth:`to_dict` and :meth:`to_redacted_dict`. Keeping
-        the secrets out of it and letting each caller fill them in is what makes
-        the redacted view provably free of them.
+        the key out of it and letting each caller fill it in is what makes the
+        redacted view provably free of *that* secret.
+
+        The scope of the guarantee is exactly one field. The nested ``to_dict()``
+        calls below (``models``, ``benchmark``, ``transparency``) are trusted to
+        carry no credentials -- true of their current schemas, but not enforced.
+        A new secret in any of them must be excluded here too, or
+        :meth:`to_redacted_dict` will leak it.
 
         Returns:
             Configuration dictionary with no ``pubmed.api_key`` entry
@@ -929,9 +965,13 @@ class LiteConfig:
         Used for validation caching - the cache is invalidated when
         the configuration changes.
 
-        SHA-256 rather than MD5: the dictionary hashed here carries the PubMed
-        API key, and a broken digest over a secret is worth avoiding even when,
-        as here, the digest never leaves the process.
+        SHA-256 rather than MD5, because CodeQL flags MD5 over a structure that
+        includes a credential -- :meth:`to_dict` carries ``pubmed.api_key``.
+        The digest is an in-memory cache key only and is never logged or
+        persisted. :meth:`validate` does not currently inspect the key, so
+        hashing the redacted view instead would also be correct; the full view
+        is used because a cache keyed on less than it validates is the more
+        expensive mistake to make later.
 
         Returns:
             SHA-256 hash of the configuration dictionary
