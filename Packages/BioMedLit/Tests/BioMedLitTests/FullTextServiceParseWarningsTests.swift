@@ -502,11 +502,41 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// A failed first search that the second recovers from costs the reader
     /// nothing.
     ///
-    /// The mutation-sensitive one: weakening `searchFailed && pmcId == nil` to
-    /// `searchFailed` marks a wholly successful retrieval as degraded, and no
-    /// other test in this file would notice. Routed by query substring — the
-    /// PMID attempt's URL carries `ext_id`, the DOI attempt's carries `DOI`.
+    /// The mutation-sensitive one, and it has to end in a *fallback* to be so.
+    /// The success path builds its result without a degradation at all — a parse
+    /// that worked cannot be a degradation from itself, and the initialiser
+    /// asserts as much — so a version of this test whose XML parse succeeds
+    /// passes just as happily with the rule weakened to `searchFailed` alone.
+    /// Here the XML is absent (404), the chain falls through to a publisher
+    /// link, and a degradation raised during resolution would ride out on it.
+    ///
+    /// Routed by query substring — the PMID attempt's URL carries `ext_id`, the
+    /// DOI attempt's carries `DOI`.
     func testAFailedPMIDSearchTheDOISearchRecoversFromIsNotADegradation() async throws {
+        let searchResponse = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1", "pmcid": "PMC12759138", "inPMC": "Y"
+        }]}}
+        """#
+        StubURLProtocol.routes = [
+            "ext_id": (400, Data()),
+            "DOI": (200, Data(searchResponse.utf8)),
+            "fullTextXML": (404, Data()),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        guard case .doi = result.content else {
+            return XCTFail("expected the publisher-link fallback, got \(result.content)")
+        }
+        XCTAssertNil(result.degradation)
+    }
+
+    /// And the recovery itself works: the DOI search's PMC ID is the one the XML
+    /// fetch uses, so the reader gets the machine-readable copy after all.
+    func testAFailedPMIDSearchStillReachesTheXMLTheDOISearchFound() async throws {
         let searchResponse = #"""
         {"resultList": {"result": [{
           "id": "1", "pmid": "1", "pmcid": "PMC12759138", "inPMC": "Y"

@@ -377,6 +377,24 @@ public actor FullTextService {
 
         /// The answer when a search threw.
         static let failed = PMCResolution(pmcId: nil, pdfRenderURL: nil, searchFailed: true)
+
+        /// The same answer, carrying a failure an *earlier* attempt reported.
+        ///
+        /// Returning a successful attempt's own resolution would drop that
+        /// failure, and then `searchFailed` would silently mean "the last search
+        /// failed" rather than "a search failed" — the two differ exactly when
+        /// one query fails and a later one recovers. The consumer must be free
+        /// to decide that costs nothing; it cannot decide what it is not told.
+        ///
+        /// - Parameter earlier: Whether any previous attempt failed.
+        /// - Returns: This resolution, with `searchFailed` OR-ed against `earlier`.
+        func alsoFailed(_ earlier: Bool) -> PMCResolution {
+            PMCResolution(
+                pmcId: pmcId,
+                pdfRenderURL: pdfRenderURL,
+                searchFailed: searchFailed || earlier
+            )
+        }
     }
 
     /// Resolve a PMC ID and PDF render URL from a PMID or DOI via Europe PMC search.
@@ -407,7 +425,7 @@ public actor FullTextService {
                     "Resolved PMID \(pmid) to \(pmcId)",
                     category: .fullText
                 )
-                return resolved
+                return resolved.alsoFailed(searchFailed)
             }
         }
 
@@ -420,7 +438,7 @@ public actor FullTextService {
                     "Resolved DOI \(doi) to \(pmcId)",
                     category: .fullText
                 )
-                return resolved
+                return resolved.alsoFailed(searchFailed)
             }
         }
 
