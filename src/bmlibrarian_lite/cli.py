@@ -207,7 +207,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     config = LiteConfig.load()
 
     if args.json:
-        print(json.dumps(config.to_dict(), indent=2))
+        print(json.dumps(config.to_redacted_dict(), indent=2))
     else:
         print("=== BMLibrarian Lite Configuration ===")
         print(f"\nConfig file: {config.storage.data_dir / 'config.json'}")

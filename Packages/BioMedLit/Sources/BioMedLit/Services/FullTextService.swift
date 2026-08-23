@@ -47,6 +47,19 @@ public actor FullTextService {
     /// Europe PMC service for identifier resolution.
     private let europePMCService: EuropePMCService
 
+    /// Characters safe to leave unescaped inside a query-string *value*.
+    ///
+    /// `.urlQueryAllowed` describes a whole query, so it permits the separators
+    /// `&` and `=` and leaves `+` alone. A value needs all of those escaped:
+    /// `+` decodes to a space server-side, which would send Unpaywall a
+    /// different address than the one configured, and an unescaped `&` or `=`
+    /// would let the value split itself into query items nobody asked for.
+    private static let queryValueAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?#")
+        return allowed
+    }()
+
     // MARK: - Initialization
 
     /// Initialize the full-text service.
@@ -585,7 +598,25 @@ public actor FullTextService {
             throw FullTextError.noIdentifiers
         }
 
-        guard let url = URL(string: "\(BioMedLitConstants.unpaywallBaseURL)/\(encodedDOI)?email=\(email)") else {
+        // The email goes in through URLComponents rather than being interpolated
+        // into a URL string. Unpaywall requires it as the caller's identity, so
+        // it has to arrive exactly as configured -- and the components carry the
+        // https scheme from ``unpaywallBaseURL`` rather than one spelled out at
+        // every call site.
+        guard var components = URLComponents(string: "\(BioMedLitConstants.unpaywallBaseURL)/\(encodedDOI)") else {
+            throw FullTextError.invalidResponse("Invalid DOI format")
+        }
+        guard let encodedEmail = email.addingPercentEncoding(
+            withAllowedCharacters: Self.queryValueAllowed
+        ) else {
+            throw FullTextError.invalidResponse("Invalid email address")
+        }
+        components.percentEncodedQueryItems = [URLQueryItem(name: "email", value: encodedEmail)]
+
+        // `URLComponents.url` is nil for a base that never parsed, and the scheme
+        // check makes the transport explicit rather than something to be
+        // inferred from a constant three files away.
+        guard let url = components.url, url.scheme == "https" else {
             throw FullTextError.invalidResponse("Invalid DOI format")
         }
 

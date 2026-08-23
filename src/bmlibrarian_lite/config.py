@@ -57,6 +57,7 @@ from .constants import (
     EUROPEPMC_SEARCH_PAGE_SIZE,
     PARALLEL_WORKERS_OLLAMA_DEFAULT,
     PARALLEL_WORKERS_CLOUD_DEFAULT,
+    REDACTED_SECRET_PLACEHOLDER,
 )
 from .data_models import SearchProvider
 from .transparency import TransparencySettings, get_default_settings
@@ -775,8 +776,43 @@ class LiteConfig:
         """
         Convert configuration to dictionary for serialization.
 
+        The result carries the PubMed API key in clear text, so it is only fit
+        for writing to the 0600 config file. Anything a human or a log can see
+        must use :meth:`to_redacted_dict` instead.
+
         Returns:
-            Configuration dictionary
+            Configuration dictionary, secrets included
+        """
+        data = self._to_dict_without_secrets()
+        data["pubmed"]["api_key"] = self.pubmed.api_key
+        return data
+
+    def to_redacted_dict(self) -> dict[str, Any]:
+        """Convert configuration to dictionary safe to display, log or paste.
+
+        Identical to :meth:`to_dict` except that the PubMed API key is replaced
+        with a placeholder. The key is never read into the returned structure at
+        all -- only tested for presence -- so there is no clear-text copy of it
+        for a caller to reach by accident.
+
+        Returns:
+            Configuration dictionary with secrets masked
+        """
+        data = self._to_dict_without_secrets()
+        data["pubmed"]["api_key"] = (
+            REDACTED_SECRET_PLACEHOLDER if self.pubmed.api_key else None
+        )
+        return data
+
+    def _to_dict_without_secrets(self) -> dict[str, Any]:
+        """Build the configuration dictionary minus every sensitive value.
+
+        The shared body of :meth:`to_dict` and :meth:`to_redacted_dict`. Keeping
+        the secrets out of it and letting each caller fill them in is what makes
+        the redacted view provably free of them.
+
+        Returns:
+            Configuration dictionary with no ``pubmed.api_key`` entry
         """
         return {
             "models": self.models.to_dict(),
@@ -786,7 +822,6 @@ class LiteConfig:
             },
             "pubmed": {
                 "email": self.pubmed.email,
-                "api_key": self.pubmed.api_key,
             },
             "europepmc": {
                 "request_timeout": self.europepmc.request_timeout,
@@ -894,11 +929,15 @@ class LiteConfig:
         Used for validation caching - the cache is invalidated when
         the configuration changes.
 
+        SHA-256 rather than MD5: the dictionary hashed here carries the PubMed
+        API key, and a broken digest over a secret is worth avoiding even when,
+        as here, the digest never leaves the process.
+
         Returns:
-            MD5 hash of the configuration dictionary
+            SHA-256 hash of the configuration dictionary
         """
         config_str = json.dumps(self.to_dict(), sort_keys=True)
-        return hashlib.md5(config_str.encode()).hexdigest()
+        return hashlib.sha256(config_str.encode()).hexdigest()
 
     def invalidate_validation_cache(self) -> None:
         """

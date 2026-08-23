@@ -726,7 +726,11 @@ class PDFDiscoverer:
                 ))
 
         # Frontiers journals
-        elif "frontiersin.org" in doi or doi.startswith("10.3389/"):
+        # Matched on the registrant prefix only, like every other branch here:
+        # a host name found somewhere inside the string is not a publisher
+        # identity, and pasting such a string into the article path below built
+        # a URL that could never resolve.
+        elif doi.startswith("10.3389/"):
             # Frontiers PDF pattern: https://www.frontiersin.org/articles/10.3389/XXX/pdf
             pdf_url = f"https://www.frontiersin.org/articles/{doi}/pdf"
             sources.append(PDFSource(
