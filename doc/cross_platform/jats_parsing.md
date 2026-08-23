@@ -1262,9 +1262,42 @@ Give the result a way to say a better source existed and was lost, alongside the
 warnings rather than inside the case that carries the content: both facts
 describe the *retrieval*, not the content type, and burying them in the cases
 means every consumer's pattern match changes each time a new fact is learned
-about a fetch. One reason is enough to start with, and it needs no payload — the
-parser's typed error belongs in the log, where a bug report reads it; persisting
-its message would be the same mistake as persisting the diagnostics.
+about a fetch. The reason needs no payload — the parser's typed error belongs in
+the log, where a bug report reads it; persisting its message would be the same
+mistake as persisting the diagnostics.
+
+There are **three** honest states, and modelling two of them is what leaves the
+reader misinformed (#186):
+
+1. **the source was absent** — it answered, and had no machine-readable text.
+   No degradation.
+2. **we had it and could not read it** — our parser failed on text we held.
+3. **we could not reach it** — a server error that outlasted its retries, a
+   transport failure, a status we do not model, or an identifier *search* that
+   threw. Distinct from (1): the source may well have had the text, and the
+   reader is looking at a substitute because of us.
+
+State (3) has a trap one layer down. An identifier resolution that answers
+"nothing" both when no record exists and when the search failed collapses (3)
+into (1) before the fetch is even attempted, and the second answer skips the
+machine-readable source entirely. Return the failure alongside the result, OR-ed
+across every attempted query, and raise the degradation only when a search failed
+**and** no identifier was found: a failed first query that a later one recovers
+from cost the reader nothing.
+
+Its sentence must not claim the machine-readable copy exists — a full-text
+endpoint answers "not found" for abstract-only deposits, so an unreachable one
+tells you a record exists and nothing about whether it has full text. Say that
+the source could not be reached, and invite a retry, which is the one thing that
+separates it from the other two: a parse failure is deterministic and will fail
+again.
+
+**Persist the reason as an explicit string, never a compiler-derived case name.**
+A reader that meets a value it does not know must not report "no degradation" —
+the field is only ever written when something *was* lost — and must not guess a
+known reason either, which names a culprit the record does not identify. Model an
+explicit "unspecified" reason for exactly this, produced by no writer and
+asserted against, so it can only ever arrive by being read.
 
 Two things must **not** set it. A source that answered "not found" was absent,
 not lost — marking that degraded fires the note on every article never deposited
