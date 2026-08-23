@@ -392,22 +392,47 @@ enum BioMedLitAdapters {
     /// - Parameter result: The BioMedLit FullTextResult.
     /// - Returns: App-compatible AppFullTextResult.
     static func toAppFullTextResult(_ result: BMLFullTextResult) -> AppFullTextResult {
-        switch result {
-        case .europePMC(let html, let markdown, let warnings):
-            // Store both HTML (for rendering) and markdown (for search/export fallback)
-            return AppFullTextResult(
-                content: .html(content: html, markdown: markdown),
-                source: .europePMC,
-                warnings: warnings
-            )
-        case .europePMCPDF(let pdfURL):
-            return AppFullTextResult(content: .pdfURL(pdfURL), source: .europePMCPDF)
-        case .unpaywall(let pdfURL):
-            return AppFullTextResult(content: .pdfURL(pdfURL), source: .unpaywall)
+        // `warnings` and `degradation` are carried across for every case, not
+        // just the parsed one: both describe the *retrieval*, and a fallback that
+        // dropped them would be a PDF the reader is looking at precisely because
+        // the parse failed, with nothing left to say so (#183).
+        AppFullTextResult(
+            content: content(of: result.content),
+            source: appSource(of: result.content),
+            warnings: result.warnings,
+            degradation: result.degradation
+        )
+    }
+
+    /// Map the package's content to the app's equivalent.
+    ///
+    /// - Parameter content: The package-side content.
+    /// - Returns: The app-side content type.
+    private static func content(of content: FullTextContent) -> AppFullTextContentType {
+        switch content {
+        case .europePMC(let html, let markdown):
+            // Both HTML (for rendering) and markdown (for search/export fallback)
+            return .html(content: html, markdown: markdown)
+        case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL):
+            return .pdfURL(pdfURL)
         case .doi(let webURL):
-            return AppFullTextResult(content: .webURL(webURL), source: .doi)
+            return .webURL(webURL)
         case .cached(let filePath):
-            return AppFullTextResult(content: .pdfURL(URL(fileURLWithPath: filePath)), source: .cached)
+            return .pdfURL(URL(fileURLWithPath: filePath))
+        }
+    }
+
+    /// Map the package's source to the app's equivalent.
+    ///
+    /// - Parameter content: The package-side content, which names its own source.
+    /// - Returns: The app-side source.
+    private static func appSource(of content: FullTextContent) -> AppFullTextSource {
+        switch content {
+        case .europePMC: return .europePMC
+        case .europePMCPDF: return .europePMCPDF
+        case .unpaywall: return .unpaywall
+        case .doi: return .doi
+        case .cached: return .cached
         }
     }
 

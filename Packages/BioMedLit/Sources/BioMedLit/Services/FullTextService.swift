@@ -56,9 +56,19 @@ public actor FullTextService {
     ///   - session: Transport to use. Defaults to ``makeSession()``;
     ///     the parameter exists so tests can serve a canned response, without
     ///     which `fetchEuropePMCXML` has no offline coverage at all.
-    public init(email: String, session: URLSession = FullTextService.makeSession()) {
+    ///   - europePMCService: Resolver for a missing PMC ID and its free PDF
+    ///     render URL. Injectable for the same reason as `session`, and separate
+    ///     from it because that service configures its own timeouts: passing
+    ///     `session` straight through would change them in production. Without
+    ///     this seam the Europe PMC PDF branch cannot be reached by a test at
+    ///     all, which is how it shipped without coverage.
+    public init(
+        email: String,
+        session: URLSession = FullTextService.makeSession(),
+        europePMCService: EuropePMCService = EuropePMCService()
+    ) {
         self.email = email
-        self.europePMCService = EuropePMCService()
+        self.europePMCService = europePMCService
         self.session = session
     }
 
@@ -88,8 +98,13 @@ public actor FullTextService {
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
     ///   - doi: Digital Object Identifier.
     ///   - pmid: PubMed ID (for fallback URL).
-    /// - Returns: Full text result with content and source.
-    /// - Throws: `FullTextError` if all sources fail.
+    /// - Returns: The content and its source, what the JATS parse of it lost
+    ///   (#181), and — when Europe PMC served XML this parser could not read —
+    ///   why this is not the best source that existed (#183).
+    /// - Throws: `FullTextError` if all sources fail, or `CancellationError` if
+    ///   the caller cancelled. Cancellation propagates rather than falling
+    ///   through, so a link is never cached as this article's full text just
+    ///   because the caller went away.
     public func fetchFullText(
         pmcId: String?,
         doi: String?,
@@ -104,10 +119,14 @@ public actor FullTextService {
         var resolvedPmcId = pmcId
         var pdfRenderURL: String?
         if resolvedPmcId == nil || resolvedPmcId?.isEmpty == true {
-            let resolved = await resolvePMCIdAndPDFUrl(pmid: pmid, doi: doi)
+            let resolved = try await resolvePMCIdAndPDFUrl(pmid: pmid, doi: doi)
             resolvedPmcId = resolved.pmcId
             pdfRenderURL = resolved.pdfRenderURL
         }
+
+        // Set when Europe PMC served XML this parser could not read, and
+        // attached to whichever fallback the chain returns instead (#183).
+        var degradation: FullTextDegradation?
 
         // Try Europe PMC first (best quality - machine readable XML)
         if let pmcId = resolvedPmcId, !pmcId.isEmpty {
@@ -117,13 +136,18 @@ public actor FullTextService {
                     "Successfully retrieved Europe PMC full text for \(pmcId)",
                     category: .fullText
                 )
-                return .europePMC(
-                    html: content.html, markdown: content.markdown, warnings: content.warnings
+                return FullTextResult(
+                    content: .europePMC(html: content.html, markdown: content.markdown),
+                    warnings: content.warnings
                 )
-            } catch is CancellationError {
+            } catch where error.isCancellation {
                 // A cancelled fetch is not a dead source. Falling through would
                 // hand back a doi.org link as though Europe PMC had nothing,
                 // and cache that as the article's full text.
+                //
+                // Tested by fact rather than by type: the transport reports
+                // cancellation as `URLError.cancelled`, and only the retry
+                // backoff raises `CancellationError` — see ``isCancellation``.
                 throw CancellationError()
             } catch {
                 // Deliberately swallowed: the remaining sources are the reason
@@ -134,6 +158,10 @@ public actor FullTextService {
                 // this parser could not read it — that is a defect in us, not an
                 // absent source, and the two read identically in a log otherwise.
                 if case FullTextError.jatsParseFailure(let parseError) = error {
+                    // Recorded on every result the chain goes on to return, so
+                    // the reader is told that a better source existed and we
+                    // could not use it — the half of #183 the log cannot do.
+                    degradation = .jatsParseFailed
                     BioMedLitLib.logger?.error(
                         "Europe PMC XML for \(pmcId) was retrieved but could not be parsed "
                             + "(\(parseError)); falling back to a PDF or publisher link",
@@ -154,7 +182,9 @@ public actor FullTextService {
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
-            return .europePMCPDF(pdfURL: pdfURL)
+            return FullTextResult(
+                content: .europePMCPDF(pdfURL: pdfURL), degradation: degradation
+            )
         }
 
         // Try Unpaywall (open access PDFs)
@@ -165,7 +195,12 @@ public actor FullTextService {
                     "Successfully found Unpaywall PDF for DOI \(doi)",
                     category: .fullText
                 )
-                return .unpaywall(pdfURL: pdfURL)
+                return FullTextResult(
+                    content: .unpaywall(pdfURL: pdfURL), degradation: degradation
+                )
+            } catch where error.isCancellation {
+                // As above: a cancelled fetch must not be read as an absent PDF.
+                throw CancellationError()
             } catch {
                 BioMedLitLib.logger?.warning(
                     "Unpaywall failed for DOI \(doi): \(error.localizedDescription)",
@@ -178,13 +213,13 @@ public actor FullTextService {
         if let doi = doi, !doi.isEmpty,
            let url = URL(string: "\(BioMedLitConstants.doiBaseURL)/\(doi)") {
             BioMedLitLib.logger?.info("Falling back to DOI URL for \(doi)", category: .fullText)
-            return .doi(webURL: url)
+            return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
         // Final fallback: PubMed page
         if let url = URL(string: "\(BioMedLitConstants.pubmedWebBaseURL)/\(pmid)/") {
             BioMedLitLib.logger?.info("Falling back to PubMed URL for PMID \(pmid)", category: .fullText)
-            return .doi(webURL: url)
+            return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
         BioMedLitLib.logger?.error("No full text available for PMID \(pmid)", category: .fullText)
@@ -303,14 +338,18 @@ public actor FullTextService {
     ///   - pmid: PubMed ID to resolve.
     ///   - doi: DOI to resolve.
     /// - Returns: Tuple of PMC ID and PDF render URL (both optional).
+    /// - Throws: `CancellationError` if the caller cancelled. A resolution that
+    ///   merely fails returns `(nil, nil)`; only cancellation propagates, so the
+    ///   chain never reads "the caller stopped us" as "this article has no PMC
+    ///   record".
     private func resolvePMCIdAndPDFUrl(
         pmid: String?,
         doi: String?
-    ) async -> (pmcId: String?, pdfRenderURL: String?) {
+    ) async throws -> (pmcId: String?, pdfRenderURL: String?) {
         // Try resolving by PMID first
         if let pmid = pmid, !pmid.isEmpty {
             let query = "ext_id:\(pmid) src:med"
-            let resolved = await searchForPMCIdAndPDFUrl(query: query)
+            let resolved = try await searchForPMCIdAndPDFUrl(query: query)
             if let pmcId = resolved.pmcId {
                 BioMedLitLib.logger?.info(
                     "Resolved PMID \(pmid) to \(pmcId)",
@@ -323,7 +362,7 @@ public actor FullTextService {
         // Try resolving by DOI
         if let doi = doi, !doi.isEmpty {
             let query = "DOI:\"\(doi)\""
-            let resolved = await searchForPMCIdAndPDFUrl(query: query)
+            let resolved = try await searchForPMCIdAndPDFUrl(query: query)
             if let pmcId = resolved.pmcId {
                 BioMedLitLib.logger?.info(
                     "Resolved DOI \(doi) to \(pmcId)",
@@ -337,9 +376,14 @@ public actor FullTextService {
     }
 
     /// Search Europe PMC and extract PMC ID and PDF render URL from the first result.
+    ///
+    /// - Parameter query: The Europe PMC query to run.
+    /// - Returns: Tuple of PMC ID and PDF render URL (both optional), and
+    ///   `(nil, nil)` when the search fails or matches nothing.
+    /// - Throws: `CancellationError` if the caller cancelled.
     private func searchForPMCIdAndPDFUrl(
         query: String
-    ) async -> (pmcId: String?, pdfRenderURL: String?) {
+    ) async throws -> (pmcId: String?, pdfRenderURL: String?) {
         do {
             let result = try await europePMCService.search(
                 query: query,
@@ -350,8 +394,17 @@ public actor FullTextService {
                 let pmcId = firstArticle.pmcId?.isEmpty == false ? firstArticle.pmcId : nil
                 return (pmcId, firstArticle.pdfRenderURL)
             }
+        } catch where error.isCancellation {
+            // As above: cancelling the search must not be read as "this article
+            // has no PMC record", which would skip the Europe PMC branch whole.
+            throw CancellationError()
         } catch {
-            BioMedLitLib.logger?.debug(
+            // Warning rather than debug: "Europe PMC has nothing for this
+            // article" and "we could not ask Europe PMC" are opposite answers,
+            // and this one skips the machine-readable source entirely. At debug
+            // it is invisible at production log levels, so the article reports
+            // as having no full text with nothing in the log to say why.
+            BioMedLitLib.logger?.warning(
                 "PMC ID resolution failed for query '\(query)': \(error.localizedDescription)",
                 category: .fullText
             )

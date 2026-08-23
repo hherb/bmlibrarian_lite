@@ -55,7 +55,9 @@ struct FullTextViewer: View {
                 // Above the content, not inside it: a reader who cannot find the
                 // table they came for must learn the rendering is incomplete
                 // before concluding the evidence is absent (#181).
-                ParseWarningBanner(warnings: result.warnings)
+                ParseWarningBanner(
+                    warnings: result.warnings, degradation: result.degradation
+                )
                 content
             }
                 .navigationTitle(document.displayTitle)

@@ -139,8 +139,14 @@ final class Document {
     /// Preferred over markdown for proper table and figure rendering.
     var fullTextHTML: String?
 
-    /// What the JATS parse of the cached full text lost, as a JSON array of
-    /// diagnostics.
+    /// What the JATS parse of the cached full text lost, as the versioned JSON
+    /// object ``JATSParseWarnings`` encodes —
+    /// `{"schemaVersion":1,"losses":[{"kind":"openFigures","count":2}]}`.
+    ///
+    /// A record holding the pre-#184 bare `[String]` of English log lines has no
+    /// schema version, so it fails to decode and reads back as an unspecified
+    /// loss rather than as a clean parse. It is rewritten from the parser on the
+    /// next fetch.
     ///
     /// Persisted rather than kept on the in-flight result because full text is
     /// cached here and re-rendered from here: on macOS the viewer reads only this
@@ -152,6 +158,20 @@ final class Document {
     /// in the same statements as the content it describes; warnings that outlive
     /// their content would label the next article with the last one's losses.
     var fullTextParseWarningsJSON: String?
+
+    /// Why the cached full text is not the best source that existed, if it is not.
+    ///
+    /// The raw value of ``FullTextDegradation``. Persisted for the same reason as
+    /// the warnings above: `MacFullTextViewer` renders only from this model, so a
+    /// note held on the in-flight result alone would never be shown there, and on
+    /// iOS would be lost on reopen.
+    ///
+    /// `nil` means "nothing known". For a record written since this field
+    /// existed that amounts to "this is the best source we had", because only a
+    /// failed parse sets it (#183). For one cached before it, a silent fallback
+    /// is indistinguishable from a genuine best source — an accepted limitation,
+    /// not a guarantee. Those records are rewritten on the next fetch.
+    var fullTextDegradedReasonRaw: String?
 
     /// URL to the locally cached PDF file, if available.
     var fullTextPDFPath: String?
@@ -440,6 +460,10 @@ final class Document {
         fullTextFetchedAt = Date()
         fullTextUnavailable = false
         storeParseWarnings(result.warnings)
+        // Cleared, not merely set: an upload or a re-fetch that succeeded must
+        // not inherit the previous attempt's note. Assigning these by hand at
+        // each call site is what let the cache and the live result drift apart.
+        fullTextDegradedReasonRaw = result.degradation?.rawValue
 
         switch result.content {
         case .markdown(let content):
@@ -476,6 +500,7 @@ final class Document {
         fullTextPDFPath = nil
         fullTextSource = nil
         fullTextParseWarningsJSON = nil
+        fullTextDegradedReasonRaw = nil
     }
 
     /// Clear cached full text data to allow re-fetching.
@@ -487,6 +512,7 @@ final class Document {
         fullTextFetchedAt = nil
         fullTextUnavailable = false
         fullTextParseWarningsJSON = nil
+        fullTextDegradedReasonRaw = nil
     }
 
     // MARK: - Cached Full Text
@@ -503,9 +529,11 @@ final class Document {
     /// hands `MacPDFView` a filesystem path rather than a URL — so this is the
     /// source of its banner's warnings, not of its content branch.
     ///
-    /// `nil` when nothing displayable is cached.
+    /// `nil` when nothing displayable is cached. Do not read the banner's
+    /// inputs through this property — use ``cachedRetrievalNotice``, which
+    /// survives that `nil`.
     var cachedFullTextResult: AppFullTextResult? {
-        let source = AppFullTextSource(rawValue: fullTextSource ?? "cached") ?? .cached
+        let source = storedFullTextSource
         let content: AppFullTextContentType
         if let html = fullTextHTML {
             content = .html(content: html, markdown: fullTextContent ?? "")
@@ -517,8 +545,50 @@ final class Document {
             return nil
         }
         return AppFullTextResult(
-            content: content, source: source, warnings: storedParseWarnings
+            content: content,
+            source: source,
+            warnings: storedParseWarnings,
+            degradation: storedDegradation
         )
+    }
+
+    /// What to tell the reader about how this document's full text was
+    /// retrieved, whether or not any of it can be rendered.
+    ///
+    /// Deliberately not read through ``cachedFullTextResult``. That property
+    /// rebuilds a *renderable* result and answers `nil` when no content was
+    /// cached — which is exactly what a publisher-link fallback stores, because
+    /// a web URL is opened in a browser rather than held as text. Reading the
+    /// banner's inputs through it therefore threw away the degradation on the
+    /// one outcome it was added for: Europe PMC had the machine-readable copy,
+    /// this parser could not read it, and the chain fell through to a link. The
+    /// reader was then told the article has no full text — #183's conclusion
+    /// inverted, and cached, so every reopen repeated it.
+    ///
+    /// Both facts are read straight from the stored fields, so a record with no
+    /// displayable content still speaks.
+    var cachedRetrievalNotice: (warnings: JATSParseWarnings, degradation: FullTextDegradation?) {
+        (storedParseWarnings, storedDegradation)
+    }
+
+    /// The cached source, defaulting to ``AppFullTextSource/cached``.
+    ///
+    /// An unrecognised stored value is logged rather than quietly relabelled:
+    /// this drives the provenance shown to the reader, and a record written by a
+    /// newer build displaying as "Cached" asserts a source we do not actually
+    /// know. The two accessors below take the same line for their own fields.
+    private var storedFullTextSource: AppFullTextSource {
+        guard let raw = fullTextSource else { return .cached }
+        guard let source = AppFullTextSource(rawValue: raw) else {
+            documentLog.error(
+                """
+                Unrecognised full-text source \(raw, privacy: .public) for PMID \
+                \(self.pmid, privacy: .public); showing it as cached.
+                """
+            )
+            return .cached
+        }
+        return source
     }
 
     /// What the cached parse lost, or clean when nothing was recorded.
@@ -531,9 +601,14 @@ final class Document {
     private var storedParseWarnings: JATSParseWarnings {
         guard let json = fullTextParseWarningsJSON else { return JATSParseWarnings() }
         do {
-            let diagnostics = try JSONDecoder().decode([String].self, from: Data(json.utf8))
-            return JATSParseWarnings(diagnostics: diagnostics)
+            return try JSONDecoder().decode(JATSParseWarnings.self, from: Data(json.utf8))
         } catch {
+            // Also the path a record written before the losses were typed takes:
+            // it holds a bare array of the old English lines, which has no
+            // schema version and so cannot decode. Mapping those sentences back
+            // to cases would re-create, in a persisted format, exactly the
+            // wording coupling #184 removed. The record is rewritten from the
+            // parser on the next fetch.
             documentLog.error(
                 """
                 Stored parse warnings failed to decode for PMID \
@@ -541,11 +616,47 @@ final class Document {
                 Reporting an unspecified loss rather than a clean parse.
                 """
             )
-            return JATSParseWarnings(diagnostics: [
-                "This article's parse diagnostics could not be read back — "
-                    + "some content may be missing."
-            ])
+            return JATSParseWarnings(losses: [.unspecified])
         }
+    }
+
+    /// Why the cached source is not the best one that existed, or `nil`.
+    ///
+    /// An unrecognised value is *not* "no degradation". The field is only ever
+    /// written when a better source was lost, so a raw value this build does not
+    /// know — one written by a newer build — still means something was lost, and
+    /// reporting none would tell the reader the publisher had no machine-readable
+    /// text when we know otherwise. It reports the one reason there is and logs.
+    private var storedDegradation: FullTextDegradation? {
+        guard let raw = fullTextDegradedReasonRaw else { return nil }
+        if let known = FullTextDegradation(rawValue: raw) { return known }
+        documentLog.error(
+            """
+            Unrecognised full-text degradation \(raw, privacy: .public) stored for PMID \
+            \(self.pmid, privacy: .public); reporting a failed parse rather than none.
+            """
+        )
+        return .jatsParseFailed
+    }
+
+    /// The persisted form of "something was lost and this record cannot say
+    /// what".
+    ///
+    /// Written when the real warnings could not be encoded. Encoding the case
+    /// rather than storing a sentinel keeps the stored payload well-formed, so
+    /// it reads back through the ordinary decode path as the loss it means
+    /// instead of relying on a second failure to convey it.
+    private static var unspecifiedWarningsJSON: String {
+        let unspecified = JATSParseWarnings(losses: [.unspecified])
+        guard let data = try? JSONEncoder().encode(unspecified),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            // One payload-free case cannot realistically fail to encode. If it
+            // somehow does, any value this build cannot decode still reads back
+            // as an unspecified loss, which is the answer we want anyway.
+            return "unencodable"
+        }
+        return json
     }
 
     /// Record what a parse lost, clearing the field when it lost nothing.
@@ -560,17 +671,22 @@ final class Document {
             fullTextParseWarningsJSON = nil
             return
         }
-        guard let data = try? JSONEncoder().encode(warnings.diagnostics),
+        guard let data = try? JSONEncoder().encode(warnings),
               let json = String(data: data, encoding: .utf8)
         else {
             documentLog.error(
                 """
                 Parse warnings for PMID \(self.pmid, privacy: .public) could not be encoded; \
-                \(warnings.diagnostics.count, privacy: .public) diagnostic(s) \
-                will not survive the cache
+                \(warnings.losses.count, privacy: .public) loss(es) \
+                will not survive the cache. Recording an unspecified loss.
                 """
             )
-            fullTextParseWarningsJSON = nil
+            // Not `nil`, which reads back as clean. Something *was* lost — that
+            // is why we are past the guard above — so the honest record is one
+            // that says so without saying what. A payload this build cannot
+            // decode is precisely how `storedParseWarnings` spells that, so a
+            // deliberately unreadable value carries the meaning exactly.
+            fullTextParseWarningsJSON = Self.unspecifiedWarningsJSON
             return
         }
         fullTextParseWarningsJSON = json

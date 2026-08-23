@@ -8,91 +8,100 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-- **The unwind audit's two blind spots** (#180/#181, PR open on
-  `fix/jats-unwind-audit-blind-spots-180-181`). Design spec:
-  `docs/superpowers/specs/2026-08-22-jats-unwind-audit-blind-spots-design.md`.
-  - **#180 — the clamp erased the evidence.** Every depth counter decremented as
-    `max(0, n - 1)` and the audit only tested `> 0`, so an over-decrement was
-    destroyed before it could be read — and worse, a counter that clamped to 0
-    read "balanced" for the rest of the document, so the audit **certified a
-    defective parse as clean**. Every counter now records it: the depths in
-    `decrementDepth`, the caption/section stacks in `popTrackingUnderflow`, the
-    exhibit collectors at their call sites. **A stack hides an over-pop just as
-    the clamp did** — "cannot go negative" is not "cannot lose the evidence",
-    since popping an empty stack is a no-op that erases the same observation.
-    The collectors were the sharper half: they *detected* it and wrote only to
-    the log, the very defect #181 exists to correct.
-    - **The clamp had to stay, and only one counter proves it.** `inSubArticle`
-      is `subArticleDepth > 0`, so an unclamped -1 is brought back to 0 by the
-      next `<sub-article>` and a reviewer report is emitted as the article's own
-      body. Correcting a claim made while designing this: `exhibitFootnoteDepth`
-      has *no* routing stake — that moved to `inInnermostExhibitFootnote` in
-      #173 — so its clamp is uniformity, not necessity.
-    - `JATSParseUnwindState` clamps in its initialiser and all seven fields are
-      `let`. `isBalanced` is pinned to agree with `unwindDiagnostics` on a state
-      built per field from a **`Mirror` of the struct** — a hand-written list
-      passed happily when a field was added to neither, which is the silent
-      disagreement the test exists to prevent.
-  - **#181 — logging is not reporting.** The audit reached the logger and
-    nothing else, so the UI rendered a gutted article exactly as it rendered a
-    complete one. `JATSParseWarnings` now travels parser → `FullTextService` →
-    `FullTextResult` → `AppFullTextResult` → `Document` → a banner.
-    - **Facts, not copy.** The package emits the log's diagnostics; the
-      clinician-facing sentence is composed in the app so it can be localised.
-    - **Narrower than the log, deliberately.** Zero authors stays log-only: a
-      metadata gap is not a truncation, and a banner that fires on editorials
-      and corrections is worth nothing on the article that really lost content.
-    - **Persistence is what makes it visible at all.** `MacFullTextViewer`
-      renders from the cached `Document` and never sees the in-flight result;
-      iOS would have shown the banner once and lost it on reopen. Hence
-      `fullTextParseWarningsJSON` — and hence `Document.cachedFullTextResult`,
-      one reconstruction instead of four. **The first pass missed two**, both
-      defaulting the warnings to clean, so a truncated article reopened from the
-      cache still rendered as complete on two of the three iOS routes.
-    - **The consolidation broke PDF caching.** `applyFullTextResult` never wrote
-      `fullTextPDFPath` — fine while its only caller was macOS, which downloads
-      straight after, but the three iOS sites converted to it had each stored the
-      URL themselves. `hasFullText` stayed false, so every PDF-sourced article
-      read as never-fetched on relaunch. **A refactor onto a shared writer is
-      only safe where every caller wanted everything that writer does.**
-    - **The upload path was a fourth hand-assignment site** that never cleared
-      the warnings, so a reader uploading a complete copy *because* the parse was
-      truncated was told their own upload was missing content.
-    - `FullTextService.init(email:session:)` is new: it built its own
-      `URLSession`, so `fetchEuropePMCXML` had **no offline coverage at all**
-      and both the channel and the typed error would have shipped untested.
-      First `URLProtocol` stub in the package.
-    - **#181's `CancellationError` claim is not reachable today** — the broad
-      catch wraps only two synchronous parse calls that throw `JATSParseError`
-      alone. Kept against a future async edit, but it now **rethrows** rather
-      than wrapping in `xmlParseError`: naming an error you could not classify
-      *is* the relabelling the comment claimed to prevent, and it marked a
-      cancellation non-retryable. `xmlParseError` had no producer left and is
-      gone: a second case rendering identically only gave a future edit somewhere
-      to put an unclassified error, and stole `jatsParseFailure`'s matches.
-    - `fetchFullText` rethrows `CancellationError` rather than falling through to
-      a `doi.org` link and caching it as the full text; a parse failure logs at
-      error level, distinct from an absent source. **Telling the reader is #183**
-      — only `.europePMC` carries warnings, so the fallback cases cannot say "we
-      had the XML and could not read it".
-  - **A pbxproj UUID collision silently drops a file from the build.** Reusing
-    an existing ID for `ParseWarningBanner.swift` compiled everywhere except the
-    macOS target, whose only symptom was "cannot find in scope" in an unrelated
-    file. `swift test` cannot see it — the SPM target excludes `Sources/macOS`.
-    **Now guarded**: `xcode_project_guards.py` rejects a duplicate object id,
-    anchored to the two-tab indent real definitions use (deeper in, the same
-    shape is a dictionary key or a `TargetAttributes` reference).
-  - Nine mutants across both issues, no survivors. **The mutation harness itself
-    lied once**: keying on the last `with N failures` line in `swift test` output
-    reported two killed mutants as survivors. Key on the exit code.
-
----
+- **Typed parse losses, and a fallback that admits its cost** (#184/#183, PR open
+  on `fix/jats-typed-parse-losses-184-183`). Design spec:
+  `docs/superpowers/specs/2026-08-22-jats-typed-parse-losses-design.md`.
+  - **#184 — the payload was rendered English.** `JATSParseWarnings.diagnostics`
+    was `[String]` of log lines, and those strings reached the reader, SwiftData
+    and `Equatable` — so the UI could not be localised, the banner could only
+    replay sentences, a rewording invalidated every stored record, and tests could
+    only substring-match. Now one `Loss` per audited counter plus `.noContent` and
+    `.unspecified`, with `diagnostics` kept as a derived property so the log and
+    the banner's technical disclosure render the same English they always did.
+    Persistence goes through `losses` via `Codable` and never touches
+    `diagnostics`.
+    - **The eight parser-produced lines moved byte-for-byte**, because
+      `testParsingReportsNoContentLoss` reads the log's text and the corpus
+      digests hang off it; a rewording later is now visibly a rewording.
+      `.unspecified` is the exception and has to be: no parse produces it, so it
+      has no parser-side predecessor.
+    - **The persisted form is versioned with named keys** —
+      `{"schemaVersion":1,"losses":[{"kind":"openFigures","count":2}]}`. Never lean
+      on synthesised `Codable` for a tagged union: Swift emits `{"_0":2}`, and `_0`
+      is a compiler detail you are then stuck reading forever. This is #163's
+      complaint answered before it accrues history.
+    - **Legacy records need a test, not a migration.** The old bare `[String]` has
+      no `schemaVersion`, so it fails to decode, and the reader already turns a
+      decode failure into `.unspecified` rather than clean. Mapping old sentences
+      back to cases was rejected: that re-creates the wording coupling in the one
+      place wording is hardest to change.
+  - **#183 — the fallback could not say what it cost.** Only `.europePMC` carried
+    warnings, so "Europe PMC had no machine-readable text" and "it had it and we
+    choked" reached the reader identically — a reader attributing our defect to
+    the evidence base. `FullTextResult` is now a struct of `content` + `warnings`
+    + `degradation`, the shape `AppFullTextResult`'s own doc comment already
+    argued for and the package's enum contradicted.
+    - **A 404 is not a degradation.** An absent source was never lost, and a note
+      that fires on every article never deposited as full text is worthless on the
+      ones where it is true. Pinned by test, and a mutant that sets it in the
+      `else` branch dies there.
+    - **The reader sees information, not a warning.** The fallback PDF is
+      *complete*; a warning triangle over content that is fine is what trains a
+      reader to dismiss the banner on the article that really lost text.
+    - Typing the losses is also what let `.noContent` stop hiding behind "some of
+      this article could not be displayed" — it is a rendering stripped to an
+      accession number, and now says so.
+  - **A view's private computed state cannot be tested.** The banner's
+    three-way choice moved into `ParseWarningMessage`, a pure value — which is
+    where the only real judgement in that file lives. Do not nest it in the view
+    and call it `State`: that silently shadows SwiftUI's `@State`.
+  - **A mutation run only proves what its assertions reach.** Review found four
+    survivors. `schemaVersion = 1 -> 2` and a renamed persisted key both left 788
+    green, because every literal-JSON test asserted a *throw* — nothing decoded a
+    literal successfully, so nothing pinned the version those literals embed. Two
+    `degradation` sites were unreachable: the test naming the doi.org branch
+    landed on the PubMed fallback (both return `.doi(webURL:)`), and the PDF
+    branch needed an `EuropePMCService` the initialiser hard-coded. Assert the
+    host, inject the seam, pin the contract with a literal past the encoder.
+  - **The degradation was written and then unreadable.** A `.webURL` fallback
+    caches no content, so `cachedFullTextResult` returned `nil` and took the note
+    with it — macOS said "No full text available" for an article we had and lost.
+    Read a retrieval note from the stored fields, never through a rebuild of the
+    content.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
 the rest.
+
+- **The unwind audit's two blind spots** (#180/#181 in PR #182, 2026-08-22).
+  **#180 — the clamp erased the evidence.** Every counter decremented as
+  `max(0, n - 1)` and the audit only tested `> 0`, so a counter that clamped to 0
+  read "balanced" for the rest of the document and the audit **certified a
+  defective parse as clean**. Every counter now records the underflow. **A stack
+  hides an over-pop just as the clamp did** — "cannot go negative" is not "cannot
+  lose the evidence". The clamp had to stay: `inSubArticle` is
+  `subArticleDepth > 0`, so an unclamped -1 is brought back to 0 by the next
+  `<sub-article>` and a reviewer report is emitted as the article's own body.
+  **#181 — logging is not reporting.** `JATSParseWarnings` now travels parser →
+  `FullTextService` → `Document` → a banner, persisted because macOS renders only
+  from the cache. Rules that still bind:
+  - **`isBalanced` is pinned against the losses via a `Mirror` of the struct** —
+    a hand-written field list passed happily when a field was added to neither.
+  - **A refactor onto a shared writer is only safe where every caller wanted
+    everything that writer does.** `applyFullTextResult` never wrote
+    `fullTextPDFPath`, so every PDF-sourced article read as never-fetched on
+    relaunch; and the upload path never cleared the warnings, so a reader
+    uploading a complete copy *because* the parse was truncated was told their own
+    upload was missing content.
+  - **A pbxproj UUID collision silently drops a file from the build**, compiling
+    everywhere except the macOS target. `swift test` cannot see it — the SPM
+    target excludes `Sources/macOS`. Now guarded by `xcode_project_guards.py`.
+  - Both its own follow-ups, #184 and #183, are in flight above. **#183 had been
+    closed as completed by a commit whose message listed it as deferred**; the
+    code agreed with the message. Check that a closing commit did what the
+    closure claims.
 
 - **One exhibit collector for figures and tables** (#170/#173/#175 in PR #179,
   2026-08-22). `<fig>` and `<table-wrap>` now share one `ExhibitCollector`, and
@@ -334,16 +343,6 @@ the rest.
 
 ## Potential follow-ups
 
-- **#183 — a failed JATS parse falls back silently.** `fetchFullText` drops to
-  the PDF/DOI chain, which is right, but the reader cannot tell "Europe PMC had
-  no machine-readable text" from "it had it and we could not read it". Needs a
-  warnings channel on the non-`.europePMC` cases; the log half is done.
-- **#184 — `JATSParseWarnings` carries rendered English**, so the banner's
-  technical rows can never be localised, cannot be aggregated, and are persisted
-  verbatim into SwiftData. Structured `Loss` cases with `diagnostics` as a
-  computed property keeps every caller working. Worth doing before the persisted
-  format has history behind it.
-
 - **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
   entry is `\bpharma(?:ceutical)?s?\b`, Swift's is `\bpharma(?:ceutical)?\b`. All
   17 other entries are byte-identical. `\b` lands before the "s", so a COI
@@ -353,17 +352,16 @@ the rest.
   instead. One-character fix, but wants a shared fixture or it recurs.
   #147 added `sponsor_patterns.json` for the government/academic lists, which is
   the same shape of guard — `INDUSTRY_KEYWORDS` still has none.
-- **#172, #174, #176, #177 — what is left of the #171 review round** (#173 and
-  #175 landed in PR #179; see above). All four are independent of each other.
-  **#172 and #174 go together**, since both are about a table or figure the renderer cannot
-  honestly describe: #172 drops a table deposited as a `<graphic>` entirely — all
-  8 tables in `PMC12759138` — and #174 gives an unlabelled exhibit a fabricated
-  `"Figure N"` from its array position, in `alt` text too, which in a
-  medical-literature tool is a number a citation may carry. bmlib already models
-  a table's `graphic_url`, so #172 is a port. #176 (`FullTextTab` swallows
-  full-text errors with no message and no log) is a UI fix in Python; #177
-  (grouped citations) now rests on 631 labels across 150 articles and wants
-  publisher spread before the model changes.
+- **#172, #174, #177 — what is left of the #171 review round** (#173 and #175
+  landed in PR #179, #176 in PR #182; see above). All three are independent.
+  **#172 and #174 go together**, since both are about a table or figure the
+  renderer cannot honestly describe: #172 drops a table deposited as a
+  `<graphic>` entirely — all 8 tables in `PMC12759138` — and #174 gives an
+  unlabelled exhibit a fabricated `"Figure N"` from its array position, in `alt`
+  text too, which in a medical-literature tool is a number a citation may carry.
+  bmlib already models a table's `graphic_url`, so #172 is a port. #177 (grouped
+  citations) now rests on 631 labels across 150 articles and wants publisher
+  spread before the model changes.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
   open** (#156, #157, #161, #167, #169 landed; see above). Fixing any of them
   moves the corpus digests and needs the sibling parsers checked — see **Verify**
