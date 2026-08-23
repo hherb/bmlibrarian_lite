@@ -380,4 +380,30 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - The persisted contract (#186)
+
+    /// The raw values are the persisted contract, pinned as literals.
+    ///
+    /// Compared against strings rather than round-tripped through
+    /// `init(rawValue:)`, which would agree with a rename and pin nothing —
+    /// the hole #185's mutation round found in the warnings tests. A stored
+    /// record outlives the case name, so the case name must not be what decides
+    /// the string.
+    func testTheDegradationRawValuesArePinned() {
+        XCTAssertEqual(FullTextDegradation.jatsParseFailed.rawValue, "jatsParseFailed")
+        XCTAssertEqual(
+            FullTextDegradation.europePMCUnreachable.rawValue, "europePMCUnreachable"
+        )
+        XCTAssertEqual(FullTextDegradation.unspecified.rawValue, "unspecified")
+    }
+
+    /// And decode back, which is the direction `Document.storedDegradation` reads.
+    func testTheDegradationRawValuesDecode() {
+        XCTAssertEqual(
+            FullTextDegradation(rawValue: "europePMCUnreachable"), .europePMCUnreachable
+        )
+        XCTAssertEqual(FullTextDegradation(rawValue: "unspecified"), .unspecified)
+        XCTAssertNil(FullTextDegradation(rawValue: "somethingANewerBuildKnowsAbout"))
+    }
 }
