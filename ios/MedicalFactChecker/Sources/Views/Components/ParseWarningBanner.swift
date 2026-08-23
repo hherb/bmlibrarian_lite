@@ -38,8 +38,8 @@ private enum ParseWarningBannerConstants {
 
 /// What a ``ParseWarningBanner`` has to say about a retrieval, if anything.
 ///
-/// A pure value rather than a computation inside the view, so the choice between
-/// the three states — the part with actual logic in it — can be tested without
+/// A pure value rather than a computation inside the view, so the choice among
+/// its states — the part with actual logic in it — can be tested without
 /// rendering anything.
 enum ParseWarningMessage: Equatable {
     /// Parts of the rendering are missing.
@@ -52,8 +52,13 @@ enum ParseWarningMessage: Equatable {
     /// two apart is what typing the losses made possible (#184).
     case noContent
 
-    /// A better source existed and could not be read (#183).
-    case degraded
+    /// A better source existed and could not be used (#183), and why (#186).
+    ///
+    /// Carries the reason rather than splitting into a case per reason: they
+    /// differ only in their sentence, and every other property — the icon, the
+    /// tint, ``isWarning`` — answers the same for all of them. A case each would
+    /// invite those answers to drift apart.
+    case degraded(FullTextDegradation)
 
     /// What to tell the reader about a retrieval, or `nil` when there is nothing
     /// to say.
@@ -68,8 +73,8 @@ enum ParseWarningMessage: Equatable {
     init?(warnings: JATSParseWarnings, degradation: FullTextDegradation?) {
         if !warnings.isClean {
             self = warnings.losses.contains(.noContent) ? .noContent : .incomplete
-        } else if degradation != nil {
-            self = .degraded
+        } else if let degradation {
+            self = .degraded(degradation)
         } else {
             return nil
         }
@@ -81,7 +86,10 @@ enum ParseWarningMessage: Equatable {
     /// complete, and a warning over content that is fine is the false alarm that
     /// trains a reader to dismiss the banner on the article where text really was
     /// discarded.
-    var isWarning: Bool { self != .degraded }
+    var isWarning: Bool {
+        if case .degraded = self { return false }
+        return true
+    }
 
     /// The sentence the reader sees.
     var headline: LocalizedStringKey {
@@ -90,8 +98,15 @@ enum ParseWarningMessage: Equatable {
             return "Some of this article could not be displayed. Parts of the text may be missing."
         case .noContent:
             return "None of this article's text could be displayed. Only its reference details are shown."
-        case .degraded:
+        case .degraded(.jatsParseFailed):
             return "This article's machine-readable copy could not be read, so a substitute is shown here."
+        case .degraded(.europePMCUnreachable):
+            return """
+                Europe PMC could not be reached, so a substitute is shown here. \
+                Trying again later may retrieve the full article.
+                """
+        case .degraded(.unspecified):
+            return "A better copy of this article could not be used, so a substitute is shown here."
         }
     }
 
@@ -110,16 +125,18 @@ enum ParseWarningMessage: Equatable {
 /// (#181). Those are opposite conclusions, and in a medical-literature tool the
 /// wrong one is a reader deciding the evidence is absent.
 ///
-/// Four renderings, one component, so the two facts cannot drift apart in
+/// Every rendering in one component, so the two facts cannot drift apart in
 /// wording or styling:
 ///
 /// - nothing lost and the best source used — renders nothing;
 /// - the rendering is incomplete — a warning;
 /// - the rendering carries no article text at all — a warning that says so
 ///   rather than hiding behind "some of this is missing";
-/// - a better source existed and could not be read — an informational note.
+/// - a better source existed and could not be used — an informational note, with
+///   a sentence per reason: our parser failed on it, we could not reach it, or a
+///   record from a newer build names a reason this one does not know (#186).
 ///
-/// The last is deliberately *not* a warning. A fallback PDF or publisher link is
+/// The last group is deliberately *not* a warning. A fallback PDF or publisher link is
 /// complete in itself, and a warning triangle over content that is fine is the
 /// false alarm that trains a reader to dismiss the banner on the article where
 /// text really was discarded (#183).
@@ -201,6 +218,8 @@ struct ParseWarningBanner: View {
         ParseWarningBanner(warnings: JATSParseWarnings(losses: [.openTables(2)]))
         ParseWarningBanner(warnings: JATSParseWarnings(losses: [.noContent]))
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .jatsParseFailed)
+        ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .europePMCUnreachable)
+        ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .unspecified)
         ParseWarningBanner(warnings: JATSParseWarnings())
         Spacer()
     }

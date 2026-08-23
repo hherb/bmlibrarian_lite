@@ -74,17 +74,40 @@ final class ParseWarningMessageTests: XCTestCase {
     // MARK: - The fallback's note (#183)
 
     func testAFallbackAfterAFailedParseIsReportedAsDegraded() {
-        XCTAssertEqual(message(degradation: .jatsParseFailed), .degraded)
+        XCTAssertEqual(message(degradation: .jatsParseFailed), .degraded(.jatsParseFailed))
     }
 
-    /// The whole point of the third state: it is information, not a warning.
+    /// A source we could not reach reports as itself, not as a failed parse.
+    ///
+    /// The two sound similar and are opposite in whose fault they are: one says
+    /// our parser choked on text we held, the other says we never got the text.
+    /// Only the second is worth retrying, which is why only its sentence says so.
+    func testAnUnreachableSourceIsReportedAsItsOwnReason() {
+        XCTAssertEqual(
+            message(degradation: .europePMCUnreachable), .degraded(.europePMCUnreachable)
+        )
+    }
+
+    /// A reason this build does not know still reaches the reader as a note.
+    func testAnUnspecifiedDegradationStillSpeaks() {
+        XCTAssertEqual(message(degradation: .unspecified), .degraded(.unspecified))
+    }
+
+    /// The whole point of the third state: it is information, not a warning —
+    /// and that must hold for every reason, not just the one it shipped with.
     ///
     /// The reader is looking at a complete PDF. What is true is that we could not
-    /// read the better copy, which is worth saying and is not worth alarming them
+    /// get the better copy, which is worth saying and is not worth alarming them
     /// about — and styling it as a warning is what would make the real warning
     /// worthless.
-    func testADegradationIsNotStyledAsAWarning() {
-        XCTAssertFalse(ParseWarningMessage.degraded.isWarning)
+    func testNoDegradationIsStyledAsAWarning() {
+        for reason in [
+            FullTextDegradation.jatsParseFailed, .europePMCUnreachable, .unspecified,
+        ] {
+            XCTAssertFalse(
+                ParseWarningMessage.degraded(reason).isWarning, "\(reason) styled as a warning"
+            )
+        }
         XCTAssertTrue(ParseWarningMessage.incomplete.isWarning)
         XCTAssertTrue(ParseWarningMessage.noContent.isWarning)
     }
@@ -101,15 +124,33 @@ final class ParseWarningMessageTests: XCTestCase {
         )
     }
 
-    /// Each state says something different. Three headlines that collapsed to one
-    /// would pass every test above while telling the reader nothing new.
-    func testTheThreeStatesReadDifferently() {
+    /// Each state says something different. Headlines that collapsed onto one
+    /// another would pass every test above while telling the reader nothing new
+    /// — and the two degradations are the pair most at risk of it, since they
+    /// differ only in whose shortfall produced the substitute.
+    func testTheFiveStatesReadDifferently() {
         let headlines = [
             ParseWarningMessage.incomplete,
             .noContent,
-            .degraded,
+            .degraded(.jatsParseFailed),
+            .degraded(.europePMCUnreachable),
+            .degraded(.unspecified),
         ].map { String(describing: $0.headline) }
 
-        XCTAssertEqual(Set(headlines).count, 3, "\(headlines)")
+        XCTAssertEqual(Set(headlines).count, 5, "\(headlines)")
+    }
+
+    /// Only one of the three invites a retry, because only one is worth
+    /// retrying: a deterministic parse failure will fail again.
+    func testOnlyTheUnreachableSentenceInvitesARetry() {
+        let unreachable = String(
+            describing: ParseWarningMessage.degraded(.europePMCUnreachable).headline
+        )
+        XCTAssertTrue(unreachable.contains("again"), unreachable)
+
+        for reason in [FullTextDegradation.jatsParseFailed, .unspecified] {
+            let other = String(describing: ParseWarningMessage.degraded(reason).headline)
+            XCTAssertFalse(other.contains("again"), other)
+        }
     }
 }
