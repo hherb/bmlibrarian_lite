@@ -99,8 +99,9 @@ public actor FullTextService {
     ///   - doi: Digital Object Identifier.
     ///   - pmid: PubMed ID (for fallback URL).
     /// - Returns: The content and its source, what the JATS parse of it lost
-    ///   (#181), and — when Europe PMC served XML this parser could not read —
-    ///   why this is not the best source that existed (#183).
+    ///   (#181), and — when Europe PMC served XML this parser could not read, or
+    ///   could not be reached at all — why this is not the best source that
+    ///   existed (#183, #186).
     /// - Throws: `FullTextError` if all sources fail, or `CancellationError` if
     ///   the caller cancelled. Cancellation propagates rather than falling
     ///   through, so a link is never cached as this article's full text just
@@ -167,9 +168,26 @@ public actor FullTextService {
                             + "(\(parseError)); falling back to a PDF or publisher link",
                         category: .fullText
                     )
-                } else {
+                } else if case FullTextError.noFullTextAvailable = error {
+                    // The source answered and had nothing. Never a degradation:
+                    // a note that fires on every article never deposited as
+                    // full text is worthless on the ones where it is true.
                     BioMedLitLib.logger?.warning(
-                        "Europe PMC XML failed for \(pmcId): \(error.localizedDescription)",
+                        "Europe PMC has no machine-readable text for \(pmcId)",
+                        category: .fullText
+                    )
+                } else {
+                    // Everything else — a server error that outlasted its
+                    // retries, a transport failure, a status we do not model —
+                    // means we could not reach the source, not that it was
+                    // empty. Those are opposite answers, and collapsing them
+                    // tells the reader the evidence base is thin when the
+                    // shortfall is ours (#186).
+                    degradation = .europePMCUnreachable
+                    BioMedLitLib.logger?.warning(
+                        "Europe PMC XML could not be retrieved for \(pmcId): "
+                            + "\(error.localizedDescription); falling back to a PDF "
+                            + "or publisher link",
                         category: .fullText
                     )
                 }

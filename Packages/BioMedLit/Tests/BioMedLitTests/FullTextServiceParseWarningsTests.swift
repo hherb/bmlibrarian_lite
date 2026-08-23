@@ -406,4 +406,63 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
         XCTAssertEqual(FullTextDegradation(rawValue: "unspecified"), .unspecified)
         XCTAssertNil(FullTextDegradation(rawValue: "somethingANewerBuildKnowsAbout"))
     }
+
+    /// An endpoint that answered with a status we cannot use is not an absent
+    /// source.
+    ///
+    /// HTTP 400 rather than the 503 the issue names, deliberately: a 503 is
+    /// retryable, and `fetchEuropePMCWithRetry` runs `RetryConfiguration.serverError`
+    /// — five attempts from a five-second delay — so the honest version of that
+    /// test costs about seventy-five seconds of real time. Both statuses reach
+    /// the same `else` branch.
+    func testAnUnusableEuropePMCStatusIsReportedAsUnreachable() async throws {
+        StubURLProtocol.routes = [
+            "fullTextXML": (400, Data()),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+
+        XCTAssertEqual(result.degradation, .europePMCUnreachable)
+    }
+
+    /// The transport failing outright, which reaches the same branch by a
+    /// different route — no `HTTPURLResponse` is ever produced, so the status
+    /// switch is never entered.
+    ///
+    /// `URLError.badServerResponse` because it is absent from `RetryHelper`'s
+    /// transient set, so it fails once rather than five times over 75 seconds.
+    func testAnEuropePMCTransportFailureIsReportedAsUnreachable() async throws {
+        StubURLProtocol.failures = ["fullTextXML": URLError(.badServerResponse)]
+        StubURLProtocol.routes = ["unpaywall": (404, Data())]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+
+        XCTAssertEqual(result.degradation, .europePMCUnreachable)
+    }
+
+    /// The distinction the whole case exists for, asserted as one statement
+    /// rather than as two tests that could drift: the same chain, the same
+    /// fallback, two different notes.
+    func testAnAbsentSourceAndAnUnreachableOneReportDifferently() async throws {
+        StubURLProtocol.routes = [
+            "fullTextXML": (404, Data()),
+            "unpaywall": (404, Data()),
+        ]
+        let absent = try await stubbedService()
+            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+
+        StubURLProtocol.reset()
+        StubURLProtocol.routes = [
+            "fullTextXML": (400, Data()),
+            "unpaywall": (404, Data()),
+        ]
+        let unreachable = try await stubbedService()
+            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+
+        XCTAssertNil(absent.degradation)
+        XCTAssertEqual(unreachable.degradation, .europePMCUnreachable)
+    }
 }
