@@ -247,4 +247,123 @@ final class JATSParseWarningsTests: XCTestCase {
     func testAnUnspecifiedLossIsNotClean() {
         XCTAssertFalse(JATSParseWarnings(losses: [.unspecified]).isClean)
     }
+
+    // MARK: - The stored contract
+
+    /// The persisted spelling of every kind, pinned one by one against a literal.
+    ///
+    /// ``testEveryLossRoundTripsThroughItsPersistedForm`` cannot catch a rename:
+    /// the encoder and decoder move together, so any spelling is self-consistent
+    /// and the round trip stays green. What a rename actually costs is every
+    /// cached record of that kind failing to decode, so the reader is told "some
+    /// content may be missing" instead of what was lost. Only a literal on the
+    /// other side of the encoder holds the contract still.
+    func testEveryLossStoresItsOwnKindString() throws {
+        let expected: [(JATSParseWarnings.Loss, String)] = [
+            (.subArticleDepth(2), "subArticleDepth"),
+            (.openFigures(3), "openFigures"),
+            (.openTables(1), "openTables"),
+            (.exhibitFootnoteDepth(4), "exhibitFootnoteDepth"),
+            (.openCaptions(5), "openCaptions"),
+            (.openSections(6), "openSections"),
+            (.depthUnderflows(7), "depthUnderflows"),
+            (.noContent, "noContent"),
+            (.unspecified, "unspecified"),
+        ]
+        XCTAssertEqual(
+            expected.count,
+            Self.everyLoss.count,
+            "a Loss case was added without pinning its stored spelling"
+        )
+        for (loss, kind) in expected {
+            let data = try JSONEncoder().encode(loss)
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            XCTAssertEqual(object["kind"] as? String, kind)
+        }
+    }
+
+    /// A stored v1 payload decodes to the losses it names.
+    ///
+    /// The one direction nothing else covered: every other literal-JSON test in
+    /// this file asserts a *throw*, so before this one no test proved the schema
+    /// version those literals embed is the version the build accepts. That made
+    /// `schemaVersion = 1` free to change — the whole suite stayed green while
+    /// every warnings record in every user's store became unreadable — and it
+    /// made the refusal tests below vacuous, since after a bump they would pass
+    /// on the version mismatch rather than on the thing they name.
+    func testAStoredVersionOnePayloadStillDecodes() throws {
+        XCTAssertEqual(JATSParseWarnings.schemaVersion, 1)
+        XCTAssertEqual(JATSParseWarnings.oldestReadableSchemaVersion, 1)
+
+        let stored = Data("""
+        {"schemaVersion":1,"losses":[\
+        {"kind":"subArticleDepth","count":2},\
+        {"kind":"openFigures","count":3},\
+        {"kind":"openTables","count":1},\
+        {"kind":"exhibitFootnoteDepth","count":4},\
+        {"kind":"openCaptions","count":5},\
+        {"kind":"openSections","count":6},\
+        {"kind":"depthUnderflows","count":7},\
+        {"kind":"noContent"},\
+        {"kind":"unspecified"}]}
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(JATSParseWarnings.self, from: stored)
+        XCTAssertEqual(decoded.losses, Self.everyLoss)
+    }
+
+    /// The count-free cases are stored without a `count`, not with a zero.
+    ///
+    /// A port reading only "kind plus count" would naturally emit `"count":0`
+    /// here, and Swift would accept it silently — the decoder ignores the extra
+    /// key — so the two would diverge only when someone diffed a stored record.
+    func testCountFreeLossesOmitTheCountEntirely() throws {
+        for loss in [JATSParseWarnings.Loss.noContent, .unspecified] {
+            let data = try JSONEncoder().encode(loss)
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            XCTAssertFalse(object.keys.contains("count"), "\(loss) stored a count")
+        }
+    }
+
+    /// A counted kind stored with a count of zero or less is refused.
+    ///
+    /// The decoder already refused a *missing* count, for the reason that a loss
+    /// of unknown size read as zero reaches the reader as no loss at all. A
+    /// stored `0` says the same thing and was accepted, rendering the sentence
+    /// "ended with 0 open <fig> — those figures were discarded" at a reader.
+    func testANonPositiveCountIsRefused() {
+        for count in [0, -4] {
+            let stored = Data(
+                #"{"schemaVersion":1,"losses":[{"kind":"openFigures","count":\#(count)}]}"#.utf8
+            )
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(JATSParseWarnings.self, from: stored),
+                "a count of \(count) is not a loss"
+            )
+        }
+    }
+
+    /// A payload older than this build reads is refused, and said to be older.
+    ///
+    /// Unreachable while the floor is 1, and pinned now precisely because it is:
+    /// the message is what a maintainer reads the day a v1 record meets a v2
+    /// build, and reporting an older record as "newer" sends them the wrong way.
+    func testAnOlderSchemaVersionIsRefusedWithoutBeingCalledNewer() {
+        let stored = Data(#"{"schemaVersion":0,"losses":[]}"#.utf8)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(JATSParseWarnings.self, from: stored)
+        ) { error in
+            guard case DecodingError.dataCorrupted(let context) = error else {
+                return XCTFail("expected a dataCorrupted failure, got \(error)")
+            }
+            XCTAssertFalse(
+                context.debugDescription.contains("newer"),
+                "an older payload was reported as newer: \(context.debugDescription)"
+            )
+        }
+    }
 }

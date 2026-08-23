@@ -108,6 +108,27 @@ public struct FullTextResult: Sendable, Equatable {
         warnings: JATSParseWarnings = JATSParseWarnings(),
         degradation: FullTextDegradation? = nil
     ) {
+        // Two combinations the fallback chain never emits, and which the reader
+        // would be shown as fact if it ever did. They were unspellable while
+        // this type was an enum with `warnings` buried in the `.europePMC` case;
+        // the struct that let the degradation travel also made them compile, so
+        // they are asserted rather than left to the one producer's good conduct.
+        //
+        // Only a parsed source can have lost anything to a parse: warnings on a
+        // PDF would put a truncation banner over a complete document, which is
+        // the false alarm that teaches a reader to dismiss the banner on the
+        // article where text really was discarded.
+        assert(
+            warnings.isClean || content.source == .europePMC,
+            "parse warnings on \(content.source), which involves no parse"
+        )
+        // And a parse that succeeded is not a degradation: this flag means the
+        // machine-readable source was lost, so it cannot travel with that
+        // source's own content.
+        assert(
+            degradation == nil || content.source != .europePMC,
+            "\(content.source) content marked as a degradation from itself"
+        )
         self.content = content
         self.warnings = warnings
         self.degradation = degradation

@@ -31,35 +31,11 @@ private enum ParseWarningBannerConstants {
     /// Vertical gap between individual diagnostic lines in the disclosure.
     static let detailSpacing: CGFloat = 4
 
-    /// Tint strength of the warning fill, kept light enough to read over.
+    /// Tint strength of the banner fill — the warning tint and the
+    /// informational accent alike — kept light enough to read over.
     static let backgroundOpacity: Double = 0.15
 }
 
-/// Tells the reader when what they are looking at is not the whole article, or
-/// not the copy we would have preferred to give them.
-///
-/// Without this the app renders a gutted article exactly as it renders a
-/// complete one, so a reader who cannot find the table they came for has no way
-/// to know whether the publisher never deposited it or the parser dropped it
-/// (#181). Those are opposite conclusions, and in a medical-literature tool the
-/// wrong one is a reader deciding the evidence is absent.
-///
-/// Three states, one component, so the two facts cannot drift apart in wording
-/// or styling:
-///
-/// - nothing lost and the best source used — renders nothing;
-/// - the rendering is incomplete — a warning;
-/// - a better source existed and could not be read — an informational note.
-///
-/// The last is deliberately *not* a warning. A fallback PDF is complete, and a
-/// warning triangle over content that is fine is the false alarm that trains a
-/// reader to dismiss the banner on the article where text really was discarded
-/// (#183).
-///
-/// The sentences are composed here rather than in `BioMedLit` because they are
-/// clinician-facing copy: the package emits typed losses and developer
-/// diagnostics, and those are offered as expandable detail for a bug report
-/// rather than shown by default.
 /// What a ``ParseWarningBanner`` has to say about a retrieval, if anything.
 ///
 /// A pure value rather than a computation inside the view, so the choice between
@@ -125,8 +101,38 @@ enum ParseWarningMessage: Equatable {
     }
 }
 
+/// Tells the reader when what they are looking at is not the whole article, or
+/// not the copy we would have preferred to give them.
+///
+/// Without this the app renders a gutted article exactly as it renders a
+/// complete one, so a reader who cannot find the table they came for has no way
+/// to know whether the publisher never deposited it or the parser dropped it
+/// (#181). Those are opposite conclusions, and in a medical-literature tool the
+/// wrong one is a reader deciding the evidence is absent.
+///
+/// Four renderings, one component, so the two facts cannot drift apart in
+/// wording or styling:
+///
+/// - nothing lost and the best source used — renders nothing;
+/// - the rendering is incomplete — a warning;
+/// - the rendering carries no article text at all — a warning that says so
+///   rather than hiding behind "some of this is missing";
+/// - a better source existed and could not be read — an informational note.
+///
+/// The last is deliberately *not* a warning. A fallback PDF or publisher link is
+/// complete in itself, and a warning triangle over content that is fine is the
+/// false alarm that trains a reader to dismiss the banner on the article where
+/// text really was discarded (#183).
+///
+/// The sentences are composed here rather than in `BioMedLit` because they are
+/// clinician-facing copy: the package emits typed losses and developer
+/// diagnostics, and those are offered as expandable detail for a bug report
+/// rather than shown by default.
 struct ParseWarningBanner: View {
-    /// What the parse lost. Renders nothing when it lost nothing.
+    /// What the parse lost.
+    ///
+    /// Renders nothing when it lost nothing *and* no better source was lost —
+    /// the banner appears whenever either fact has something to say.
     let warnings: JATSParseWarnings
 
     /// Why this is not the best source that existed, or `nil` when it is.
@@ -154,7 +160,14 @@ struct ParseWarningBanner: View {
                             alignment: .leading,
                             spacing: ParseWarningBannerConstants.detailSpacing
                         ) {
-                            ForEach(warnings.diagnostics, id: \.self) { diagnostic in
+                            // Keyed by position, not by the sentence: SwiftUI
+                            // silently drops duplicate IDs, and the log wording
+                            // is the one thing this channel deliberately does
+                            // not treat as identity.
+                            ForEach(
+                                Array(warnings.diagnostics.enumerated()),
+                                id: \.offset
+                            ) { _, diagnostic in
                                 Text(diagnostic)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)

@@ -100,11 +100,17 @@ public struct JATSParseWarnings: Sendable, Equatable, Codable {
 
         /// The developer-log rendering of this loss.
         ///
-        /// The wording every line carried before the losses were typed,
-        /// reproduced to the byte: it is what `BioMedLitLib.logger` receives,
-        /// and the real-corpus suite reads that log's text. Keeping it identical
-        /// meant the log, the corpus digests and that test all stayed still, so
-        /// a later rewording is a visible change rather than a side effect.
+        /// For the eight losses the parser produces, this is the wording each
+        /// line carried before they were typed, reproduced to the byte: it is
+        /// what `BioMedLitLib.logger` receives, and the real-corpus suite reads
+        /// that log's text. Keeping it identical meant the log, the corpus
+        /// digests and that test all stayed still, so a later rewording is a
+        /// visible change rather than a side effect.
+        ///
+        /// ``unspecified`` is the exception, and cannot be otherwise: no parse
+        /// produces it, so it has no parser-side predecessor. It is composed by
+        /// a caller that could not read a stored payload, and reaches that
+        /// caller's own log rather than this package's.
         public var logLine: String {
             switch self {
             case .subArticleDepth(let depth):
@@ -145,7 +151,21 @@ public struct JATSParseWarnings: Sendable, Equatable, Codable {
     /// reported as an unspecified loss, instead of being half-read. The corpus
     /// digest format shipped without one and #163 exists to add it after the
     /// fact; the same mistake costs one `enum CodingKeys` to avoid here.
+    ///
+    /// Bumping this alone silently discards every stored record, because each
+    /// one then fails ``oldestReadableSchemaVersion`` and reads back as
+    /// ``Loss/unspecified``. Raise that constant deliberately, or add a decode
+    /// branch for the older shape.
     public static let schemaVersion = 1
+
+    /// The oldest persisted version this build can still read exactly.
+    ///
+    /// Separate from ``schemaVersion`` so the two directions are distinct: a
+    /// payload from a *newer* build must be refused because it cannot be read
+    /// exactly, while one from an older build is refused only if nobody has
+    /// written the migration. Keeping them as one `==` comparison meant the
+    /// second decision was made silently by whoever bumped the first.
+    public static let oldestReadableSchemaVersion = 1
 
     /// What the parse lost, in the order the audit found it.
     public let losses: [Loss]
@@ -188,19 +208,24 @@ public struct JATSParseWarnings: Sendable, Equatable, Codable {
     /// Read a stored payload, refusing anything this build cannot read exactly.
     ///
     /// - Parameter decoder: The decoder to read from.
-    /// - Throws: `DecodingError.dataCorrupted` for a payload written by a newer
-    ///   build, and whatever the decoder throws for a malformed one. Failing is
-    ///   the point: the caller turns a failure into ``Loss/unspecified``, and a
-    ///   payload read approximately would be reported as fact.
+    /// - Throws: `DecodingError.dataCorrupted` for a payload whose schema this
+    ///   build does not read, and whatever the decoder throws for a malformed
+    ///   one. Failing is the point: the caller turns a failure into
+    ///   ``Loss/unspecified``, and a payload read approximately would be
+    ///   reported as fact.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let version = try container.decode(Int.self, forKey: .schemaVersion)
-        guard version == Self.schemaVersion else {
+        guard
+            version >= Self.oldestReadableSchemaVersion,
+            version <= Self.schemaVersion
+        else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schemaVersion,
                 in: container,
                 debugDescription:
-                    "parse warnings schema \(version) is newer than \(Self.schemaVersion)"
+                    "parse warnings schema \(version) is not one this build reads "
+                    + "(\(Self.oldestReadableSchemaVersion)...\(Self.schemaVersion))"
             )
         }
         self.losses = try container.decode([Loss].self, forKey: .losses)
@@ -257,16 +282,32 @@ extension JATSParseWarnings.Loss: Codable {
     /// Read a stored loss.
     ///
     /// - Parameter decoder: The decoder to read from.
-    /// - Throws: `DecodingError` for an unknown kind, and for a counted kind
-    ///   stored without its count — a loss of unknown size read as zero would be
-    ///   reported to the reader as no loss at all.
+    /// - Throws: `DecodingError` for an unknown kind, for a counted kind stored
+    ///   without its count, and for one stored with a count of zero or less — a
+    ///   loss of unknown size read as zero would be reported to the reader as no
+    ///   loss at all.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let kind = try container.decode(Kind.self, forKey: .kind)
 
         /// The count this kind requires, or a decoding failure naming what is missing.
+        ///
+        /// A stored count is rejected unless it is positive. The audit only ever
+        /// records a counter it found above zero, so a zero or negative one
+        /// means the record disagrees with the parser that wrote it — and
+        /// "0 open <fig> were discarded" is a sentence this type should never
+        /// render at a reader.
         func count() throws -> Int {
-            try container.decode(Int.self, forKey: .count)
+            let stored = try container.decode(Int.self, forKey: .count)
+            guard stored > 0 else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .count,
+                    in: container,
+                    debugDescription:
+                        "\(kind.rawValue) stored a count of \(stored); a loss counts at least one"
+                )
+            }
+            return stored
         }
 
         switch kind {

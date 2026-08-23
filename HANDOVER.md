@@ -16,11 +16,15 @@ its slice has landed; add a new section when handing off new work.
     and `Equatable` — so the UI could not be localised, the banner could only
     replay sentences, a rewording invalidated every stored record, and tests could
     only substring-match. Now one `Loss` per audited counter plus `.noContent` and
-    `.unspecified`, with `diagnostics` kept as a derived property so every caller
-    carried on unchanged.
-    - **The wording moved byte-for-byte**, because `testParsingReportsNoContentLoss`
-      reads the log's text and the corpus digests hang off it. The diff is the
-      type and nothing else; a rewording later is now visibly a rewording.
+    `.unspecified`, with `diagnostics` kept as a derived property so the log and
+    the banner's technical disclosure render the same English they always did.
+    Persistence goes through `losses` via `Codable` and never touches
+    `diagnostics`.
+    - **The eight parser-produced lines moved byte-for-byte**, because
+      `testParsingReportsNoContentLoss` reads the log's text and the corpus
+      digests hang off it; a rewording later is now visibly a rewording.
+      `.unspecified` is the exception and has to be: no parse produces it, so it
+      has no parser-side predecessor.
     - **The persisted form is versioned with named keys** —
       `{"schemaVersion":1,"losses":[{"kind":"openFigures","count":2}]}`. Never lean
       on synthesised `Codable` for a tagged union: Swift emits `{"_0":2}`, and `_0`
@@ -49,9 +53,21 @@ its slice has landed; add a new section when handing off new work.
       accession number, and now says so.
   - **A view's private computed state cannot be tested.** The banner's
     three-way choice moved into `ParseWarningMessage`, a pure value — which is
-    where the only real judgement in that file lives. Naming its nested enum
-    `State` also silently shadows SwiftUI's `@State`.
-  - Fourteen mutants across both issues, no survivors.
+    where the only real judgement in that file lives. Do not nest it in the view
+    and call it `State`: that silently shadows SwiftUI's `@State`.
+  - **A mutation run only proves what its assertions reach.** Review found four
+    survivors. `schemaVersion = 1 -> 2` and a renamed persisted key both left 788
+    green, because every literal-JSON test asserted a *throw* — nothing decoded a
+    literal successfully, so nothing pinned the version those literals embed. Two
+    `degradation` sites were unreachable: the test naming the doi.org branch
+    landed on the PubMed fallback (both return `.doi(webURL:)`), and the PDF
+    branch needed an `EuropePMCService` the initialiser hard-coded. Assert the
+    host, inject the seam, pin the contract with a literal past the encoder.
+  - **The degradation was written and then unreadable.** A `.webURL` fallback
+    caches no content, so `cachedFullTextResult` returned `nil` and took the note
+    with it — macOS said "No full text available" for an article we had and lost.
+    Read a retrieval note from the stored fields, never through a rebuild of the
+    content.
 
 ## Recently landed (context)
 
@@ -82,7 +98,7 @@ the rest.
   - **A pbxproj UUID collision silently drops a file from the build**, compiling
     everywhere except the macOS target. `swift test` cannot see it — the SPM
     target excludes `Sources/macOS`. Now guarded by `xcode_project_guards.py`.
-  - Both its own follow-ups, #184 and #183, are closed above. **#183 had been
+  - Both its own follow-ups, #184 and #183, are in flight above. **#183 had been
     closed as completed by a commit whose message listed it as deferred**; the
     code agreed with the message. Check that a closing commit did what the
     closure claims.

@@ -779,11 +779,12 @@ final class JATSParseGuardTests: XCTestCase {
 
         _ = try parser.parseToHTML()
 
-        XCTAssertFalse(parser.parseWarnings.isClean)
-        XCTAssertTrue(
-            parser.parseWarnings.diagnostics.contains { $0.contains("open <fig>") },
-            "\(parser.parseWarnings.diagnostics)"
-        )
+        // Asserted as a value, not by searching the rendered English. These
+        // are the only tests that drive a real parse all the way through
+        // `reportParseCompletion` to the caller's payload, so a substring match
+        // here left the exact thing #184 removed sitting on the one path where
+        // a dropped count or a duplicated loss would show.
+        XCTAssertEqual(parser.parseWarnings.losses, [.openFigures(1)])
     }
 
     /// The other loss a reader can act on: an article rendered as its own
@@ -795,10 +796,7 @@ final class JATSParseGuardTests: XCTestCase {
 
         _ = try parser.parseToHTML()
 
-        XCTAssertTrue(
-            parser.parseWarnings.diagnostics.contains { $0.contains("no title, abstract or body") },
-            "\(parser.parseWarnings.diagnostics)"
-        )
+        XCTAssertEqual(parser.parseWarnings.losses, [.noContent])
     }
 
     /// The cry-wolf guard, and the reason `parseWarnings` is not simply "every

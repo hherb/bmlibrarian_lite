@@ -75,7 +75,7 @@ Out, and lodged rather than ported:
 
 ```swift
 public struct JATSParseWarnings: Sendable, Equatable, Codable {
-    public enum Loss: Sendable, Equatable {
+    public enum Loss: Sendable, Equatable, Hashable {
         case subArticleDepth(Int)
         case openFigures(Int)
         case openTables(Int)
@@ -174,7 +174,7 @@ public struct FullTextResult: Sendable, Equatable {
 }
 
 /// Why this result is not the best source that existed for the article.
-public enum FullTextDegradation: String, Sendable, Codable {
+public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     case jatsParseFailed
 }
 ```
@@ -213,7 +213,7 @@ rethrows rather than falling through, so it never reaches a fallback at all.
 ### 5. One writer, on the app side
 
 `AppFullTextResult` gains `degradation` beside `warnings`, defaulting to `nil`.
-`Document` gains `fullTextDegradedReason: String?`, an added optional property
+`Document` gains `fullTextDegradedReasonRaw: String?`, an added optional property
 inside `SchemaV2` — the same lightweight addition `fullTextParseWarningsJSON`
 made in `8f23fd1`, and no new schema version for the same reason.
 

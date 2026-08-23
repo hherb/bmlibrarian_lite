@@ -159,7 +159,7 @@ struct AppFullTextResult: Equatable, Sendable {
     /// Sits beside `content` rather than inside `.html` because it describes the
     /// *retrieval*, not the content type — and because burying it in the enum
     /// case would make every `case .html(let content, let markdown)` in the views
-    /// change for no benefit. Empty for PDFs and publisher links, which are not
+    /// change for no benefit. Clean for PDFs and publisher links, which are not
     /// parsed at all.
     let warnings: JATSParseWarnings
 

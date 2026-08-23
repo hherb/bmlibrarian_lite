@@ -696,7 +696,7 @@ public final class JATSXMLParser: NSObject {
     /// What this parse lost, for a caller that wants to tell the reader.
     ///
     /// Empty until the parse completes. Populated by `reportParseCompletion()`
-    /// from the same audit that writes the log, so on the lines they share the
+    /// from the same audit that writes the log, so on the losses they share the
     /// two cannot silently diverge. The log is deliberately the wider of the
     /// two: the zero-author warning goes only there, and this carries the
     /// no-content line, which is not an unwind diagnostic at all.

@@ -381,4 +381,96 @@ final class FullTextParseWarningsTests: XCTestCase {
         XCTAssertNil(document.fullTextHTML)
         XCTAssertNil(document.fullTextContent)
     }
+
+    // MARK: - A link-only fallback still speaks (#183)
+
+    /// The outcome the degradation was added for, and the one it could not
+    /// reach: Europe PMC had the machine-readable copy, our parser choked, and
+    /// the chain fell through to a publisher link.
+    ///
+    /// A `.webURL` result caches no content — a link is opened in a browser
+    /// rather than held as text — so `cachedFullTextResult` returns `nil` and
+    /// took the degradation down with it. The reader was then shown "no full
+    /// text available" for an article whose own record says we had the text and
+    /// lost it: #183's conclusion exactly inverted, and cached, so every reopen
+    /// repeated it.
+    func testALinkOnlyFallbackStillReportsItsDegradation() {
+        let document = makeDocument()
+
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .webURL(URL(string: "https://doi.org/10.1234/example")!),
+                source: .doi,
+                degradation: .jatsParseFailed
+            )
+        )
+
+        // The precondition that made this invisible: nothing displayable is
+        // cached, so the result cannot be rebuilt.
+        XCTAssertNil(document.cachedFullTextResult)
+        XCTAssertFalse(document.hasFullText)
+
+        // The note survives that anyway, which is the whole point.
+        XCTAssertEqual(document.cachedRetrievalNotice.degradation, .jatsParseFailed)
+    }
+
+    /// The same for warnings, so a link-only record cannot report a truncation
+    /// as a clean parse either.
+    func testALinkOnlyRecordStillReportsItsWarnings() {
+        let document = makeDocument()
+
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .webURL(URL(string: "https://doi.org/10.1234/example")!),
+                source: .doi,
+                warnings: JATSParseWarnings(losses: [.unspecified])
+            )
+        )
+
+        XCTAssertNil(document.cachedFullTextResult)
+        XCTAssertEqual(document.cachedRetrievalNotice.warnings.losses, [.unspecified])
+    }
+
+    /// The negative control: a link-only record with nothing to report says
+    /// nothing, so the banner stays silent on an ordinary fallback.
+    func testALinkOnlyRecordWithNothingToReportIsSilent() {
+        let document = makeDocument()
+
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .webURL(URL(string: "https://doi.org/10.1234/example")!),
+                source: .doi
+            )
+        )
+
+        XCTAssertTrue(document.cachedRetrievalNotice.warnings.isClean)
+        XCTAssertNil(document.cachedRetrievalNotice.degradation)
+    }
+
+    /// A record whose warnings could not be encoded reads back as a loss, not as
+    /// a clean parse.
+    ///
+    /// The field is only written when something *was* lost, so clearing it on an
+    /// encode failure would record a truncated article as complete — the one
+    /// failure this whole channel exists to prevent, arrived at from the write
+    /// side rather than the read side.
+    func testAnUnencodableWarningsRecordIsNotReportedAsClean() {
+        let document = makeDocument()
+        document.fullTextParseWarningsJSON = "not json at all"
+
+        XCTAssertFalse(document.cachedRetrievalNotice.warnings.isClean)
+        XCTAssertEqual(document.cachedRetrievalNotice.warnings.losses, [.unspecified])
+    }
+
+    /// A payload from a newer build is a loss of unknown size, not a clean parse.
+    ///
+    /// The stated purpose of the schema version, exercised end to end at the
+    /// layer that actually reads a user's database.
+    func testAForwardSchemaVersionRecordIsNotReportedAsClean() {
+        let document = makeDocument()
+        document.fullTextParseWarningsJSON =
+            #"{"schemaVersion":99,"losses":[{"kind":"openFigures","count":2}]}"#
+
+        XCTAssertEqual(document.cachedRetrievalNotice.warnings.losses, [.unspecified])
+    }
 }

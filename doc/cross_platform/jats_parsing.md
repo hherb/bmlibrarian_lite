@@ -1087,12 +1087,24 @@ const EUROPEPMC_FIGURE_BASE_URL = "https://europepmc.org/articles"
 
 ### End-of-parse audit
 
-Implemented in Swift only, as of this writing. bmlib (hherb/bmlib#134) and the
-Kotlin port (#165) have no end-of-parse audit at all, so this section and the
+The Kotlin port (#165) has no end-of-parse audit at all, so this section and the
 three that follow it describe work still to be done there rather than shared
-behaviour to match. Given the common JATS ancestry, the misrouting defects the audit exists
-to catch — #156, #157, #169, #171, #173 — are presumably reachable on both and
-silent on both.
+behaviour to match.
+
+**bmlib already has one** — `bmlib/fulltext/_parse_audit.py`, whose
+`ParseUnwindState` and `unwind_diagnostics()` are consumed from
+`jats_parser.py` — and it audits *more* than Swift does: open contrib groups,
+unfilled figure and table slots, excess text buffers, the open-element names and
+the stuck routing flags. What it does not have is the channel described below:
+its diagnostics reach an ERROR log and no caller. It also returns `list[str]` of
+rendered English, which is exactly the shape #184 removed from Swift, so the
+next section is a change to make there rather than a feature to add
+(hherb/bmlib#134). The wording of the two ports' lines already differs, so there
+is no shared string to preserve — only the shape.
+
+Given the common JATS ancestry, the misrouting defects the audit exists to catch
+— #156, #157, #169, #171, #173 — are presumably reachable on both and silent on
+both.
 
 Every stack and counter above must be back to zero when the document ends. While
 any of them is not, content is being filed somewhere other than the article body,
@@ -1179,7 +1191,7 @@ evidence is absent.
 
 Expose the losses as a value on the parser, carry it out through whatever the
 full-text service returns, and show the reader that the rendering is incomplete.
-Three rules make the difference between a channel and a decoration:
+Four rules make the difference between a channel and a decoration:
 
 - **Carry facts, not copy — and make "facts" mean values, not sentences.** The
   first Swift version carried `[String]` of rendered English written for a log,
@@ -1204,6 +1216,24 @@ Three rules make the difference between a channel and a decoration:
   place wording is hardest to change. Do not lean on a language's synthesised
   encoding for a tagged union: Swift's emits `{"openFigures":{"_0":2}}`, and
   `_0` is a compiler detail to be stuck reading forever.
+
+  The contract each port must reproduce, since a divergence here is silent —
+  a decoder ignores an unexpected key, so two ports round-trip their own writes
+  and only disagree when someone diffs a stored record:
+
+  ```json
+  {"schemaVersion": 1, "losses": [{"kind": "openFigures", "count": 2}]}
+  ```
+
+  The nine `kind` spellings are `subArticleDepth`, `openFigures`, `openTables`,
+  `exhibitFootnoteDepth`, `openCaptions`, `openSections`, `depthUnderflows`,
+  `noContent` and `unspecified`. `count` is **omitted, never `0`**, for
+  `noContent` and `unspecified` — a stored zero invites a reader to treat "no
+  figures were lost" as a thing this type says. A counted kind arriving without
+  its `count`, or with one of zero or less, is a decode *failure*: a loss of
+  unknown size read as zero would be reported to the reader as no loss at all.
+  Keep the version a build writes separate from the oldest it can still read, so
+  that bumping the first does not silently discard every stored record.
 - **Persist it with the cached text.** Full text is normally cached and
   re-rendered from the cache, so warnings held only on the in-flight result are
   shown once and lost on reopen — and a viewer that renders *only* from the cache
@@ -1249,7 +1279,7 @@ dismiss the banner on the article where text really was discarded.
 
 Make the audited state a type that **cannot hold a negative count**, clamping in
 its initialiser, and give it a single `isBalanced` predicate. Then pin by test
-that `isBalanced` and the diagnostics agree across every single-field state: they
+that `isBalanced` and the losses agree across every single-field state: they
 answer the same question two ways, and a field added to one and not the other is
 otherwise a silent disagreement about what "clean" means.
 

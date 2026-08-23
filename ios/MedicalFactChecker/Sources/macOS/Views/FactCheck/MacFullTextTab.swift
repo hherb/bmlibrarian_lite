@@ -203,6 +203,18 @@ struct MacFullTextTab: View {
 
     private func noFullTextView(for document: Document) -> some View {
         VStack(spacing: MacSpacing.large) {
+            // A document reaches this screen with nothing displayable cached —
+            // which is what a publisher-link fallback stores, since a web URL is
+            // opened in a browser rather than held as text. When the reason we
+            // have no text is that Europe PMC's copy failed *our* parse, saying
+            // "not retrieved" and stopping there tells the reader the evidence
+            // was never deposited (#183). The notice reads from the stored
+            // fields, so it survives having no content to render.
+            ParseWarningBanner(
+                warnings: document.cachedRetrievalNotice.warnings,
+                degradation: document.cachedRetrievalNotice.degradation
+            )
+
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: MacIconSize.emptyStateLarge))
                 .foregroundColor(.secondary)

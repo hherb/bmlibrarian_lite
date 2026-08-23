@@ -35,10 +35,23 @@ final class StubURLProtocol: URLProtocol {
     /// Longest key wins, so a specific route beats a general one.
     static var routes: [String: (status: Int, body: Data)] = [:]
 
-    /// Reset both, so one test's routes cannot leak into the next.
+    /// Errors to fail matching requests with, instead of answering them.
+    ///
+    /// Needed because cancellation cannot be expressed as a status code: the
+    /// chain has to distinguish "this source gave nothing" from "the caller
+    /// stopped us", and only the second must propagate.
+    ///
+    /// Keyed by URL substring like ``routes``, and for a sharper reason: the
+    /// chain guards cancellation at three separate `catch` sites, so failing
+    /// *every* request cancels at whichever site is reached first and proves
+    /// nothing about the others. One route at a time isolates one guard.
+    static var failures: [String: Error] = [:]
+
+    /// Reset all three, so one test's setup cannot leak into the next.
     static func reset() {
         stubbed = (200, Data())
         routes = [:]
+        failures = [:]
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -47,6 +60,10 @@ final class StubURLProtocol: URLProtocol {
 
     override func startLoading() {
         let url = request.url?.absoluteString ?? ""
+        if let failure = Self.failures.first(where: { url.contains($0.key) })?.value {
+            client?.urlProtocol(self, didFailWithError: failure)
+            return
+        }
         let match = Self.routes
             .filter { url.contains($0.key) }
             .max { $0.key.count < $1.key.count }
@@ -76,10 +93,25 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     }
 
     /// A service whose transport answers from ``StubURLProtocol``.
+    ///
+    /// The identifier resolver is stubbed too. It reaches Europe PMC over its
+    /// own session, so leaving it on the default sent any test that omits a PMC
+    /// ID to the live network — which is both slow and a test that passes or
+    /// fails on someone else's uptime.
     private func stubbedService() -> FullTextService {
+        let session = URLSession(configuration: Self.stubbedConfiguration)
+        return FullTextService(
+            email: "test@example.com",
+            session: session,
+            europePMCService: EuropePMCService(session: session)
+        )
+    }
+
+    /// A session configuration whose requests are served by ``StubURLProtocol``.
+    private static var stubbedConfiguration: URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
-        return FullTextService(email: "test@example.com", session: URLSession(configuration: config))
+        return config
     }
 
     /// An article stripped to its own accession number. `buildHTML` emits the
@@ -156,19 +188,77 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
 
     // MARK: - The fallback admits what it cost (#183)
 
-    /// Europe PMC's XML could not be parsed, so the reader gets a publisher
-    /// link — and the result says which of the two reasons put them there.
-    ///
-    /// Before this the two were indistinguishable: "Europe PMC had no
-    /// machine-readable text" and "it had it and we choked" both arrived as a
-    /// bare link, and the reader concluded the article was not machine-readable.
+    /// Passing no DOI means this lands on the *PubMed* fallback, the chain's last
+    /// return. Both it and the doi.org branch above it return `.doi(webURL:)`, so
+    /// the host is asserted: without it the two are indistinguishable and one of
+    /// them can lose its degradation with the suite still green.
     func testAParseFailureMarksTheFallbackAsDegraded() async throws {
         let result = try await service(serving: "<article><body></article>")
             .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1")
 
-        guard case .doi = result.content else {
+        guard case .doi(let webURL) = result.content else {
             return XCTFail("expected the publisher-link fallback, got \(result.content)")
         }
+        XCTAssertEqual(webURL.host, "pubmed.ncbi.nlm.nih.gov")
+        XCTAssertEqual(result.degradation, .jatsParseFailed)
+    }
+
+    /// The doi.org branch, which the test above never reaches.
+    ///
+    /// It is a separate `return` from the PubMed fallback, so it carries its own
+    /// copy of the degradation and can lose it independently.
+    func testAPublisherLinkFallbackCarriesTheDegradation() async throws {
+        StubURLProtocol.routes = [
+            "fullTextXML": (200, Data("<article><body></article>".utf8)),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+
+        guard case .doi(let webURL) = result.content else {
+            return XCTFail("expected the publisher-link fallback, got \(result.content)")
+        }
+        XCTAssertEqual(webURL.host, "doi.org")
+        XCTAssertEqual(result.degradation, .jatsParseFailed)
+    }
+
+    /// The Europe PMC PDF render branch, the *first* fallback a real degraded
+    /// fetch reaches — an article whose XML we failed to parse is by definition
+    /// in PMC, and usually offers a `pdf=render` URL.
+    ///
+    /// It shipped with no coverage at all because it was unreachable by a test:
+    /// the branch needs a `pdfRenderURL`, which only the identifier resolution
+    /// produces, and that went through a `EuropePMCService` the initialiser
+    /// hard-coded. Injecting the service is what makes this assertion possible.
+    func testAnEuropePMCPDFFallbackAlsoCarriesTheDegradation() async throws {
+        let searchResponse = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1", "pmcid": "PMC12759138", "inPMC": "Y",
+          "fullTextUrlList": {"fullTextUrl": [
+            {"documentStyle": "pdf", "site": "Europe_PMC",
+             "url": "https://europepmc.org/articles/PMC12759138?pdf=render",
+             "availability": "Open access", "availabilityCode": "OA"}
+          ]}
+        }]}}
+        """#
+        StubURLProtocol.routes = [
+            "fullTextXML": (200, Data("<article><body></article>".utf8)),
+            "search": (200, Data(searchResponse.utf8)),
+        ]
+
+        // No PMC ID, so the chain resolves one — and picks up the PDF render URL
+        // on the way, which is the only route to this branch.
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: nil, pmid: "1")
+
+        guard case .europePMCPDF(let pdfURL) = result.content else {
+            return XCTFail("expected the Europe PMC PDF fallback, got \(result.content)")
+        }
+        XCTAssertEqual(
+            pdfURL.absoluteString,
+            "https://europepmc.org/articles/PMC12759138?pdf=render"
+        )
         XCTAssertEqual(result.degradation, .jatsParseFailed)
     }
 
@@ -216,5 +306,78 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
             return XCTFail("expected the publisher-link fallback, got \(result.content)")
         }
         XCTAssertNil(result.degradation)
+    }
+
+    // MARK: - A cancelled fetch is not a dead source
+
+    /// Cancellation must propagate, not fall through to a publisher link.
+    ///
+    /// Falling through would cache a doi.org link as this article's full text,
+    /// as though Europe PMC had nothing — a wrong answer written to the database
+    /// because the reader closed a tab.
+    ///
+    /// Served as `URLError.cancelled` deliberately: that is how a cancelled
+    /// `URLSession` request actually surfaces. The guard originally tested only
+    /// for `CancellationError`, which `Task.sleep` in the retry backoff raises —
+    /// so it caught the rarer of the two shapes and missed the one a real fetch
+    /// hits.
+    func testACancelledFetchDoesNotFallThrough() async {
+        // Only the Europe PMC XML call is cancelled. The rest of the chain
+        // answers normally, so nothing downstream can throw the cancellation on
+        // this guard's behalf and make the test pass for the wrong reason.
+        StubURLProtocol.failures = ["fullTextXML": URLError(.cancelled)]
+        StubURLProtocol.routes = ["unpaywall": (404, Data())]
+
+        do {
+            _ = try await stubbedService()
+                .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+            XCTFail("a cancelled fetch returned a fallback instead of propagating")
+        } catch {
+            XCTAssertTrue(
+                error is CancellationError,
+                "expected cancellation to propagate, got \(error)"
+            )
+        }
+    }
+
+    /// The same guard on the Unpaywall branch, which is a separate `catch`.
+    ///
+    /// Europe PMC is allowed to fail normally here, so the chain genuinely
+    /// reaches Unpaywall and this guard is the only one that can propagate.
+    func testACancelledUnpaywallFetchDoesNotFallThrough() async {
+        StubURLProtocol.routes = ["fullTextXML": (404, Data())]
+        StubURLProtocol.failures = ["unpaywall": URLError(.cancelled)]
+
+        do {
+            _ = try await stubbedService()
+                .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+            XCTFail("a cancelled Unpaywall fetch returned a fallback instead of propagating")
+        } catch {
+            XCTAssertTrue(
+                error is CancellationError,
+                "expected cancellation to propagate, got \(error)"
+            )
+        }
+    }
+
+    /// And on identifier resolution, the earliest of the three.
+    ///
+    /// Swallowing a cancellation here is the worst of the three, because it
+    /// leaves no PMC ID: the Europe PMC branch is then skipped entirely and the
+    /// article reports as having no machine-readable copy at all.
+    func testACancelledIdentifierResolutionDoesNotFallThrough() async {
+        StubURLProtocol.failures = ["search": URLError(.cancelled)]
+
+        do {
+            // No PMC ID, so the chain has to resolve one first.
+            _ = try await stubbedService()
+                .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+            XCTFail("a cancelled resolution returned a fallback instead of propagating")
+        } catch {
+            XCTAssertTrue(
+                error is CancellationError,
+                "expected cancellation to propagate, got \(error)"
+            )
+        }
     }
 }
