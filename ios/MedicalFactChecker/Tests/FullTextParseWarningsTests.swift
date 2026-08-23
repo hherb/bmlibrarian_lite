@@ -291,13 +291,29 @@ final class FullTextParseWarningsTests: XCTestCase {
     /// written when something *was* lost, so reporting "no degradation" would
     /// tell the reader the publisher had no machine-readable text when we know
     /// otherwise.
-    func testAnUnknownStoredDegradationIsNotReportedAsNone() {
+    ///
+    /// It reports `.unspecified` rather than guessing a reason. Before there
+    /// were three reasons, answering `.jatsParseFailed` was a one-in-one guess;
+    /// it is now a one-in-three guess that names our own parser as the culprit,
+    /// which is exactly the misattribution this channel exists to prevent (#186).
+    func testAnUnknownStoredDegradationIsReportedAsUnspecified() {
         let document = makeDocument()
         document.fullTextPDFPath = "https://example.org/a.pdf"
         document.fullTextSource = AppFullTextSource.unpaywall.rawValue
         document.fullTextDegradedReasonRaw = "somethingANewerBuildKnowsAbout"
 
-        XCTAssertEqual(document.cachedFullTextResult?.degradation, .jatsParseFailed)
+        XCTAssertEqual(document.cachedFullTextResult?.degradation, .unspecified)
+        XCTAssertEqual(document.cachedRetrievalNotice.degradation, .unspecified)
+    }
+
+    /// A reason this build *does* know is not flattened into the unknown one.
+    func testAKnownStoredDegradationSurvives() {
+        let document = makeDocument()
+        document.fullTextPDFPath = "https://example.org/a.pdf"
+        document.fullTextSource = AppFullTextSource.unpaywall.rawValue
+        document.fullTextDegradedReasonRaw = FullTextDegradation.europePMCUnreachable.rawValue
+
+        XCTAssertEqual(document.cachedRetrievalNotice.degradation, .europePMCUnreachable)
     }
 
     /// The negative control: an ordinary cached result carries no note.
@@ -472,5 +488,39 @@ final class FullTextParseWarningsTests: XCTestCase {
             #"{"schemaVersion":99,"losses":[{"kind":"openFigures","count":2}]}"#
 
         XCTAssertEqual(document.cachedRetrievalNotice.warnings.losses, [.unspecified])
+    }
+
+    // MARK: - The link-only record (#187)
+
+    /// The four states that reach the predicate, in one test so that a change
+    /// widening it has to face the three it must stay false for.
+    ///
+    /// It lives on the model rather than inside a view because it is the whole
+    /// judgement behind two surfaces, and a private computed property in a
+    /// `View` cannot be tested at all (#185).
+    func testALinkOnlyRecordIsTheOneThatWasFetchedAndCachedNothing() {
+        let neverAttempted = makeDocument()
+        XCTAssertFalse(neverAttempted.isLinkOnly)
+
+        let cachedContent = makeDocument()
+        cachedContent.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!), source: .unpaywall
+            )
+        )
+        XCTAssertFalse(cachedContent.isLinkOnly)
+
+        let unavailable = makeDocument()
+        unavailable.fullTextUnavailable = true
+        XCTAssertFalse(unavailable.isLinkOnly)
+
+        let linkOnly = makeDocument()
+        linkOnly.applyFullTextResult(
+            AppFullTextResult(
+                content: .webURL(URL(string: "https://doi.org/10.1234/example")!), source: .doi
+            )
+        )
+        XCTAssertTrue(linkOnly.isLinkOnly)
+        XCTAssertFalse(linkOnly.hasFullText, "a web URL is opened, not cached as text")
     }
 }
