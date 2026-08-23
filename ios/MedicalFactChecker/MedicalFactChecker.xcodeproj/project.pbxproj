@@ -62,6 +62,7 @@
 		A1000040001 /* FullTextConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000040000 /* FullTextConstants.swift */; };
 		A1000041001 /* JATSXMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041000 /* JATSXMLParser.swift */; };
 		A1000042001 /* PlatformHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000042000 /* PlatformHelper.swift */; };
+		A1000090001 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000090000 /* Logger.swift */; };
 		A1000043001 /* QueryTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000043000 /* QueryTranslator.swift */; };
 		A1000044001 /* QueryValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000044000 /* QueryValidator.swift */; };
 		A1000045001 /* SearchResultMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045000 /* SearchResultMerger.swift */; };
@@ -171,6 +172,7 @@
 		A1000040000 /* FullTextConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextConstants.swift; sourceTree = "<group>"; };
 		A1000041000 /* JATSXMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JATSXMLParser.swift; sourceTree = "<group>"; };
 		A1000042000 /* PlatformHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformHelper.swift; sourceTree = "<group>"; };
+		A1000090000 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		A1000043000 /* QueryTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryTranslator.swift; sourceTree = "<group>"; };
 		A1000044000 /* QueryValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryValidator.swift; sourceTree = "<group>"; };
 		A1000045000 /* SearchResultMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultMerger.swift; sourceTree = "<group>"; };
@@ -348,6 +350,7 @@
 				A1000040000 /* FullTextConstants.swift */,
 				A1000041000 /* JATSXMLParser.swift */,
 				A1000014000 /* KeychainHelper.swift */,
+				A1000090000 /* Logger.swift */,
 				A1000029000 /* NotificationNames.swift */,
 				A1000027000 /* PDFExporter.swift */,
 				A1000042000 /* PlatformHelper.swift */,
@@ -659,6 +662,7 @@
 				A1000040001 /* FullTextConstants.swift in Sources */,
 				A1000041001 /* JATSXMLParser.swift in Sources */,
 				A1000042001 /* PlatformHelper.swift in Sources */,
+				A1000090001 /* Logger.swift in Sources */,
 				A1000043001 /* QueryTranslator.swift in Sources */,
 				A1000044001 /* QueryValidator.swift in Sources */,
 				A1000045001 /* SearchResultMerger.swift in Sources */,

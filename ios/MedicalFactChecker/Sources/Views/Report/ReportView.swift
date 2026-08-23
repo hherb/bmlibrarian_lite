@@ -1236,6 +1236,7 @@ struct DocumentDetailSheet: View {
     @Bindable var document: Document
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.modelContext) private var modelContext
 
     // Full text state
     @State private var isLoadingFullText = false
@@ -1377,6 +1378,59 @@ struct DocumentDetailSheet: View {
 
     // MARK: - Full Text Section
 
+    /// Persist a change to the document, reporting a failure rather than
+    /// trusting autosave with it.
+    ///
+    /// The retrieval note is read back from the stored fields, so a save that
+    /// fails silently means a link-only record reads as never-fetched on the
+    /// next launch — the #187 state, restored by the one step with no visible
+    /// symptom at the time it happens. Matches `FullTextTab` and
+    /// ``DocumentScoreRow``; all three iOS surfaces run the same retrieval and
+    /// must persist it the same way.
+    ///
+    /// - Parameters:
+    ///   - document: The document being saved, for the log line.
+    ///   - what: What was being recorded, for the log line.
+    private func save(_ document: Document, _ what: String) {
+        do {
+            try modelContext.save()
+        } catch {
+            AppLogger.fullText.error(
+                """
+                Failed to save \(what, privacy: .public) for PMID \
+                \(document.pmid, privacy: .public): \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+            fullTextError = "Could not save the retrieved full text."
+        }
+    }
+
+    /// What a link-only record has to say, and the way to reach the substitute.
+    ///
+    /// The Report tab runs the same retrieval as the Fact Check tab and reached
+    /// the same dead end: a fetch that ends in a publisher link caches no
+    /// content, so this card read as never-fetched and Safari took over before
+    /// the reader saw why the article was a substitute (#183, #187). Kept in
+    /// step with ``DocumentScoreRow/linkOnlyNotice``; the two cards state the
+    /// same fact and must not word it differently.
+    @ViewBuilder
+    private var linkOnlyNotice: some View {
+        if document.isLinkOnly {
+            ParseWarningBanner(
+                warnings: document.cachedRetrievalNotice.warnings,
+                degradation: document.cachedRetrievalNotice.degradation
+            )
+
+            if let url = document.fullTextLinkDestination {
+                Link(destination: url) {
+                    Label("Open Publisher", systemImage: "safari")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
     /// Section displaying full text status and action button.
     @ViewBuilder
     private var fullTextSection: some View {
@@ -1409,15 +1463,17 @@ struct DocumentDetailSheet: View {
                 }
 
                 // Still offer to open in browser
-                if let doi = document.doi,
-                   let url = PlatformHelper.doiURL(for: doi) {
+                if let url = document.fullTextLinkDestination {
                     Link(destination: url) {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
                 }
             } else {
-                // Not yet attempted - show fetch button
+                // Not yet attempted, or attempted and left with only a link.
+                // The same three states this card had before, plus the one it
+                // was silently folding into "not yet attempted" (#187).
+                linkOnlyNotice
                 HStack(spacing: 12) {
                     Button(action: fetchFullText) {
                         if isLoadingFullText {
@@ -1476,13 +1532,20 @@ struct DocumentDetailSheet: View {
                     // included. Assigning them by hand is what let the
                     // cache and the live result drift apart (#181).
                     document.applyFullTextResult(result)
+                    save(document, "full text")
 
                     fullTextResult = result
                     isLoadingFullText = false
 
-                    // For web URLs, open directly instead of showing viewer
+                    // A web URL is opened rather than shown — but only when
+                    // there is nothing to explain first. Handing the reader to
+                    // Safari before they have read why this is a substitute is
+                    // the silent fallback #183 objects to; the note and a link
+                    // are in the card, via `linkOnlyNotice`.
                     if case .webURL(let url) = result.content {
-                        openURL(url)
+                        if result.degradation == nil {
+                            openURL(url)
+                        }
                     } else {
                         showFullTextViewer = true
                     }
@@ -1490,7 +1553,11 @@ struct DocumentDetailSheet: View {
             } catch {
                 await MainActor.run {
                     if case FullTextError.noFullTextAvailable = error {
-                        document.fullTextUnavailable = true
+                        // The writer, not the flag: it also clears the source, the
+                        // warnings and the degradation, so a note left by an earlier
+                        // attempt cannot outlive the attempt that superseded it.
+                        document.markFullTextUnavailable()
+                        save(document, "full text availability")
                     }
                     fullTextError = error.localizedDescription
                     isLoadingFullText = false

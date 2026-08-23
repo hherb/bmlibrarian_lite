@@ -408,6 +408,47 @@ final class Document {
         fullTextFetchedAt != nil || fullTextUnavailable
     }
 
+    /// Whether this document was fetched and nothing displayable came back.
+    ///
+    /// What a publisher-link fallback stores: a web URL is opened in a browser
+    /// rather than held as text, so ``hasFullText`` is false even though the
+    /// whole chain ran. Without this the iOS list shows such a record a download
+    /// button and it reads as never-fetched (#187) — which is also the state in
+    /// which a retrieval note has the most to say and the least chance of being
+    /// seen, since there is no content to open a viewer with.
+    ///
+    /// Distinct from ``fullTextUnavailable``, which is the chain reporting that
+    /// no source had anything at all.
+    ///
+    /// The predicate tests the *effect* — a date with nothing displayable behind
+    /// it — because that is what the reader is actually looking at. Anything
+    /// that later clears the cached content without clearing
+    /// ``fullTextFetchedAt`` (a sync eviction, a cache trim) would make an
+    /// evicted record read as link-only and show a stale retrieval note. Clear
+    /// the date alongside the content, as ``clearFullTextCache()`` does.
+    var isLinkOnly: Bool {
+        fullTextAttempted && !hasFullText && !fullTextUnavailable
+    }
+
+    /// Where to send a reader whose full text is only reachable in a browser.
+    ///
+    /// The publisher's DOI page when there is a DOI, and the PubMed record
+    /// otherwise — mirroring the chain's own last two fallbacks, so the card
+    /// offers a route to the same place the retrieval settled on.
+    ///
+    /// The PubMed half is not a nicety. A `.webURL` result caches no content, so
+    /// the URL the chain resolved is gone after the fetch, and a DOI-less record
+    /// gated on the DOI alone had no route at all — the reader was shown a note
+    /// saying a substitute exists and no way to reach it (#187). Empty strings
+    /// are treated as absent, because `doiURL(for: "")` resolves to the DOI
+    /// resolver's front page.
+    var fullTextLinkDestination: URL? {
+        if let doi = doi, !doi.isEmpty, let url = PlatformHelper.doiURL(for: doi) {
+            return url
+        }
+        return PlatformHelper.pubmedURL(for: pmid)
+    }
+
     /// Display name for the full text source.
     var fullTextSourceDisplay: String? {
         guard let source = fullTextSource else { return nil }
@@ -626,17 +667,22 @@ final class Document {
     /// written when a better source was lost, so a raw value this build does not
     /// know — one written by a newer build — still means something was lost, and
     /// reporting none would tell the reader the publisher had no machine-readable
-    /// text when we know otherwise. It reports the one reason there is and logs.
+    /// text when we know otherwise.
+    ///
+    /// It reports ``FullTextDegradation/unspecified``, which says exactly that
+    /// and no more. Naming a specific reason would be a guess, and the reason it
+    /// used to guess — a failed parse — blames our own parser for a shortfall we
+    /// cannot attribute (#186).
     private var storedDegradation: FullTextDegradation? {
         guard let raw = fullTextDegradedReasonRaw else { return nil }
         if let known = FullTextDegradation(rawValue: raw) { return known }
         documentLog.error(
             """
             Unrecognised full-text degradation \(raw, privacy: .public) stored for PMID \
-            \(self.pmid, privacy: .public); reporting a failed parse rather than none.
+            \(self.pmid, privacy: .public); reporting an unspecified one rather than none.
             """
         )
-        return .jatsParseFailed
+        return .unspecified
     }
 
     /// The persisted form of "something was lost and this record cannot say

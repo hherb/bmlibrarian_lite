@@ -291,13 +291,29 @@ final class FullTextParseWarningsTests: XCTestCase {
     /// written when something *was* lost, so reporting "no degradation" would
     /// tell the reader the publisher had no machine-readable text when we know
     /// otherwise.
-    func testAnUnknownStoredDegradationIsNotReportedAsNone() {
+    ///
+    /// It reports `.unspecified` rather than guessing a reason. Before there
+    /// were three reasons, answering `.jatsParseFailed` was a one-in-one guess;
+    /// it is now a one-in-three guess that names our own parser as the culprit,
+    /// which is exactly the misattribution this channel exists to prevent (#186).
+    func testAnUnknownStoredDegradationIsReportedAsUnspecified() {
         let document = makeDocument()
         document.fullTextPDFPath = "https://example.org/a.pdf"
         document.fullTextSource = AppFullTextSource.unpaywall.rawValue
         document.fullTextDegradedReasonRaw = "somethingANewerBuildKnowsAbout"
 
-        XCTAssertEqual(document.cachedFullTextResult?.degradation, .jatsParseFailed)
+        XCTAssertEqual(document.cachedFullTextResult?.degradation, .unspecified)
+        XCTAssertEqual(document.cachedRetrievalNotice.degradation, .unspecified)
+    }
+
+    /// A reason this build *does* know is not flattened into the unknown one.
+    func testAKnownStoredDegradationSurvives() {
+        let document = makeDocument()
+        document.fullTextPDFPath = "https://example.org/a.pdf"
+        document.fullTextSource = AppFullTextSource.unpaywall.rawValue
+        document.fullTextDegradedReasonRaw = FullTextDegradation.europePMCUnreachable.rawValue
+
+        XCTAssertEqual(document.cachedRetrievalNotice.degradation, .europePMCUnreachable)
     }
 
     /// The negative control: an ordinary cached result carries no note.
@@ -472,5 +488,98 @@ final class FullTextParseWarningsTests: XCTestCase {
             #"{"schemaVersion":99,"losses":[{"kind":"openFigures","count":2}]}"#
 
         XCTAssertEqual(document.cachedRetrievalNotice.warnings.losses, [.unspecified])
+    }
+
+    // MARK: - The link-only record (#187)
+
+    /// The four states that reach the predicate, in one test so that a change
+    /// widening it has to face the three it must stay false for.
+    ///
+    /// It lives on the model rather than inside a view because it is the whole
+    /// judgement behind two surfaces, and a private computed property in a
+    /// `View` cannot be tested at all (#185).
+    func testALinkOnlyRecordIsTheOneThatWasFetchedAndCachedNothing() {
+        let neverAttempted = makeDocument()
+        XCTAssertFalse(neverAttempted.isLinkOnly)
+
+        let cachedContent = makeDocument()
+        cachedContent.applyFullTextResult(
+            AppFullTextResult(
+                content: .pdfURL(URL(string: "https://example.org/a.pdf")!), source: .unpaywall
+            )
+        )
+        XCTAssertFalse(cachedContent.isLinkOnly)
+
+        let unavailable = makeDocument()
+        unavailable.fullTextUnavailable = true
+        XCTAssertFalse(unavailable.isLinkOnly)
+
+        let linkOnly = makeDocument()
+        linkOnly.applyFullTextResult(
+            AppFullTextResult(
+                content: .webURL(URL(string: "https://doi.org/10.1234/example")!), source: .doi
+            )
+        )
+        XCTAssertTrue(linkOnly.isLinkOnly)
+        XCTAssertFalse(linkOnly.hasFullText, "a web URL is opened, not cached as text")
+    }
+
+    /// A record that was fetched, marked unavailable, and kept its date is still
+    /// not link-only.
+    ///
+    /// Reachable in production until the views were routed through
+    /// ``Document/markFullTextUnavailable()``: setting the flag by hand left
+    /// ``Document/fullTextFetchedAt`` behind, so `fullTextAttempted` and
+    /// `fullTextUnavailable` were true together. The predicate has to stay false
+    /// for that pair however it arises, because a record the chain says is empty
+    /// must never render as one holding a link.
+    func testAnUnavailableRecordThatKeptItsFetchDateIsNotLinkOnly() {
+        let document = makeDocument()
+        document.fullTextFetchedAt = Date()
+        document.fullTextUnavailable = true
+
+        XCTAssertTrue(document.fullTextAttempted)
+        XCTAssertFalse(document.isLinkOnly)
+    }
+
+    // MARK: - Where a link-only record sends the reader (#187)
+
+    /// A DOI is the publisher's own page, so it wins.
+    func testTheLinkDestinationPrefersTheDOI() {
+        let document = makeDocument()
+        document.doi = "10.1234/example"
+
+        XCTAssertEqual(
+            document.fullTextLinkDestination?.absoluteString,
+            "https://doi.org/10.1234/example"
+        )
+    }
+
+    /// Without one, PubMed — which is where the chain itself ends up.
+    ///
+    /// The case that made this a defect rather than a nicety: a `.webURL` result
+    /// caches no URL, the automatic jump to the browser is suppressed whenever
+    /// there is a note to read first, and a card gated on the DOI alone then had
+    /// no route at all. The reader was told a substitute was shown and given no
+    /// way to reach it (#187).
+    func testTheLinkDestinationFallsBackToPubMedWithoutADOI() {
+        let document = makeDocument()
+        document.doi = nil
+
+        XCTAssertEqual(
+            document.fullTextLinkDestination?.absoluteString,
+            "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+        )
+    }
+
+    /// An empty DOI is an absent one, not a link to the resolver's front page.
+    func testAnEmptyDOIIsTreatedAsAbsent() {
+        let document = makeDocument()
+        document.doi = ""
+
+        XCTAssertEqual(
+            document.fullTextLinkDestination?.absoluteString,
+            "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+        )
     }
 }

@@ -126,7 +126,7 @@ struct FullTextViewer: View {
                 EmptyView()
             }
 
-            if let doi = document.doi,
+            if let doi = document.doi, !doi.isEmpty,
                let url = PlatformHelper.doiURL(for: doi) {
                 ShareLink(item: url) {
                     Label("Share Link", systemImage: "square.and.arrow.up")
@@ -145,7 +145,7 @@ struct FullTextViewer: View {
 
     /// Open the document in the system browser.
     private func openInBrowser() {
-        if let doi = document.doi,
+        if let doi = document.doi, !doi.isEmpty,
            let url = PlatformHelper.doiURL(for: doi) {
             PlatformHelper.openURL(url)
         } else if let url = PlatformHelper.pubmedURL(for: document.pmid) {

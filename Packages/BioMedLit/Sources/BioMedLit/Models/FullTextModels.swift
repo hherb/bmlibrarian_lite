@@ -56,20 +56,67 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
 /// through to a PDF or a publisher link when it cannot use it. That chain is
 /// right — a reader who can be handed the publisher's PDF should get it rather
 /// than an error — but without this the reader cannot tell the two outcomes
-/// apart: "Europe PMC had no machine-readable text for this article" and
-/// "Europe PMC had it and this parser choked on it" present identically (#183).
-/// In a medical-literature tool the wrong conclusion is a reader attributing our
-/// defect to the evidence base.
+/// apart: "Europe PMC had no machine-readable text for this article", "Europe PMC
+/// had it and this parser choked on it", and "we could not reach Europe PMC at
+/// all" present identically (#183, #186). In a medical-literature tool the wrong
+/// conclusion is a reader attributing our defect to the evidence base.
 ///
-/// One case, no payload, on purpose. The parser's typed ``JATSParseError`` is
-/// already logged at error level with its own message, which is where a bug
-/// report gets its detail; persisting that error's `String` payloads would
-/// repeat the mistake ``JATSParseWarnings`` exists to correct (#184). An
-/// optional enum rather than a `Bool` because the field names a *reason* from a
-/// set that happens to have one member today.
+/// No payload on any case. The parser's typed ``JATSParseError`` is already
+/// logged at error level with its own message, which is where a bug report gets
+/// its detail; persisting that error's `String` payloads would repeat the
+/// mistake ``JATSParseWarnings`` exists to correct (#184). An optional enum
+/// rather than a `Bool` because the field names a *reason*.
+///
+/// The raw values are explicit because they are a *persisted* contract: a
+/// compiler-derived name is a detail a rename silently changes, which is the
+/// mistake ``JATSParseWarnings`` was rebuilt to avoid (#184, #163).
+/// `jatsParseFailed` keeps the string it has shipped with since PR #185.
 public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// Europe PMC served machine-readable XML and this parser could not read it.
-    case jatsParseFailed
+    case jatsParseFailed = "jatsParseFailed"
+
+    /// Europe PMC could not be reached, so we never learned whether it had
+    /// machine-readable text for this article.
+    ///
+    /// Distinct from no degradation at all, which means the source answered and
+    /// had nothing. These are all *losses* — the machine-readable copy may well
+    /// have been there, and the reader is looking at a substitute because of us
+    /// rather than because of the evidence base (#186):
+    ///
+    /// - a server error that outlasted its retries;
+    /// - a transport failure;
+    /// - a status we do not model;
+    /// - an identifier search that threw **and left us without a PMC ID**, no
+    ///   later query having matched a record for the article. A search that
+    ///   answered — even with a record naming no PMC ID — settles the question,
+    ///   and a query a later one recovered from cost the reader nothing.
+    ///
+    /// This list is the canonical one. `FullTextService.fetchFullText` and
+    /// `doc/cross_platform/jats_parsing.md` restate it; they must not diverge.
+    ///
+    /// It deliberately does not claim the copy exists. `fullTextXML` answers 404
+    /// for abstract-only deposits, so an unreachable endpoint tells us a PMC
+    /// record exists and nothing about whether it has full text.
+    case europePMCUnreachable = "europePMCUnreachable"
+
+    /// A better source was lost and this build cannot say why.
+    ///
+    /// No producer in this package emits it, and
+    /// ``FullTextResult/init(content:warnings:degradation:)`` asserts as much —
+    /// in debug builds, which is where a new producer gets written.
+    ///
+    /// A *reader* does produce it, which is the point: a persisted raw value
+    /// this build does not recognise decodes to it (see the app's
+    /// `Document.storedDegradation`). The field is only ever written when
+    /// something was lost, so an unrecognised value still means a loss, and
+    /// naming a specific reason we do not have would be the overclaim this whole
+    /// channel exists to prevent.
+    ///
+    /// Note the sibling channel takes the opposite line with the same word:
+    /// ``JATSParseWarnings/Loss/unspecified`` is deliberately written and
+    /// round-tripped, because a warning with no detail is still a warning. Here
+    /// a *reason* with no detail is a reason we do not have.
+    case unspecified = "unspecified"
 }
 
 /// What a full-text retrieval produced, and what it cost.
@@ -108,7 +155,7 @@ public struct FullTextResult: Sendable, Equatable {
         warnings: JATSParseWarnings = JATSParseWarnings(),
         degradation: FullTextDegradation? = nil
     ) {
-        // Two combinations the fallback chain never emits, and which the reader
+        // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
         // this type was an enum with `warnings` buried in the `.europePMC` case;
         // the struct that let the degradation travel also made them compile, so
@@ -128,6 +175,14 @@ public struct FullTextResult: Sendable, Equatable {
         assert(
             degradation == nil || content.source != .europePMC,
             "\(content.source) content marked as a degradation from itself"
+        )
+        // The one case with no producer. Asserted rather than trusted, because
+        // the type system cannot say "readable but not writable" and a future
+        // caller reaching for a vague-sounding case would silently tell every
+        // reader we do not know why their article is a substitute.
+        assert(
+            degradation != .unspecified,
+            "no producer emits .unspecified; it names a value read back from a newer build"
         )
         self.content = content
         self.warnings = warnings
