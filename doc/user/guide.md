@@ -280,6 +280,13 @@ bmll config --json
 bmll clear
 ```
 
+`bmll config` prints your NCBI API key as `<redacted>` in both its plain and
+`--json` forms, so the output is safe to paste into a bug report. That also
+makes it a lossy view: it is a diagnostic, not a backup. Saving it back over
+`~/.bmlibrarian_lite/config.json` would replace your key with the placeholder,
+which BMLibrarian detects on load and ignores, falling back to the
+`NCBI_API_KEY` environment variable.
+
 ## Data Storage
 
 All data is stored locally in `~/.bmlibrarian_lite/`:

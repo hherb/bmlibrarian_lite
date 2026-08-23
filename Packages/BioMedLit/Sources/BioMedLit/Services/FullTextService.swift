@@ -47,6 +47,22 @@ public actor FullTextService {
     /// Europe PMC service for identifier resolution.
     private let europePMCService: EuropePMCService
 
+    /// Characters safe to leave unescaped inside a query-string *value*.
+    ///
+    /// `.urlQueryAllowed` describes a whole query, so of the characters removed
+    /// here it permits `+`, `&`, `=` and `?`. Three of those matter to a value:
+    /// `+` decodes to a space server-side, which would send Unpaywall a
+    /// different address than the one configured, and an unescaped `&` or `=`
+    /// would let the value split itself into query items nobody asked for.
+    /// `?` is legal inside a value and is removed only so the set reads as the
+    /// complete list of delimiters; `#` is not in `.urlQueryAllowed` to begin
+    /// with, so removing it is a no-op kept for the same reason.
+    private static let queryValueAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?#")
+        return allowed
+    }()
+
     // MARK: - Initialization
 
     /// Initialize the full-text service.
@@ -585,11 +601,62 @@ public actor FullTextService {
             throw FullTextError.noIdentifiers
         }
 
-        guard let url = URL(string: "\(BioMedLitConstants.unpaywallBaseURL)/\(encodedDOI)?email=\(email)") else {
-            throw FullTextError.invalidResponse("Invalid DOI format")
+        // The email goes in through URLComponents rather than being interpolated
+        // into a URL string, so the scheme comes from ``unpaywallBaseURL`` rather
+        // than being spelled out here. Unpaywall requires the address as the
+        // caller's identity, so it has to arrive exactly as configured.
+        //
+        // Each guard below names the thing that actually failed. The DOI cannot
+        // influence the scheme and the address cannot influence the path, so an
+        // error message that blames the wrong one sends the reader to the wrong
+        // file.
+        guard var components = URLComponents(string: "\(BioMedLitConstants.unpaywallBaseURL)/\(encodedDOI)") else {
+            let reason = "Unpaywall base URL '\(BioMedLitConstants.unpaywallBaseURL)' is not a valid URL"
+            BioMedLitLib.logger?.error(reason, category: .fullText)
+            throw FullTextError.invalidResponse(reason)
         }
 
-        BioMedLitLib.logger?.debug("Fetching Unpaywall data from: \(url.absoluteString)", category: .fullText)
+        // Unpaywall answers 422 for a missing address, which would surface to the
+        // reader as "no full text available" -- an outage dressed up as an absent
+        // PDF. Caught here instead, where the cause can still be named.
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else {
+            let reason = "Unpaywall requires a contact email address; none is configured"
+            BioMedLitLib.logger?.error(reason, category: .fullText)
+            throw FullTextError.invalidResponse(reason)
+        }
+
+        // `addingPercentEncoding` is total for any `String` Swift can hold, so
+        // this is a formality rather than address validation -- the emptiness
+        // check above is what actually rejects a bad value.
+        guard let encodedEmail = trimmedEmail.addingPercentEncoding(
+            withAllowedCharacters: Self.queryValueAllowed
+        ) else {
+            let reason = "Contact email address could not be percent-encoded"
+            BioMedLitLib.logger?.error(reason, category: .fullText)
+            throw FullTextError.invalidResponse(reason)
+        }
+        components.percentEncodedQueryItems = [URLQueryItem(name: "email", value: encodedEmail)]
+
+        guard let url = components.url else {
+            let reason = "Unpaywall base URL '\(BioMedLitConstants.unpaywallBaseURL)' produced no usable URL"
+            BioMedLitLib.logger?.error(reason, category: .fullText)
+            throw FullTextError.invalidResponse(reason)
+        }
+
+        // Not reachable while ``unpaywallBaseURL`` is the https literal it is
+        // today. It stands so that editing that constant cannot silently
+        // downgrade the transport carrying the reader's email address.
+        guard url.scheme == "https" else {
+            let reason = "Unpaywall base URL must use https, got '\(url.scheme ?? "no scheme")' "
+                + "-- check BioMedLitConstants.unpaywallBaseURL"
+            BioMedLitLib.logger?.error(reason, category: .fullText)
+            throw FullTextError.invalidResponse(reason)
+        }
+
+        // Path only: the query carries the reader's email address, which has no
+        // place in a log file.
+        BioMedLitLib.logger?.debug("Fetching Unpaywall data for DOI: \(doi)", category: .fullText)
 
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")

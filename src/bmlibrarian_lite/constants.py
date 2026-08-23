@@ -391,6 +391,13 @@ CONFIG_FILE_PERMISSIONS = 0o600
 # 0o700 = drwx------ (only owner can access)
 CONFIG_DIR_PERMISSIONS = 0o700
 
+# Stand-in for a secret in any configuration view a human or a log can see.
+# Deliberately not a row of asterisks: it must be impossible to mistake for a
+# real credential if the output is ever pasted back into a config file. That
+# intent is enforced on the load path -- see _reject_redaction_placeholder() in
+# config.py, which discards this value rather than loading it as a key.
+REDACTED_SECRET_PLACEHOLDER = "<redacted>"
+
 # =============================================================================
 # Quality Filtering Settings
 # =============================================================================

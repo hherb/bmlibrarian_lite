@@ -695,7 +695,20 @@ class PDFDiscoverer:
         return None
 
     def _discover_publisher_specific(self, doi: str) -> List[PDFSource]:
-        """Discover PDF using publisher-specific URL patterns."""
+        """Discover PDF using publisher-specific URL patterns.
+
+        Every branch identifies its publisher by the DOI registrant prefix, via
+        ``startswith`` on the DOI normalised by :meth:`_clean_doi`. A host name
+        found somewhere inside the string is not a publisher identity: matching
+        that way lets an arbitrary string be pasted into an article path. Keep
+        new branches prefix-anchored.
+
+        Args:
+            doi: DOI in any of the forms :meth:`_clean_doi` accepts
+
+        Returns:
+            Publisher PDF sources, empty if no branch recognises the registrant
+        """
         sources: List[PDFSource] = []
         doi = self._clean_doi(doi)
 
@@ -726,7 +739,10 @@ class PDFDiscoverer:
                 ))
 
         # Frontiers journals
-        elif "frontiersin.org" in doi or doi.startswith("10.3389/"):
+        # Prefix-anchored, not a substring test: a string merely containing
+        # "frontiersin.org" used to be pasted whole into the article path below,
+        # building a URL that could never resolve.
+        elif doi.startswith("10.3389/"):
             # Frontiers PDF pattern: https://www.frontiersin.org/articles/10.3389/XXX/pdf
             pdf_url = f"https://www.frontiersin.org/articles/{doi}/pdf"
             sources.append(PDFSource(
@@ -745,15 +761,23 @@ class PDFDiscoverer:
 
         # PeerJ
         elif doi.startswith("10.7717/peerj"):
-            # PeerJ PDF pattern
-            pdf_url = f"https://peerj.com/articles/{doi.split('.')[-1]}.pdf"
-            sources.append(PDFSource(
-                url=pdf_url,
-                source_type=PDFSourceType.DOI_DIRECT,
-                is_open_access=True,
-                host_type="publisher",
-                version="publishedVersion",
-            ))
+            # PeerJ numbers each series separately, and the series is part of the
+            # article slug: 10.7717/peerj.1234 is peerj.com/articles/1234, but
+            # 10.7717/peerj-cs.1234 is peerj.com/articles/cs-1234. Taking the
+            # text after the last "." drops the series and silently points at a
+            # different, existing article in the flagship journal.
+            match = re.match(r"10\.7717/peerj(?:-(\w+))?\.(\d+)$", doi)
+            if match:
+                series, article_number = match.group(1), match.group(2)
+                slug = f"{series}-{article_number}" if series else article_number
+                pdf_url = f"https://peerj.com/articles/{slug}.pdf"
+                sources.append(PDFSource(
+                    url=pdf_url,
+                    source_type=PDFSourceType.DOI_DIRECT,
+                    is_open_access=True,
+                    host_type="publisher",
+                    version="publishedVersion",
+                ))
 
         # BMC/SpringerOpen (BioMed Central)
         elif doi.startswith("10.1186/"):
@@ -801,10 +825,30 @@ class PDFDiscoverer:
         return sources
 
     def _clean_doi(self, doi: str) -> str:
-        """Clean and normalize a DOI."""
+        """Clean and normalize a DOI to its bare ``10.x/...`` form.
+
+        Accepts the resolver forms that turn up in real metadata: ``doi.org``
+        and ``dx.doi.org`` URLs over either scheme, a ``doi:``/``DOI:`` prefix,
+        and surrounding whitespace. Anything else is returned as given --
+        publisher matching is prefix-anchored, so an unrecognised form simply
+        matches no branch rather than being coerced into one.
+
+        Args:
+            doi: DOI in any of the above forms
+
+        Returns:
+            The DOI with any recognised resolver prefix removed
+        """
         doi = doi.strip()
         # Remove common prefixes
-        prefixes = ["https://doi.org/", "http://doi.org/", "doi:", "DOI:"]
+        prefixes = [
+            "https://doi.org/",
+            "http://doi.org/",
+            "https://dx.doi.org/",
+            "http://dx.doi.org/",
+            "doi:",
+            "DOI:",
+        ]
         for prefix in prefixes:
             if doi.lower().startswith(prefix.lower()):
                 doi = doi[len(prefix):]
