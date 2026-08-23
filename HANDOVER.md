@@ -8,9 +8,42 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-Nothing. `master` is at PR #185; the working tree is clean. Pick the next slice
-from **Potential follow-ups** below — **#186** and **#187** are the live ones,
-both split out of the #185 review.
+- **An unreachable source is not an absent one** (#186/#187, PR open on
+  `fix/fulltext-unreachable-source-186-187`). Design spec:
+  `docs/superpowers/specs/2026-08-23-fulltext-unreachable-source-design.md`.
+  - **#186 — the channel modelled two of three honest states.** A source that
+    answered "nothing" and a source we could not reach are opposite answers, and
+    only the first is the evidence base's fault. `FullTextDegradation` now has
+    `europePMCUnreachable` beside `jatsParseFailed`, plus `unspecified` for a raw
+    value a newer build wrote — never produced here, asserted against, and the
+    only honest answer to "a loss whose reason this build cannot name". **Raw
+    values are explicit**, because a compiler-derived case name is a detail a
+    rename silently changes; pinned against literals, not round-tripped through
+    `init(rawValue:)`, which would agree with a rename and pin nothing.
+  - **The identifier search was the sharper half.** It answered `(nil, nil)` for
+    both "no PMC record" and "the search failed", so the machine-readable source
+    was skipped whole and the article reported as having no full text because we
+    could not ask. It now returns `searchFailed` alongside, OR-ed across
+    attempts, and the degradation is raised only when a search failed **and** no
+    ID was found.
+  - **#187 — iOS could not speak for a link-only record.** A `.webURL` fallback
+    caches nothing, so `hasFullText` is false: the list row offered a download
+    button for a record already fetched, and the card jumped straight to Safari.
+    The row now shows **Link only**, and the card shows the banner plus an Open
+    Publisher link — the automatic jump fires only when there is nothing to
+    explain. Both surfaces key off `Document.isLinkOnly`, a tested model
+    predicate rather than private view state.
+  - **A mutant that dies on the success path proves nothing.** The test meant to
+    pin "a failed first search the second recovers from" ended in a *successful*
+    parse — and that `return` omits `degradation` by construction, since a parse
+    that worked cannot be degraded from itself. It has to end in a **fallback**.
+    Chasing it found a real defect: the early-return path handed back the
+    successful attempt's own resolution and **dropped the accumulated flag**, so
+    `searchFailed` silently meant "the last search failed".
+  - **The iOS app target had not compiled for some time, and nothing could see
+    it.** `Sources/Utilities/Logger.swift` was the one file on disk absent from
+    `project.pbxproj`, so `AppLogger` did not exist in that target. Fixed here;
+    the CI gap is **#190**. See **Verify**.
 
 ## Recently landed (context)
 
@@ -24,45 +57,42 @@ the rest.
     carries one `Loss` per audited counter plus `.noContent`/`.unspecified`, and
     `diagnostics` is *derived* — so the log and the banner's technical disclosure
     render the same English they always did, while persistence, `Equatable` and
-    the tests key off `losses`.
+    the tests key off `losses`. The eight parser-produced log lines moved
+    byte-for-byte, because `testParsingReportsNoContentLoss` reads the log's text
+    and the corpus digests hang off it; a rewording later is visibly a rewording.
   - **A tagged union's persisted form needs named keys and a `schemaVersion`.**
     Synthesised `Codable` emits `{"_0":2}`, and `_0` is a compiler detail you are
     then stuck reading forever (#163's complaint, answered before it accrued
-    history). Legacy bare-`[String]` records have no `schemaVersion`, so they fail
-    to decode and the reader lands them on `.unspecified` — that *is* the
-    migration, and it is pinned by test. Mapping old sentences back to cases was
-    rejected: it re-creates the wording coupling where wording is hardest to change.
-  - **The eight parser-produced log lines moved byte-for-byte**, because
-    `testParsingReportsNoContentLoss` reads the log's text and the corpus digests
-    hang off it. A rewording later is now visibly a rewording.
-  - **A 404 is not a degradation.** An absent source was never lost, and a note
-    that fires on every article never deposited as full text is worthless on the
-    ones where it is true. The fallback PDF is *complete*, so the reader sees
-    information, not a warning triangle — a triangle over content that is fine is
-    what trains a reader to dismiss the banner on the article that really lost text.
-  - **A view's private computed state cannot be tested.** The banner's three-way
-    choice is `ParseWarningMessage`, a pure value. Do not nest such a type in the
-    view and call it `State` — it silently shadows SwiftUI's `@State`.
+    history). Legacy bare-`[String]` records cannot decode and land on
+    `.unspecified` — that *is* the migration, pinned by test. Mapping old
+    sentences back to cases was rejected: it re-creates the wording coupling
+    where wording is hardest to change.
+  - **A 404 is not a degradation**, and the fallback PDF is *complete*, so the
+    reader sees information rather than a warning triangle — a triangle over
+    content that is fine is what trains a reader to dismiss the banner on the
+    article that really lost text.
+  - **A view's private computed state cannot be tested.** The banner's choice is
+    `ParseWarningMessage`, a pure value. Do not nest such a type in the view and
+    call it `State` — it silently shadows SwiftUI's `@State`.
   - **A mutation run only proves what its assertions reach.** Four survivors:
     every literal-JSON test asserted a *throw*, so nothing decoded a literal
-    successfully and nothing pinned the `schemaVersion` or the key names those
-    literals embed; and two `degradation` sites were unreachable — the test naming
-    the doi.org branch landed on the PubMed fallback (both return `.doi(webURL:)`)
-    and the PDF branch needed an `EuropePMCService` the initialiser hard-coded.
-    Assert the host, inject the seam, pin the contract with a literal past the encoder.
-  - **Read a retrieval note from the stored fields, never through a rebuild of the
-    content.** A `.webURL` fallback caches nothing, so `cachedFullTextResult`
-    returned `nil` and took the note with it — macOS said "No full text available"
-    for an article we had and lost.
-  - Both its own follow-ups, **#186** and **#187**, are open below.
+    successfully and nothing pinned the `schemaVersion` or key names those
+    literals embed; and two `degradation` sites were unreachable — two branches
+    return `.doi(webURL:)`, and a hard-coded `EuropePMCService` left the PDF
+    branch unexercised. Assert the host, inject the seam, pin the contract with a
+    literal past the encoder.
+  - **Read a retrieval note from the stored fields, never through a rebuild of
+    the content.** A `.webURL` fallback caches nothing, so `cachedFullTextResult`
+    returned `nil` and took the note with it — macOS said "No full text
+    available" for an article we had and lost.
 
 - **The unwind audit's two blind spots** (#180/#181 in PR #182, 2026-08-22).
   **#180 — the clamp erased the evidence.** Every counter decremented as
   `max(0, n - 1)` and the audit only tested `> 0`, so a counter that clamped to 0
   read "balanced" for the rest of the document and the audit **certified a
-  defective parse as clean**. Every counter now records the underflow. **A stack
-  hides an over-pop just as the clamp did** — "cannot go negative" is not "cannot
-  lose the evidence". The clamp had to stay: `inSubArticle` is
+  defective parse as clean**. Every counter now records the underflow, and **a
+  stack hides an over-pop just as the clamp did** — "cannot go negative" is not
+  "cannot lose the evidence". The clamp had to stay: `inSubArticle` is
   `subArticleDepth > 0`, so an unclamped -1 is brought back to 0 by the next
   `<sub-article>` and a reviewer report is emitted as the article's own body.
   **#181 — logging is not reporting.** `JATSParseWarnings` now travels parser →
@@ -74,116 +104,81 @@ the rest.
     everything that writer does.** `applyFullTextResult` never wrote
     `fullTextPDFPath`, so every PDF-sourced article read as never-fetched on
     relaunch; and the upload path never cleared the warnings, so a reader
-    uploading a complete copy *because* the parse was truncated was told their own
-    upload was missing content.
+    uploading a complete copy *because* the parse was truncated was told their
+    own upload was missing content.
   - **A pbxproj UUID collision silently drops a file from the build**, compiling
-    everywhere except the macOS target. `swift test` cannot see it — the SPM
-    target excludes `Sources/macOS`. Now guarded by `xcode_project_guards.py`.
-  - Both its own follow-ups, #184 and #183, are in flight above. **#183 had been
-    closed as completed by a commit whose message listed it as deferred**; the
-    code agreed with the message. Check that a closing commit did what the
-    closure claims.
+    everywhere except the macOS target. Now guarded by `xcode_project_guards.py`
+    — which does not catch a file absent from the project altogether (#190).
+  - **#183 had been closed as completed by a commit whose message listed it as
+    deferred**, and the code agreed with the message. Check that a closing commit
+    did what the closure claims.
 
-- **One exhibit collector for figures and tables** (#170/#173/#175 in PR #179,
-  2026-08-22). `<fig>` and `<table-wrap>` now share one `ExhibitCollector`, and
-  `inFigure`, `inTableWrap`, `figures` and `tables` are **derived from it and
-  never stored** — a stored flag is exactly what an inner exhibit's close tag
-  clears while the outer one is still open, which is #156, #169, the `</fn>`
-  counter and both halves of #173 in one sentence.
-  - **The stack alone did not finish #173.** The same sentence applies to a
-    parser-wide *counter*: `exhibitFootnoteDepth` still stood at the outer
-    table's depth while the inner table parsed, so the inner table's own cell
-    `<p>` was filed as its footnote and rendered twice. Prose routes on
-    `inInnermostExhibitFootnote`, derived from `elementStack`; the counter
-    survives only so the audit can notice its two ends drifting apart.
+- **One exhibit collector, and routing by the owning element** (#170/#173/#175 in
+  PR #179; #156/#157/#161 in PR #166; #167/#169 in PR #171 — all 2026-08-22).
+  Eight defects, one mistake: markup routed on *ambient* parser state — `inFigure`,
+  `inTableWrap`, "is a section open?" — rather than on the element it belongs to.
+  `<fig>` and `<table-wrap>` now share one `ExhibitCollector`, and every exhibit
+  flag is **derived from it and never stored**: a stored flag is exactly what an
+  inner exhibit's close tag clears while the outer one is still open. Rules that
+  still bind:
+  - **Read `elementStack`, not ambient state.** `enclosingElement` for "whose
+    child am I?", `innermostExhibit` for "which of a nested pair is nearer?", and
+    `graphicOwner` for `<graphic>`, whose ownership passes through
+    `<alternatives>` and stops at everything else. Prefer the parent test to a
+    depth counter where both would work — #157's depth comparison needed a
+    special case for each way an exhibit can open inside a footnote;
+    `enclosingElement == "fn"` subsumes all of them.
+  - **A parser-wide *counter* has the same flaw as a stored flag** (#173's second
+    half): `exhibitFootnoteDepth` still stood at the outer table's depth while
+    the inner table parsed, so the inner table's own cell `<p>` was filed as its
+    footnote and rendered twice.
+  - **Fix every site the question is asked at, not the two the bug report
+    names.** Grep for the *predicate*, not the symptom. And **a counter's two
+    ends must test the same predicate as the routing**: `</fn>` was guarded on
+    ambient flags while the prose it bracketed routed off the element stack, so a
+    `<table-wrap>` opening *and closing* inside a footnote skipped the decrement
+    and every later paragraph in the document drained into the footnote branch
+    and was discarded.
+  - **A safety net installed where production never runs is not installed**
+    (#175) — the unwind audit lived in `parseToArticle` while the full-text path
+    is `parseToHTML`/`parseToMarkdown`. **Wiring such a net needs a check a
+    document *can* trip**, or a mutation deleting the call survives; the
+    zero-author warning is that check. And **nothing connected a counter to the
+    field it is reported under**, so swapping two changed no observable
+    behaviour — pinned by driving the `XMLParserDelegate` callbacks directly.
+  - **`doc/cross_platform/jats_parsing.md` is the port contract**, and a routing
+    change that leaves it stale re-introduces the defect downstream: it still
+    specified the deleted depth-comparison algorithm, so a faithful Kotlin port
+    would have rebuilt #169 from the spec while the Swift fix sat next to it.
   - **A fixture's table cells must hold `<p>`.** Bare `<td>` text never reaches
     the `<p>` branch, so it hides every defect that lives there. No corpus
     article nests a `<table-wrap>` — hand-written fixtures are the only guard.
-  - **A closing exhibit hands itself plus the run that closed inside it up to
-    its parent**, so #156's reserved-slot array goes away: same document order,
-    no index, no `nil` meaning two things (#170). bmlib keeps the slot-list
-    shape and is equally correct; `doc/cross_platform/jats_parsing.md` carries
-    both.
-  - **A safety net installed where production never runs is not installed**
-    (#175). The end-of-parse unwind audit lived in `parseToArticle`; the
-    full-text path is `parseToHTML`/`parseToMarkdown`. It runs from
-    `runParser()` now, over six counters, as a pure static function on
-    `JATSParseUnwindState` — nothing well-formed can trip it, so the tests hand
-    it the state a defect would leave.
-    - **Wiring such a net needs a check a document *can* trip**, or a mutation
-      deleting the call survives. The zero-author warning is that check, moved
-      to `runParser()` where it was always needed.
-    - **Nothing connected a counter to the field it is reported under**, so
-      swapping two changed no observable behaviour. Pinned by driving the
-      `XMLParserDelegate` callbacks directly — open an element and never deliver
-      its end tag, the one thing well-formed XML cannot do.
-    - Both blind spots it shipped with, #180 and #181, are closed above.
-  - **bmlib was measured, not assumed**: it never had the first half of #173,
-    and sidesteps the second only by dropping exhibit-footnote prose outright —
-    a larger content loss, lodged as bmlib **#124**. It has no end-of-parse
-    audit at all (bmlib **#134**). Kotlin has the single-slot shape for *both*
-    exhibits and no audit either; added to **#165**.
-
-- **JATS routing by the owning element** (#156/#157/#161 in PR #166, #167/#169 in
-  PR #171, both 2026-08-22). Six defects, one mistake: markup routed on *ambient*
-  parser state — `inFigure`, `inTableWrap`, "is a section open?" — rather than on
-  the element it belongs to. The remedy, now used by `<caption>`, `<title>` and
-  `<label>` alike, is to read `elementStack`: `enclosingElement` for "whose child
-  am I?" and `innermostExhibit` for "which of a nested pair is nearer?".
-  - **Prefer the parent test to a depth counter where both would work.** #157's
-    depth comparison needed a special case for each way an exhibit can open
-    *inside* a footnote; `enclosingElement == "fn"` subsumes all of them.
-  - **Fix every site the question is asked at, not the two the bug report
-    names.** The #171 review found `<graphic>` still routing on ambient
-    `inFigure` after `<label>` and the footnotes had been fixed for the same
-    nesting. Grep for the *predicate*, not the symptom.
-  - **`<graphic>` needs a third accessor.** Ownership passes through
-    `<alternatives>` and stops at everything else, so `enclosingElement` drops
-    the multi-deposit case #161 exists to serve and `innermostExhibit` hands a
-    `<supplementary-material>`'s image to the figure around it. `graphicOwner` is
-    a port of bmlib's `_graphic_owner`.
-  - **A counter's two ends must test the same predicate as the routing.** `</fn>`
-    was guarded on ambient flags while the prose it bracketed routed off the
-    element stack, so a `<table-wrap>` opening *and closing* inside a footnote
-    skipped the decrement and **every later paragraph in the document drained
-    into the footnote branch and was discarded**. Pre-existing, not
-    corpus-visible, found by review.
-  - **`doc/cross_platform/jats_parsing.md` is the port contract, and a routing
-    change that leaves it stale re-introduces the defect downstream.** It still
-    specified the deleted depth-comparison algorithm, so a faithful Kotlin port
-    would have rebuilt #169 from the spec while the Swift fix sat next to it.
+  - **`<graphic>` deposits are ranked, not positional** — `archival` <
+    `thumbnail` < `full`, thumbnail-ness read from `content-type` **or**
+    `specific-use` and never the file extension. **Each attribute needs a test in
+    both deposit orders**, or first-wins resolves the image and the second
+    attribute goes uncovered. **A slot is reserved when a figure opens and filled
+    when it closes** — pop-and-append passes "the parent survives" and fails
+    document order. **One parse per `JATSXMLParser` instance** (#168), the flag
+    set *before* `parser.parse()`.
   - **Neither behaviour captured the grouped-citation marker.** The ambient
     `inRef` test wrote the last of `(a)`, `(b)`, `(c)` into the field holding the
-    reference *number* — 631 such labels across 158 refs in 150 articles, not one
-    a reference number. Routing by parent drops them instead; a blank the
-    renderer can see beats a confidently wrong number. #177 tracks capturing them
-    properly. Grouped citations are an RSC chemistry convention, so **publisher
-    spread, not sample size, is what is still thin**.
-  - **Corpus evidence, all six:** `PMC8754430` 9 figures → 12 and its section
-    title `"Author contributions"` → `"Additional information"`; `PMC12661592`
-    table label `"a"` → `"Table 1."`; `PMC12755737` + `PMC13294358` `.gif` →
-    `.jpg`. #169's shape has no corpus occurrence, which is why the corpus is a
-    floor and not the whole test suite.
-  - **A slot is reserved when a figure opens and filled when it closes.**
-    Pop-and-append passes "the parent survives" and fails document order, so
-    eLife's supplements precede the figure they belong to.
-  - **`<graphic>` deposits are ranked, not positional** — `archival` <
-    `thumbnail` < `full`, accepted only when strictly better. Thumbnail-ness
-    reads `content-type` **or** `specific-use`, never the file extension. **Each
-    attribute needs a test in both deposit orders**: with the thumbnail last,
-    plain first-wins already resolves the image, so `specific-use` was uncovered
-    until a thumbnail-first case was added.
-  - **One parse per `JATSXMLParser` instance** (#168), now
-    `JATSParseError.alreadyParsed`. The flag is set *before* `parser.parse()`, so
-    a failed first parse consumes the instance too.
-  - **Both sibling parsers were measured, not assumed.** bmlib replicates
-    #156/#157/#161 and #167 but **not** #169 or #168; Android replicates all five
-    routing defects (**#165**, which also notes Kotlin pops `elementStack` before
-    its `when`, so its `lastOrNull()` is already the parent).
-  - **`bmlib` is ahead of Swift on exhibit modelling — port from it rather than
-    reinventing.** It already had `_innermost_exhibit()`, `_graphic_owner()` and
-    derived-never-stored exhibit flags, which is exactly what #173 needed.
-  - Twenty-nine mutations across the two PRs and the review round, no survivors.
+    reference *number* — 631 labels across 158 refs in 150 articles, not one a
+    reference number. Routing by parent drops them instead; a blank the renderer
+    can see beats a confidently wrong number. #177 tracks capturing them, and
+    grouped citations are an RSC chemistry convention, so **publisher spread, not
+    sample size, is what is still thin**.
+  - **Both sibling parsers were measured, not assumed**, and **bmlib is ahead of
+    Swift on exhibit modelling — port from it rather than reinventing.** bmlib
+    replicates #156/#157/#161 and #167 but not #169 or #168; it drops
+    exhibit-footnote prose outright (bmlib **#124**) and has no end-of-parse
+    audit (bmlib **#134**). Kotlin replicates all five routing defects and has
+    neither (**#165**). Twenty-nine mutations across these PRs, no survivors.
+  - Corpus evidence: `PMC8754430` 9 figures → 12 and its section title
+    `"Author contributions"` → `"Additional information"`; `PMC12661592` table
+    label `"a"` → `"Table 1."`; `PMC12755737` + `PMC13294358` `.gif` → `.jpg`.
+    #169's shape has no corpus occurrence — the corpus is a floor, not the whole
+    test suite.
 
 - **JATS structural survey** (#164, PR #178, 2026-08-22): `scripts/jats_survey.py`
   counts the prevalence figures every JATS issue rests on, from the XML and
@@ -191,15 +186,14 @@ the rest.
   document contains would agree with the parser's bugs, which is how #161 and
   #162 survived a green suite. Re-derive a figure before quoting it.
   - **A prevalence figure without its journal mix is repeatable, not
-    reproducible.** It reproduces the old 225-article survey where the
-    measurement is publisher-neutral and diverges where it is not — nested `<fig>`
-    **0.3% vs 19.6%**, eLife's house style against a different draw. Every run
-    prints its journal mix.
+    reproducible** — nested `<fig>` came back **0.3% vs 19.6%** against the old
+    225-article survey, eLife's house style against a different draw. Every run
+    prints its journal mix and its sample composition.
   - **Sample the population you are measuring.** Europe PMC serves `fullTextXML`
     for abstract-only deposits, so a 400-article draw came back 390 conference
     abstracts and reported "0 nested figures". `PUB_TYPE:"research-article"`
     excludes them — and excludes the `review-article`/`brief-report` where #177's
-    grouped citations live. Every run prints its sample composition.
+    grouped citations live.
   - **Check a flagged counterexample by hand before believing it.** Two detector
     bugs, both the survey manufacturing the evidence it exists to look for,
     reported 3 false counterexamples that would have argued for reopening #177.
@@ -215,11 +209,9 @@ the rest.
   writes nothing in CI; the bytes are never edited.
   - **Hand-checking the digests is the step that pays.** It found #154, #155,
     #156, #157 and #161; PR review found #162; reviewing the review found #167
-    and #169. Generating a digest and committing it unread would have found none
-    and frozen all of them as expectations. **A digest field only catches what it
-    is shaped to see** — #161 was invisible until review replaced a `hasGraphic`
-    boolean with the resolved URL, #162 until a row count became a hash of the
-    rendered markdown.
+    and #169. **A digest field only catches what it is shaped to see** — #161 was
+    invisible until review replaced a `hasGraphic` boolean with the resolved URL,
+    #162 until a row count became a hash of the rendered markdown.
   - **Two traps that live only here, because the README does not carry them:**
     - **The fixture walk stops at the checkout root**, in both `JATSRealCorpusTests`
       and `TransparencyParityTests` — they must not drift. Both used to climb to
@@ -243,11 +235,11 @@ the rest.
 - **Funder classification and sponsor tiers, Python↔Swift** (#143/#147/#152,
   PR #153, 2026-08-21). Both platforms score precision 0.909 / recall 0.333 on
   the shared corpus. `sponsor_patterns.json` (schema_version 3) is the contract,
-  asserted from both sides; it carries `confidence_probes` (the DOI > gov >
-  academic > industry-name > none ladder, checked *behaviourally* since Swift's
-  constants are private) and `pattern_probes` (every pattern must match ≥1 probe
-  — a typo transcribed faithfully into every copy agrees with itself, which is
-  where `\bniaid\b`, `\bnhlbi\b` and `\bnimh\b` sat).
+  asserted from both sides; it carries `confidence_probes` (checked
+  *behaviourally*, since Swift's constants are private) and `pattern_probes`
+  (every pattern must match ≥1 probe — a typo transcribed faithfully into every
+  copy agrees with itself, which is where `\bniaid\b`, `\bnhlbi\b` and
+  `\bnimh\b` sat).
   - **Never merge the funder lists into `INDUSTRY_KEYWORDS`** — that list is COI
     *prose*, and corporate suffixes match far too freely in running text. Pinned.
   - **A stem and a whole word are different kinds of thing**: a stem must match
@@ -259,6 +251,7 @@ the rest.
     tier GOVERNMENT, `government`/`federal`/`state` sit in the *academic* half,
     and `\bva\b` tiers "…, Richmond VA" as GOVERNMENT. Revisit on both
     platforms or neither. Deferred: **#159**, **#160**.
+
 - **CI on all three platforms** (#129, 2026-08-20): `python-tests.yml` (pytest +
   `lint-delta`), `swift-tests.yml` (`macos-15` over both Swift packages),
   `android-tests.yml`. What still binds:
@@ -285,33 +278,27 @@ the rest.
   `dropRetiredModelSelection` / `LLMModel.resolveSelection` must only ever see a
   list that really came from the provider, or they will rewrite a valid stored
   selection whenever the network is down.
-- **Cross-platform parity drift guard** (#105 landed 2026-07-19): parity between
-  the three data-availability classifiers is enforced by test, not convention.
-  The contract is `doc/cross_platform/transparency_parity/` — **read its
-  `README.md` before touching a pattern**; it carries the full rationale, the
-  structural traps and the mutation evidence. In short: two fixtures, both
-  load-bearing (one pins the patterns string-for-string and order-sensitively,
-  one pins 65 worked cases behaviourally, and neither subsumes the other);
-  changing a pattern means editing the contract plus all three platforms plus a
-  covering case; coverage guards require every tier, every label **and every
-  individual pattern** to be exercised, per-pattern being strictly stronger than
-  per-label and having already caught a shipped blind spot. **Do not remove the
-  `inputs.dir` declaration in `app/build.gradle.kts`** — without it Gradle sees
-  no changed input for a contract-only edit, reports `UP-TO-DATE`, and silently
-  skips the Android parity test.
-- **Data-availability classifier, July slices** (#101–#125, merged 2026-07-16/19).
-  Python `study_transparency_analyzer.py` is canonical; Swift and Android mirror
-  it byte-for-byte — for this classifier, and since #143 the funder-name one, but
-  *not* `INDUSTRY_KEYWORDS` (#148). Three rules survive:
+- **Cross-platform parity drift guard** (#105, 2026-07-19) and the
+  **data-availability classifier's July slices** (#101–#125). Python
+  `study_transparency_analyzer.py` is canonical; Swift and Android mirror it
+  byte-for-byte — for this classifier and, since #143, the funder-name one, but
+  *not* `INDUSTRY_KEYWORDS` (#148). **The contract is
+  `doc/cross_platform/transparency_parity/`, and its `README.md` carries the
+  rationale, the structural traps, the mutation evidence and the two fixtures'
+  division of labour — read it before touching a pattern.** Three things it does
+  *not* carry:
+  - **Do not remove the `inputs.dir` declaration in `app/build.gradle.kts`** —
+    without it Gradle sees no changed input for a contract-only edit, reports
+    `UP-TO-DATE`, and silently skips the Android parity test.
   - **Do not reword the pattern test fixtures.** Negated openness is matched
     forward (negator, bounded window, affirmation) because Python forbids a
     variable-length lookbehind and the patterns must stay byte-identical across
     three platforms. The pins only work at specific sentence shapes.
   - **Kotlin: `negatedOpennessPatterns` must stay declared *before*
     `restrictedPatterns`** — object properties initialise in declaration order,
-    so a forward reference silently appends nothing.
-  - **Kotlin `RegexHelper` compiles with `(?U)`** so `\w\s\b\d` match Unicode
-    the way Python and Swift do.
+    so a forward reference silently appends nothing. And `RegexHelper` compiles
+    with `(?U)` so `\w\s\b\d` match Unicode the way Python and Swift do.
+
 - **Android PubMed XML parsing** (#119, PR #122, 2026-07-18): `parseArticleXml`
   runs on a pure-JVM JAXP SAX parser, not Android's `XmlPullParser` (which throws
   "not mocked" under plain JUnit, and whose exception the broad catch swallowed
@@ -324,28 +311,20 @@ the rest.
 
 ## Potential follow-ups
 
-- **#186 — an unreachable Europe PMC is reported as an absent one.**
-  `FullTextService` sets `.jatsParseFailed` only when Europe PMC served XML we
-  could not read; a 503 through all retries, a timeout, or a 403 from Unpaywall
-  takes the `else` branch and sets nothing, so "never existed" and "we could not
-  reach it" reach the reader identically — the same collapse #183 fixed one level
-  up. Wants a `case europePMCUnreachable` with its own banner sentence, one that
-  invites a retry rather than implying a defect. Deferred out of #185 because it
-  adds a persisted enum case, new clinician-facing copy, and a change to the
-  `doc/cross_platform/jats_parsing.md` contract that the Kotlin (#165) and bmlib
-  (hherb/bmlib#134) ports follow. `searchForPMCIdAndPDFUrl` is a second site: it
-  now logs at `.warning` and propagates cancellation, but a transient failure
-  there still skips the whole Europe PMC branch silently.
-- **#187 — iOS has nowhere to show why a record is link-only.** #185 fixed the
-  model layer and macOS (`Document.cachedRetrievalNotice` reads the stored fields,
-  and `MacFullTextTab.noFullTextView` renders the banner). On iOS a `.webURL`
-  fallback caches no content, so `hasFullText` is `false`, `FullTextTab`'s row
-  shows a download button and reads as *unfetched*, and `ScoredDocumentsView`
-  opens the browser directly, bypassing `FullTextViewer` and its banner. Not
-  actively wrong the way the macOS bug was, but the note never arrives and a
-  re-tap re-runs the whole chain. The data source is in place and
-  platform-agnostic; what is undecided is the surface — badge, row subtitle, or a
-  detail sheet for documents with no full text — which is a UI design call.
+- **#190 — CI never builds either app target.** `swift test` compiles the
+  iOS-only sources to nothing on a macOS host, the SPM target excludes
+  `Sources/macOS`, and no workflow runs `xcodebuild` at all — so the union of the
+  checks compiles neither app. That is how a missing `project.pbxproj` entry left
+  the iOS target unbuildable (fixed in the #186/#187 PR). Wants two build jobs,
+  macOS and iOS Simulator, and — cheaper, and the exact defect that occurred — a
+  guard that fails when a `.swift` file under `ios/MedicalFactChecker/Sources/`
+  is referenced by no target.
+- **#189 — a failed Unpaywall lookup reads as an article with no OA PDF.** The
+  same collapse #183 fixed for Europe PMC's XML and #186 for its search, one
+  source along. It cannot reuse `europePMCUnreachable` — Unpaywall is a different
+  source, and saying Europe PMC was unreachable would be untrue — so it wants its
+  own reason and sentence. Smaller in consequence: the fallback below Unpaywall
+  is a publisher link either way, and no machine-readable text is at stake.
 - **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
   entry is `\bpharma(?:ceutical)?s?\b`, Swift's is `\bpharma(?:ceutical)?\b`. All
   17 other entries are byte-identical. `\b` lands before the "s", so a COI
@@ -367,36 +346,30 @@ the rest.
   spread before the model changes.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
   open** (#156, #157, #161, #167, #169 landed; see above). Fixing any of them
-  moves the corpus digests and needs the sibling parsers checked — see **Verify**
-  for both workflows.
+  moves the corpus digests and needs the sibling parsers checked — see **Verify**.
   - **#154 — author affiliations are never captured.** `currentAffiliations` is
     written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
     98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
-    inside `<contrib>`, which is the shape every synthetic test uses. Every
-    corpus author reports zero.
+    inside `<contrib>`, which is the shape every synthetic test uses.
   - **#155 — `<mixed-citation>` yields no structured reference metadata.** 80.9%
     of articles, **74.6% of all real references**. The citation string survives,
     so it degrades quietly.
-  - **#162 — `rowspan` is never read.** `grep -rn rowspan Sources/` returns
-    nothing: a spanning cell contributes to its first row only, every later row is
-    a cell short, and `padRow` quietly pads the gap so the columns after it shift.
-    11 real cells in the corpus. `markdownRowCount` could never see it — a
-    rowspan misalignment does not change the row count — which is why the digest
-    now stores a `markdownDigest` hash of the rendering instead.
+  - **#162 — `rowspan` is never read.** A spanning cell contributes to its first
+    row only, every later row is a cell short, and `padRow` quietly pads the gap
+    so the columns after it shift. 11 real cells in the corpus. `markdownRowCount`
+    could never see it — a rowspan misalignment does not change the row count —
+    which is why the digest now stores a `markdownDigest` hash of the rendering.
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry `\bnci\b`, `\bniaid\b`, `\bnhlbi\b`,
   `\bnimh\b` but no singular "National Institute of X" form, while CrossRef
-  returns it routinely ("National Cancer Institute", "National Institute of
-  Child Health and Human Development"). They tiered ACADEMIC before #147 and
-  NONPROFIT after it — both wrong for a US federal agency. Funder classification
-  is unaffected; only `sponsor_type` is. Pinned by
+  returns it routinely. They tiered ACADEMIC before #147 and NONPROFIT after it —
+  both wrong for a US federal agency. Only `sponsor_type` is affected. Pinned by
   `test_a_spelled_out_nih_institute_should_be_government`, written as the
   behaviour we *want* and marked `xfail(strict=True)`: the gap reads as an open
   to-do in CI rather than a passing feature, and fixing it makes the test XPASS,
   which `strict` turns into a failure so the marker must come off. Widening to
-  `\bnational institutes? of\b` reaches
-  non-US bodies ("National Institute of Development Administration"), so measure
-  first — and change both platforms together.
+  `\bnational institutes? of\b` reaches non-US bodies ("National Institute of
+  Development Administration"), so measure first — and change both platforms.
 - **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
   dropped**: they no longer corrupt the enclosing section (fixed in #142 review),
   but there is no model to capture them into. 258 + 144 + 15 occurrences across
@@ -420,27 +393,22 @@ the rest.
 - **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
   indicators, funding/trial (network), JATS statement extraction, Room
   persistence + `DocumentCard` UI.
-- **#126 — redundant "Data not openly available" label** (cosmetic): emitted
-  alongside a more specific label for the same clause ("Data cannot be shared",
-  "Requires IRB approval"). Tiers are correct; presentation noise only.
 - **#109 — LLM-assisted disambiguation of repo + soft-restriction**: a repo
   mention + a *soft* on-request restriction is kept FULL_OPEN today; add an
   optional config-gated deterministic-fallback LLM layer at the orchestration
   layer, leaving the pure classifier + parity tests unchanged.
-- **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles
-  per call). Negligible today; memoize if it ever hits a hot path.
-- **#136 — model catalogue pricing disagrees with `CostCalculator`**: GPT-5.2 is
-  advertised at $2.00/$8.00 but billed at $1.75/$14.00, and `mistral-large-latest`
-  matches no pricing key so it bills at the `defaultPricing` placeholder. Needs a
-  decision on which figures are current before it can be fixed.
-- **#137 — pricing duplicated across six sites per platform**; #136 is that
-  duplication having already drifted.
+- **#111 — cache compiled regexes in Swift `RegexHelper`** (`anyMatch` recompiles per call). Negligible today; memoize if it ever hits a hot path.
+- **#136/#137 — pricing is hardcoded in six places per platform and has already
+  drifted**: GPT-5.2 is advertised at $2.00/$8.00 but billed at $1.75/$14.00, and
+  `mistral-large-latest` matches no pricing key so it bills at the
+  `defaultPricing` placeholder. #136 needs a decision on which figures are
+  current before it can be fixed; #137 is the duplication that caused it.
 - **#138 — the model-list fetch has no retry/backoff**, contrary to golden rule 7.
   More visible now that failures surface instead of silently falling back.
 - **#139 — four providers still filter models by whitelist** (OpenAI, Groq,
   Mistral, Anthropic), the pattern that broke DeepSeek. Riskier than before, since
   the healing logic will now rewrite a selection when a whitelist drops new models.
-- **#140 — `ThinkingConfig.type` is a raw `String`** for a two-valued toggle.
+- **#140 — `ThinkingConfig.type` is a raw `String`** for a two-valued toggle. **#126 — redundant "Data not openly available" label** (cosmetic): emitted alongside a more specific label for the same clause. Tiers are correct; presentation noise only.
 - **Swift risk *level* heuristic** (`TransparencyScorer.calculateRiskLevel`) has
   no Python counterpart; revisit only if a canonical definition is introduced.
 
@@ -470,8 +438,22 @@ the rest.
     the last `with N failures` line reports killed mutants as survivors: the run
     prints several summaries and the last one is not the overall verdict. Cost a
     round of false "survivors" in #180/#181.
-- Adding a Swift file the **macOS** app needs? `swift test` cannot see it — the
-  SPM target excludes `Sources/macOS` — so only `xcodebuild` catches a mistake.
+  - **A survivor is a claim about the test, and sometimes about the code.** In
+    #186 the test meant to pin a predicate ended on a path that *discards* the
+    value it asserted on, so it could not have failed however the predicate was
+    mutated — and chasing that turned up a real defect behind it. Ask what the
+    asserted value's provenance is on that exact path before assuming the test
+    merely needs strengthening.
+- **`swift test` compiles neither app target's platform-guarded sources.** On a
+  macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
+  `Sources/macOS` — so a break behind either guard is invisible to it *and* to
+  the other platform's `xcodebuild`. Touching iOS-only view code means
+  `xcodebuild -scheme MedicalFactChecker -destination 'platform=iOS
+  Simulator,name=<device>' build`; CI runs neither (**#190**).
+- Adding a Swift file either app needs? It must be in `project.pbxproj` — a file
+  present on disk and absent from the project compiles nowhere, which is how the
+  iOS target sat unbuildable. `xcode_project_guards.py` checks for duplicate IDs
+  and out-of-repo references, not for absent files.
   In particular a **duplicate pbxproj UUID silently drops the file from the
   build**, and the only symptom is "cannot find X in scope" in an unrelated file.
   Check the new IDs are absent from `project.pbxproj` before building.
