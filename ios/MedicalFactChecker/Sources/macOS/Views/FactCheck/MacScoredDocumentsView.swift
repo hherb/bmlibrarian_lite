@@ -399,9 +399,47 @@ struct MacDocumentCard: View {
 
     // MARK: - Full Text Section
 
+    /// What a link-only record has to say, and the way to reach the substitute.
+    ///
+    /// The macOS twin of ``DocumentScoreRow/linkOnlyNotice``, and it needed the
+    /// same fix for the same reason: a fetch that ends in a publisher link caches
+    /// no content, so this card read as never-fetched and the browser took over
+    /// before the reader saw why the article was a substitute (#183, #187).
+    /// `MacFullTextTab` and `MacFullTextViewer` already spoke; this card did not.
+    @ViewBuilder
+    private var linkOnlyNotice: some View {
+        if document.isLinkOnly {
+            ParseWarningBanner(
+                warnings: document.cachedRetrievalNotice.warnings,
+                degradation: document.cachedRetrievalNotice.degradation
+            )
+
+            if let url = document.fullTextLinkDestination {
+                Link(destination: url) {
+                    Label("Open Publisher", systemImage: "safari")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
     /// Section for full-text retrieval button and status.
+    ///
+    /// A column rather than a row, so the retrieval note can sit above the
+    /// controls at full width: it is a sentence, and a sentence squeezed into a
+    /// button row is one the reader skips.
     @ViewBuilder
     private var fullTextSection: some View {
+        VStack(alignment: .leading, spacing: MacSpacing.small) {
+            linkOnlyNotice
+
+            fullTextControls
+        }
+    }
+
+    /// The retrieval controls themselves, one row.
+    @ViewBuilder
+    private var fullTextControls: some View {
         HStack(spacing: MacSpacing.medium) {
             if document.hasFullText {
                 // Already have full text - show view button
@@ -441,14 +479,16 @@ struct MacDocumentCard: View {
                 Spacer()
 
                 // Still offer to open in browser
-                if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                if let url = document.fullTextLinkDestination {
                     Link(destination: url) {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
                 }
             } else {
-                // Not yet attempted
+                // Not yet attempted, or attempted and left with only a link;
+                // what the latter has to say is above this row, in
+                // `linkOnlyNotice`.
                 Button(action: fetchFullText) {
                     if isLoadingFullText {
                         ProgressView()
@@ -598,8 +638,14 @@ struct MacDocumentCard: View {
                         }
 
                     case .webURL(let url):
-                        // Open in browser
-                        NSWorkspace.shared.open(url)
+                        // Opened rather than shown — but only when there is
+                        // nothing to explain first. Handing the reader to the
+                        // browser before they have read why this is a substitute
+                        // is the silent fallback #183 objects to; the note and a
+                        // link are in the card, via `linkOnlyNotice`.
+                        if result.degradation == nil {
+                            NSWorkspace.shared.open(url)
+                        }
                     }
 
                     isLoadingFullText = false

@@ -166,10 +166,21 @@ struct AppFullTextResult: Equatable, Sendable {
     /// Why this is not the best source that existed for the article, or `nil`
     /// when it is.
     ///
-    /// Set when Europe PMC served machine-readable XML that the parser could not
-    /// read, so the reader was handed a PDF or a publisher link instead. Without
-    /// it the reader cannot tell that outcome from an article that was simply
-    /// never deposited as full text (#183).
+    /// Set when a better source existed and could not be used, and carrying
+    /// which one and why: our parser choked on the XML, Europe PMC could not be
+    /// reached, or a record from a newer build names a reason this one does not
+    /// know. Without it the reader cannot tell any of those outcomes from an
+    /// article that was simply never deposited as full text (#183, #186).
+    ///
+    /// See ``FullTextDegradation`` for the canonical list of what sets each
+    /// case. This is the value every iOS and macOS view reads, via
+    /// `BioMedLitAdapters.toAppFullTextResult` or `Document.cachedFullTextResult`.
+    ///
+    /// Note this type deliberately does *not* carry `FullTextResult`'s asserts.
+    /// It is built from persisted values as well as from live ones, and
+    /// ``FullTextDegradation/unspecified`` is a legitimate thing to read back —
+    /// asserting against it here would crash every debug build that opened a
+    /// record written by a newer build.
     let degradation: FullTextDegradation?
 
     /// Create a full-text result.

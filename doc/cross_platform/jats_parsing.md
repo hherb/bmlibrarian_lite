@@ -1280,24 +1280,59 @@ reader misinformed (#186):
 State (3) has a trap one layer down. An identifier resolution that answers
 "nothing" both when no record exists and when the search failed collapses (3)
 into (1) before the fetch is even attempted, and the second answer skips the
-machine-readable source entirely. Return the failure alongside the result, OR-ed
-across every attempted query, and raise the degradation only when a search failed
-**and** no identifier was found: a failed first query that a later one recovers
-from cost the reader nothing.
+machine-readable source entirely. Accumulate **two** facts across the attempted
+queries, not one, and raise the degradation only when both agree:
+
+- **any query threw** — OR-ed across every attempt. Accumulate it as a fold, not
+  as an assignment per branch: hand-written accumulation where the first attempt
+  assigns and the second ORs is correct only because the first runs first, and a
+  third query added above it silently discards its failure.
+- **no query matched a record** — also OR-ed. A search that *answered* settles
+  the question however the others went, and a record that names no full-text
+  identifier is state (1), not state (3): the article is indexed and was never
+  deposited, so there was never a machine-readable copy to lose. Without this
+  second fact a transient failure on an earlier query reports an article that
+  simply is not deposited as one we could not reach — the same misattribution,
+  inverted.
+
+An identifier found needs no third check: only a matched record can carry one.
+
+Carry the *whole* of each attempt through the fold, not just the failure flag. A
+free PDF URL offered by a query that found no full-text identifier is worth as
+much as one offered by the query that did, and a resolution that returns early on
+the identifier alone drops it before the PDF branch can see it.
 
 Its sentence must not claim the machine-readable copy exists — a full-text
 endpoint answers "not found" for abstract-only deposits, so an unreachable one
 tells you a record exists and nothing about whether it has full text. Say that
 the source could not be reached, and invite a retry, which is the one thing that
-separates it from the other two: a parse failure is deterministic and will fail
-again.
+separates it from the other two: a parse failure on the same bytes is
+deterministic and will fail again. Note the invitation is about the *sentence*;
+the surface may still offer a retry control on all three, and usually should.
 
 **Persist the reason as an explicit string, never a compiler-derived case name.**
 A reader that meets a value it does not know must not report "no degradation" —
 the field is only ever written when something *was* lost — and must not guess a
 known reason either, which names a culprit the record does not identify. Model an
 explicit "unspecified" reason for exactly this, produced by no writer and
-asserted against, so it can only ever arrive by being read.
+asserted against, so it can only ever arrive by being read. A reader must also
+not *re-persist* "unspecified" over the value it replaced: the newer build's
+string is the only record of what actually happened.
+
+The persisted strings are part of the contract, so they are listed here rather
+than left to each port's naming conventions — note they are camelCase, unlike the
+snake_case `FullTextSource` values above:
+
+| state | persisted value |
+|---|---|
+| our parser failed on text we held | `jatsParseFailed` |
+| we could not reach the source | `europePMCUnreachable` |
+| a reason this build does not know | `unspecified` |
+
+Beware the word "unspecified" doing opposite duty in the sibling channel: an
+*unspecified parse loss* is deliberately written and round-tripped, because a
+warning with no detail is still a warning. An unspecified *reason* is one we do
+not have, and writing it would assert a loss we cannot attribute.
 
 Two things must **not** set it. A source that answered "not found" was absent,
 not lost — marking that degraded fires the note on every article never deposited
@@ -1307,6 +1342,22 @@ true. And a cancelled fetch is not a dead source at all.
 Show it as *information*, not as a warning. The fallback PDF is complete, and a
 warning over content that is fine is the false alarm that trains a reader to
 dismiss the banner on the article where text really was discarded.
+
+Two rules for the surfaces, both learned the hard way (#187):
+
+- **A fallback that cached no content still needs somewhere to speak.** A
+  publisher link is opened in a browser rather than held as text, so a viewer
+  keyed on "is there renderable content" never opens for it — which is exactly
+  the outcome the channel was added for. Read the note straight from the stored
+  fields, and give the list a state between "has full text" and "not available"
+  so such a record does not read as never-fetched.
+- **A degraded web URL must not open the browser by itself.** Handing the reader
+  to a publisher page before they have read why this is a substitute is the
+  silent fallback this whole section objects to, one surface along. Suppress the
+  jump when a degradation is set and put a link on the card instead — and derive
+  that link from an identifier that is always present, not from the DOI alone. A
+  record with no DOI is precisely the one the chain sent to the search index's
+  own page, and gating on the DOI leaves it with no route at all.
 
 ### The audited state as a type
 

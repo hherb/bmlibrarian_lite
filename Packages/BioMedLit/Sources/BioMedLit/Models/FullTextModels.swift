@@ -79,11 +79,20 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// machine-readable text for this article.
     ///
     /// Distinct from no degradation at all, which means the source answered and
-    /// had nothing. A server error that outlasted its retries, a transport
-    /// failure, or an identifier search that threw are all *losses*: the
-    /// machine-readable copy may well have been there, and the reader is looking
-    /// at a substitute because of us rather than because of the evidence base
-    /// (#186).
+    /// had nothing. These are all *losses* — the machine-readable copy may well
+    /// have been there, and the reader is looking at a substitute because of us
+    /// rather than because of the evidence base (#186):
+    ///
+    /// - a server error that outlasted its retries;
+    /// - a transport failure;
+    /// - a status we do not model;
+    /// - an identifier search that threw **and left us without a PMC ID**, no
+    ///   later query having matched a record for the article. A search that
+    ///   answered — even with a record naming no PMC ID — settles the question,
+    ///   and a query a later one recovered from cost the reader nothing.
+    ///
+    /// This list is the canonical one. `FullTextService.fetchFullText` and
+    /// `doc/cross_platform/jats_parsing.md` restate it; they must not diverge.
     ///
     /// It deliberately does not claim the copy exists. `fullTextXML` answers 404
     /// for abstract-only deposits, so an unreachable endpoint tells us a PMC
@@ -92,12 +101,21 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
 
     /// A better source was lost and this build cannot say why.
     ///
-    /// Never produced here — no code path emits it, and ``FullTextResult/init``
-    /// asserts as much. It exists so a reader of a record written by a *newer*
-    /// build has an honest answer: the field is only ever written when something
-    /// was lost, so an unrecognised value still means a loss, and naming a
-    /// specific reason we do not have would be the overclaim this whole channel
-    /// exists to prevent.
+    /// No producer in this package emits it, and
+    /// ``FullTextResult/init(content:warnings:degradation:)`` asserts as much —
+    /// in debug builds, which is where a new producer gets written.
+    ///
+    /// A *reader* does produce it, which is the point: a persisted raw value
+    /// this build does not recognise decodes to it (see the app's
+    /// `Document.storedDegradation`). The field is only ever written when
+    /// something was lost, so an unrecognised value still means a loss, and
+    /// naming a specific reason we do not have would be the overclaim this whole
+    /// channel exists to prevent.
+    ///
+    /// Note the sibling channel takes the opposite line with the same word:
+    /// ``JATSParseWarnings/Loss/unspecified`` is deliberately written and
+    /// round-tripped, because a warning with no detail is still a warning. Here
+    /// a *reason* with no detail is a reason we do not have.
     case unspecified = "unspecified"
 }
 

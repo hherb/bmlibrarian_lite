@@ -1227,8 +1227,17 @@ struct MacDocumentDetailSheet: View {
                         showFullTextInTab()
 
                     case .webURL(let url):
-                        // Open in browser
-                        NSWorkspace.shared.open(url)
+                        // Opened rather than shown — but only when there is
+                        // nothing to explain first. Handing the reader to the
+                        // browser before they have read why this is a substitute
+                        // is the silent fallback #183 objects to. The Full Text
+                        // tab banners the record from its stored fields, so a
+                        // degraded link is sent there to be explained.
+                        if result.degradation == nil {
+                            NSWorkspace.shared.open(url)
+                        } else {
+                            showFullTextInTab()
+                        }
                     }
                 }
             } catch {

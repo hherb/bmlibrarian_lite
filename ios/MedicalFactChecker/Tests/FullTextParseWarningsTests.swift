@@ -523,4 +523,63 @@ final class FullTextParseWarningsTests: XCTestCase {
         XCTAssertTrue(linkOnly.isLinkOnly)
         XCTAssertFalse(linkOnly.hasFullText, "a web URL is opened, not cached as text")
     }
+
+    /// A record that was fetched, marked unavailable, and kept its date is still
+    /// not link-only.
+    ///
+    /// Reachable in production until the views were routed through
+    /// ``Document/markFullTextUnavailable()``: setting the flag by hand left
+    /// ``Document/fullTextFetchedAt`` behind, so `fullTextAttempted` and
+    /// `fullTextUnavailable` were true together. The predicate has to stay false
+    /// for that pair however it arises, because a record the chain says is empty
+    /// must never render as one holding a link.
+    func testAnUnavailableRecordThatKeptItsFetchDateIsNotLinkOnly() {
+        let document = makeDocument()
+        document.fullTextFetchedAt = Date()
+        document.fullTextUnavailable = true
+
+        XCTAssertTrue(document.fullTextAttempted)
+        XCTAssertFalse(document.isLinkOnly)
+    }
+
+    // MARK: - Where a link-only record sends the reader (#187)
+
+    /// A DOI is the publisher's own page, so it wins.
+    func testTheLinkDestinationPrefersTheDOI() {
+        let document = makeDocument()
+        document.doi = "10.1234/example"
+
+        XCTAssertEqual(
+            document.fullTextLinkDestination?.absoluteString,
+            "https://doi.org/10.1234/example"
+        )
+    }
+
+    /// Without one, PubMed — which is where the chain itself ends up.
+    ///
+    /// The case that made this a defect rather than a nicety: a `.webURL` result
+    /// caches no URL, the automatic jump to the browser is suppressed whenever
+    /// there is a note to read first, and a card gated on the DOI alone then had
+    /// no route at all. The reader was told a substitute was shown and given no
+    /// way to reach it (#187).
+    func testTheLinkDestinationFallsBackToPubMedWithoutADOI() {
+        let document = makeDocument()
+        document.doi = nil
+
+        XCTAssertEqual(
+            document.fullTextLinkDestination?.absoluteString,
+            "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+        )
+    }
+
+    /// An empty DOI is an absent one, not a link to the resolver's front page.
+    func testAnEmptyDOIIsTreatedAsAbsent() {
+        let document = makeDocument()
+        document.doi = ""
+
+        XCTAssertEqual(
+            document.fullTextLinkDestination?.absoluteString,
+            "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+        )
+    }
 }

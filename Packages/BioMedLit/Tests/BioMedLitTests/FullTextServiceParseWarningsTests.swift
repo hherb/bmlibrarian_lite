@@ -556,4 +556,121 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
         }
         XCTAssertNil(result.degradation)
     }
+
+    /// A failed first search the second does *not* recover from still counts.
+    ///
+    /// The companion to the test above, and the one that pins the accumulation
+    /// rather than the consumer's rule. With the fold written as an assignment
+    /// instead of an OR, the DOI attempt's clean `searchFailed == false`
+    /// overwrites the PMID attempt's failure and the degradation disappears —
+    /// which is #186 restored, one line inside the fix for it. The DOI query is
+    /// answered with an empty result list, so nothing later in the chain can
+    /// raise the degradation on its own.
+    func testAFailedPMIDSearchSurvivesADOISearchThatMatchedNothing() async throws {
+        StubURLProtocol.routes = [
+            "ext_id": (400, Data()),
+            "DOI": (200, Data(#"{"resultList": {"result": []}}"#.utf8)),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        guard case .doi = result.content else {
+            return XCTFail("expected the publisher-link fallback, got \(result.content)")
+        }
+        XCTAssertEqual(result.degradation, .europePMCUnreachable)
+    }
+
+    /// A search that *answered* settles the question, however the others went.
+    ///
+    /// Europe PMC returning a record for this article that names no PMC ID is
+    /// the absent-source answer: the article is indexed and was never deposited
+    /// in PMC, so there is no machine-readable copy to have lost. Reporting it
+    /// as unreachable would blame our outage for a gap in the evidence base and
+    /// invite a retry that cannot succeed — #186 inverted.
+    ///
+    /// Distinguished from the test above only by whether the DOI query matched
+    /// a record, which is exactly the bit `matchedARecord` carries.
+    func testARecordWithNoPMCIdIsAnAnswerNotAnOutage() async throws {
+        let searchResponse = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1", "doi": "10.1234/example"
+        }]}}
+        """#
+        StubURLProtocol.routes = [
+            "ext_id": (400, Data()),
+            "DOI": (200, Data(searchResponse.utf8)),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        guard case .doi = result.content else {
+            return XCTFail("expected the publisher-link fallback, got \(result.content)")
+        }
+        XCTAssertNil(result.degradation)
+    }
+
+    /// A free PDF offered by a query that found no PMC ID is still a free PDF.
+    ///
+    /// `fullTextUrlList` is populated independently of `pmcid`, so a record can
+    /// offer a downloadable PDF and name no PMC accession. The resolution used
+    /// to return early only on a PMC ID and discard everything else on the way
+    /// out, so that PDF — a better source than the publisher link the chain
+    /// settles for — was dropped before the `europePMCPDF` branch could see it.
+    func testAPDFOfferedWithoutAPMCIdIsStillUsed() async throws {
+        let searchResponse = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1",
+          "fullTextUrlList": {"fullTextUrl": [{
+            "documentStyle": "pdf", "availability": "Open access",
+            "availabilityCode": "OA", "site": "Europe_PMC",
+            "url": "https://europepmc.org/articles/PMC1/pdf"
+          }]}
+        }]}}
+        """#
+        StubURLProtocol.routes = [
+            "ext_id": (200, Data(searchResponse.utf8)),
+            "DOI": (200, Data(#"{"resultList": {"result": []}}"#.utf8)),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        guard case .europePMCPDF(let pdfURL) = result.content else {
+            return XCTFail("expected the Europe PMC PDF render, got \(result.content)")
+        }
+        XCTAssertEqual(pdfURL.absoluteString, "https://europepmc.org/articles/PMC1/pdf")
+        XCTAssertNil(result.degradation)
+    }
+
+    /// And a record matched by an *earlier* query still answers, after a later
+    /// one fails.
+    ///
+    /// The order-mirror of the test above. `matchedARecord` has to accumulate
+    /// for the same reason `searchFailed` does: written as an assignment it
+    /// carries only the last attempt's answer, and the article Europe PMC has
+    /// already told us about reverts to an outage.
+    func testARecordMatchedBeforeALaterSearchFailedStillAnswers() async throws {
+        let searchResponse = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1"
+        }]}}
+        """#
+        StubURLProtocol.routes = [
+            "ext_id": (200, Data(searchResponse.utf8)),
+            "DOI": (400, Data()),
+            "unpaywall": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")
+
+        guard case .doi = result.content else {
+            return XCTFail("expected the publisher-link fallback, got \(result.content)")
+        }
+        XCTAssertNil(result.degradation)
+    }
 }

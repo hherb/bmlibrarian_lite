@@ -301,7 +301,10 @@ struct FullTextTab: View {
                     if case FullTextError.noFullTextAvailable = error {
                         // The one expected outcome: recorded on the document so
                         // the list can show it, and not an error to report.
-                        document.fullTextUnavailable = true
+                        // The writer, not the flag: it also clears the source, the
+                        // warnings and the degradation, so a note left by an earlier
+                        // attempt cannot outlive the attempt that superseded it.
+                        document.markFullTextUnavailable()
                         save(document, "full text availability")
                     } else {
                         AppLogger.fullText.error(
@@ -415,8 +418,10 @@ struct FullTextDocumentRow: View {
                         .foregroundColor(.secondary)
                 } else if document.isLinkOnly {
                     // Fetched, and all we got was a link. A download button here
-                    // says "not fetched yet", which is wrong and invites a tap
-                    // that re-runs the whole chain (#187).
+                    // says "not fetched yet", which is wrong (#187). The tap it
+                    // used to invite is handled in ``handleTap``, which opens the
+                    // link rather than re-running the chain — changing the badge
+                    // alone would have left the behaviour it objects to intact.
                     linkOnlyBadge
                 } else if !document.fullTextUnavailable {
                     Button(action: onFetchFullText) {
@@ -440,7 +445,7 @@ struct FullTextDocumentRow: View {
                 }
             }
 
-            if let doi = document.doi,
+            if let doi = document.doi, !doi.isEmpty,
                let url = PlatformHelper.doiURL(for: doi) {
                 Button {
                     openURL(url)
@@ -460,9 +465,20 @@ struct FullTextDocumentRow: View {
     }
 
     /// Handle tap on the row.
+    ///
+    /// The link-only arm is not cosmetic. Removing the download button for that
+    /// state left the whole row still wired to `onFetchFullText`, so the tap it
+    /// was meant to stop inviting still re-ran the entire chain — a network
+    /// round trip to rediscover what the record already says (#187). A link-only
+    /// record has nothing cached to open a viewer with, so the tap goes where
+    /// the chain went: the browser.
     private func handleTap() {
         if document.hasFullText {
             onSelect()
+        } else if document.isLinkOnly {
+            if let url = document.fullTextLinkDestination {
+                openURL(url)
+            }
         } else if !document.fullTextUnavailable && !isLoadingFullText {
             onFetchFullText()
         }

@@ -86,9 +86,14 @@ enum ParseWarningMessage: Equatable {
     /// complete, and a warning over content that is fine is the false alarm that
     /// trains a reader to dismiss the banner on the article where text really was
     /// discarded.
+    /// Exhaustive rather than `if case … else true`, so a case added later has
+    /// to state whether it alarms the reader instead of inheriting the triangle
+    /// by default — which is the false alarm this property exists to ration.
     var isWarning: Bool {
-        if case .degraded = self { return false }
-        return true
+        switch self {
+        case .incomplete, .noContent: return true
+        case .degraded: return false
+        }
     }
 
     /// The sentence the reader sees.

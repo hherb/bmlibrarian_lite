@@ -261,6 +261,8 @@ struct DocumentScoreRow: View {
     @Bindable var document: Document
     let showEmbeddingScore: Bool
 
+    @Environment(\.modelContext) private var modelContext
+
     @State private var isExpanded = false
 
     // Full-text retrieval state
@@ -479,8 +481,7 @@ struct DocumentScoreRow: View {
                 Spacer()
 
                 // Still offer to open in browser
-                if let doi = document.doi,
-                   let url = PlatformHelper.doiURL(for: doi) {
+                if let url = document.fullTextLinkDestination {
                     Link(destination: url) {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
@@ -495,17 +496,21 @@ struct DocumentScoreRow: View {
 
     /// What a link-only record has to say, and the way to reach the substitute.
     ///
-    /// Rendered here rather than in ``FullTextViewer`` because this record has
-    /// no content to open that viewer with — which is exactly the outcome the
-    /// degradation channel was added for, and the one place iOS could not speak
-    /// (#187). A record that *did* cache content is left alone: it opens in the
-    /// viewer, which banners it already, and a second copy behind it is the
-    /// duplication that makes a notice ignorable.
+    /// Rendered here rather than in ``FullTextViewer`` because this card cannot
+    /// open that viewer: ``Document/cachedFullTextResult`` rebuilds a
+    /// *renderable* result and answers `nil` when nothing was cached, which is
+    /// exactly what a publisher-link fallback stores. So this card was silent on
+    /// the outcome the degradation channel was added for — it opened Safari
+    /// instead of saying anything (#187). A record that *did* cache content is
+    /// left alone: it opens in the viewer, which banners it already, and a
+    /// second copy behind it is the duplication that makes a notice ignorable.
     ///
     /// The "Get Full Text" button below is the retry the unreachable sentence
-    /// invites, so no second retry control is added. The publisher link is,
-    /// because suppressing the automatic jump to the browser would otherwise
-    /// leave the substitute unreachable from this card.
+    /// invites, so no second retry control is added. The link is, because
+    /// suppressing the automatic jump to the browser would otherwise leave the
+    /// substitute unreachable from this card — and it goes through
+    /// ``Document/fullTextLinkDestination`` rather than the DOI alone, because a
+    /// record with no DOI is precisely one the chain sent to PubMed.
     @ViewBuilder
     private var linkOnlyNotice: some View {
         if document.isLinkOnly {
@@ -515,7 +520,7 @@ struct DocumentScoreRow: View {
                     degradation: document.cachedRetrievalNotice.degradation
                 )
 
-                if let doi = document.doi, let url = PlatformHelper.doiURL(for: doi) {
+                if let url = document.fullTextLinkDestination {
                     Link(destination: url) {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
@@ -688,6 +693,7 @@ struct DocumentScoreRow: View {
                     // included. Assigning them by hand is what let the
                     // cache and the live result drift apart (#181).
                     document.applyFullTextResult(result)
+                    save(document, "full text")
 
                     fullTextResult = result
                     isLoadingFullText = false
@@ -708,12 +714,43 @@ struct DocumentScoreRow: View {
             } catch {
                 await MainActor.run {
                     if case FullTextError.noFullTextAvailable = error {
-                        document.fullTextUnavailable = true
+                        // The writer, not the flag: it also clears the source,
+                        // the warnings and the degradation, so a note left by an
+                        // earlier attempt cannot outlive the one that
+                        // superseded it.
+                        document.markFullTextUnavailable()
+                        save(document, "full text availability")
                     }
                     fullTextError = error.localizedDescription
                     isLoadingFullText = false
                 }
             }
+        }
+    }
+
+    /// Persist a change to the document, reporting a failure rather than
+    /// trusting autosave with it.
+    ///
+    /// The retrieval note is read back from the stored fields, so a save that
+    /// fails silently means a link-only record reads as never-fetched on the
+    /// next launch — the #187 state, restored by the one step that has no
+    /// visible symptom at the time it happens.
+    ///
+    /// - Parameters:
+    ///   - document: The document being saved, for the log line.
+    ///   - what: What was being recorded, for the log line.
+    private func save(_ document: Document, _ what: String) {
+        do {
+            try modelContext.save()
+        } catch {
+            AppLogger.fullText.error(
+                """
+                Failed to save \(what, privacy: .public) for PMID \
+                \(document.pmid, privacy: .public): \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+            fullTextError = "Could not save the retrieved full text."
         }
     }
 

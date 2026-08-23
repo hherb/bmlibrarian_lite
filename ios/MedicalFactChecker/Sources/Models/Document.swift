@@ -419,8 +419,34 @@ final class Document {
     ///
     /// Distinct from ``fullTextUnavailable``, which is the chain reporting that
     /// no source had anything at all.
+    ///
+    /// The predicate tests the *effect* — a date with nothing displayable behind
+    /// it — because that is what the reader is actually looking at. Anything
+    /// that later clears the cached content without clearing
+    /// ``fullTextFetchedAt`` (a sync eviction, a cache trim) would make an
+    /// evicted record read as link-only and show a stale retrieval note. Clear
+    /// the date alongside the content, as ``clearFullTextCache()`` does.
     var isLinkOnly: Bool {
         fullTextAttempted && !hasFullText && !fullTextUnavailable
+    }
+
+    /// Where to send a reader whose full text is only reachable in a browser.
+    ///
+    /// The publisher's DOI page when there is a DOI, and the PubMed record
+    /// otherwise — mirroring the chain's own last two fallbacks, so the card
+    /// offers a route to the same place the retrieval settled on.
+    ///
+    /// The PubMed half is not a nicety. A `.webURL` result caches no content, so
+    /// the URL the chain resolved is gone after the fetch, and a DOI-less record
+    /// gated on the DOI alone had no route at all — the reader was shown a note
+    /// saying a substitute exists and no way to reach it (#187). Empty strings
+    /// are treated as absent, because `doiURL(for: "")` resolves to the DOI
+    /// resolver's front page.
+    var fullTextLinkDestination: URL? {
+        if let doi = doi, !doi.isEmpty, let url = PlatformHelper.doiURL(for: doi) {
+            return url
+        }
+        return PlatformHelper.pubmedURL(for: pmid)
     }
 
     /// Display name for the full text source.
