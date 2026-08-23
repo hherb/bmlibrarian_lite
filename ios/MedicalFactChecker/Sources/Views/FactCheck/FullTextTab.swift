@@ -413,6 +413,11 @@ struct FullTextDocumentRow: View {
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                } else if document.isLinkOnly {
+                    // Fetched, and all we got was a link. A download button here
+                    // says "not fetched yet", which is wrong and invites a tap
+                    // that re-runs the whole chain (#187).
+                    linkOnlyBadge
                 } else if !document.fullTextUnavailable {
                     Button(action: onFetchFullText) {
                         Image(systemName: "arrow.down.circle")
@@ -490,6 +495,21 @@ struct FullTextDocumentRow: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Color.orange.opacity(0.15))
+            .cornerRadius(4)
+    }
+
+    /// Badge shown when the fetch returned only a publisher link.
+    ///
+    /// Tinted with the accent colour rather than orange: a link is a working
+    /// outcome, not a failure, and the reason it is only a link — if there is
+    /// one — is said in full on the document's card in the Fact Check tab.
+    private var linkOnlyBadge: some View {
+        Text("Link only")
+            .font(.caption2)
+            .foregroundColor(.accentColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.accentColor.opacity(0.15))
             .cornerRadius(4)
     }
 

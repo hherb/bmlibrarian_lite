@@ -29,6 +29,9 @@ private enum ScoredDocumentsConstants {
 
     /// UserDefaults key for persisting sort preference.
     static let sortPreferenceKey = "scoredDocumentsSortOption"
+
+    /// Vertical gap between the rows of the full-text section.
+    static let sectionSpacing: CGFloat = 8
 }
 
 /// Section displaying scored documents with both LLM and embedding scores.
@@ -455,8 +458,11 @@ struct DocumentScoreRow: View {
             // Already tried, not available
             fullTextUnavailableView
         } else {
-            // Not yet attempted
-            fullTextFetchView
+            // Not yet attempted, or attempted and left with only a link.
+            VStack(alignment: .leading, spacing: ScoredDocumentsConstants.sectionSpacing) {
+                linkOnlyNotice
+                fullTextFetchView
+            }
         }
     }
 
@@ -484,6 +490,38 @@ struct DocumentScoreRow: View {
 
             // Upload button when full text is unavailable
             uploadFullTextButton
+        }
+    }
+
+    /// What a link-only record has to say, and the way to reach the substitute.
+    ///
+    /// Rendered here rather than in ``FullTextViewer`` because this record has
+    /// no content to open that viewer with — which is exactly the outcome the
+    /// degradation channel was added for, and the one place iOS could not speak
+    /// (#187). A record that *did* cache content is left alone: it opens in the
+    /// viewer, which banners it already, and a second copy behind it is the
+    /// duplication that makes a notice ignorable.
+    ///
+    /// The "Get Full Text" button below is the retry the unreachable sentence
+    /// invites, so no second retry control is added. The publisher link is,
+    /// because suppressing the automatic jump to the browser would otherwise
+    /// leave the substitute unreachable from this card.
+    @ViewBuilder
+    private var linkOnlyNotice: some View {
+        if document.isLinkOnly {
+            VStack(alignment: .leading, spacing: ScoredDocumentsConstants.sectionSpacing) {
+                ParseWarningBanner(
+                    warnings: document.cachedRetrievalNotice.warnings,
+                    degradation: document.cachedRetrievalNotice.degradation
+                )
+
+                if let doi = document.doi, let url = PlatformHelper.doiURL(for: doi) {
+                    Link(destination: url) {
+                        Label("Open Publisher", systemImage: "safari")
+                            .font(.caption)
+                    }
+                }
+            }
         }
     }
 
@@ -654,9 +692,15 @@ struct DocumentScoreRow: View {
                     fullTextResult = result
                     isLoadingFullText = false
 
-                    // For web URLs, open directly instead of showing viewer
+                    // A web URL is opened rather than shown — but only when
+                    // there is nothing to explain first. Handing the reader to
+                    // Safari before they have read why this is a substitute is
+                    // the silent fallback #183 objects to, one surface along;
+                    // the note and an Open Publisher link are in the card.
                     if case .webURL(let url) = result.content {
-                        openURL(url)
+                        if result.degradation == nil {
+                            openURL(url)
+                        }
                     } else {
                         showFullTextViewer = true
                     }
