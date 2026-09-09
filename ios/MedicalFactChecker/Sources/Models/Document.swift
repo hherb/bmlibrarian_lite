@@ -565,9 +565,9 @@ final class Document {
             } else {
                 storePDFPath(url.absoluteString, isLocalFile: false)
             }
-            // Prose recovered from the PDF, which is what transparency analysis
-            // and report generation read. `nil` for a scan or a failed
-            // extraction, exactly as before.
+            // Prose recovered from the PDF, which is what transparency
+            // analysis reads. `nil` for a scan or a failed extraction, exactly
+            // as before.
             fullTextContent = result.extractedText
             fullTextHTML = nil
         case .webURL:
@@ -643,7 +643,8 @@ final class Document {
     /// Extraction serves *analysis*: `fullTextContent` holds the recovered
     /// prose for a PDF whose ``storedContentKind`` is
     /// ``FullTextContentKind/extracted``, which is what the transparency
-    /// analyzer and report generation read. Display still prefers the
+    /// analyzer reads — through ``analyzableFullText``, the only consumer that
+    /// treats stored text as an article body. Display still prefers the
     /// document, so that case is resolved — and answered as a PDF — before
     /// the ordinary field-population fallback below gets a chance to hand
     /// back the same text as prose.

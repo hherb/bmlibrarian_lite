@@ -194,9 +194,10 @@ struct AppFullTextResult: Equatable, Sendable {
 
     /// Prose recovered from a PDF, or `nil` when none was.
     ///
-    /// This is what transparency analysis and report generation read for a
-    /// PDF-sourced article. `content` stays the PDF, because extraction recovers
-    /// the prose and loses the figures, tables and layout.
+    /// This is what transparency analysis reads for a PDF-sourced article — the
+    /// only consumer that treats stored text as an article body; report
+    /// generation works from the citations. `content` stays the PDF, because
+    /// extraction recovers the prose and loses the figures, tables and layout.
     let extractedText: String?
 
     /// Where the downloaded PDF now is on disk, or `nil` when none was cached.
