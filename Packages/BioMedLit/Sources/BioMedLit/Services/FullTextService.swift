@@ -136,6 +136,10 @@ public actor FullTextService {
         // whichever fallback the chain returns instead (#183, #186).
         var degradation: FullTextDegradation?
 
+        // A body-less Europe PMC rendering, kept aside until every better tier
+        // has had its turn. `nil` when none was seen.
+        var abstractOnly: FullTextResult?
+
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
         var pdfRenderURL: String?
@@ -161,10 +165,27 @@ public actor FullTextService {
                     "Successfully retrieved Europe PMC full text for \(pmcId)",
                     category: .fullText
                 )
-                return FullTextResult(
+                let parsed = FullTextResult(
                     content: .europePMC(html: content.html, markdown: content.markdown),
-                    warnings: content.warnings
+                    warnings: content.warnings,
+                    contentKind: content.contentKind
                 )
+                // A body-less deposit is not an article. Returning it here — as
+                // this did — made it beat every remaining tier, so an
+                // open-access PDF of the same paper was unreachable, and the
+                // abstract was cached and scored as an article body. Held back
+                // instead, and returned at the end only if nothing better
+                // arrives, mirroring bmlib's `_with_abstract_fallback`.
+                if content.contentKind == .abstract {
+                    BioMedLitLib.logger?.info(
+                        "Europe PMC served an abstract-only deposit for \(pmcId); "
+                            + "holding it back in case a PDF tier does better",
+                        category: .fullText
+                    )
+                    abstractOnly = parsed
+                } else {
+                    return parsed
+                }
             } catch where error.isCancellation {
                 // A cancelled fetch is not a dead source. Falling through would
                 // hand back a doi.org link as though Europe PMC had nothing,
@@ -251,6 +272,18 @@ public actor FullTextService {
             }
         }
 
+        // The reader gets the abstract rather than a bare link. No web URL is
+        // attached to it: `Document.fullTextLinkDestination` already resolves
+        // the DOI page or the PubMed record for every document, and a second
+        // copy here would give the views two sources for one link.
+        if let abstractOnly {
+            BioMedLitLib.logger?.info(
+                "No tier beat the abstract-only rendering for PMID \(pmid); returning it",
+                category: .fullText
+            )
+            return abstractOnly
+        }
+
         // Fallback to DOI or PubMed URL
         if let doi = doi, !doi.isEmpty,
            let url = URL(string: "\(BioMedLitConstants.doiBaseURL)/\(doi)") {
@@ -273,7 +306,9 @@ public actor FullTextService {
     /// Fetch full-text XML from Europe PMC with retry logic.
     private func fetchEuropePMCWithRetry(
         pmcId: String
-    ) async throws -> (html: String, markdown: String, warnings: JATSParseWarnings) {
+    ) async throws -> (
+        html: String, markdown: String, warnings: JATSParseWarnings, contentKind: FullTextContentKind
+    ) {
         try await RetryHelper.retry(
             config: .serverError,
             shouldRetry: RetryHelper.retryOnlyTransient
@@ -294,7 +329,9 @@ public actor FullTextService {
     /// - Throws: `FullTextError` on failure.
     func fetchEuropePMCXML(
         pmcId: String
-    ) async throws -> (html: String, markdown: String, warnings: JATSParseWarnings) {
+    ) async throws -> (
+        html: String, markdown: String, warnings: JATSParseWarnings, contentKind: FullTextContentKind
+    ) {
         // Normalize PMC ID (ensure it has the PMC prefix)
         let normalizedId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
 
@@ -340,10 +377,16 @@ public actor FullTextService {
             // Create a second parser for markdown (XML parser is consumed after first parse)
             let markdownParser = JATSXMLParser(data: data, knownPMCId: normalizedId)
             let markdown = try markdownParser.parseToMarkdown()
-            // Both parsers read the same bytes and so produce the same warnings.
-            // The HTML parser's are taken because that is the rendering the
-            // reader is shown.
-            return (html: html, markdown: markdown, warnings: parser.parseWarnings)
+            // Both parsers read the same bytes and so produce the same warnings
+            // and the same content kind. The HTML parser's are taken for both
+            // because that is the rendering the reader is shown — this is about
+            // which instance is authoritative, not about which answer is right.
+            return (
+                html: html,
+                markdown: markdown,
+                warnings: parser.parseWarnings,
+                contentKind: parser.producedBody ? .fulltext : .abstract
+            )
         } catch let parseError as JATSParseError {
             // Kept typed. Flattening it to a string left `.noContent`,
             // `.alreadyParsed` and `.parsingFailed` indistinguishable to every
