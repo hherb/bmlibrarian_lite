@@ -395,12 +395,18 @@ enum BioMedLitAdapters {
         // `warnings` and `degradation` are carried across for every case, not
         // just the parsed one: both describe the *retrieval*, and a fallback that
         // dropped them would be a PDF the reader is looking at precisely because
-        // the parse failed, with nothing left to say so (#183).
+        // the parse failed, with nothing left to say so (#183). `contentKind`,
+        // `extractedText` and `localPDFPath` describe the same retrieval, so the
+        // same reasoning carries them across too: Task 8 reads them off the
+        // document regardless of which case produced the result.
         AppFullTextResult(
             content: content(of: result.content),
             source: appSource(of: result.content),
             warnings: result.warnings,
-            degradation: result.degradation
+            degradation: result.degradation,
+            contentKind: result.contentKind,
+            extractedText: result.extractedText,
+            localPDFPath: result.localPDFPath
         )
     }
 

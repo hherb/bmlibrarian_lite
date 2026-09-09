@@ -183,12 +183,32 @@ struct AppFullTextResult: Equatable, Sendable {
     /// record written by a newer build.
     let degradation: FullTextDegradation?
 
+    /// What this result's text actually is.
+    ///
+    /// `nil`-free because a result always holds one of the four kinds, but note
+    /// this type carries no asserts about it, for the reason `degradation`
+    /// documents: it is built from persisted values as well as live ones, and a
+    /// record written by a newer build must decode rather than crash a debug
+    /// build.
+    let contentKind: FullTextContentKind
+
+    /// Prose recovered from a PDF, or `nil` when none was.
+    ///
+    /// This is what transparency analysis and report generation read for a
+    /// PDF-sourced article. `content` stays the PDF, because extraction recovers
+    /// the prose and loses the figures, tables and layout.
+    let extractedText: String?
+
+    /// Where the downloaded PDF now is on disk, or `nil` when none was cached.
+    let localPDFPath: String?
+
     /// Create a full-text result.
     ///
     /// Replaces the synthesised memberwise initialiser so `warnings` and
     /// `degradation` can default: only a parsed source can have warnings, only a
     /// fallback can be degraded, and every other source would otherwise have to
-    /// pass an empty value at each call site.
+    /// pass an empty value at each call site. `contentKind`, `extractedText` and
+    /// `localPDFPath` default the same way, for the same reason.
     ///
     /// - Parameters:
     ///   - content: The retrieved content, in whichever form the source gave it.
@@ -197,16 +217,28 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     default — for PDFs, publisher links and any source that was not parsed.
     ///   - degradation: Why this is not the best source that existed. `nil` —
     ///     the default — when it is.
+    ///   - contentKind: What the text actually is. ``FullTextContentKind/none``
+    ///     — the default — for a result that holds no text.
+    ///   - extractedText: Prose recovered from a PDF, or `nil` — the default —
+    ///     when none was.
+    ///   - localPDFPath: Where a downloaded PDF now is on disk, or `nil` — the
+    ///     default — when none was cached.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,
         warnings: JATSParseWarnings = JATSParseWarnings(),
-        degradation: FullTextDegradation? = nil
+        degradation: FullTextDegradation? = nil,
+        contentKind: FullTextContentKind = .none,
+        extractedText: String? = nil,
+        localPDFPath: String? = nil
     ) {
         self.content = content
         self.source = source
         self.warnings = warnings
         self.degradation = degradation
+        self.contentKind = contentKind
+        self.extractedText = extractedText
+        self.localPDFPath = localPDFPath
     }
 
     /// Whether this result can be displayed within the app.
