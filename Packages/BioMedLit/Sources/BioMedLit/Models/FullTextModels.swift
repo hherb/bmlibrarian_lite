@@ -119,6 +119,37 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     case unspecified = "unspecified"
 }
 
+/// What a retrieval's text actually is.
+///
+/// A retrieval can hand back an article body, the abstract of a body-less
+/// deposit, prose recovered from a PDF, or no text at all, and until this
+/// existed all four looked alike to a caller: `html` was either set or it was
+/// not. So an abstract-only Europe PMC deposit was cached, displayed and handed
+/// to the transparency analyzer as though it were an article.
+///
+/// Callers that must not analyse an abstract as if it were an article branch on
+/// this rather than on the text being non-nil.
+///
+/// The four raw values are bmlib's `ContentKind` verbatim, so a stored value
+/// means the same thing on both sides. They are explicit literals because they
+/// are a *persisted* contract — the rule ``FullTextDegradation`` records.
+public enum FullTextContentKind: String, Sendable, Codable, CaseIterable {
+    /// A JATS document that had a `<body>`.
+    case fulltext = "fulltext"
+
+    /// A body-less JATS rendering. There is no article text in it, and it is
+    /// returned only when nothing better was found.
+    case abstract = "abstract"
+
+    /// Text recovered from a PDF. Prose only: no figures, tables or layout, and
+    /// possibly not every page, which is why the PDF itself stays worth
+    /// offering alongside it.
+    case extracted = "extracted"
+
+    /// There is no text, only a link.
+    case none = "none"
+}
+
 /// What a full-text retrieval produced, and what it cost.
 ///
 /// A struct rather than an enum of cases each carrying their own extras. The
@@ -142,6 +173,27 @@ public struct FullTextResult: Sendable, Equatable {
     /// Why this is not the best source that existed, or `nil` when it is.
     public let degradation: FullTextDegradation?
 
+    /// What ``extractedText`` or ``content``'s text actually is.
+    ///
+    /// See ``FullTextContentKind``. Defaults to ``FullTextContentKind/none``,
+    /// which is what a link-only result holds.
+    public let contentKind: FullTextContentKind
+
+    /// Prose recovered from a PDF, or `nil` when none was.
+    ///
+    /// Separate from ``content`` because it is not what the source handed over:
+    /// the source handed over a PDF, and this is what we got out of it. Kept
+    /// beside the PDF's own URL and path rather than replacing them, because
+    /// extraction recovers the prose and loses the figures, tables and layout.
+    public let extractedText: String?
+
+    /// Where the downloaded PDF now is on disk, or `nil` when none was cached.
+    ///
+    /// Distinct from ``pdfURL``, which is where it came from. Both are worth
+    /// having: the remote URL is what a re-download would use, and this is what
+    /// a viewer opens.
+    public let localPDFPath: String?
+
     /// Create a retrieval result.
     ///
     /// - Parameters:
@@ -150,10 +202,19 @@ public struct FullTextResult: Sendable, Equatable {
     ///     publisher links and anything else that was not parsed.
     ///   - degradation: Why this is not the best source that existed for the
     ///     article. `nil` — the default — when it is.
+    ///   - contentKind: What the text actually is. ``FullTextContentKind/none``
+    ///     — the default — for a result that holds no text.
+    ///   - extractedText: Prose recovered from a PDF, or `nil` — the default —
+    ///     when none was.
+    ///   - localPDFPath: Where a downloaded PDF now is on disk, or `nil` — the
+    ///     default — when none was cached.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
-        degradation: FullTextDegradation? = nil
+        degradation: FullTextDegradation? = nil,
+        contentKind: FullTextContentKind = .none,
+        extractedText: String? = nil,
+        localPDFPath: String? = nil
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -184,9 +245,37 @@ public struct FullTextResult: Sendable, Equatable {
             degradation != .unspecified,
             "no producer emits .unspecified; it names a value read back from a newer build"
         )
+        // The kind and the text are one fact stored twice. A caller that
+        // branches on `.extracted` and finds no text, or holds text under any
+        // other kind, has two answers to one question and no rule for which
+        // wins.
+        assert(
+            (extractedText != nil) == (contentKind == .extracted),
+            "extractedText and .extracted must agree; got \(String(describing: extractedText?.count)) chars under \(contentKind)"
+        )
+        // `.fulltext` and `.abstract` name what a *parse* found, and Europe PMC
+        // XML is the only thing this service parses.
+        assert(
+            (contentKind != .fulltext && contentKind != .abstract) || content.source == .europePMC,
+            "\(contentKind) claims a parse, but \(content.source) involves none"
+        )
+        // And the converse: a parsed source's text is its own. Extracted text
+        // on it would mean two texts with no rule for which the analyzer reads.
+        assert(
+            extractedText == nil || content.source != .europePMC,
+            "extracted text on \(content.source), which is parsed rather than extracted"
+        )
+        // A path on a publisher link hands the viewer a file that is not there.
+        assert(
+            localPDFPath == nil || content.pdfURL != nil,
+            "localPDFPath on \(content.source), which carries no PDF"
+        )
         self.content = content
         self.warnings = warnings
         self.degradation = degradation
+        self.contentKind = contentKind
+        self.extractedText = extractedText
+        self.localPDFPath = localPDFPath
     }
 
     /// The source of this full-text content.
