@@ -121,7 +121,7 @@ struct MacFullTextViewer: View {
             // Actions
             HStack(spacing: MacSpacing.small) {
                 // Search field (for markdown)
-                if document.fullTextContent != nil {
+                if isDisplayingSearchableText {
                     if isSearchFieldVisible {
                         HStack(spacing: MacSpacing.xSmall) {
                             TextField("Search", text: $searchText)
@@ -184,26 +184,49 @@ struct MacFullTextViewer: View {
 
     /// The view for whichever form of full text the document has cached.
     ///
-    /// Selected from the stored fields rather than from
-    /// `Document.cachedFullTextResult`, because this also has to place the
-    /// loading, error and empty states, and because `MacPDFView` opens a
-    /// filesystem path rather than a URL. The cache rebuild supplies the
+    /// Selected from ``Document/displayedFullText`` rather than from the
+    /// stored fields directly, and rather than from
+    /// `Document.cachedFullTextResult` — this view also has to place the
+    /// loading, error and empty states that property knows nothing about,
+    /// and it hands `MacPDFView` a filesystem path rather than a URL. Reading
+    /// the same decision `cachedFullTextResult` reads is what matters: a
+    /// second, independent copy of "which content wins" is exactly how an
+    /// extracted PDF once ended up shown here as plain prose while the cache
+    /// rebuild above correctly showed the PDF. The cache rebuild supplies the
     /// banner's warnings above; this supplies the content.
     @ViewBuilder
     private var renderedContent: some View {
-        // Prefer HTML for better table rendering, fall back to markdown
-        if let htmlContent = document.fullTextHTML {
+        switch document.displayedFullText {
+        case .html(let htmlContent, _):
             HTMLContentView(htmlContent: htmlContent, searchText: searchText)
-        } else if let markdownContent = document.fullTextContent {
+        case .markdown(let markdownContent):
             MacMarkdownView(content: markdownContent, searchText: searchText)
-        } else if let pdfPath = document.fullTextPDFPath {
-            MacPDFView(filePath: pdfPath)
-        } else if isLoadingPDF {
-            loadingView
-        } else if let error = loadError {
-            errorView(error)
-        } else {
-            emptyView
+        case .extractedPDF(let path), .cachedPDF(let path):
+            MacPDFView(filePath: path)
+        case .none:
+            if isLoadingPDF {
+                loadingView
+            } else if let error = loadError {
+                errorView(error)
+            } else {
+                emptyView
+            }
+        }
+    }
+
+    /// Whether the content currently on screen is HTML or markdown, and
+    /// therefore something the search field can search.
+    ///
+    /// Follows ``Document/displayedFullText`` rather than
+    /// `document.fullTextContent != nil`: an extracted PDF still has prose in
+    /// that field, but the screen is showing the PDF, and a search field over
+    /// a PDF view searches nothing.
+    private var isDisplayingSearchableText: Bool {
+        switch document.displayedFullText {
+        case .html, .markdown:
+            return true
+        case .extractedPDF, .cachedPDF, .none:
+            return false
         }
     }
 
@@ -257,7 +280,14 @@ struct MacFullTextViewer: View {
 
     private var shareMenu: some View {
         Menu {
-            if let content = document.fullTextContent {
+            // Independent of what's on screen: prose recovered from a PDF
+            // remains copyable while the PDF itself is what's displayed
+            // (``Document/displayedFullText``'s extraction-serves-analysis
+            // rule). Reads `fullTextContent` directly rather than through
+            // that property, so this action does not quietly disappear for
+            // an extracted PDF — and guards against a stored empty string, so
+            // it never copies nothing.
+            if let content = document.fullTextContent, !content.isEmpty {
                 Button(action: { copyToClipboard(content) }) {
                     Label("Copy Text", systemImage: "doc.on.doc")
                 }

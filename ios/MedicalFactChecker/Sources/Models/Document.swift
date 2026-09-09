@@ -577,6 +577,44 @@ final class Document {
 
     // MARK: - Cached Full Text
 
+    /// Which of the stored fields answers "what do we show the reader" —
+    /// the single place that decision is made.
+    ///
+    /// `cachedFullTextResult` below and `MacFullTextViewer.renderedContent`
+    /// both need it, and used to decide it independently: `MacFullTextViewer`
+    /// re-implements its own loading/error/empty states around the content,
+    /// so it could not simply call `cachedFullTextResult`, and instead
+    /// re-read the same stored fields in the same field-population order.
+    /// That was harmless while `fullTextContent` was only ever set for a
+    /// parsed article — until extraction started populating it with recovered
+    /// PDF prose too, and only one of the two copies was taught to check the
+    /// content kind before falling through to it. The other kept showing the
+    /// prose, silently dropping the figures, tables and layout the PDF was
+    /// kept for. Two independent copies of one display rule is exactly the
+    /// shape that had already drifted once, across four retrieval surfaces
+    /// instead of two — see the HANDOVER note on that.
+    ///
+    /// Extraction serves *analysis*: `fullTextContent` holds the recovered
+    /// prose for a PDF whose ``storedContentKind`` is
+    /// ``FullTextContentKind/extracted``, which is what the transparency
+    /// analyzer and report generation read. Display still prefers the
+    /// document, so that case is resolved — and answered as a PDF — before
+    /// the ordinary field-population fallback below gets a chance to hand
+    /// back the same text as prose.
+    var displayedFullText: DisplayedFullText {
+        if storedContentKind == .extracted, let path = fullTextPDFPath {
+            return .extractedPDF(path: path)
+        } else if let html = fullTextHTML {
+            return .html(html, markdown: fullTextContent ?? "")
+        } else if let markdown = fullTextContent {
+            return .markdown(markdown)
+        } else if let path = fullTextPDFPath {
+            return .cachedPDF(path: path)
+        } else {
+            return .none
+        }
+    }
+
     /// The cached full text, rebuilt as a result the viewers can render.
     ///
     /// One place rather than four: `FullTextTab`, `ScoredDocumentsView` and
@@ -584,10 +622,12 @@ final class Document {
     /// warnings to clean, so a truncated article reopened from the cache
     /// rendered exactly like a complete one.
     ///
-    /// `MacFullTextViewer` still selects its *view* from the stored fields
-    /// directly — it also has loading, error and empty states to place, and it
-    /// hands `MacPDFView` a filesystem path rather than a URL — so this is the
-    /// source of its banner's warnings, not of its content branch.
+    /// Its content branch comes from ``displayedFullText``, the same property
+    /// `MacFullTextViewer.renderedContent` consults, so the two cannot pick
+    /// different content for the same document. `MacFullTextViewer` still
+    /// places its own loading, error and empty states around that content,
+    /// and still hands `MacPDFView` a filesystem path rather than the `URL`
+    /// this type carries — those stay per-view concerns.
     ///
     /// `nil` when nothing displayable is cached. Do not read the banner's
     /// inputs through this property — use ``cachedRetrievalNotice``, which
@@ -595,20 +635,21 @@ final class Document {
     var cachedFullTextResult: AppFullTextResult? {
         let source = storedFullTextSource
         let content: AppFullTextContentType
-        if storedContentKind == .extracted, let path = fullTextPDFPath {
-            // Display prefers the document. Extraction serves *analysis*: the
-            // recovered prose has no figures, tables or layout, so reopening a
-            // PDF-sourced article as text loses the reason the PDF was kept.
-            // Note this branch has to come first — the text is also populated,
-            // and the field-population order below would take it.
-            content = .pdfURL(URL(fileURLWithPath: path))
-        } else if let html = fullTextHTML {
-            content = .html(content: html, markdown: fullTextContent ?? "")
-        } else if let markdown = fullTextContent {
+        switch displayedFullText {
+        case .html(let html, let markdown):
+            content = .html(content: html, markdown: markdown)
+        case .markdown(let markdown):
             content = .markdown(markdown)
-        } else if let path = fullTextPDFPath, let url = URL(string: path) {
+        case .extractedPDF(let path):
+            // A genuine local file: extraction only ever runs on a PDF
+            // already downloaded.
+            content = .pdfURL(URL(fileURLWithPath: path))
+        case .cachedPDF(let path):
+            // The legacy case: a record's stored value here is a remote URL
+            // string, not a filesystem path.
+            guard let url = URL(string: path) else { return nil }
             content = .pdfURL(url)
-        } else {
+        case .none:
             return nil
         }
         return AppFullTextResult(
@@ -867,4 +908,38 @@ final class Document {
 
         return result
     }
+}
+
+// MARK: - Displayed Full Text
+
+/// What ``Document/displayedFullText`` resolved to.
+///
+/// Two PDF cases rather than one, because they need different `URL`
+/// constructors downstream and telling them apart *after* the fact would
+/// reintroduce the branch this type exists to hold exactly once:
+/// ``extractedPDF(path:)`` is always a genuine local file — extraction only
+/// ever runs on a PDF already downloaded — while ``cachedPDF(path:)`` may
+/// still be the remote URL string a pre-extraction record, or an upload, was
+/// left holding. Both render identically; only `Document.cachedFullTextResult`
+/// needs to know which is which, and it reads that off the case rather than
+/// re-deriving it.
+enum DisplayedFullText: Equatable {
+    /// Rendered with `HTMLContentView` for its table support. `markdown`
+    /// rides along as the plain-text form the same article was also stored
+    /// as, for callers that copy or search it rather than render it.
+    case html(String, markdown: String)
+
+    /// Rendered with `MacMarkdownView` / `FullTextViewer`'s markdown branch.
+    case markdown(String)
+
+    /// A PDF recovered from extraction. `path` is a real file on disk.
+    case extractedPDF(path: String)
+
+    /// A PDF from before extraction existed, or from a source that never
+    /// extracts. `path` may be a real file, once `downloadAndCachePDF` has
+    /// overwritten it, or still the remote URL string it started as.
+    case cachedPDF(path: String)
+
+    /// Nothing cached to show.
+    case none
 }

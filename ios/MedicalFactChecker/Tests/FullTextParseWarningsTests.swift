@@ -648,4 +648,39 @@ final class FullTextParseWarningsTests: XCTestCase {
         XCTAssertEqual(document.fullTextContentKindRaw, "fulltext")
         XCTAssertNil(document.fullTextPDFPath)
     }
+
+    // MARK: - The single display seam (#8 round 1: a second surface's regression)
+
+    /// The regression a second surface shipped with: `MacFullTextViewer`
+    /// picked its content by re-reading the stored fields in the old
+    /// field-population order, so an extracted PDF's recovered prose in
+    /// `fullTextContent` reached it before any kind-first check could say
+    /// otherwise — the same failure `cachedFullTextResult` was fixed against
+    /// above, reintroduced by a second, independent copy of the decision.
+    /// `displayedFullText` is now the one place both surfaces ask, so this
+    /// test is the seam: it fails whenever that single answer regresses,
+    /// regardless of how many views read it.
+    func testDisplayedFullTextPrefersThePDFForAnExtractedDocument() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+        XCTAssertEqual(document.displayedFullText, .extractedPDF(path: "/tmp/a.pdf"))
+    }
+
+    /// The negative control: a PDF that was never extracted keeps the
+    /// pre-extraction field-population order, and is tagged as the legacy
+    /// case so `cachedFullTextResult` knows to parse it with `URL(string:)`
+    /// rather than `URL(fileURLWithPath:)`.
+    func testDisplayedFullTextFallsBackToCachedPDFWithoutExtraction() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(content: .pdfURL(URL(string: "https://example.org/a.pdf")!), source: .unpaywall)
+        )
+        XCTAssertEqual(document.displayedFullText, .cachedPDF(path: "https://example.org/a.pdf"))
+    }
 }
