@@ -47,6 +47,24 @@ public actor FullTextService {
     /// Europe PMC service for identifier resolution.
     private let europePMCService: EuropePMCService
 
+    /// Recovers text from a downloaded PDF.
+    ///
+    /// Injectable for the same reason `session` and `europePMCService` are:
+    /// without the seam the PDF tiers can only be tested against a real file,
+    /// and PDFKit's own behaviour becomes part of every tier test's subject.
+    private let extractor: PDFTextExtracting
+
+    /// Whether to download a PDF tier's file and recover its text.
+    ///
+    /// Mirrors bmlib's `convert_pdfs`. On, a PDF tier downloads, caches and
+    /// extracts, so the article's prose reaches transparency analysis and report
+    /// generation. Off, the tier returns the URL alone and nothing is
+    /// downloaded, which is the behaviour every caller had before this existed.
+    ///
+    /// The PDF's URL is reported either way, because extracted text recovers the
+    /// prose and loses the figures, tables and layout.
+    private let extractPDFText: Bool
+
     /// Characters safe to leave unescaped inside a query-string *value*.
     ///
     /// `.urlQueryAllowed` describes a whole query, so of the characters removed
@@ -78,14 +96,23 @@ public actor FullTextService {
     ///     `session` straight through would change them in production. Without
     ///     this seam the Europe PMC PDF branch cannot be reached by a test at
     ///     all, which is how it shipped without coverage.
+    ///   - extractor: Recovers text from a downloaded PDF. Defaults to
+    ///     ``PDFKitTextExtractor``; injectable so a test can exercise the PDF
+    ///     tiers without a real file.
+    ///   - extractPDFText: Whether a PDF tier downloads, caches and extracts.
+    ///     Defaults to `true`. Mirrors bmlib's `convert_pdfs`.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
-        europePMCService: EuropePMCService = EuropePMCService()
+        europePMCService: EuropePMCService = EuropePMCService(),
+        extractor: PDFTextExtracting = PDFKitTextExtractor(),
+        extractPDFText: Bool = true
     ) {
         self.email = email
         self.europePMCService = europePMCService
         self.session = session
+        self.extractor = extractor
+        self.extractPDFText = extractPDFText
     }
 
     /// The transport production uses.
@@ -245,9 +272,25 @@ public actor FullTextService {
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
-            return FullTextResult(
-                content: .europePMCPDF(pdfURL: pdfURL), degradation: degradation
-            )
+            let (localPath, text) = await downloadAndExtract(from: pdfURL, pmid: pmid)
+            // A PDF tier counts as a success as soon as it has a URL, so a
+            // download or extraction that gave nothing would otherwise discard
+            // an abstract already in hand and leave the reader a bare link.
+            // bmlib's `_with_abstract_fallback` makes the same call.
+            if text == nil, abstractOnly != nil {
+                BioMedLitLib.logger?.info(
+                    "The Europe PMC PDF yielded no text for PMID \(pmid); keeping the abstract",
+                    category: .fullText
+                )
+            } else {
+                return FullTextResult(
+                    content: .europePMCPDF(pdfURL: pdfURL),
+                    degradation: degradation,
+                    contentKind: text == nil ? .none : .extracted,
+                    extractedText: text,
+                    localPDFPath: localPath
+                )
+            }
         }
 
         // Try Unpaywall (open access PDFs)
@@ -258,9 +301,21 @@ public actor FullTextService {
                     "Successfully found Unpaywall PDF for DOI \(doi)",
                     category: .fullText
                 )
-                return FullTextResult(
-                    content: .unpaywall(pdfURL: pdfURL), degradation: degradation
-                )
+                let (localPath, text) = await downloadAndExtract(from: pdfURL, pmid: pmid)
+                if text == nil, abstractOnly != nil {
+                    BioMedLitLib.logger?.info(
+                        "The Unpaywall PDF yielded no text for PMID \(pmid); keeping the abstract",
+                        category: .fullText
+                    )
+                } else {
+                    return FullTextResult(
+                        content: .unpaywall(pdfURL: pdfURL),
+                        degradation: degradation,
+                        contentKind: text == nil ? .none : .extracted,
+                        extractedText: text,
+                        localPDFPath: localPath
+                    )
+                }
             } catch where error.isCancellation {
                 // As above: a cancelled fetch must not be read as an absent PDF.
                 throw CancellationError()
@@ -791,6 +846,73 @@ public actor FullTextService {
         BioMedLitLib.logger?.info("Cached PDF at: \(filePath)", category: .fullText)
 
         return filePath
+    }
+
+    /// Download a PDF tier's file, cache it, and recover its text.
+    ///
+    /// Best-effort throughout, and deliberately non-throwing: every failure here
+    /// still leaves the reader the URL, which is exactly what this tier returned
+    /// before extraction existed. Throwing would turn a tier that succeeded into
+    /// a fall-through to the publisher link.
+    ///
+    /// Every empty outcome is logged at warning level, as bmlib does, because a
+    /// scan that yields nothing is invisible otherwise and a partial extraction
+    /// must not be mistaken for a whole article.
+    ///
+    /// - Parameters:
+    ///   - url: The remote PDF.
+    ///   - pmid: PubMed ID, used to name the cached file.
+    /// - Returns: The cached path and the recovered text. Both `nil` when the
+    ///   flag is off; the text alone `nil` when nothing was recovered.
+    private func downloadAndExtract(
+        from url: URL,
+        pmid: String
+    ) async -> (localPath: String?, text: String?) {
+        guard extractPDFText else { return (nil, nil) }
+
+        let path: String
+        do {
+            path = try await downloadAndCachePDF(from: url, for: pmid)
+        } catch where error.isCancellation {
+            return (nil, nil)
+        } catch {
+            BioMedLitLib.logger?.warning(
+                "Could not download the PDF for PMID \(pmid) from \(url.absoluteString): "
+                    + "\(error.localizedDescription); returning the link alone",
+                category: .fullText
+            )
+            return (nil, nil)
+        }
+
+        let extraction = extractor.extract(from: URL(fileURLWithPath: path))
+        guard extraction.success else {
+            BioMedLitLib.logger?.warning(
+                "PDF text extraction failed for \(path): "
+                    + "\(extraction.errorMessage ?? "no reason reported")",
+                category: .fullText
+            )
+            return (path, nil)
+        }
+        guard extraction.charCount > 0 else {
+            BioMedLitLib.logger?.warning(
+                "PDF \(path) yielded no extractable text over \(extraction.pageCount) page(s) — "
+                    + "likely a scan; \(extraction.warnings.prefix(3))",
+                category: .fullText
+            )
+            return (path, nil)
+        }
+        if !extraction.isComplete {
+            BioMedLitLib.logger?.warning(
+                "PDF \(path) extracted only \(extraction.convertedPages) of "
+                    + "\(extraction.pageCount) pages — the attached text is incomplete",
+                category: .fullText
+            )
+        }
+        BioMedLitLib.logger?.info(
+            "Extracted \(extraction.charCount) chars of text from PDF \(path)",
+            category: .fullText
+        )
+        return (path, extraction.text)
     }
 
     /// Save PDF data to the cache directory.
