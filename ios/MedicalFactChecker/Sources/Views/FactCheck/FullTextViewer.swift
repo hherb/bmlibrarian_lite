@@ -56,7 +56,9 @@ struct FullTextViewer: View {
                 // table they came for must learn the rendering is incomplete
                 // before concluding the evidence is absent (#181).
                 ParseWarningBanner(
-                    warnings: result.warnings, degradation: result.degradation
+                    warnings: result.warnings,
+                    degradation: result.degradation,
+                    extractionCoverage: result.extractionCoverage
                 )
                 content
             }
@@ -121,6 +123,17 @@ struct FullTextViewer: View {
             case .markdown(let text):
                 Button(action: { PlatformHelper.copyToClipboard(text) }) {
                     Label("Copy Text", systemImage: "doc.on.doc")
+                }
+            case .pdfURL:
+                // A PDF-sourced article's text lives in `extractedText`, not in
+                // `content`, so switching on the content alone dropped this
+                // action for exactly the articles the extraction slice added —
+                // while macOS kept offering it. Absent for a scan, which has no
+                // recovered prose to copy.
+                if let extracted = result.extractedText {
+                    Button(action: { PlatformHelper.copyToClipboard(extracted) }) {
+                        Label("Copy Text", systemImage: "doc.on.doc")
+                    }
                 }
             default:
                 EmptyView()
@@ -549,7 +562,12 @@ struct PDFContentView: View {
         }
     }
 
-    /// Error view with fallback browser link.
+    /// Error view, with a browser link only when there is a browser to send
+    /// the reader to.
+    ///
+    /// A cached PDF's URL is a `file:///` path; offering to open that in a
+    /// browser is the tail end of the same bug that produced the error in the
+    /// first place.
     private func errorView(message: String) -> some View {
         VStack(spacing: FullTextViewerConstants.stackSpacing) {
             Image(systemName: "exclamationmark.triangle")
@@ -559,39 +577,28 @@ struct PDFContentView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            Link("Open in Browser", destination: url)
-                .buttonStyle(.bordered)
+            if !url.isFileURL {
+                Link("Open in Browser", destination: url)
+                    .buttonStyle(.bordered)
+            }
         }
         .padding(FullTextViewerConstants.contentPadding)
     }
 
-    /// Load the PDF data from the URL.
+    /// Load the PDF data from the URL — off disk when it is a cached file,
+    /// over HTTP when it is a live remote link. See ``PDFContentLoader``.
     private func loadPDF() async {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == FullTextConstants.httpStatusOK else {
-                throw URLError(.badServerResponse)
-            }
-
-            // Validate PDF magic bytes (%PDF)
-            let pdfMagic = Data(FullTextConstants.pdfMagicBytes)
-            guard data.count > pdfMagic.count,
-                  data.prefix(pdfMagic.count) == pdfMagic else {
-                await MainActor.run {
-                    self.error = "The URL did not return a valid PDF file. Try opening in browser."
-                    self.isLoading = false
-                }
-                return
-            }
-
+            let data = try await PDFContentLoader.loadData(from: url)
             await MainActor.run {
                 self.pdfData = data
                 self.isLoading = false
             }
         } catch {
+            let message = (error as? PDFContentLoader.LoadError)?.errorDescription
+                ?? "Failed to load PDF: \(error.localizedDescription)"
             await MainActor.run {
-                self.error = "Failed to load PDF: \(error.localizedDescription)"
+                self.error = message
                 self.isLoading = false
             }
         }

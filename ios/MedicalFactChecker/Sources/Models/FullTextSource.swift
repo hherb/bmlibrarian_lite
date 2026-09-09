@@ -183,12 +183,41 @@ struct AppFullTextResult: Equatable, Sendable {
     /// record written by a newer build.
     let degradation: FullTextDegradation?
 
+    /// What this result's text actually is.
+    ///
+    /// `nil`-free because a result always holds one of the four kinds, but note
+    /// this type carries no asserts about it, for the reason `degradation`
+    /// documents: it is built from persisted values as well as live ones, and a
+    /// record written by a newer build must decode rather than crash a debug
+    /// build.
+    let contentKind: FullTextContentKind
+
+    /// Prose recovered from a PDF, or `nil` when none was.
+    ///
+    /// This is what transparency analysis reads for a PDF-sourced article — the
+    /// only consumer that treats stored text as an article body; report
+    /// generation works from the citations. `content` stays the PDF, because
+    /// extraction recovers the prose and loses the figures, tables and layout.
+    let extractedText: String?
+
+    /// Where the downloaded PDF now is on disk, or `nil` when none was cached.
+    let localPDFPath: String?
+
+    /// How much of the PDF ``extractedText`` came from, or `nil` when no
+    /// extraction was run.
+    ///
+    /// Shown to the reader by `ParseWarningBanner`, and persisted alongside the
+    /// text, so a partial extraction says so on every reopen rather than only
+    /// in the log of the session that fetched it.
+    let extractionCoverage: PDFExtractionCoverage?
+
     /// Create a full-text result.
     ///
     /// Replaces the synthesised memberwise initialiser so `warnings` and
     /// `degradation` can default: only a parsed source can have warnings, only a
     /// fallback can be degraded, and every other source would otherwise have to
-    /// pass an empty value at each call site.
+    /// pass an empty value at each call site. `contentKind`, `extractedText` and
+    /// `localPDFPath` default the same way, for the same reason.
     ///
     /// - Parameters:
     ///   - content: The retrieved content, in whichever form the source gave it.
@@ -197,16 +226,32 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     default — for PDFs, publisher links and any source that was not parsed.
     ///   - degradation: Why this is not the best source that existed. `nil` —
     ///     the default — when it is.
+    ///   - contentKind: What the text actually is. ``FullTextContentKind/none``
+    ///     — the default — for a result that holds no text.
+    ///   - extractedText: Prose recovered from a PDF, or `nil` — the default —
+    ///     when none was.
+    ///   - localPDFPath: Where a downloaded PDF now is on disk, or `nil` — the
+    ///     default — when none was cached.
+    ///   - extractionCoverage: How much of the PDF `extractedText` came from,
+    ///     or `nil` — the default — when no extraction was run.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,
         warnings: JATSParseWarnings = JATSParseWarnings(),
-        degradation: FullTextDegradation? = nil
+        degradation: FullTextDegradation? = nil,
+        contentKind: FullTextContentKind = .none,
+        extractedText: String? = nil,
+        localPDFPath: String? = nil,
+        extractionCoverage: PDFExtractionCoverage? = nil
     ) {
         self.content = content
         self.source = source
         self.warnings = warnings
         self.degradation = degradation
+        self.contentKind = contentKind
+        self.extractedText = extractedText
+        self.localPDFPath = localPDFPath
+        self.extractionCoverage = extractionCoverage
     }
 
     /// Whether this result can be displayed within the app.
@@ -283,9 +328,127 @@ struct AppFullTextResult: Equatable, Sendable {
 
     /// Create an uploaded result from user-provided content.
     ///
-    /// - Parameter content: The uploaded content type (markdown, HTML, or PDF).
+    /// `localPDFPath` matters for an uploaded PDF specifically. The file the
+    /// reader chose has been copied into the app's own storage, so it *is* a
+    /// local file, and saying so here is what lets `Document.applyFullTextResult`
+    /// record it as one. Without it the upload path stored the file's URL string
+    /// with the "this is a local file" flag set to `false`, and the record read
+    /// back as a remote link: `URL(string:)` turned the absolute path into a
+    /// schemeless URL, the loader fetched it over HTTP, and the reader's own
+    /// document came back as "The server did not return the PDF."
+    ///
+    /// - Parameters:
+    ///   - content: The uploaded content type (markdown, HTML, or PDF).
+    ///   - localPDFPath: Where the copied PDF now is on disk, or `nil` — the
+    ///     default — for uploads that are not PDFs.
     /// - Returns: A full-text result with uploaded source.
-    static func uploaded(content: AppFullTextContentType) -> AppFullTextResult {
-        AppFullTextResult(content: content, source: .uploaded)
+    static func uploaded(
+        content: AppFullTextContentType,
+        localPDFPath: String? = nil
+    ) -> AppFullTextResult {
+        AppFullTextResult(content: content, source: .uploaded, localPDFPath: localPDFPath)
+    }
+}
+
+// MARK: - PDF Content Loading
+
+/// Reads the bytes behind a `.pdfURL` full-text result, from disk or over HTTP.
+///
+/// The URL such a result carries is not always remote. Since extraction landed,
+/// a PDF-sourced article reopened from the cache rebuilds as
+/// `URL(fileURLWithPath:)` for the file the retrieval tier already downloaded —
+/// `Document.cachedFullTextResult` does exactly that. The iOS viewer had only an
+/// HTTP path: it called `URLSession.data(from:)` and then cast the response to
+/// `HTTPURLResponse`. `URLSession` will happily open a `file://` URL, but it
+/// answers with a plain `NSURLResponse`, so the cast failed and *every*
+/// PDF-sourced article reopened from the cache showed "bad server response" over
+/// an "Open in Browser" link pointing at a `file:///` path. macOS never had the
+/// problem because `MacPDFView` takes a filesystem path rather than a URL.
+///
+/// Lives beside ``AppFullTextContentType/pdfURL(_:)`` because that is the case
+/// it reads, and outside `FullTextViewer.swift` because that file is wrapped in
+/// `#if os(iOS)` — this logic is platform-independent, and putting it here is
+/// what lets the suite exercise it on the host that runs it.
+enum PDFContentLoader {
+    /// Why a PDF could not be shown, phrased for the reader.
+    ///
+    /// A local file and a remote fetch fail for different reasons and deserve
+    /// different words: telling someone the *server* misbehaved when the file
+    /// on their own device is missing sends them to retry the wrong thing.
+    enum LoadError: LocalizedError, Equatable {
+        /// The cached file is gone — evicted, or the record outlived it.
+        case fileMissing
+
+        /// The file is there but could not be read.
+        case fileUnreadable(String)
+
+        /// A remote fetch answered with something other than HTTP 200.
+        case badServerResponse
+
+        /// The bytes are not a PDF, whatever their origin.
+        case notAPDF
+
+        var errorDescription: String? {
+            switch self {
+            case .fileMissing:
+                return "The cached PDF is no longer on this device. Fetch the full text again."
+            case .fileUnreadable(let reason):
+                return "The cached PDF could not be read: \(reason)"
+            case .badServerResponse:
+                return "The server did not return the PDF."
+            case .notAPDF:
+                return "That did not turn out to be a valid PDF file."
+            }
+        }
+    }
+
+    /// Load and validate the PDF `url` points at.
+    ///
+    /// - Parameters:
+    ///   - url: A `file://` URL for a cached PDF, or a remote one.
+    ///   - session: Injected so the remote branch has offline coverage.
+    /// - Returns: The PDF's bytes, magic-byte checked.
+    /// - Throws: ``LoadError``, or whatever the transport threw.
+    static func loadData(
+        from url: URL,
+        session: URLSession = .shared
+    ) async throws -> Data {
+        let data = url.isFileURL
+            ? try loadFromDisk(at: url)
+            : try await loadOverHTTP(from: url, session: session)
+
+        // Checked for both origins. A cached entry can be corrupt too — that is
+        // the whole reason `FullTextService.cachedPDFPath` validates on the way
+        // out — and rendering a truncated file as an article is worse than
+        // saying so.
+        let magic = Data(FullTextConstants.pdfMagicBytes)
+        guard data.count > magic.count, data.prefix(magic.count) == magic else {
+            throw LoadError.notAPDF
+        }
+        return data
+    }
+
+    /// Read a cached PDF off the filesystem.
+    private static func loadFromDisk(at url: URL) throws -> Data {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw LoadError.fileMissing
+        }
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            throw LoadError.fileUnreadable(error.localizedDescription)
+        }
+    }
+
+    /// Fetch a PDF that really is remote — a live result whose tier returned a
+    /// link without downloading it, which is what the extraction flag being off
+    /// looks like.
+    private static func loadOverHTTP(from url: URL, session: URLSession) async throws -> Data {
+        let (data, response) = try await session.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == FullTextConstants.httpStatusOK else {
+            throw LoadError.badServerResponse
+        }
+        return data
     }
 }

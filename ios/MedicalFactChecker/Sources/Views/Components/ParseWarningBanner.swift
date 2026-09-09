@@ -52,6 +52,19 @@ enum ParseWarningMessage: Equatable {
     /// two apart is what typing the losses made possible (#184).
     case noContent
 
+    /// Only part of a PDF yielded text, and this much of it did.
+    ///
+    /// Distinct from ``incomplete``, which is what a *parse* lost. Nothing was
+    /// parsed here: the document is whole and on screen, and it is the text
+    /// taken out of it for analysis that stops short. The page counts are
+    /// carried because "10 of 14 pages" tells a reader whether to go looking,
+    /// and "some of it" does not.
+    ///
+    /// A coverage of zero gets its own sentence rather than reading "0 of 12",
+    /// because it is a different situation: not a shortfall in the analysis but
+    /// its complete absence, on a document that looks entirely ordinary.
+    case partialExtraction(PDFExtractionCoverage)
+
     /// A better source existed and could not be used (#183), and why (#186).
     ///
     /// Carries the reason rather than splitting into a case per reason: they
@@ -63,16 +76,29 @@ enum ParseWarningMessage: Equatable {
     /// What to tell the reader about a retrieval, or `nil` when there is nothing
     /// to say.
     ///
-    /// Warnings win over a degradation on a result that somehow carries both: an
-    /// incomplete rendering the reader is actually looking at outranks a note
-    /// about the source it came from.
+    /// In precedence order, most immediate first. Warnings win over everything:
+    /// an incomplete rendering the reader is actually looking at outranks any
+    /// note about where it came from. A partial extraction comes next, because
+    /// it is also a fact about the text in front of them, and it outranks a
+    /// degradation for the same reason — a PDF reached by fallback whose text
+    /// stops two-thirds of the way through has two things wrong with it, and the
+    /// missing text is the one that changes what they should conclude.
     ///
     /// - Parameters:
     ///   - warnings: What the parse of this content lost.
     ///   - degradation: Why this is not the best source that existed, if it is not.
-    init?(warnings: JATSParseWarnings, degradation: FullTextDegradation?) {
+    ///   - extractionCoverage: How much of a PDF yielded text, when one was
+    ///     extracted. A complete extraction says nothing — the banner is
+    ///     rationed to the cases where something is actually missing.
+    init?(
+        warnings: JATSParseWarnings,
+        degradation: FullTextDegradation?,
+        extractionCoverage: PDFExtractionCoverage? = nil
+    ) {
         if !warnings.isClean {
             self = warnings.losses.contains(.noContent) ? .noContent : .incomplete
+        } else if let extractionCoverage, !extractionCoverage.isComplete {
+            self = .partialExtraction(extractionCoverage)
         } else if let degradation {
             self = .degraded(degradation)
         } else {
@@ -82,16 +108,22 @@ enum ParseWarningMessage: Equatable {
 
     /// Whether this is a problem with the text shown, or a note about its source.
     ///
-    /// A degradation is deliberately not a warning: the fallback PDF is
-    /// complete, and a warning over content that is fine is the false alarm that
-    /// trains a reader to dismiss the banner on the article where text really was
-    /// discarded.
+    /// A degradation is deliberately not a warning: a fallback PDF the reader
+    /// can read in full is fine, and a warning over content that is fine is the
+    /// false alarm that trains a reader to dismiss the banner on the article
+    /// where text really was discarded.
+    ///
+    /// A partial extraction *is* a warning. The reader sees a complete-looking
+    /// document, and the shortfall is in the text taken out of it for analysis —
+    /// invisible on screen, and load-bearing for the transparency verdict shown
+    /// beside it.
+    ///
     /// Exhaustive rather than `if case … else true`, so a case added later has
     /// to state whether it alarms the reader instead of inheriting the triangle
     /// by default — which is the false alarm this property exists to ration.
     var isWarning: Bool {
         switch self {
-        case .incomplete, .noContent: return true
+        case .incomplete, .noContent, .partialExtraction: return true
         case .degraded: return false
         }
     }
@@ -103,6 +135,19 @@ enum ParseWarningMessage: Equatable {
             return "Some of this article could not be displayed. Parts of the text may be missing."
         case .noContent:
             return "None of this article's text could be displayed. Only its reference details are shown."
+        case .partialExtraction(let coverage) where coverage.convertedPages == 0:
+            return """
+                No text could be read from this PDF — it may be a scan, or a restricted \
+                file. You can read the document itself, but nothing in it was available \
+                to the transparency assessment or any other analysis.
+                """
+        case .partialExtraction(let coverage):
+            return """
+                Text was recovered from \(coverage.convertedPages) of this PDF's \
+                \(coverage.pageCount) pages. The document is shown in full, but any \
+                analysis of it — including the transparency assessment — read only \
+                the recovered part.
+                """
         case .degraded(.jatsParseFailed):
             return "This article's machine-readable copy could not be read, so a substitute is shown here."
         case .degraded(.europePMCUnreachable):
@@ -137,6 +182,10 @@ enum ParseWarningMessage: Equatable {
 /// - the rendering is incomplete — a warning;
 /// - the rendering carries no article text at all — a warning that says so
 ///   rather than hiding behind "some of this is missing";
+/// - only part of a PDF yielded text — a warning naming the page counts, because
+///   the document on screen looks complete and the shortfall is in what the
+///   analysis behind it could read, with a sentence of its own when *no* text
+///   was recovered at all;
 /// - a better source existed and could not be used — an informational note, with
 ///   a sentence per reason: our parser failed on it, we could not reach it, or a
 ///   record from a newer build names a reason this one does not know (#186).
@@ -164,10 +213,20 @@ struct ParseWarningBanner: View {
     /// fact alone.
     var degradation: FullTextDegradation? = nil
 
+    /// How much of a PDF yielded text, when one was extracted.
+    ///
+    /// Defaulted like `degradation`, so the parsed-article callers that have no
+    /// extraction to describe need not name it.
+    var extractionCoverage: PDFExtractionCoverage? = nil
+
     @State private var showingDetail = false
 
     var body: some View {
-        if let message = ParseWarningMessage(warnings: warnings, degradation: degradation) {
+        if let message = ParseWarningMessage(
+            warnings: warnings,
+            degradation: degradation,
+            extractionCoverage: extractionCoverage
+        ) {
             VStack(alignment: .leading, spacing: ParseWarningBannerConstants.spacing) {
                 Label(message.headline, systemImage: message.iconName)
                     .font(.footnote)
@@ -225,6 +284,10 @@ struct ParseWarningBanner: View {
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .jatsParseFailed)
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .europePMCUnreachable)
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .unspecified)
+        ParseWarningBanner(
+            warnings: JATSParseWarnings(),
+            extractionCoverage: PDFExtractionCoverage(convertedPages: 10, pageCount: 14)
+        )
         ParseWarningBanner(warnings: JATSParseWarnings())
         Spacer()
     }

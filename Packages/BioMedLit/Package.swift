@@ -39,7 +39,12 @@ let package = Package(
         .testTarget(
             name: "BioMedLitTests",
             dependencies: ["BioMedLit"],
-            path: "Tests/BioMedLitTests"
+            path: "Tests/BioMedLitTests",
+            // PDF fixtures are read from disk via #filePath (see
+            // PDFTextExtractorTests), the same way JATSRealCorpusTests reads the
+            // JATS corpus, never from a bundle — so they are excluded here
+            // rather than declared as `resources:`.
+            exclude: ["Fixtures"]
         ),
     ]
 )

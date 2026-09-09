@@ -1939,7 +1939,9 @@ final class FactCheckWorkflow {
                 let result = try await service.analyze(
                     doi: document.doi,
                     pmid: pmid,
-                    fullText: document.fullTextContent
+                    // Not `fullTextContent`: an abstract-only deposit's text
+                    // is an abstract, and must not be analysed as a body.
+                    fullText: document.analyzableFullText
                 )
                 document.storeTransparencyResult(result)
                 try? modelContext.save()

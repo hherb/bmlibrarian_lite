@@ -582,4 +582,260 @@ final class FullTextParseWarningsTests: XCTestCase {
             "https://pubmed.ncbi.nlm.nih.gov/12345678/"
         )
     }
+
+    // MARK: - Extracted PDF text
+
+    /// The whole point of the slice: a PDF-sourced article now has text for the
+    /// transparency analyzer, which used to receive `nil`.
+    func testAnExtractedResultStoresItsTextAndItsLocalPath() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+        XCTAssertEqual(document.fullTextContent, "Recovered prose.")
+        XCTAssertEqual(
+            document.fullTextPDFPath, "/tmp/a.pdf",
+            "the cached file, not the remote URL the field used to be given"
+        )
+        XCTAssertEqual(document.fullTextContentKindRaw, "extracted")
+    }
+
+    /// Extraction serves analysis; display still prefers the document.
+    /// `cachedFullTextResult` tests `fullTextContent` before `fullTextPDFPath`,
+    /// so without a kind-first branch every PDF-sourced article would reopen as
+    /// prose and lose its figures, tables and layout.
+    func testAnExtractedRecordReopensAsThePDFAndNotAsText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+        let rebuilt = document.cachedFullTextResult
+        XCTAssertNotNil(rebuilt?.content.pdfURL, "the viewer must get the PDF back")
+        XCTAssertEqual(rebuilt?.content.pdfURL?.path, "/tmp/a.pdf")
+        XCTAssertEqual(
+            rebuilt?.extractedText, "Recovered prose.",
+            "and the analyzer must still reach the text"
+        )
+    }
+
+    /// A record written before this field existed keeps today's behaviour:
+    /// `nil` means "nothing known", not "no text".
+    func testALegacyRecordKeepsFieldPopulationOrder() {
+        let document = makeDocument()
+        document.fullTextContent = "markdown from an older build"
+        document.fullTextSource = "europepmc"
+        document.fullTextFetchedAt = Date()
+        XCTAssertNil(document.fullTextContentKindRaw)
+        XCTAssertEqual(document.cachedFullTextResult?.content.markdownContent, "markdown from an older build")
+    }
+
+    /// A parsed article is unaffected, and its kind is recorded.
+    func testAParsedArticleStoresTheFulltextKind() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .html(content: "<p>body</p>", markdown: "body"),
+            source: .europePMC,
+            contentKind: .fulltext
+        ))
+        XCTAssertEqual(document.fullTextContentKindRaw, "fulltext")
+        XCTAssertNil(document.fullTextPDFPath)
+    }
+
+    // MARK: - The single display seam (#8 round 1: a second surface's regression)
+
+    /// The regression a second surface shipped with: `MacFullTextViewer`
+    /// picked its content by re-reading the stored fields in the old
+    /// field-population order, so an extracted PDF's recovered prose in
+    /// `fullTextContent` reached it before any kind-first check could say
+    /// otherwise — the same failure `cachedFullTextResult` was fixed against
+    /// above, reintroduced by a second, independent copy of the decision.
+    /// `displayedFullText` is now the one place both surfaces ask, so this
+    /// test is the seam: it fails whenever that single answer regresses,
+    /// regardless of how many views read it.
+    func testDisplayedFullTextPrefersThePDFForAnExtractedDocument() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+        XCTAssertEqual(document.displayedFullText, .localPDF(path: "/tmp/a.pdf"))
+    }
+
+    /// The negative control: a PDF that was never downloaded keeps the
+    /// pre-extraction field-population order, and is tagged as the remote case
+    /// so `cachedFullTextResult` knows to parse it with `URL(string:)` rather
+    /// than `URL(fileURLWithPath:)`.
+    func testDisplayedFullTextFallsBackToARemoteLinkWithoutADownload() {
+        let document = makeDocument()
+        document.applyFullTextResult(
+            AppFullTextResult(content: .pdfURL(URL(string: "https://example.org/a.pdf")!), source: .unpaywall)
+        )
+        XCTAssertEqual(
+            document.displayedFullText,
+            .remotePDFLink(urlString: "https://example.org/a.pdf")
+        )
+    }
+
+    // MARK: - A downloaded PDF that yielded no text (final review #2)
+
+    /// A scan: it downloaded and cached like any other PDF, but extraction got
+    /// nothing out of it, so its kind is `.none`. Keying "is this a real file?"
+    /// on `.extracted` routed it down the remote-URL branch, where
+    /// `URL(string:)` turns an absolute path into a schemeless URL the viewer
+    /// cannot open.
+    func testADownloadedPDFThatYieldedNoTextIsStillKnownToBeALocalFile() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/scan.pdf")!),
+            source: .unpaywall,
+            contentKind: FullTextContentKind.none,
+            extractedText: nil,
+            localPDFPath: "/tmp/scan.pdf"
+        ))
+
+        XCTAssertEqual(document.displayedFullText, .localPDF(path: "/tmp/scan.pdf"))
+        XCTAssertEqual(document.fullTextPDFPathIsLocalFile, true)
+    }
+
+    /// And the result rebuilt from it must say the file exists and hand the
+    /// viewer a URL it can actually open — the two halves the old routing got
+    /// wrong at once.
+    func testARebuiltScanResultCarriesAFileURLAndItsLocalPath() throws {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/scan.pdf")!),
+            source: .unpaywall,
+            contentKind: FullTextContentKind.none,
+            extractedText: nil,
+            localPDFPath: "/tmp/scan.pdf"
+        ))
+
+        let rebuilt = try XCTUnwrap(document.cachedFullTextResult)
+        XCTAssertEqual(rebuilt.localPDFPath, "/tmp/scan.pdf")
+        guard case .pdfURL(let url) = rebuilt.content else {
+            return XCTFail("expected a PDF result, got \(rebuilt.content)")
+        }
+        XCTAssertTrue(url.isFileURL, "a stored file path must rebuild as a file URL")
+        XCTAssertEqual(url.path, "/tmp/scan.pdf")
+    }
+
+    /// What the removed macOS re-download used to be relied on for: the cached
+    /// file's path reaching the document. `applyFullTextResult` already does it,
+    /// which is why `MacScoredDocumentsView` no longer downloads a second time.
+    func testAPDFResultPutsTheCachedFileOnTheDocument() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+
+        XCTAssertEqual(document.fullTextPDFPath, "/tmp/a.pdf")
+    }
+
+    /// An extracted PDF reports its local path too, and still carries the prose
+    /// separately for the analyzer.
+    func testARebuiltExtractedResultCarriesBothTheFileAndTheProse() throws {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+
+        let rebuilt = try XCTUnwrap(document.cachedFullTextResult)
+        XCTAssertEqual(rebuilt.localPDFPath, "/tmp/a.pdf")
+        XCTAssertEqual(rebuilt.extractedText, "Recovered prose.")
+    }
+
+    // MARK: - What analysis is allowed to read (final review #3)
+
+    /// The gap the content kind existed to close and nothing consumed: when no
+    /// PDF tier answers, the held abstract is returned and written to
+    /// `fullTextContent`, and every transparency call site handed it straight
+    /// to the analyzer as an article body.
+    func testAnAbstractOnlyDepositIsNotOfferedAsArticleText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .markdown("## Abstract\n\nBackground and findings only."),
+            source: .europePMC,
+            contentKind: .abstract
+        ))
+
+        XCTAssertNotNil(document.fullTextContent, "it is still stored and still shown")
+        XCTAssertNil(document.analyzableFullText, "but it is not the article's body")
+    }
+
+    /// The negative control: a real article body is still analysed.
+    func testAParsedArticleIsOfferedAsArticleText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .html(content: "<p>body</p>", markdown: "body"),
+            source: .europePMC,
+            contentKind: .fulltext
+        ))
+
+        XCTAssertEqual(document.analyzableFullText, "body")
+    }
+
+    /// Prose recovered from a PDF is the article, and is the whole point of
+    /// this slice reaching the analyzer at all.
+    func testExtractedPDFProseIsOfferedAsArticleText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+
+        XCTAssertEqual(document.analyzableFullText, "Recovered prose.")
+    }
+
+    /// A record written before the kind existed keeps its pre-existing
+    /// behaviour rather than being newly withheld.
+    func testALegacyRecordWithNoStoredKindIsStillOffered() {
+        let document = makeDocument()
+        document.fullTextContent = "body"
+        document.fullTextContentKindRaw = nil
+
+        XCTAssertEqual(document.analyzableFullText, "body")
+    }
+
+    /// Legacy records: written before either field existed, their stored value
+    /// really is a remote URL string, and they must keep behaving exactly as
+    /// they did.
+    func testALegacyRecordWithNoProvenanceIsReadAsARemoteLink() throws {
+        let document = makeDocument()
+        document.fullTextPDFPath = "https://example.org/legacy.pdf"
+        document.fullTextPDFPathIsLocalFile = nil
+        document.fullTextContentKindRaw = nil
+
+        XCTAssertEqual(
+            document.displayedFullText,
+            .remotePDFLink(urlString: "https://example.org/legacy.pdf")
+        )
+        let rebuilt = try XCTUnwrap(document.cachedFullTextResult)
+        XCTAssertNil(rebuilt.localPDFPath)
+        guard case .pdfURL(let url) = rebuilt.content else {
+            return XCTFail("expected a PDF result, got \(rebuilt.content)")
+        }
+        XCTAssertEqual(url.absoluteString, "https://example.org/legacy.pdf")
+    }
 }

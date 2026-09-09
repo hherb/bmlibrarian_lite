@@ -395,25 +395,46 @@ enum BioMedLitAdapters {
         // `warnings` and `degradation` are carried across for every case, not
         // just the parsed one: both describe the *retrieval*, and a fallback that
         // dropped them would be a PDF the reader is looking at precisely because
-        // the parse failed, with nothing left to say so (#183).
+        // the parse failed, with nothing left to say so (#183). `contentKind`,
+        // `extractedText` and `localPDFPath` describe the same retrieval, so the
+        // same reasoning carries them across too: Task 8 reads them off the
+        // document regardless of which case produced the result.
         AppFullTextResult(
-            content: content(of: result.content),
+            content: content(of: result.content, localPDFPath: result.localPDFPath),
             source: appSource(of: result.content),
             warnings: result.warnings,
-            degradation: result.degradation
+            degradation: result.degradation,
+            contentKind: result.contentKind,
+            extractedText: result.extractedText,
+            localPDFPath: result.localPDFPath,
+            extractionCoverage: result.extractionCoverage
         )
     }
 
     /// Map the package's content to the app's equivalent.
     ///
-    /// - Parameter content: The package-side content.
+    /// - Parameters:
+    ///   - content: The package-side content.
+    ///   - localPDFPath: Where the service already cached this PDF, when it did.
     /// - Returns: The app-side content type.
-    private static func content(of content: FullTextContent) -> AppFullTextContentType {
+    private static func content(
+        of content: FullTextContent,
+        localPDFPath: String?
+    ) -> AppFullTextContentType {
         switch content {
         case .europePMC(let html, let markdown):
             // Both HTML (for rendering) and markdown (for search/export fallback)
             return .html(content: html, markdown: markdown)
         case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL):
+            // The cached file wins over the remote URL. The iOS viewers render
+            // the live result rather than the stored document, so mapping this
+            // to the remote URL sent them back over the network for bytes
+            // `downloadAndExtract` had just written to disk — the second
+            // download this slice removed on macOS, still present on iOS
+            // because nothing there read `localPDFPath` at all.
+            if let localPDFPath {
+                return .pdfURL(URL(fileURLWithPath: localPDFPath))
+            }
             return .pdfURL(pdfURL)
         case .doi(let webURL):
             return .webURL(webURL)

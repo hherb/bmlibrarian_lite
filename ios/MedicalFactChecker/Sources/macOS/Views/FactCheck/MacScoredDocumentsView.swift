@@ -411,7 +411,8 @@ struct MacDocumentCard: View {
         if document.isLinkOnly {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
-                degradation: document.cachedRetrievalNotice.degradation
+                degradation: document.cachedRetrievalNotice.degradation,
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
             )
 
             if let url = document.fullTextLinkDestination {
@@ -456,8 +457,10 @@ struct MacDocumentCard: View {
 
                 Spacer()
 
-                // Open in Preview (for PDFs)
-                if document.fullTextPDFPath != nil {
+                // Open in Preview (for PDFs). Gated on there being a real
+                // file: when nothing was downloaded the stored value is a
+                // remote URL, and offering Preview for it does nothing.
+                if document.localPDFFilePath != nil {
                     Button(action: openInPreview) {
                         Label("Open in Preview", systemImage: "eye")
                     }
@@ -526,7 +529,7 @@ struct MacDocumentCard: View {
                 Label("View Full Text", systemImage: "doc.text")
             }
 
-            if document.fullTextPDFPath != nil {
+            if document.localPDFFilePath != nil {
                 Button(action: openInPreview) {
                     Label("Open in Preview", systemImage: "eye")
                 }
@@ -627,15 +630,17 @@ struct MacDocumentCard: View {
                     document.applyFullTextResult(result)
 
                     switch result.content {
-                    case .markdown, .html:
-                        // Content already stored, show in tab
+                    case .markdown, .html, .pdfURL:
+                        // Everything the tab needs is already on the document:
+                        // `applyFullTextResult` above stored the text, or the
+                        // cached PDF's path. The PDF case used to re-download
+                        // here, which pulled the same bytes a second time over
+                        // the same cache path — the service's tiers download,
+                        // cache and extract inside the tier now — and let a
+                        // transient failure on that second attempt surface as
+                        // "Failed to download PDF" over an article that had in
+                        // fact been retrieved and stored.
                         onShowFullText?(document)
-
-                    case .pdfURL(let url):
-                        // Download and cache PDF
-                        Task {
-                            await downloadAndCachePDF(from: url)
-                        }
 
                     case .webURL(let url):
                         // Opened rather than shown — but only when there is
@@ -663,39 +668,23 @@ struct MacDocumentCard: View {
         }
     }
 
-    /// Download and cache a PDF file.
-    ///
-    /// - Parameter url: The URL to download the PDF from.
-    private func downloadAndCachePDF(from url: URL) async {
-        do {
-            let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
-            let path = try await service.downloadAndCachePDF(from: url, for: document.pmid)
-
-            await MainActor.run {
-                document.fullTextPDFPath = path
-                isLoadingFullText = false
-                // Show in full text tab
-                onShowFullText?(document)
-            }
-        } catch {
-            await MainActor.run {
-                fullTextError = "Failed to download PDF"
-                isLoadingFullText = false
-                AppLogger.fullText.error("Failed to cache PDF: \(error.localizedDescription)")
-            }
-        }
-    }
-
     /// Open the cached PDF in Preview.app.
+    ///
+    /// Asks for the *file* path, so a stored remote URL string cannot be
+    /// turned into a `file://` URL that names nothing.
     private func openInPreview() {
-        guard let path = document.fullTextPDFPath else { return }
+        guard let path = document.localPDFFilePath else { return }
         let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.open(url)
+        if !NSWorkspace.shared.open(url) {
+            AppLogger.fullText.error(
+                "Preview.app declined to open the cached PDF at \(path, privacy: .public)"
+            )
+        }
     }
 
     /// Reveal the cached PDF in Finder.
     private func revealInFinder() {
-        guard let path = document.fullTextPDFPath else { return }
+        guard let path = document.localPDFFilePath else { return }
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
     }
 

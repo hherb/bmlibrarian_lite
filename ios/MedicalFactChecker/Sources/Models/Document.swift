@@ -173,8 +173,65 @@ final class Document {
     /// not a guarantee. Those records are rewritten on the next fetch.
     var fullTextDegradedReasonRaw: String?
 
-    /// URL to the locally cached PDF file, if available.
+    /// What the stored full text actually is, as a ``FullTextContentKind`` raw
+    /// value.
+    ///
+    /// `nil` means "written before this field existed", which is not the same as
+    /// ``FullTextContentKind/none``: such a record's text may be an article
+    /// body, an abstract-only deposit, or nothing, and there is no way to tell
+    /// after the fact. Those records keep the old field-population behaviour and
+    /// are rewritten on the next fetch. A required field would instead strand
+    /// every one of them behind a decode failure that reads as "never fetched" —
+    /// the reasoning `fullTextDegradedReasonRaw` was added with.
+    var fullTextContentKindRaw: String?
+
+    /// Where this document's PDF is — either a filesystem path or, when nothing
+    /// was downloaded, the remote URL string it was offered at.
+    ///
+    /// The field has always carried both, which is why
+    /// ``fullTextPDFPathIsLocalFile`` exists beside it: the two are read with
+    /// different `URL` constructors and only the writer knows which was stored.
     var fullTextPDFPath: String?
+
+    /// Whether ``fullTextPDFPath`` holds a filesystem path rather than a remote
+    /// URL string.
+    ///
+    /// Recorded rather than inferred. The kind alone cannot answer it: a PDF
+    /// that downloaded and cached fine but yielded no text — a scan — is stored
+    /// under ``FullTextContentKind/none`` with a real file on disk, and reading
+    /// "is this a file?" off `contentKind == .extracted` sent exactly that
+    /// record down the remote-URL branch, where `URL(string:)` turned an
+    /// absolute path into a schemeless URL and the rebuilt result reported
+    /// `localPDFPath: nil` for a file that was demonstrably there. Guessing from
+    /// the string's shape would be the same mistake with more steps; the writer
+    /// knows, so the writer says.
+    ///
+    /// `nil` means "written before this field existed", and such a record keeps
+    /// today's behaviour exactly: it is read as a remote URL string, which is
+    /// what `URL(string:)` was always applied to. Same reasoning, and the same
+    /// lightweight SwiftData migration, as ``fullTextContentKindRaw`` above.
+    var fullTextPDFPathIsLocalFile: Bool?
+
+    /// Pages of the stored PDF that yielded text, or `nil` when no extraction
+    /// was run.
+    ///
+    /// Paired with ``fullTextTotalPages``; read them through
+    /// ``storedExtractionCoverage``, which returns them together or not at all.
+    /// Two scalar columns rather than one encoded value because SwiftData
+    /// lightweight-migrates added optional scalars, and because a `#Predicate`
+    /// can compare them — the reasoning ``fullTextContentKindRaw`` was added
+    /// with.
+    ///
+    /// `nil` means "no extraction", not "no pages". A record written before
+    /// these existed also answers `nil`: its text may well be partial and there
+    /// is no way to tell after the fact, so it keeps the pre-existing silence
+    /// and is rewritten on the next fetch.
+    var fullTextExtractedPages: Int?
+
+    /// Pages the stored PDF holds, or `nil` when no extraction was run.
+    ///
+    /// See ``fullTextExtractedPages``.
+    var fullTextTotalPages: Int?
 
     /// Source of the full text (for display and debugging).
     /// Values: "europepmc", "unpaywall", "doi"
@@ -505,31 +562,82 @@ final class Document {
         // not inherit the previous attempt's note. Assigning these by hand at
         // each call site is what let the cache and the live result drift apart.
         fullTextDegradedReasonRaw = result.degradation?.rawValue
+        fullTextContentKindRaw = result.contentKind.rawValue
+        storeExtractionCoverage(result.extractionCoverage)
 
         switch result.content {
         case .markdown(let content):
             fullTextContent = content
             fullTextHTML = nil
-            fullTextPDFPath = nil
+            storePDFPath(nil, isLocalFile: false)
         case .html(let htmlContent, let markdownContent):
             fullTextHTML = htmlContent
             fullTextContent = markdownContent
-            fullTextPDFPath = nil
+            storePDFPath(nil, isLocalFile: false)
         case .pdfURL(let url):
-            // The remote URL, so the document reads as retrieved before any
-            // download. macOS overwrites this with the cached local path in
-            // `downloadAndCachePDF`; iOS has no such step, and leaving it unset
-            // left `hasFullText` false for every PDF-sourced article — cached
-            // as "fetched" yet indistinguishable from never-fetched on relaunch.
-            fullTextPDFPath = url.absoluteString
-            fullTextContent = nil
+            // The cached file when there is one, so the viewer opens a real
+            // path. Before extraction existed this held the *remote URL*, which
+            // read as "retrieved" and was handed to `URL(string:)` by every
+            // consumer that thought it had a file. The remote URL falls back
+            // only when nothing was downloaded, which is what the extraction
+            // flag being off looks like — and which of the two was stored is
+            // recorded rather than left to be inferred later.
+            if let localPath = result.localPDFPath {
+                storePDFPath(localPath, isLocalFile: true)
+            } else {
+                storePDFPath(url.absoluteString, isLocalFile: false)
+            }
+            // Prose recovered from the PDF, which is what transparency
+            // analysis reads. `nil` for a scan or a failed extraction, exactly
+            // as before.
+            fullTextContent = result.extractedText
             fullTextHTML = nil
         case .webURL:
             // Web URLs don't store content locally
             fullTextContent = nil
             fullTextHTML = nil
-            fullTextPDFPath = nil
+            storePDFPath(nil, isLocalFile: false)
         }
+    }
+
+    /// Store a PDF path together with what kind of path it is.
+    ///
+    /// One writer for the pair, so the flag cannot be left describing a path
+    /// that has since been replaced — the drift that a second, independent
+    /// assignment invites.
+    ///
+    /// - Parameters:
+    ///   - path: The filesystem path or remote URL string, or `nil` to clear.
+    ///   - isLocalFile: Whether `path` is a file on disk. Ignored when `path`
+    ///     is `nil`, which clears the flag too.
+    private func storePDFPath(_ path: String?, isLocalFile: Bool) {
+        fullTextPDFPath = path
+        fullTextPDFPathIsLocalFile = path == nil ? nil : isLocalFile
+    }
+
+    /// Store an extraction's coverage, or clear it.
+    ///
+    /// One writer for the pair, for the reason ``storePDFPath(_:isLocalFile:)``
+    /// is: two counts written independently can be left describing different
+    /// extractions, and a coverage figure that disagrees with the text beside it
+    /// tells the reader a precise, wrong thing.
+    ///
+    /// - Parameter coverage: The figure to store, or `nil` to clear both counts.
+    private func storeExtractionCoverage(_ coverage: PDFExtractionCoverage?) {
+        fullTextExtractedPages = coverage?.convertedPages
+        fullTextTotalPages = coverage?.pageCount
+    }
+
+    /// The persisted extraction coverage, or `nil` when none was recorded.
+    ///
+    /// Answers `nil` unless *both* counts are present. A half-written pair is a
+    /// record we cannot describe, and reporting "0 of 12 pages" for it would
+    /// invent a figure rather than admit to not having one.
+    private var storedExtractionCoverage: PDFExtractionCoverage? {
+        guard let converted = fullTextExtractedPages, let total = fullTextTotalPages else {
+            return nil
+        }
+        return PDFExtractionCoverage(convertedPages: converted, pageCount: total)
     }
 
     /// Mark the document as having no full text available.
@@ -539,9 +647,12 @@ final class Document {
         fullTextContent = nil
         fullTextHTML = nil
         fullTextPDFPath = nil
+        fullTextPDFPathIsLocalFile = nil
         fullTextSource = nil
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
+        fullTextContentKindRaw = nil
+        storeExtractionCoverage(nil)
     }
 
     /// Clear cached full text data to allow re-fetching.
@@ -549,14 +660,120 @@ final class Document {
         fullTextContent = nil
         fullTextHTML = nil
         fullTextPDFPath = nil
+        fullTextPDFPathIsLocalFile = nil
         fullTextSource = nil
         fullTextFetchedAt = nil
         fullTextUnavailable = false
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
+        fullTextContentKindRaw = nil
+        storeExtractionCoverage(nil)
     }
 
     // MARK: - Cached Full Text
+
+    /// Which of the stored fields answers "what do we show the reader" —
+    /// the single place that decision is made.
+    ///
+    /// `cachedFullTextResult` below and `MacFullTextViewer.renderedContent`
+    /// both need it, and used to decide it independently: `MacFullTextViewer`
+    /// re-implements its own loading/error/empty states around the content,
+    /// so it could not simply call `cachedFullTextResult`, and instead
+    /// re-read the same stored fields in the same field-population order.
+    /// That was harmless while `fullTextContent` was only ever set for a
+    /// parsed article — until extraction started populating it with recovered
+    /// PDF prose too, and only one of the two copies was taught to check the
+    /// content kind before falling through to it. The other kept showing the
+    /// prose, silently dropping the figures, tables and layout the PDF was
+    /// kept for. Two independent copies of one display rule is exactly the
+    /// shape that had already drifted once, across four retrieval surfaces
+    /// instead of two — see the HANDOVER note on that.
+    ///
+    /// Extraction serves *analysis*: `fullTextContent` holds the recovered
+    /// prose for a PDF whose ``storedContentKind`` is
+    /// ``FullTextContentKind/extracted``, which is what the transparency
+    /// analyzer reads — through ``analyzableFullText``, the only consumer that
+    /// treats stored text as an article body. Display still prefers the
+    /// document, so that case is resolved — and answered as a PDF — before
+    /// the ordinary field-population fallback below gets a chance to hand
+    /// back the same text as prose.
+    var displayedFullText: DisplayedFullText {
+        if storedContentKind == .extracted, let path = fullTextPDFPath {
+            return storedPDF(at: path)
+        } else if let html = fullTextHTML {
+            return .html(html, markdown: fullTextContent ?? "")
+        } else if let markdown = fullTextContent {
+            return .markdown(markdown)
+        } else if let path = fullTextPDFPath {
+            return storedPDF(at: path)
+        } else {
+            return .none
+        }
+    }
+
+    /// Which kind of PDF reference ``fullTextPDFPath`` is holding.
+    ///
+    /// Read off ``fullTextPDFPathIsLocalFile`` rather than off the content
+    /// kind or the shape of the string. A record predating that flag answers
+    /// `false`, which is what `URL(string:)` was always applied to and so
+    /// leaves those records behaving exactly as they did.
+    private func storedPDF(at path: String) -> DisplayedFullText {
+        fullTextPDFPathIsLocalFile == true
+            ? .localPDF(path: path)
+            : .remotePDFLink(urlString: path)
+    }
+
+    /// The filesystem path of this document's PDF, or `nil` when what is stored
+    /// is a remote link rather than a file.
+    ///
+    /// For the actions that need a *file* — reveal it in Finder, hand it to
+    /// Preview.app — rather than something to render. Those asked
+    /// ``fullTextPDFPath`` for a non-`nil` value and then built a file URL from
+    /// it, which is the guess ``fullTextPDFPathIsLocalFile`` was added to
+    /// replace: when nothing was downloaded, that field holds a remote URL
+    /// string, and `file:///…/https:/example.org/paper.pdf` is what Finder was
+    /// being handed. The menu item was offered and did nothing at all.
+    /// Read off the flag rather than off ``displayedFullText``, deliberately.
+    /// Whether a file exists is not a display decision: a record whose display
+    /// rule picks the HTML rendering may still have a cached PDF worth
+    /// revealing, and routing this through the display rule would make "can I
+    /// open this file" depend on which of several renderings won. Same rule as
+    /// ``cachedFullTextResult``'s `localPDFPath`, and the same one writer keeps
+    /// the flag honest.
+    var localPDFFilePath: String? {
+        fullTextPDFPathIsLocalFile == true ? fullTextPDFPath : nil
+    }
+
+    /// The stored full text an analyzer may treat as the article's body, or
+    /// `nil` when there is none.
+    ///
+    /// The single place the content kind is consulted for analysis, read by
+    /// `FactCheckWorkflow`, `ReportView` and `MacReportView` alike. Three
+    /// copies of one rule is the shape this slice already had to correct twice
+    /// — once across four retrieval surfaces, once across two display surfaces
+    /// — so the rule is stated once and the call sites ask.
+    ///
+    /// An abstract-only Europe PMC deposit answers `nil`. Such a record's
+    /// stored text is the abstract and nothing else: the deposit carries
+    /// `<front>` and `<back>` but no `<body>`, which is why the retrieval chain
+    /// labels it ``FullTextContentKind/abstract`` and holds it behind every PDF
+    /// tier in the first place. Handing it over as article text is what the
+    /// holdback exists to prevent, and it does not stop being a misuse just
+    /// because no PDF tier answered and the abstract was returned after all —
+    /// the transparency extractors would read a funding or COI sentence out of
+    /// abstract prose and store a verdict about a body they never saw. bmlib
+    /// takes the same line: a body-less rendering contains no article text.
+    ///
+    /// Every other kind is offered. Extracted PDF prose *is* the article, and a
+    /// `nil` kind means "written before this field existed", which keeps its
+    /// pre-existing behaviour rather than being newly withheld.
+    ///
+    /// The abstract is not lost — `abstract` holds it, and the analyzer is
+    /// given the identifiers it uses to fetch registry and CrossRef metadata
+    /// either way. What it stops getting is an abstract dressed as a body.
+    var analyzableFullText: String? {
+        storedContentKind == .abstract ? nil : fullTextContent
+    }
 
     /// The cached full text, rebuilt as a result the viewers can render.
     ///
@@ -565,10 +782,12 @@ final class Document {
     /// warnings to clean, so a truncated article reopened from the cache
     /// rendered exactly like a complete one.
     ///
-    /// `MacFullTextViewer` still selects its *view* from the stored fields
-    /// directly — it also has loading, error and empty states to place, and it
-    /// hands `MacPDFView` a filesystem path rather than a URL — so this is the
-    /// source of its banner's warnings, not of its content branch.
+    /// Its content branch comes from ``displayedFullText``, the same property
+    /// `MacFullTextViewer.renderedContent` consults, so the two cannot pick
+    /// different content for the same document. `MacFullTextViewer` still
+    /// places its own loading, error and empty states around that content,
+    /// and still hands `MacPDFView` a filesystem path rather than the `URL`
+    /// this type carries — those stay per-view concerns.
     ///
     /// `nil` when nothing displayable is cached. Do not read the banner's
     /// inputs through this property — use ``cachedRetrievalNotice``, which
@@ -576,20 +795,37 @@ final class Document {
     var cachedFullTextResult: AppFullTextResult? {
         let source = storedFullTextSource
         let content: AppFullTextContentType
-        if let html = fullTextHTML {
-            content = .html(content: html, markdown: fullTextContent ?? "")
-        } else if let markdown = fullTextContent {
+        switch displayedFullText {
+        case .html(let html, let markdown):
+            content = .html(content: html, markdown: markdown)
+        case .markdown(let markdown):
             content = .markdown(markdown)
-        } else if let path = fullTextPDFPath, let url = URL(string: path) {
+        case .localPDF(let path):
+            content = .pdfURL(URL(fileURLWithPath: path))
+        case .remotePDFLink(let urlString):
+            // Nothing was downloaded, so the stored value is the link itself.
+            guard let url = URL(string: urlString) else { return nil }
             content = .pdfURL(url)
-        } else {
+        case .none:
             return nil
         }
         return AppFullTextResult(
             content: content,
             source: source,
             warnings: storedParseWarnings,
-            degradation: storedDegradation
+            degradation: storedDegradation,
+            contentKind: storedContentKind ?? .none,
+            extractedText: storedContentKind == .extracted ? fullTextContent : nil,
+            // Every stored path that is a file, not only the ones extraction
+            // got text out of. A scan downloads and caches like any other PDF,
+            // and reporting `nil` for it told the viewer there was no file to
+            // open when there plainly was one.
+            localPDFPath: fullTextPDFPathIsLocalFile == true ? fullTextPDFPath : nil,
+            // Gated on there being a PDF, not on the kind: a scan stores
+            // `.none` and still has a coverage figure worth reporting — `0` of
+            // however many pages. What the gate excludes is a parsed article,
+            // whose text was never extracted from anything.
+            extractionCoverage: fullTextPDFPath == nil ? nil : storedExtractionCoverage
         )
     }
 
@@ -606,10 +842,24 @@ final class Document {
     /// reader was then told the article has no full text — #183's conclusion
     /// inverted, and cached, so every reopen repeated it.
     ///
-    /// Both facts are read straight from the stored fields, so a record with no
-    /// displayable content still speaks.
-    var cachedRetrievalNotice: (warnings: JATSParseWarnings, degradation: FullTextDegradation?) {
-        (storedParseWarnings, storedDegradation)
+    /// All three facts are read straight from the stored fields, so a record
+    /// with no displayable content still speaks.
+    ///
+    /// The extraction coverage joins them for the same reason the other two are
+    /// here: `MacFullTextViewer` renders only from this model, so a figure held
+    /// on the in-flight result alone would never reach the reader there, and on
+    /// iOS would be lost on reopen — which is how a partial extraction came to
+    /// be shown exactly like a whole article.
+    var cachedRetrievalNotice: (
+        warnings: JATSParseWarnings,
+        degradation: FullTextDegradation?,
+        extractionCoverage: PDFExtractionCoverage?
+    ) {
+        (
+            storedParseWarnings,
+            storedDegradation,
+            fullTextPDFPath == nil ? nil : storedExtractionCoverage
+        )
     }
 
     /// The cached source, defaulting to ``AppFullTextSource/cached``.
@@ -683,6 +933,23 @@ final class Document {
             """
         )
         return .unspecified
+    }
+
+    /// The persisted content kind, or `nil` for a record that predates it.
+    ///
+    /// An unrecognised value — a record written by a newer build — reads as
+    /// `nil` rather than as a guess, so it falls back to field-population order
+    /// instead of claiming a kind this build does not understand.
+    private var storedContentKind: FullTextContentKind? {
+        guard let raw = fullTextContentKindRaw else { return nil }
+        if let known = FullTextContentKind(rawValue: raw) { return known }
+        documentLog.error(
+            """
+            Unrecognised full-text content kind \(raw, privacy: .public) stored for PMID \
+            \(self.pmid, privacy: .public); falling back to field-population order.
+            """
+        )
+        return nil
     }
 
     /// The persisted form of "something was lost and this record cannot say
@@ -821,4 +1088,44 @@ final class Document {
 
         return result
     }
+}
+
+// MARK: - Displayed Full Text
+
+/// What ``Document/displayedFullText`` resolved to.
+///
+/// Two PDF cases rather than one, and the axis they split on is *where the
+/// PDF is*, not how it was classified. They need different `URL` constructors
+/// downstream, and a consumer that had to work out which from the string, or
+/// from the content kind, would be guessing — which is exactly what went
+/// wrong: keying "is this a real file?" on ``FullTextContentKind/extracted``
+/// sent a downloaded-but-unextractable PDF (a scan: file on disk, kind
+/// ``FullTextContentKind/none``) down the remote-URL branch, where
+/// `URL(string:)` produced a schemeless URL the viewer could not open and the
+/// rebuilt result claimed no local file existed. Both cases render
+/// identically; the distinction is carried once, here, so nobody re-derives
+/// it.
+enum DisplayedFullText: Equatable {
+    /// Rendered with `HTMLContentView` for its table support. `markdown`
+    /// rides along as the plain-text form the same article was also stored
+    /// as, for callers that copy or search it rather than render it.
+    case html(String, markdown: String)
+
+    /// Rendered with `MacMarkdownView` / `FullTextViewer`'s markdown branch.
+    case markdown(String)
+
+    /// A PDF on this device: `path` is a real filesystem path, whether or not
+    /// any text was recovered from it. Read with `URL(fileURLWithPath:)`.
+    case localPDF(path: String)
+
+    /// A PDF that was never downloaded — nothing was stored but the link it
+    /// was offered at. Three ways a record ends up here: it was written before
+    /// extraction existed, it was written with extraction turned off, or the
+    /// download simply failed. The last is the common one at runtime, and the
+    /// easiest to forget: a 404 or a timeout stores the remote URL too.
+    /// Read with `URL(string:)`.
+    case remotePDFLink(urlString: String)
+
+    /// Nothing cached to show.
+    case none
 }
