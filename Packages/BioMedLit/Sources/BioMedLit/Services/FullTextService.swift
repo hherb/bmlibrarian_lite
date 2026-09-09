@@ -819,12 +819,36 @@ public actor FullTextService {
     /// test. A cached entry that fails validation is quarantined there and reads
     /// as a miss, which is exactly what makes the download below the repair.
     ///
+    /// An empty `pmid` is refused outright rather than downloaded uncached.
+    /// `cachedPDFPath(for: "")` would otherwise resolve to the same path —
+    /// `<cache>/.pdf` — for every article with no PMID, and an empty PMID is a
+    /// real, reachable value: `EuropePMCService.swift` builds one as
+    /// `result.pmid ?? result.id ?? ""`, and the macOS viewer documents an
+    /// empty `pmid` with a non-nil `pmcId` as an ordinary Europe PMC-sourced
+    /// article, not a bug. Before this method consulted the cache, every call
+    /// re-downloaded, so extraction always read back the bytes it had just
+    /// written and the shared filename never mattered; now that a cache hit
+    /// short-circuits the download, a second empty-PMID article would
+    /// deterministically read back the first one's cached text. Failing here
+    /// costs nothing extra: `downloadAndExtract`, this method's only caller,
+    /// already treats any thrown, non-cancellation error as "no PDF for this
+    /// tier" and falls through to the next source, exactly as it does for a
+    /// download that 404s — so refusing needs no new handling and cannot mix
+    /// two articles' bytes under one key.
+    ///
     /// - Parameters:
     ///   - url: URL to download the PDF from, on a cache miss.
-    ///   - pmid: PubMed ID for naming the cached file.
+    ///   - pmid: PubMed ID for naming the cached file. Must not be empty.
     /// - Returns: Local file path to the cached PDF.
-    /// - Throws: `FullTextError` on failure.
+    /// - Throws: `FullTextError` on failure, including an empty `pmid`.
     public func downloadAndCachePDF(from url: URL, for pmid: String) async throws -> String {
+        guard !pmid.isEmpty else {
+            throw FullTextError.cachingFailed(
+                "empty PMID; refusing to read or write a cache entry shared by every "
+                    + "article with no PMID"
+            )
+        }
+
         if let cached = Self.cachedPDFPath(for: pmid) {
             BioMedLitLib.logger?.info(
                 "Serving the cached PDF for PMID \(pmid) from \(cached)",
@@ -941,7 +965,19 @@ public actor FullTextService {
     }
 
     /// Save PDF data to the cache directory.
+    ///
+    /// Refuses an empty `pmid`: see ``downloadAndCachePDF(from:for:)`` for why a
+    /// shared key must never be written. `downloadAndCachePDF` already guards
+    /// this before it can be reached, but the check is repeated here so this
+    /// method cannot write a collision under any future caller either.
     private func cachePDF(data: Data, for pmid: String) throws -> String {
+        guard !pmid.isEmpty else {
+            throw FullTextError.cachingFailed(
+                "empty PMID; refusing to write a cache entry shared by every article "
+                    + "with no PMID"
+            )
+        }
+
         let cacheDir = Self.pdfCacheDirectory
         let fileURL = cacheDir.appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
 
@@ -1001,10 +1037,19 @@ public actor FullTextService {
     /// answers `nil`, because turning a recoverable miss into a thrown error
     /// helps nobody.
     ///
+    /// An empty `pmid` always answers `nil`, without touching disk. Every
+    /// article with no PMID would otherwise share the one path
+    /// `<cache>/.pdf` — a real, reachable case (see
+    /// ``downloadAndCachePDF(from:for:)``), and this method must not read,
+    /// quarantine, or otherwise treat that shared entry as belonging to
+    /// whichever article happens to ask first.
+    ///
     /// - Parameter pmid: PubMed ID to check.
-    /// - Returns: The cached file's path, or `nil` if there is none or it was
-    ///   unusable.
+    /// - Returns: The cached file's path, or `nil` if there is none, `pmid` is
+    ///   empty, or the entry was unusable.
     public static func cachedPDFPath(for pmid: String) -> String? {
+        guard !pmid.isEmpty else { return nil }
+
         let fileURL = pdfCacheDirectory
             .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
