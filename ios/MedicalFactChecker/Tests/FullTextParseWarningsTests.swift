@@ -747,6 +747,61 @@ final class FullTextParseWarningsTests: XCTestCase {
         XCTAssertEqual(rebuilt.extractedText, "Recovered prose.")
     }
 
+    // MARK: - What analysis is allowed to read (final review #3)
+
+    /// The gap the content kind existed to close and nothing consumed: when no
+    /// PDF tier answers, the held abstract is returned and written to
+    /// `fullTextContent`, and every transparency call site handed it straight
+    /// to the analyzer as an article body.
+    func testAnAbstractOnlyDepositIsNotOfferedAsArticleText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .markdown("## Abstract\n\nBackground and findings only."),
+            source: .europePMC,
+            contentKind: .abstract
+        ))
+
+        XCTAssertNotNil(document.fullTextContent, "it is still stored and still shown")
+        XCTAssertNil(document.analyzableFullText, "but it is not the article's body")
+    }
+
+    /// The negative control: a real article body is still analysed.
+    func testAParsedArticleIsOfferedAsArticleText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .html(content: "<p>body</p>", markdown: "body"),
+            source: .europePMC,
+            contentKind: .fulltext
+        ))
+
+        XCTAssertEqual(document.analyzableFullText, "body")
+    }
+
+    /// Prose recovered from a PDF is the article, and is the whole point of
+    /// this slice reaching the analyzer at all.
+    func testExtractedPDFProseIsOfferedAsArticleText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+
+        XCTAssertEqual(document.analyzableFullText, "Recovered prose.")
+    }
+
+    /// A record written before the kind existed keeps its pre-existing
+    /// behaviour rather than being newly withheld.
+    func testALegacyRecordWithNoStoredKindIsStillOffered() {
+        let document = makeDocument()
+        document.fullTextContent = "body"
+        document.fullTextContentKindRaw = nil
+
+        XCTAssertEqual(document.analyzableFullText, "body")
+    }
+
     /// Legacy records: written before either field existed, their stored value
     /// really is a remote URL string, and they must keep behaving exactly as
     /// they did.

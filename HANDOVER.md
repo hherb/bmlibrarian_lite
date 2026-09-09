@@ -23,7 +23,11 @@ its slice has landed; add a new section when handing off new work.
   - **An abstract-only deposit is held back, not returned.** Returning it
     on the spot made it beat every remaining tier — an open-access PDF of
     the same paper became unreachable, and the abstract was cached and
-    analysed as if it were the article.
+    analysed as if it were the article. The holdback is only half of that:
+    when no PDF tier answers, the abstract *is* returned and cached, so the
+    consumer has to check the kind too. `Document.analyzableFullText` is
+    where that check lives — one property, consulted by all three
+    transparency call sites, answering `nil` for an abstract-only record.
   - **A `nil` stored content kind means "predates the field", not
     `.none`.** Such a record's text may be an article body, an abstract,
     or nothing, and there is no way to tell after the fact, so it keeps

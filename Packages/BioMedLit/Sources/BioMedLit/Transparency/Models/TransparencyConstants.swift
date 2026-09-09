@@ -47,8 +47,10 @@ public enum TransparencyConstants {
     /// - Version 3 (2026-09-09): a downloaded PDF now contributes its extracted
     ///   text, where the analyzer previously received `nil` for every
     ///   PDF-sourced article; and an abstract-only Europe PMC deposit is no
-    ///   longer handed over as an article body. Both change which evidence
-    ///   reaches the scorer, in opposite directions.
+    ///   longer handed over as an article body — it is held behind every PDF
+    ///   tier, and when it is returned anyway because nothing better existed,
+    ///   the app passes `nil` rather than its abstract to ``analyze``. Both
+    ///   change which evidence reaches the scorer, in opposite directions.
     public static let analyzerVersion = 3
 
 

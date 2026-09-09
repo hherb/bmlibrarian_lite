@@ -463,7 +463,10 @@ non-empty `bodySections` collection would still have reported this deposit as
 `fulltext`, because back-matter sections land in the same collection as true
 body sections. The predicate is a count of prose paragraphs found *inside*
 `<body>` instead — see `doc/cross_platform/fulltext_retrieval.md` for the
-rule stated as Android will also have to satisfy it.
+rule stated as Android will also have to satisfy it, including its consumer
+half: the holdback keeps the abstract from beating a PDF tier, and
+`Document.analyzableFullText` keeps the abstract that is returned when nothing
+better existed from reaching the transparency analyzer as an article body.
 
 **Cache writes were already atomic; reads were not validated.** This row and
 its note previously said `cachePDF` "writes straight to the target path" and

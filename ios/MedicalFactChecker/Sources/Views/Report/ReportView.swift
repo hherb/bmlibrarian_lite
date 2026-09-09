@@ -1636,7 +1636,9 @@ struct DocumentDetailSheet: View {
                 let result = try await service.analyze(
                     doi: document.doi,
                     pmid: document.pmid.isEmpty ? nil : document.pmid,
-                    fullText: document.fullTextContent
+                    // Not `fullTextContent`: an abstract-only deposit's text
+                    // is an abstract, and must not be analysed as a body.
+                    fullText: document.analyzableFullText
                 )
                 await MainActor.run {
                     // A failed write leaves the previous result in place; saying so

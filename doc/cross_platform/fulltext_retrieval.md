@@ -393,6 +393,13 @@ unreachable and the abstract is cached and analysed as though it were the
 article. Instead, hold it in a local and let the PDF tiers run; only return
 it at the end, if nothing better arrived.
 
+The holdback alone is not enough, and a port that stops there still has the
+defect. When no PDF tier answers, the abstract is returned and cached like any
+other result, so the *consumer* must check the kind as well: anything that
+treats stored full text as the article's body — transparency analysis above
+all — must be given nothing at all for a record whose kind is `ABSTRACT`. Make
+that one accessor the whole app reads, not a check repeated at each call site.
+
 No web URL rides along on the held abstract. Resolve the publisher or PubMed
 link from the identifiers already available — the same resolution every
 other case falls back to — rather than carrying a second copy of it on the

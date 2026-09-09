@@ -673,6 +673,37 @@ final class Document {
             : .remotePDFLink(urlString: path)
     }
 
+    /// The stored full text an analyzer may treat as the article's body, or
+    /// `nil` when there is none.
+    ///
+    /// The single place the content kind is consulted for analysis, read by
+    /// `FactCheckWorkflow`, `ReportView` and `MacReportView` alike. Three
+    /// copies of one rule is the shape this slice already had to correct twice
+    /// — once across four retrieval surfaces, once across two display surfaces
+    /// — so the rule is stated once and the call sites ask.
+    ///
+    /// An abstract-only Europe PMC deposit answers `nil`. Such a record's
+    /// stored text is the abstract and nothing else: the deposit carries
+    /// `<front>` and `<back>` but no `<body>`, which is why the retrieval chain
+    /// labels it ``FullTextContentKind/abstract`` and holds it behind every PDF
+    /// tier in the first place. Handing it over as article text is what the
+    /// holdback exists to prevent, and it does not stop being a misuse just
+    /// because no PDF tier answered and the abstract was returned after all —
+    /// the transparency extractors would read a funding or COI sentence out of
+    /// abstract prose and store a verdict about a body they never saw. bmlib
+    /// takes the same line: a body-less rendering contains no article text.
+    ///
+    /// Every other kind is offered. Extracted PDF prose *is* the article, and a
+    /// `nil` kind means "written before this field existed", which keeps its
+    /// pre-existing behaviour rather than being newly withheld.
+    ///
+    /// The abstract is not lost — `abstract` holds it, and the analyzer is
+    /// given the identifiers it uses to fetch registry and CrossRef metadata
+    /// either way. What it stops getting is an abstract dressed as a body.
+    var analyzableFullText: String? {
+        storedContentKind == .abstract ? nil : fullTextContent
+    }
+
     /// The cached full text, rebuilt as a result the viewers can render.
     ///
     /// One place rather than four: `FullTextTab`, `ScoredDocumentsView` and
