@@ -54,6 +54,33 @@ public enum TransparencyConstants {
     public static let analyzerVersion = 3
 
 
+    // MARK: - Full-Text Section Extraction
+
+    /// How much of a full-text section the COI and data-availability extractors
+    /// will take, in characters.
+    ///
+    /// The extractors end a section at a blank line or the end of the text.
+    /// That is right for JATS markdown, where paragraphs are separated by blank
+    /// lines — and wrong for the other input this analyzer now receives.
+    /// PDFKit's `PDFPage.string` separates *lines* with a single `\n` and never
+    /// emits a blank one, so extracted PDF prose has no paragraph breaks at all:
+    /// a COI header found mid-page matches from there to the end of the page,
+    /// and on the last page to the end of the document. `COIAnalyzer` then
+    /// counts industry keywords across that whole blob, and an article that
+    /// declared no conflicts can be recorded as having industry ties because
+    /// the sentence naming a drug's manufacturer sat two paragraphs below the
+    /// disclosure.
+    ///
+    /// The real repair is section segmentation of extracted text — bmlib's
+    /// `segmenter.py`, explicitly the next slice's scope. This is the bounded
+    /// stand-in: 1500 characters comfortably holds a whole statement of
+    /// ordinary length (most run to a few hundred) while keeping a runaway
+    /// capture to well under one PDF page. A genuinely long disclosure is
+    /// truncated, which under-claims rather than over-claims — the direction
+    /// this analyzer errs in deliberately, since a stored verdict is what a
+    /// reader acts on.
+    public static let maxSectionCaptureLength = 1500
+
     // MARK: - API URLs
 
     /// CrossRef API base URL for funder and DOI metadata lookups.

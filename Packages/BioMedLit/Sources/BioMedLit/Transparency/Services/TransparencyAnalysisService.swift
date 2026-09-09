@@ -403,9 +403,16 @@ public actor TransparencyAnalysisService {
     /// Searches for common data availability section headers and extracts
     /// the surrounding text.
     ///
+    /// Capped at ``TransparencyConstants/maxSectionCaptureLength`` — see there
+    /// for why unsegmented PDF prose makes that necessary.
+    ///
+    /// Internal rather than private so the cap has a test, and `nonisolated`
+    /// because it is a pure function of its argument; `analyze` is the only
+    /// production caller.
+    ///
     /// - Parameter fullText: The full text of the article.
     /// - Returns: The extracted data availability statement, or nil if not found.
-    private func extractDataAvailabilitySection(from fullText: String) -> String? {
+    nonisolated func extractDataAvailabilitySection(from fullText: String) -> String? {
         let patterns = [
             #"(?i)data\s+availability[:\s]+([^§]+?)(?=\n\n|\z)"#,
             #"(?i)availability\s+of\s+data[:\s]+([^§]+?)(?=\n\n|\z)"#,
@@ -417,7 +424,7 @@ public actor TransparencyAnalysisService {
             if let extracted = RegexHelper.extractFirst(pattern: pattern, from: fullText) {
                 let trimmed = extracted.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
-                    return trimmed
+                    return Self.capped(trimmed)
                 }
             }
         }
@@ -429,9 +436,16 @@ public actor TransparencyAnalysisService {
     ///
     /// Searches for common COI section headers and extracts the surrounding text.
     ///
+    /// Capped at ``TransparencyConstants/maxSectionCaptureLength`` — see there
+    /// for why unsegmented PDF prose makes that necessary.
+    ///
+    /// Internal rather than private so the cap has a test, and `nonisolated`
+    /// because it is a pure function of its argument; `analyze` is the only
+    /// production caller.
+    ///
     /// - Parameter fullText: The full text of the article.
     /// - Returns: The extracted COI statement, or nil if not found.
-    private func extractCOISection(from fullText: String) -> String? {
+    nonisolated func extractCOISection(from fullText: String) -> String? {
         let patterns = [
             #"(?i)conflict(?:s)?\s+of\s+interest[:\s]+([^§]+?)(?=\n\n|\z)"#,
             #"(?i)competing\s+interest(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)"#,
@@ -443,12 +457,27 @@ public actor TransparencyAnalysisService {
             if let extracted = RegexHelper.extractFirst(pattern: pattern, from: fullText) {
                 let trimmed = extracted.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
-                    return trimmed
+                    return Self.capped(trimmed)
                 }
             }
         }
 
         return nil
+    }
+
+    /// Bound a captured section to
+    /// ``TransparencyConstants/maxSectionCaptureLength``.
+    ///
+    /// Applied after extraction rather than inside the patterns: a bounded
+    /// quantifier in the regex would make a section with no terminating blank
+    /// line fail to match at all, which loses the statement entirely instead of
+    /// trimming it.
+    nonisolated private static func capped(_ section: String) -> String {
+        guard section.count > TransparencyConstants.maxSectionCaptureLength else {
+            return section
+        }
+        return String(section.prefix(TransparencyConstants.maxSectionCaptureLength))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Helper Functions
