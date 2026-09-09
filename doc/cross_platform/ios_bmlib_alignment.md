@@ -451,8 +451,13 @@ is wrong about the first two — neither `ParallelScoringService` nor
 `ParallelCitationService` reads `fullTextContent`; both work from abstracts.
 The cost lands on transparency analysis alone — a second correction, from
 the final review: nothing passes `fullTextContent` to report generation
-either. Its only consumers are the three `analyze` call sites and macOS's
-"Copy Text" item; report generation works from the citations.
+either; report generation works from the citations. To be exact about the
+consumers, since an earlier version of this sentence was not: the three
+`analyze` call sites reach it through `Document.analyzableFullText`, which is
+the only reader that treats stored text as an *article body*. The display
+path reads it too — `hasFullText`, `displayedFullText` and
+`cachedFullTextResult` — as do macOS's "Copy Text" item and, since the
+extraction slice, iOS's.
 
 **Extracted PDF prose has no paragraph breaks, and that is a real, unfixed
 gap.** `extractCOISection` and `extractDataAvailabilitySection` end a
@@ -496,12 +501,20 @@ so the truncated-file failure was never reachable through this path. The real
 defect was on the read side, which validated nothing —
 `cachedPDFPath(for:)` checked only `FileManager.fileExists`. It now also
 checks the `%PDF` magic bytes, and a failing entry is renamed to a `.corrupt`
-name rather than deleted, matching bmlib's issue **#71** reasoning: leaving a
-bad entry in place hides a freshly cached PDF behind it and the article
-re-downloads on every run forever. Worth being precise about what this
-hardens: `FullTextService.cachedPDFPath(for:)` has no callers in the package
-or the app today — the views read `Document.fullTextPDFPath` directly — so
-this closes a path a future caller could take, not a defect a user hits now.
+name rather than deleted. Two facts justify the quarantine and no more: the
+entry stops being served as this article's text, and its bytes stay available
+to whoever investigates. bmlib's issue **#71** argues something stronger —
+that a bad entry left in place *shadows* a freshly cached one — and that
+reasoning does not transfer: it is a property of bmlib's two-tier
+HTML-before-PDF lookup, whereas this cache holds one entry per article and
+source URL and an atomic re-download simply overwrites it.
+
+This validation is on the hot path, not a future one. An earlier version of
+this note said `cachedPDFPath` had no callers, which stopped being true when
+`downloadAndCachePDF` was changed to consult the cache before downloading:
+it is now step one of every PDF fetch. That is also what makes the
+empty-identifier guard load-bearing rather than defensive — see the
+`download_and_cache_pdf` pseudocode in `fulltext_retrieval.md`.
 
 **One deliberate deviation from bmlib**, beside the `plc` note in §1: bmlib
 writes cache entries through a temp file with `fsync` before `os.replace`.

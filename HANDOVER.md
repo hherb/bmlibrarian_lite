@@ -32,12 +32,52 @@ its slice has landed; add a new section when handing off new work.
     `.none`.** Such a record's text may be an article body, an abstract,
     or nothing, and there is no way to tell after the fact, so it keeps
     the old field-population display order rather than claiming a kind.
+  - **Extraction coverage travels with the text, and is persisted.**
+    `PDFExtractionCoverage` pairs the two page counts as one value and rides
+    on `FullTextResult` → `AppFullTextResult` → two optional `Int` columns on
+    `Document`, surfacing through `ParseWarningBanner`. It exists because the
+    extractor computed `convertedPages`, `pageCount` and `isComplete` and
+    passed all three to the logger and nowhere else, so a ten-of-fourteen-page
+    extraction reached the transparency analyzer and the reader exactly as a
+    whole article did — #181 again, on a new channel. A scan reports `0` of
+    its page count *with no text*: that combination is deliberate, because a
+    scan renders as an ordinary document and is otherwise indistinguishable
+    from one that analysed cleanly.
+  - **A PDF tier's outcome has four states, not two.** `notAttempted`,
+    `downloadFailed`, `noText` and `extracted`. The first two used to share
+    `(nil, nil)`, so the tier decided whether to continue by asking whether an
+    abstract happened to be in hand — and a Europe PMC render URL that 404s
+    ended the chain with that dead link as the article's full text, never
+    reaching Unpaywall. A failed download now falls through and the URL is
+    held in reserve, returned only if nothing better arrives.
+  - **The PDF cache is keyed on the article *and* the source URL.** One
+    article can be offered more than one PDF, and they are different files;
+    keyed on the identifier alone the first tier to download won the entry and
+    later tiers were served its bytes under the wrong provenance. Entries
+    written before this never match and are re-downloaded once.
+  - **`fullTextPDFPath` holds a path or a URL string, and only the writer
+    knows which.** Every read that guesses is wrong for one of the two. Ask
+    `Document.localPDFFilePath` for the file-only actions, and route writes
+    through `applyFullTextResult` — assigning the column directly cannot set
+    the companion flag, because `storePDFPath` is private, and that is exactly
+    how the upload path came to store a filesystem path labelled as a remote
+    link.
   - **The PDF fixtures are not byte-reproducible.**
     `Packages/BioMedLit/Scripts/make_pdf_fixtures.swift` embeds a
     run-varying `/ID` and fresh encryption key material on every run, so
-    re-running it shows a spurious diff on all four fixture files even
+    re-running it shows a spurious diff on all five fixture files even
     though nothing semantic changed and the regenerated set passes the
     same tests. Noted in the script's own header comment too.
+  - **Known gaps, tracked rather than fixed here.** #199 (the transparency
+    extractors over-capture on PDF text, because extracted prose has no blank
+    lines and their patterns end a section at one), #200 (`isComplete` is
+    satisfied by one character per page, so a stamped scan reports as whole —
+    shared with bmlib, needs one decision for both), #201 (concurrent fetches
+    for one PDF both download), #202 (articles with no PMID get no extraction
+    at all), #203 (transparency analysis records absence as fact when the
+    extraction was partial). bmlib #224 is the parity half of the same area:
+    its parser drops unsectioned back-matter prose, where funding and COI
+    statements live.
 
 - **Four CodeQL alerts, and what fixing them turned up** (PR #195 on
   `fix/codeql-secret-exposure-and-url-matching`). CodeQL now reports
