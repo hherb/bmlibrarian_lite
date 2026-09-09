@@ -449,7 +449,10 @@ corrects a claim the previous version of this row made: the missing text was
 said to cost "scoring, citation extraction and transparency analysis", which
 is wrong about the first two — neither `ParallelScoringService` nor
 `ParallelCitationService` reads `fullTextContent`; both work from abstracts.
-The cost lands on transparency analysis and report generation only.
+The cost lands on transparency analysis alone — a second correction, from
+the final review: nothing passes `fullTextContent` to report generation
+either. Its only consumers are the three `analyze` call sites and macOS's
+"Copy Text" item; report generation works from the citations.
 
 **`contentKind` now exists, and it closed a gap this table never named.**
 `FullTextContentKind` carries bmlib's four raw values verbatim — `fulltext`,
@@ -557,8 +560,8 @@ Roughly by (impact × confidence) ÷ effort. Items 1–4 are **done** — see
 3. ~~**1.2 + 1.3 JATS caption routing and unsectioned body**~~ — done.
 4. ~~**PDF → text via PDFKit**~~ — done. `FullTextService`'s PDF tiers now
    download, cache and extract inside the tier itself, so the recovered prose
-   reaches transparency analysis and report generation (not scoring or
-   citation extraction — neither reads full text). See §3 for what landed
+   reaches transparency analysis (not report generation, and not scoring or
+   citation extraction — none of the three reads full text). See §3 for what landed
    with it: `content_kind`, cache-read validation and the abstract-holdback
    rule. Items 5–7 below are unchanged.
 5. **2.5 trial ids from full text** with the cue window, and **2.4** the

@@ -19,10 +19,18 @@ reads text.
   `.unpaywall` carry a `URL` and nothing else. `Document.applyFullTextResult`
   sets `fullTextContent = nil` for that case.
 - **`document.fullTextContent` is the only feed into analysis.**
-  `FactCheckWorkflow.swift:1942` passes it to
-  `TransparencyAnalysisService.analyze`, and `ReportView`/`MacReportView` pass it
-  to report generation. So a PDF-sourced article is analysed as though it had no
+  `FactCheckWorkflow.swift:1942`, `ReportView.swift` and `MacReportView.swift`
+  each pass it to `TransparencyAnalysisService.analyze` — all three call sites
+  are transparency analysis; nothing passes it to report generation, which works
+  from the citations. So a PDF-sourced article is analysed as though it had no
   full text at all.
+
+  > **Correction (final review).** An earlier draft of this bullet, and of the
+  > §3 correction below, said `ReportView`/`MacReportView` passed it to *report
+  > generation*. They do not, and no code path does: `fullTextContent` reaches
+  > exactly three consumers, all three of them `analyze`, plus macOS's "Copy
+  > Text" menu item. Named here because the payoff this slice is justified by
+  > has to be stated accurately.
 - **iOS never downloads the PDF.** `FullTextService.downloadAndCachePDF` has one
   call site, `MacScoredDocumentsView.swift:669`. On iOS the remote URL string is
   written into `fullTextPDFPath`, a field `MacFullTextViewer` reads as a file
@@ -51,9 +59,9 @@ the read side, which validates nothing: `cachedPDFPath(for:)` checks only
 **Scoring and citation extraction do not read full text.** §3 says the missing
 PDF text costs "scoring, citation extraction and transparency analysis". Neither
 `ParallelScoringService` nor `ParallelCitationService` reads `fullTextContent`;
-they work from abstracts. The cost is real but lands on transparency analysis and
-report generation only. Stating it accurately matters because it is the payoff
-this slice is justified by.
+they work from abstracts. The cost is real but lands on transparency analysis
+alone — not on report generation either, as this spec first said. Stating it
+accurately matters because it is the payoff this slice is justified by.
 
 ### A gap the list does not name
 
@@ -129,8 +137,12 @@ on top of it.
 count. Three rules port with it.
 
 - **A PDF that needs a password is a failed result, not an empty successful one.**
-  bmlib states this explicitly. PDFKit reports it as `isEncrypted`/`isLocked`.
-  The distinction is what stops a locked file being logged as a scan.
+  bmlib states this explicitly. The distinction is what stops a locked file being
+  logged as a scan. PDFKit reports it as `isLocked` — and *only* `isLocked`, as
+  the final review had to correct: bmlib names rejecting on `is_encrypted` as the
+  wrong rule, because an owner password restricts permissions without blocking
+  reads, so an encrypted-but-readable article would be thrown away. The suite
+  carries an owner-password negative control for exactly that.
 - **A page yielding no text counts as unconverted** and records a warning naming
   the page, so `convertedPages < pageCount` is what a partial extraction looks
   like.
@@ -249,9 +261,18 @@ written before this change needs.
 That also exposes a second thing the same branch gets away with today.
 `URL(string: path)` works there only because the stored value is a remote URL
 string; a real filesystem path produces a schemeless URL. Storing the cached path
-means that branch needs `URL(fileURLWithPath:)`. `MacFullTextViewer` is
-unaffected, since its documentation records that it selects its view from the
-stored fields directly and hands `MacPDFView` a path rather than a URL.
+means that branch needs `URL(fileURLWithPath:)`.
+
+> **Correction (Task 8).** This paragraph originally ended "`MacFullTextViewer`
+> is unaffected, since its documentation records that it selects its view from
+> the stored fields directly and hands `MacPDFView` a path rather than a URL."
+> That reasoning was wrong. Reading a *path* rather than a URL is why it needs
+> no `URL` change, and says nothing about its branch **order**, which had the
+> identical defect: it re-implemented the same field-population chain, so an
+> extracted PDF would have opened as plain prose and never reached
+> `MacPDFView`. The fix gave both surfaces one shared decision,
+> `Document.displayedFullText`, rather than two parallel chains — the shape
+> #186 had already had to correct across four surfaces.
 
 ### 7. Stored transparency scores
 
@@ -285,8 +306,17 @@ and a warning; the mixed one `convertedPages < pageCount` with `isComplete` fals
 as the seam without which the PDF branch has no offline coverage at all. Covered:
 an abstract-only parse is held back rather than returned; a PDF that yields text
 beats the held abstract; a PDF that yields nothing falls back to the held abstract
-with the link attached; the extraction flag off returns the link alone; and each
-of the four new initializer assertions.
+with the link attached; and the extraction flag off returns the link alone.
+
+The four new initializer assertions are **not** each given a test, and this spec
+should not have promised it: a Swift `assert` traps the process, and XCTest
+cannot observe a trap without a crash harness this repo does not have. What is
+verified instead is that every combination the chain actually emits *satisfies*
+them — each service test above asserts the emitted `contentKind`,
+`extractedText` and `localPDFPath` together, so a tier that violated an
+invariant would trap the debug test run rather than pass quietly. The asserts
+document and enforce the invariants at their write sites; the tests pin what is
+written.
 
 **Cache.** A corrupt entry is renamed and the read returns nil; a valid file is
 returned untouched; a rename that fails is logged and still returns nil.
