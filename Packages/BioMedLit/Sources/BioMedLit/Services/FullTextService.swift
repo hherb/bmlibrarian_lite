@@ -964,14 +964,59 @@ public actor FullTextService {
         return cacheDir
     }
 
-    /// Check if a cached PDF exists for a document.
+    /// The cached PDF for a document, or `nil` when there is none usable.
+    ///
+    /// Validated rather than merely existence-checked. `downloadAndCachePDF`
+    /// verifies the magic bytes on the way in; this did not check them on the
+    /// way out, so a caller would have been handed the path to an entry
+    /// corrupted by anything outside this service — an interrupted restore, a
+    /// sync eviction, a file written by an older build — and would have kept
+    /// treating it as the article's full text indefinitely, since nothing
+    /// downstream re-validates a path it already has.
+    ///
+    /// A failing entry is renamed rather than deleted, so it can be inspected,
+    /// and the method answers `nil` so the next fetch re-downloads. Leaving it
+    /// in place would be the worse failure: it would hide a freshly cached PDF
+    /// behind it, so the article would re-download on every call for good.
+    /// bmlib's issue #71 reaches the same conclusion for the equivalent Python
+    /// path.
+    ///
+    /// Best-effort: a rename that itself fails is logged and the read still
+    /// answers `nil`, because turning a recoverable miss into a thrown error
+    /// helps nobody.
     ///
     /// - Parameter pmid: PubMed ID to check.
-    /// - Returns: Path to cached PDF if it exists, nil otherwise.
+    /// - Returns: The cached file's path, or `nil` if there is none or it was
+    ///   unusable.
     public static func cachedPDFPath(for pmid: String) -> String? {
-        let fileURL = pdfCacheDirectory.appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            return fileURL.path
+        let fileURL = pdfCacheDirectory
+            .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+
+        let magic = Data(BioMedLitConstants.pdfMagicBytes)
+        let handle = try? FileHandle(forReadingFrom: fileURL)
+        defer { try? handle?.close() }
+        let head = (try? handle?.read(upToCount: magic.count)) ?? nil
+
+        if let head, head == magic { return fileURL.path }
+
+        BioMedLitLib.logger?.warning(
+            "Cached PDF for PMID \(pmid) is not a PDF; quarantining it so the next "
+                + "fetch re-downloads instead of serving it forever",
+            category: .fullText
+        )
+        let aside = fileURL.appendingPathExtension("corrupt")
+        do {
+            if FileManager.default.fileExists(atPath: aside.path) {
+                try FileManager.default.removeItem(at: aside)
+            }
+            try FileManager.default.moveItem(at: fileURL, to: aside)
+        } catch {
+            BioMedLitLib.logger?.error(
+                "Could not quarantine the corrupt cached PDF for PMID \(pmid): "
+                    + "\(error.localizedDescription)",
+                category: .fullText
+            )
         }
         return nil
     }
