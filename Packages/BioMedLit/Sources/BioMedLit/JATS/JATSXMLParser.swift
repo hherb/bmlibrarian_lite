@@ -264,6 +264,11 @@ public final class JATSXMLParser: NSObject {
     private var inBack = false
     private var sectionStack: [SectionBuilder] = []
 
+    /// Prose found inside `<body>`. Counted separately from `bodySections`
+    /// because back-matter sections land there too, so a non-empty
+    /// `bodySections` does not by itself mean the article has a body.
+    private var bodyParagraphCount = 0
+
     /// Pending prose from an unsectioned `<body>`.
     ///
     /// `<sec>` is optional in JATS: a `<body>` may hold `<p>` directly. Without
@@ -721,6 +726,26 @@ public final class JATSXMLParser: NSObject {
             openSections: sectionStack.count,
             depthUnderflows: depthUnderflows
         )
+    }
+
+    /// Whether the parse found any article body.
+    ///
+    /// Read after parsing, the way ``parseWarnings`` is, so neither
+    /// ``parseToHTML()`` nor ``parseToMarkdown()`` changes signature for it.
+    ///
+    /// This is not the same question as ``producedContent``, and the difference
+    /// is the whole point: a body-less deposit has a title and an abstract, so
+    /// it *produced content*, rendered successfully, and was returned as an
+    /// article. Europe PMC serves those for records deposited abstract-only, and
+    /// until this existed nothing downstream could tell one from a real article.
+    ///
+    /// Keyed on paragraph count rather than `bodySections` presence, because
+    /// back-matter sections land in `bodySections` alongside true body sections,
+    /// so an abstract-only deposit with acknowledgements would be misclassified.
+    /// Also detects bodies holding only unsectioned prose and rejects both empty
+    /// `<body>` tags and bodies with only exhibits (figures/tables).
+    public var producedBody: Bool {
+        bodyParagraphCount > 0
     }
 
     /// Whether the parse produced anything at all.
@@ -2125,6 +2150,9 @@ extension JATSXMLParser: XMLParserDelegate {
                 }
             } else if (inBody || inBack), !sectionStack.isEmpty {
                 // Capture paragraphs in both body and back matter sections
+                if inBody, !normalizedText.isEmpty {
+                    bodyParagraphCount += 1
+                }
                 sectionStack[sectionStack.count - 1].paragraphs.append(normalizedText)
             } else if inBody || inBack, !normalizedText.isEmpty {
                 // An unsectioned <body> or <back> child. <sec> is optional in both,
@@ -2136,6 +2164,9 @@ extension JATSXMLParser: XMLParserDelegate {
                 // section-less.
                 if implicitBodySection == nil {
                     implicitBodySection = SectionBuilder()
+                }
+                if inBody {
+                    bodyParagraphCount += 1
                 }
                 implicitBodySection?.paragraphs.append(normalizedText)
             }
