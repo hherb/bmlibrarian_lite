@@ -272,7 +272,7 @@ public actor FullTextService {
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
-            let (localPath, text) = await downloadAndExtract(from: pdfURL, pmid: pmid)
+            let (localPath, text) = try await downloadAndExtract(from: pdfURL, pmid: pmid)
             // A PDF tier counts as a success as soon as it has a URL, so a
             // download or extraction that gave nothing would otherwise discard
             // an abstract already in hand and leave the reader a bare link.
@@ -301,7 +301,7 @@ public actor FullTextService {
                     "Successfully found Unpaywall PDF for DOI \(doi)",
                     category: .fullText
                 )
-                let (localPath, text) = await downloadAndExtract(from: pdfURL, pmid: pmid)
+                let (localPath, text) = try await downloadAndExtract(from: pdfURL, pmid: pmid)
                 if text == nil, abstractOnly != nil {
                     BioMedLitLib.logger?.info(
                         "The Unpaywall PDF yielded no text for PMID \(pmid); keeping the abstract",
@@ -850,10 +850,17 @@ public actor FullTextService {
 
     /// Download a PDF tier's file, cache it, and recover its text.
     ///
-    /// Best-effort throughout, and deliberately non-throwing: every failure here
-    /// still leaves the reader the URL, which is exactly what this tier returned
-    /// before extraction existed. Throwing would turn a tier that succeeded into
-    /// a fall-through to the publisher link.
+    /// An ordinary failure — a 404, a server error, a file PDFKit cannot open —
+    /// returns empty-handed and leaves the reader the URL, which is exactly what
+    /// this tier returned before extraction existed. Throwing on those would turn
+    /// a tier that succeeded into a fall-through to the publisher link.
+    ///
+    /// Cancellation is the one thing this does not swallow: it propagates as
+    /// `CancellationError`, matching every other guard in this file. A cancelled
+    /// download is not a dead source, and letting it fall through here would
+    /// return a normal, non-throwing result for a fetch the caller walked away
+    /// from — caching a bare link as this article's full text, the outcome
+    /// `fetchFullText`'s own doc comment promises cannot happen.
     ///
     /// Every empty outcome is logged at warning level, as bmlib does, because a
     /// scan that yields nothing is invisible otherwise and a partial extraction
@@ -864,17 +871,19 @@ public actor FullTextService {
     ///   - pmid: PubMed ID, used to name the cached file.
     /// - Returns: The cached path and the recovered text. Both `nil` when the
     ///   flag is off; the text alone `nil` when nothing was recovered.
+    /// - Throws: `CancellationError` if the caller cancelled.
     private func downloadAndExtract(
         from url: URL,
         pmid: String
-    ) async -> (localPath: String?, text: String?) {
+    ) async throws -> (localPath: String?, text: String?) {
         guard extractPDFText else { return (nil, nil) }
 
         let path: String
         do {
             path = try await downloadAndCachePDF(from: url, for: pmid)
         } catch where error.isCancellation {
-            return (nil, nil)
+            // As above: a cancelled download must not be read as an absent PDF.
+            throw CancellationError()
         } catch {
             BioMedLitLib.logger?.warning(
                 "Could not download the PDF for PMID \(pmid) from \(url.absoluteString): "

@@ -37,6 +37,21 @@ final class FullTextServiceExtractionTests: XCTestCase {
 
     private static let pdfBytes = Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34])
 
+    /// A Europe PMC search result that names both a PMC ID and a free PDF render
+    /// URL, so identifier resolution (which only `pmcId: nil` triggers) yields
+    /// the `pdfRenderURL` the Europe PMC PDF branch needs — the only route to
+    /// that branch, since a caller cannot pass `pdfRenderURL` directly.
+    private static let searchResponseWithPDFRender = #"""
+    {"resultList": {"result": [{
+      "id": "1", "pmid": "42", "pmcid": "PMC1", "inPMC": "Y",
+      "fullTextUrlList": {"fullTextUrl": [
+        {"documentStyle": "pdf", "site": "Europe_PMC",
+         "url": "https://europepmc.org/articles/PMC1/pdf",
+         "availability": "Open access", "availabilityCode": "OA"}
+      ]}
+    }]}}
+    """#
+
     private func makeService(
         extractor: PDFTextExtracting,
         extractPDFText: Bool = true
@@ -102,6 +117,10 @@ final class FullTextServiceExtractionTests: XCTestCase {
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.contentKind, FullTextContentKind.none)
         XCTAssertNil(result.extractedText)
+        XCTAssertNotNil(
+            result.localPDFPath,
+            "the file downloaded and cached fine; only extraction came up empty"
+        )
     }
 
     /// And when an abstract was held back, it is better than nothing — bmlib's
@@ -157,5 +176,80 @@ final class FullTextServiceExtractionTests: XCTestCase {
         XCTAssertNil(result.extractedText)
         XCTAssertNil(result.localPDFPath)
         XCTAssertNotNil(result.pdfURL, "the reader can still open it")
+    }
+
+    /// The Europe PMC PDF tier's own fall-through, not the Unpaywall tier's.
+    ///
+    /// Every test above reaches a PDF tier through Unpaywall, so the Europe PMC
+    /// PDF branch's `if text == nil, abstractOnly != nil` fall-through — the
+    /// branch that used to `return` unconditionally, the load-bearing defect
+    /// Task 4's review flagged — was only verified by reading. `pmcId: nil` with
+    /// no explicit PMC ID forces identifier resolution, which is the only way to
+    /// populate `pdfRenderURL` and so the only way a test reaches this branch.
+    func testAnEuropePMCPDFThatYieldsNothingFallsBackToTheHeldAbstract() async throws {
+        // A pmid this file's other tests do not use, and cleaned up on both ends,
+        // so a stale cache file from a previous run cannot make the download
+        // assertion below pass for the wrong reason.
+        let pmid = "42"
+        let cachedFile = FullTextService.pdfCacheDirectory.appendingPathComponent("\(pmid).pdf")
+        try? FileManager.default.removeItem(at: cachedFile)
+        defer { try? FileManager.default.removeItem(at: cachedFile) }
+
+        StubURLProtocol.routes = [
+            "search": (200, Data(Self.searchResponseWithPDFRender.utf8)),
+            "fullTextXML": (200, Self.bodyless),
+            "articles/PMC1/pdf": (200, Self.pdfBytes),
+        ]
+        let extractor = StubExtractor(result: PDFExtractionResult(
+            text: "", success: true, pageCount: 2, convertedPages: 0,
+            warnings: ["page 1 yielded no text", "page 2 yielded no text"]
+        ))
+        // No DOI, so a bug that skipped the Europe PMC PDF branch entirely could
+        // not be masked by falling through to an Unpaywall tier instead.
+        let result = try await makeService(extractor: extractor)
+            .fetchFullText(pmcId: nil, doi: nil, pmid: pmid)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: cachedFile.path),
+            "the Europe PMC PDF must actually have been downloaded (and so extracted) "
+                + "for this to test the tier's fall-through rather than a branch that "
+                + "pdfRenderURL resolution failed to reach"
+        )
+        XCTAssertEqual(
+            result.contentKind, .abstract,
+            "a no-text extraction from this tier must not beat the held abstract"
+        )
+        XCTAssertNotNil(result.markdown)
+    }
+
+    /// The critical case: a cancellation during the PDF *binary* download must
+    /// propagate like every other cancellation in this file, not be swallowed
+    /// the way an ordinary download failure is. Collapsing the two would let a
+    /// cancelled fetch return a normal, non-throwing link-only result — which a
+    /// caller then caches as this article's full text for a fetch it never
+    /// actually completed.
+    ///
+    /// `StubURLProtocol.failures` isolates the one call this guards: the
+    /// Unpaywall JSON answers normally, so only `downloadAndCachePDF`'s
+    /// `session.data(from:)` for the PDF binary itself is cancelled.
+    func testACancelledPDFDownloadDoesNotFallThrough() async {
+        StubURLProtocol.routes = [
+            "unpaywall": (200, Data(#"{"best_oa_location":{"url_for_pdf":"https://example.org/a.pdf"}}"#.utf8)),
+        ]
+        StubURLProtocol.failures = ["a.pdf": URLError(.cancelled)]
+        let extractor = StubExtractor(result: PDFExtractionResult(
+            text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1, warnings: []
+        ))
+
+        do {
+            _ = try await makeService(extractor: extractor)
+                .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: "1")
+            XCTFail("a cancelled PDF download returned a fallback instead of propagating")
+        } catch {
+            XCTAssertTrue(
+                error is CancellationError,
+                "expected cancellation to propagate, got \(error)"
+            )
+        }
     }
 }
