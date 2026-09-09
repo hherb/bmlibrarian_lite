@@ -185,8 +185,32 @@ final class Document {
     /// the reasoning `fullTextDegradedReasonRaw` was added with.
     var fullTextContentKindRaw: String?
 
-    /// URL to the locally cached PDF file, if available.
+    /// Where this document's PDF is — either a filesystem path or, when nothing
+    /// was downloaded, the remote URL string it was offered at.
+    ///
+    /// The field has always carried both, which is why
+    /// ``fullTextPDFPathIsLocalFile`` exists beside it: the two are read with
+    /// different `URL` constructors and only the writer knows which was stored.
     var fullTextPDFPath: String?
+
+    /// Whether ``fullTextPDFPath`` holds a filesystem path rather than a remote
+    /// URL string.
+    ///
+    /// Recorded rather than inferred. The kind alone cannot answer it: a PDF
+    /// that downloaded and cached fine but yielded no text — a scan — is stored
+    /// under ``FullTextContentKind/none`` with a real file on disk, and reading
+    /// "is this a file?" off `contentKind == .extracted` sent exactly that
+    /// record down the remote-URL branch, where `URL(string:)` turned an
+    /// absolute path into a schemeless URL and the rebuilt result reported
+    /// `localPDFPath: nil` for a file that was demonstrably there. Guessing from
+    /// the string's shape would be the same mistake with more steps; the writer
+    /// knows, so the writer says.
+    ///
+    /// `nil` means "written before this field existed", and such a record keeps
+    /// today's behaviour exactly: it is read as a remote URL string, which is
+    /// what `URL(string:)` was always applied to. Same reasoning, and the same
+    /// lightweight SwiftData migration, as ``fullTextContentKindRaw`` above.
+    var fullTextPDFPathIsLocalFile: Bool?
 
     /// Source of the full text (for display and debugging).
     /// Values: "europepmc", "unpaywall", "doi"
@@ -523,19 +547,24 @@ final class Document {
         case .markdown(let content):
             fullTextContent = content
             fullTextHTML = nil
-            fullTextPDFPath = nil
+            storePDFPath(nil, isLocalFile: false)
         case .html(let htmlContent, let markdownContent):
             fullTextHTML = htmlContent
             fullTextContent = markdownContent
-            fullTextPDFPath = nil
+            storePDFPath(nil, isLocalFile: false)
         case .pdfURL(let url):
             // The cached file when there is one, so the viewer opens a real
             // path. Before extraction existed this held the *remote URL*, which
             // read as "retrieved" and was handed to `URL(string:)` by every
             // consumer that thought it had a file. The remote URL falls back
             // only when nothing was downloaded, which is what the extraction
-            // flag being off looks like.
-            fullTextPDFPath = result.localPDFPath ?? url.absoluteString
+            // flag being off looks like — and which of the two was stored is
+            // recorded rather than left to be inferred later.
+            if let localPath = result.localPDFPath {
+                storePDFPath(localPath, isLocalFile: true)
+            } else {
+                storePDFPath(url.absoluteString, isLocalFile: false)
+            }
             // Prose recovered from the PDF, which is what transparency analysis
             // and report generation read. `nil` for a scan or a failed
             // extraction, exactly as before.
@@ -545,8 +574,23 @@ final class Document {
             // Web URLs don't store content locally
             fullTextContent = nil
             fullTextHTML = nil
-            fullTextPDFPath = nil
+            storePDFPath(nil, isLocalFile: false)
         }
+    }
+
+    /// Store a PDF path together with what kind of path it is.
+    ///
+    /// One writer for the pair, so the flag cannot be left describing a path
+    /// that has since been replaced — the drift that a second, independent
+    /// assignment invites.
+    ///
+    /// - Parameters:
+    ///   - path: The filesystem path or remote URL string, or `nil` to clear.
+    ///   - isLocalFile: Whether `path` is a file on disk. Ignored when `path`
+    ///     is `nil`, which clears the flag too.
+    private func storePDFPath(_ path: String?, isLocalFile: Bool) {
+        fullTextPDFPath = path
+        fullTextPDFPathIsLocalFile = path == nil ? nil : isLocalFile
     }
 
     /// Mark the document as having no full text available.
@@ -556,6 +600,7 @@ final class Document {
         fullTextContent = nil
         fullTextHTML = nil
         fullTextPDFPath = nil
+        fullTextPDFPathIsLocalFile = nil
         fullTextSource = nil
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
@@ -567,6 +612,7 @@ final class Document {
         fullTextContent = nil
         fullTextHTML = nil
         fullTextPDFPath = nil
+        fullTextPDFPathIsLocalFile = nil
         fullTextSource = nil
         fullTextFetchedAt = nil
         fullTextUnavailable = false
@@ -603,16 +649,28 @@ final class Document {
     /// back the same text as prose.
     var displayedFullText: DisplayedFullText {
         if storedContentKind == .extracted, let path = fullTextPDFPath {
-            return .extractedPDF(path: path)
+            return storedPDF(at: path)
         } else if let html = fullTextHTML {
             return .html(html, markdown: fullTextContent ?? "")
         } else if let markdown = fullTextContent {
             return .markdown(markdown)
         } else if let path = fullTextPDFPath {
-            return .cachedPDF(path: path)
+            return storedPDF(at: path)
         } else {
             return .none
         }
+    }
+
+    /// Which kind of PDF reference ``fullTextPDFPath`` is holding.
+    ///
+    /// Read off ``fullTextPDFPathIsLocalFile`` rather than off the content
+    /// kind or the shape of the string. A record predating that flag answers
+    /// `false`, which is what `URL(string:)` was always applied to and so
+    /// leaves those records behaving exactly as they did.
+    private func storedPDF(at path: String) -> DisplayedFullText {
+        fullTextPDFPathIsLocalFile == true
+            ? .localPDF(path: path)
+            : .remotePDFLink(urlString: path)
     }
 
     /// The cached full text, rebuilt as a result the viewers can render.
@@ -640,14 +698,11 @@ final class Document {
             content = .html(content: html, markdown: markdown)
         case .markdown(let markdown):
             content = .markdown(markdown)
-        case .extractedPDF(let path):
-            // A genuine local file: extraction only ever runs on a PDF
-            // already downloaded.
+        case .localPDF(let path):
             content = .pdfURL(URL(fileURLWithPath: path))
-        case .cachedPDF(let path):
-            // The legacy case: a record's stored value here is a remote URL
-            // string, not a filesystem path.
-            guard let url = URL(string: path) else { return nil }
+        case .remotePDFLink(let urlString):
+            // Nothing was downloaded, so the stored value is the link itself.
+            guard let url = URL(string: urlString) else { return nil }
             content = .pdfURL(url)
         case .none:
             return nil
@@ -659,7 +714,11 @@ final class Document {
             degradation: storedDegradation,
             contentKind: storedContentKind ?? .none,
             extractedText: storedContentKind == .extracted ? fullTextContent : nil,
-            localPDFPath: storedContentKind == .extracted ? fullTextPDFPath : nil
+            // Every stored path that is a file, not only the ones extraction
+            // got text out of. A scan downloads and caches like any other PDF,
+            // and reporting `nil` for it told the viewer there was no file to
+            // open when there plainly was one.
+            localPDFPath: fullTextPDFPathIsLocalFile == true ? fullTextPDFPath : nil
         )
     }
 
@@ -914,15 +973,17 @@ final class Document {
 
 /// What ``Document/displayedFullText`` resolved to.
 ///
-/// Two PDF cases rather than one, because they need different `URL`
-/// constructors downstream and telling them apart *after* the fact would
-/// reintroduce the branch this type exists to hold exactly once:
-/// ``extractedPDF(path:)`` is always a genuine local file — extraction only
-/// ever runs on a PDF already downloaded — while ``cachedPDF(path:)`` may
-/// still be the remote URL string a pre-extraction record, or an upload, was
-/// left holding. Both render identically; only `Document.cachedFullTextResult`
-/// needs to know which is which, and it reads that off the case rather than
-/// re-deriving it.
+/// Two PDF cases rather than one, and the axis they split on is *where the
+/// PDF is*, not how it was classified. They need different `URL` constructors
+/// downstream, and a consumer that had to work out which from the string, or
+/// from the content kind, would be guessing — which is exactly what went
+/// wrong: keying "is this a real file?" on ``FullTextContentKind/extracted``
+/// sent a downloaded-but-unextractable PDF (a scan: file on disk, kind
+/// ``FullTextContentKind/none``) down the remote-URL branch, where
+/// `URL(string:)` produced a schemeless URL the viewer could not open and the
+/// rebuilt result claimed no local file existed. Both cases render
+/// identically; the distinction is carried once, here, so nobody re-derives
+/// it.
 enum DisplayedFullText: Equatable {
     /// Rendered with `HTMLContentView` for its table support. `markdown`
     /// rides along as the plain-text form the same article was also stored
@@ -932,13 +993,15 @@ enum DisplayedFullText: Equatable {
     /// Rendered with `MacMarkdownView` / `FullTextViewer`'s markdown branch.
     case markdown(String)
 
-    /// A PDF recovered from extraction. `path` is a real file on disk.
-    case extractedPDF(path: String)
+    /// A PDF on this device: `path` is a real filesystem path, whether or not
+    /// any text was recovered from it. Read with `URL(fileURLWithPath:)`.
+    case localPDF(path: String)
 
-    /// A PDF from before extraction existed, or from a source that never
-    /// extracts. `path` may be a real file, once `downloadAndCachePDF` has
-    /// overwritten it, or still the remote URL string it started as.
-    case cachedPDF(path: String)
+    /// A PDF that was never downloaded — nothing was stored but the link it
+    /// was offered at, which is what a record written before extraction
+    /// existed, or one written with extraction turned off, is left holding.
+    /// Read with `URL(string:)`.
+    case remotePDFLink(urlString: String)
 
     /// Nothing cached to show.
     case none

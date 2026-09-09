@@ -201,7 +201,12 @@ struct MacFullTextViewer: View {
             HTMLContentView(htmlContent: htmlContent, searchText: searchText)
         case .markdown(let markdownContent):
             MacMarkdownView(content: markdownContent, searchText: searchText)
-        case .extractedPDF(let path), .cachedPDF(let path):
+        case .localPDF(let path), .remotePDFLink(let path):
+            // Both hand `MacPDFView` the stored string, as they always have.
+            // For a record that never downloaded, that string is a remote URL
+            // and this view has never been able to open it — pre-existing, and
+            // out of this fix's scope; naming the two cases apart at least
+            // makes it visible rather than hidden behind one `path`.
             MacPDFView(filePath: path)
         case .none:
             if isLoadingPDF {
@@ -225,7 +230,7 @@ struct MacFullTextViewer: View {
         switch document.displayedFullText {
         case .html, .markdown:
             return true
-        case .extractedPDF, .cachedPDF, .none:
+        case .localPDF, .remotePDFLink, .none:
             return false
         }
     }

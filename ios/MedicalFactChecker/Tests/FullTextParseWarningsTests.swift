@@ -669,18 +669,102 @@ final class FullTextParseWarningsTests: XCTestCase {
             extractedText: "Recovered prose.",
             localPDFPath: "/tmp/a.pdf"
         ))
-        XCTAssertEqual(document.displayedFullText, .extractedPDF(path: "/tmp/a.pdf"))
+        XCTAssertEqual(document.displayedFullText, .localPDF(path: "/tmp/a.pdf"))
     }
 
-    /// The negative control: a PDF that was never extracted keeps the
-    /// pre-extraction field-population order, and is tagged as the legacy
-    /// case so `cachedFullTextResult` knows to parse it with `URL(string:)`
-    /// rather than `URL(fileURLWithPath:)`.
-    func testDisplayedFullTextFallsBackToCachedPDFWithoutExtraction() {
+    /// The negative control: a PDF that was never downloaded keeps the
+    /// pre-extraction field-population order, and is tagged as the remote case
+    /// so `cachedFullTextResult` knows to parse it with `URL(string:)` rather
+    /// than `URL(fileURLWithPath:)`.
+    func testDisplayedFullTextFallsBackToARemoteLinkWithoutADownload() {
         let document = makeDocument()
         document.applyFullTextResult(
             AppFullTextResult(content: .pdfURL(URL(string: "https://example.org/a.pdf")!), source: .unpaywall)
         )
-        XCTAssertEqual(document.displayedFullText, .cachedPDF(path: "https://example.org/a.pdf"))
+        XCTAssertEqual(
+            document.displayedFullText,
+            .remotePDFLink(urlString: "https://example.org/a.pdf")
+        )
+    }
+
+    // MARK: - A downloaded PDF that yielded no text (final review #2)
+
+    /// A scan: it downloaded and cached like any other PDF, but extraction got
+    /// nothing out of it, so its kind is `.none`. Keying "is this a real file?"
+    /// on `.extracted` routed it down the remote-URL branch, where
+    /// `URL(string:)` turns an absolute path into a schemeless URL the viewer
+    /// cannot open.
+    func testADownloadedPDFThatYieldedNoTextIsStillKnownToBeALocalFile() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/scan.pdf")!),
+            source: .unpaywall,
+            contentKind: FullTextContentKind.none,
+            extractedText: nil,
+            localPDFPath: "/tmp/scan.pdf"
+        ))
+
+        XCTAssertEqual(document.displayedFullText, .localPDF(path: "/tmp/scan.pdf"))
+        XCTAssertEqual(document.fullTextPDFPathIsLocalFile, true)
+    }
+
+    /// And the result rebuilt from it must say the file exists and hand the
+    /// viewer a URL it can actually open — the two halves the old routing got
+    /// wrong at once.
+    func testARebuiltScanResultCarriesAFileURLAndItsLocalPath() throws {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/scan.pdf")!),
+            source: .unpaywall,
+            contentKind: FullTextContentKind.none,
+            extractedText: nil,
+            localPDFPath: "/tmp/scan.pdf"
+        ))
+
+        let rebuilt = try XCTUnwrap(document.cachedFullTextResult)
+        XCTAssertEqual(rebuilt.localPDFPath, "/tmp/scan.pdf")
+        guard case .pdfURL(let url) = rebuilt.content else {
+            return XCTFail("expected a PDF result, got \(rebuilt.content)")
+        }
+        XCTAssertTrue(url.isFileURL, "a stored file path must rebuild as a file URL")
+        XCTAssertEqual(url.path, "/tmp/scan.pdf")
+    }
+
+    /// An extracted PDF reports its local path too, and still carries the prose
+    /// separately for the analyzer.
+    func testARebuiltExtractedResultCarriesBothTheFileAndTheProse() throws {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+
+        let rebuilt = try XCTUnwrap(document.cachedFullTextResult)
+        XCTAssertEqual(rebuilt.localPDFPath, "/tmp/a.pdf")
+        XCTAssertEqual(rebuilt.extractedText, "Recovered prose.")
+    }
+
+    /// Legacy records: written before either field existed, their stored value
+    /// really is a remote URL string, and they must keep behaving exactly as
+    /// they did.
+    func testALegacyRecordWithNoProvenanceIsReadAsARemoteLink() throws {
+        let document = makeDocument()
+        document.fullTextPDFPath = "https://example.org/legacy.pdf"
+        document.fullTextPDFPathIsLocalFile = nil
+        document.fullTextContentKindRaw = nil
+
+        XCTAssertEqual(
+            document.displayedFullText,
+            .remotePDFLink(urlString: "https://example.org/legacy.pdf")
+        )
+        let rebuilt = try XCTUnwrap(document.cachedFullTextResult)
+        XCTAssertNil(rebuilt.localPDFPath)
+        guard case .pdfURL(let url) = rebuilt.content else {
+            return XCTFail("expected a PDF result, got \(rebuilt.content)")
+        }
+        XCTAssertEqual(url.absoluteString, "https://example.org/legacy.pdf")
     }
 }
