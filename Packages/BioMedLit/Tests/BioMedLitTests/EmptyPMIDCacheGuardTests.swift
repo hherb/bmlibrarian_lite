@@ -24,18 +24,26 @@ import XCTest
 /// `pmcId` as an ordinary Europe PMC condition, not a bug. Before
 /// `downloadAndCachePDF` consulted the cache, every call re-downloaded, so
 /// extraction always read back the bytes it had just written and the shared
-/// filename never mattered. Once a cache hit could short-circuit the download,
-/// that self-healed on every call, and a second empty-PMID article would
-/// deterministically read back the first one's cached text.
+/// filename never mattered — the collision self-healed. Once a cache hit could
+/// short-circuit the download that stopped being true, and a second empty-PMID
+/// article would deterministically read back the first one's cached text.
 final class EmptyPMIDCacheGuardTests: XCTestCase {
+    /// A source URL shared by both articles below, so the only thing that could
+    /// separate their cache entries is the identifier — which neither has.
+    private let sharedSourceURL = URL(string: "https://example.org/first-article.pdf")!
+
     /// The one path every empty-PMID article resolves to.
     private var sharedEmptyPMIDFile: URL {
         FullTextService.pdfCacheDirectory
-            .appendingPathComponent(".\(BioMedLitConstants.pdfExtension)")
+            .appendingPathComponent(
+                FullTextService.cacheFilename(pmid: "", url: sharedSourceURL)
+            )
     }
 
     private var quarantinedSharedFile: URL {
-        sharedEmptyPMIDFile.appendingPathExtension("corrupt")
+        sharedEmptyPMIDFile.appendingPathExtension(
+            BioMedLitConstants.quarantinedPDFExtension
+        )
     }
 
     private func clearCache() {
@@ -68,7 +76,7 @@ final class EmptyPMIDCacheGuardTests: XCTestCase {
     func testCachedPDFPathIsNilForAnEmptyPMIDEvenWhenTheSharedFileExists() throws {
         try Data(BioMedLitConstants.pdfMagicBytes).write(to: sharedEmptyPMIDFile)
 
-        XCTAssertNil(FullTextService.cachedPDFPath(for: ""))
+        XCTAssertNil(FullTextService.cachedPDFPath(for: "", from: sharedSourceURL))
     }
 
     /// The scenario the bug report measured: two unrelated articles, neither

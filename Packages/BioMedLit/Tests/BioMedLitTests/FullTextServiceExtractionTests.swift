@@ -25,8 +25,8 @@ private struct StubExtractor: PDFTextExtracting {
 }
 
 /// A PDF used to reach the reader and stop there: `applyFullTextResult` set
-/// `fullTextContent = nil` for it, so transparency analysis and report
-/// generation saw nothing at all for a PDF-sourced article.
+/// `fullTextContent = nil` for it, so transparency analysis saw nothing at all
+/// for a PDF-sourced article.
 final class FullTextServiceExtractionTests: XCTestCase {
     private static let bodyless = Data("""
     <article><front><article-meta>
@@ -80,21 +80,35 @@ final class FullTextServiceExtractionTests: XCTestCase {
         ]
     }
 
+    /// The PMID most tests in this file fetch for.
+    ///
+    /// Deliberately not a number. The service caches into the *real* user
+    /// Application Support directory, and `clearCache` deletes every entry for
+    /// these identifiers — so naming them "1" and "42", as this once did, meant
+    /// running the suite destroyed the cached PDFs of two real PubMed articles
+    /// on the developer's own machine. No real article has this identifier.
+    private static let primaryPMID = "extraction-test-99001"
+
+    /// A second PMID, for the one test that must not share a cache entry with
+    /// the rest.
+    private static let secondaryPMID = "extraction-test-99002"
+
     /// Every PMID any test in this file fetches for.
     ///
-    /// The service caches into the *real* user Application Support directory,
-    /// so these tests leave files on the machine that runs them unless they
-    /// clear up after themselves — and once `downloadAndCachePDF` consults the
+    /// Cleared before and after each test: these leave files on the machine
+    /// that runs them otherwise, and once `downloadAndCachePDF` consults the
     /// cache, a leftover entry from an earlier run silently skips the download
     /// a later test is asserting on.
-    private static let cachedPMIDs = ["1", "42"]
+    private static let cachedPMIDs = [primaryPMID, secondaryPMID]
 
     private static func clearCache() {
         for pmid in cachedPMIDs {
-            let file = FullTextService.pdfCacheDirectory
-                .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
-            try? FileManager.default.removeItem(at: file)
-            try? FileManager.default.removeItem(at: file.appendingPathExtension("corrupt"))
+            // Through the service's own deletion, which knows that one article
+            // holds an entry per source URL and that quarantined entries carry
+            // a second extension. Rebuilding the filename here would have to
+            // repeat the key derivation, and would silently stop matching the
+            // day that changed.
+            FullTextService.deleteCachedPDF(for: pmid)
         }
     }
 
@@ -116,7 +130,7 @@ final class FullTextServiceExtractionTests: XCTestCase {
             text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1, warnings: []
         ))
         let result = try await makeService(extractor: extractor)
-            .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: "1")
+            .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: Self.primaryPMID)
 
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.contentKind, .extracted)
@@ -132,7 +146,7 @@ final class FullTextServiceExtractionTests: XCTestCase {
             text: "", success: true, pageCount: 3, convertedPages: 0, warnings: ["page 1 yielded no text"]
         ))
         let result = try await makeService(extractor: extractor)
-            .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: "1")
+            .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: Self.primaryPMID)
 
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.contentKind, FullTextContentKind.none)
@@ -157,7 +171,7 @@ final class FullTextServiceExtractionTests: XCTestCase {
             errorMessage: "the PDF is password-protected"
         ))
         let result = try await makeService(extractor: extractor)
-            .fetchFullText(pmcId: "PMC1", doi: "10.1/x", pmid: "1")
+            .fetchFullText(pmcId: "PMC1", doi: "10.1/x", pmid: Self.primaryPMID)
 
         XCTAssertEqual(result.contentKind, .abstract)
         XCTAssertNotNil(result.markdown)
@@ -174,7 +188,7 @@ final class FullTextServiceExtractionTests: XCTestCase {
             text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1, warnings: []
         ))
         let result = try await makeService(extractor: extractor)
-            .fetchFullText(pmcId: "PMC1", doi: "10.1/x", pmid: "1")
+            .fetchFullText(pmcId: "PMC1", doi: "10.1/x", pmid: Self.primaryPMID)
 
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.contentKind, .extracted)
@@ -189,7 +203,7 @@ final class FullTextServiceExtractionTests: XCTestCase {
             text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1, warnings: []
         ))
         let result = try await makeService(extractor: extractor, extractPDFText: false)
-            .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: "1")
+            .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: Self.primaryPMID)
 
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.contentKind, FullTextContentKind.none)
@@ -210,9 +224,15 @@ final class FullTextServiceExtractionTests: XCTestCase {
         // A pmid this file's other tests do not use. `setUp` clears it, so a
         // stale cache file from a previous run cannot make the download
         // assertion below pass for the wrong reason.
-        let pmid = "42"
+        let pmid = Self.secondaryPMID
+        // Named through the service's own key derivation, not rebuilt here: an
+        // entry is keyed on the source URL as well as the article, and a
+        // hand-built `<pmid>.pdf` would look for a file that is never written.
+        let renderURL = URL(string: "https://europepmc.org/articles/PMC1/pdf")!
         let cachedFile = FullTextService.pdfCacheDirectory
-            .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+            .appendingPathComponent(
+                FullTextService.cacheFilename(pmid: pmid, url: renderURL)
+            )
 
         StubURLProtocol.routes = [
             "search": (200, Data(Self.searchResponseWithPDFRender.utf8)),
@@ -262,7 +282,7 @@ final class FullTextServiceExtractionTests: XCTestCase {
 
         do {
             _ = try await makeService(extractor: extractor)
-                .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: "1")
+                .fetchFullText(pmcId: nil, doi: "10.1/x", pmid: Self.primaryPMID)
             XCTFail("a cancelled PDF download returned a fallback instead of propagating")
         } catch {
             XCTAssertTrue(

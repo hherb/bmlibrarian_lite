@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import PDFKit
 import XCTest
 @testable import BioMedLit
 
@@ -88,7 +89,15 @@ final class PDFTextExtractorTests: XCTestCase {
     /// article. bmlib rejects on `needs_pass` alone and names widening it as the
     /// wrong rule (`DECISIONS.md`, "fulltext — the PDF converter"); `isLocked` is
     /// PDFKit's `needs_pass`.
-    func testAnOwnerPasswordAloneDoesNotBlockExtraction() {
+    func testAnOwnerPasswordAloneDoesNotBlockExtraction() throws {
+        // Pinned rather than taken on trust. If a regeneration of the fixtures
+        // ever produced a plain unencrypted file here, every assertion below
+        // would keep passing while the control quietly stopped controlling for
+        // anything — the guard's only deliberate design decision, unprotected.
+        let document = try XCTUnwrap(PDFDocument(url: Self.fixture("ownerpassword.pdf")))
+        XCTAssertTrue(document.isEncrypted, "the fixture must actually carry an owner password")
+        XCTAssertFalse(document.isLocked, "an owner password must not block reading")
+
         let result = extractor.extract(from: Self.fixture("ownerpassword.pdf"))
         XCTAssertTrue(result.success, "an owner password restricts permissions, not reading")
         XCTAssertNil(result.errorMessage)
@@ -104,13 +113,37 @@ final class PDFTextExtractorTests: XCTestCase {
         XCTAssertNotNil(result.errorMessage)
     }
 
-    /// `isComplete` is derived, and every clause of it matters: an empty
-    /// successful extraction is not complete.
-    func testCompletenessRequiresSuccessEveryPageAndSomeText() {
+    /// `isComplete` is derived, and every clause of it matters — though not for
+    /// the reason bmlib's equivalent comment gives, because the page loop here
+    /// counts differently on purpose.
+    ///
+    /// A document with **no pages** is what the `charCount > 0` clause actually
+    /// catches: `pageCount == convertedPages` is vacuously true for it. A scan
+    /// is caught by the second clause instead, since a page yielding nothing is
+    /// not counted as converted.
+    func testAZeroPageDocumentIsNotComplete() {
         let empty = PDFExtractionResult(
             text: "", success: true, pageCount: 0, convertedPages: 0, warnings: []
         )
         XCTAssertFalse(empty.isComplete)
         XCTAssertEqual(empty.completionRatio, 0)
+    }
+
+    /// The divergence from bmlib, stated as a test so it cannot be "corrected"
+    /// back by someone reading the two side by side.
+    ///
+    /// bmlib's `PyMuPDFConverter` increments `converted_pages` for a page that
+    /// yielded nothing, so a two-page article whose second page is a scan
+    /// reports `2/2` — complete — and the reader is told nothing at all. Here
+    /// that page is not counted, which is what makes a partial extraction
+    /// visible.
+    func testAPageThatYieldedNothingIsNotCountedAsConverted() {
+        let result = extractor.extract(from: Self.fixture("mixed.pdf"))
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.pageCount, 2)
+        XCTAssertEqual(result.convertedPages, 1, "the text-free page is not a converted page")
+        XCTAssertFalse(result.isComplete, "and so the extraction reports as partial")
+        XCTAssertEqual(result.coverage.convertedPages, 1)
+        XCTAssertEqual(result.coverage.pageCount, 2)
     }
 }

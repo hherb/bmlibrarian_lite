@@ -102,4 +102,59 @@ final class JATSProducedBodyTests: XCTestCase {
         _ = try parser.parseToHTML()
         XCTAssertTrue(parser.producedBody)
     }
+
+    /// The claims `producedBody`'s own doc comment makes about exhibits, which
+    /// were true but untested — so nothing stopped a later change to caption or
+    /// cell routing from quietly making a figure legend count as an article
+    /// body.
+    func testAFigureAloneIsNotABody() throws {
+        let parser = JATSXMLParser(data: xml("""
+        <body><fig id="f1"><caption><p>Trial profile.</p></caption></fig></body>
+        """))
+        _ = try parser.parseToHTML()
+        XCTAssertFalse(parser.producedBody, "a figure caption is not article prose")
+    }
+
+    func testATableAloneIsNotABody() throws {
+        let parser = JATSXMLParser(data: xml("""
+        <body><table-wrap id="t1"><caption><p>Baseline characteristics.</p></caption>
+        <table><tr><td>Age</td><td>64</td></tr></table></table-wrap></body>
+        """))
+        _ = try parser.parseToHTML()
+        XCTAssertFalse(parser.producedBody, "table furniture is not article prose")
+    }
+
+    /// A section heading with nothing under it is not a body either.
+    func testASectionTitleWithNoProseIsNotABody() throws {
+        let parser = JATSXMLParser(data: xml("<body><sec><title>Methods</title></sec></body>"))
+        _ = try parser.parseToHTML()
+        XCTAssertFalse(parser.producedBody)
+    }
+
+    /// The case most worth pinning, because it is the one that fails *closed*:
+    /// a body whose prose is list-formatted. If this regressed, articles with
+    /// list-formatted methods would be classified as abstract-only and withheld
+    /// from analysis entirely — the holdback turned on real article text.
+    func testListItemProseCountsAsABody() throws {
+        let parser = JATSXMLParser(data: xml("""
+        <body><list list-type="order"><list-item><p>We enrolled 120 patients.</p></list-item>
+        </list></body>
+        """))
+        _ = try parser.parseToHTML()
+        XCTAssertTrue(parser.producedBody, "list-formatted prose is still article prose")
+    }
+
+    /// Back matter is not body matter. Acknowledgements land in `bodySections`
+    /// alongside true body sections, which is exactly why the count is kept
+    /// separately from that array.
+    func testAcknowledgementsAloneAreNotABody() throws {
+        let parser = JATSXMLParser(data: xml("""
+        <back><ack><p>We thank the trial coordinators.</p></ack></back>
+        """))
+        _ = try parser.parseToHTML()
+        XCTAssertFalse(
+            parser.producedBody,
+            "an abstract-only deposit with acknowledgements is still abstract-only"
+        )
+    }
 }

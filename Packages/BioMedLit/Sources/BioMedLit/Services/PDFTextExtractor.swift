@@ -17,6 +17,50 @@
 import Foundation
 import PDFKit
 
+/// How much of a PDF an extraction actually recovered text from.
+///
+/// The two counts travel as one value because they are one fact. Carried
+/// separately they can be written independently and disagree, and a coverage
+/// figure that disagrees with the text it describes is worse than none: it
+/// tells the reader a precise, wrong thing.
+///
+/// Split out of ``PDFExtractionResult`` so it can outlive it. The result is a
+/// package-internal detail of one call; this is what ``FullTextResult`` carries
+/// to the app, and the app persists, so a reader who reopens a partially
+/// extracted article is still told it was partial.
+public struct PDFExtractionCoverage: Sendable, Equatable, Codable {
+    /// Pages that yielded text.
+    public let convertedPages: Int
+
+    /// Pages the document holds.
+    public let pageCount: Int
+
+    /// Whether every page yielded text.
+    ///
+    /// A zero-page document is not complete. It is a document we recovered
+    /// nothing from, and answering `true` for it would report the emptiest
+    /// possible extraction as the most successful kind.
+    public var isComplete: Bool {
+        pageCount > 0 && convertedPages == pageCount
+    }
+
+    /// The share of pages that yielded text, `0` for a document with no pages.
+    public var ratio: Double {
+        guard pageCount > 0 else { return 0 }
+        return Double(convertedPages) / Double(pageCount)
+    }
+
+    /// Create a coverage figure.
+    ///
+    /// - Parameters:
+    ///   - convertedPages: Pages that yielded text.
+    ///   - pageCount: Pages the document holds.
+    public init(convertedPages: Int, pageCount: Int) {
+        self.convertedPages = convertedPages
+        self.pageCount = pageCount
+    }
+}
+
 /// What extracting a PDF's text produced, and how much of the document it
 /// covered.
 ///
@@ -46,20 +90,36 @@ public struct PDFExtractionResult: Sendable, Equatable {
     /// Characters recovered.
     public var charCount: Int { text.count }
 
+    /// How much of the document yielded text.
+    ///
+    /// The pair the app persists and shows the reader. ``isComplete`` and
+    /// ``completionRatio`` below are this value's own answers, forwarded so the
+    /// package's callers need not reach through.
+    public var coverage: PDFExtractionCoverage {
+        PDFExtractionCoverage(convertedPages: convertedPages, pageCount: pageCount)
+    }
+
     /// Whether every page of a readable document yielded text.
     ///
-    /// All three clauses are load-bearing. A failed read is not complete; a
-    /// document with an unconverted page is not complete; and an empty
-    /// successful extraction — a scan — is not complete either, or a scanned
-    /// article would report as a whole one.
+    /// All three clauses are load-bearing, though not for the reasons a reader
+    /// of bmlib's `is_complete` would expect, because the page loop below
+    /// counts differently from bmlib's on purpose — see ``extract(from:)``.
+    /// Here: a failed read is not complete; a document with a page that gave
+    /// nothing is not complete, which is the clause that catches a scan; and
+    /// `charCount > 0` catches a document with **no pages at all**, for which
+    /// the second clause is vacuously true.
+    ///
+    /// It does *not* catch a page that yielded a single stray character — a
+    /// watermark or a download stamp over a scanned page counts that page as
+    /// converted. bmlib has the same hole. Closing it needs a minimum-prose
+    /// floor agreed across both, and is tracked rather than fixed one-sidedly.
     public var isComplete: Bool {
         success && pageCount == convertedPages && charCount > 0
     }
 
     /// The share of pages that yielded text, `0` for a document with no pages.
     public var completionRatio: Double {
-        guard pageCount > 0 else { return 0 }
-        return Double(convertedPages) / Double(pageCount)
+        coverage.ratio
     }
 
     /// Create a result.
@@ -100,6 +160,12 @@ public protocol PDFTextExtracting: Sendable {
     /// Never throws: an unreadable file is a result that says so, because the
     /// caller's next move is the same either way and a thrown error at that
     /// point discards the page counts an operator needs.
+    ///
+    /// Implementations should stop early when the calling task is cancelled.
+    /// They must not report that as a failure — a cancelled read is not an
+    /// unreadable file — so the partial value they return is meaningless and
+    /// the caller is expected to discard it by checking cancellation itself.
+    /// ``FullTextService`` does exactly that.
     ///
     /// - Parameter fileURL: A file URL for the PDF to read.
     /// - Returns: What was recovered and how much of the document it covered.
@@ -145,12 +211,28 @@ public struct PDFKitTextExtractor: PDFTextExtracting {
         var convertedPages = 0
 
         for index in 0..<document.pageCount {
+            // A long document must not pin the `FullTextService` actor after
+            // the reader has walked away. The partial value this returns is
+            // discarded: `downloadAndExtract` checks cancellation immediately
+            // after calling us and throws, so nothing downstream ever sees a
+            // truncated-by-cancellation extraction reported as a real one.
+            if Task.isCancelled { break }
+
             guard let page = document.page(at: index) else {
                 warnings.append("page \(index + 1) could not be read")
                 continue
             }
             let pageText = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if pageText.isEmpty {
+                // Counted as *not* converted, deliberately diverging from
+                // bmlib's `PyMuPDFConverter`, which increments
+                // `converted_pages` on this branch too. Under bmlib's rule a
+                // two-page article whose second page is a scan reports
+                // `2/2` — complete — and the reader is told nothing. The
+                // divergence is what makes `isComplete`'s second clause catch
+                // a partial extraction at all, and it is why `completionRatio`
+                // is a share of pages that gave prose rather than of pages
+                // visited. Tracked for bmlib so the two converge on this rule.
                 warnings.append("page \(index + 1) yielded no text")
                 continue
             }

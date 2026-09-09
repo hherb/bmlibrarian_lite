@@ -17,20 +17,28 @@
 import XCTest
 @testable import BioMedLit
 
-/// `cachedPDFPath` asked only whether a file existed. A zero-length or corrupt
-/// entry was therefore served as this article's full text forever, and — worse —
-/// stood in front of any fresh download, so the article re-fetched on every run
-/// and never got better. bmlib's issue #71 is the same finding.
+/// `cachedPDFPath` asked only whether a file existed, so a zero-length or
+/// corrupt entry was served as this article's full text on every read, and
+/// nothing downstream re-validated a path it had already been given.
+///
+/// Quarantining it — rather than deleting it — keeps the bytes inspectable while
+/// taking them out of service. Note this cache does *not* have the further
+/// problem bmlib's issue #71 describes, where a bad entry shadows a good one:
+/// that is a property of bmlib's HTML-before-PDF lookup order, and here a
+/// re-download simply overwrites the entry atomically.
 final class FullTextCacheQuarantineTests: XCTestCase {
     private let pmid = "quarantine-test-99999"
+    private let sourceURL = URL(string: "https://example.org/quarantine.pdf")!
 
     private var cachedFile: URL {
         FullTextService.pdfCacheDirectory
-            .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+            .appendingPathComponent(
+                FullTextService.cacheFilename(pmid: pmid, url: sourceURL)
+            )
     }
 
     private var quarantinedFile: URL {
-        cachedFile.appendingPathExtension("corrupt")
+        cachedFile.appendingPathExtension(BioMedLitConstants.quarantinedPDFExtension)
     }
 
     override func tearDown() {
@@ -41,14 +49,14 @@ final class FullTextCacheQuarantineTests: XCTestCase {
 
     func testAValidPDFIsReturnedUntouched() throws {
         try Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34]).write(to: cachedFile)
-        XCTAssertEqual(FullTextService.cachedPDFPath(for: pmid), cachedFile.path)
+        XCTAssertEqual(FullTextService.cachedPDFPath(for: pmid, from: sourceURL), cachedFile.path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachedFile.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: quarantinedFile.path))
     }
 
     func testAnEmptyEntryIsQuarantinedAndReadsAsAbsent() throws {
         try Data().write(to: cachedFile)
-        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid))
+        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid, from: sourceURL))
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: cachedFile.path),
             "it must not stand in front of the next download"
@@ -61,12 +69,12 @@ final class FullTextCacheQuarantineTests: XCTestCase {
 
     func testAnEntryThatIsNotAPDFIsQuarantined() throws {
         try Data("<html>404 not found</html>".utf8).write(to: cachedFile)
-        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid))
+        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid, from: sourceURL))
         XCTAssertTrue(FileManager.default.fileExists(atPath: quarantinedFile.path))
     }
 
     func testAnAbsentEntryIsSimplyAbsent() {
-        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid))
+        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid, from: sourceURL))
         XCTAssertFalse(FileManager.default.fileExists(atPath: quarantinedFile.path))
     }
 
@@ -77,7 +85,7 @@ final class FullTextCacheQuarantineTests: XCTestCase {
     func testASecondQuarantineOverwritesTheFirst() throws {
         try Data("first".utf8).write(to: quarantinedFile)
         try Data("second".utf8).write(to: cachedFile)
-        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid))
+        XCTAssertNil(FullTextService.cachedPDFPath(for: pmid, from: sourceURL))
         XCTAssertEqual(try Data(contentsOf: quarantinedFile), Data("second".utf8))
     }
 }

@@ -66,16 +66,20 @@ final class FullTextContentKindTests: XCTestCase {
         XCTAssertEqual(result.contentKind, .fulltext)
     }
 
-    /// The three facts a PDF tier produces travel together.
-    func testAPDFResultCarriesItsTextAndItsPath() {
+    /// The four facts a PDF tier produces travel together.
+    func testAPDFResultCarriesItsTextItsPathAndItsCoverage() {
         let result = FullTextResult(
             content: .unpaywall(pdfURL: URL(string: "https://example.org/a.pdf")!),
             contentKind: .extracted,
             extractedText: "recovered prose",
-            localPDFPath: "/tmp/a.pdf"
+            localPDFPath: "/tmp/a.pdf",
+            extractionCoverage: PDFExtractionCoverage(convertedPages: 3, pageCount: 4)
         )
         XCTAssertEqual(result.extractedText, "recovered prose")
         XCTAssertEqual(result.localPDFPath, "/tmp/a.pdf")
         XCTAssertEqual(result.pdfURL?.absoluteString, "https://example.org/a.pdf")
+        XCTAssertEqual(result.extractionCoverage?.convertedPages, 3)
+        XCTAssertEqual(result.extractionCoverage?.pageCount, 4)
+        XCTAssertFalse(result.extractionCoverage?.isComplete ?? true)
     }
 }

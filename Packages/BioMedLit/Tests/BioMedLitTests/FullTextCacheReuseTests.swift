@@ -21,20 +21,28 @@ import XCTest
 /// downloaded bytes already on disk and the validation and quarantine that
 /// method carries had no production caller — a corrupt entry was moved aside by
 /// nothing but a test. `doc/cross_platform/fulltext_retrieval.md` has shown the
-/// cache check as step one of the download since this branch published it.
+/// cache check as step one of the download since this branch changed it to a
+/// *validated* one — an unvalidated existence check was already in that
+/// document beforehand.
 final class FullTextCacheReuseTests: XCTestCase {
     private let pmid = "cache-reuse-99998"
 
     private static let validPDF = Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34, 0x0A])
     private static let freshPDF = Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A])
 
+    /// The one source URL every test here fetches from. Named once because it
+    /// is part of the cache key: an entry is keyed on the article *and* the URL
+    /// its bytes came from, so a test that planted a file under one URL and
+    /// downloaded from another would simply miss.
+    private let sourceURL = URL(string: "https://example.org/a.pdf")!
+
     private var cachedFile: URL {
         FullTextService.pdfCacheDirectory
-            .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+            .appendingPathComponent(FullTextService.cacheFilename(pmid: pmid, url: sourceURL))
     }
 
     private var quarantinedFile: URL {
-        cachedFile.appendingPathExtension("corrupt")
+        cachedFile.appendingPathExtension(BioMedLitConstants.quarantinedPDFExtension)
     }
 
     private func clearCache() {
@@ -67,7 +75,7 @@ final class FullTextCacheReuseTests: XCTestCase {
         StubURLProtocol.stubbed = (404, Data())
 
         let path = try await makeService().downloadAndCachePDF(
-            from: URL(string: "https://example.org/a.pdf")!, for: pmid
+            from: sourceURL, for: pmid
         )
 
         XCTAssertEqual(path, cachedFile.path)
@@ -82,7 +90,7 @@ final class FullTextCacheReuseTests: XCTestCase {
         StubURLProtocol.stubbed = (200, Self.freshPDF)
 
         let path = try await makeService().downloadAndCachePDF(
-            from: URL(string: "https://example.org/a.pdf")!, for: pmid
+            from: sourceURL, for: pmid
         )
 
         XCTAssertEqual(path, cachedFile.path)
@@ -98,7 +106,7 @@ final class FullTextCacheReuseTests: XCTestCase {
         StubURLProtocol.stubbed = (200, Self.freshPDF)
 
         let path = try await makeService().downloadAndCachePDF(
-            from: URL(string: "https://example.org/a.pdf")!, for: pmid
+            from: sourceURL, for: pmid
         )
 
         XCTAssertEqual(path, cachedFile.path)

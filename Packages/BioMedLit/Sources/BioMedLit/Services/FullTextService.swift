@@ -14,14 +14,21 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import CryptoKit
 import Foundation
 
 /// Service for retrieving full-text articles with fallback chain.
 ///
 /// Attempts to retrieve full text from multiple sources in order:
 /// 1. **Europe PMC XML** - Preferred source, machine-readable, converts to HTML/markdown
-/// 2. **Unpaywall PDF** - Open access PDFs via Unpaywall API
-/// 3. **DOI Resolution** - Falls back to opening publisher website
+/// 2. **Europe PMC PDF** - The free render URL, when the XML is unavailable or
+///    carries no `<body>`
+/// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API
+/// 4. **DOI Resolution** - Falls back to opening publisher website
+///
+/// A body-less Europe PMC deposit does not win at step 1. It is held back and
+/// returned only if every PDF tier came up empty, so an open-access PDF of the
+/// same paper is still reachable — see `fetchFullText`.
 ///
 /// Thread-safe using Swift's actor model. Includes retry logic with
 /// exponential backoff for network operations.
@@ -57,9 +64,12 @@ public actor FullTextService {
     /// Whether to download a PDF tier's file and recover its text.
     ///
     /// Mirrors bmlib's `convert_pdfs`. On, a PDF tier downloads, caches and
-    /// extracts, so the article's prose reaches transparency analysis and report
-    /// generation. Off, the tier returns the URL alone and nothing is
-    /// downloaded, which is the behaviour every caller had before this existed.
+    /// extracts, so the article's prose reaches transparency analysis. Off, the
+    /// tier returns the URL alone and nothing is downloaded, which is the
+    /// behaviour every caller had before this existed.
+    ///
+    /// Transparency analysis is the whole of it: report generation works from
+    /// the citations, and nothing passes recovered prose to it.
     ///
     /// The PDF's URL is reported either way, because extracted text recovers the
     /// prose and loses the figures, tables and layout.
@@ -134,8 +144,10 @@ public actor FullTextService {
 
     /// Attempt to retrieve full text for a document.
     ///
-    /// Tries sources in order: Europe PMC XML → Unpaywall PDF → DOI website.
-    /// Each source is tried with retry logic for transient network failures.
+    /// Tries sources in order: Europe PMC XML → Europe PMC PDF → Unpaywall PDF
+    /// → DOI website. Each source is tried with retry logic for transient
+    /// network failures. A body-less XML deposit is held back rather than
+    /// returned, so the PDF tiers still get their turn.
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -167,11 +179,17 @@ public actor FullTextService {
         // has had its turn. `nil` when none was seen.
         var abstractOnly: FullTextResult?
 
+        // A PDF URL whose download failed, kept in case no later tier does
+        // better. See `pdfTierResult`.
+        var pdfLinkFallback: FullTextResult?
+
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
         var pdfRenderURL: String?
+        var identifiersResolved = false
         if resolvedPmcId == nil || resolvedPmcId?.isEmpty == true {
             let resolved = try await resolvePMCIdAndPDFUrl(pmid: pmid, doi: doi)
+            identifiersResolved = true
             resolvedPmcId = resolved.pmcId
             pdfRenderURL = resolved.pdfRenderURL
             // Only when the failure actually cost us the source. A failed PMID
@@ -266,30 +284,42 @@ public actor FullTextService {
             }
         }
 
-        // Try Europe PMC PDF render URL (when XML unavailable but free PDF exists)
+        // Try Europe PMC PDF render URL (when XML is unavailable or body-less).
+        //
+        // The render URL arrives with the PMC ID resolution above, which runs
+        // only when the caller had none. Every app call site passes the PMC ID
+        // it already holds, so this tier was reached with nothing to try on its
+        // most common input and the chain went straight to Unpaywall — the tier
+        // the extraction slice was built for, skipped for exactly the
+        // open-access articles that have a free render URL. Resolved here
+        // instead, and only here: this line is reached only when the XML tier
+        // did not return, so an article whose XML has a body still costs no
+        // extra request.
+        //
+        // Only `pdfRenderURL` is taken from the resolution here. Its
+        // `lostTheSource` flag is deliberately ignored: the XML tier above has
+        // already run and recorded its own outcome, and letting a failed
+        // *render-URL* lookup set `.europePMCUnreachable` would overwrite the
+        // more specific reason with a vaguer one.
+        if !identifiersResolved {
+            pdfRenderURL = try await resolvePMCIdAndPDFUrl(pmid: pmid, doi: doi).pdfRenderURL
+            identifiersResolved = true
+        }
         if let urlString = pdfRenderURL, let pdfURL = URL(string: urlString) {
             BioMedLitLib.logger?.info(
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
-            let (localPath, text) = try await downloadAndExtract(from: pdfURL, pmid: pmid)
-            // A PDF tier counts as a success as soon as it has a URL, so a
-            // download or extraction that gave nothing would otherwise discard
-            // an abstract already in hand and leave the reader a bare link.
-            // bmlib's `_with_abstract_fallback` makes the same call.
-            if text == nil, abstractOnly != nil {
-                BioMedLitLib.logger?.info(
-                    "The Europe PMC PDF yielded no text for PMID \(pmid); keeping the abstract",
-                    category: .fullText
-                )
-            } else {
-                return FullTextResult(
-                    content: .europePMCPDF(pdfURL: pdfURL),
-                    degradation: degradation,
-                    contentKind: text == nil ? .none : .extracted,
-                    extractedText: text,
-                    localPDFPath: localPath
-                )
+            let outcome = try await downloadAndExtract(from: pdfURL, pmid: pmid)
+            if let result = pdfTierResult(
+                outcome: outcome,
+                content: .europePMCPDF(pdfURL: pdfURL),
+                degradation: degradation,
+                holdingAbstract: abstractOnly != nil,
+                pmid: pmid,
+                linkFallback: &pdfLinkFallback
+            ) {
+                return result
             }
         }
 
@@ -301,20 +331,16 @@ public actor FullTextService {
                     "Successfully found Unpaywall PDF for DOI \(doi)",
                     category: .fullText
                 )
-                let (localPath, text) = try await downloadAndExtract(from: pdfURL, pmid: pmid)
-                if text == nil, abstractOnly != nil {
-                    BioMedLitLib.logger?.info(
-                        "The Unpaywall PDF yielded no text for PMID \(pmid); keeping the abstract",
-                        category: .fullText
-                    )
-                } else {
-                    return FullTextResult(
-                        content: .unpaywall(pdfURL: pdfURL),
-                        degradation: degradation,
-                        contentKind: text == nil ? .none : .extracted,
-                        extractedText: text,
-                        localPDFPath: localPath
-                    )
+                let outcome = try await downloadAndExtract(from: pdfURL, pmid: pmid)
+                if let result = pdfTierResult(
+                    outcome: outcome,
+                    content: .unpaywall(pdfURL: pdfURL),
+                    degradation: degradation,
+                    holdingAbstract: abstractOnly != nil,
+                    pmid: pmid,
+                    linkFallback: &pdfLinkFallback
+                ) {
+                    return result
                 }
             } catch where error.isCancellation {
                 // As above: a cancelled fetch must not be read as an absent PDF.
@@ -337,6 +363,18 @@ public actor FullTextService {
                 category: .fullText
             )
             return abstractOnly
+        }
+
+        // Then a PDF whose bytes we could not fetch. Below the abstract, which
+        // is text in hand, and above the publisher page, which is a guess at
+        // where the article might be — this URL is at least known to name it.
+        if let pdfLinkFallback {
+            BioMedLitLib.logger?.info(
+                "No tier retrieved a PDF for PMID \(pmid); returning the link we could not "
+                    + "download",
+                category: .fullText
+            )
+            return pdfLinkFallback
         }
 
         // Fallback to DOI or PubMed URL
@@ -820,21 +858,23 @@ public actor FullTextService {
     /// as a miss, which is exactly what makes the download below the repair.
     ///
     /// An empty `pmid` is refused outright rather than downloaded uncached.
-    /// `cachedPDFPath(for: "")` would otherwise resolve to the same path —
-    /// `<cache>/.pdf` — for every article with no PMID, and an empty PMID is a
-    /// real, reachable value: `EuropePMCService.swift` builds one as
-    /// `result.pmid ?? result.id ?? ""`, and the macOS viewer documents an
-    /// empty `pmid` with a non-nil `pmcId` as an ordinary Europe PMC-sourced
-    /// article, not a bug. Before this method consulted the cache, every call
-    /// re-downloaded, so extraction always read back the bytes it had just
-    /// written and the shared filename never mattered; now that a cache hit
-    /// short-circuits the download, a second empty-PMID article would
-    /// deterministically read back the first one's cached text. Failing here
-    /// costs nothing extra: `downloadAndExtract`, this method's only caller,
-    /// already treats any thrown, non-cancellation error as "no PDF for this
-    /// tier" and falls through to the next source, exactly as it does for a
-    /// download that 404s — so refusing needs no new handling and cannot mix
-    /// two articles' bytes under one key.
+    /// The key would otherwise collapse to the same name for every article
+    /// with no PMID, and an empty PMID is a real, reachable value:
+    /// `EuropePMCService.swift` builds one as `result.pmid ?? result.id ?? ""`,
+    /// and `MacScoredDocumentsView` documents an empty `pmid` with a non-nil
+    /// `pmcId` as an ordinary Europe PMC-sourced article, not a bug. Before
+    /// this method consulted the cache, every call re-downloaded, so extraction
+    /// always read back the bytes it had just written and the shared filename
+    /// never mattered — the collision self-healed. A cache hit now
+    /// short-circuits the download, so it no longer does: a second empty-PMID
+    /// article would deterministically read back the first one's cached text.
+    ///
+    /// Failing here costs nothing extra. `downloadAndExtract` — this method's
+    /// only caller inside the package, though the method is `public` and so
+    /// could acquire others — treats any thrown, non-cancellation error as
+    /// "this tier has no PDF" and moves to the next source, exactly as it does
+    /// for a download that 404s. Refusing therefore needs no new handling and
+    /// cannot mix two articles' bytes under one key.
     ///
     /// - Parameters:
     ///   - url: URL to download the PDF from, on a cache miss.
@@ -849,7 +889,7 @@ public actor FullTextService {
             )
         }
 
-        if let cached = Self.cachedPDFPath(for: pmid) {
+        if let cached = Self.cachedPDFPath(for: pmid, from: url) {
             BioMedLitLib.logger?.info(
                 "Serving the cached PDF for PMID \(pmid) from \(cached)",
                 category: .fullText
@@ -882,25 +922,60 @@ public actor FullTextService {
         }
 
         // Cache the PDF
-        let filePath = try cachePDF(data: data, for: pmid)
+        let filePath = try cachePDF(data: data, for: pmid, from: url)
         BioMedLitLib.logger?.info("Cached PDF at: \(filePath)", category: .fullText)
 
         return filePath
     }
 
+    /// What a PDF tier's download-and-extract attempt produced.
+    ///
+    /// Four outcomes rather than a `(path?, text?)` pair, because two of them
+    /// used to share `(nil, nil)` and the tier could not tell them apart. It
+    /// therefore keyed its decision to try the next tier on whether an abstract
+    /// happened to be in hand, so a Europe PMC render URL that 404s ended the
+    /// chain and an open-access Unpaywall copy of the same paper was never
+    /// fetched. "We chose not to look" and "we looked and the source is dead"
+    /// call for opposite moves.
+    private enum PDFTierOutcome {
+        /// Extraction is switched off, so nothing was downloaded.
+        case notAttempted
+
+        /// The bytes could not be fetched: a 404, a server error, a body that
+        /// is not a PDF, or a cache key we refuse to use.
+        case downloadFailed
+
+        /// The file is on disk and holds no recoverable prose — a scan, or a
+        /// document PDFKit declined to open.
+        ///
+        /// Carries coverage whenever a page count is known, so the reader can
+        /// be told that nothing was recovered. That covers a scan and a
+        /// password-protected file alike — PDFKit reports a page count for a
+        /// locked document even though it hands back no text. `nil` only when
+        /// the file could not be opened at all, where there is nothing to
+        /// count and the reason went to the log.
+        case noText(localPath: String, coverage: PDFExtractionCoverage?)
+
+        /// Prose was recovered, and this much of the document yielded it.
+        case extracted(localPath: String, text: String, coverage: PDFExtractionCoverage)
+    }
+
     /// Download a PDF tier's file, cache it, and recover its text.
     ///
     /// An ordinary failure — a 404, a server error, a file PDFKit cannot open —
-    /// returns empty-handed and leaves the reader the URL, which is exactly what
-    /// this tier returned before extraction existed. Throwing on those would turn
-    /// a tier that succeeded into a fall-through to the publisher link.
+    /// is reported as an outcome rather than thrown. Throwing on those would
+    /// turn a tier that merely came up empty into a hard failure of the whole
+    /// chain.
     ///
     /// Cancellation is the one thing this does not swallow: it propagates as
     /// `CancellationError`, matching every other guard in this file. A cancelled
     /// download is not a dead source, and letting it fall through here would
     /// return a normal, non-throwing result for a fetch the caller walked away
     /// from — caching a bare link as this article's full text, the outcome
-    /// `fetchFullText`'s own doc comment promises cannot happen.
+    /// `fetchFullText`'s own doc comment promises cannot happen. The check after
+    /// extraction is what makes the extractor's own early exit safe: it stops
+    /// mid-document on cancellation, and the partial value it returns is
+    /// discarded here rather than reported as a real extraction.
     ///
     /// Every empty outcome is logged at warning level, as bmlib does, because a
     /// scan that yields nothing is invisible otherwise and a partial extraction
@@ -909,14 +984,13 @@ public actor FullTextService {
     /// - Parameters:
     ///   - url: The remote PDF.
     ///   - pmid: PubMed ID, used to name the cached file.
-    /// - Returns: The cached path and the recovered text. Both `nil` when the
-    ///   flag is off; the text alone `nil` when nothing was recovered.
+    /// - Returns: What the attempt produced. See ``PDFTierOutcome``.
     /// - Throws: `CancellationError` if the caller cancelled.
     private func downloadAndExtract(
         from url: URL,
         pmid: String
-    ) async throws -> (localPath: String?, text: String?) {
-        guard extractPDFText else { return (nil, nil) }
+    ) async throws -> PDFTierOutcome {
+        guard extractPDFText else { return .notAttempted }
 
         let path: String
         do {
@@ -927,28 +1001,41 @@ public actor FullTextService {
         } catch {
             BioMedLitLib.logger?.warning(
                 "Could not download the PDF for PMID \(pmid) from \(url.absoluteString): "
-                    + "\(error.localizedDescription); returning the link alone",
+                    + "\(error.localizedDescription); trying the next source",
                 category: .fullText
             )
-            return (nil, nil)
+            return .downloadFailed
         }
 
         let extraction = extractor.extract(from: URL(fileURLWithPath: path))
+        // Before anything is read off `extraction`: the extractor stops early
+        // when cancelled, so a cancelled read looks exactly like a short
+        // document unless the cancellation is asked about first.
+        try Task.checkCancellation()
+
         guard extraction.success else {
             BioMedLitLib.logger?.warning(
                 "PDF text extraction failed for \(path): "
                     + "\(extraction.errorMessage ?? "no reason reported")",
                 category: .fullText
             )
-            return (path, nil)
+            // The page count survives a failed read when PDFKit could open the
+            // document enough to count pages — a locked file, typically. Passed
+            // on so the reader learns that no text reached any analysis, rather
+            // than being shown a document that looks entirely ordinary.
+            return .noText(
+                localPath: path,
+                coverage: extraction.pageCount > 0 ? extraction.coverage : nil
+            )
         }
         guard extraction.charCount > 0 else {
             BioMedLitLib.logger?.warning(
                 "PDF \(path) yielded no extractable text over \(extraction.pageCount) page(s) — "
-                    + "likely a scan; \(extraction.warnings.prefix(3))",
+                    + "likely a scan; "
+                    + "\(extraction.warnings.prefix(BioMedLitConstants.loggedPageWarningLimit))",
                 category: .fullText
             )
-            return (path, nil)
+            return .noText(localPath: path, coverage: extraction.coverage)
         }
         if !extraction.isComplete {
             BioMedLitLib.logger?.warning(
@@ -961,7 +1048,88 @@ public actor FullTextService {
             "Extracted \(extraction.charCount) chars of text from PDF \(path)",
             category: .fullText
         )
-        return (path, extraction.text)
+        return .extracted(localPath: path, text: extraction.text, coverage: extraction.coverage)
+    }
+
+    /// Turn a PDF tier's outcome into the result to return, or `nil` to let the
+    /// chain try the next tier.
+    ///
+    /// Shared by the Europe PMC PDF and Unpaywall tiers so the two cannot decide
+    /// this differently — they already had one copy of the rule each, and only
+    /// one of them was ever updated.
+    ///
+    /// - Parameters:
+    ///   - outcome: What the download and extraction produced.
+    ///   - content: The content value to attach to a returned result.
+    ///   - degradation: Why this is not the best source that existed, if it is not.
+    ///   - holdingAbstract: Whether a body-less rendering is being kept in
+    ///     reserve. A tier that recovered nothing must not displace it.
+    ///   - pmid: PubMed ID, for the log line only.
+    ///   - linkFallback: Set to a link-only result when a download failed, so
+    ///     the chain can still offer the URL if no later tier does better.
+    ///     First writer wins: the earliest tier is the best-quality source.
+    /// - Returns: The result to return, or `nil` to continue the chain.
+    private func pdfTierResult(
+        outcome: PDFTierOutcome,
+        content: FullTextContent,
+        degradation: FullTextDegradation?,
+        holdingAbstract: Bool,
+        pmid: String,
+        linkFallback: inout FullTextResult?
+    ) -> FullTextResult? {
+        switch outcome {
+        case .downloadFailed:
+            // Try the next tier, but keep the URL. Returning it here — which is
+            // what this did, because a failed download was indistinguishable
+            // from "extraction is switched off" — ended the chain on a link we
+            // had just proved we could not fetch, so an open-access Unpaywall
+            // copy of the same paper was never tried. Held in reserve instead:
+            // a link we could not download is still better than a publisher
+            // page, and still worse than a copy a later tier actually retrieves.
+            if linkFallback == nil {
+                linkFallback = FullTextResult(content: content, degradation: degradation)
+            }
+            return nil
+
+        case .notAttempted:
+            // Nothing was downloaded because nothing was meant to be. The URL
+            // is still worth handing over, unless an abstract is in reserve —
+            // a bare link does not beat a rendering of the article's abstract.
+            if holdingAbstract { return nil }
+            return FullTextResult(content: content, degradation: degradation)
+
+        case .noText(let localPath, let coverage):
+            if holdingAbstract {
+                BioMedLitLib.logger?.info(
+                    "The \(content.source.displayName) PDF yielded no text for PMID \(pmid); "
+                        + "keeping the abstract",
+                    category: .fullText
+                )
+                return nil
+            }
+            // The file is real even though its prose is not, so the path goes
+            // with it: a scan is still worth showing the reader. The coverage
+            // goes too, so the reader is told that nothing was recovered —
+            // otherwise a scan displays as an ordinary article while every
+            // analysis of it silently ran on no text at all.
+            return FullTextResult(
+                content: content,
+                degradation: degradation,
+                contentKind: .none,
+                localPDFPath: localPath,
+                extractionCoverage: coverage
+            )
+
+        case .extracted(let localPath, let text, let coverage):
+            return FullTextResult(
+                content: content,
+                degradation: degradation,
+                contentKind: .extracted,
+                extractedText: text,
+                localPDFPath: localPath,
+                extractionCoverage: coverage
+            )
+        }
     }
 
     /// Save PDF data to the cache directory.
@@ -970,7 +1138,17 @@ public actor FullTextService {
     /// shared key must never be written. `downloadAndCachePDF` already guards
     /// this before it can be reached, but the check is repeated here so this
     /// method cannot write a collision under any future caller either.
-    private func cachePDF(data: Data, for pmid: String) throws -> String {
+    ///
+    /// - Parameters:
+    ///   - data: The verified PDF bytes.
+    ///   - pmid: PubMed ID the entry belongs to.
+    ///   - url: The remote PDF the bytes came from. Part of the key, so a
+    ///     second source for the same article gets its own entry rather than
+    ///     overwriting the first — see ``cacheFilename(pmid:url:)``.
+    /// - Returns: The path the bytes were written to.
+    /// - Throws: `FullTextError.cachingFailed` on an empty `pmid` or a failed
+    ///   write.
+    private func cachePDF(data: Data, for pmid: String, from url: URL) throws -> String {
         guard !pmid.isEmpty else {
             throw FullTextError.cachingFailed(
                 "empty PMID; refusing to write a cache entry shared by every article "
@@ -979,7 +1157,7 @@ public actor FullTextService {
         }
 
         let cacheDir = Self.pdfCacheDirectory
-        let fileURL = cacheDir.appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+        let fileURL = cacheDir.appendingPathComponent(Self.cacheFilename(pmid: pmid, url: url))
 
         do {
             try data.write(to: fileURL, options: .atomic)
@@ -1027,11 +1205,17 @@ public actor FullTextService {
     /// downstream re-validates a path it already has.
     ///
     /// A failing entry is renamed rather than deleted, so it can be inspected,
-    /// and the method answers `nil` so the next fetch re-downloads. Leaving it
-    /// in place would be the worse failure: it would hide a freshly cached PDF
-    /// behind it, so the article would re-download on every call for good.
-    /// bmlib's issue #71 reaches the same conclusion for the equivalent Python
-    /// path.
+    /// and the method answers `nil` so the next fetch re-downloads. Those two
+    /// facts are the whole justification: the entry stops being served as this
+    /// article's text, and its bytes stay available to whoever investigates.
+    ///
+    /// Note bmlib's issue #71 argues something stronger for the Python path —
+    /// that a bad entry left in place *hides* a freshly cached copy behind it —
+    /// and that reasoning does not transfer here. It is a property of bmlib's
+    /// two-tier cache, which consults an HTML entry before the PDF one. This
+    /// cache holds a single entry per article and source URL, and a re-download
+    /// overwrites it atomically, so there is nothing for a corrupt entry to
+    /// hide.
     ///
     /// Best-effort: a rename that itself fails is logged and the read still
     /// answers `nil`, because turning a recoverable miss into a thrown error
@@ -1044,14 +1228,17 @@ public actor FullTextService {
     /// quarantine, or otherwise treat that shared entry as belonging to
     /// whichever article happens to ask first.
     ///
-    /// - Parameter pmid: PubMed ID to check.
+    /// - Parameters:
+    ///   - pmid: PubMed ID to check.
+    ///   - url: The remote PDF the caller wants. Part of the key — see
+    ///     ``cacheFilename(pmid:url:)``.
     /// - Returns: The cached file's path, or `nil` if there is none, `pmid` is
     ///   empty, or the entry was unusable.
-    public static func cachedPDFPath(for pmid: String) -> String? {
+    public static func cachedPDFPath(for pmid: String, from url: URL) -> String? {
         guard !pmid.isEmpty else { return nil }
 
         let fileURL = pdfCacheDirectory
-            .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+            .appendingPathComponent(cacheFilename(pmid: pmid, url: url))
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
 
         let magic = Data(BioMedLitConstants.pdfMagicBytes)
@@ -1066,7 +1253,7 @@ public actor FullTextService {
                 + "fetch re-downloads instead of serving it forever",
             category: .fullText
         )
-        let aside = fileURL.appendingPathExtension("corrupt")
+        let aside = fileURL.appendingPathExtension(BioMedLitConstants.quarantinedPDFExtension)
         do {
             if FileManager.default.fileExists(atPath: aside.path) {
                 try FileManager.default.removeItem(at: aside)
@@ -1082,15 +1269,96 @@ public actor FullTextService {
         return nil
     }
 
-    /// Delete a cached PDF file.
+    /// The filename one article's copy of one PDF is cached under.
     ///
-    /// - Parameter pmid: PubMed ID of the PDF to delete.
+    /// Keyed on the source URL as well as the article, because an article can
+    /// be offered more than one PDF — Europe PMC's render URL and Unpaywall's
+    /// open-access copy are different files of the same paper. Keyed on the
+    /// PMID alone, the first tier to download won the entry and every later
+    /// tier was served *its* bytes: the chain then returned that file as the
+    /// Unpaywall result, recorded `fullTextSource = "unpaywall"` over a Europe
+    /// PMC download, and never fetched the copy that might have extracted
+    /// cleanly.
+    ///
+    /// The PMID is sanitised rather than trusted. It reaches this method from
+    /// Europe PMC search results, and `appendingPathComponent` on a value
+    /// holding `/` or `..` would place the file outside the cache directory.
+    ///
+    /// Entries written before the URL became part of the key simply never
+    /// match, so they are re-downloaded once and then superseded. That is the
+    /// cheap direction to be wrong in: a stale entry costs one download, while
+    /// serving the wrong article's bytes costs the reader a wrong answer.
+    ///
+    /// - Parameters:
+    ///   - pmid: PubMed ID. Must not be empty; callers guard first.
+    ///   - url: The remote PDF this entry holds.
+    /// Internal rather than private so a test can name the file it is about to
+    /// plant without duplicating the key derivation — a duplicate that would
+    /// keep passing if the real one changed.
+    ///
+    /// - Returns: The filename, including extension.
+    static func cacheFilename(pmid: String, url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+        let fingerprint = digest
+            .prefix(BioMedLitConstants.cacheKeyFingerprintBytes)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "\(sanitizedCacheKey(pmid))-\(fingerprint).\(BioMedLitConstants.pdfExtension)"
+    }
+
+    /// A PMID reduced to characters that are safe in a filename.
+    ///
+    /// `Hasher` is deliberately not used for the sibling fingerprint: Swift
+    /// seeds it per process, so a cache filename built from it would change on
+    /// every launch and every entry would miss forever.
+    ///
+    /// - Parameter pmid: The identifier to sanitise.
+    /// - Returns: The identifier with every unsafe character replaced by `_`.
+    private static func sanitizedCacheKey(_ pmid: String) -> String {
+        String(pmid.map { BioMedLitConstants.cacheKeyAllowedCharacters.contains($0) ? $0 : "_" })
+    }
+
+    /// Delete every cached PDF for a document.
+    ///
+    /// Plural because one article can hold an entry per source URL — see
+    /// ``cacheFilename(pmid:url:)``. Quarantined entries go too: they belong to
+    /// the same article and are of no use once it is being discarded.
+    ///
+    /// - Parameter pmid: PubMed ID of the PDFs to delete.
     public static func deleteCachedPDF(for pmid: String) {
-        let fileURL = pdfCacheDirectory.appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
-        try? FileManager.default.removeItem(at: fileURL)
+        guard !pmid.isEmpty else { return }
+        let safePMID = sanitizedCacheKey(pmid)
+        let cacheDir = pdfCacheDirectory
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: cacheDir,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for fileURL in contents
+        where fileURL.lastPathComponent.hasPrefix("\(safePMID)-")
+            || fileURL.lastPathComponent.hasPrefix("\(safePMID).") {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    /// Whether "clear cache" should remove this file.
+    ///
+    /// A separate predicate so it can be tested without calling
+    /// ``clearPDFCache()``, which empties the *real* user cache directory — a
+    /// test that called it would delete the PDFs of whoever ran the suite.
+    ///
+    /// - Parameter fileURL: A file found in the cache directory.
+    /// - Returns: `true` for a cached PDF or a quarantined one.
+    static func isClearableCacheEntry(_ fileURL: URL) -> Bool {
+        fileURL.pathExtension == BioMedLitConstants.pdfExtension
+            || fileURL.pathExtension == BioMedLitConstants.quarantinedPDFExtension
     }
 
     /// Clear all cached PDFs.
+    ///
+    /// Quarantined entries are removed too. Filtering on the `pdf` extension
+    /// alone left every `.corrupt` file behind, so the bytes a quarantine set
+    /// aside for inspection accumulated in a directory the user had explicitly
+    /// asked to empty, and "clear cache" did not clear the cache.
     public static func clearPDFCache() {
         let cacheDir = pdfCacheDirectory
         do {
@@ -1098,7 +1366,7 @@ public actor FullTextService {
                 at: cacheDir,
                 includingPropertiesForKeys: nil
             )
-            for fileURL in contents where fileURL.pathExtension == BioMedLitConstants.pdfExtension {
+            for fileURL in contents where Self.isClearableCacheEntry(fileURL) {
                 try FileManager.default.removeItem(at: fileURL)
             }
             BioMedLitLib.logger?.info("Cleared PDF cache", category: .fullText)

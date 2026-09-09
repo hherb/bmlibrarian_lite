@@ -146,7 +146,15 @@ public enum FullTextContentKind: String, Sendable, Codable, CaseIterable {
     /// offering alongside it.
     case extracted = "extracted"
 
-    /// There is no text, only a link.
+    /// No text was recovered.
+    ///
+    /// Never read this as "there is no file". A PDF that downloaded and cached
+    /// fine but yielded no prose — a scan — is stored under this kind *with a
+    /// real file on disk*, and reading the kind as "only a link" is precisely
+    /// what sent such a record down the remote-URL branch, where `URL(string:)`
+    /// turned an absolute path into a schemeless URL. Ask
+    /// ``FullTextResult/localPDFPath`` — or, in the app,
+    /// `Document.fullTextPDFPathIsLocalFile` — which knows.
     case none = "none"
 }
 
@@ -194,6 +202,26 @@ public struct FullTextResult: Sendable, Equatable {
     /// a viewer opens.
     public let localPDFPath: String?
 
+    /// How much of the PDF yielded text, or `nil` when no extraction was run —
+    /// or when the document could not be opened to count its pages at all.
+    ///
+    /// Travels with the text for the same reason ``warnings`` does, and to stop
+    /// the same failure recurring on a new channel. The extractor already
+    /// computed this; before it was carried here it reached the logger and
+    /// nothing else, so a ten-of-fourteen-page extraction was handed to the
+    /// transparency analyzer and rendered to the reader exactly as a whole
+    /// article was (#181). The pages that fail to extract are disproportionately
+    /// the last ones, which is where funding, competing-interest and data-
+    /// availability statements live — so "we read all of it" and "we read most
+    /// of it" produce opposite conclusions about the same paper.
+    ///
+    /// Present for a scan too, where it reads `0` of however many pages and
+    /// ``extractedText`` is `nil`. That combination is the point rather than an
+    /// edge case: a scan renders as an ordinary document, so without it the
+    /// reader has no way to learn that every analysis of the article ran on no
+    /// text whatsoever.
+    public let extractionCoverage: PDFExtractionCoverage?
+
     /// Create a retrieval result.
     ///
     /// - Parameters:
@@ -208,13 +236,16 @@ public struct FullTextResult: Sendable, Equatable {
     ///     when none was.
     ///   - localPDFPath: Where a downloaded PDF now is on disk, or `nil` — the
     ///     default — when none was cached.
+    ///   - extractionCoverage: How much of the PDF `extractedText` came from,
+    ///     or `nil` — the default — when no extraction was run.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
         degradation: FullTextDegradation? = nil,
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
-        localPDFPath: String? = nil
+        localPDFPath: String? = nil,
+        extractionCoverage: PDFExtractionCoverage? = nil
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -270,12 +301,30 @@ public struct FullTextResult: Sendable, Equatable {
             localPDFPath == nil || content.pdfURL != nil,
             "localPDFPath on \(content.source), which carries no PDF"
         )
+        // Text without coverage is the silence this field was added to end: the
+        // banner would have no figure to show and would fall back to presenting
+        // a partial extraction as a whole article.
+        //
+        // The converse is allowed, and deliberately so. A scan reports coverage
+        // with no text — `0 of 12 pages` — because "we read a document and got
+        // nothing out of it" is the fact the reader most needs, and pairing the
+        // two strictly would have made it the one fact we could not state.
+        assert(
+            extractedText == nil || extractionCoverage != nil,
+            "extracted text with no coverage; the reader cannot be told how much was recovered"
+        )
+        // Coverage describes reading a PDF, so there has to be one.
+        assert(
+            extractionCoverage == nil || content.pdfURL != nil,
+            "extraction coverage on \(content.source), which carries no PDF"
+        )
         self.content = content
         self.warnings = warnings
         self.degradation = degradation
         self.contentKind = contentKind
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath
+        self.extractionCoverage = extractionCoverage
     }
 
     /// The source of this full-text content.

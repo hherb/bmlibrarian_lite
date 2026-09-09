@@ -159,6 +159,33 @@ public enum BioMedLitConstants {
     /// PDF file extension.
     public static let pdfExtension = "pdf"
 
+    /// Extension a cache entry is renamed to when it fails validation.
+    ///
+    /// Quarantined rather than deleted so the bytes stay inspectable, which is
+    /// only useful while "clear cache" also removes them.
+    public static let quarantinedPDFExtension = "corrupt"
+
+    /// Characters a PDF cache filename may take from an article identifier.
+    ///
+    /// Everything else is replaced, so an identifier carrying `/` or `..`
+    /// cannot walk the written file out of the cache directory.
+    public static let cacheKeyAllowedCharacters = Set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+    )
+
+    /// Bytes of the source-URL digest kept in a PDF cache filename.
+    ///
+    /// Eight bytes is sixteen hex characters: far more than enough to separate
+    /// the two or three PDF URLs one article is ever offered, and short enough
+    /// to leave the filename readable.
+    public static let cacheKeyFingerprintBytes = 8
+
+    /// Per-page extraction warnings included in a single log line.
+    ///
+    /// A scan warns once per page, so an unbounded list turns one event into a
+    /// log entry the length of the document.
+    public static let loggedPageWarningLimit = 3
+
     /// PDF filename prefix.
     public static let pdfFilenamePrefix = "article_"
 
