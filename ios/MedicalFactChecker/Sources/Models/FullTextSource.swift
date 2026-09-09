@@ -321,3 +321,106 @@ struct AppFullTextResult: Equatable, Sendable {
         AppFullTextResult(content: content, source: .uploaded)
     }
 }
+
+// MARK: - PDF Content Loading
+
+/// Reads the bytes behind a `.pdfURL` full-text result, from disk or over HTTP.
+///
+/// The URL such a result carries is not always remote. Since extraction landed,
+/// a PDF-sourced article reopened from the cache rebuilds as
+/// `URL(fileURLWithPath:)` for the file the retrieval tier already downloaded —
+/// `Document.cachedFullTextResult` does exactly that. The iOS viewer had only an
+/// HTTP path: it called `URLSession.data(from:)` and then cast the response to
+/// `HTTPURLResponse`. `URLSession` will happily open a `file://` URL, but it
+/// answers with a plain `NSURLResponse`, so the cast failed and *every*
+/// PDF-sourced article reopened from the cache showed "bad server response" over
+/// an "Open in Browser" link pointing at a `file:///` path. macOS never had the
+/// problem because `MacPDFView` takes a filesystem path rather than a URL.
+///
+/// Lives beside ``AppFullTextContentType/pdfURL(_:)`` because that is the case
+/// it reads, and outside `FullTextViewer.swift` because that file is wrapped in
+/// `#if os(iOS)` — this logic is platform-independent, and putting it here is
+/// what lets the suite exercise it on the host that runs it.
+enum PDFContentLoader {
+    /// Why a PDF could not be shown, phrased for the reader.
+    ///
+    /// A local file and a remote fetch fail for different reasons and deserve
+    /// different words: telling someone the *server* misbehaved when the file
+    /// on their own device is missing sends them to retry the wrong thing.
+    enum LoadError: LocalizedError, Equatable {
+        /// The cached file is gone — evicted, or the record outlived it.
+        case fileMissing
+
+        /// The file is there but could not be read.
+        case fileUnreadable(String)
+
+        /// A remote fetch answered with something other than HTTP 200.
+        case badServerResponse
+
+        /// The bytes are not a PDF, whatever their origin.
+        case notAPDF
+
+        var errorDescription: String? {
+            switch self {
+            case .fileMissing:
+                return "The cached PDF is no longer on this device. Fetch the full text again."
+            case .fileUnreadable(let reason):
+                return "The cached PDF could not be read: \(reason)"
+            case .badServerResponse:
+                return "The server did not return the PDF."
+            case .notAPDF:
+                return "That did not turn out to be a valid PDF file."
+            }
+        }
+    }
+
+    /// Load and validate the PDF `url` points at.
+    ///
+    /// - Parameters:
+    ///   - url: A `file://` URL for a cached PDF, or a remote one.
+    ///   - session: Injected so the remote branch has offline coverage.
+    /// - Returns: The PDF's bytes, magic-byte checked.
+    /// - Throws: ``LoadError``, or whatever the transport threw.
+    static func loadData(
+        from url: URL,
+        session: URLSession = .shared
+    ) async throws -> Data {
+        let data = url.isFileURL
+            ? try loadFromDisk(at: url)
+            : try await loadOverHTTP(from: url, session: session)
+
+        // Checked for both origins. A cached entry can be corrupt too — that is
+        // the whole reason `FullTextService.cachedPDFPath` validates on the way
+        // out — and rendering a truncated file as an article is worse than
+        // saying so.
+        let magic = Data(FullTextConstants.pdfMagicBytes)
+        guard data.count > magic.count, data.prefix(magic.count) == magic else {
+            throw LoadError.notAPDF
+        }
+        return data
+    }
+
+    /// Read a cached PDF off the filesystem.
+    private static func loadFromDisk(at url: URL) throws -> Data {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw LoadError.fileMissing
+        }
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            throw LoadError.fileUnreadable(error.localizedDescription)
+        }
+    }
+
+    /// Fetch a PDF that really is remote — a live result whose tier returned a
+    /// link without downloading it, which is what the extraction flag being off
+    /// looks like.
+    private static func loadOverHTTP(from url: URL, session: URLSession) async throws -> Data {
+        let (data, response) = try await session.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == FullTextConstants.httpStatusOK else {
+            throw LoadError.badServerResponse
+        }
+        return data
+    }
+}
