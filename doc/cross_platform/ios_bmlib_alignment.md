@@ -454,6 +454,21 @@ the final review: nothing passes `fullTextContent` to report generation
 either. Its only consumers are the three `analyze` call sites and macOS's
 "Copy Text" item; report generation works from the citations.
 
+**Extracted PDF prose has no paragraph breaks, and that is a real, unfixed
+gap.** `extractCOISection` and `extractDataAvailabilitySection` end a
+section at `(?=\n\n|\z)` — correct for JATS markdown, whose paragraphs are
+separated by blank lines. PDFKit's `PDFPage.string` separates *lines* with a
+single `\n` and never emits a blank one, so a section header found mid-page
+can match from there to the end of the page, or on the last page to the end
+of the document, folding unrelated prose into what gets analysed as the
+disclosure. A bounded post-extraction truncation was tried and reverted: it
+traded this for a worse failure on the common, properly segmented case (a
+long ordinary JATS disclosure ending "...all other authors declare no
+competing interests" had that declaration pushed past the cap, so the
+article stored a conflict it had explicitly declared away). The real fix is
+section segmentation of extracted text — the "PDF section segmentation" row
+in §3's table above, which the next slice already scopes out of this one.
+
 **`contentKind` now exists, and it closed a gap this table never named.**
 `FullTextContentKind` carries bmlib's four raw values verbatim — `fulltext`,
 `abstract`, `extracted`, `none` — so a stored value means the same thing on
