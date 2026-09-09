@@ -71,8 +71,9 @@ final class FullTextCacheQuarantineTests: XCTestCase {
     }
 
     /// A second corrupt entry replaces the first rather than failing the read:
-    /// `replaceItemAt` overwrites, and a quarantine that threw would turn a
-    /// recoverable miss into an error.
+    /// the quarantine removes any existing `.corrupt` file before moving the new
+    /// one aside, because `moveItem` refuses an occupied destination — and a
+    /// quarantine that threw would turn a recoverable miss into an error.
     func testASecondQuarantineOverwritesTheFirst() throws {
         try Data("first".utf8).write(to: quarantinedFile)
         try Data("second".utf8).write(to: cachedFile)

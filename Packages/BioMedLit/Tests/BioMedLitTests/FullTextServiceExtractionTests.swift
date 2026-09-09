@@ -80,13 +80,33 @@ final class FullTextServiceExtractionTests: XCTestCase {
         ]
     }
 
+    /// Every PMID any test in this file fetches for.
+    ///
+    /// The service caches into the *real* user Application Support directory,
+    /// so these tests leave files on the machine that runs them unless they
+    /// clear up after themselves — and once `downloadAndCachePDF` consults the
+    /// cache, a leftover entry from an earlier run silently skips the download
+    /// a later test is asserting on.
+    private static let cachedPMIDs = ["1", "42"]
+
+    private static func clearCache() {
+        for pmid in cachedPMIDs {
+            let file = FullTextService.pdfCacheDirectory
+                .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: file.appendingPathExtension("corrupt"))
+        }
+    }
+
     override func setUp() {
         super.setUp()
         StubURLProtocol.reset()
+        Self.clearCache()
     }
 
     override func tearDown() {
         StubURLProtocol.reset()
+        Self.clearCache()
         super.tearDown()
     }
 
@@ -187,13 +207,12 @@ final class FullTextServiceExtractionTests: XCTestCase {
     /// no explicit PMC ID forces identifier resolution, which is the only way to
     /// populate `pdfRenderURL` and so the only way a test reaches this branch.
     func testAnEuropePMCPDFThatYieldsNothingFallsBackToTheHeldAbstract() async throws {
-        // A pmid this file's other tests do not use, and cleaned up on both ends,
-        // so a stale cache file from a previous run cannot make the download
+        // A pmid this file's other tests do not use. `setUp` clears it, so a
+        // stale cache file from a previous run cannot make the download
         // assertion below pass for the wrong reason.
         let pmid = "42"
-        let cachedFile = FullTextService.pdfCacheDirectory.appendingPathComponent("\(pmid).pdf")
-        try? FileManager.default.removeItem(at: cachedFile)
-        defer { try? FileManager.default.removeItem(at: cachedFile) }
+        let cachedFile = FullTextService.pdfCacheDirectory
+            .appendingPathComponent("\(pmid).\(BioMedLitConstants.pdfExtension)")
 
         StubURLProtocol.routes = [
             "search": (200, Data(Self.searchResponseWithPDFRender.utf8)),
