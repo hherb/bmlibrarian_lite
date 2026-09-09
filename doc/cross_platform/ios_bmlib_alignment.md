@@ -22,8 +22,11 @@ against real corpora and pinned by mutation testing. None of them have reached S
 This document is a gap list, ordered by what it costs to leave each one alone.
 
 **Status.** Everything in §1 is now fixed on `master` — see
-[§1 status](#1-status-fixed) for what landed and what it moved. §2 onward is
-still a plan; nothing there has been implemented.
+[§1 status](#1-status-fixed) for what landed and what it moved. Three rows of
+§3 landed with the PDF-extraction slice (2026-09-09): PDF → text extraction,
+body-less JATS detection / `content_kind`, and corrupt-entry quarantine — see
+§3 for what changed and two claims it corrects. §2 remains a plan; nothing
+there has been implemented.
 
 ---
 
@@ -424,38 +427,68 @@ free PDF (1d) → Unpaywall → DOI/PubMed URL.
 | NCBI PMC JATS tier (`efetch`) — issue #47, 0.7.0 | ✅ | ❌ |
 | Second PMC-id resolver (NCBI ID Converter) — #47 | ✅ | ❌ |
 | Free-PDF availability allow-list — #79 | ✅ | ✅ (1.1) |
-| Body-less JATS detection / `content_kind` | ✅ | ❌ |
-| PDF → text extraction | ✅ | ❌ (see below) |
+| Body-less JATS detection / `content_kind` | ✅ | ✅ (see below) |
+| PDF → text extraction | ✅ | ✅ (see below) |
 | PDF section segmentation | ✅ (0.8.0) | ❌ |
 | Judged PDF metadata title — #56, 0.9.1 | ✅ | n/a |
-| Atomic cache write — #70, 0.9.0 | ✅ | ❌ |
-| Corrupt-entry quarantine — #71, 0.9.0 | ✅ | ❌ |
+| Atomic cache write — #70, 0.9.0 | ✅ | ✅ (see below) |
+| Corrupt-entry quarantine — #71, 0.9.0 | ✅ | ✅ (see below) |
 | Exhaustion / swallowed-bug reporting — #67/#68/#72 | ✅ | ❌ |
 
-Three of these are worth naming individually.
+Four of these are worth naming individually. The next slice is the four rows
+still marked ❌ above: the NCBI efetch tier, the second PMC-id resolver, PDF
+section segmentation and exhaustion reporting.
 
-**A downloaded PDF contributes nothing.** `Document.applyFullTextResult` has
-`case .pdfURL: fullTextContent = nil`. The PDF is fetched, cached and rendered for
-the user in `FullTextViewer` (PDFKit, display only), but scoring, citation
-extraction and transparency analysis all see `nil`. Now that 1.1 has landed the
-PDF tier finally *offers* the ~95% of free PDFs it used to discard, which makes
-this the binding constraint: the PDFs arrive and still contribute no text. PDFKit's `PDFPage.string` is the native equivalent
-of what bmlib does with PyMuPDF.
+**A downloaded PDF now contributes its text.** `FullTextService`'s PDF tiers
+download, cache and extract inside the tier itself, and the recovered prose
+reaches `Document.fullTextContent` under `content_kind = .extracted`.
+PDFKit's `PDFPage.string` is the native equivalent of what bmlib does with
+PyMuPDF; the tier still reports the PDF's own URL alongside the text, since
+extraction recovers the prose and loses the figures, tables and layout. This
+corrects a claim the previous version of this row made: the missing text was
+said to cost "scoring, citation extraction and transparency analysis", which
+is wrong about the first two — neither `ParallelScoringService` nor
+`ParallelCitationService` reads `fullTextContent`; both work from abstracts.
+The cost lands on transparency analysis and report generation only.
 
-**No `contentKind`.** bmlib distinguishes `fulltext` / `abstract` / `extracted` /
-`none`, which is what lets it detect the medRxiv preprints that serve
-`<front>`+`<back>` with no prose, hold them back as a last resort, and never cache
-them. iOS cannot tell an abstract-only retrieval from a real one, so it caches and
-scores it as full text.
+**`contentKind` now exists, and it closed a gap this table never named.**
+`FullTextContentKind` carries bmlib's four raw values verbatim — `fulltext`,
+`abstract`, `extracted`, `none` — so a stored value means the same thing on
+both sides. What made this worth having is not hypothetical: an abstract-only
+Europe PMC deposit (`<front>` and `<back>`, no `<body>`) parsed successfully,
+so it was returned, cached and analysed as an article body, because
+`JATSXMLParser.parseToHTML` throws `.noContent` only when the whole rendering
+is empty. Detecting it needed bmlib's own predicate, not the obvious one: a
+non-empty `bodySections` collection would still have reported this deposit as
+`fulltext`, because back-matter sections land in the same collection as true
+body sections. The predicate is a count of prose paragraphs found *inside*
+`<body>` instead — see `doc/cross_platform/fulltext_retrieval.md` for the
+rule stated as Android will also have to satisfy it.
 
-**Cache writes are not atomic and reads are not validated.** `cachePDF` writes
-straight to the target path. bmlib's issue **#70** found the failure this creates:
-a disk that fills mid-write leaves a truncated file that decodes fine and is served
-as complete forever, with no log at any level — "worse than #67: that lost data in
-a shape resembling absence, this fabricated a complete-looking article". Its fix is
-temp file + `fsync` + `os.replace`; issue **#71** adds quarantining an unreadable
-entry to a `.corrupt` name, because leaving it in place hides a freshly cached PDF
-behind it and the article re-downloads on every run forever.
+**Cache writes were already atomic; reads were not validated.** This row and
+its note previously said `cachePDF` "writes straight to the target path" and
+repeated bmlib's issue **#70** failure — a disk that fills mid-write leaves a
+truncated file that decodes fine and is served as complete forever. That is
+wrong: `cachePDF` has always called `data.write(to:options: .atomic)`, which
+writes an auxiliary file and renames; a full disk fails the write and throws,
+so the truncated-file failure was never reachable through this path. The real
+defect was on the read side, which validated nothing —
+`cachedPDFPath(for:)` checked only `FileManager.fileExists`. It now also
+checks the `%PDF` magic bytes, and a failing entry is renamed to a `.corrupt`
+name rather than deleted, matching bmlib's issue **#71** reasoning: leaving a
+bad entry in place hides a freshly cached PDF behind it and the article
+re-downloads on every run forever. Worth being precise about what this
+hardens: `FullTextService.cachedPDFPath(for:)` has no callers in the package
+or the app today — the views read `Document.fullTextPDFPath` directly — so
+this closes a path a future caller could take, not a defect a user hits now.
+
+**One deliberate deviation from bmlib**, beside the `plc` note in §1: bmlib
+writes cache entries through a temp file with `fsync` before `os.replace`.
+Swift's `.atomic` gives temp-and-rename without the sync, so the residual
+exposure is a power loss that loses the file rather than one that truncates
+it — the benign failure, and the one the new read validation above catches.
+Hand-rolling an `fsync` write to close that gap is not worth diverging from a
+well-tested platform primitive for the outcome it would buy.
 
 ---
 
@@ -513,17 +546,18 @@ behind it and the article re-downloads on every run forever.
 
 ## 7. Suggested order
 
-Roughly by (impact × confidence) ÷ effort. Items 1–3 are **done** — see
-[§1 status](#1-status-fixed).
+Roughly by (impact × confidence) ÷ effort. Items 1–4 are **done** — see
+[§1 status](#1-status-fixed) for 1–3 and §3 for 4.
 
 1. ~~**1.1 Europe PMC availability allow-list**~~ — done.
 2. ~~**1.4 funder patterns**~~ — done, corpus lifted as the fourth shared fixture.
 3. ~~**1.2 + 1.3 JATS caption routing and unsectioned body**~~ — done.
-4. **PDF → text via PDFKit** — now the highest-value remaining item, and more so
-   than before: 1.1 means the Europe PMC PDF tier finally offers the ~95% of free
-   PDFs it was discarding, but `Document.applyFullTextResult` still sets
-   `fullTextContent = nil` for `case .pdfURL`, so none of them reach scoring,
-   citation extraction or transparency analysis.
+4. ~~**PDF → text via PDFKit**~~ — done. `FullTextService`'s PDF tiers now
+   download, cache and extract inside the tier itself, so the recovered prose
+   reaches transparency analysis and report generation (not scoring or
+   citation extraction — neither reads full text). See §3 for what landed
+   with it: `content_kind`, cache-read validation and the abstract-holdback
+   rule. Items 5–7 below are unchanged.
 5. **2.5 trial ids from full text** with the cue window, and **2.4** the
    unreachable-API guard — the two places where iOS currently reports a confident
    wrong answer rather than an unknown.
@@ -532,9 +566,9 @@ Roughly by (impact × confidence) ÷ effort. Items 1–3 are **done** — see
 7. Everything in §3's table below the PDF work, then §4/§5 as product priorities
    dictate.
 
-Item 4 is a behaviour change that **moves stored values**: `fullTextContent` and
-cached full text are not comparable across it, and giving the scorer a paper's
-full text where it previously saw `nil` moves transparency scores too. The
-mechanism for that is now in place — bump
-`TransparencyConstants.analyzerVersion` and stored results mark themselves stale
-(see [Stored values](#stored-values)).
+Item 4 was a behaviour change that **moves stored values**: `fullTextContent`
+and cached full text are not comparable across it, and giving the scorer a
+paper's full text where it previously saw `nil` moves transparency scores too.
+`TransparencyConstants.analyzerVersion` went from 2 to 3 with it, and stored
+results from before mark themselves stale rather than being silently read
+beside a current score (see [Stored values](#stored-values)).

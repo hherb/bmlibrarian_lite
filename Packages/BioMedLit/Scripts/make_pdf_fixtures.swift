@@ -19,6 +19,13 @@
 //
 // Run from the package root:  swift Scripts/make_pdf_fixtures.swift
 //
+// Not byte-reproducible: CGContext embeds a run-varying /ID and, for
+// encrypted.pdf, fresh encryption key material on every run, so re-running
+// this against an unchanged fixture set still diffs all four files. The
+// diff is spurious — semantically equivalent output, and the regenerated
+// set passes the same tests — read it as such rather than as evidence
+// something changed.
+//
 // CoreGraphics and CoreText only, so this needs no dependency and no Xcode
 // project. Text is drawn with CoreText rather than as an image, because the
 // whole point of three of these four files is that PDFKit can get the text
