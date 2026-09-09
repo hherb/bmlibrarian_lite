@@ -44,7 +44,12 @@ public enum TransparencyConstants {
     ///   footnotes captured instead of dropped; and the funder patterns
     ///   recalibrated against the shared labelled corpus (bmlib #36). Each
     ///   changes which evidence reaches the scorer.
-    public static let analyzerVersion = 2
+    /// - Version 3 (2026-09-09): a downloaded PDF now contributes its extracted
+    ///   text, where the analyzer previously received `nil` for every
+    ///   PDF-sourced article; and an abstract-only Europe PMC deposit is no
+    ///   longer handed over as an article body. Both change which evidence
+    ///   reaches the scorer, in opposite directions.
+    public static let analyzerVersion = 3
 
 
     // MARK: - API URLs

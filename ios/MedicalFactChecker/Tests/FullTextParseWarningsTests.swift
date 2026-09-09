@@ -582,4 +582,70 @@ final class FullTextParseWarningsTests: XCTestCase {
             "https://pubmed.ncbi.nlm.nih.gov/12345678/"
         )
     }
+
+    // MARK: - Extracted PDF text
+
+    /// The whole point of the slice: a PDF-sourced article now has text for the
+    /// transparency analyzer, which used to receive `nil`.
+    func testAnExtractedResultStoresItsTextAndItsLocalPath() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+        XCTAssertEqual(document.fullTextContent, "Recovered prose.")
+        XCTAssertEqual(
+            document.fullTextPDFPath, "/tmp/a.pdf",
+            "the cached file, not the remote URL the field used to be given"
+        )
+        XCTAssertEqual(document.fullTextContentKindRaw, "extracted")
+    }
+
+    /// Extraction serves analysis; display still prefers the document.
+    /// `cachedFullTextResult` tests `fullTextContent` before `fullTextPDFPath`,
+    /// so without a kind-first branch every PDF-sourced article would reopen as
+    /// prose and lose its figures, tables and layout.
+    func testAnExtractedRecordReopensAsThePDFAndNotAsText() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+        let rebuilt = document.cachedFullTextResult
+        XCTAssertNotNil(rebuilt?.content.pdfURL, "the viewer must get the PDF back")
+        XCTAssertEqual(rebuilt?.content.pdfURL?.path, "/tmp/a.pdf")
+        XCTAssertEqual(
+            rebuilt?.extractedText, "Recovered prose.",
+            "and the analyzer must still reach the text"
+        )
+    }
+
+    /// A record written before this field existed keeps today's behaviour:
+    /// `nil` means "nothing known", not "no text".
+    func testALegacyRecordKeepsFieldPopulationOrder() {
+        let document = makeDocument()
+        document.fullTextContent = "markdown from an older build"
+        document.fullTextSource = "europepmc"
+        document.fullTextFetchedAt = Date()
+        XCTAssertNil(document.fullTextContentKindRaw)
+        XCTAssertEqual(document.cachedFullTextResult?.content.markdownContent, "markdown from an older build")
+    }
+
+    /// A parsed article is unaffected, and its kind is recorded.
+    func testAParsedArticleStoresTheFulltextKind() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .html(content: "<p>body</p>", markdown: "body"),
+            source: .europePMC,
+            contentKind: .fulltext
+        ))
+        XCTAssertEqual(document.fullTextContentKindRaw, "fulltext")
+        XCTAssertNil(document.fullTextPDFPath)
+    }
 }
