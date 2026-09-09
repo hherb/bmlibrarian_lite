@@ -809,14 +809,30 @@ public actor FullTextService {
 
     // MARK: - PDF Caching
 
-    /// Download and cache a PDF file.
+    /// Return this article's cached PDF, downloading it first if there is none.
+    ///
+    /// The cache check is step one, as `doc/cross_platform/fulltext_retrieval.md`
+    /// specifies for every platform. Without it this method re-downloaded on
+    /// every call — a second fetch of bytes already on disk — and
+    /// ``cachedPDFPath(for:)``'s validation and quarantine had no production
+    /// caller at all, so a corrupt entry was never moved aside by anything but a
+    /// test. A cached entry that fails validation is quarantined there and reads
+    /// as a miss, which is exactly what makes the download below the repair.
     ///
     /// - Parameters:
-    ///   - url: URL to download the PDF from.
+    ///   - url: URL to download the PDF from, on a cache miss.
     ///   - pmid: PubMed ID for naming the cached file.
     /// - Returns: Local file path to the cached PDF.
     /// - Throws: `FullTextError` on failure.
     public func downloadAndCachePDF(from url: URL, for pmid: String) async throws -> String {
+        if let cached = Self.cachedPDFPath(for: pmid) {
+            BioMedLitLib.logger?.info(
+                "Serving the cached PDF for PMID \(pmid) from \(cached)",
+                category: .fullText
+            )
+            return cached
+        }
+
         BioMedLitLib.logger?.info(
             "Downloading PDF for PMID \(pmid) from \(url.absoluteString)",
             category: .fullText
