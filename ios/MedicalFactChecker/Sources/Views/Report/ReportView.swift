@@ -1419,7 +1419,8 @@ struct DocumentDetailSheet: View {
         if document.isLinkOnly {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
-                degradation: document.cachedRetrievalNotice.degradation
+                degradation: document.cachedRetrievalNotice.degradation,
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
             )
 
             if let url = document.fullTextLinkDestination {

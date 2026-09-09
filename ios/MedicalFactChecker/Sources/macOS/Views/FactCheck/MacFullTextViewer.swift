@@ -176,7 +176,8 @@ struct MacFullTextViewer: View {
             // never show this banner at all.
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
-                degradation: document.cachedRetrievalNotice.degradation
+                degradation: document.cachedRetrievalNotice.degradation,
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
             )
             renderedContent
         }
@@ -298,7 +299,10 @@ struct MacFullTextViewer: View {
                 }
             }
 
-            if let pdfPath = document.fullTextPDFPath {
+            // The file path, not whatever `fullTextPDFPath` holds: a record
+            // where nothing was downloaded stores a remote URL there, and both
+            // of these actions need something Finder can find.
+            if let pdfPath = document.localPDFFilePath {
                 Button(action: { openInPreview(pdfPath) }) {
                     Label("Open in Preview", systemImage: "eye")
                 }

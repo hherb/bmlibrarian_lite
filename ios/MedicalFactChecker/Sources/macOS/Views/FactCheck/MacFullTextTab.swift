@@ -212,7 +212,8 @@ struct MacFullTextTab: View {
             // fields, so it survives having no content to render.
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
-                degradation: document.cachedRetrievalNotice.degradation
+                degradation: document.cachedRetrievalNotice.degradation,
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
             )
 
             Image(systemName: "doc.text.magnifyingglass")

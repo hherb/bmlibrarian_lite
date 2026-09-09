@@ -29,9 +29,14 @@ final class ParseWarningMessageTests: XCTestCase {
 
     private func message(
         warnings: JATSParseWarnings = JATSParseWarnings(),
-        degradation: FullTextDegradation? = nil
+        degradation: FullTextDegradation? = nil,
+        extractionCoverage: PDFExtractionCoverage? = nil
     ) -> ParseWarningMessage? {
-        ParseWarningMessage(warnings: warnings, degradation: degradation)
+        ParseWarningMessage(
+            warnings: warnings,
+            degradation: degradation,
+            extractionCoverage: extractionCoverage
+        )
     }
 
     /// Nothing lost and the best source used: the banner must not appear at all.
@@ -152,5 +157,84 @@ final class ParseWarningMessageTests: XCTestCase {
             let other = String(describing: ParseWarningMessage.degraded(reason).headline)
             XCTAssertFalse(other.contains("again"), other)
         }
+    }
+
+    // MARK: - Partial extraction
+
+    /// The silence this case was added to end. A PDF whose last four pages gave
+    /// no text renders as a complete-looking document, and the transparency
+    /// verdict beside it was computed from prose that stopped early.
+    func testAPartialExtractionIsReported() {
+        XCTAssertEqual(
+            message(extractionCoverage: PDFExtractionCoverage(convertedPages: 10, pageCount: 14)),
+            .partialExtraction(PDFExtractionCoverage(convertedPages: 10, pageCount: 14))
+        )
+    }
+
+    /// A whole extraction says nothing. The banner is rationed to the cases
+    /// where something is actually missing — a note over content that is fine is
+    /// what trains a reader to dismiss it.
+    func testACompleteExtractionSaysNothing() {
+        XCTAssertNil(
+            message(extractionCoverage: PDFExtractionCoverage(convertedPages: 6, pageCount: 6))
+        )
+    }
+
+    /// It alarms, unlike a degradation. The shortfall is invisible on screen.
+    func testAPartialExtractionIsAWarning() {
+        let message = try? XCTUnwrap(
+            message(extractionCoverage: PDFExtractionCoverage(convertedPages: 1, pageCount: 9))
+        )
+        XCTAssertEqual(message?.isWarning, true)
+    }
+
+    /// A PDF reached by fallback whose text stops short has two things wrong
+    /// with it. The missing text is the one that changes what the reader should
+    /// conclude, so it outranks the note about where the copy came from.
+    func testAPartialExtractionOutranksADegradation() {
+        XCTAssertEqual(
+            message(
+                degradation: .jatsParseFailed,
+                extractionCoverage: PDFExtractionCoverage(convertedPages: 2, pageCount: 8)
+            ),
+            .partialExtraction(PDFExtractionCoverage(convertedPages: 2, pageCount: 8))
+        )
+    }
+
+    /// And a complete extraction lets the degradation through, rather than
+    /// swallowing it.
+    func testACompleteExtractionStillReportsADegradation() {
+        XCTAssertEqual(
+            message(
+                degradation: .jatsParseFailed,
+                extractionCoverage: PDFExtractionCoverage(convertedPages: 8, pageCount: 8)
+            ),
+            .degraded(.jatsParseFailed)
+        )
+    }
+
+    /// Parse losses still win over everything: they describe the rendering the
+    /// reader is actually looking at.
+    func testParseLossesOutrankAPartialExtraction() {
+        XCTAssertEqual(
+            message(
+                warnings: JATSParseWarnings(losses: [.noContent]),
+                extractionCoverage: PDFExtractionCoverage(convertedPages: 2, pageCount: 8)
+            ),
+            .noContent
+        )
+    }
+
+    /// A scan gets its own sentence. "0 of 12 pages" understates it: this is not
+    /// a shortfall in the analysis but its complete absence, on a document that
+    /// looks entirely ordinary on screen.
+    func testAScanIsReportedAsHavingYieldedNoTextAtAll() {
+        let message = message(
+            extractionCoverage: PDFExtractionCoverage(convertedPages: 0, pageCount: 12)
+        )
+        XCTAssertEqual(
+            message, .partialExtraction(PDFExtractionCoverage(convertedPages: 0, pageCount: 12))
+        )
+        XCTAssertEqual(message?.isWarning, true)
     }
 }

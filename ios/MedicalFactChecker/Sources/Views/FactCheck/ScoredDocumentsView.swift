@@ -517,7 +517,8 @@ struct DocumentScoreRow: View {
             VStack(alignment: .leading, spacing: ScoredDocumentsConstants.sectionSpacing) {
                 ParseWarningBanner(
                     warnings: document.cachedRetrievalNotice.warnings,
-                    degradation: document.cachedRetrievalNotice.degradation
+                    degradation: document.cachedRetrievalNotice.degradation,
+                    extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
                 )
 
                 if let url = document.fullTextLinkDestination {
@@ -626,12 +627,19 @@ struct DocumentScoreRow: View {
                         // hand here left them behind to label the reader's own
                         // upload as truncated, and left the superseded HTML in
                         // place to shadow the PDF they had just chosen.
-                        let result = AppFullTextResult.uploaded(content: .pdfURL(destURL))
+                        // The copied file's path travels *in* the result, so the
+                        // one writer records the path and the "this is a local
+                        // file" flag together. Assigning `fullTextPDFPath` by
+                        // hand afterwards — which is what this did — could not
+                        // touch the flag, because `storePDFPath` is private:
+                        // the record ended up holding a filesystem path
+                        // labelled as a remote link, and every reopen of an
+                        // uploaded PDF failed with a server error.
+                        let result = AppFullTextResult.uploaded(
+                            content: .pdfURL(destURL),
+                            localPDFPath: destURL.path
+                        )
                         document.applyFullTextResult(result)
-                        // The cached file, not the URL: `MacPDFView` opens this
-                        // as a filesystem path. Same follow-up as the macOS
-                        // download path.
-                        document.fullTextPDFPath = destURL.path
                         fullTextResult = result
                         isProcessingUpload = false
                         showFullTextViewer = true

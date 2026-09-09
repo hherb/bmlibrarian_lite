@@ -203,6 +203,14 @@ struct AppFullTextResult: Equatable, Sendable {
     /// Where the downloaded PDF now is on disk, or `nil` when none was cached.
     let localPDFPath: String?
 
+    /// How much of the PDF ``extractedText`` came from, or `nil` when no
+    /// extraction was run.
+    ///
+    /// Shown to the reader by `ParseWarningBanner`, and persisted alongside the
+    /// text, so a partial extraction says so on every reopen rather than only
+    /// in the log of the session that fetched it.
+    let extractionCoverage: PDFExtractionCoverage?
+
     /// Create a full-text result.
     ///
     /// Replaces the synthesised memberwise initialiser so `warnings` and
@@ -224,6 +232,8 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     when none was.
     ///   - localPDFPath: Where a downloaded PDF now is on disk, or `nil` — the
     ///     default — when none was cached.
+    ///   - extractionCoverage: How much of the PDF `extractedText` came from,
+    ///     or `nil` — the default — when no extraction was run.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,
@@ -231,7 +241,8 @@ struct AppFullTextResult: Equatable, Sendable {
         degradation: FullTextDegradation? = nil,
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
-        localPDFPath: String? = nil
+        localPDFPath: String? = nil,
+        extractionCoverage: PDFExtractionCoverage? = nil
     ) {
         self.content = content
         self.source = source
@@ -240,6 +251,7 @@ struct AppFullTextResult: Equatable, Sendable {
         self.contentKind = contentKind
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath
+        self.extractionCoverage = extractionCoverage
     }
 
     /// Whether this result can be displayed within the app.
@@ -316,10 +328,25 @@ struct AppFullTextResult: Equatable, Sendable {
 
     /// Create an uploaded result from user-provided content.
     ///
-    /// - Parameter content: The uploaded content type (markdown, HTML, or PDF).
+    /// `localPDFPath` matters for an uploaded PDF specifically. The file the
+    /// reader chose has been copied into the app's own storage, so it *is* a
+    /// local file, and saying so here is what lets `Document.applyFullTextResult`
+    /// record it as one. Without it the upload path stored the file's URL string
+    /// with the "this is a local file" flag set to `false`, and the record read
+    /// back as a remote link: `URL(string:)` turned the absolute path into a
+    /// schemeless URL, the loader fetched it over HTTP, and the reader's own
+    /// document came back as "The server did not return the PDF."
+    ///
+    /// - Parameters:
+    ///   - content: The uploaded content type (markdown, HTML, or PDF).
+    ///   - localPDFPath: Where the copied PDF now is on disk, or `nil` — the
+    ///     default — for uploads that are not PDFs.
     /// - Returns: A full-text result with uploaded source.
-    static func uploaded(content: AppFullTextContentType) -> AppFullTextResult {
-        AppFullTextResult(content: content, source: .uploaded)
+    static func uploaded(
+        content: AppFullTextContentType,
+        localPDFPath: String? = nil
+    ) -> AppFullTextResult {
+        AppFullTextResult(content: content, source: .uploaded, localPDFPath: localPDFPath)
     }
 }
 

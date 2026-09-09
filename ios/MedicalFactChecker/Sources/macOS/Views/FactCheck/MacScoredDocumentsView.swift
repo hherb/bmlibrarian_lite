@@ -411,7 +411,8 @@ struct MacDocumentCard: View {
         if document.isLinkOnly {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
-                degradation: document.cachedRetrievalNotice.degradation
+                degradation: document.cachedRetrievalNotice.degradation,
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
             )
 
             if let url = document.fullTextLinkDestination {
@@ -456,8 +457,10 @@ struct MacDocumentCard: View {
 
                 Spacer()
 
-                // Open in Preview (for PDFs)
-                if document.fullTextPDFPath != nil {
+                // Open in Preview (for PDFs). Gated on there being a real
+                // file: when nothing was downloaded the stored value is a
+                // remote URL, and offering Preview for it does nothing.
+                if document.localPDFFilePath != nil {
                     Button(action: openInPreview) {
                         Label("Open in Preview", systemImage: "eye")
                     }
@@ -526,7 +529,7 @@ struct MacDocumentCard: View {
                 Label("View Full Text", systemImage: "doc.text")
             }
 
-            if document.fullTextPDFPath != nil {
+            if document.localPDFFilePath != nil {
                 Button(action: openInPreview) {
                     Label("Open in Preview", systemImage: "eye")
                 }
@@ -666,15 +669,22 @@ struct MacDocumentCard: View {
     }
 
     /// Open the cached PDF in Preview.app.
+    ///
+    /// Asks for the *file* path, so a stored remote URL string cannot be
+    /// turned into a `file://` URL that names nothing.
     private func openInPreview() {
-        guard let path = document.fullTextPDFPath else { return }
+        guard let path = document.localPDFFilePath else { return }
         let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.open(url)
+        if !NSWorkspace.shared.open(url) {
+            AppLogger.fullText.error(
+                "Preview.app declined to open the cached PDF at \(path, privacy: .public)"
+            )
+        }
     }
 
     /// Reveal the cached PDF in Finder.
     private func revealInFinder() {
-        guard let path = document.fullTextPDFPath else { return }
+        guard let path = document.localPDFFilePath else { return }
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
     }
 

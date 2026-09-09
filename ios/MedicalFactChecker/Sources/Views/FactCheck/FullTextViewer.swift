@@ -56,7 +56,9 @@ struct FullTextViewer: View {
                 // table they came for must learn the rendering is incomplete
                 // before concluding the evidence is absent (#181).
                 ParseWarningBanner(
-                    warnings: result.warnings, degradation: result.degradation
+                    warnings: result.warnings,
+                    degradation: result.degradation,
+                    extractionCoverage: result.extractionCoverage
                 )
                 content
             }
@@ -121,6 +123,17 @@ struct FullTextViewer: View {
             case .markdown(let text):
                 Button(action: { PlatformHelper.copyToClipboard(text) }) {
                     Label("Copy Text", systemImage: "doc.on.doc")
+                }
+            case .pdfURL:
+                // A PDF-sourced article's text lives in `extractedText`, not in
+                // `content`, so switching on the content alone dropped this
+                // action for exactly the articles the extraction slice added —
+                // while macOS kept offering it. Absent for a scan, which has no
+                // recovered prose to copy.
+                if let extracted = result.extractedText {
+                    Button(action: { PlatformHelper.copyToClipboard(extracted) }) {
+                        Label("Copy Text", systemImage: "doc.on.doc")
+                    }
                 }
             default:
                 EmptyView()

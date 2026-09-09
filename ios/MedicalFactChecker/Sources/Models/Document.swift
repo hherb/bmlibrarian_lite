@@ -212,6 +212,27 @@ final class Document {
     /// lightweight SwiftData migration, as ``fullTextContentKindRaw`` above.
     var fullTextPDFPathIsLocalFile: Bool?
 
+    /// Pages of the stored PDF that yielded text, or `nil` when no extraction
+    /// was run.
+    ///
+    /// Paired with ``fullTextTotalPages``; read them through
+    /// ``storedExtractionCoverage``, which returns them together or not at all.
+    /// Two scalar columns rather than one encoded value because SwiftData
+    /// lightweight-migrates added optional scalars, and because a `#Predicate`
+    /// can compare them — the reasoning ``fullTextContentKindRaw`` was added
+    /// with.
+    ///
+    /// `nil` means "no extraction", not "no pages". A record written before
+    /// these existed also answers `nil`: its text may well be partial and there
+    /// is no way to tell after the fact, so it keeps the pre-existing silence
+    /// and is rewritten on the next fetch.
+    var fullTextExtractedPages: Int?
+
+    /// Pages the stored PDF holds, or `nil` when no extraction was run.
+    ///
+    /// See ``fullTextExtractedPages``.
+    var fullTextTotalPages: Int?
+
     /// Source of the full text (for display and debugging).
     /// Values: "europepmc", "unpaywall", "doi"
     var fullTextSource: String?
@@ -542,6 +563,7 @@ final class Document {
         // each call site is what let the cache and the live result drift apart.
         fullTextDegradedReasonRaw = result.degradation?.rawValue
         fullTextContentKindRaw = result.contentKind.rawValue
+        storeExtractionCoverage(result.extractionCoverage)
 
         switch result.content {
         case .markdown(let content):
@@ -593,6 +615,31 @@ final class Document {
         fullTextPDFPathIsLocalFile = path == nil ? nil : isLocalFile
     }
 
+    /// Store an extraction's coverage, or clear it.
+    ///
+    /// One writer for the pair, for the reason ``storePDFPath(_:isLocalFile:)``
+    /// is: two counts written independently can be left describing different
+    /// extractions, and a coverage figure that disagrees with the text beside it
+    /// tells the reader a precise, wrong thing.
+    ///
+    /// - Parameter coverage: The figure to store, or `nil` to clear both counts.
+    private func storeExtractionCoverage(_ coverage: PDFExtractionCoverage?) {
+        fullTextExtractedPages = coverage?.convertedPages
+        fullTextTotalPages = coverage?.pageCount
+    }
+
+    /// The persisted extraction coverage, or `nil` when none was recorded.
+    ///
+    /// Answers `nil` unless *both* counts are present. A half-written pair is a
+    /// record we cannot describe, and reporting "0 of 12 pages" for it would
+    /// invent a figure rather than admit to not having one.
+    private var storedExtractionCoverage: PDFExtractionCoverage? {
+        guard let converted = fullTextExtractedPages, let total = fullTextTotalPages else {
+            return nil
+        }
+        return PDFExtractionCoverage(convertedPages: converted, pageCount: total)
+    }
+
     /// Mark the document as having no full text available.
     func markFullTextUnavailable() {
         fullTextUnavailable = true
@@ -605,6 +652,7 @@ final class Document {
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
         fullTextContentKindRaw = nil
+        storeExtractionCoverage(nil)
     }
 
     /// Clear cached full text data to allow re-fetching.
@@ -619,6 +667,7 @@ final class Document {
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
         fullTextContentKindRaw = nil
+        storeExtractionCoverage(nil)
     }
 
     // MARK: - Cached Full Text
@@ -672,6 +721,27 @@ final class Document {
         fullTextPDFPathIsLocalFile == true
             ? .localPDF(path: path)
             : .remotePDFLink(urlString: path)
+    }
+
+    /// The filesystem path of this document's PDF, or `nil` when what is stored
+    /// is a remote link rather than a file.
+    ///
+    /// For the actions that need a *file* — reveal it in Finder, hand it to
+    /// Preview.app — rather than something to render. Those asked
+    /// ``fullTextPDFPath`` for a non-`nil` value and then built a file URL from
+    /// it, which is the guess ``fullTextPDFPathIsLocalFile`` was added to
+    /// replace: when nothing was downloaded, that field holds a remote URL
+    /// string, and `file:///…/https:/example.org/paper.pdf` is what Finder was
+    /// being handed. The menu item was offered and did nothing at all.
+    /// Read off the flag rather than off ``displayedFullText``, deliberately.
+    /// Whether a file exists is not a display decision: a record whose display
+    /// rule picks the HTML rendering may still have a cached PDF worth
+    /// revealing, and routing this through the display rule would make "can I
+    /// open this file" depend on which of several renderings won. Same rule as
+    /// ``cachedFullTextResult``'s `localPDFPath`, and the same one writer keeps
+    /// the flag honest.
+    var localPDFFilePath: String? {
+        fullTextPDFPathIsLocalFile == true ? fullTextPDFPath : nil
     }
 
     /// The stored full text an analyzer may treat as the article's body, or
@@ -750,7 +820,12 @@ final class Document {
             // got text out of. A scan downloads and caches like any other PDF,
             // and reporting `nil` for it told the viewer there was no file to
             // open when there plainly was one.
-            localPDFPath: fullTextPDFPathIsLocalFile == true ? fullTextPDFPath : nil
+            localPDFPath: fullTextPDFPathIsLocalFile == true ? fullTextPDFPath : nil,
+            // Gated on there being a PDF, not on the kind: a scan stores
+            // `.none` and still has a coverage figure worth reporting — `0` of
+            // however many pages. What the gate excludes is a parsed article,
+            // whose text was never extracted from anything.
+            extractionCoverage: fullTextPDFPath == nil ? nil : storedExtractionCoverage
         )
     }
 
@@ -767,10 +842,24 @@ final class Document {
     /// reader was then told the article has no full text — #183's conclusion
     /// inverted, and cached, so every reopen repeated it.
     ///
-    /// Both facts are read straight from the stored fields, so a record with no
-    /// displayable content still speaks.
-    var cachedRetrievalNotice: (warnings: JATSParseWarnings, degradation: FullTextDegradation?) {
-        (storedParseWarnings, storedDegradation)
+    /// All three facts are read straight from the stored fields, so a record
+    /// with no displayable content still speaks.
+    ///
+    /// The extraction coverage joins them for the same reason the other two are
+    /// here: `MacFullTextViewer` renders only from this model, so a figure held
+    /// on the in-flight result alone would never reach the reader there, and on
+    /// iOS would be lost on reopen — which is how a partial extraction came to
+    /// be shown exactly like a whole article.
+    var cachedRetrievalNotice: (
+        warnings: JATSParseWarnings,
+        degradation: FullTextDegradation?,
+        extractionCoverage: PDFExtractionCoverage?
+    ) {
+        (
+            storedParseWarnings,
+            storedDegradation,
+            fullTextPDFPath == nil ? nil : storedExtractionCoverage
+        )
     }
 
     /// The cached source, defaulting to ``AppFullTextSource/cached``.
@@ -1030,8 +1119,10 @@ enum DisplayedFullText: Equatable {
     case localPDF(path: String)
 
     /// A PDF that was never downloaded — nothing was stored but the link it
-    /// was offered at, which is what a record written before extraction
-    /// existed, or one written with extraction turned off, is left holding.
+    /// was offered at. Three ways a record ends up here: it was written before
+    /// extraction existed, it was written with extraction turned off, or the
+    /// download simply failed. The last is the common one at runtime, and the
+    /// easiest to forget: a 404 or a timeout stores the remote URL too.
     /// Read with `URL(string:)`.
     case remotePDFLink(urlString: String)
 
