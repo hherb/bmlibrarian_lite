@@ -94,9 +94,9 @@ makePDF(named: "imageonly.pdf") { context in
     context.endPage()
 }
 
-// 4. Password-protected. bmlib is explicit that this is a *failed* result and
-//    not an empty successful one, so that a locked file is never logged as a
-//    scan.
+// 4. Password-protected: a *user* password, which is what actually blocks
+//    reading. bmlib is explicit that this is a *failed* result and not an
+//    empty successful one, so that a locked file is never logged as a scan.
 let encryption: CFDictionary = [
     kCGPDFContextUserPassword as String: "secret",
     kCGPDFContextOwnerPassword as String: "owner",
@@ -105,5 +105,24 @@ makePDF(named: "encrypted.pdf", auxiliaryInfo: encryption) { context in
     var box = pageSize
     context.beginPage(mediaBox: &box)
     draw("You should not be able to read this.", in: context, y: 700)
+    context.endPage()
+}
+
+// 5. The negative control for #4, and the reason the guard checks `isLocked`
+//    alone. An *owner* password restricts permissions — printing, copying —
+//    without blocking reads, so this file is encrypted and extracts perfectly.
+//    PDFKit reports `isLocked == false, isEncrypted == true` for it, so a guard
+//    widened to `isEncrypted` rejects a readable article. bmlib rejects on
+//    `needs_pass` for exactly this reason (DECISIONS.md, "the PDF converter"),
+//    and carries the same negative control so that neither guard is a check
+//    that cannot fail.
+let ownerOnly: CFDictionary = [
+    kCGPDFContextOwnerPassword as String: "owner",
+] as CFDictionary
+makePDF(named: "ownerpassword.pdf", auxiliaryInfo: ownerOnly) { context in
+    var box = pageSize
+    context.beginPage(mediaBox: &box)
+    draw("An owner password restricts permissions, not reading.", in: context, y: 700)
+    draw("Methods: we enrolled 120 patients.", in: context, y: 670)
     context.endPage()
 }

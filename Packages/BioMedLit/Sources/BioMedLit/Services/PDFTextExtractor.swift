@@ -124,7 +124,15 @@ public struct PDFKitTextExtractor: PDFTextExtracting {
         // Checked before reading rather than inferred from empty output. A
         // locked document hands back nil for every page, which is
         // indistinguishable from a scan unless the lock is asked about first.
-        if document.isLocked || document.isEncrypted {
+        //
+        // `isLocked` alone, deliberately: it is PDFKit's `needs_pass`, and
+        // bmlib names widening this to `is_encrypted` as the wrong rule
+        // (DECISIONS.md, "fulltext — the PDF converter"). An *owner* password
+        // restricts permissions — printing, copying — without blocking reads,
+        // so such a file reports `isEncrypted == true`, `isLocked == false` and
+        // extracts perfectly. `Fixtures/PDF/ownerpassword.pdf` is exactly that
+        // file, and it is why this guard is not a check that cannot fail.
+        if document.isLocked {
             return PDFExtractionResult(
                 text: "", success: false, pageCount: document.pageCount,
                 convertedPages: 0, warnings: [],

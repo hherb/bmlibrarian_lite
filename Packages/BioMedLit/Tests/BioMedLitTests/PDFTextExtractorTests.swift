@@ -79,6 +79,24 @@ final class PDFTextExtractorTests: XCTestCase {
         XCTAssertNotNil(result.errorMessage)
     }
 
+    /// The negative control the guard needs to not be a check that cannot fail.
+    ///
+    /// An *owner* password restricts permissions without blocking reads, so the
+    /// file is encrypted and converts perfectly. PDFKit reports
+    /// `isLocked == false, isEncrypted == true` for this fixture — verified when
+    /// it was generated — so a guard widened to `isEncrypted` rejects a readable
+    /// article. bmlib rejects on `needs_pass` alone and names widening it as the
+    /// wrong rule (`DECISIONS.md`, "fulltext — the PDF converter"); `isLocked` is
+    /// PDFKit's `needs_pass`.
+    func testAnOwnerPasswordAloneDoesNotBlockExtraction() {
+        let result = extractor.extract(from: Self.fixture("ownerpassword.pdf"))
+        XCTAssertTrue(result.success, "an owner password restricts permissions, not reading")
+        XCTAssertNil(result.errorMessage)
+        XCTAssertTrue(result.text.contains("120 patients"))
+        XCTAssertEqual(result.convertedPages, result.pageCount)
+        XCTAssertTrue(result.isComplete)
+    }
+
     func testAMissingFileIsAFailure() {
         let result = extractor.extract(from: Self.fixture("does-not-exist.pdf"))
         XCTAssertFalse(result.success)
