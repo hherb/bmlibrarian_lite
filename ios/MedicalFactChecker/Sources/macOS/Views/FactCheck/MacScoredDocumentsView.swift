@@ -627,15 +627,17 @@ struct MacDocumentCard: View {
                     document.applyFullTextResult(result)
 
                     switch result.content {
-                    case .markdown, .html:
-                        // Content already stored, show in tab
+                    case .markdown, .html, .pdfURL:
+                        // Everything the tab needs is already on the document:
+                        // `applyFullTextResult` above stored the text, or the
+                        // cached PDF's path. The PDF case used to re-download
+                        // here, which pulled the same bytes a second time over
+                        // the same cache path — the service's tiers download,
+                        // cache and extract inside the tier now — and let a
+                        // transient failure on that second attempt surface as
+                        // "Failed to download PDF" over an article that had in
+                        // fact been retrieved and stored.
                         onShowFullText?(document)
-
-                    case .pdfURL(let url):
-                        // Download and cache PDF
-                        Task {
-                            await downloadAndCachePDF(from: url)
-                        }
 
                     case .webURL(let url):
                         // Opened rather than shown — but only when there is
@@ -659,29 +661,6 @@ struct MacDocumentCard: View {
                     isLoadingFullText = false
                     AppLogger.fullText.error("Failed to fetch full text: \(error.localizedDescription)")
                 }
-            }
-        }
-    }
-
-    /// Download and cache a PDF file.
-    ///
-    /// - Parameter url: The URL to download the PDF from.
-    private func downloadAndCachePDF(from url: URL) async {
-        do {
-            let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
-            let path = try await service.downloadAndCachePDF(from: url, for: document.pmid)
-
-            await MainActor.run {
-                document.fullTextPDFPath = path
-                isLoadingFullText = false
-                // Show in full text tab
-                onShowFullText?(document)
-            }
-        } catch {
-            await MainActor.run {
-                fullTextError = "Failed to download PDF"
-                isLoadingFullText = false
-                AppLogger.fullText.error("Failed to cache PDF: \(error.localizedDescription)")
             }
         }
     }

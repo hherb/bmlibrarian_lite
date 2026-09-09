@@ -730,6 +730,22 @@ final class FullTextParseWarningsTests: XCTestCase {
         XCTAssertEqual(url.path, "/tmp/scan.pdf")
     }
 
+    /// What the removed macOS re-download used to be relied on for: the cached
+    /// file's path reaching the document. `applyFullTextResult` already does it,
+    /// which is why `MacScoredDocumentsView` no longer downloads a second time.
+    func testAPDFResultPutsTheCachedFileOnTheDocument() {
+        let document = makeDocument()
+        document.applyFullTextResult(AppFullTextResult(
+            content: .pdfURL(URL(string: "https://example.org/a.pdf")!),
+            source: .unpaywall,
+            contentKind: .extracted,
+            extractedText: "Recovered prose.",
+            localPDFPath: "/tmp/a.pdf"
+        ))
+
+        XCTAssertEqual(document.fullTextPDFPath, "/tmp/a.pdf")
+    }
+
     /// An extracted PDF reports its local path too, and still carries the prose
     /// separately for the analyzer.
     func testARebuiltExtractedResultCarriesBothTheFileAndTheProse() throws {
