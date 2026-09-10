@@ -8,7 +8,7 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-- **Europe PMC's own word for what an identifier is** (#209, branch
+- **Europe PMC's own word for what an identifier is** (#209, PR #211, branch
   `fix/europepmc-source-kind-209`). Rules that bind:
   - **The kind is stated, not guessed.** `ArticleIdentifierKind` is built from
     the record's `source` field (`MED`/`PPR`/`PMC`/anything else) at the decode
