@@ -465,6 +465,35 @@ public actor FullTextService {
             return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
+        // Two different answers, and they must not be given the same words.
+        //
+        // A slot that still holds something we could not classify means the
+        // *last resort was refused*, not that the article has nothing. Saying
+        // "no full text available" there states a fact about the literature to
+        // explain a decision of ours, and the callers record that on the
+        // document and take the retry away. The reader is left with a permanent
+        // claim that the paper does not exist in full anywhere, which for a
+        // PubMed record they can see in a browser is simply false.
+        //
+        // Only when the kind is genuinely *unresolved*. A stated preprint whose
+        // sources are exhausted is the honest `noFullTextAvailable`: we know
+        // exactly what the identifier is, it simply has no PubMed record and
+        // nothing else answered. The refusal this case describes is narrower —
+        // nobody said, the shape does not settle it, and no provider vouched.
+        let unclassified = (pmid ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !unclassified.isEmpty,
+           ArticleIdentifierKind.resolved(declared: primaryKind, accession: unclassified) == .unknown {
+            BioMedLitLib.logger?.error(
+                """
+                Exhausted every source for \(articleName) and could not \
+                establish that '\(unclassified)' is a PubMed ID, so the PubMed \
+                record was not offered
+                """,
+                category: .fullText
+            )
+            throw FullTextError.identifierKindUnresolved(unclassified)
+        }
+
         BioMedLitLib.logger?.error("No full text available for \(articleName)", category: .fullText)
         throw FullTextError.noFullTextAvailable
     }
@@ -882,8 +911,8 @@ public actor FullTextService {
     /// of those builds a URL that names no article — see the final fallback in
     /// ``fetchFullText(pmcId:doi:pmid:primaryKind:)`` for what that cost the reader.
     ///
-    /// Delegated rather than decided here. The apps ask the same question at
-    /// nine link and citation surfaces, and a rule this consequential answered
+    /// Delegated rather than decided here. Every link and citation surface in
+    /// the apps asks the same question, and a rule this consequential answered
     /// separately per surface is how #186 came to be fixed on one of four.
     ///
     /// - Parameters:

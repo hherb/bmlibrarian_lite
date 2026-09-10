@@ -355,6 +355,30 @@ final class NoPMIDPDFExtractionTests: XCTestCase {
                 pmcId: nil, doi: nil, pmid: "889149"
             )
             XCTFail("expected no full text, got \(result.content)")
+        } catch FullTextError.identifierKindUnresolved(let identifier) {
+            // Changed claim: this used to expect `noFullTextAvailable`, and that
+            // was the app telling the reader an article has no full text
+            // anywhere in order to explain a decision of its own. The refusal is
+            // ours — nobody named this accession — so the error says that, and
+            // carries the accession the reader can search with. The caller does
+            // not mark the document permanently unavailable on it.
+            XCTAssertEqual(identifier, "889149")
+        }
+    }
+
+    /// The other half of the distinction, so neither error can absorb the other.
+    ///
+    /// A stated preprint is fully classified: we know what the identifier is, it
+    /// has no PubMed record by definition, and every other rung was tried. That
+    /// really is "nothing left", and it must keep saying so — otherwise the
+    /// honest answer disappears into the refusal and the fetch button never
+    /// stops being offered for articles that genuinely have nothing.
+    func testAKnownKindWithNothingLeftStillSaysNoFullText() async throws {
+        do {
+            let result = try await makeExhaustedService().fetchFullText(
+                pmcId: nil, doi: nil, pmid: "PPR1287966", primaryKind: .preprint
+            )
+            XCTFail("expected no full text, got \(result.content)")
         } catch FullTextError.noFullTextAvailable {
             // The honest answer: nothing left that is known to name this article.
         }

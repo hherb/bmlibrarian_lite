@@ -681,7 +681,9 @@ function stated_kind(record) -> Kind | null:
 # **it may not name a PubMed ID**. A bare decimal is the shape of a PubMed ID
 # and equally the shape of a Europe PMC thesis (ETH), case report (CBA) or HIR
 # accession, none of which carry a PubMed ID at all — 322,044 such records with
-# abstracts are served today. Guessing wrong there does not produce a dead
+# abstracts, measured against the live Europe PMC API on 2026-09-11 with
+# SRC:ETH OR SRC:CBA OR SRC:HIR, resultType=core. The count drifts daily; the
+# argument needs only that it is not zero. Guessing wrong there does not produce a dead
 # link: Europe PMC thesis 889149 and PubMed article 889149 both exist, and the
 # second is a 1977 paper on mouse courtship, which is what the reader was
 # handed as this article's source.
@@ -1071,13 +1073,26 @@ As of 2026-09-11:
 **The last row is Swift-only by construction, not by neglect.** Swift's
 `SearchArticle` has one primary identifier slot, filled as
 `pmid ?? id ?? ""`, so a thesis accession lands where a PubMed ID is expected
-and every consumer must then ask what it is holding. Python's `Article.pmid`
-and Kotlin's `DocumentEntity.pmid` are nullable and are filled from the
-record's `pmid` field alone, so a record without one carries `null` and both
-platforms' PubMed URL builders — `data_types.py`'s `__post_init__` and
-`Document.kt`'s `pubmedUrl` — are already gated by that. Any port that gives
-either platform a single collapsed slot inherits the whole of this section
-along with it.
+and every consumer must then ask what it is holding. Neither other platform has
+a collapsed slot, but for two different reasons, and the difference matters to
+anyone porting:
+
+- **Python is safe by package boundary, not by nullability.** Its only PubMed
+  URL builder is `PubMedArticle.__post_init__` in `pubmed/data_types.py`, whose
+  `pmid: str` is *not* optional. What keeps it honest is that `PubMedArticle` is
+  constructed from exactly one site, inside the PubMed-only package, so its slot
+  holds a PubMed ID by construction. The Europe PMC-facing types — `ArticleInfo`
+  and `LiteDocument` — do have a nullable `pmid`, filled from the record's own
+  `pmid` field with no `id` fallback, and they feed no URL builder at all.
+  Constructing a `PubMedArticle` from a Europe PMC record would import this
+  whole section.
+- **Kotlin is safe by nullability.** `DocumentEntity.pmid` is `String?`, filled
+  from the record's `pmid` field alone in `EuropePMCService.kt`, and
+  `Document.kt`'s `pubmedUrl` is gated as `pmid?.let { … }`, so a record without
+  a PubMed ID carries `null` and gets no link.
+
+Any port that gives either platform a single collapsed slot inherits the whole
+of this section along with it.
 
 **Python** branches `PMCID:` against `ext_id:… src:med` in
 `europepmc.py`, so it reaches a PMC ID, but it tries the PMC rung *first*,

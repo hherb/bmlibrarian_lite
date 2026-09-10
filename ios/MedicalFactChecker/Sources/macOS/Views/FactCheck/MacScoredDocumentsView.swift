@@ -382,8 +382,8 @@ struct MacDocumentCard: View {
                     }
                 }
 
-                if let doi = document.doi {
-                    Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                if let doi = document.doi, let doiURL = PlatformHelper.doiURL(for: doi) {
+                    Link(destination: doiURL) {
                         HStack(spacing: MacSpacing.xSmall) {
                             Image(systemName: "doc.text")
                             Text("DOI")
@@ -400,7 +400,7 @@ struct MacDocumentCard: View {
                 // or, for a bare thesis accession, one that looks up as a
                 // different article (#212, #213).
                 if let citationIdentifier = document.citationIdentifier {
-                    Text(citationIdentifier)
+                    Text(citationIdentifier.labelled)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .textSelection(.enabled)
@@ -433,6 +433,10 @@ struct MacDocumentCard: View {
                     Label("Open Publisher", systemImage: "safari")
                         .font(.caption)
                 }
+            } else if let notice = document.unresolvableIdentifierNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -500,6 +504,10 @@ struct MacDocumentCard: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             } else {
                 // Not yet attempted, or attempted and left with only a link;
@@ -703,17 +711,23 @@ struct MacDocumentCard: View {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
     }
 
-    /// Copy the article's identifier, named by the namespace that resolves it.
+    /// Copy the article's identifier, unlabelled.
     ///
     /// It used to copy the raw slot under the label "Copy PMID", and the slot
     /// also holds preprint, PMC and thesis accessions — so what landed in the
     /// reader's clipboard, to be pasted somewhere that expects a PubMed ID, was
-    /// often not one (#213). Copying the labelled form makes the pasted text say
-    /// what it is; a document nothing can name has no menu item at all.
+    /// often not one (#213). What is copied now is an identifier the app can
+    /// name; a document nothing can name has no menu item at all.
+    ///
+    /// The bare ``CitationIdentifier/value`` rather than
+    /// ``CitationIdentifier/labelled``: this clipboard's destination is a
+    /// PubMed search box or a reference manager, neither of which accepts a
+    /// `PMID: ` prefix. The labelled form is what "Copy Citation" carries, one
+    /// menu item below, so both are reachable and neither has to guess.
     private func copyIdentifier() {
         guard let citationIdentifier = document.citationIdentifier else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(citationIdentifier, forType: .string)
+        NSPasteboard.general.setString(citationIdentifier.value, forType: .string)
     }
 
     /// Copy the full citation to the clipboard.

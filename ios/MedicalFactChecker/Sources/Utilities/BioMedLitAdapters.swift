@@ -390,25 +390,6 @@ enum BioMedLitAdapters {
         )
     }
 
-    // MARK: - Search Provider Conversion
-
-    /// Convert app SearchProvider to BioMedLit SearchProvider.
-    ///
-    /// - Parameter provider: App search provider enum.
-    /// - Returns: BioMedLit search provider enum.
-    static func toBioMedLitProvider(_ provider: SearchProvider) -> BMLSearchProvider {
-        switch provider {
-        case .pubmed:
-            return .pubmed
-        case .europePMC:
-            return .europePMC
-        case .both:
-            // BioMedLit doesn't have a "both" option, default to PubMed
-            // The app handles "both" by calling both services separately
-            return .pubmed
-        }
-    }
-
     // MARK: - Full Text Conversion
 
     /// Convert BioMedLit FullTextResult to app's AppFullTextResult.

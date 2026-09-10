@@ -1923,10 +1923,15 @@ final class FactCheckWorkflow {
             )
 
             do {
-                let pmid = document.pmid.isEmpty ? nil : document.pmid
                 let result = try await service.analyze(
                     doi: document.doi,
-                    pmid: pmid,
+                    // Not the raw slot: it also holds thesis and case-report
+                    // accessions, and `analyze` searches PubMed with whatever
+                    // it is given, then adopts the first hit's title, journal,
+                    // authors and DOI. A bare Europe PMC accession would file
+                    // an unrelated article's funding and conflicts under this
+                    // document (#212).
+                    pmid: document.pubmedID,
                     // Not `fullTextContent`: an abstract-only deposit's text
                     // is an abstract, and must not be analysed as a body.
                     fullText: document.analyzableFullText
@@ -2015,7 +2020,11 @@ final class FactCheckWorkflow {
                 year: doc.year,
                 title: doc.title,
                 journal: doc.journal,
-                pmid: doc.pmid
+                // The labelled form, not the raw slot. This list is
+                // concatenated into `EvidenceReport.fullReport` and saved, so
+                // a mislabelled identifier here is written down once and read
+                // back by every later view and export (#212).
+                identifier: doc.citationIdentifier?.labelled
             )
         }
         let references = ReportFormatter.formatReferences(referenceData)

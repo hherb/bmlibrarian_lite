@@ -1353,8 +1353,8 @@ struct DocumentDetailSheet: View {
                         }
                     }
 
-                    if let doi = document.doi {
-                        Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                    if let doi = document.doi, let doiURL = PlatformHelper.doiURL(for: doi) {
+                        Link(destination: doiURL) {
                             HStack {
                                 Image(systemName: "doc.text")
                                 Text("View via DOI")
@@ -1430,6 +1430,10 @@ struct DocumentDetailSheet: View {
                     Label("Open Publisher", systemImage: "safari")
                         .font(.caption)
                 }
+            } else if let notice = document.unresolvableIdentifierNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -1471,6 +1475,10 @@ struct DocumentDetailSheet: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             } else {
                 // Not yet attempted, or attempted and left with only a link.
@@ -1634,7 +1642,13 @@ struct DocumentDetailSheet: View {
                 let service = TransparencyAnalysisService.create(from: .shared)
                 let result = try await service.analyze(
                     doi: document.doi,
-                    pmid: document.pmid.isEmpty ? nil : document.pmid,
+                    // Not the raw slot: it also holds thesis and case-report
+                    // accessions, and `analyze` searches PubMed with whatever
+                    // it is given, then adopts the first hit's title, journal,
+                    // authors and DOI. A bare Europe PMC accession would file
+                    // an unrelated article's funding and conflicts under this
+                    // document (#212).
+                    pmid: document.pubmedID,
                     // Not `fullTextContent`: an abstract-only deposit's text
                     // is an abstract, and must not be analysed as a body.
                     fullText: document.analyzableFullText

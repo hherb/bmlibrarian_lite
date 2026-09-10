@@ -231,7 +231,7 @@ struct MacFullTextTab: View {
 
             // Quick actions
             HStack(spacing: MacSpacing.large) {
-                if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                if let doi = document.doi, let url = PlatformHelper.doiURL(for: doi) {
                     Link(destination: url) {
                         Label("Open Publisher", systemImage: "safari")
                     }
@@ -244,6 +244,20 @@ struct MacFullTextTab: View {
                     }
                     .buttonStyle(.bordered)
                 }
+            }
+
+            // Both links can now be absent at once — a record with no DOI whose
+            // identifier nothing vouches for (#212) — and the text above this
+            // row tells the reader to use a control that would not be there.
+            // No second DOI check: the notice is already nil whenever a DOI
+            // resolves, because that is what `fullTextLinkDestination` returns
+            // first.
+            if let notice = document.unresolvableIdentifierNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: MacLayout.emptyStateMaxWidth)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

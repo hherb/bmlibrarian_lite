@@ -486,6 +486,10 @@ struct DocumentScoreRow: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -526,6 +530,10 @@ struct DocumentScoreRow: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -798,7 +806,7 @@ struct DocumentScoreRow: View {
             }
 
             if let citationIdentifier = document.citationIdentifier {
-                Label(citationIdentifier, systemImage: "number")
+                Label(citationIdentifier.labelled, systemImage: "number")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }

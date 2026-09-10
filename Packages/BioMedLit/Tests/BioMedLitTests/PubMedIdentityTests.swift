@@ -20,8 +20,9 @@ import XCTest
 /// Nothing may be presented as a PubMed article unless something said it is one.
 ///
 /// Europe PMC serves theses (`ETH`), case reports (`CBA`) and `HIR` records
-/// whose accession is a bare decimal number and which carry no PubMed ID —
-/// 322,044 records with abstracts between them. A bare decimal is also the exact
+/// whose accession is a bare decimal number and which carry no PubMed ID.
+/// See `ArticleIdentifierKind.inferred(from:)` for the measured size of that
+/// population; it is large, and one record would be enough. A bare decimal is also the exact
 /// shape of a PubMed ID, so the shape rule called every one of them `.pubmed`
 /// and the last resort pasted it after the PubMed base URL.
 ///

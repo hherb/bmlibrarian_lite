@@ -199,4 +199,69 @@ final class PubMedLinkIdentityTests: XCTestCase {
 
         XCTAssertFalse(document.fullCitation.contains("889149"), document.fullCitation)
     }
+
+    /// A stated kind is not a licence to print an unusable value.
+    ///
+    /// The URL path already refused this; the citation path did not, and a
+    /// citation is the half that outlives the app. `PMID: 126 62058` in an
+    /// exported report is a locator nobody can resolve, printed with the
+    /// authority of a namespace.
+    func testACitationRefusesAMalformedValueUnderAStatedKind() {
+        let document = makeDocument(pmid: "126 62058", kind: .pubmed, provider: .pubmed)
+
+        XCTAssertNil(document.citationIdentifier)
+        XCTAssertFalse(document.fullCitation.contains("126 62058"), document.fullCitation)
+    }
+
+    // MARK: - What the provider may not be guessed to be
+
+    /// A row with no recorded provider is not assumed to be from PubMed.
+    ///
+    /// `searchSourceEnum` *does* fall back to `.pubmed` for these rows, for the
+    /// provider badge, and the two must not be unified: a guess is fine for a
+    /// badge and is not fine for a link. Unifying them would hand every
+    /// provider-less legacy row a PubMed link built from an unvouched slot,
+    /// which is #212 for the oldest documents in the store.
+    func testAProviderlessLegacyRowIsNotGuessedToBeFromPubMed() {
+        let document = makeDocument(pmid: "889149")
+
+        XCTAssertNil(document.pubmedURL)
+        XCTAssertNil(document.citationIdentifier)
+    }
+
+    // MARK: - What the card says when it cannot offer a link
+
+    /// A record whose identifier nothing vouches for, and with no DOI, has no
+    /// browser destination at all — a state gating the fallback made reachable.
+    ///
+    /// Rendering nothing there is #187: a banner saying a substitute exists,
+    /// above the empty space where the way to reach it used to be. The reader is
+    /// told what happened, and given the accession to search with.
+    func testACardWithNoDestinationExplainsItselfAndOffersTheAccession() throws {
+        let document = makeDocument(pmid: "889149", provider: .both)
+
+        XCTAssertNil(document.fullTextLinkDestination)
+        let notice = try XCTUnwrap(document.unresolvableIdentifierNotice)
+        XCTAssertTrue(notice.contains("889149"), notice)
+    }
+
+    /// The notice is for the `else` of a link, and never shows beside one.
+    func testACardWithADestinationShowsNoNotice() {
+        let document = makeDocument(pmid: "12662058", provider: .pubmed)
+
+        XCTAssertNotNil(document.fullTextLinkDestination)
+        XCTAssertNil(document.unresolvableIdentifierNotice)
+    }
+
+    // MARK: - What a clipboard receives
+
+    /// "Copy Identifier" is pasted into a PubMed search box or a reference
+    /// manager, neither of which accepts a `PMID: ` prefix. The labelled form is
+    /// what a citation prints, and what "Copy Citation" carries.
+    func testTheCopyableIdentifierCarriesNoLabel() {
+        let document = makeDocument(pmid: "12662058", provider: .pubmed)
+
+        XCTAssertEqual(document.citationIdentifier?.value, "12662058")
+        XCTAssertEqual(document.citationIdentifier?.labelled, "PMID: 12662058")
+    }
 }

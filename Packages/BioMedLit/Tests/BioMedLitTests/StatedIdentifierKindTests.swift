@@ -172,8 +172,13 @@ final class StatedIdentifierKindTests: XCTestCase {
             let result = try await service.fetchFullText(pmcId: nil, doi: nil, pmid: accession)
             XCTFail("expected no full text, got \(String(describing: result.webURL))")
         } catch let error as FullTextError {
-            guard case .noFullTextAvailable = error else {
-                return XCTFail("expected noFullTextAvailable, got \(error)")
+            // Changed claim: `noFullTextAvailable` until the two answers were
+            // separated. Nothing named this accession, so the chain refused its
+            // own last resort — a fact about us, not about the article, and the
+            // one the reader needs in order to know the record may still be
+            // findable by hand.
+            guard case .identifierKindUnresolved = error else {
+                return XCTFail("expected identifierKindUnresolved, got \(error)")
             }
         }
     }

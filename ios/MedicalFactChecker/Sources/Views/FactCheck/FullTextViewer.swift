@@ -146,23 +146,19 @@ struct FullTextViewer: View {
                 }
             }
 
-            Button(action: openInBrowser) {
-                Label("Open in Browser", systemImage: "safari")
+            // Hidden rather than inert when nothing names a destination, as on
+            // macOS: the handler used to be an `if / else if` with no `else`,
+            // and once `pubmedURL` could answer `nil` a tap did nothing at all
+            // — no sheet, no error, no log line (#212, #213).
+            if let browserDestination = document.fullTextLinkDestination {
+                Button {
+                    PlatformHelper.openURL(browserDestination)
+                } label: {
+                    Label("Open in Browser", systemImage: "safari")
+                }
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-        }
-    }
-
-    // MARK: - Actions
-
-    /// Open the document in the system browser.
-    private func openInBrowser() {
-        if let doi = document.doi, !doi.isEmpty,
-           let url = PlatformHelper.doiURL(for: doi) {
-            PlatformHelper.openURL(url)
-        } else if let url = document.pubmedURL {
-            PlatformHelper.openURL(url)
         }
     }
 }

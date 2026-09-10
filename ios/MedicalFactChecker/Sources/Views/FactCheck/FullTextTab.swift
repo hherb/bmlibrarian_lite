@@ -294,6 +294,14 @@ struct FullTextTab: View {
                 }
             } catch {
                 await MainActor.run {
+                    // This case only, never `identifierKindUnresolved`. That one
+                    // means the chain refused its own last resort because it
+                    // could not establish the identifier's kind, which is a fact
+                    // about us and not about the article — recording it here
+                    // would state that no full text exists anywhere and remove
+                    // the retry, permanently, for a record that may well be
+                    // sitting on PubMed. It belongs in the `else`, where its
+                    // message reaches the reader and the button survives.
                     if case FullTextError.noFullTextAvailable = error {
                         // The one expected outcome: recorded on the document so
                         // the list can show it, and not an error to report.

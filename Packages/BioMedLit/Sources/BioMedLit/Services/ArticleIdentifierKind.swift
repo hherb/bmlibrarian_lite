@@ -81,14 +81,20 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
     /// The kind Europe PMC stated for a record.
     ///
     /// A token outside `[a-z0-9]` is refused rather than carried. The token is
-    /// network-supplied, and it reaches two places that need a closed set: a
-    /// Europe PMC query as `src:<token>`, where a space or a colon would make
-    /// the query parse as something else and match nothing, and — through
-    /// ``ArticleCacheKey`` — a filename tag, which is interpolated without
-    /// sanitising because every tag is drawn from a fixed vocabulary. Refusing
-    /// here is what keeps that assumption true at both ends. Every source token
-    /// Europe PMC publishes is a short alphanumeric word, so this refuses
+    /// network-supplied and reaches a Europe PMC query as `src:<token>`, where
+    /// a space or a colon would make the query parse as something else and match
+    /// nothing — not a URL injection, since the transport percent-encodes, but a
+    /// widened lookup that quietly answers about the wrong article. Every source
+    /// token Europe PMC publishes is a short alphanumeric word, so this refuses
     /// nothing the provider actually sends.
+    ///
+    /// It does **not** reach a cache filename: ``ArticleCacheKey`` files every
+    /// unmodelled source under one fixed tag. That was the original reason for
+    /// this filter and is no longer one, which is worth saying so nobody removes
+    /// the filter after checking only the filename path.
+    ///
+    /// The case itself is public and its payload is not re-validated, so this
+    /// initialiser is a convention rather than a guarantee — see #219.
     ///
     /// - Parameter europePMCSource: The record's `source` field, as decoded.
     /// - Returns: `nil` when the record carried no token, or one outside the
@@ -131,9 +137,11 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
     /// Only the two prefixes settle anything. Everything else is ``unknown``,
     /// **including a bare decimal number** — the shape of a PubMed ID, and
     /// equally the shape of a Europe PMC thesis (`ETH`), case report (`CBA`) or
-    /// `HIR` accession, none of which carry a PubMed ID at all. 322,044 such
-    /// records with abstracts are served today, so this is not a hypothetical
-    /// collision.
+    /// `HIR` accession, none of which carry a PubMed ID at all. Measured against
+    /// the live Europe PMC API on 2026-09-11, `SRC:ETH OR SRC:CBA OR SRC:HIR`
+    /// with `resultType=core` returned 322,044 such records carrying abstracts,
+    /// so this is not a hypothetical collision. The figure drifts daily and the
+    /// argument does not depend on it: one such record is enough.
     ///
     /// Reading that shape as ``pubmed`` was #212. The value went behind the
     /// PubMed base URL and came back as a **real but unrelated article**: Europe
@@ -141,12 +149,22 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
     /// courtship — both exist. A dead link tells the reader something is wrong;
     /// a live link to the wrong paper does not.
     ///
-    /// Nothing routes differently for losing that branch: ``unknown`` already
-    /// queried `src:med`, which is where a bare number went before. What changed
-    /// is that the shape no longer *claims* a kind, so
-    /// ``pubmedID(in:declared:)`` refuses it. Where a number really is a PubMed
-    /// ID, something says so — the record's `source`, or the provider that
-    /// returned it; see ``resolved(declared:accession:provider:)``.
+    /// **No query changed.** ``unknown`` already queried `src:med`, which is
+    /// where a bare number went before, so Europe PMC is asked for exactly what
+    /// it was asked for previously. What changed is that the shape no longer
+    /// *claims* a kind, so ``pubmedID(in:declared:)`` refuses it. Where a number
+    /// really is a PubMed ID, something says so — the record's `source`, or the
+    /// provider that returned it; see ``resolved(declared:accession:provider:)``.
+    ///
+    /// The PDF cache filename *does* change, and it is the second consumer of
+    /// this type rather than an afterthought: a bare decimal nobody vouches for
+    /// now files under ``ArticleCacheKey``'s untyped tag instead of the PubMed
+    /// one. An already-downloaded PDF for such a record is orphaned — still on
+    /// disk, no longer found, reclaimed only by a full cache clear. Bounded by
+    /// the same population as the lost link: a legacy row from a Europe PMC or
+    /// merged search. Filing it under the PubMed tag is what the tag has to
+    /// stop meaning, so this is the cost of the repair rather than a defect in
+    /// it.
     ///
     /// Case is ignored: Europe PMC writes these accessions upper-case by
     /// convention, and a convention is not a guarantee.
@@ -168,12 +186,19 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
 
     /// Whether every character is an ASCII digit.
     ///
-    /// `Character.isNumber` is deliberately not used: it is true for `½`, for
-    /// superscripts, and for every non-Latin digit, so `١٢٣` would satisfy it
-    /// and be called a PubMed ID. A PubMed ID is an ASCII decimal integer, and
-    /// this is the test standing between a slot's value and the PubMed URL —
-    /// the one place a wrong label reaches the reader as a real but different
-    /// article.
+    /// `isASCII` is the load-bearing half, and it must not be removed as
+    /// redundant. `isWholeNumber` is true for every non-Latin digit, so `١٢٣`
+    /// satisfies it on its own; `isNumber` additionally admits `½` and the
+    /// superscripts. Given the `isASCII` guard the two number predicates are
+    /// equivalent here, because ASCII holds no fractions and no superscript
+    /// digits — which is exactly why deleting the guard on the strength of that
+    /// equivalence would be the wrong lesson to draw.
+    ///
+    /// A PubMed ID is an ASCII decimal integer, and this is the test standing
+    /// between a slot's value and the PubMed URL — the one place a wrong label
+    /// reaches the reader as a real but different article. An earlier draft of
+    /// this rule tested `isNumber` alone and classified `١٢٣` as a PubMed ID;
+    /// it was caught in review before it shipped.
     ///
     /// - Parameter value: The string to test.
     /// - Returns: `true` when `value` is non-empty and all ASCII digits.
@@ -245,12 +270,15 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
 
     /// The identifier, when it is one that may be pasted after the PubMed URL.
     ///
-    /// The single authority for that question. It is asked by the retrieval
-    /// chain's last resort and by every app surface that offers a PubMed link or
-    /// prints a `PMID:` line — nine of them, which had none of this rule between
-    /// them and five of which force-unwrapped the result (#213). A predicate
-    /// this consequential re-implemented per surface is how #186 came to be
-    /// fixed on one of four.
+    /// The single authority for that question, and the invariant it carries is:
+    /// **every PubMed URL and every `PMID:` line in either app resolves through
+    /// here**, by way of the app's `Document.pubmedURL` and
+    /// `Document.citationIdentifier` and the retrieval chain's last resort.
+    /// Stated as an invariant rather than as a census of today's callers,
+    /// because the next surface added is the one a count would not cover — a
+    /// predicate this consequential re-implemented per surface is how #186 came
+    /// to be fixed on one of four, and how #212 and #213 reached a dozen-odd
+    /// screens at once.
     ///
     /// Two independent tests, and both must pass:
     ///
@@ -258,9 +286,10 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
     ///   Europe PMC's numeric accessions are indistinguishable from a PubMed ID
     ///   and resolve, on PubMed, to a real but unrelated article (#212).
     /// - **The value can be one.** It is network-supplied and reaches
-    ///   `URL(string:)`, which answers `nil` for a string containing a space.
-    ///   ASCII digits only: `Character.isNumber` is true for `½` and for every
-    ///   non-Latin numeral, so `١٢٣` once passed as a PubMed ID (#211).
+    ///   `URL(string:)`, which answers `nil` for a string containing a space —
+    ///   the crash in #213, where surfaces force-unwrapped that result. ASCII
+    ///   digits only; see ``isAllASCIIDigits(_:)`` for why the ASCII half is
+    ///   the half that matters.
     ///
     /// - Parameters:
     ///   - identifier: The raw primary identifier slot.

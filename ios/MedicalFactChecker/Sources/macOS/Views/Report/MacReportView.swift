@@ -1014,8 +1014,8 @@ struct MacDocumentDetailSheet: View {
                             }
                         }
 
-                        if let doi = document.doi {
-                            Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                        if let doi = document.doi, let doiURL = PlatformHelper.doiURL(for: doi) {
+                            Link(destination: doiURL) {
                                 HStack(spacing: MacSpacing.xSmall) {
                                     Image(systemName: "doc.text")
                                     Text("View via DOI")
@@ -1026,7 +1026,7 @@ struct MacDocumentDetailSheet: View {
                         Spacer()
 
                         if let citationIdentifier = document.citationIdentifier {
-                            Text(citationIdentifier)
+                            Text(citationIdentifier.labelled)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .textSelection(.enabled)
@@ -1072,8 +1072,8 @@ struct MacDocumentDetailSheet: View {
                 }
 
                 // Still offer to open in browser
-                if let doi = document.doi {
-                    Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                if let doi = document.doi, let doiURL = PlatformHelper.doiURL(for: doi) {
+                    Link(destination: doiURL) {
                         Label("Open Publisher", systemImage: "safari")
                     }
                 }
@@ -1166,10 +1166,15 @@ struct MacDocumentDetailSheet: View {
         Task {
             do {
                 let service = TransparencyAnalysisService.create(from: AppSettings.shared)
-                let pmid = document.pmid.isEmpty ? nil : document.pmid
                 let result = try await service.analyze(
                     doi: document.doi,
-                    pmid: pmid,
+                    // Not the raw slot: it also holds thesis and case-report
+                    // accessions, and `analyze` searches PubMed with whatever
+                    // it is given, then adopts the first hit's title, journal,
+                    // authors and DOI. A bare Europe PMC accession would file
+                    // an unrelated article's funding and conflicts under this
+                    // document (#212).
+                    pmid: document.pubmedID,
                     // Not `fullTextContent`: an abstract-only deposit's text
                     // is an abstract, and must not be analysed as a body.
                     fullText: document.analyzableFullText

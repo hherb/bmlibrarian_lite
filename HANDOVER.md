@@ -20,49 +20,86 @@ the rest.
   2026-09-11). Rules that still bind:
   - **The shape of a number never states a PubMed ID.** Europe PMC's theses
     (`ETH`), case reports (`CBA`) and `HIR` records carry bare decimal
-    accessions and no PMID — 322,044 with abstracts. Pasted after the PubMed
+    accessions and no PMID — 322,044 with abstracts, measured 2026-09-11
+    (`SRC:ETH OR SRC:CBA OR SRC:HIR`, `resultType=core`). Pasted after the PubMed
     base URL such an accession returns a **real but unrelated article**: thesis
     `889149` is also the PMID of a 1977 mouse-courtship paper. A dead link tells
     the reader something is wrong; a live link to the wrong paper does not.
   - **`inferred(from:)` is prefix-only.** No query changed: `.unknown` already
-    routed to `src:med`, which is where a bare number went before.
+    routed to `src:med`, which is where a bare number went before. The **cache
+    filename does** change: a bare decimal nobody vouches for moves from the
+    `pmid_` tag to `id_`, orphaning any PDF already downloaded for such a
+    record. Same population as the lost link, reclaimed only by a full cache
+    clear.
   - **Three sources of knowledge, strongest first** — the record's stated token,
     the identifier's shape where a prefix settles it, then the provider.
     `SearchProvider.pubmed` vouches for a bare decimal, which is what keeps every
     legacy row on the default provider linking. **`.both` vouches for nothing**:
     the app records the *search mode* on every document a merged search
-    produces, including the ones only Europe PMC returned. Do not reach for
-    `BioMedLitAdapters.toBioMedLitProvider` here — it answers `.pubmed` for
-    `both`, which reintroduces exactly this.
+    produces, including the ones only Europe PMC returned. The provider must
+    therefore reach the resolver unflattened — an adapter that collapsed `both`
+    to `.pubmed` existed and was deleted, because the resolver can only refuse
+    `both` if `both` is still legible when it arrives.
   - **`PubMedService` states `.pubmed` on every article it builds**, so nothing
     downstream has to guess for the common path.
   - **One predicate authorises every PubMed URL and every `PMID:` line** —
     `ArticleIdentifierKind.pubmedID(in:declared:)`, reached from the app through
-    `Document.pubmedURL` / `Document.citationIdentifier`. Nine app surfaces built
-    the URL and seven more labelled, cited or copied the slot as a PubMed ID;
-    none of them had the rule, and five force-unwrapped `URL(string:)` over a
-    network value, so a slot with a space crashed the app when a context menu
-    drew.
+    `Document.pubmedURL` / `Document.citationIdentifier`. Stated as an invariant,
+    not a count of today's callers: the next surface added is the one a census
+    would miss, and the review of this PR found three the first pass had missed
+    — the live PDF exporter, the generated References section, and the
+    transparency analyser, which searched PubMed with the raw slot and filed an
+    unrelated article's funding and conflicts under this document.
   - **A citation names the namespace it can prove**: `PMID:`, `PMCID:`,
     `Europe PMC:`, and nothing where neither the record nor the provider names
-    one. Reaches both printable report views, which outlive the session.
+    one. Carried as `CitationIdentifier` — namespace and value kept apart,
+    because a printed citation wants `PMID: 12662058` and a clipboard wants
+    `12662058`. Reaches the exported PDF and the saved `EvidenceReport`, both of
+    which outlive the session.
   - **A stated-but-unmodelled source now tags `src_`, not `id_`.** Latent until
     this round: once a bare decimal became `.unknown`, a stated `ETH` accession
     and an unclassified identifier with the same digits would have shared a
     cache filename — the collision the tagging exists to prevent, reintroduced
     by the repair that removed a different one.
   - **The defect is Swift-only by construction.** Only Swift's `SearchArticle`
-    collapses the identifiers into one slot (`pmid ?? id ?? ""`). Python's
-    `Article.pmid` and Kotlin's `DocumentEntity.pmid` are nullable and filled
-    from the record's `pmid` alone, so both platforms' URL builders are already
-    gated. Any port that introduces a collapsed slot inherits all of this.
+    collapses the identifiers into one slot (`pmid ?? id ?? ""`). Kotlin is safe
+    by nullability: `DocumentEntity.pmid` is `String?` and `pubmedUrl` is gated
+    on it. Python is safe by *package boundary*, not nullability — its one URL
+    builder takes a non-optional `pmid: str` on `PubMedArticle`, which is only
+    ever constructed inside the PubMed-only package. Its Europe PMC-facing types
+    have a nullable `pmid` and build no URL. Any port that introduces a collapsed
+    slot, or constructs a `PubMedArticle` from a Europe PMC record, inherits all
+    of this.
   - **Known cost, accepted:** a document stored before the kind field existed,
-    from a Europe PMC or `both` search, loses its PubMed link and its citation
-    identifier. The default provider is PubMed, so this is a minority setting on
-    legacy rows only.
-  - Lodged rather than fixed: **#217** — the error queue labels every entry's
-    identifier `PMID`, and naming it honestly needs the kind carried onto
-    `TransientErrorEntry`, which is #214's field too.
+    from a Europe PMC or `both` search, loses its PubMed link, its cached PDF's
+    filename, and — from a `both` search or a row with no recorded provider —
+    its citation identifier. A Europe PMC row keeps a citation identifier, named
+    for the provider. Where the link is gone the card now says so and offers the
+    accession to search with, rather than leaving the empty space that was #187.
+    The default provider is PubMed, so this is a minority setting on legacy rows
+    only.
+  - **A refusal is not a fact about the article.** `FullTextError` gained
+    `identifierKindUnresolved`, thrown where every source was exhausted *and*
+    the kind was never established. It used to share `noFullTextAvailable`, and
+    the callers record that on the document and take the fetch button away — so
+    an internal refusal became a permanent claim that the paper has no full text
+    anywhere. Callers must keep matching `noFullTextAvailable` alone; the new
+    case belongs in the `else`, where its message reaches the reader and the
+    retry survives.
+  - **macOS sources are now compiled in CI.** `Package.swift` excludes
+    `Sources/macOS` from the test target, so `swift test` type-checked none of
+    it — half the app's link and citation surfaces, including four of the five
+    force-unwraps #213 was about. A separate `xcodebuild` job covers it. Verified
+    by inserting invalid Swift into a macOS view and watching `swift test` pass.
+  - Lodged rather than fixed: **#217** (the error queue labels every entry's
+    identifier `PMID`; naming it honestly needs the kind carried onto
+    `TransientErrorEntry`, which is #214's field too), **#219** (make the
+    invariant structural rather than conventional — a cache-tag enum, no
+    defaulted `primaryKind`, a validated source token, and the `pmid` rename),
+    **#220** (Android has the same ungated URL builder), **#221**
+    (`PrintableReportView` exists twice and is instantiated nowhere), **#222**
+    (a legacy card can show a PubMed badge beside no PubMed link), **#223**
+    (a malformed source token warns once per SwiftUI redraw).
 
 - **Europe PMC's own word for what an identifier is** (#209 in PR #211,
   2026-09-10). Rules that still bind:

@@ -347,7 +347,7 @@ struct PrintableReportView: View {
             // who never saw the app, so a mislabelled identifier here is the
             // most consequential form of #213.
             if let citationIdentifier = document.citationIdentifier {
-                Text(citationIdentifier)
+                Text(citationIdentifier.labelled)
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
