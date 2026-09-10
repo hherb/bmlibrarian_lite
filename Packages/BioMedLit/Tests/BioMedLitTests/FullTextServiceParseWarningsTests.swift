@@ -47,11 +47,29 @@ final class StubURLProtocol: URLProtocol {
     /// nothing about the others. One route at a time isolates one guard.
     static var failures: [String: Error] = [:]
 
-    /// Reset all three, so one test's setup cannot leak into the next.
+    /// Every URL asked for, in order.
+    ///
+    /// ``routes`` matches on a substring, so a stub keyed on `search` answers
+    /// *any* search URL regardless of what was actually asked. A test that only
+    /// checks the returned content therefore passes whether the chain asked
+    /// Europe PMC the right question or the wrong one — and asking the wrong
+    /// question, in terms a source cannot answer, is #202 itself. Recording the
+    /// URLs is what lets a test assert the query rather than infer it.
+    static private(set) var requestedURLs: [String] = []
+
+    /// Whether any request carried this substring. Query values arrive
+    /// percent-encoded, so callers should pass an encoded fragment or use
+    /// ``requestedURLs`` directly.
+    static func requested(_ fragment: String) -> Bool {
+        requestedURLs.contains { $0.contains(fragment) }
+    }
+
+    /// Reset all four, so one test's setup cannot leak into the next.
     static func reset() {
         stubbed = (200, Data())
         routes = [:]
         failures = [:]
+        requestedURLs = []
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -60,6 +78,7 @@ final class StubURLProtocol: URLProtocol {
 
     override func startLoading() {
         let url = request.url?.absoluteString ?? ""
+        Self.requestedURLs.append(url)
         if let failure = Self.failures.first(where: { url.contains($0.key) })?.value {
             client?.urlProtocol(self, didFailWithError: failure)
             return

@@ -34,6 +34,9 @@ final class PDFTierFallthroughTests: XCTestCase {
     private static let pdfBytes = Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34])
     private static let pmid = "fallthrough-test-99201"
 
+    /// The name this article's cached PDFs are filed under.
+    private static let cacheKey = ArticleCacheKey(pmid: pmid, pmcId: nil, doi: nil)!
+
     /// Names both a PMC ID and a free PDF render URL, so identifier resolution
     /// yields the `pdfRenderURL` the Europe PMC PDF tier needs.
     private static let searchResponseWithPDFRender = #"""
@@ -50,12 +53,12 @@ final class PDFTierFallthroughTests: XCTestCase {
     override func setUp() {
         super.setUp()
         StubURLProtocol.reset()
-        FullTextService.deleteCachedPDF(for: Self.pmid)
+        FullTextService.deleteCachedPDF(for: Self.cacheKey)
     }
 
     override func tearDown() {
         StubURLProtocol.reset()
-        FullTextService.deleteCachedPDF(for: Self.pmid)
+        FullTextService.deleteCachedPDF(for: Self.cacheKey)
         super.tearDown()
     }
 

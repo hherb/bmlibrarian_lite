@@ -77,6 +77,35 @@ public enum BioMedLitConstants {
     /// Europe PMC ``documentStyle`` marking a PDF entry.
     public static let europePMCPDFDocumentStyle = "pdf"
 
+    /// Prefix of a Europe PMC preprint accession, e.g. `PPR1287966`.
+    ///
+    /// A preprint carries no PMID and no PMC ID, so this accession is the only
+    /// identifier it has besides its DOI. Recognising it is what lets the
+    /// article be asked for under the source that can answer — see
+    /// ``europePMCPreprintSource``.
+    public static let europePMCPreprintAccessionPrefix = "PPR"
+
+    /// Prefix of a PubMed Central accession, e.g. `PMC1082889`.
+    public static let pmcAccessionPrefix = "PMC"
+
+    /// Europe PMC `src` token for MEDLINE records, which an `ext_id` query
+    /// must name to match a PubMed ID.
+    public static let europePMCMedlineSource = "med"
+
+    /// Europe PMC `src` token for preprint records.
+    ///
+    /// Measured against the live API on 2026-09-10:
+    /// `ext_id:PPR1287966 src:ppr` matches, `ext_id:PPR1287966 src:med` does
+    /// not.
+    public static let europePMCPreprintSource = "ppr"
+
+    /// Europe PMC query field that matches a PMC accession.
+    ///
+    /// A PMC ID is not reachable as an `ext_id` under the sources we tried:
+    /// measured on 2026-09-10, `src:pmc` and `src:med` both return no hits for
+    /// one, with or without the `PMC` prefix, while `PMCID:PMC1082889` matches.
+    public static let europePMCPMCIDField = "PMCID"
+
     // MARK: - PubMed API
 
     /// NCBI E-utilities base URL.
@@ -172,6 +201,32 @@ public enum BioMedLitConstants {
     public static let cacheKeyAllowedCharacters = Set(
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
     )
+
+    /// Tag naming the rung a PDF cache filename was keyed on.
+    ///
+    /// These three define the on-disk cache format, and they are the whole
+    /// mechanism keeping two identifier kinds apart: an article whose primary
+    /// slot holds `PMC7654321` must not name the entry a different article
+    /// reached by that PMC ID names. They are mutually non-prefixing, and `_`
+    /// joins a tag to its identifier because `-` is absent from
+    /// ``cacheKeyAllowedCharacters`` and so stays free to separate the article
+    /// component from the source-URL fingerprint.
+    public static let primaryCacheKeyTag = "id"
+
+    /// Tag for a cache filename keyed on a PMC ID. See ``primaryCacheKeyTag``.
+    public static let pmcCacheKeyTag = "pmc"
+
+    /// Tag for a cache filename keyed on a DOI. See ``primaryCacheKeyTag``.
+    public static let doiCacheKeyTag = "doi"
+
+    /// Bytes of the DOI digest kept in a PDF cache filename.
+    ///
+    /// Longer than the source-URL fingerprint below, because the two are
+    /// separating different populations. The fingerprint distinguishes the two
+    /// or three PDF URLs one article is offered; this distinguishes one article
+    /// from every other article the user ever fetches, and a collision there
+    /// serves the wrong paper's bytes.
+    public static let doiCacheKeyDigestBytes = 16
 
     /// Bytes of the source-URL digest kept in a PDF cache filename.
     ///

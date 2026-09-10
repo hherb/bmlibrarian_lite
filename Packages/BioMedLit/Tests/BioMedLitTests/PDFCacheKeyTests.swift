@@ -26,6 +26,9 @@ import XCTest
 /// extracted cleanly.
 final class PDFCacheKeyTests: XCTestCase {
     private static let pmid = "cache-key-test-99301"
+
+    /// The name this article's cached PDFs are filed under.
+    private static let cacheKey = ArticleCacheKey(pmid: pmid, pmcId: nil, doi: nil)!
     private static let europePMCURL = URL(string: "https://europepmc.org/articles/PMC9/pdf")!
     private static let unpaywallURL = URL(string: "https://example.org/oa.pdf")!
 
@@ -37,12 +40,12 @@ final class PDFCacheKeyTests: XCTestCase {
     override func setUp() {
         super.setUp()
         StubURLProtocol.reset()
-        FullTextService.deleteCachedPDF(for: Self.pmid)
+        FullTextService.deleteCachedPDF(for: Self.cacheKey)
     }
 
     override func tearDown() {
         StubURLProtocol.reset()
-        FullTextService.deleteCachedPDF(for: Self.pmid)
+        FullTextService.deleteCachedPDF(for: Self.cacheKey)
         super.tearDown()
     }
 
@@ -63,10 +66,10 @@ final class PDFCacheKeyTests: XCTestCase {
         let service = makeService()
 
         let firstPath = try await service.downloadAndCachePDF(
-            from: Self.europePMCURL, for: Self.pmid
+            from: Self.europePMCURL, for: Self.cacheKey
         )
         let secondPath = try await service.downloadAndCachePDF(
-            from: Self.unpaywallURL, for: Self.pmid
+            from: Self.unpaywallURL, for: Self.cacheKey
         )
 
         XCTAssertNotEqual(firstPath, secondPath)
@@ -84,11 +87,11 @@ final class PDFCacheKeyTests: XCTestCase {
         let service = makeService()
 
         let firstPath = try await service.downloadAndCachePDF(
-            from: Self.unpaywallURL, for: Self.pmid
+            from: Self.unpaywallURL, for: Self.cacheKey
         )
         StubURLProtocol.routes = ["oa.pdf": (404, Data())]
         let secondPath = try await service.downloadAndCachePDF(
-            from: Self.unpaywallURL, for: Self.pmid
+            from: Self.unpaywallURL, for: Self.cacheKey
         )
 
         XCTAssertEqual(firstPath, secondPath, "a second fetch of the same URL must not re-download")
@@ -98,8 +101,8 @@ final class PDFCacheKeyTests: XCTestCase {
     /// building the fingerprint from it would miss every entry written by a
     /// previous run — a cache that never hits, and never says so.
     func testTheKeyIsStableForTheSameInputs() {
-        let first = FullTextService.cacheFilename(pmid: Self.pmid, url: Self.unpaywallURL)
-        let second = FullTextService.cacheFilename(pmid: Self.pmid, url: Self.unpaywallURL)
+        let first = FullTextService.cacheFilename(key: Self.cacheKey, url: Self.unpaywallURL)
+        let second = FullTextService.cacheFilename(key: Self.cacheKey, url: Self.unpaywallURL)
         XCTAssertEqual(first, second)
         XCTAssertTrue(first.hasSuffix(".\(BioMedLitConstants.pdfExtension)"))
     }
@@ -108,9 +111,8 @@ final class PDFCacheKeyTests: XCTestCase {
     /// and `appendingPathComponent` on a value holding `/` or `..` would place
     /// the written file outside the cache directory entirely.
     func testAnIdentifierCannotWalkOutOfTheCacheDirectory() {
-        let hostile = FullTextService.cacheFilename(
-            pmid: "../../etc/passwd", url: Self.unpaywallURL
-        )
+        let hostileKey = ArticleCacheKey(pmid: "../../etc/passwd", pmcId: nil, doi: nil)!
+        let hostile = FullTextService.cacheFilename(key: hostileKey, url: Self.unpaywallURL)
         XCTAssertFalse(hostile.contains("/"))
         XCTAssertFalse(hostile.contains(".."))
 
@@ -131,7 +133,7 @@ final class PDFCacheKeyTests: XCTestCase {
     func testTheCacheClearCoversQuarantinedEntriesAsWellAsPDFs() {
         let cached = FullTextService.pdfCacheDirectory
             .appendingPathComponent(
-                FullTextService.cacheFilename(pmid: Self.pmid, url: Self.unpaywallURL)
+                FullTextService.cacheFilename(key: Self.cacheKey, url: Self.unpaywallURL)
             )
         let quarantined = cached
             .appendingPathExtension(BioMedLitConstants.quarantinedPDFExtension)
@@ -154,12 +156,49 @@ final class PDFCacheKeyTests: XCTestCase {
             "oa.pdf": (200, Self.unpaywallBytes),
         ]
         let service = makeService()
-        let first = try await service.downloadAndCachePDF(from: Self.europePMCURL, for: Self.pmid)
-        let second = try await service.downloadAndCachePDF(from: Self.unpaywallURL, for: Self.pmid)
+        let first = try await service.downloadAndCachePDF(from: Self.europePMCURL, for: Self.cacheKey)
+        let second = try await service.downloadAndCachePDF(from: Self.unpaywallURL, for: Self.cacheKey)
 
-        FullTextService.deleteCachedPDF(for: Self.pmid)
+        FullTextService.deleteCachedPDF(for: Self.cacheKey)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: first))
         XCTAssertFalse(FileManager.default.fileExists(atPath: second))
+    }
+
+    /// Deleting one article must not take another's entries with it.
+    ///
+    /// `deleteCachedPDF` finds an article's files by prefix, and the boundary it
+    /// matches on is load-bearing: one identifier is freely a prefix of another
+    /// (`12345` of `123456`), so matching the bare component rather than the
+    /// component plus its separator would clear a different article's cache.
+    /// The separator holds only because `-` and `.` are absent from
+    /// ``BioMedLitConstants/cacheKeyAllowedCharacters`` — widening that set is
+    /// the change that would turn this into silent data loss, and this test is
+    /// what would catch it.
+    func testDeletingAnArticleLeavesAnArticleWhoseIdentifierExtendsIt() async throws {
+        let shorter = try XCTUnwrap(ArticleCacheKey(pmid: "12345", pmcId: nil, doi: nil))
+        let longer = try XCTUnwrap(ArticleCacheKey(pmid: "123456", pmcId: nil, doi: nil))
+        defer {
+            FullTextService.deleteCachedPDF(for: shorter)
+            FullTextService.deleteCachedPDF(for: longer)
+        }
+
+        StubURLProtocol.routes = ["oa.pdf": (200, Self.unpaywallBytes)]
+        let service = makeService()
+        let shorterPath = try await service.downloadAndCachePDF(
+            from: Self.unpaywallURL, for: shorter
+        )
+        let longerPath = try await service.downloadAndCachePDF(
+            from: Self.unpaywallURL, for: longer
+        )
+        XCTAssertNotEqual(shorterPath, longerPath)
+
+        FullTextService.deleteCachedPDF(for: shorter)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shorterPath))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: longerPath),
+            "deleting article 12345 must not clear article 123456's cache"
+        )
     }
 }
