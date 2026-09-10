@@ -121,6 +121,39 @@ final class Document {
     /// Whether this is a preprint (Europe PMC only).
     var isPreprint: Bool = false
 
+    /// What kind of identifier ``pmid`` holds, as the Europe PMC source token
+    /// that names it (`med`, `ppr`, `pmc`, or any other the provider sent).
+    ///
+    /// The slot takes whatever identifier the record had, so its value cannot
+    /// say what it is. Europe PMC states the kind once, on the search result;
+    /// everything that needs it — the query that can match the identifier, the
+    /// PDF cache filename — happens after that record is gone. Stored, the kind
+    /// is carried; unstored, it is guessed back from the accession's shape,
+    /// which can only recognise the shapes it was taught (#209).
+    ///
+    /// `nil` means "nothing was stated", for any of four reasons: the document
+    /// was written before this field existed, Europe PMC sent no `source`, the
+    /// provider was PubMed, or ``ArticleIdentifierKind/unknown`` was assigned.
+    /// One column cannot tell those apart, and it does not need to — all four
+    /// take the same path, the shape rule, which is exactly the behaviour every
+    /// document had before. Do not read `nil` as "pre-dates the field" when
+    /// planning a migration or a backfill; it does not narrow that far. The
+    /// same lightweight SwiftData migration, and the same reasoning, as
+    /// ``fullTextContentKindRaw``.
+    ///
+    /// Read and written through ``identifierKind``.
+    var identifierKindToken: String?
+
+    /// ``identifierKindToken`` as the kind it names.
+    ///
+    /// `nil` when the record stated none. Assigning
+    /// ``ArticleIdentifierKind/unknown`` clears the field rather than storing a
+    /// token, because a stated absence of knowledge is not knowledge.
+    var identifierKind: ArticleIdentifierKind? {
+        get { ArticleIdentifierKind(europePMCSource: identifierKindToken) }
+        set { identifierKindToken = newValue?.europePMCSourceToken }
+    }
+
     /// The `SearchProvider` enum value for the stored source string.
     ///
     /// Returns `.pubmed` as default if no source is set (for backwards compatibility).
@@ -395,6 +428,33 @@ final class Document {
         self.authors = authors
         self.batchNumber = batchNumber
         self.resultPosition = resultPosition
+    }
+
+    /// Copy everything a search result knows about this article onto it.
+    ///
+    /// One writer rather than a field-by-field copy at each call site. The
+    /// workflow builds documents in three places, and every field it copied by
+    /// hand had to be remembered three times; the kind and the preprint flag are
+    /// the two that arrived after those blocks were written. This is the same
+    /// reason `applyFullTextResult` exists: a direct assignment at one site is
+    /// how another site quietly keeps the old behaviour — which is exactly what
+    /// happened to the alternative-query path, converted last and only after a
+    /// review found it still hand-copying.
+    ///
+    /// - Parameters:
+    ///   - metadata: The search result to copy from.
+    ///   - provider: The provider that returned it, recorded as
+    ///     ``searchSource``.
+    func applySearchMetadata(_ metadata: UnifiedArticleMetadata, provider: SearchProvider) {
+        year = metadata.year
+        journal = metadata.journal
+        doi = metadata.doi
+        pmcId = metadata.pmcId
+        meshTerms = metadata.meshTerms
+        publicationDate = metadata.publicationDate
+        isPreprint = metadata.isPreprint
+        identifierKind = metadata.identifierKind
+        searchSource = provider.rawValue
     }
 
     // MARK: - Computed Properties

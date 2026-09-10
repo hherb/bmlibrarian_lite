@@ -65,14 +65,30 @@ final class UnidentifiedArticleCacheTests: XCTestCase {
 
     /// Two articles that carry different *kinds* of identifier must not collide
     /// either, which is why the kind is part of the filename and not only the
-    /// value. This is the case an untagged key would have merged.
+    /// value. This is the case an untagged key would have merged: one article's
+    /// PMC accession is `5000001` and the other's PubMed ID is the same digits.
     func testArticlesIdentifiedByDifferentKindsResolveToDifferentPaths() throws {
+        let viaPMC = try XCTUnwrap(ArticleCacheKey(pmid: "", pmcId: "5000001", doi: nil))
+        let viaPubMed = try XCTUnwrap(ArticleCacheKey(pmid: "5000001", pmcId: nil, doi: nil))
+
+        XCTAssertNotEqual(
+            FullTextService.cacheFilename(key: viaPMC, url: sharedSourceURL),
+            FullTextService.cacheFilename(key: viaPubMed, url: sharedSourceURL)
+        )
+    }
+
+    /// One article, one entry. A PMC-only Europe PMC record carries its
+    /// accession in the primary slot *and* in `pmcId`, and while the tag named
+    /// the rung rather than the kind, the two rungs named two entries — so the
+    /// record class #202 was opened for downloaded and stored its PDF twice
+    /// (#209).
+    func testOnePMCAccessionResolvesToOnePathThroughEitherRung() throws {
         let viaPMC = try XCTUnwrap(ArticleCacheKey(pmid: "", pmcId: "PMC5000001", doi: nil))
         let viaPrimarySlot = try XCTUnwrap(
             ArticleCacheKey(pmid: "PMC5000001", pmcId: nil, doi: nil)
         )
 
-        XCTAssertNotEqual(
+        XCTAssertEqual(
             FullTextService.cacheFilename(key: viaPMC, url: sharedSourceURL),
             FullTextService.cacheFilename(key: viaPrimarySlot, url: sharedSourceURL)
         )

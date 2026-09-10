@@ -352,12 +352,18 @@ async function fetch_fulltext(
     pmc_id: string | null,
     doi: string | null,
     pmid: string | null,
-    email: string
+    email: string,
+    # What the record said its identifier was, carried from the search that
+    # found it and persisted with the document. null means nothing was stated —
+    # including every document stored before this field existed — and the shape
+    # rule stands in. See "Identifier Kind" below.
+    stated_kind: IdentifierKind | null
 ) -> FullTextResult:
 
-    # The article half of the key. A ladder, tagged with which rung it came
-    # from — see "Cache Keys". null only when the article carries none of the
-    # three, which is also the only case that reaches no PDF tier at all.
+    # The article half of the key. A ladder, tagged with the identifier's
+    # kind — not the rung it arrived on; see "Cache Keys". null only when the
+    # article carries none of the three, which is also the only case that
+    # reaches no PDF tier at all.
     #
     # Built here, once, from the identifiers the *document* carries — never
     # from a PMC ID a lookup below resolves. A key that depended on whether a
@@ -366,7 +372,7 @@ async function fetch_fulltext(
     # There is no cache check at this point. The other half of the key is the
     # source URL, which is not known until a tier has one, so each PDF tier
     # consults the cache itself with `check_cache(cache_key, url)`.
-    cache_key = article_cache_key(pmid, pmc_id, doi)
+    cache_key = article_cache_key(pmid, pmc_id, doi, stated_kind)
 
     # A body-less Europe PMC rendering, held here until every later tier has
     # had its turn. null when none was seen. See "Abstract Holdback" below.
@@ -501,17 +507,35 @@ article alone:
 # The article half: the first identifier the document actually has, tagged
 # with which kind it is. null when it has none of the three, which is the one
 # case with no stable name to file bytes under.
-function article_cache_key(pmid, pmc_id, doi) -> string | null:
-    if not blank(pmid):   return tagged("id",  trim(pmid))
+function article_cache_key(pmid, pmc_id, doi, stated_kind) -> string | null:
+    if not blank(pmid):
+        return tagged(kind_tag(resolve_kind(stated_kind, trim(pmid))), trim(pmid))
     if not blank(pmc_id): return tagged("pmc", trim(pmc_id))
     if not blank(doi):    return "doi_" + hex(sha256(trim(doi)))[:32]
     return null
+
+function kind_tag(kind) -> string:
+    if kind == PUBMED:   return "pmid"
+    if kind == PREPRINT: return "ppr"
+    if kind == PMC:      return "pmc"
+    return "id"   # an unmodelled source, or a kind nobody could name
 
 function tagged(tag, identifier) -> string:
     # Sanitising is lossy — every unsafe character becomes `_` — so an
     # identifier it alters needs a digest to stay distinct from every other
     # identifier that sanitises the same way. One it leaves untouched, which
     # is every well-formed PMID and PMC accession, keeps its readable name.
+    #
+    # `sanitise` replaces every character outside [A-Za-z0-9_] with `_`. The
+    # identifier arrives from search results, and a value holding `/` or `..`
+    # would place the written file outside the cache directory. `-` is
+    # deliberately absent from that set, which is what leaves it free to
+    # separate the article component from the source-URL fingerprint in
+    # `cache_filename` below.
+    #
+    # The tag is not sanitised. Every tag comes from the fixed vocabulary in
+    # `kind_tag`, and `stated_kind` refuses a source token outside [a-z0-9],
+    # so no caller-supplied string reaches this position.
     safe = sanitise(identifier)
     if safe == identifier: return f"{tag}_{safe}"
     return f"{tag}_{safe}_{hex(sha256(identifier))[:32]}"
@@ -542,12 +566,23 @@ persisted by older builds.
 does not hold one kind of thing: a PubMed ID for a MEDLINE record, a `PPR…`
 accession for a preprint, a PMC ID for a PMC-only record. Untagged, an article
 whose primary slot happens to hold `PMC7654321` names the same entry as a
-different article reached by that PMC ID, and one is served the other's bytes.
-Tagging invalidates entries written by earlier builds. They are re-downloaded
-once, and then *orphaned* rather than replaced: the new filename differs, and
-the per-article delete matches on the tagged prefix, so only a full cache clear
-reclaims them. Still the cheap direction to be wrong in — a stale entry costs
-one download and some disk, a wrong entry costs the reader a wrong answer.
+different article reached by a *PubMed ID* of `PMC7654321`, and one is served
+the other's bytes. Tagging invalidates entries written by earlier builds. They
+are re-downloaded once, and then *orphaned* rather than replaced: the new
+filename differs, and the per-article delete matches on the tagged prefix, so
+only a full cache clear reclaims them. Still the cheap direction to be wrong in
+— a stale entry costs one download and some disk, a wrong entry costs the
+reader a wrong answer.
+
+**The tag names the identifier's kind, not the rung it arrived on.** A PMC-only
+record carries its accession in the primary slot *and* in `pmc_id`, so tagging
+the rung filed one article under two names and downloaded its PDF twice — for
+exactly the record class the ladder was added to serve. Both rungs tag `pmc`,
+so both name one entry. This is also why the tag for a PubMed ID is `pmid` and
+not `id`: `id` is now the bucket for an identifier whose kind nothing settles,
+and two such identifiers that are byte-identical still share a name. That is
+the one collision the scheme keeps, and it is the collision every primary-slot
+value had before the kinds were separated.
 
 **No two identifiers share a name**, which is stronger than keeping the kinds
 apart and is the property the cache actually needs. Sanitising is not
@@ -581,16 +616,16 @@ nothing, which is indistinguishable from the article not existing.
 
 ```pseudocode
 # Most specific first, in the same order the cache key ladder climbs.
-function identifier_queries(pmid, pmc_id, doi) -> [Query]:
+function identifier_queries(pmid, pmc_id, doi, stated_kind) -> [Query]:
     queries = []
 
     if not blank(pmid):
-        # The primary slot again — a PubMed ID, a preprint accession, or a
-        # PMC ID — so route on the accession prefix, ignoring case.
         id = trim(pmid)
-        if uppercase(id).starts_with("PPR"): queries.append(f'ext_id:{id} src:ppr')
-        elif uppercase(id).starts_with("PMC"): queries.append(f'PMCID:{id}')
-        else:                                  queries.append(f'ext_id:{id} src:med')
+        kind = resolve_kind(stated_kind, id)
+        if kind == PREPRINT:     queries.append(f'ext_id:{id} src:ppr')
+        elif kind == PMC:        queries.append(f'PMCID:{id}')
+        elif kind is a source token t: queries.append(f'ext_id:{id} src:{t}')
+        else:                    queries.append(f'ext_id:{id} src:med')
 
     if not blank(pmc_id):
         queries.append(f'PMCID:{trim(pmc_id)}')
@@ -598,8 +633,83 @@ function identifier_queries(pmid, pmc_id, doi) -> [Query]:
     if not blank(doi):
         queries.append(f'DOI:"{trim(doi)}"')
 
-    return queries
+    # Drop repeats, keeping the first of each query string. A PMC-only record
+    # carries its accession in the primary slot *and* in pmc_id, so both rungs
+    # build the identical `PMCID:` query — for exactly the record class this
+    # ladder was added to serve. Without this the same request goes out twice,
+    # and on a transient failure the retry backoff is paid twice for one answer.
+    # Keeping the *first* leaves the more specific rung's description to name
+    # the article in the log.
+    return dedupe_preserving_order(queries, by: query_string)
 ```
+
+The kind comes from the record, not from the string. Europe PMC states it on
+every result in the `source` field (`MED`, `PPR`, `PMC`, and a dozen more), and
+the shape rule below is only a stand-in for records that stated none — every
+document persisted before the field existed, and any identifier reaching the
+chain from elsewhere:
+
+```pseudocode
+# What a provider said the identifier is. null when it said nothing.
+#
+# A token outside [a-z0-9] is refused, not carried. It reaches a query as
+# `src:{token}` and a cache filename as a tag, and both need a closed set: a
+# token holding a space or a colon makes the query parse as something else and
+# match nothing, which this ladder reads as "no such article". Every token
+# Europe PMC publishes is a short alphanumeric word, so this refuses nothing
+# the provider actually sends.
+function stated_kind(record) -> Kind | null:
+    token = lowercase(trim(record.source))
+    if blank(token): return null
+    if not token.matches(/^[a-z0-9]+$/): return null
+    if token == "med": return PUBMED
+    if token == "ppr": return PREPRINT
+    if token == "pmc": return PMC
+    return SourceToken(token)     # NBK, PAT, AGR, ETH, …
+
+# The stand-in, for identifiers nobody classified. Deliberately not total:
+# calling an unrecognised accession a PubMed ID is what put a `PPR…` value
+# behind a PubMed URL.
+#
+# `all_digits` means ASCII `0`-`9`, and an empty id is UNKNOWN, not PUBMED.
+# Both are load-bearing and both differ by language: Kotlin's
+# `"".all { it.isDigit() }` is true and Python's `"".isdigit()` is false, so a
+# port that omits the empty guard sends `pubmed.ncbi.nlm.nih.gov//` for a blank
+# slot on one platform and not the other. A non-ASCII digit test is worse: it
+# calls `١٢٣` a PubMed ID and pastes it after the PubMed URL.
+function infer_kind(id) -> Kind:
+    u = uppercase(trim(id))
+    if blank(u):             return UNKNOWN
+    if u.starts_with("PPR"): return PREPRINT
+    if u.starts_with("PMC"): return PMC
+    if all_digits(u):        return PUBMED     # ASCII 0-9 only
+    return UNKNOWN
+
+function resolve_kind(stated, id) -> Kind:
+    if stated is null or stated == UNKNOWN: return infer_kind(id)
+    return stated
+```
+
+**Store the kind with the document, as the source token itself.** The record is
+gone by the time any of this runs: the query, the cache filename and the
+preprint indicator all happen days later, from persisted fields. A kind that is
+not stored is a kind that must be guessed, and a guess can only recognise the
+shapes it was taught — every other Europe PMC source is then asked for under
+`src:med`, where it matches nothing. Storing the provider's own token means
+nothing has to be invented to write it down, and an absent value keeps its own
+meaning: "written before this field existed", which falls back to the shape
+rule rather than claiming a kind.
+
+**A shape-inferred `UNKNOWN` still queries `src:med`.** That is where such a
+value has always gone. It matches nothing unless the identifier really is a
+PubMed ID, so log the empty result — otherwise an identifier asked for under a
+source that cannot answer is indistinguishable from an article Europe PMC has
+never held.
+
+**Only a PubMed ID may be pasted after the PubMed base URL.** The last-resort
+fallback must apply the same rule: the resolved kind must be `PUBMED` *and* the
+value all digits. A stated preprint whose accession happens to be numeric would
+otherwise be handed to the reader as a PubMed link that names no article.
 
 Measured against the live Europe PMC API on 2026-09-10:
 
@@ -902,18 +1012,37 @@ As of 2026-09-10:
 
 | Section | Swift (BioMedLit) | Python (desktop) | Kotlin (Android) |
 |---|---|---|---|
-| Tagged cache-key ladder | yes | n/a — no PDF cache | no (#205) |
+| Tagged cache-key ladder | yes | no (#207) | no (#205) |
 | Identifier resolution queries | yes | partial | no (#205) |
+| Kind stated by the record, not inferred | yes | no (#207) | no (#205) |
+| Kind persisted with the document | yes (iOS/macOS) | no (#207) | no (#205) |
 
 **Python** branches `PMCID:` against `ext_id:… src:med` in
 `europepmc.py`, so it reaches a PMC ID, but it tries the PMC rung *first*,
 runs a single query rather than every rung, and has no preprint (`src:ppr`)
 routing. A preprint therefore resolves only through its DOI, and not at all
-without one. Tracked in #207.
+without one.
+
+Python *does* keep a persistent PDF cache — `pdf_utils.py` files bytes under
+`{year}/{doi with / replaced by _}.pdf`, falling back to `doc_{id}.pdf`. It is
+not "no cache" but an untagged one, and it commits both defects this section
+names: the replacement is lossy with no digest, so two DOIs differing only
+where the slashes fall share one entry, and nothing in the name records the
+source URL, so a second URL for one article overwrites the first. Both tracked
+in #207.
 
 **Android** builds `ext_id:$pmid src:med` unconditionally in
 `FullTextService.kt` and keys its cache on one untagged string. Tracked in
 #205.
+
+**Both ports also need the kind carried and stored**, not only the ladder.
+Europe PMC's `source` field is decoded on every platform and *read* on every
+platform — but on both ports it is read only far enough to set a boolean
+preprint flag (`europepmc.py`, `EuropePMCService.kt`), and neither routes a
+query or a cache key on it. A boolean cannot express `NBK`, `PAT` or `ETH`, and
+cannot distinguish "stated nothing" from "stated something we do not model", so
+a port that adds the ladder while still inferring the kind from an accession
+prefix reproduces the narrower half of the same defect (#209).
 
 ## Platform-Specific Notes
 

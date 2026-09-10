@@ -38,7 +38,7 @@ final class ArticleCacheKeyTests: XCTestCase {
     func testPrimaryIdentifierIsPreferredOverEveryOtherIdentifier() {
         let key = ArticleCacheKey(pmid: "12345678", pmcId: "PMC7654321", doi: "10.1/abc")
 
-        XCTAssertEqual(key?.filenameComponent, "id_12345678")
+        XCTAssertEqual(key?.filenameComponent, "pmid_12345678")
     }
 
     /// The defect #202 names, directly: a Europe PMC article with a PMC ID and
@@ -97,12 +97,113 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// so it holds a PubMed ID, a Europe PMC preprint accession, or a PMC ID
     /// depending on the record. Untagged, an article whose primary slot happens
     /// to hold `PMC7654321` would name the same entry as a different article
-    /// reached by that PMC ID, and one would be served the other's bytes.
-    func testAPMCIdentifierInThePrimarySlotDoesNotCollideWithThePMCRung() {
+    /// reached by a *PubMed ID* of `PMC7654321`, and one would be served the
+    /// other's bytes.
+    func testAPMCAccessionAndAPubMedIdentifierNeverShareAName() {
+        let pubmed = ArticleCacheKey(pmid: "7654321", pmcId: nil, doi: nil)
+        let pmc = ArticleCacheKey(pmid: "", pmcId: "7654321", doi: nil)
+
+        XCTAssertNotEqual(pubmed?.filenameComponent, pmc?.filenameComponent)
+    }
+
+    /// The other half of that rule, and the correction #209 makes to it.
+    ///
+    /// Tagging on the *slot* an identifier arrived in filed one article under
+    /// two names: a PMC-only record carries its accession in both the primary
+    /// slot and `pmcId`, so it was downloaded twice and cached twice. Tagging on
+    /// the identifier's *kind* collapses the two, because both names describe
+    /// the same PMC accession — which is a statement about the article, not
+    /// about which rung reached it.
+    func testAPMCAccessionNamesOneEntryWhicheverRungReachesIt() {
         let viaPrimary = ArticleCacheKey(pmid: "PMC7654321", pmcId: nil, doi: nil)
         let viaPMCRung = ArticleCacheKey(pmid: "", pmcId: "PMC7654321", doi: nil)
 
-        XCTAssertNotEqual(viaPrimary?.filenameComponent, viaPMCRung?.filenameComponent)
+        XCTAssertEqual(viaPrimary?.filenameComponent, "pmc_PMC7654321")
+        XCTAssertEqual(viaPrimary?.filenameComponent, viaPMCRung?.filenameComponent)
+    }
+
+    // MARK: - The kind Europe PMC stated (#209)
+
+    /// A record's stated kind names the entry, without consulting the shape of
+    /// the accession. Europe PMC knows what it sent us; the shape rule is only
+    /// a stand-in for records that predate the field.
+    func testAStatedKindDecidesTheTag() {
+        let key = ArticleCacheKey(
+            pmid: "1287966",
+            pmcId: nil,
+            doi: nil,
+            primaryKind: .preprint
+        )
+
+        XCTAssertEqual(key?.filenameComponent, "ppr_1287966")
+    }
+
+    /// An identifier no one classified and whose shape settles nothing keeps the
+    /// untyped tag. Filing it under `pmid_` would claim it is a PubMed ID, the
+    /// kind of label that put a `PPR…` accession behind a PubMed URL (#202).
+    func testAnUnclassifiableIdentifierKeepsTheUntypedTag() {
+        let key = ArticleCacheKey(pmid: "CN101548780", pmcId: nil, doi: nil)
+
+        XCTAssertEqual(key?.filenameComponent, "id_CN101548780")
+    }
+
+    /// Two articles from different Europe PMC sources can carry the same
+    /// external identifier, and neither states a kind this type tags on. They
+    /// share the untyped tag, which is the one collision this design keeps — it
+    /// costs a wrong entry only for two unclassified identifiers that are also
+    /// byte-identical, and it is the same collision every primary-slot value had
+    /// before the kinds were separated.
+    ///
+    /// Stated as a comparison of two keys rather than one assertion about one:
+    /// the collision is a relationship, and a single expected string cannot
+    /// witness it.
+    func testTwoUnclassifiedIdentifiersStillShareTheUntypedTag() {
+        let patent = ArticleCacheKey(
+            pmid: "SHARED1234", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("pat")
+        )
+        let thesis = ArticleCacheKey(
+            pmid: "SHARED1234", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
+
+        XCTAssertEqual(patent?.filenameComponent, thesis?.filenameComponent)
+        XCTAssertEqual(patent?.filenameComponent, "id_SHARED1234")
+    }
+
+    /// An unmodelled source token files under the untyped bucket, never under a
+    /// tag built from the token itself.
+    ///
+    /// The tag is interpolated into the filename without sanitising, because
+    /// every tag is drawn from a fixed vocabulary. Returning the token here
+    /// would put a provider-supplied string in that position. Nothing else in
+    /// the suite pinned this branch: replacing it with `return token` passed
+    /// every test before this case existed.
+    func testAnUnmodelledSourceTokenFilesUnderTheUntypedTag() {
+        let key = ArticleCacheKey(
+            pmid: "879809", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
+
+        XCTAssertEqual(key?.filenameComponent, "id_879809")
+        XCTAssertFalse(key?.filenameComponent.contains("eth") ?? true)
+    }
+
+    /// A stated kind outranks the shape rule in the cache tag, and this is the
+    /// case where getting it wrong costs a wrong answer rather than a wrong
+    /// name: Europe PMC's thesis (`ETH`) and case-report (`CBA`) records carry
+    /// bare numeric accessions, so the shape rule calls them PubMed IDs. Filing
+    /// one under `pmid_` would let a thesis and a genuine PubMed article with
+    /// the same digits share an entry and be served each other's bytes.
+    func testANumericAccessionFromAnotherSourceDoesNotShareThePubMedTag() {
+        let thesis = ArticleCacheKey(
+            pmid: "879809", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
+        let article = ArticleCacheKey(pmid: "879809", pmcId: nil, doi: nil)
+
+        XCTAssertEqual(article?.filenameComponent, "pmid_879809")
+        XCTAssertNotEqual(thesis?.filenameComponent, article?.filenameComponent)
     }
 
     // MARK: - Preprints
@@ -114,7 +215,7 @@ final class ArticleCacheKeyTests: XCTestCase {
     func testAPreprintAccessionKeysOnThePrimaryRung() {
         let key = ArticleCacheKey(pmid: "PPR1287966", pmcId: nil, doi: "10.64898/2026.07.25.26358746")
 
-        XCTAssertEqual(key?.filenameComponent, "id_PPR1287966")
+        XCTAssertEqual(key?.filenameComponent, "ppr_PPR1287966")
     }
 
     // MARK: - Path safety
@@ -146,7 +247,7 @@ final class ArticleCacheKeyTests: XCTestCase {
     func testAPaddedIdentifierIsStoredTrimmed() {
         let key = ArticleCacheKey(pmid: " 12345 ", pmcId: nil, doi: nil)
 
-        XCTAssertEqual(key?.filenameComponent, "id_12345")
+        XCTAssertEqual(key?.filenameComponent, "pmid_12345")
     }
 
     // MARK: - One name per article
@@ -172,7 +273,7 @@ final class ArticleCacheKeyTests: XCTestCase {
     func testAWellFormedIdentifierKeepsItsReadableName() {
         XCTAssertEqual(
             ArticleCacheKey(pmid: "12345678", pmcId: nil, doi: nil)?.filenameComponent,
-            "id_12345678"
+            "pmid_12345678"
         )
         XCTAssertEqual(
             ArticleCacheKey(pmid: "", pmcId: "PMC7654321", doi: nil)?.filenameComponent,

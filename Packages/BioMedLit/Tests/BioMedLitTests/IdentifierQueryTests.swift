@@ -40,8 +40,18 @@ import XCTest
 ///                                       ext_id:PMC1082889 src:med -> 0
 /// ```
 final class IdentifierQueryTests: XCTestCase {
-    private func queries(pmid: String?, pmcId: String? = nil, doi: String?) -> [String] {
-        FullTextService.identifierQueries(pmid: pmid, pmcId: pmcId, doi: doi).map(\.query)
+    private func queries(
+        pmid: String?,
+        pmcId: String? = nil,
+        doi: String?,
+        primaryKind: ArticleIdentifierKind? = nil
+    ) -> [String] {
+        FullTextService.identifierQueries(
+            pmid: pmid,
+            pmcId: pmcId,
+            doi: doi,
+            primaryKind: primaryKind
+        ).map(\.query)
     }
 
     /// The case that already worked, pinned so routing the others cannot
@@ -119,13 +129,56 @@ final class IdentifierQueryTests: XCTestCase {
     /// An accession shape the routing does not recognise falls through to
     /// `src:med`, where it matches nothing.
     ///
-    /// Europe PMC returns records whose `id` is an `NBK…`, `PAT…` or `AGR…`
+    /// Europe PMC returns records whose `id` is an `PAT…`, `AGR…` or `ETH…`
     /// accession, and none of those is a PubMed ID. Pinned so the fall-through
     /// is a decision on record rather than an accident: a future rung for one of
     /// these shapes should change this expectation deliberately. The zero-hit
     /// search it produces is now logged by `searchForPMCIdAndPDFUrl`, which is
     /// what keeps it from being silent the way #202 was.
     func testAnUnrecognisedAccessionShapeFallsThroughToTheMedlineSource() {
-        XCTAssertEqual(queries(pmid: "NBK1234", doi: nil), ["ext_id:NBK1234 src:med"])
+        XCTAssertEqual(queries(pmid: "CN101548780", doi: nil), ["ext_id:CN101548780 src:med"])
+    }
+
+    // MARK: - The Kind Europe PMC Stated (#209)
+
+    /// A record's own `source` field decides the route, without consulting the
+    /// accession's shape. The shape rule is a stand-in for records that stated
+    /// nothing, and where a record did state its kind, guessing again could only
+    /// disagree with it.
+    func testAStatedPreprintKindRoutesToThePreprintSource() {
+        XCTAssertEqual(
+            queries(pmid: "1287966", doi: nil, primaryKind: .preprint),
+            ["ext_id:1287966 src:ppr"]
+        )
+    }
+
+    /// The defect the shape rule cannot fix. Europe PMC serves books, patents,
+    /// theses and agricultural records, each answering only under its own token;
+    /// asked as `src:med` every one of them matches nothing, which reads exactly
+    /// like an article Europe PMC has never heard of.
+    func testAStatedSourceTokenIsAskedForUnderItself() {
+        XCTAssertEqual(
+            queries(pmid: "CN101548780", doi: nil, primaryKind: .europePMCSource("pat")),
+            ["ext_id:CN101548780 src:pat"]
+        )
+    }
+
+    /// A stated PMC record still needs the `PMCID` field rather than
+    /// `ext_id:… src:pmc`, which matches nothing.
+    func testAStatedPMCKindStillUsesThePMCIDField() {
+        XCTAssertEqual(
+            queries(pmid: "PMC1082889", doi: nil, primaryKind: .pmc),
+            ["PMCID:PMC1082889"]
+        )
+    }
+
+    /// `.unknown` is what a record that stated nothing resolves to when its
+    /// shape does not settle the kind either, and it keeps the documented
+    /// fall-through rather than inventing a source.
+    func testAnUnknownKindKeepsTheMedlineFallThrough() {
+        XCTAssertEqual(
+            queries(pmid: "CN101548780", doi: nil, primaryKind: .unknown),
+            ["ext_id:CN101548780 src:med"]
+        )
     }
 }

@@ -618,11 +618,7 @@ struct MacDocumentCard: View {
         Task {
             do {
                 let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
-                let bmlResult = try await service.fetchFullText(
-                    pmcId: document.pmcId,
-                    doi: document.doi,
-                    pmid: document.pmid
-                )
+                let bmlResult = try await service.fetchFullText(for: document)
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {

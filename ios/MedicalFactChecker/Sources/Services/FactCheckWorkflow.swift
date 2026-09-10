@@ -462,14 +462,8 @@ final class FactCheckWorkflow {
                     batchNumber: session.batchesFetched + 1,
                     resultPosition: article.resultPosition
                 )
-                document.year = article.year
-                document.journal = article.journal
-                document.doi = article.doi
-                document.pmcId = article.pmcId
-                document.meshTerms = article.meshTerms
-                document.publicationDate = article.publicationDate
+                document.applySearchMetadata(article, provider: result.provider)
                 document.session = session
-                document.searchSource = result.provider.rawValue
 
                 modelContext.insert(document)
                 newDocumentsFound += 1
@@ -1571,14 +1565,8 @@ final class FactCheckWorkflow {
                 batchNumber: batchNumber,
                 resultPosition: article.resultPosition
             )
-            document.year = article.year
-            document.journal = article.journal
-            document.doi = article.doi
-            document.pmcId = article.pmcId
-            document.meshTerms = article.meshTerms
-            document.publicationDate = article.publicationDate
+            document.applySearchMetadata(article, provider: result.provider)
             document.session = session
-            document.searchSource = result.provider.rawValue
 
             modelContext.insert(document)
         }
@@ -2247,13 +2235,7 @@ final class FactCheckWorkflow {
                 batchNumber: batchNumber,
                 resultPosition: session.documentsFound + index
             )
-            document.year = article.year
-            document.journal = article.journal
-            document.doi = article.doi
-            document.pmcId = article.pmcId
-            document.meshTerms = article.meshTerms
-            document.publicationDate = article.publicationDate
-            document.searchSource = result.provider.rawValue
+            document.applySearchMetadata(article, provider: result.provider)
             document.session = session
 
             modelContext.insert(document)

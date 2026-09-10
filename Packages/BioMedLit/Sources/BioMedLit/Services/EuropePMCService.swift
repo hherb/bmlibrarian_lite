@@ -129,34 +129,7 @@ public actor EuropePMCService {
         articles.reserveCapacity(results.count)
 
         for result in results {
-            let pmid = result.pmid ?? result.id ?? ""
-            let title = result.title ?? ""
-            let abstract = cleanAbstract(result.abstractText)
-            let authors = result.authorString ?? ""
-            let journal = result.journalTitle ?? result.journalInfo?.journal?.title ?? ""
-            let year = result.pubYear ?? ""
-            let hasFullText = result.inPMC == "Y"
-            let isOpenAccess = result.isOpenAccess == "Y"
-
-            // Extract free PDF render URL from fullTextUrlList
-            let pdfRenderURL = EuropePMCService.extractFreePDFURL(from: result)
-
-            let article = SearchArticle(
-                pmid: pmid,
-                pmcId: result.pmcid,
-                doi: result.doi,
-                title: title,
-                abstract: abstract,
-                authors: authors,
-                journal: journal,
-                year: year,
-                publicationDate: result.firstPublicationDate,
-                hasFullText: hasFullText,
-                isOpenAccess: isOpenAccess,
-                source: .europePMC,
-                pdfRenderURL: pdfRenderURL
-            )
-            articles.append(article)
+            articles.append(EuropePMCService.searchArticle(from: result))
         }
 
         BioMedLitLib.logger?.info(
@@ -170,6 +143,43 @@ public actor EuropePMCService {
             nextCursor: response.nextCursorMark,
             query: fullQuery,
             provider: .europePMC
+        )
+    }
+
+    // MARK: - Result Mapping
+
+    /// One Europe PMC record as a search article.
+    ///
+    /// The primary identifier slot is `pmid ?? id ?? ""`, which is why it does
+    /// not hold one kind of thing: a MEDLINE record fills it with a PubMed ID, a
+    /// preprint with a `PPR…` accession, a PMC-only record with a PMC accession,
+    /// and a record with neither leaves it empty (#202).
+    ///
+    /// The record's own `source` field says which, and travels with the article
+    /// as ``SearchArticle/identifierKind``. It used to be decoded and dropped
+    /// here, leaving the retrieval chain to reconstruct the kind from the
+    /// accession's shape — a reconstruction that cannot name the sources it was
+    /// never taught, and asks for each of them under `src:med`, where they match
+    /// nothing (#209).
+    ///
+    /// - Parameter result: One decoded Europe PMC search result.
+    /// - Returns: The article, carrying the kind the record stated.
+    static func searchArticle(from result: EuropePMCResult) -> SearchArticle {
+        SearchArticle(
+            pmid: result.pmid ?? result.id ?? "",
+            pmcId: result.pmcid,
+            doi: result.doi,
+            title: result.title ?? "",
+            abstract: cleanAbstract(result.abstractText),
+            authors: result.authorString ?? "",
+            journal: result.journalTitle ?? result.journalInfo?.journal?.title ?? "",
+            year: result.pubYear ?? "",
+            publicationDate: result.firstPublicationDate,
+            hasFullText: result.inPMC == "Y",
+            isOpenAccess: result.isOpenAccess == "Y",
+            source: .europePMC,
+            pdfRenderURL: extractFreePDFURL(from: result),
+            identifierKind: ArticleIdentifierKind(europePMCSource: result.source)
         )
     }
 
@@ -241,7 +251,7 @@ public actor EuropePMCService {
     // MARK: - Helpers
 
     /// Clean abstract text by removing HTML tags.
-    private func cleanAbstract(_ text: String?) -> String {
+    private static func cleanAbstract(_ text: String?) -> String {
         guard let text = text else { return "" }
 
         // Convert <h4>Section</h4> to **Section:**
