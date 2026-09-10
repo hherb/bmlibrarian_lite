@@ -99,6 +99,15 @@ public enum BioMedLitConstants {
     /// not.
     public static let europePMCPreprintSource = "ppr"
 
+    /// Europe PMC `src` token for PubMed Central records.
+    ///
+    /// Names the kind of a record, which is what the `source` field carries and
+    /// what ``ArticleIdentifierKind`` stores. It is deliberately *not* used to
+    /// build an `ext_id` query: measured on 2026-09-10, `ext_id:PMC1082889
+    /// src:pmc` returns no hits, while ``europePMCPMCIDField`` matches — see
+    /// that constant.
+    public static let europePMCPMCSource = "pmc"
+
     /// Europe PMC query field that matches a PMC accession.
     ///
     /// A PMC ID is not reachable as an `ext_id` under the sources we tried:
@@ -202,18 +211,33 @@ public enum BioMedLitConstants {
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
     )
 
-    /// Tag naming the rung a PDF cache filename was keyed on.
+    /// Tag for a cache filename whose identifier has no kind to name it by.
     ///
-    /// These three define the on-disk cache format, and they are the whole
+    /// These tags define the on-disk cache format, and they are the whole
     /// mechanism keeping two identifier kinds apart: an article whose primary
     /// slot holds `PMC7654321` must not name the entry a different article
-    /// reached by that PMC ID names. They are mutually non-prefixing, and `_`
-    /// joins a tag to its identifier because `-` is absent from
+    /// reached by a PubMed ID of `PMC7654321`. They are mutually non-prefixing,
+    /// and `_` joins a tag to its identifier because `-` is absent from
     /// ``cacheKeyAllowedCharacters`` and so stays free to separate the article
     /// component from the source-URL fingerprint.
+    ///
+    /// This one is the bucket for an identifier no record classified and whose
+    /// shape settles nothing — an `NBK…` or `AGR…` accession, say. Filing such a
+    /// value under ``pubmedCacheKeyTag`` would be a label that lies.
     public static let primaryCacheKeyTag = "id"
 
+    /// Tag for a cache filename keyed on a PubMed ID. See ``primaryCacheKeyTag``.
+    public static let pubmedCacheKeyTag = "pmid"
+
+    /// Tag for a cache filename keyed on a preprint accession. See
+    /// ``primaryCacheKeyTag``.
+    public static let preprintCacheKeyTag = "ppr"
+
     /// Tag for a cache filename keyed on a PMC ID. See ``primaryCacheKeyTag``.
+    ///
+    /// Shared by both rungs that can carry a PMC accession, which is what stops
+    /// a PMC-only record — whose accession arrives in the primary slot *and* in
+    /// `pmcId` — from being downloaded and cached twice (#209).
     public static let pmcCacheKeyTag = "pmc"
 
     /// Tag for a cache filename keyed on a DOI. See ``primaryCacheKeyTag``.

@@ -71,13 +71,16 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
     /// The case is what keeps two kinds apart in the filename; the associated
     /// value is the raw identifier, before sanitising or digesting.
     public enum Identifier: Equatable, Hashable, Sendable {
-        /// The document's primary identifier slot.
+        /// The document's primary identifier slot, and what kind of identifier
+        /// it turned out to hold.
         ///
-        /// Deliberately not called `pmid`: the slot holds a PubMed ID for a
-        /// MEDLINE record, a `PPR…` accession for a preprint, and a PMC ID for
+        /// The slot is deliberately not called `pmid`: it holds a PubMed ID for
+        /// a MEDLINE record, a `PPR…` accession for a preprint, and a PMC ID for
         /// a PMC-only record. Naming it for one of the three would be a label
-        /// that lies about the other two.
-        case primary(String)
+        /// that lies about the other two — so the kind rides alongside instead,
+        /// stated by Europe PMC where it said and inferred from the accession
+        /// where it did not.
+        case primary(String, kind: ArticleIdentifierKind)
 
         /// A PubMed Central ID, used when the primary slot is empty.
         case pmcID(String)
@@ -103,14 +106,27 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
     ///
     /// - Parameters:
     ///   - pmid: The document's primary identifier slot. See
-    ///     ``Identifier/primary(_:)`` for why it is not only ever a PubMed ID.
+    ///     ``Identifier/primary(_:kind:)`` for why it is not only ever a PubMed
+    ///     ID.
     ///   - pmcId: PubMed Central ID, if the document has one.
     ///   - doi: Digital Object Identifier, if the document has one.
+    ///   - primaryKind: What the record said the primary slot holds, when it
+    ///     said. Omitted or `nil`, the slot's kind is read from the accession's
+    ///     shape, which is what every document stored before the kind was
+    ///     recorded falls back on.
     /// - Returns: `nil` when all three are absent or blank, which is the one
     ///   case with no stable name to file bytes under.
-    public init?(pmid: String?, pmcId: String?, doi: String?) {
+    public init?(
+        pmid: String?,
+        pmcId: String?,
+        doi: String?,
+        primaryKind: ArticleIdentifierKind? = nil
+    ) {
         if let value = Self.usable(pmid) {
-            identifier = .primary(value)
+            identifier = .primary(
+                value,
+                kind: ArticleIdentifierKind.resolved(declared: primaryKind, accession: value)
+            )
         } else if let value = Self.usable(pmcId) {
             identifier = .pmcID(value)
         } else if let value = Self.usable(doi) {
@@ -142,8 +158,8 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
     /// caller passes.
     public var filenameComponent: String {
         switch identifier {
-        case .primary(let value):
-            return Self.component(BioMedLitConstants.primaryCacheKeyTag, readable: value)
+        case .primary(let value, let kind):
+            return Self.component(Self.tag(for: kind), readable: value)
         case .pmcID(let value):
             return Self.component(BioMedLitConstants.pmcCacheKeyTag, readable: value)
         case .doi(let value):
@@ -157,9 +173,37 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
     /// exists to be recognised, and nobody recognises a hash.
     public var logDescription: String {
         switch identifier {
-        case .primary(let value): return "article \(value)"
+        case .primary(let value, let kind):
+            switch kind {
+            case .pubmed: return "PMID \(value)"
+            case .preprint: return "preprint \(value)"
+            case .pmc: return "PMC ID \(value)"
+            case .europePMCSource(let source): return "\(source.uppercased()) record \(value)"
+            case .unknown: return "article \(value)"
+            }
         case .pmcID(let value): return "PMC ID \(value)"
         case .doi(let value): return "DOI \(value)"
+        }
+    }
+
+    /// The filename tag naming an identifier's kind.
+    ///
+    /// A kind this cache does not tag separately — an unrecognised Europe PMC
+    /// source, or an identifier nobody classified — takes
+    /// ``BioMedLitConstants/primaryCacheKeyTag``, the untyped bucket every
+    /// primary-slot value shared before the kinds were separated. Two such
+    /// identifiers that are byte-identical still collide; the alternative, a tag
+    /// built from an arbitrary source token, would put a caller-supplied string
+    /// where the filename format needs a closed set.
+    ///
+    /// - Parameter kind: The identifier's kind.
+    /// - Returns: The tag to file it under.
+    private static func tag(for kind: ArticleIdentifierKind) -> String {
+        switch kind {
+        case .pubmed: return BioMedLitConstants.pubmedCacheKeyTag
+        case .preprint: return BioMedLitConstants.preprintCacheKeyTag
+        case .pmc: return BioMedLitConstants.pmcCacheKeyTag
+        case .europePMCSource, .unknown: return BioMedLitConstants.primaryCacheKeyTag
         }
     }
 

@@ -136,6 +136,12 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     /// Whether this is a preprint (Europe PMC only).
     let isPreprint: Bool
 
+    /// What kind of identifier ``pmid`` holds, when the provider said.
+    ///
+    /// `nil` where nothing was stated, which is what a PubMed result and every
+    /// pre-#209 stored document answer. See ``ArticleIdentifierKind``.
+    let identifierKind: ArticleIdentifierKind?
+
     /// Whether full text is available in PubMed Central.
     ///
     /// True if the article has a PMC ID or the `inPMC` flag is set.
@@ -181,6 +187,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         meshTerms: [String] = [],
         source: SearchProvider,
         isPreprint: Bool = false,
+        identifierKind: ArticleIdentifierKind? = nil,
         hasFullTextInPMC: Bool = false,
         batchNumber: Int = 1,
         resultPosition: Int = 0
@@ -197,6 +204,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         self.meshTerms = meshTerms
         self.source = source
         self.isPreprint = isPreprint
+        self.identifierKind = identifierKind
         self.hasFullTextInPMC = hasFullTextInPMC
         self.batchNumber = batchNumber
         self.resultPosition = resultPosition
@@ -268,7 +276,12 @@ enum BioMedLitAdapters {
             year: Int(article.year),
             meshTerms: [],  // BioMedLit doesn't parse MeSH terms yet
             source: appProvider,
-            isPreprint: false,  // BioMedLit SearchArticle doesn't track preprint status
+            // Europe PMC states the record's kind, and `SearchArticle` now
+            // carries it. Until #209 this was hard-coded `false` because nothing
+            // downstream of the decode knew, which is why the preprint badge in
+            // both apps had never once appeared.
+            isPreprint: article.identifierKind == .preprint,
+            identifierKind: article.identifierKind,
             hasFullTextInPMC: article.hasFullText,
             batchNumber: batchNumber,
             resultPosition: resultPosition
@@ -506,6 +519,32 @@ extension BMLFullTextService {
     static func create(from settings: AppSettings) -> BMLFullTextService {
         let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
         return BMLFullTextService(email: email)
+    }
+
+    /// Retrieve full text for a document, from every identifier it carries.
+    ///
+    /// One seam for all five fetch surfaces — two iOS views, two macOS views and
+    /// the full-text tab — which ran the same call with hand-written argument
+    /// lists. They had drifted four ways once before, and #186 was fixed on one
+    /// of them while the others kept the defect.
+    ///
+    /// The stated identifier kind travels with the identifiers, which is what
+    /// keeps `identifierKindToken` from being a field written for nobody: it is
+    /// stored at search time and read here, days later, as the thing that says
+    /// which Europe PMC source can answer for this article (#209).
+    ///
+    /// - Parameter document: The document to fetch for.
+    /// - Returns: The retrieved content and everything the chain learned on the
+    ///   way.
+    /// - Throws: Whatever ``FullTextService/fetchFullText(pmcId:doi:pmid:primaryKind:)``
+    ///   throws, cancellation included.
+    func fetchFullText(for document: Document) async throws -> BMLFullTextResult {
+        try await fetchFullText(
+            pmcId: document.pmcId,
+            doi: document.doi,
+            pmid: document.pmid,
+            primaryKind: document.identifierKind
+        )
     }
 }
 

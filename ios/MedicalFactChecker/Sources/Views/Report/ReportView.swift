@@ -1521,11 +1521,7 @@ struct DocumentDetailSheet: View {
         Task {
             do {
                 let service = BMLFullTextService.create(from: .shared)
-                let bmlResult = try await service.fetchFullText(
-                    pmcId: document.pmcId,
-                    doi: document.doi,
-                    pmid: document.pmid
-                )
+                let bmlResult = try await service.fetchFullText(for: document)
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {

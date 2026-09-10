@@ -96,6 +96,19 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
     /// Free PDF URL from Europe PMC fullTextUrlList (when XML is unavailable).
     public let pdfRenderURL: String?
 
+    /// What kind of identifier ``pmid`` holds, when the provider said.
+    ///
+    /// The slot takes whatever identifier a record has — a PubMed ID, a
+    /// preprint accession, a PMC accession — so the value alone cannot say what
+    /// it is. Europe PMC states the kind on every record; carrying it here is
+    /// what stops the retrieval chain from reconstructing it from the
+    /// accession's shape, which can only recognise the shapes it was taught
+    /// (#209).
+    ///
+    /// `nil` means the provider stated nothing, and consumers fall back to
+    /// ``ArticleIdentifierKind/inferred(from:)``.
+    public let identifierKind: ArticleIdentifierKind?
+
     public init(
         pmid: String,
         pmcId: String? = nil,
@@ -109,7 +122,8 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         hasFullText: Bool = false,
         isOpenAccess: Bool = false,
         source: SearchProvider,
-        pdfRenderURL: String? = nil
+        pdfRenderURL: String? = nil,
+        identifierKind: ArticleIdentifierKind? = nil
     ) {
         self.id = pmid
         self.pmid = pmid
@@ -125,6 +139,7 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         self.isOpenAccess = isOpenAccess
         self.source = source
         self.pdfRenderURL = pdfRenderURL
+        self.identifierKind = identifierKind
     }
 }
 
