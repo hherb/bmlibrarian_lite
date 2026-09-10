@@ -64,10 +64,10 @@ final class IdentifierKindPersistenceTests: XCTestCase {
     func testAnUnmodelledSourceTokenRoundTrips() {
         let document = makeDocument()
 
-        document.identifierKind = .europePMCSource("nbk")
+        document.identifierKind = .europePMCSource("pat")
 
-        XCTAssertEqual(document.identifierKindToken, "nbk")
-        XCTAssertEqual(document.identifierKind, .europePMCSource("nbk"))
+        XCTAssertEqual(document.identifierKindToken, "pat")
+        XCTAssertEqual(document.identifierKind, .europePMCSource("pat"))
     }
 
     /// `.unknown` records nothing, because it is the absence of knowledge. A
@@ -106,9 +106,10 @@ final class IdentifierKindPersistenceTests: XCTestCase {
         XCTAssertEqual(metadata.identifierKind, .preprint)
     }
 
-    /// The preprint badge has been in both apps since before this change and has
+    /// The preprint badge has been drawn on iOS since before this change and has
     /// never once lit up: the adapter hard-coded `isPreprint: false`, because
     /// the only thing that knew — the record's source — was discarded at decode.
+    /// macOS draws no surface that reads the flag yet (#210).
     func testAPreprintRecordIsMarkedAsAPreprint() {
         let metadata = BioMedLitAdapters.toUnifiedArticleMetadata(
             BMLSearchArticle(
@@ -133,7 +134,7 @@ final class IdentifierKindPersistenceTests: XCTestCase {
     /// provider said nothing must not either — an unlit badge on a preprint is a
     /// missing fact, a lit one on a journal article is a wrong one.
     func testAnArticleThatIsNotAPreprintIsNotMarkedAsOne() {
-        for kind: ArticleIdentifierKind? in [.pubmed, .pmc, .europePMCSource("nbk"), nil] {
+        for kind: ArticleIdentifierKind? in [.pubmed, .pmc, .europePMCSource("pat"), nil] {
             let metadata = BioMedLitAdapters.toUnifiedArticleMetadata(
                 BMLSearchArticle(
                     pmid: "12662058",
@@ -155,6 +156,37 @@ final class IdentifierKindPersistenceTests: XCTestCase {
                 "\(String(describing: kind)) must not be marked a preprint"
             )
         }
+    }
+
+    /// A preprint that stated no source still gets the badge.
+    ///
+    /// The flag is resolved, not read from the declared kind alone. Every
+    /// document stored before the kind existed states nothing, and the
+    /// retrieval chain already treats a `PPR…` accession as a preprint through
+    /// the shape rule. Reading only the declared kind here left the badge
+    /// disagreeing with the ladder for exactly those records — and because the
+    /// flag is stored once at search time, the disagreement is permanent.
+    ///
+    /// Failing to mark evidence as not peer-reviewed is a clinical error in a
+    /// fact-checking app, not a cosmetic one.
+    func testAPreprintThatStatedNoKindIsStillMarkedAsAPreprint() {
+        let metadata = BioMedLitAdapters.toUnifiedArticleMetadata(
+            BMLSearchArticle(
+                pmid: "PPR1287966",
+                title: "A preprint stored before the kind existed",
+                abstract: "",
+                authors: "",
+                journal: "",
+                year: "2026",
+                source: .europePMC,
+                identifierKind: nil
+            ),
+            appProvider: .europePMC,
+            batchNumber: 1,
+            resultPosition: 0
+        )
+
+        XCTAssertTrue(metadata.isPreprint)
     }
 
     // MARK: - The one writer

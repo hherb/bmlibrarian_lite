@@ -142,9 +142,9 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// untyped tag. Filing it under `pmid_` would claim it is a PubMed ID, the
     /// kind of label that put a `PPR…` accession behind a PubMed URL (#202).
     func testAnUnclassifiableIdentifierKeepsTheUntypedTag() {
-        let key = ArticleCacheKey(pmid: "NBK1234", pmcId: nil, doi: nil)
+        let key = ArticleCacheKey(pmid: "CN101548780", pmcId: nil, doi: nil)
 
-        XCTAssertEqual(key?.filenameComponent, "id_NBK1234")
+        XCTAssertEqual(key?.filenameComponent, "id_CN101548780")
     }
 
     /// Two articles from different Europe PMC sources can carry the same
@@ -153,10 +153,57 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// costs a wrong entry only for two unclassified identifiers that are also
     /// byte-identical, and it is the same collision every primary-slot value had
     /// before the kinds were separated.
+    ///
+    /// Stated as a comparison of two keys rather than one assertion about one:
+    /// the collision is a relationship, and a single expected string cannot
+    /// witness it.
     func testTwoUnclassifiedIdentifiersStillShareTheUntypedTag() {
-        let book = ArticleCacheKey(pmid: "AGR1234", pmcId: nil, doi: nil)
+        let patent = ArticleCacheKey(
+            pmid: "SHARED1234", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("pat")
+        )
+        let thesis = ArticleCacheKey(
+            pmid: "SHARED1234", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
 
-        XCTAssertEqual(book?.filenameComponent, "id_AGR1234")
+        XCTAssertEqual(patent?.filenameComponent, thesis?.filenameComponent)
+        XCTAssertEqual(patent?.filenameComponent, "id_SHARED1234")
+    }
+
+    /// An unmodelled source token files under the untyped bucket, never under a
+    /// tag built from the token itself.
+    ///
+    /// The tag is interpolated into the filename without sanitising, because
+    /// every tag is drawn from a fixed vocabulary. Returning the token here
+    /// would put a provider-supplied string in that position. Nothing else in
+    /// the suite pinned this branch: replacing it with `return token` passed
+    /// every test before this case existed.
+    func testAnUnmodelledSourceTokenFilesUnderTheUntypedTag() {
+        let key = ArticleCacheKey(
+            pmid: "879809", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
+
+        XCTAssertEqual(key?.filenameComponent, "id_879809")
+        XCTAssertFalse(key?.filenameComponent.contains("eth") ?? true)
+    }
+
+    /// A stated kind outranks the shape rule in the cache tag, and this is the
+    /// case where getting it wrong costs a wrong answer rather than a wrong
+    /// name: Europe PMC's thesis (`ETH`) and case-report (`CBA`) records carry
+    /// bare numeric accessions, so the shape rule calls them PubMed IDs. Filing
+    /// one under `pmid_` would let a thesis and a genuine PubMed article with
+    /// the same digits share an entry and be served each other's bytes.
+    func testANumericAccessionFromAnotherSourceDoesNotShareThePubMedTag() {
+        let thesis = ArticleCacheKey(
+            pmid: "879809", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
+        let article = ArticleCacheKey(pmid: "879809", pmcId: nil, doi: nil)
+
+        XCTAssertEqual(article?.filenameComponent, "pmid_879809")
+        XCTAssertNotEqual(thesis?.filenameComponent, article?.filenameComponent)
     }
 
     // MARK: - Preprints

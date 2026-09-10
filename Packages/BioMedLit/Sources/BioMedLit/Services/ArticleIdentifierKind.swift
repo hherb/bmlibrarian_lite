@@ -58,11 +58,11 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
 
     /// A Europe PMC source token this type does not model, lower-cased.
     ///
-    /// Europe PMC also serves books (`NBK`), patents (`PAT`), agricultural
-    /// records (`AGR`), theses (`ETH`) and more, each answering only under its
-    /// own token. Keeping the token is what lets such a record be asked for in
-    /// its own terms; without it the query names `src:med` and matches nothing,
-    /// which is indistinguishable from the article not existing.
+    /// Europe PMC also serves patents (`PAT`), agricultural records (`AGR`),
+    /// theses (`ETH`), case reports (`CBA`) and more, each answering only under
+    /// its own token. Keeping the token is what lets such a record be asked for
+    /// in its own terms; without it the query names `src:med` and matches
+    /// nothing, which is indistinguishable from the article not existing.
     case europePMCSource(String)
 
     /// Nobody said, and the identifier's shape does not settle it.
@@ -73,15 +73,43 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
 
     /// The kind Europe PMC stated for a record.
     ///
+    /// A token outside `[a-z0-9]` is refused rather than carried. The token is
+    /// network-supplied, and it reaches two places that need a closed set: a
+    /// Europe PMC query as `src:<token>`, where a space or a colon would make
+    /// the query parse as something else and match nothing, and — through
+    /// ``ArticleCacheKey`` — a filename tag, which is interpolated without
+    /// sanitising because every tag is drawn from a fixed vocabulary. Refusing
+    /// here is what keeps that assumption true at both ends. Every source token
+    /// Europe PMC publishes is a short alphanumeric word, so this refuses
+    /// nothing the provider actually sends.
+    ///
     /// - Parameter europePMCSource: The record's `source` field, as decoded.
-    /// - Returns: `nil` when the record carried no token, which is not a kind
-    ///   and must not be recorded as one.
+    /// - Returns: `nil` when the record carried no token, or one outside the
+    ///   allowed alphabet. Neither is a kind, and neither must be recorded as
+    ///   one.
     public init?(europePMCSource: String?) {
         guard let token = europePMCSource?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased(),
             !token.isEmpty
         else { return nil }
+
+        guard token.allSatisfy({ $0.isASCII && ($0.isLowercase || $0.isWholeNumber) })
+        else {
+            // Logged rather than dropped quietly. Every token Europe PMC
+            // publishes fits this alphabet, so reaching here means the field
+            // changed shape under us — and the consequence is silent: the kind
+            // reverts to the shape rule and the routing this type exists to fix
+            // stops happening, with nothing else to show for it.
+            BioMedLitLib.logger?.warning(
+                """
+                Europe PMC source token '\(token)' is outside the expected \
+                alphabet and was not recorded as a kind
+                """,
+                category: .search
+            )
+            return nil
+        }
 
         switch token {
         case BioMedLitConstants.europePMCMedlineSource: self = .pubmed
@@ -113,10 +141,25 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
         if normalised.hasPrefix(BioMedLitConstants.pmcAccessionPrefix) {
             return .pmc
         }
-        if normalised.allSatisfy(\.isNumber) {
+        if isAllASCIIDigits(normalised) {
             return .pubmed
         }
         return .unknown
+    }
+
+    /// Whether every character is an ASCII digit.
+    ///
+    /// `Character.isNumber` is deliberately not used: it is true for `½`, for
+    /// superscripts, and for every non-Latin digit, so `١٢٣` would satisfy it
+    /// and be called a PubMed ID. A PubMed ID is an ASCII decimal integer, and
+    /// anything the shape rule calls ``pubmed`` can be pasted after the PubMed
+    /// URL — which is the one place a wrong label reaches the reader as a real
+    /// but different article.
+    ///
+    /// - Parameter value: The string to test.
+    /// - Returns: `true` when `value` is non-empty and all ASCII digits.
+    static func isAllASCIIDigits(_ value: String) -> Bool {
+        !value.isEmpty && value.allSatisfy { $0.isASCII && $0.isWholeNumber }
     }
 
     /// The kind to act on, given what the record stated and what it holds.

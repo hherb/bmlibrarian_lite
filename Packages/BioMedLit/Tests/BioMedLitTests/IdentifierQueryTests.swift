@@ -129,14 +129,14 @@ final class IdentifierQueryTests: XCTestCase {
     /// An accession shape the routing does not recognise falls through to
     /// `src:med`, where it matches nothing.
     ///
-    /// Europe PMC returns records whose `id` is an `NBK…`, `PAT…` or `AGR…`
+    /// Europe PMC returns records whose `id` is an `PAT…`, `AGR…` or `ETH…`
     /// accession, and none of those is a PubMed ID. Pinned so the fall-through
     /// is a decision on record rather than an accident: a future rung for one of
     /// these shapes should change this expectation deliberately. The zero-hit
     /// search it produces is now logged by `searchForPMCIdAndPDFUrl`, which is
     /// what keeps it from being silent the way #202 was.
     func testAnUnrecognisedAccessionShapeFallsThroughToTheMedlineSource() {
-        XCTAssertEqual(queries(pmid: "NBK1234", doi: nil), ["ext_id:NBK1234 src:med"])
+        XCTAssertEqual(queries(pmid: "CN101548780", doi: nil), ["ext_id:CN101548780 src:med"])
     }
 
     // MARK: - The Kind Europe PMC Stated (#209)
@@ -158,8 +158,8 @@ final class IdentifierQueryTests: XCTestCase {
     /// like an article Europe PMC has never heard of.
     func testAStatedSourceTokenIsAskedForUnderItself() {
         XCTAssertEqual(
-            queries(pmid: "NBK1234", doi: nil, primaryKind: .europePMCSource("nbk")),
-            ["ext_id:NBK1234 src:nbk"]
+            queries(pmid: "CN101548780", doi: nil, primaryKind: .europePMCSource("pat")),
+            ["ext_id:CN101548780 src:pat"]
         )
     }
 
@@ -177,8 +177,8 @@ final class IdentifierQueryTests: XCTestCase {
     /// fall-through rather than inventing a source.
     func testAnUnknownKindKeepsTheMedlineFallThrough() {
         XCTAssertEqual(
-            queries(pmid: "NBK1234", doi: nil, primaryKind: .unknown),
-            ["ext_id:NBK1234 src:med"]
+            queries(pmid: "CN101548780", doi: nil, primaryKind: .unknown),
+            ["ext_id:CN101548780 src:med"]
         )
     }
 }

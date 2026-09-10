@@ -49,8 +49,8 @@ final class ArticleIdentifierKindTests: XCTestCase {
     /// nothing.
     func testAnUnrecognisedSourceTokenIsKept() {
         XCTAssertEqual(
-            ArticleIdentifierKind(europePMCSource: "NBK"),
-            .europePMCSource("nbk")
+            ArticleIdentifierKind(europePMCSource: "PAT"),
+            .europePMCSource("pat")
         )
     }
 
@@ -87,12 +87,12 @@ final class ArticleIdentifierKindTests: XCTestCase {
         XCTAssertEqual(ArticleIdentifierKind.inferred(from: "12662058"), .pubmed)
     }
 
-    /// `NBK…` is neither a preprint, a PMC accession nor a PubMed ID, and the
+    /// `CN…` is neither a preprint, a PMC accession nor a PubMed ID, and the
     /// shape rule cannot say what it is. Answering `.pubmed` would be a label
     /// that lies; `.unknown` is what keeps the existing `src:med` fall-through
     /// from claiming to be a routing decision.
     func testAnUnrecognisedShapeIsUnknown() {
-        XCTAssertEqual(ArticleIdentifierKind.inferred(from: "NBK1234"), .unknown)
+        XCTAssertEqual(ArticleIdentifierKind.inferred(from: "CN101548780"), .unknown)
     }
 
     func testTheShapeRuleIgnoresCase() {
@@ -140,7 +140,7 @@ final class ArticleIdentifierKindTests: XCTestCase {
     /// from.
     func testAKindRoundTripsThroughItsSourceToken() {
         for kind: ArticleIdentifierKind in [
-            .pubmed, .preprint, .pmc, .europePMCSource("nbk")
+            .pubmed, .preprint, .pmc, .europePMCSource("pat")
         ] {
             XCTAssertEqual(
                 ArticleIdentifierKind(europePMCSource: kind.europePMCSourceToken),
@@ -154,5 +154,59 @@ final class ArticleIdentifierKindTests: XCTestCase {
     /// would turn "nobody told us" into a claim.
     func testUnknownHasNoSourceToken() {
         XCTAssertNil(ArticleIdentifierKind.unknown.europePMCSourceToken)
+    }
+
+    // MARK: - The Token Alphabet
+
+    /// A source token outside `[a-z0-9]` is refused rather than carried.
+    ///
+    /// The token reaches a Europe PMC query as `src:<token>` and a cache
+    /// filename as a tag, and both positions assume a closed set: the query
+    /// would parse as something else and match nothing — which this ladder
+    /// reads as "no such article", the very defect #209 is about — and the tag
+    /// is interpolated without sanitising.
+    func testASourceTokenOutsideTheAllowedAlphabetIsRefused() {
+        // Surrounding whitespace is trimmed before this guard runs, so "eth\n"
+        // is a valid token and is deliberately absent here.
+        for hostile in ["../etc", "med or *", "pat:x", "a b", "p/t", "e t h"] {
+            XCTAssertNil(
+                ArticleIdentifierKind(europePMCSource: hostile),
+                "\(hostile) was accepted as a source token"
+            )
+        }
+    }
+
+    /// Every token Europe PMC actually publishes is a short alphanumeric word,
+    /// so the guard above refuses nothing the provider sends. These six are
+    /// live `SRC:` values, each verified to return hits.
+    func testTheRealSourceTokensAreAllAccepted() {
+        for token in ["MED", "PPR", "PMC", "PAT", "AGR", "ETH", "CBA", "HIR", "CTX"] {
+            XCTAssertNotNil(
+                ArticleIdentifierKind(europePMCSource: token),
+                "\(token) is a live Europe PMC source and must be accepted"
+            )
+        }
+    }
+
+    /// `Character.isNumber` is true for `½`, for superscripts and for every
+    /// non-Latin digit, so a shape rule built on it calls `١٢٣` a PubMed ID and
+    /// lets it be pasted after the PubMed URL. A PubMed ID is an ASCII decimal
+    /// integer and nothing else.
+    func testANonASCIINumeralIsNotAPubMedIdentifier() {
+        for numeral in ["١٢٣٤٥٦٧", "１２３４５６７", "½", "³⁴⁵"] {
+            XCTAssertEqual(
+                ArticleIdentifierKind.inferred(from: numeral),
+                .unknown,
+                "\(numeral) was read as a PubMed identifier"
+            )
+        }
+    }
+
+    /// An empty accession settles nothing. Returning `.pubmed` would put the
+    /// empty string behind the PubMed URL, which is PubMed's front page offered
+    /// as though it were this article.
+    func testAnEmptyAccessionIsUnknown() {
+        XCTAssertEqual(ArticleIdentifierKind.inferred(from: ""), .unknown)
+        XCTAssertEqual(ArticleIdentifierKind.inferred(from: "   "), .unknown)
     }
 }

@@ -278,9 +278,20 @@ enum BioMedLitAdapters {
             source: appProvider,
             // Europe PMC states the record's kind, and `SearchArticle` now
             // carries it. Until #209 this was hard-coded `false` because nothing
-            // downstream of the decode knew, which is why the preprint badge in
-            // both apps had never once appeared.
-            isPreprint: article.identifierKind == .preprint,
+            // downstream of the decode knew, which is why the preprint badge on
+            // iOS had never once appeared. macOS draws no surface that reads the
+            // flag yet (#210), so lighting it up here reaches one app.
+            //
+            // Resolved rather than compared against the stated kind alone: a
+            // record that stated nothing still has a `PPR…` accession, and the
+            // retrieval chain already treats such a record as a preprint via the
+            // shape rule. Reading only the declared kind here would leave the
+            // badge disagreeing with the ladder for exactly the records that
+            // predate the field.
+            isPreprint: ArticleIdentifierKind.resolved(
+                declared: article.identifierKind,
+                accession: article.pmid
+            ) == .preprint,
             identifierKind: article.identifierKind,
             hasFullTextInPMC: article.hasFullText,
             batchNumber: batchNumber,

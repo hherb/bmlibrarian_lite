@@ -31,26 +31,57 @@ its slice has landed; add a new section when handing off new work.
     and the argument for doing it in the same round.
   - **One seam for the five fetch surfaces.** `BMLFullTextService.fetchFullText(for:)`
     replaces five hand-written argument lists; #186 was once fixed on one of
-    them while the other four kept the defect. Same reasoning for
-    `Document.applySearchMetadata(_:provider:)`, which replaces the two
-    field-by-field copies in `FactCheckWorkflow`.
+    the four surfaces that round covered while the other three kept the defect.
+    Same reasoning for
+    `Document.applySearchMetadata(_:provider:)`, which replaces the **three**
+    field-by-field copies in `FactCheckWorkflow` — the third, in
+    `executeAlternativeQuery`, was missed when the seam was written and found in
+    review, having shipped documents with no kind and no preprint flag. Nothing
+    tests those three paths: **#216**.
   - **The preprint badge lights up for the first time.** `BioMedLitAdapters`
     hard-coded `isPreprint: false` because nothing downstream of the decode knew.
     macOS still has no surface that reads the flag — **#210**.
   - **Only Swift conforms.** The contract's new kind-resolution pseudocode and
     conformance rows say so; **#205** and **#207** carry the ports, and both
-    issues now name the kind requirement, not just the ladder.
+    issues now name the kind requirement, not just the ladder. Python's row is
+    `no (#207)`, not "n/a": `pdf_utils.py` does keep a PDF cache, an untagged one
+    that commits both defects the section names.
+  - **A lookup by identifier must not filter preprints.** `EuropePMCService.search`
+    appends ` NOT SRC:PPR` unless the query already contains that literal, so the
+    preprint rung only ever worked by substring coincidence and the DOI rung —
+    a preprint's documented recovery path — could not match one at all. The
+    resolution ladder now passes `includePreprints: true`, pinned on the emitted
+    URL because an outcome assertion passes either way.
+  - **The source token is refused outside `[a-z0-9]`, and the refusal is logged.**
+    The token reaches a query as `src:<token>` and a cache filename as a tag,
+    both of which assume a closed set. Every token Europe PMC publishes fits, so
+    reaching the guard means the field changed shape under us — which is
+    otherwise silent, because the kind quietly reverts to the shape rule.
+  - **`isNumber` is not "all digits".** It is true for `½` and for every
+    non-Latin numeral, so `١٢٣` classified as a PubMed ID. Both shape tests now
+    go through `ArticleIdentifierKind.isAllASCIIDigits`.
+  - **`NBK` is not a Europe PMC source token** (`SRC:NBK` → 0 hits), and every
+    fixture for the record class this work is named for used it. Real unmodelled
+    sources are `PAT`, `AGR`, `ETH`, `CBA`, `HIR`, `CTX`. `ETH`/`CBA`/`HIR` carry
+    **bare numeric** accessions, which is the dangerous shape: see **#212**.
+  - **Review round, open follow-ups.** #212 (a numeric non-PubMed accession is
+    handed to the reader as a real but unrelated PubMed article — the highest-harm
+    item, reachable on stored data), #213 (five app surfaces still build a PubMed
+    URL from any identifier, with force-unwraps), #214 (what the chain learns
+    never reaches the reader or the error queue), #215 (cache read/write failures
+    misreported), #216 (untested document-creation paths). **#192 was reopened**:
+    it had been closed by a commit whose message recorded it as deferred.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
-not the archaeology. Git history and the two `doc/cross_platform/` READMEs carry
+not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
 - **An article without a PMID can reach its PDF** (#202 in PR #206, 2026-09-10).
   Rules that still bind:
   - **An article is named by a *ladder*, not by its PMID.** `ArticleCacheKey`
-    takes the primary slot, then the PMC ID, then the DOI, and tags the rung in
+    takes the primary slot, then the PMC ID, then the DOI, and tags the kind in
     the filename. `EuropePMCService` fills the primary slot as
     `result.pmid ?? result.id ?? ""` — that `?? ""` is why it can be empty — so
     it holds a PubMed ID, a `PPR…` accession, or a PMC ID. Tagging invalidated
@@ -275,7 +306,7 @@ independent of each other. (#209 is in flight — see above.)
   `isPreprint` real; live now, and iOS and macOS disagree about what they tell
   the reader.
 - **#208 — every iOS `Document` without a PMID shares the id `"pmid-"`.** #202's
-  defect one layer up, and still live: `Document.swift:391` builds
+  defect one layer up, and still live: `Document`'s initialiser builds
   `"pmid-\(pmid)"`, `.unique` was dropped for CloudKit, and `ReportView`'s
   `documents.first { $0.id == documentId }` then hands back the wrong article.
   Wants the same tagged ladder, plus a migration for stored `"pmid-"` rows.
@@ -511,8 +542,9 @@ Swift and Kotlin rather than a Swift-side patch.
   this on PRs; reproduce it locally with
   `python .github/scripts/lint_delta.py --base-ref origin/master`.
   - **Don't record an absolute baseline count — the mypy total is
-    platform-dependent** (677 on macOS, 688 on the Linux runner, from the
-    platform-specific branches it analyses). The gate is immune because it
+    platform-dependent**, differing between macOS and the Linux runner from the
+    platform-specific branches it analyses, and drifting with every commit. No
+    number is written here for that reason. The gate is immune because it
     compares two measurements from the same machine in the same run; a committed
     baseline number would be wrong by ~a dozen the moment it changed hosts.
 

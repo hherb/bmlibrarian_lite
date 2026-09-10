@@ -74,10 +74,10 @@ final class EuropePMCRecordSourceTests: XCTestCase {
     /// was asked for under `src:med`, where it matches nothing.
     func testAnUnrecognisedSourceIsCarriedAsItself() throws {
         let article = try article("""
-        {"id": "NBK1234", "source": "NBK", "pmid": null, "title": "A book chapter"}
+        {"id": "CN101548780", "source": "PAT", "pmid": null, "title": "A book chapter"}
         """)
 
-        XCTAssertEqual(article.identifierKind, .europePMCSource("nbk"))
+        XCTAssertEqual(article.identifierKind, .europePMCSource("pat"))
     }
 
     /// A record that states no source states no kind. Inventing one here would

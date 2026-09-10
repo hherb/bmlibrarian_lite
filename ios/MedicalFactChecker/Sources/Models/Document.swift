@@ -131,10 +131,15 @@ final class Document {
     /// is carried; unstored, it is guessed back from the accession's shape,
     /// which can only recognise the shapes it was taught (#209).
     ///
-    /// `nil` means "written before this field existed", not "no kind": such a
-    /// record keeps the shape rule, which is exactly the behaviour every
-    /// document had before. The same lightweight SwiftData migration, and the
-    /// same reasoning, as ``fullTextContentKindRaw``.
+    /// `nil` means "nothing was stated", for any of four reasons: the document
+    /// was written before this field existed, Europe PMC sent no `source`, the
+    /// provider was PubMed, or ``ArticleIdentifierKind/unknown`` was assigned.
+    /// One column cannot tell those apart, and it does not need to — all four
+    /// take the same path, the shape rule, which is exactly the behaviour every
+    /// document had before. Do not read `nil` as "pre-dates the field" when
+    /// planning a migration or a backfill; it does not narrow that far. The
+    /// same lightweight SwiftData migration, and the same reasoning, as
+    /// ``fullTextContentKindRaw``.
     ///
     /// Read and written through ``identifierKind``.
     var identifierKindToken: String?
@@ -428,11 +433,13 @@ final class Document {
     /// Copy everything a search result knows about this article onto it.
     ///
     /// One writer rather than a field-by-field copy at each call site. The
-    /// workflow builds documents in two places, and every field it copied by
-    /// hand had to be remembered twice; the kind and the preprint flag are the
-    /// two that arrived after those blocks were written. This is the same reason
-    /// `applyFullTextResult` exists: a direct assignment at one site is how the
-    /// other site quietly keeps the old behaviour.
+    /// workflow builds documents in three places, and every field it copied by
+    /// hand had to be remembered three times; the kind and the preprint flag are
+    /// the two that arrived after those blocks were written. This is the same
+    /// reason `applyFullTextResult` exists: a direct assignment at one site is
+    /// how another site quietly keeps the old behaviour — which is exactly what
+    /// happened to the alternative-query path, converted last and only after a
+    /// review found it still hand-copying.
     ///
     /// - Parameters:
     ///   - metadata: The search result to copy from.

@@ -23,7 +23,7 @@ import XCTest
 /// Every case here uses an identifier whose *shape* says something different
 /// from what the record said, because that is the only way to tell a carried
 /// kind from a re-derived one. The shapes are contrived; the mechanism they
-/// prove is not, and it is what a `NBK…`, `PAT…` or `AGR…` record depends on —
+/// prove is not, and it is what a `PAT…`, `AGR…` or `ETH…` record depends on —
 /// each of those matches nothing when asked under `src:med`, which is where the
 /// shape rule sends everything it cannot name (#209).
 ///
@@ -54,6 +54,40 @@ final class StatedIdentifierKindTests: XCTestCase {
     override func tearDown() {
         StubURLProtocol.reset()
         super.tearDown()
+    }
+
+    /// Identifier resolution must not carry a preprint exclusion.
+    ///
+    /// `EuropePMCService.search` appends ` NOT SRC:PPR` to any query that does
+    /// not already contain that literal, and this ladder used to let it. The
+    /// preprint rung survived only because `src:ppr` happens to contain
+    /// `SRC:PPR` as a substring; every other rung went out filtered. Verified
+    /// against the live API: the DOI of a `SRC:PPR` record returns one hit, and
+    /// none once the exclusion is appended — so the DOI rung, which the ladder
+    /// documents as a preprint's recovery path, could not match one at all.
+    ///
+    /// Asserted on the emitted URL rather than on the outcome, because the
+    /// substring coincidence means an outcome assertion passes either way.
+    func testIdentifierResolutionDoesNotExcludePreprints() async throws {
+        StubURLProtocol.routes = ["search": (200, Data(#"{"resultList": {"result": []}}"#.utf8))]
+        StubURLProtocol.stubbed = (404, Data())
+        let service = makeService(session: stubbedSession())
+
+        _ = try? await service.fetchFullText(
+            pmcId: nil,
+            doi: "10.1101/2024.01.01.573813",
+            pmid: "",
+            primaryKind: nil
+        )
+
+        XCTAssertFalse(
+            StubURLProtocol.requested("NOT SRC:PPR")
+                || StubURLProtocol.requested("NOT%20SRC:PPR")
+                || StubURLProtocol.requested("NOT+SRC:PPR")
+                || StubURLProtocol.requested("NOT%20SRC%3APPR")
+                || StubURLProtocol.requested("NOT+SRC%3APPR"),
+            "a lookup by identifier must not filter out preprints: \(StubURLProtocol.requestedURLs)"
+        )
     }
 
     /// A stated preprint is asked for under `src:ppr` even though its accession
@@ -87,12 +121,12 @@ final class StatedIdentifierKindTests: XCTestCase {
         _ = try? await service.fetchFullText(
             pmcId: nil,
             doi: nil,
-            pmid: "NBK1234",
-            primaryKind: .europePMCSource("nbk")
+            pmid: "CN101548780",
+            primaryKind: .europePMCSource("pat")
         )
 
         XCTAssertTrue(
-            StubURLProtocol.requested("src:nbk") || StubURLProtocol.requested("src%3Anbk"),
+            StubURLProtocol.requested("src:pat") || StubURLProtocol.requested("src%3Apat"),
             "an unmodelled source must be asked for under itself: \(StubURLProtocol.requestedURLs)"
         )
     }

@@ -222,7 +222,7 @@ public enum BioMedLitConstants {
     /// component from the source-URL fingerprint.
     ///
     /// This one is the bucket for an identifier no record classified and whose
-    /// shape settles nothing — an `NBK…` or `AGR…` accession, say. Filing such a
+    /// shape settles nothing — a `CN…` patent or `IND…` accession, say. Filing such a
     /// value under ``pubmedCacheKeyTag`` would be a label that lies.
     public static let primaryCacheKeyTag = "id"
 

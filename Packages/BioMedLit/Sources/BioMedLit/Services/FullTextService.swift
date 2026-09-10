@@ -446,7 +446,7 @@ public actor FullTextService {
         // really holds a PubMed ID.
         //
         // The slot does not hold one kind of thing (see
-        // ``primaryIdentifierQuery(for:)``), and pasting whatever it holds after
+        // ``primaryIdentifierQuery(for:kind:)``), and pasting whatever it holds after
         // the PubMed base URL fabricates a destination rather than naming one. A
         // preprint gave `…/PPR1287966/`, which 404s; an empty slot gave `…//`,
         // PubMed's front page, offered to the reader as this article's full
@@ -680,7 +680,7 @@ public actor FullTextService {
     ///
     /// Paired so the log line can name what resolved the article without the
     /// loop having to know which identifier it is on.
-    /// Internal rather than private so ``identifierQueries(pmid:pmcId:doi:)`` can be
+    /// Internal rather than private so ``identifierQueries(pmid:pmcId:doi:primaryKind:)`` can be
     /// tested on the query it builds, which is the whole of its behaviour.
     struct PMCQuery {
         /// How to describe the identifier in a log line.
@@ -694,7 +694,7 @@ public actor FullTextService {
     /// carries, via Europe PMC search.
     ///
     /// Tries the primary slot, then the PMC ID, then the DOI — see
-    /// ``identifierQueries(pmid:pmcId:doi:)`` — stopping at the first PMC ID.
+    /// ``identifierQueries(pmid:pmcId:doi:primaryKind:)`` — stopping at the first PMC ID.
     /// Also extracts the free PDF render URL from the `fullTextUrlList` in the
     /// search response.
     ///
@@ -756,7 +756,7 @@ public actor FullTextService {
     ///
     /// - Parameters:
     ///   - pmid: The document's primary identifier slot, if any. Not only ever
-    ///     a PubMed ID — see ``primaryIdentifierQuery(for:)``.
+    ///     a PubMed ID — see ``primaryIdentifierQuery(for:kind:)``.
     ///   - pmcId: PubMed Central ID to resolve, if any.
     ///   - doi: DOI to resolve, if any.
     /// - Returns: A query per identifier that is present and not blank, with
@@ -880,7 +880,7 @@ public actor FullTextService {
     /// Only a PubMed ID may be pasted after the PubMed base URL. The slot also
     /// holds `PPR…` and `PMC…` accessions and can hold nothing at all, and each
     /// of those builds a URL that names no article — see the final fallback in
-    /// ``fetchFullText(pmcId:doi:pmid:)`` for what that cost the reader.
+    /// ``fetchFullText(pmcId:doi:pmid:primaryKind:)`` for what that cost the reader.
     ///
     /// Both tests must pass. The kind is what a record said it is, and a record
     /// that said "preprint" is not a PubMed article however numeric its
@@ -899,7 +899,7 @@ public actor FullTextService {
     ) -> String? {
         guard let value = trimmed(identifier),
               ArticleIdentifierKind.resolved(declared: kind, accession: value) == .pubmed,
-              value.allSatisfy(\.isNumber) else { return nil }
+              ArticleIdentifierKind.isAllASCIIDigits(value) else { return nil }
         return value
     }
 
@@ -911,9 +911,27 @@ public actor FullTextService {
     /// - Throws: `CancellationError` if the caller cancelled.
     private func searchForPMCIdAndPDFUrl(query: String) async throws -> PMCResolution {
         do {
+            // `includePreprints: true` is required, not cosmetic. `search`
+            // appends ` NOT SRC:PPR` to any query that does not already contain
+            // that literal, so with the default this ladder asked
+            // `DOI:"…" NOT SRC:PPR` — a filter that cannot match a preprint by
+            // construction, which is the one record class the DOI rung is the
+            // recovery path for. Verified against the live API: the DOI of a
+            // `SRC:PPR` record returns one hit, and none once the exclusion is
+            // appended. The accession rung only ever worked because `src:ppr`
+            // happens to contain `SRC:PPR` as a substring.
+            //
+            // A preprint filter belongs to discovery, where the reader is asking
+            // what the literature holds. This is a lookup of one known article
+            // by its own identifier, and the answer is not ours to filter.
+            //
+            // Both flags also make the emitted query identical to `query`, which
+            // is what lets the `noMatch` line below name the string that was
+            // actually sent.
             let result = try await europePMCService.search(
                 query: query,
                 pageSize: 1,
+                includePreprints: true,
                 requireAbstract: false
             )
             if let firstArticle = result.articles.first {
@@ -1214,7 +1232,7 @@ public actor FullTextService {
     ///   - key: Names the article, and so the cached file. Non-optional: a
     ///     document carrying no identifier at all reaches no PDF tier in the
     ///     first place, so there is no refusal for this method to make. See
-    ///     ``fetchFullText(pmcId:doi:pmid:)``.
+    ///     ``fetchFullText(pmcId:doi:pmid:primaryKind:)``.
     /// - Returns: What the attempt produced. See ``PDFTierOutcome``.
     /// - Throws: `CancellationError` if the caller cancelled.
     private func downloadAndExtract(

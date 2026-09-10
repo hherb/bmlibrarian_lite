@@ -50,12 +50,11 @@ import CryptoKit
 /// entry costs one download and some disk, while serving the wrong article's
 /// bytes costs the reader a wrong answer.
 ///
-/// Tagging on slot *provenance* has a second consequence, stated here because
-/// this section otherwise reads as a complete account: the same PMC accession
-/// reached through the primary slot and through the PMC rung produces two
-/// entries for one article. See ``init(pmid:pmcId:doi:)``. That costs a
-/// duplicate download, never a wrong answer, which is the direction this type
-/// errs in throughout.
+/// The tag names the identifier's *kind*, not the rung it arrived on. A
+/// PMC-only record carries its accession in the primary slot *and* in `pmcId`,
+/// so tagging the rung filed one article under two names and downloaded its PDF
+/// twice — for exactly the record class this ladder was added to serve (#209).
+/// Both rungs now tag `pmc`, so the two paths name one entry.
 ///
 /// ## Usage
 ///
@@ -142,16 +141,25 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
     /// ``BioMedLitConstants/primaryCacheKeyTag`` — so no two kinds can produce
     /// the same string.
     ///
-    /// **Two distinct identifiers never produce the same component either**,
-    /// which is the property the cache actually needs and is stronger than
-    /// keeping the kinds apart. `sanitized` is not injective: it maps every
-    /// unsafe character to `_`, so `10.1/abc` and `10.1_abc` both become
-    /// `10_1_abc`. A DOI is therefore digested outright, since it always carries
-    /// `/` and `.` and never needed to be readable in a filename. The other two
-    /// rungs keep their readable form *only while sanitising changes nothing*,
-    /// and a digest is appended the moment it does — so a well-formed PMID or
-    /// PMC accession names exactly what it always named, while a malformed one
-    /// still gets an entry of its own instead of sharing another article's.
+    /// **Two identifiers that differ only where sanitising is lossy still get
+    /// their own components**, which is the property the cache actually needs
+    /// and is stronger than keeping the kinds apart. `sanitized` is not
+    /// injective: it maps every unsafe character to `_`, so `10.1/abc` and
+    /// `10.1_abc` both become `10_1_abc`. A DOI is therefore digested outright,
+    /// since it always carries `/` and `.` and never needed to be readable in a
+    /// filename. The other two rungs keep their readable form *only while
+    /// sanitising changes nothing*, and a digest is appended the moment it does
+    /// — so a well-formed PMID or PMC accession names exactly what it always
+    /// named, while a malformed one still gets an entry of its own instead of
+    /// sharing another article's.
+    ///
+    /// The guarantee is deliberately not stated as total injectivity, which
+    /// would be false: `_` is itself in ``BioMedLitConstants/cacheKeyAllowedCharacters``,
+    /// so an identifier that already *looks* like a sanitised-and-digested one
+    /// passes through untouched and collides with the real thing. Reaching that
+    /// requires an identifier holding a 32-character hex tail no provider emits,
+    /// and closing it would cost every readable filename — the trade is stated
+    /// here rather than left for a reader to discover as a broken promise.
     ///
     /// Relying on real identifiers being alphanumeric would be a property of the
     /// data rather than of this type, and the primary slot takes whatever the
