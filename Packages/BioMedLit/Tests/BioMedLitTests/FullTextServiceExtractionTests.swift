@@ -108,7 +108,9 @@ final class FullTextServiceExtractionTests: XCTestCase {
             // a second extension. Rebuilding the filename here would have to
             // repeat the key derivation, and would silently stop matching the
             // day that changed.
-            FullTextService.deleteCachedPDF(for: pmid)
+            FullTextService.deleteCachedPDF(
+                for: ArticleCacheKey(pmid: pmid, pmcId: nil, doi: nil)!
+            )
         }
     }
 
@@ -231,7 +233,9 @@ final class FullTextServiceExtractionTests: XCTestCase {
         let renderURL = URL(string: "https://europepmc.org/articles/PMC1/pdf")!
         let cachedFile = FullTextService.pdfCacheDirectory
             .appendingPathComponent(
-                FullTextService.cacheFilename(pmid: pmid, url: renderURL)
+                FullTextService.cacheFilename(
+                    key: ArticleCacheKey(pmid: pmid, pmcId: nil, doi: nil)!, url: renderURL
+                )
             )
 
         StubURLProtocol.routes = [

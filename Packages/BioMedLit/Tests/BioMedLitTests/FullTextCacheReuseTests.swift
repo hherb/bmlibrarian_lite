@@ -27,6 +27,9 @@ import XCTest
 final class FullTextCacheReuseTests: XCTestCase {
     private let pmid = "cache-reuse-99998"
 
+    /// The name this article's cached PDFs are filed under.
+    private lazy var cacheKey = ArticleCacheKey(pmid: pmid, pmcId: nil, doi: nil)!
+
     private static let validPDF = Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34, 0x0A])
     private static let freshPDF = Data([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A])
 
@@ -38,7 +41,7 @@ final class FullTextCacheReuseTests: XCTestCase {
 
     private var cachedFile: URL {
         FullTextService.pdfCacheDirectory
-            .appendingPathComponent(FullTextService.cacheFilename(pmid: pmid, url: sourceURL))
+            .appendingPathComponent(FullTextService.cacheFilename(key: cacheKey, url: sourceURL))
     }
 
     private var quarantinedFile: URL {
@@ -75,7 +78,7 @@ final class FullTextCacheReuseTests: XCTestCase {
         StubURLProtocol.stubbed = (404, Data())
 
         let path = try await makeService().downloadAndCachePDF(
-            from: sourceURL, for: pmid
+            from: sourceURL, for: cacheKey
         )
 
         XCTAssertEqual(path, cachedFile.path)
@@ -90,7 +93,7 @@ final class FullTextCacheReuseTests: XCTestCase {
         StubURLProtocol.stubbed = (200, Self.freshPDF)
 
         let path = try await makeService().downloadAndCachePDF(
-            from: sourceURL, for: pmid
+            from: sourceURL, for: cacheKey
         )
 
         XCTAssertEqual(path, cachedFile.path)
@@ -106,7 +109,7 @@ final class FullTextCacheReuseTests: XCTestCase {
         StubURLProtocol.stubbed = (200, Self.freshPDF)
 
         let path = try await makeService().downloadAndCachePDF(
-            from: sourceURL, for: pmid
+            from: sourceURL, for: cacheKey
         )
 
         XCTAssertEqual(path, cachedFile.path)

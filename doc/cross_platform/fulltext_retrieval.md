@@ -226,15 +226,14 @@ async function download_and_cache_pdf(
     url: string,
     article_id: string
 ) -> string:  # Returns local file path
-    # Refuse an empty identifier outright. It is a real, reachable value —
-    # Europe PMC results are commonly built as `pmid or id or ""` — and every
-    # article carrying one would otherwise share a single cache entry. That
-    # was harmless only while every call re-downloaded; once the cache is
-    # consulted first, the second empty-id article deterministically reads
-    # back the first one's bytes and reports them as its own full text.
-    if article_id is empty:
-        throw CachingError("empty identifier; refusing a shared cache entry")
-
+    # `article_id` is the tagged ladder value from "Cache Keys", which cannot
+    # be constructed for an article carrying no identifier at all. There is
+    # therefore no shared entry to guard against here, and no refusal to make.
+    #
+    # Refusing an empty PMID was the earlier answer, and it was too blunt: it
+    # threw away the article's *other* identifiers, so a Europe PMC record with
+    # a PMC ID and no PMID got no PDF extraction at all, and the tier reported
+    # a download failure indistinguishable from a dead link.
     filepath = cache_dir / cache_filename(article_id, url)
 
     # Check cache — validated, not a bare existence check. See
@@ -357,10 +356,10 @@ async function fetch_fulltext(
 ) -> FullTextResult:
 
     # 1. Check cache first
-    # Whichever identifier the platform keys its cache on. It must never be
-    # empty — see download_and_cache_pdf — and it is only half the key: the
-    # source URL is the other half.
-    cache_key = pmc_id or doi or pmid
+    # The article half of the key. A ladder, tagged with which rung it came
+    # from — see "Cache Keys". null only when the article carries none of the
+    # three, and the source URL is the other half of the key.
+    cache_key = article_cache_key(pmid, pmc_id, doi)
     if cache_key:
         cached_path = check_cache(cache_key)
         if cached_path:
@@ -496,19 +495,49 @@ A cache entry is keyed on the article **and the source URL**, not on the
 article alone:
 
 ```pseudocode
-function cache_filename(article_id: string, url: string) -> string:
-    # Replace every character outside [A-Za-z0-9_] in the identifier. It
-    # arrives from search results, and a value holding "/" or ".." would
-    # place the written file outside the cache directory.
-    safe_id = sanitise(article_id)
+# The article half: the first identifier the document actually has, tagged
+# with which kind it is. null when it has none of the three, which is the one
+# case with no stable name to file bytes under.
+function article_cache_key(pmid, pmc_id, doi) -> string | null:
+    if not blank(pmid):   return "id_"  + sanitise(trim(pmid))
+    if not blank(pmc_id): return "pmc_" + sanitise(trim(pmc_id))
+    if not blank(doi):    return "doi_" + hex(sha256(trim(doi)))[:32]
+    return null
 
+function cache_filename(article_id: string, url: string) -> string:
     # A stable digest — SHA-256 or equivalent. Not a language's built-in
     # hash: those are commonly seeded per process, so the filename would
     # change on every launch and every entry would miss forever.
     fingerprint = hex(sha256(url))[:16]
 
-    return f"{safe_id}-{fingerprint}.pdf"
+    return f"{article_id}-{fingerprint}.pdf"
 ```
+
+Three things about that ladder are load-bearing.
+
+**The primary slot comes first, not the PMC ID.** It is the rung most
+consistently populated: Europe PMC always returns a record `id` and results are
+commonly built as `pmid or id or ""`, and PubMed supplies a PMID for every
+result, whereas a PMC ID exists only for articles deposited in PMC. Putting the
+always-present rung first means the fewest articles fall through to a weaker
+one, and an article found through both providers lands on the same rung either
+way — for a MEDLINE article both supply the same PMID. The lower rungs carry
+the cases where the slot really is empty, which in practice means documents
+persisted by older builds.
+
+**The kind is part of the name, including for the primary slot.** That slot
+does not hold one kind of thing: a PubMed ID for a MEDLINE record, a `PPR…`
+accession for a preprint, a PMC ID for a PMC-only record. Untagged, an article
+whose primary slot happens to hold `PMC7654321` names the same entry as a
+different article reached by that PMC ID, and one is served the other's bytes.
+Tagging invalidates entries written by earlier builds, which are re-downloaded
+once and then superseded — the cheap direction to be wrong in.
+
+**The DOI is digested, not sanitised.** It carries `/` and `.`, neither of
+which survives sanitising, so `10.1/abc` and `10.1_abc` both become `10_1_abc`
+and share one entry. Every other rung is sanitised rather than trusted:
+identifiers arrive from search results, and a value holding `/` or `..` would
+place the written file outside the cache directory.
 
 One article can be offered more than one PDF — Europe PMC's render URL and
 Unpaywall's open-access copy are different files of the same paper. Keyed on
@@ -520,6 +549,60 @@ fetches the copy that might have extracted cleanly.
 Deleting an article's cache must remove every entry it holds, and clearing
 the cache must remove quarantined (`.corrupt`) entries too — otherwise bytes
 set aside for inspection accumulate in a directory the user asked to empty.
+
+### Identifier Resolution Queries
+
+Resolving a PMC ID and a free PDF render URL means asking Europe PMC for the
+article by identifier, and **Europe PMC answers only when the identifier is
+asked for in its own terms**. A query that names the wrong source matches
+nothing, which is indistinguishable from the article not existing.
+
+```pseudocode
+# Most specific first, in the same order the cache key ladder climbs.
+function identifier_queries(pmid, pmc_id, doi) -> [Query]:
+    queries = []
+
+    if not blank(pmid):
+        # The primary slot again — a PubMed ID, a preprint accession, or a
+        # PMC ID — so route on the accession prefix, ignoring case.
+        id = trim(pmid)
+        if uppercase(id).starts_with("PPR"): queries.append(f'ext_id:{id} src:ppr')
+        elif uppercase(id).starts_with("PMC"): queries.append(f'PMCID:{id}')
+        else:                                  queries.append(f'ext_id:{id} src:med')
+
+    if not blank(pmc_id):
+        queries.append(f'PMCID:{trim(pmc_id)}')
+
+    if not blank(doi):
+        queries.append(f'DOI:"{trim(doi)}"')
+
+    return queries
+```
+
+Measured against the live Europe PMC API on 2026-09-10:
+
+| Query | Hits |
+|---|---|
+| `ext_id:12662058 src:med` | 1 |
+| `ext_id:PPR1287966 src:ppr` | 1 |
+| `ext_id:PPR1287966 src:med` | 0 |
+| `PMCID:PMC1082889` | 1 |
+| `ext_id:PMC1082889 src:pmc` | 0 |
+| `ext_id:PMC1082889 src:med` | 0 |
+
+Two failures follow from getting this wrong, and both are silent.
+
+**A preprint is reachable only by accident.** Preprints carry no PMID and no
+PMC ID, so the accession is the only identifier they have besides a DOI. Asked
+for as `ext_id:<accession> src:med` it matches nothing, and the article reaches
+its full text only through the DOI rung below — never by its own accession, and
+not at all if the record carries no DOI. Europe PMC does hold open-access PDFs
+for preprints: a `SRC:PPR` record answers `pmid: null, pmcid: null`, and an
+open-access one carries a `pdf` entry with `availabilityCode: OA`.
+
+**An article with a PMC ID and nothing else resolves no render URL.** Without
+the PMC rung, such an article reaches no PDF tier however the cache is keyed —
+which is why fixing the cache key alone does not fix it.
 
 ### Abstract Holdback
 
