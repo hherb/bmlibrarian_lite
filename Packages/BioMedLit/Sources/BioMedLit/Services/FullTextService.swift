@@ -127,7 +127,8 @@ public actor FullTextService {
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:)`` so a test can
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:)``
+    /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
     /// - Returns: A session configured with the package's request and download
@@ -173,10 +174,11 @@ public actor FullTextService {
         //
         // `nil` only when the document carries no identifier at all, and the
         // two PDF tiers below are guarded on it rather than on a refusal inside
-        // the download. Such a document reaches neither tier anyway — the
-        // render URL is resolved from these same identifiers, and Unpaywall is
-        // keyed on the DOI — so a guard inside the download would be a branch
-        // production never takes, and an untaken branch protects nothing.
+        // the download: the render URL is resolved from these same identifiers,
+        // and the Unpaywall tier needs a DOI, so the guard costs at most one
+        // skipped request on an input carrying nothing to key on. A guard inside
+        // the download would instead be a branch production never takes, and an
+        // untaken branch protects nothing.
         let cacheKey = ArticleCacheKey(pmid: pmid, pmcId: pmcId, doi: doi)
 
         // How the log lines below name this article. The PMID slot is exactly
@@ -320,10 +322,25 @@ public actor FullTextService {
         // *render-URL* lookup set `.europePMCUnreachable` would overwrite the
         // more specific reason with a vaguer one.
         if !identifiersResolved {
+            // `resolvedPmcId` is still the document's own `pmcId` here, never a
+            // looked-up value: it is reassigned only inside the branch that sets
+            // `identifiersResolved = true`, which this line is guarded against.
+            // That is what keeps the PMC rung asking about the document rather
+            // than about whatever an earlier search happened to return.
             pdfRenderURL = try await resolvePMCIdAndPDFUrl(
                 pmid: pmid, pmcId: resolvedPmcId, doi: doi
             ).pdfRenderURL
             identifiersResolved = true
+        }
+        if pdfRenderURL == nil {
+            // Says why the best PDF tier is about to be skipped. Without it the
+            // skip is silent, and a routing bug that resolves no render URL is
+            // indistinguishable from an article that genuinely has no free PDF
+            // — which is the shape of #202 itself.
+            BioMedLitLib.logger?.info(
+                "No Europe PMC render URL resolved for \(articleName); skipping that PDF tier",
+                category: .fullText
+            )
         }
         if let cacheKey, let urlString = pdfRenderURL, let pdfURL = URL(string: urlString) {
             BioMedLitLib.logger?.info(
@@ -343,8 +360,13 @@ public actor FullTextService {
             }
         }
 
-        // Try Unpaywall (open access PDFs)
-        if let cacheKey, let doi = doi, !doi.isEmpty {
+        // Try Unpaywall (open access PDFs). The DOI is trimmed to the same
+        // definition of "blank" `ArticleCacheKey` uses, so the two guards agree
+        // about the same input: a whitespace-only DOI keys nothing, and it must
+        // not reach Unpaywall either.
+        let unpaywallDOI = doi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let cacheKey, !unpaywallDOI.isEmpty {
+            let doi = unpaywallDOI
             do {
                 let pdfURL = try await fetchUnpaywallPDFWithRetry(doi: doi)
                 BioMedLitLib.logger?.info(
@@ -398,15 +420,35 @@ public actor FullTextService {
         }
 
         // Fallback to DOI or PubMed URL
-        if let doi = doi, !doi.isEmpty,
-           let url = URL(string: "\(BioMedLitConstants.doiBaseURL)/\(doi)") {
-            BioMedLitLib.logger?.info("Falling back to DOI URL for \(doi)", category: .fullText)
+        if !unpaywallDOI.isEmpty,
+           let url = URL(string: "\(BioMedLitConstants.doiBaseURL)/\(unpaywallDOI)") {
+            BioMedLitLib.logger?.info(
+                "Falling back to DOI URL for \(unpaywallDOI)",
+                category: .fullText
+            )
             return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
-        // Final fallback: PubMed page
-        if let url = URL(string: "\(BioMedLitConstants.pubmedWebBaseURL)/\(pmid)/") {
-            BioMedLitLib.logger?.info("Falling back to PubMed URL for PMID \(pmid)", category: .fullText)
+        // Final fallback: the PubMed record — but only when the primary slot
+        // really holds a PubMed ID.
+        //
+        // The slot does not hold one kind of thing (see
+        // ``primaryIdentifierQuery(for:)``), and pasting whatever it holds after
+        // the PubMed base URL fabricates a destination rather than naming one. A
+        // preprint gave `…/PPR1287966/`, which 404s; an empty slot gave `…//`,
+        // PubMed's front page, offered to the reader as this article's full
+        // text. Both render as an ordinary publisher link, so a local routing
+        // fault reached the reader as a real destination — which is #202's own
+        // failure shape, on the very articles this ladder exists to serve.
+        //
+        // An article with no PubMed ID and no DOI has genuinely nowhere left to
+        // point, and `noFullTextAvailable` says so honestly.
+        if let pubmedID = Self.pubmedIdentifier(in: pmid),
+           let url = URL(string: "\(BioMedLitConstants.pubmedWebBaseURL)/\(pubmedID)/") {
+            BioMedLitLib.logger?.info(
+                "Falling back to the PubMed record for \(articleName)",
+                category: .fullText
+            )
             return FullTextResult(content: .doi(webURL: url), degradation: degradation)
         }
 
@@ -635,9 +677,11 @@ public actor FullTextService {
         let query: String
     }
 
-    /// Resolve a PMC ID and PDF render URL from a PMID or DOI via Europe PMC search.
+    /// Resolve a PMC ID and PDF render URL from the identifiers a document
+    /// carries, via Europe PMC search.
     ///
-    /// Tries PMID first (more specific), then DOI, stopping at the first PMC ID.
+    /// Tries the primary slot, then the PMC ID, then the DOI — see
+    /// ``identifierQueries(pmid:pmcId:doi:)`` — stopping at the first PMC ID.
     /// Also extracts the free PDF render URL from the `fullTextUrlList` in the
     /// search response.
     ///
@@ -699,7 +743,13 @@ public actor FullTextService {
     ///     a PubMed ID — see ``primaryIdentifierQuery(for:)``.
     ///   - pmcId: PubMed Central ID to resolve, if any.
     ///   - doi: DOI to resolve, if any.
-    /// - Returns: A query per identifier that is present and not blank.
+    /// - Returns: A query per identifier that is present and not blank, with
+    ///   duplicates removed. A PMC-only Europe PMC record arrives with the same
+    ///   accession in both the primary slot and `pmcId` — `result.pmid ?? result.id`
+    ///   yields the PMC ID when there is no PMID — and both rungs then build the
+    ///   byte-identical `PMCID:` query. Left in, that asks Europe PMC the same
+    ///   question twice, and on the failure path pays the retry backoff twice,
+    ///   for exactly the record class this ladder was added to serve.
     static func identifierQueries(pmid: String?, pmcId: String?, doi: String?) -> [PMCQuery] {
         var queries: [PMCQuery] = []
         if let identifier = trimmed(pmid) {
@@ -716,7 +766,12 @@ public actor FullTextService {
         if let doi = trimmed(doi) {
             queries.append(PMCQuery(describedAs: "DOI \(doi)", query: "DOI:\"\(doi)\""))
         }
-        return queries
+
+        // Keeps the first of each query string, so the surviving rung is the
+        // more specific one and its `describedAs` is the one that names the
+        // article in the log.
+        var seen: Set<String> = []
+        return queries.filter { seen.insert($0.query).inserted }
     }
 
     /// An identifier with surrounding whitespace removed, or `nil` if nothing
@@ -734,11 +789,12 @@ public actor FullTextService {
     /// The Europe PMC query that can match the document's primary identifier.
     ///
     /// The slot does not hold one kind of thing. `EuropePMCService` fills it as
-    /// `result.pmid ?? result.id`, so it carries a PubMed ID for a MEDLINE
-    /// record, a `PPR…` accession for a preprint, and a PMC ID for a PMC-only
-    /// record — and Europe PMC answers for each only when asked in its own
-    /// terms. Every value was previously asked for as `ext_id:<id> src:med`,
-    /// which only a PubMed ID can match.
+    /// `result.pmid ?? result.id ?? ""`, so it carries a PubMed ID for a MEDLINE
+    /// record, a `PPR…` accession for a preprint, a PMC ID for a PMC-only
+    /// record, and — through that `?? ""` — nothing at all for a record with
+    /// neither. Europe PMC answers for each only when asked in its own terms.
+    /// Every value was previously asked for as `ext_id:<id> src:med`, which only
+    /// a PubMed ID can match.
     ///
     /// The cost fell on preprints. One reached its full text only if it also
     /// carried a DOI, through the rung below, and never by its own accession;
@@ -773,6 +829,26 @@ public actor FullTextService {
             describedAs: "PMID \(identifier)",
             query: "ext_id:\(identifier) src:\(BioMedLitConstants.europePMCMedlineSource)"
         )
+    }
+
+    /// The primary slot's value, when it really is a PubMed ID.
+    ///
+    /// Only a PubMed ID may be pasted after the PubMed base URL. The slot also
+    /// holds `PPR…` and `PMC…` accessions and can hold nothing at all, and each
+    /// of those builds a URL that names no article — see the final fallback in
+    /// ``fetchFullText(pmcId:doi:pmid:)`` for what that cost the reader.
+    ///
+    /// Recognised by exclusion, mirroring ``primaryIdentifierQuery(for:)``:
+    /// anything that routes to `src:med` there is a PubMed ID here, so the two
+    /// cannot drift apart into disagreeing about the same value. A PubMed ID is
+    /// all digits, which is also the cheapest thing to assert.
+    ///
+    /// - Parameter identifier: The raw primary identifier slot.
+    /// - Returns: The trimmed PubMed ID, or `nil` if the slot holds anything else.
+    private static func pubmedIdentifier(in identifier: String?) -> String? {
+        guard let value = trimmed(identifier),
+              value.allSatisfy(\.isNumber) else { return nil }
+        return value
     }
 
     /// Search Europe PMC and extract PMC ID and PDF render URL from the first result.
@@ -815,6 +891,19 @@ public actor FullTextService {
             )
             return .failed
         }
+
+        // Names the query that matched nothing. A zero-hit search is the one
+        // outcome that says nothing to the reader — `noMatch` merges as
+        // `nothingAttempted`, no degradation is recorded, and both PDF tiers are
+        // then skipped — so without this line, a query aimed at a source that
+        // cannot answer it is indistinguishable from an article Europe PMC has
+        // never heard of. That indistinguishability *is* #202, and the routing
+        // above still falls through to `src:med` for any accession shape it does
+        // not yet recognise.
+        BioMedLitLib.logger?.info(
+            "Europe PMC matched no record for query '\(query)'",
+            category: .fullText
+        )
         return .noMatch
     }
 
@@ -966,8 +1055,9 @@ public actor FullTextService {
     /// since every such article would otherwise share one entry — but that cost
     /// those articles their extraction entirely (#202). The key falls back to
     /// the PMC ID and then the DOI, and only an article carrying none of the
-    /// three has no name to file bytes under; such an article cannot be
-    /// constructed, so this method has no refusal left to make.
+    /// three has no name to file bytes under. No *key* can be constructed for
+    /// such an article — the article itself certainly exists — so this method,
+    /// which takes a key, has no refusal left to make.
     ///
     /// - Parameters:
     ///   - url: URL to download the PDF from, on a cache miss.
@@ -1359,9 +1449,12 @@ public actor FullTextService {
     ///
     /// Entries written before the URL became part of the key, or before the key
     /// named the *kind* of identifier it holds (#202), simply never match: they
-    /// are re-downloaded once and then superseded. That is the cheap direction
-    /// to be wrong in — a stale entry costs one download, while serving the
-    /// wrong article's bytes costs the reader a wrong answer.
+    /// are re-downloaded once, and the old entries are then orphaned rather than
+    /// replaced. ``deleteCachedPDF(for:)`` matches on the tagged prefix, so it
+    /// cannot find them either, and only ``clearPDFCache()`` reclaims them. That
+    /// is still the cheap direction to be wrong in — a stale entry costs one
+    /// download and some disk, while serving the wrong article's bytes costs the
+    /// reader a wrong answer.
     ///
     /// `Hasher` is deliberately not used for the fingerprint: Swift seeds it
     /// per process, so a filename built from it would change on every launch

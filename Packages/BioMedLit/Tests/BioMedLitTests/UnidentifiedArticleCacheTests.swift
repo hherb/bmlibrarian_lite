@@ -20,9 +20,10 @@ import XCTest
 /// What is left of the empty-PMID guard once the PMID stopped being the key.
 ///
 /// The cache used to key on the PMID alone and refuse an empty one, because
-/// `cachedPDFPath(for: "")` resolved to `<cache>/.pdf` — the same path for
-/// every article with no PMID — and a second such article would have read back
-/// the first one's bytes. `ArticleCacheKey` removes the shared path rather than
+/// `cachedPDFPath(for: "", from:)` resolved to `<cache>/-<fingerprint>.pdf` —
+/// the same path for every article with no PMID that was offered the same
+/// source URL — and a second such article would have read back the first one's
+/// bytes. `ArticleCacheKey` removes the shared path rather than
 /// guarding it: an article is named by the first identifier it actually has, so
 /// two articles can only collide if they share one, and an article with no
 /// identifier at all cannot name an entry to collide on (#202).

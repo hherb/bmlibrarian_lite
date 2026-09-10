@@ -164,4 +164,41 @@ final class PDFCacheKeyTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: first))
         XCTAssertFalse(FileManager.default.fileExists(atPath: second))
     }
+
+    /// Deleting one article must not take another's entries with it.
+    ///
+    /// `deleteCachedPDF` finds an article's files by prefix, and the boundary it
+    /// matches on is load-bearing: one identifier is freely a prefix of another
+    /// (`12345` of `123456`), so matching the bare component rather than the
+    /// component plus its separator would clear a different article's cache.
+    /// The separator holds only because `-` and `.` are absent from
+    /// ``BioMedLitConstants/cacheKeyAllowedCharacters`` — widening that set is
+    /// the change that would turn this into silent data loss, and this test is
+    /// what would catch it.
+    func testDeletingAnArticleLeavesAnArticleWhoseIdentifierExtendsIt() async throws {
+        let shorter = try XCTUnwrap(ArticleCacheKey(pmid: "12345", pmcId: nil, doi: nil))
+        let longer = try XCTUnwrap(ArticleCacheKey(pmid: "123456", pmcId: nil, doi: nil))
+        defer {
+            FullTextService.deleteCachedPDF(for: shorter)
+            FullTextService.deleteCachedPDF(for: longer)
+        }
+
+        StubURLProtocol.routes = ["oa.pdf": (200, Self.unpaywallBytes)]
+        let service = makeService()
+        let shorterPath = try await service.downloadAndCachePDF(
+            from: Self.unpaywallURL, for: shorter
+        )
+        let longerPath = try await service.downloadAndCachePDF(
+            from: Self.unpaywallURL, for: longer
+        )
+        XCTAssertNotEqual(shorterPath, longerPath)
+
+        FullTextService.deleteCachedPDF(for: shorter)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shorterPath))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: longerPath),
+            "deleting article 12345 must not clear article 123456's cache"
+        )
+    }
 }

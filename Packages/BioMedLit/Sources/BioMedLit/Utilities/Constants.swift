@@ -101,9 +101,9 @@ public enum BioMedLitConstants {
 
     /// Europe PMC query field that matches a PMC accession.
     ///
-    /// A PMC ID is not reachable as an `ext_id` under any source: measured on
-    /// 2026-09-10, both `src:pmc` and `src:med` return no hits for one, while
-    /// `PMCID:PMC1082889` matches.
+    /// A PMC ID is not reachable as an `ext_id` under the sources we tried:
+    /// measured on 2026-09-10, `src:pmc` and `src:med` both return no hits for
+    /// one, with or without the `PMC` prefix, while `PMCID:PMC1082889` matches.
     public static let europePMCPMCIDField = "PMCID"
 
     // MARK: - PubMed API
@@ -201,6 +201,23 @@ public enum BioMedLitConstants {
     public static let cacheKeyAllowedCharacters = Set(
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
     )
+
+    /// Tag naming the rung a PDF cache filename was keyed on.
+    ///
+    /// These three define the on-disk cache format, and they are the whole
+    /// mechanism keeping two identifier kinds apart: an article whose primary
+    /// slot holds `PMC7654321` must not name the entry a different article
+    /// reached by that PMC ID names. They are mutually non-prefixing, and `_`
+    /// joins a tag to its identifier because `-` is absent from
+    /// ``cacheKeyAllowedCharacters`` and so stays free to separate the article
+    /// component from the source-URL fingerprint.
+    public static let primaryCacheKeyTag = "id"
+
+    /// Tag for a cache filename keyed on a PMC ID. See ``primaryCacheKeyTag``.
+    public static let pmcCacheKeyTag = "pmc"
+
+    /// Tag for a cache filename keyed on a DOI. See ``primaryCacheKeyTag``.
+    public static let doiCacheKeyTag = "doi"
 
     /// Bytes of the DOI digest kept in a PDF cache filename.
     ///

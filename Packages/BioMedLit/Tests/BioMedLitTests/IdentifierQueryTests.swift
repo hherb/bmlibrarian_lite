@@ -20,15 +20,18 @@ import XCTest
 /// Europe PMC will only answer for an identifier if it is asked under the right
 /// source, and the primary identifier slot does not hold one kind of thing.
 ///
-/// `EuropePMCService` fills it as `result.pmid ?? result.id`, so it carries a
-/// PubMed ID for a MEDLINE record, a `PPR…` accession for a preprint, and a
-/// PMC ID for a PMC-only record. Every one of them used to be asked for as
-/// `ext_id:<id> src:med`, which only the first can match.
+/// `EuropePMCService` fills it as `result.pmid ?? result.id ?? ""`, so it
+/// carries a PubMed ID for a MEDLINE record, a `PPR…` accession for a preprint,
+/// a PMC ID for a PMC-only record, and nothing at all for a record with neither.
+/// Every one of them used to be asked for as `ext_id:<id> src:med`, which only
+/// the first can match.
 ///
 /// The cost fell on preprints. A preprint reached its full text only if it also
 /// carried a DOI, through the rung below — never by its own accession — and one
-/// that did not was unreachable. Every hit count asserted here was measured
-/// against the live Europe PMC API on 2026-09-10:
+/// that did not was unreachable. The hit counts below were *recorded*, not
+/// asserted: this suite pins the query strings, and nothing in CI re-checks the
+/// counts against Europe PMC. They were measured against the live API on
+/// 2026-09-10:
 ///
 /// ```
 /// ext_id:PPR1287966 src:ppr   -> 1      ext_id:PPR1287966 src:med -> 0
@@ -99,5 +102,30 @@ final class IdentifierQueryTests: XCTestCase {
         XCTAssertEqual(queries(pmid: "", doi: "10.1/abc"), ["DOI:\"10.1/abc\""])
         XCTAssertEqual(queries(pmid: "   ", doi: nil), [])
         XCTAssertEqual(queries(pmid: nil, doi: nil), [])
+    }
+
+    /// A PMC-only Europe PMC record arrives with its accession in *both* slots —
+    /// `result.pmid ?? result.id` yields the PMC ID when there is no PMID — so
+    /// both rungs build the same query. Asking Europe PMC the identical question
+    /// twice pays the retry backoff twice on the failure path, for exactly the
+    /// record class the PMC rung was added to serve.
+    func testTheSameQueryIsNotAskedTwice() {
+        XCTAssertEqual(
+            queries(pmid: "PMC1082889", pmcId: "PMC1082889", doi: nil),
+            ["PMCID:PMC1082889"]
+        )
+    }
+
+    /// An accession shape the routing does not recognise falls through to
+    /// `src:med`, where it matches nothing.
+    ///
+    /// Europe PMC returns records whose `id` is an `NBK…`, `PAT…` or `AGR…`
+    /// accession, and none of those is a PubMed ID. Pinned so the fall-through
+    /// is a decision on record rather than an accident: a future rung for one of
+    /// these shapes should change this expectation deliberately. The zero-hit
+    /// search it produces is now logged by `searchForPMCIdAndPDFUrl`, which is
+    /// what keeps it from being silent the way #202 was.
+    func testAnUnrecognisedAccessionShapeFallsThroughToTheMedlineSource() {
+        XCTAssertEqual(queries(pmid: "NBK1234", doi: nil), ["ext_id:NBK1234 src:med"])
     }
 }

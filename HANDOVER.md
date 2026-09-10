@@ -14,13 +14,20 @@ its slice has landed; add a new section when handing off new work.
     `ArticleCacheKey` takes the primary slot, then the PMC ID, then the DOI,
     and **tags the rung in the filename** (`id_`, `pmc_`, `doi_`). The tag is
     not decoration: `EuropePMCService` fills the primary slot as
-    `result.pmid ?? result.id`, so it holds a PubMed ID, a `PPR…` preprint
-    accession, or a PMC ID — untagged, an article whose primary slot happens to
-    hold `PMC7654321` names the same entry as a different article reached by
-    that PMC ID. Tagging invalidates every pre-existing entry, re-downloaded
-    once; the file already took that trade for the URL fingerprint.
-  - **The DOI rung is digested, every other rung sanitised.** `10.1/abc` and
-    `10.1_abc` both sanitise to `10_1_abc` and would share an entry.
+    `result.pmid ?? result.id ?? ""` — that `?? ""` is why the slot can be empty
+    — so it holds a PubMed ID, a `PPR…` preprint accession, or a PMC ID.
+    Untagged, an article whose primary slot happens to hold `PMC7654321` names
+    the same entry as a different article reached by that PMC ID. Tagging
+    invalidates every pre-existing entry, re-downloaded once and then
+    **orphaned, not replaced** — `deleteCachedPDF` matches the tagged prefix, so
+    only `clearPDFCache()` reclaims them.
+  - **No two identifiers may share a name**, which is stronger than keeping the
+    kinds apart and is what the cache actually needs. `sanitize` is not
+    injective, so the DOI rung is digested outright and the other two carry a
+    digest **whenever sanitising changes the value** — a well-formed PMID or PMC
+    accession keeps its readable name and its existing entry. Leaning on "real
+    identifiers are alphanumeric" would make this a property of the data, not of
+    the key, and the primary slot takes whatever it is handed.
   - **The key comes from the document, never from `resolvedPmcId`.** A key that
     depended on whether a Europe PMC lookup succeeded would file one article
     under two names across runs.
@@ -37,13 +44,36 @@ its slice has landed; add a new section when handing off new work.
     reaches no PDF tier anyway (the render URL comes from these same
     identifiers, Unpaywall from the DOI), so the tiers are guarded on the
     optional key and `downloadAndExtract` takes a non-optional one — #175's
-    lesson, that a net where production never runs is not installed.
+    lesson, that a net where production never runs is not installed. The
+    Unpaywall guard trims its DOI to the same definition of blank the key uses,
+    so the two cannot disagree about a whitespace-only value.
+  - **Never paste the primary slot after the PubMed base URL.** The last-resort
+    fallback did, and the slot is not always a PubMed ID: a preprint got
+    `…/PPR1287966/`, which 404s, and an empty slot got `…//`, PubMed's front
+    page — both returned to the reader as the article's full text and rendered
+    as an ordinary publisher link. A local routing fault reaching the reader as
+    a real destination is #202's own shape. An article with no PubMed ID and no
+    DOI now throws `noFullTextAvailable`, which is the honest answer.
+  - **A query that matches nothing is logged.** `noMatch` merges as
+    `nothingAttempted`, records no degradation, and skips both PDF tiers, so
+    without a log line an identifier asked for under a source that cannot answer
+    is indistinguishable from an article Europe PMC has never heard of. The
+    routing still falls through to `src:med` for any accession shape it does not
+    recognise (`NBK…`, `PAT…`), which is pinned by test.
   - **`doc/cross_platform/fulltext_retrieval.md` is the port contract** and
     specified `cache_key = pmc_id or doi or pmid`, a ladder Swift never
     implemented — the real root of #202. Now updated with the tagged ladder,
     the ordering rationale, and a new "Identifier Resolution Queries" section
-    the contract previously lacked entirely. **#205** tracks Android, which
-    replicates the `src:med` defect verbatim at `FullTextService.kt:308`.
+    the contract previously lacked entirely, and a **conformance table** saying
+    which platform implements what — a contract that reads as binding on three
+    platforms while only one implements it is how #202 happened. **#205** tracks
+    Android, which replicates the `src:med` defect verbatim at
+    `FullTextService.kt:308`; **#207** tracks Python, which reaches a PMC ID but
+    has no preprint routing and runs only the first matching rung.
+  - **Follow-ups filed from the review, deliberately out of scope here:** #208
+    (every iOS `Document` without a PMID shares the id `"pmid-"` — the same
+    defect one layer up) and #209 (Europe PMC hands us each record's `source`
+    and we discard it, then guess the kind back from an accession prefix).
 
 ## Recently landed (context)
 

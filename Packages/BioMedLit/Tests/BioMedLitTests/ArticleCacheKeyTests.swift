@@ -30,8 +30,11 @@ import XCTest
 final class ArticleCacheKeyTests: XCTestCase {
     // MARK: - The ladder
 
-    /// The primary identifier wins when there is one, which keeps every
-    /// article that already had a cache entry on the same rung it was on.
+    /// The primary identifier wins when there is one, so a document lands on the
+    /// same rung on every run rather than accumulating an entry per rung. The
+    /// filename still differs from pre-``ArticleCacheKey`` builds — every rung is
+    /// now tagged — so this is about stability from here on, not continuity with
+    /// what is already on disk.
     func testPrimaryIdentifierIsPreferredOverEveryOtherIdentifier() {
         let key = ArticleCacheKey(pmid: "12345678", pmcId: "PMC7654321", doi: "10.1/abc")
 
@@ -50,10 +53,21 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// sanitised text: `10.1/abc` and `10.1_abc` both sanitise to `10_1_abc`
     /// and would share an entry, which is the very collision this ladder exists
     /// to prevent.
+    /// The digest is pinned to its exact hex rather than merely to its prefix.
+    ///
+    /// A cache filename must be the same string in every process that ever runs:
+    /// Swift seeds `Hasher` per launch, so a filename built from one would change
+    /// on every start and every entry would miss forever, growing the cache
+    /// without bound and re-downloading every DOI-keyed PDF — silently, since
+    /// a miss is indistinguishable from a first fetch. A same-process stability
+    /// assertion cannot catch that, and neither can a `hasPrefix` check. Only
+    /// the literal bytes can, and they pin the algorithm, the digest length
+    /// (``BioMedLitConstants/doiCacheKeyDigestBytes``), and the hex encoding at
+    /// once. Independently computed: `sha256("10.1/abc")`, first 16 bytes.
     func testDOIIsUsedWhenNoIdentifierIsAvailableAndIsDigested() throws {
         let key = try XCTUnwrap(ArticleCacheKey(pmid: "", pmcId: nil, doi: "10.1/abc"))
 
-        XCTAssertTrue(key.filenameComponent.hasPrefix("doi_"))
+        XCTAssertEqual(key.filenameComponent, "doi_8680376ce68f74cdeadea6aa60cc5dc7")
         // Not the sanitised text: `10.1/abc` sanitises to `10_1_abc`, which is
         // what the next test shows would merge two distinct articles.
         XCTAssertNotEqual(key.filenameComponent, "doi_10_1_abc")
@@ -121,5 +135,60 @@ final class ArticleCacheKeyTests: XCTestCase {
         let key = ArticleCacheKey(pmid: "   ", pmcId: "PMC7654321", doi: nil)
 
         XCTAssertEqual(key?.filenameComponent, "pmc_PMC7654321")
+    }
+
+    /// A padded identifier is stored trimmed, not merely accepted.
+    ///
+    /// `identifierQueries` trims separately before asking Europe PMC, so an
+    /// untrimmed key would have the cache filing an article under `id__12345_`
+    /// while the search asked about `12345` — the same article, two names, and
+    /// no error anywhere to say so.
+    func testAPaddedIdentifierIsStoredTrimmed() {
+        let key = ArticleCacheKey(pmid: " 12345 ", pmcId: nil, doi: nil)
+
+        XCTAssertEqual(key?.filenameComponent, "id_12345")
+    }
+
+    // MARK: - One name per article
+
+    /// Tagging keeps two *kinds* apart; this is the stronger property the cache
+    /// actually needs, that two distinct *identifiers* never share a name.
+    ///
+    /// Sanitising maps every unsafe character to `_`, so it is not injective:
+    /// `PMC/1` and `PMC_1` both sanitise to `PMC_1`. Relying on real
+    /// identifiers being alphanumeric would make this a property of the data
+    /// rather than of the type, and the primary slot takes whatever it is given.
+    func testIdentifiersThatSanitiseIdenticallyStillGetDifferentNames() {
+        let slashed = ArticleCacheKey(pmid: "PMC/1", pmcId: nil, doi: nil)
+        let underscored = ArticleCacheKey(pmid: "PMC_1", pmcId: nil, doi: nil)
+
+        XCTAssertNotEqual(slashed?.filenameComponent, underscored?.filenameComponent)
+    }
+
+    /// The readable form survives for every identifier sanitising leaves alone,
+    /// which is every well-formed PMID and PMC accession. Guarding injectivity
+    /// must not cost the cache a second round of invalidation, nor make a
+    /// filename unreadable for the identifiers that were always safe.
+    func testAWellFormedIdentifierKeepsItsReadableName() {
+        XCTAssertEqual(
+            ArticleCacheKey(pmid: "12345678", pmcId: nil, doi: nil)?.filenameComponent,
+            "id_12345678"
+        )
+        XCTAssertEqual(
+            ArticleCacheKey(pmid: "", pmcId: "PMC7654321", doi: nil)?.filenameComponent,
+            "pmc_PMC7654321"
+        )
+    }
+
+    /// The separator the filename depends on must stay out of the identifier.
+    ///
+    /// ``FullTextService/cacheFilename(key:url:)`` joins this component to the
+    /// source-URL fingerprint with `-`, and ``FullTextService/deleteCachedPDF(for:)``
+    /// finds an article's entries by matching that `-` boundary. Were `-` or `.`
+    /// ever added to the allowed set, `id_123` would begin matching `id_1234`'s
+    /// entries and deleting one article's cache would take another's with it.
+    func testTheFilenameSeparatorsCannotAppearInAnIdentifier() {
+        XCTAssertFalse(BioMedLitConstants.cacheKeyAllowedCharacters.contains("-"))
+        XCTAssertFalse(BioMedLitConstants.cacheKeyAllowedCharacters.contains("."))
     }
 }
