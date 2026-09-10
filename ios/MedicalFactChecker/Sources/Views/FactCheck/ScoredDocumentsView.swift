@@ -797,9 +797,11 @@ struct DocumentScoreRow: View {
                     .lineLimit(1)
             }
 
-            Label("PMID: \(document.pmid)", systemImage: "number")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            if let citationIdentifier = document.citationIdentifier {
+                Label(citationIdentifier, systemImage: "number")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 

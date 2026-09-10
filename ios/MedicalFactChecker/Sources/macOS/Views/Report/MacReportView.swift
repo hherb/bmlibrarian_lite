@@ -1005,10 +1005,12 @@ struct MacDocumentDetailSheet: View {
                     Divider()
 
                     HStack(spacing: MacSpacing.large) {
-                        Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                            HStack(spacing: MacSpacing.xSmall) {
-                                Image(systemName: "link")
-                                Text("View on PubMed")
+                        if let pubmedURL = document.pubmedURL {
+                            Link(destination: pubmedURL) {
+                                HStack(spacing: MacSpacing.xSmall) {
+                                    Image(systemName: "link")
+                                    Text("View on PubMed")
+                                }
                             }
                         }
 
@@ -1023,10 +1025,12 @@ struct MacDocumentDetailSheet: View {
 
                         Spacer()
 
-                        Text("PMID: \(document.pmid)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .textSelection(.enabled)
+                        if let citationIdentifier = document.citationIdentifier {
+                            Text(citationIdentifier)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
                 .padding(MacSpacing.xxLarge)

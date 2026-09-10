@@ -58,7 +58,14 @@ enum PlatformHelper {
 
     /// Build a PubMed URL from a PMID.
     ///
-    /// - Parameter pmid: The PubMed ID.
+    /// Assembles the URL and nothing more: it cannot tell a PubMed ID from a
+    /// preprint accession, a thesis accession or an empty string, and each of
+    /// those produces a URL that names the wrong article or none. Ask
+    /// ``Document/pubmedURL`` instead, which establishes that the value is a
+    /// PubMed ID first (#212, #213). This is called from exactly one place, for
+    /// that reason.
+    ///
+    /// - Parameter pmid: A value already established to be a PubMed ID.
     /// - Returns: A URL pointing to the PubMed page, or nil if invalid.
     static func pubmedURL(for pmid: String) -> URL? {
         URL(string: "\(FullTextConstants.pubmedBaseURL)/\(pmid)/")

@@ -450,7 +450,7 @@ struct FullTextDocumentRow: View {
                 }
             }
 
-            if let url = PlatformHelper.pubmedURL(for: document.pmid) {
+            if let url = document.pubmedURL {
                 Button {
                     openURL(url)
                 } label: {

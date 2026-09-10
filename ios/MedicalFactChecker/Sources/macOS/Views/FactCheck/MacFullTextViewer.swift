@@ -321,7 +321,7 @@ struct MacFullTextViewer: View {
             }
 
             // PubMed link
-            if let pubmedURL = URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/") {
+            if let pubmedURL = document.pubmedURL {
                 ShareLink(item: pubmedURL) {
                     Label("Share PubMed Link", systemImage: "link")
                 }

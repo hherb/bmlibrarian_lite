@@ -563,7 +563,99 @@ final class Document {
         if let doi = doi, !doi.isEmpty, let url = PlatformHelper.doiURL(for: doi) {
             return url
         }
-        return PlatformHelper.pubmedURL(for: pmid)
+        return pubmedURL
+    }
+
+    // MARK: - PubMed Identity
+
+    /// The provider that returned this record, as the package names it.
+    ///
+    /// Mapped here rather than through `BioMedLitAdapters.toBioMedLitProvider`,
+    /// which answers `.pubmed` for `both` because the package has no merged
+    /// mode. Passing that answer to the resolver below would have a merged
+    /// search vouch for every document it produced, including the ones only
+    /// Europe PMC returned — which is the defect this whole property exists to
+    /// close (#212).
+    ///
+    /// `nil` where nothing was recorded. Documents predating provider tracking
+    /// have no source, and the app guesses one for the provider badge; a guess
+    /// is fine for a badge and is not fine for a link, so nothing is guessed
+    /// here.
+    private var recordedProvider: BioMedLit.SearchProvider? {
+        switch searchSource {
+        case SearchProvider.pubmed.rawValue: return .pubmed
+        case SearchProvider.europePMC.rawValue: return .europePMC
+        case SearchProvider.both.rawValue: return .both
+        default: return nil
+        }
+    }
+
+    /// What is known about what ``pmid`` holds.
+    ///
+    /// The record's stated kind, the identifier's shape where a prefix settles
+    /// it, and finally the provider — a PubMed search vouches for a bare decimal
+    /// that nothing else names, which is what keeps documents stored before the
+    /// kind field existed reaching their PubMed record.
+    ///
+    /// This, not ``identifierKind``, is what the retrieval chain is given: the
+    /// chain has no provider of its own, so a document that resolved its kind
+    /// only from the provider would arrive with nothing stated and be guessed
+    /// about all over again.
+    var resolvedIdentifierKind: ArticleIdentifierKind {
+        ArticleIdentifierKind.resolved(
+            declared: identifierKind,
+            accession: pmid,
+            provider: recordedProvider
+        )
+    }
+
+    /// ``pmid`` when it really is a PubMed ID, and `nil` otherwise.
+    var pubmedID: String? {
+        ArticleIdentifierKind.pubmedID(in: pmid, declared: resolvedIdentifierKind)
+    }
+
+    /// This article's PubMed record, when it has one that can be named.
+    ///
+    /// The one accessor every PubMed link in either app goes through. Nine
+    /// surfaces used to paste ``pmid`` after the base URL directly, so a
+    /// preprint was offered a 404, an identifier-less record was offered
+    /// PubMed's front page as its own full text, and a Europe PMC thesis
+    /// accession — a bare decimal, indistinguishable from a PubMed ID — was
+    /// offered a **real but unrelated article** (#212, #213).
+    ///
+    /// Optional, and never force-unwrapped: five of those surfaces wrote
+    /// `URL(string:)!` over a network-supplied value, and `URL(string:)` answers
+    /// `nil` for a string containing a space, so drawing a context menu over
+    /// such a document brought the app down.
+    var pubmedURL: URL? {
+        guard let pubmedID else { return nil }
+        return PlatformHelper.pubmedURL(for: pubmedID)
+    }
+
+    /// The identifier line for a citation, naming the namespace that resolves it.
+    ///
+    /// A citation outlives the app — it goes into an exported report someone
+    /// else reads — so `PMID: PPR1287966` is the most consequential form a
+    /// fabricated identifier takes. Each kind is named as what it is instead,
+    /// and where neither the record nor the provider names a namespace there is
+    /// no honest label to print: a bare number under any label invites the
+    /// reader to take it for a PubMed ID.
+    var citationIdentifier: String? {
+        let identifier = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identifier.isEmpty else { return nil }
+
+        switch resolvedIdentifierKind {
+        case .pubmed:
+            guard let pubmedID else { return nil }
+            return "PMID: \(pubmedID)"
+        case .pmc:
+            return "PMCID: \(identifier)"
+        case .preprint, .europePMCSource:
+            return "Europe PMC: \(identifier)"
+        case .unknown:
+            guard recordedProvider == .europePMC else { return nil }
+            return "Europe PMC: \(identifier)"
+        }
     }
 
     /// Display name for the full text source.
@@ -589,8 +681,8 @@ final class Document {
         if let journal = journal {
             parts.append("*\(journal)*")
         }
-        if !pmid.isEmpty {
-            parts.append("PMID: \(pmid)")
+        if let citationIdentifier {
+            parts.append(citationIdentifier)
         }
         return parts.joined(separator: ". ")
     }

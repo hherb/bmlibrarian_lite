@@ -518,7 +518,17 @@ function kind_tag(kind) -> string:
     if kind == PUBMED:   return "pmid"
     if kind == PREPRINT: return "ppr"
     if kind == PMC:      return "pmc"
-    return "id"   # an unmodelled source, or a kind nobody could name
+    if kind is a source token: return "src"   # stated, but not modelled here
+    return "id"                               # nobody named it at all
+
+    # "src" and "id" are separate buckets because the two describe different
+    # situations, and since the shape rule stopped naming PubMed IDs one of
+    # them is a bare decimal. A stated ETH accession and an unclassified
+    # identifier with the same digits would otherwise share a filename and be
+    # served each other's bytes. Neither tag carries the source token itself:
+    # the token is network-supplied and this position needs a fixed
+    # vocabulary, so two identifiers within one bucket that are byte-identical
+    # still collide.
 
 function tagged(tag, identifier) -> string:
     # Sanitising is lossy — every unsafe character becomes `_` — so an
@@ -667,27 +677,53 @@ function stated_kind(record) -> Kind | null:
     if token == "pmc": return PMC
     return SourceToken(token)     # NBK, PAT, AGR, ETH, …
 
-# The stand-in, for identifiers nobody classified. Deliberately not total:
-# calling an unrecognised accession a PubMed ID is what put a `PPR…` value
-# behind a PubMed URL.
-#
-# `all_digits` means ASCII `0`-`9`, and an empty id is UNKNOWN, not PUBMED.
-# Both are load-bearing and both differ by language: Kotlin's
-# `"".all { it.isDigit() }` is true and Python's `"".isdigit()` is false, so a
-# port that omits the empty guard sends `pubmed.ncbi.nlm.nih.gov//` for a blank
-# slot on one platform and not the other. A non-ASCII digit test is worse: it
-# calls `١٢٣` a PubMed ID and pastes it after the PubMed URL.
+# The stand-in, for identifiers nobody classified. Deliberately not total, and
+# **it may not name a PubMed ID**. A bare decimal is the shape of a PubMed ID
+# and equally the shape of a Europe PMC thesis (ETH), case report (CBA) or HIR
+# accession, none of which carry a PubMed ID at all — 322,044 such records with
+# abstracts are served today. Guessing wrong there does not produce a dead
+# link: Europe PMC thesis 889149 and PubMed article 889149 both exist, and the
+# second is a 1977 paper on mouse courtship, which is what the reader was
+# handed as this article's source.
 function infer_kind(id) -> Kind:
     u = uppercase(trim(id))
     if blank(u):             return UNKNOWN
     if u.starts_with("PPR"): return PREPRINT
     if u.starts_with("PMC"): return PMC
-    if all_digits(u):        return PUBMED     # ASCII 0-9 only
     return UNKNOWN
 
-function resolve_kind(stated, id) -> Kind:
-    if stated is null or stated == UNKNOWN: return infer_kind(id)
-    return stated
+# Three sources of knowledge, strongest first: what the record said, what the
+# identifier's shape settles, and finally who returned the record.
+#
+# A provider is consulted last, and only PubMed vouches. PubMed returns MEDLINE
+# records and nothing else, so the search itself states what a document stored
+# before the kind field existed never recorded — without which every such
+# document loses its PubMed link. A *merged* search vouches for nothing: the
+# mode is recorded on every document it produces, including the ones only
+# Europe PMC returned.
+#
+# `all_digits` means ASCII `0`-`9`, and a blank id is never PUBMED. Both are
+# load-bearing and both differ by language: Kotlin's `"".all { it.isDigit() }`
+# is true and Python's `"".isdigit()` is false, so a port that omits the blank
+# guard sends `pubmed.ncbi.nlm.nih.gov//` for an empty slot on one platform and
+# not the other. A non-ASCII digit test is worse: it calls `١٢٣` a PubMed ID.
+function resolve_kind(stated, id, provider = null) -> Kind:
+    if stated is not null and stated != UNKNOWN: return stated
+    shaped = infer_kind(id)
+    if shaped != UNKNOWN: return shaped
+    if provider == PUBMED and all_digits(trim(id)): return PUBMED  # ASCII 0-9
+    return UNKNOWN
+
+# The one predicate that authorises a PubMed URL or a `PMID:` citation line.
+# Every surface asks this — the last-resort fallback and every link, share
+# sheet and citation in the apps. Answered per surface, it is answered
+# differently per surface: nine app surfaces had none of this rule at all.
+function pubmed_id(id, kind) -> string | null:
+    v = trim(id)
+    if blank(v):                          return null
+    if resolve_kind(kind, v) != PUBMED:   return null
+    if not all_digits(v):                 return null   # ASCII 0-9
+    return v
 ```
 
 **Store the kind with the document, as the source token itself.** The record is
@@ -706,10 +742,24 @@ PubMed ID, so log the empty result — otherwise an identifier asked for under a
 source that cannot answer is indistinguishable from an article Europe PMC has
 never held.
 
-**Only a PubMed ID may be pasted after the PubMed base URL.** The last-resort
-fallback must apply the same rule: the resolved kind must be `PUBMED` *and* the
-value all digits. A stated preprint whose accession happens to be numeric would
-otherwise be handed to the reader as a PubMed link that names no article.
+**Only a PubMed ID may be pasted after the PubMed base URL, and a number's
+shape never says it is one.** Every surface that builds such a URL, or prints a
+`PMID:` line in a citation, goes through `pubmed_id` above — the retrieval
+chain's last resort and every link, share sheet and reference list in the apps.
+
+Two things this closes. A stated preprint whose accession happens to be numeric
+is not handed to the reader as a PubMed link that names no article. And a bare
+decimal that nothing vouched for is not handed to them as a PubMed link that
+names *the wrong* article, which is the more serious of the two: a dead link
+tells the reader something is wrong, and a live link to a real, unrelated paper
+does not.
+
+**Name a citation's identifier by the namespace that resolves it.** `PMID:` for
+a PubMed ID, `PMCID:` for a PMC accession, `Europe PMC:` for a preprint
+accession or any Europe PMC-sourced record, and nothing at all where neither
+the record nor the provider names a namespace — a bare number under any label
+invites the reader to read it as a PubMed ID. A citation outlives the session,
+in an exported report someone else reads.
 
 Measured against the live Europe PMC API on 2026-09-10:
 
@@ -1008,7 +1058,7 @@ implementation has not caught up, say so here rather than letting the
 pseudocode imply otherwise — a contract describing a ladder no caller climbs
 is what produced #202 in the first place.
 
-As of 2026-09-10:
+As of 2026-09-11:
 
 | Section | Swift (BioMedLit) | Python (desktop) | Kotlin (Android) |
 |---|---|---|---|
@@ -1016,6 +1066,18 @@ As of 2026-09-10:
 | Identifier resolution queries | yes | partial | no (#205) |
 | Kind stated by the record, not inferred | yes | no (#207) | no (#205) |
 | Kind persisted with the document | yes (iOS/macOS) | no (#207) | no (#205) |
+| A PubMed URL requires a vouched PubMed ID | yes | n/a | n/a |
+
+**The last row is Swift-only by construction, not by neglect.** Swift's
+`SearchArticle` has one primary identifier slot, filled as
+`pmid ?? id ?? ""`, so a thesis accession lands where a PubMed ID is expected
+and every consumer must then ask what it is holding. Python's `Article.pmid`
+and Kotlin's `DocumentEntity.pmid` are nullable and are filled from the
+record's `pmid` field alone, so a record without one carries `null` and both
+platforms' PubMed URL builders — `data_types.py`'s `__post_init__` and
+`Document.kt`'s `pubmedUrl` — are already gated by that. Any port that gives
+either platform a single collapsed slot inherits the whole of this section
+along with it.
 
 **Python** branches `PMCID:` against `ext_id:… src:med` in
 `europepmc.py`, so it reaches a PMC ID, but it tries the PMC rung *first*,

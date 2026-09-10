@@ -156,7 +156,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
 
     func testWarningsFromATruncatedParseReachTheResult() async throws {
         let result = try await service(serving: Self.contentlessArticle)
-            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1")
+            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1", primaryKind: .pubmed)
 
         guard case .europePMC = result.content else {
             return XCTFail("expected a Europe PMC result, got \(result)")
@@ -170,7 +170,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// happily against a channel that reports every article as truncated.
     func testACompleteArticleCarriesNoWarnings() async throws {
         let result = try await service(serving: Self.completeArticle)
-            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1")
+            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1", primaryKind: .pubmed)
 
         guard case .europePMC(let html, _) = result.content else {
             return XCTFail("expected a Europe PMC result, got \(result)")
@@ -213,7 +213,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// them can lose its degradation with the suite still green.
     func testAParseFailureMarksTheFallbackAsDegraded() async throws {
         let result = try await service(serving: "<article><body></article>")
-            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1")
+            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1", primaryKind: .pubmed)
 
         guard case .doi(let webURL) = result.content else {
             return XCTFail("expected the publisher-link fallback, got \(result.content)")
@@ -306,7 +306,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// happily against a service that reports every result as degraded.
     func testASuccessfulParseIsNotDegraded() async throws {
         let result = try await service(serving: Self.completeArticle)
-            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1")
+            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1", primaryKind: .pubmed)
 
         XCTAssertNil(result.degradation)
     }
@@ -319,7 +319,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// note worthless on the articles where it is true.
     func testAnAbsentSourceIsNotADegradation() async throws {
         let result = try await service(serving: "", status: 404)
-            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1")
+            .fetchFullText(pmcId: "PMC12759138", doi: nil, pmid: "1", primaryKind: .pubmed)
 
         guard case .doi = result.content else {
             return XCTFail("expected the publisher-link fallback, got \(result.content)")

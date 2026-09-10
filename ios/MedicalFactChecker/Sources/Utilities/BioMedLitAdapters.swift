@@ -544,6 +544,12 @@ extension BMLFullTextService {
     /// stored at search time and read here, days later, as the thing that says
     /// which Europe PMC source can answer for this article (#209).
     ///
+    /// `resolvedIdentifierKind` rather than the stored token alone. The chain
+    /// has no provider of its own, so a document whose kind is known only
+    /// because a PubMed search returned it would arrive stating nothing — and
+    /// since #212 nothing is what a bare decimal accession stays, which would
+    /// cost every pre-#209 PubMed document its last-resort link.
+    ///
     /// - Parameter document: The document to fetch for.
     /// - Returns: The retrieved content and everything the chain learned on the
     ///   way.
@@ -554,7 +560,7 @@ extension BMLFullTextService {
             pmcId: document.pmcId,
             doi: document.doi,
             pmid: document.pmid,
-            primaryKind: document.identifierKind
+            primaryKind: document.resolvedIdentifierKind
         )
     }
 }

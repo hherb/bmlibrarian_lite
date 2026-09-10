@@ -36,7 +36,10 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// now tagged — so this is about stability from here on, not continuity with
     /// what is already on disk.
     func testPrimaryIdentifierIsPreferredOverEveryOtherIdentifier() {
-        let key = ArticleCacheKey(pmid: "12345678", pmcId: "PMC7654321", doi: "10.1/abc")
+        let key = ArticleCacheKey(
+            pmid: "12345678", pmcId: "PMC7654321", doi: "10.1/abc",
+            primaryKind: .pubmed
+        )
 
         XCTAssertEqual(key?.filenameComponent, "pmid_12345678")
     }
@@ -168,7 +171,7 @@ final class ArticleCacheKeyTests: XCTestCase {
         )
 
         XCTAssertEqual(patent?.filenameComponent, thesis?.filenameComponent)
-        XCTAssertEqual(patent?.filenameComponent, "id_SHARED1234")
+        XCTAssertEqual(patent?.filenameComponent, "src_SHARED1234")
     }
 
     /// An unmodelled source token files under the untyped bucket, never under a
@@ -179,14 +182,33 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// would put a provider-supplied string in that position. Nothing else in
     /// the suite pinned this branch: replacing it with `return token` passed
     /// every test before this case existed.
-    func testAnUnmodelledSourceTokenFilesUnderTheUntypedTag() {
+    func testAnUnmodelledSourceTokenFilesUnderAClosedTag() {
         let key = ArticleCacheKey(
             pmid: "879809", pmcId: nil, doi: nil,
             primaryKind: .europePMCSource("eth")
         )
 
-        XCTAssertEqual(key?.filenameComponent, "id_879809")
+        XCTAssertEqual(key?.filenameComponent, "src_879809")
         XCTAssertFalse(key?.filenameComponent.contains("eth") ?? true)
+    }
+
+    /// A stated source and an identifier nobody classified are different
+    /// situations and must not share a name.
+    ///
+    /// Latent until #212: an unvouched decimal accession used to be called a
+    /// PubMed ID, so it never landed in the untyped bucket at all. Now that it
+    /// does, sharing the bucket with a stated `ETH` accession of the same digits
+    /// would serve one article the other's bytes — the collision the tagging
+    /// exists to prevent, reintroduced by the repair that removed a different
+    /// one.
+    func testAStatedSourceAndAnUnclassifiedIdentifierDoNotShareAName() {
+        let thesis = ArticleCacheKey(
+            pmid: "879809", pmcId: nil, doi: nil,
+            primaryKind: .europePMCSource("eth")
+        )
+        let unclassified = ArticleCacheKey(pmid: "879809", pmcId: nil, doi: nil)
+
+        XCTAssertNotEqual(thesis?.filenameComponent, unclassified?.filenameComponent)
     }
 
     /// A stated kind outranks the shape rule in the cache tag, and this is the
@@ -200,7 +222,10 @@ final class ArticleCacheKeyTests: XCTestCase {
             pmid: "879809", pmcId: nil, doi: nil,
             primaryKind: .europePMCSource("eth")
         )
-        let article = ArticleCacheKey(pmid: "879809", pmcId: nil, doi: nil)
+        let article = ArticleCacheKey(
+            pmid: "879809", pmcId: nil, doi: nil,
+            primaryKind: .pubmed
+        )
 
         XCTAssertEqual(article?.filenameComponent, "pmid_879809")
         XCTAssertNotEqual(thesis?.filenameComponent, article?.filenameComponent)
@@ -245,7 +270,7 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// while the search asked about `12345` — the same article, two names, and
     /// no error anywhere to say so.
     func testAPaddedIdentifierIsStoredTrimmed() {
-        let key = ArticleCacheKey(pmid: " 12345 ", pmcId: nil, doi: nil)
+        let key = ArticleCacheKey(pmid: " 12345 ", pmcId: nil, doi: nil, primaryKind: .pubmed)
 
         XCTAssertEqual(key?.filenameComponent, "pmid_12345")
     }
@@ -272,7 +297,9 @@ final class ArticleCacheKeyTests: XCTestCase {
     /// filename unreadable for the identifiers that were always safe.
     func testAWellFormedIdentifierKeepsItsReadableName() {
         XCTAssertEqual(
-            ArticleCacheKey(pmid: "12345678", pmcId: nil, doi: nil)?.filenameComponent,
+            ArticleCacheKey(
+                pmid: "12345678", pmcId: nil, doi: nil, primaryKind: .pubmed
+            )?.filenameComponent,
             "pmid_12345678"
         )
         XCTAssertEqual(

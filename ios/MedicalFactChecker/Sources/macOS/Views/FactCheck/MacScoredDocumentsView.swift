@@ -368,12 +368,18 @@ struct MacDocumentCard: View {
 
             // Links
             HStack(spacing: MacSpacing.large) {
-                Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                    HStack(spacing: MacSpacing.xSmall) {
-                        Image(systemName: "link")
-                        Text("PubMed")
+                // Offered only when the slot really holds a PubMed ID: it also
+                // holds preprint and thesis accessions, and a thesis accession
+                // is a bare decimal that names a real but unrelated PubMed
+                // article (#212, #213).
+                if let pubmedURL = document.pubmedURL {
+                    Link(destination: pubmedURL) {
+                        HStack(spacing: MacSpacing.xSmall) {
+                            Image(systemName: "link")
+                            Text("PubMed")
+                        }
+                        .font(.caption)
                     }
-                    .font(.caption)
                 }
 
                 if let doi = document.doi {
@@ -388,10 +394,17 @@ struct MacDocumentCard: View {
 
                 Spacer()
 
-                Text("PMID: \(document.pmid)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
+                // Named by the namespace that resolves it. The slot also holds
+                // preprint, PMC and thesis accessions, and labelling one of
+                // those "PMID" is an identifier the reader cannot look up —
+                // or, for a bare thesis accession, one that looks up as a
+                // different article (#212, #213).
+                if let citationIdentifier = document.citationIdentifier {
+                    Text(citationIdentifier)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
             }
         }
         .padding(MacSpacing.large)
@@ -550,8 +563,10 @@ struct MacDocumentCard: View {
         }
 
         // Standard links
-        Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-            Label("Open in PubMed", systemImage: "link")
+        if let pubmedURL = document.pubmedURL {
+            Link(destination: pubmedURL) {
+                Label("Open in PubMed", systemImage: "link")
+            }
         }
 
         if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
@@ -562,8 +577,12 @@ struct MacDocumentCard: View {
 
         Divider()
 
-        Button(action: copyPMID) {
-            Label("Copy PMID", systemImage: "doc.on.doc")
+        // Hidden rather than inert when nothing names the identifier: a menu
+        // item that quietly does nothing is worse than one that is not offered.
+        if document.citationIdentifier != nil {
+            Button(action: copyIdentifier) {
+                Label("Copy Identifier", systemImage: "doc.on.doc")
+            }
         }
 
         Button(action: copyCitation) {
@@ -684,10 +703,17 @@ struct MacDocumentCard: View {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
     }
 
-    /// Copy the PMID to the clipboard.
-    private func copyPMID() {
+    /// Copy the article's identifier, named by the namespace that resolves it.
+    ///
+    /// It used to copy the raw slot under the label "Copy PMID", and the slot
+    /// also holds preprint, PMC and thesis accessions — so what landed in the
+    /// reader's clipboard, to be pasted somewhere that expects a PubMed ID, was
+    /// often not one (#213). Copying the labelled form makes the pasted text say
+    /// what it is; a document nothing can name has no menu item at all.
+    private func copyIdentifier() {
+        guard let citationIdentifier = document.citationIdentifier else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(document.pmid, forType: .string)
+        NSPasteboard.general.setString(citationIdentifier, forType: .string)
     }
 
     /// Copy the full citation to the clipboard.

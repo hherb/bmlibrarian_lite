@@ -882,25 +882,20 @@ public actor FullTextService {
     /// of those builds a URL that names no article — see the final fallback in
     /// ``fetchFullText(pmcId:doi:pmid:primaryKind:)`` for what that cost the reader.
     ///
-    /// Both tests must pass. The kind is what a record said it is, and a record
-    /// that said "preprint" is not a PubMed article however numeric its
-    /// accession looks; the all-digits test is what stands in where nothing was
-    /// said, and is the same rule ``ArticleIdentifierKind/inferred(from:)``
-    /// applies, so the fallback and the routing cannot drift into disagreeing
-    /// about one value.
+    /// Delegated rather than decided here. The apps ask the same question at
+    /// nine link and citation surfaces, and a rule this consequential answered
+    /// separately per surface is how #186 came to be fixed on one of four.
     ///
     /// - Parameters:
     ///   - identifier: The raw primary identifier slot.
-    ///   - kind: What the record said the slot holds, when it said.
+    ///   - kind: What is known about the slot — stated by the record, or
+    ///     resolved by the caller where a provider had to vouch for it.
     /// - Returns: The trimmed PubMed ID, or `nil` if the slot holds anything else.
     private static func pubmedIdentifier(
         in identifier: String?,
         kind: ArticleIdentifierKind?
     ) -> String? {
-        guard let value = trimmed(identifier),
-              ArticleIdentifierKind.resolved(declared: kind, accession: value) == .pubmed,
-              ArticleIdentifierKind.isAllASCIIDigits(value) else { return nil }
-        return value
+        ArticleIdentifierKind.pubmedID(in: identifier, declared: kind)
     }
 
     /// Search Europe PMC and extract PMC ID and PDF render URL from the first result.

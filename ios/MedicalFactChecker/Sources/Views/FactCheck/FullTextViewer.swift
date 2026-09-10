@@ -161,7 +161,7 @@ struct FullTextViewer: View {
         if let doi = document.doi, !doi.isEmpty,
            let url = PlatformHelper.doiURL(for: doi) {
             PlatformHelper.openURL(url)
-        } else if let url = PlatformHelper.pubmedURL(for: document.pmid) {
+        } else if let url = document.pubmedURL {
             PlatformHelper.openURL(url)
         }
     }

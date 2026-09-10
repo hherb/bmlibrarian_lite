@@ -1343,12 +1343,14 @@ struct DocumentDetailSheet: View {
                     // External Links
                     Divider()
 
-                    Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                        HStack {
-                            Image(systemName: "link")
-                            Text("View on PubMed")
+                    if let pubmedURL = document.pubmedURL {
+                        Link(destination: pubmedURL) {
+                            HStack {
+                                Image(systemName: "link")
+                                Text("View on PubMed")
+                            }
+                            .font(.subheadline)
                         }
-                        .font(.subheadline)
                     }
 
                     if let doi = document.doi {

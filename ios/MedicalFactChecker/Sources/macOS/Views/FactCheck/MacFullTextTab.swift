@@ -238,10 +238,12 @@ struct MacFullTextTab: View {
                     .buttonStyle(.bordered)
                 }
 
-                Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                    Label("Open PubMed", systemImage: "link")
+                if let pubmedURL = document.pubmedURL {
+                    Link(destination: pubmedURL) {
+                        Label("Open PubMed", systemImage: "link")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
