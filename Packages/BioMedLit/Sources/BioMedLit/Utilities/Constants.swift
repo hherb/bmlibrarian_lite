@@ -240,6 +240,24 @@ public enum BioMedLitConstants {
     /// `pmcId` — from being downloaded and cached twice (#209).
     public static let pmcCacheKeyTag = "pmc"
 
+    /// Tag for a cache filename keyed on an accession whose source Europe PMC
+    /// stated but this build does not model — a thesis, a case report, a patent.
+    /// See ``primaryCacheKeyTag``.
+    ///
+    /// Separate from ``primaryCacheKeyTag`` because the two now describe
+    /// genuinely different situations, and one of them is a bare number. Since
+    /// #212 an unvouched decimal accession is ``ArticleIdentifierKind/unknown``
+    /// rather than a PubMed ID, so without this tag a stated `ETH` accession and
+    /// an unclassified identifier with the same digits would share a filename
+    /// and be served each other's bytes — the collision the tagging exists to
+    /// prevent, reintroduced by the repair.
+    ///
+    /// A single closed tag rather than the source token itself: the token is
+    /// network-supplied, and the filename format needs a fixed vocabulary. Two
+    /// *different* unmodelled sources whose accessions are byte-identical still
+    /// share a name, which is the same residual ``primaryCacheKeyTag`` carries.
+    public static let europePMCSourceCacheKeyTag = "src"
+
     /// Tag for a cache filename keyed on a DOI. See ``primaryCacheKeyTag``.
     public static let doiCacheKeyTag = "doi"
 

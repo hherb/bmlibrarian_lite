@@ -290,9 +290,14 @@ struct PrintableReportView: View {
                 }
             }
 
-            Text("PMID: \(document.pmid)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            // As on macOS: the exported report is read by people who never saw
+            // the app, so a mislabelled identifier here outlives everything
+            // else (#213).
+            if let citationIdentifier = document.citationIdentifier {
+                Text(citationIdentifier.labelled)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(8)
         .background(Color.gray.opacity(0.05))

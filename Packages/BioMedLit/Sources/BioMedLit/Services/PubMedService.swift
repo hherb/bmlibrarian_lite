@@ -411,7 +411,14 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
                 journal: currentJournal,
                 year: currentYear,
                 hasFullText: currentPMCID != nil,
-                source: .pubmed
+                source: .pubmed,
+                // Stated, not left to be guessed back later. PubMed returns
+                // MEDLINE records and nothing else, so this is knowledge we
+                // hold at the decode site and would otherwise discard — after
+                // which the shape rule has to stand in, and a bare decimal is a
+                // shape PubMed IDs share with Europe PMC's thesis and
+                // case-report accessions (#212).
+                identifierKind: .pubmed
             )
             articles.append(article)
             inArticle = false

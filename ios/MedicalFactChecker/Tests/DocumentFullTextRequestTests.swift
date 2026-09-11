@@ -131,4 +131,27 @@ final class DocumentFullTextRequestTests: XCTestCase {
             "the PMC rung must be asked: \(StubFetchURLProtocol.requestedURLs)"
         )
     }
+
+    /// The seam passes the *resolved* kind, not the stored one.
+    ///
+    /// The chain has no provider of its own, so a document whose kind is known
+    /// only because a PubMed search vouched for it would arrive stating nothing
+    /// and be refused the PubMed last resort — silently losing the link for
+    /// every row written before the kind field existed. Passing
+    /// `identifierKind` here instead of `resolvedIdentifierKind` compiles, runs,
+    /// and breaks exactly that.
+    func testTheSeamPassesTheProviderVouchedKindNotTheStoredOne() async throws {
+        let document = Document(pmid: "12662058", title: "A legacy article", abstract: "")
+        document.searchSource = MedicalFactChecker.SearchProvider.pubmed.rawValue
+
+        XCTAssertNil(document.identifierKind, "precondition: nothing stated the kind")
+        XCTAssertEqual(document.resolvedIdentifierKind, .pubmed)
+
+        let result = try await stubbedService().fetchFullText(for: document)
+
+        guard case .doi(let url) = result.content else {
+            return XCTFail("expected the PubMed last resort, got \(result.content)")
+        }
+        XCTAssertEqual(url.absoluteString, "https://pubmed.ncbi.nlm.nih.gov/12662058/")
+    }
 }

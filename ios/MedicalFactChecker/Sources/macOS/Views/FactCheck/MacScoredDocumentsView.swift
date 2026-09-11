@@ -368,16 +368,22 @@ struct MacDocumentCard: View {
 
             // Links
             HStack(spacing: MacSpacing.large) {
-                Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-                    HStack(spacing: MacSpacing.xSmall) {
-                        Image(systemName: "link")
-                        Text("PubMed")
+                // Offered only when the slot really holds a PubMed ID: it also
+                // holds preprint and thesis accessions, and a thesis accession
+                // is a bare decimal that names a real but unrelated PubMed
+                // article (#212, #213).
+                if let pubmedURL = document.pubmedURL {
+                    Link(destination: pubmedURL) {
+                        HStack(spacing: MacSpacing.xSmall) {
+                            Image(systemName: "link")
+                            Text("PubMed")
+                        }
+                        .font(.caption)
                     }
-                    .font(.caption)
                 }
 
-                if let doi = document.doi {
-                    Link(destination: URL(string: "https://doi.org/\(doi)")!) {
+                if let doi = document.doi, let doiURL = PlatformHelper.doiURL(for: doi) {
+                    Link(destination: doiURL) {
                         HStack(spacing: MacSpacing.xSmall) {
                             Image(systemName: "doc.text")
                             Text("DOI")
@@ -388,10 +394,17 @@ struct MacDocumentCard: View {
 
                 Spacer()
 
-                Text("PMID: \(document.pmid)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
+                // Named by the namespace that resolves it. The slot also holds
+                // preprint, PMC and thesis accessions, and labelling one of
+                // those "PMID" is an identifier the reader cannot look up —
+                // or, for a bare thesis accession, one that looks up as a
+                // different article (#212, #213).
+                if let citationIdentifier = document.citationIdentifier {
+                    Text(citationIdentifier.labelled)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
             }
         }
         .padding(MacSpacing.large)
@@ -420,6 +433,10 @@ struct MacDocumentCard: View {
                     Label("Open Publisher", systemImage: "safari")
                         .font(.caption)
                 }
+            } else if let notice = document.unresolvableIdentifierNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -487,6 +504,10 @@ struct MacDocumentCard: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             } else {
                 // Not yet attempted, or attempted and left with only a link;
@@ -550,8 +571,10 @@ struct MacDocumentCard: View {
         }
 
         // Standard links
-        Link(destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/\(document.pmid)/")!) {
-            Label("Open in PubMed", systemImage: "link")
+        if let pubmedURL = document.pubmedURL {
+            Link(destination: pubmedURL) {
+                Label("Open in PubMed", systemImage: "link")
+            }
         }
 
         if let doi = document.doi, let url = URL(string: "https://doi.org/\(doi)") {
@@ -562,8 +585,12 @@ struct MacDocumentCard: View {
 
         Divider()
 
-        Button(action: copyPMID) {
-            Label("Copy PMID", systemImage: "doc.on.doc")
+        // Hidden rather than inert when nothing names the identifier: a menu
+        // item that quietly does nothing is worse than one that is not offered.
+        if document.citationIdentifier != nil {
+            Button(action: copyIdentifier) {
+                Label("Copy Identifier", systemImage: "doc.on.doc")
+            }
         }
 
         Button(action: copyCitation) {
@@ -684,10 +711,23 @@ struct MacDocumentCard: View {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
     }
 
-    /// Copy the PMID to the clipboard.
-    private func copyPMID() {
+    /// Copy the article's identifier, unlabelled.
+    ///
+    /// It used to copy the raw slot under the label "Copy PMID", and the slot
+    /// also holds preprint, PMC and thesis accessions — so what landed in the
+    /// reader's clipboard, to be pasted somewhere that expects a PubMed ID, was
+    /// often not one (#213). What is copied now is an identifier the app can
+    /// name; a document nothing can name has no menu item at all.
+    ///
+    /// The bare ``CitationIdentifier/value`` rather than
+    /// ``CitationIdentifier/labelled``: this clipboard's destination is a
+    /// PubMed search box or a reference manager, neither of which accepts a
+    /// `PMID: ` prefix. The labelled form is what "Copy Citation" carries, one
+    /// menu item below, so both are reachable and neither has to guess.
+    private func copyIdentifier() {
+        guard let citationIdentifier = document.citationIdentifier else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(document.pmid, forType: .string)
+        NSPasteboard.general.setString(citationIdentifier.value, forType: .string)
     }
 
     /// Copy the full citation to the clipboard.

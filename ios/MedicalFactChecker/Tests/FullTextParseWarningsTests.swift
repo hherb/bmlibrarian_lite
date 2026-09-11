@@ -562,8 +562,13 @@ final class FullTextParseWarningsTests: XCTestCase {
     /// there is a note to read first, and a card gated on the DOI alone then had
     /// no route at all. The reader was told a substitute was shown and given no
     /// way to reach it (#187).
+    ///
+    /// The kind is stated because since #212 the digits alone do not state it:
+    /// a Europe PMC thesis accession has the same shape and names a different
+    /// article on PubMed. `PubMedLinkIdentityTests` covers that half.
     func testTheLinkDestinationFallsBackToPubMedWithoutADOI() {
         let document = makeDocument()
+        document.identifierKind = .pubmed
         document.doi = nil
 
         XCTAssertEqual(
@@ -575,6 +580,7 @@ final class FullTextParseWarningsTests: XCTestCase {
     /// An empty DOI is an absent one, not a link to the resolver's front page.
     func testAnEmptyDOIIsTreatedAsAbsent() {
         let document = makeDocument()
+        document.identifierKind = .pubmed
         document.doi = ""
 
         XCTAssertEqual(

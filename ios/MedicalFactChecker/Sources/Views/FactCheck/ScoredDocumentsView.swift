@@ -486,6 +486,10 @@ struct DocumentScoreRow: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -526,6 +530,10 @@ struct DocumentScoreRow: View {
                         Label("Open Publisher", systemImage: "safari")
                             .font(.caption)
                     }
+                } else if let notice = document.unresolvableIdentifierNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -797,9 +805,11 @@ struct DocumentScoreRow: View {
                     .lineLimit(1)
             }
 
-            Label("PMID: \(document.pmid)", systemImage: "number")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            if let citationIdentifier = document.citationIdentifier {
+                Label(citationIdentifier.labelled, systemImage: "number")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 

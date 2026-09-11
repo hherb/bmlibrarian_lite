@@ -490,10 +490,21 @@ struct PDFExporter {
 
                         _ = drawText("• \(doc.title)", font: .boldSystemFont(ofSize: PDFLayout.docTitleFontSize))
                         _ = drawText("  \(doc.formattedAuthors)", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .darkGray)
+                        // `citationIdentifier`, never the raw slot: this line
+                        // used to read "PMID: \(doc.pmid)" unconditionally, and
+                        // the slot also holds preprint, PMC and thesis
+                        // accessions. An exported PDF is read by people who
+                        // never saw the app and cannot check it, so a bare
+                        // thesis accession labelled PMID sends them to a real
+                        // but unrelated article (#212). Omitted entirely where
+                        // nothing can name it — a locator nobody can resolve is
+                        // worse than none.
+                        let identifierLine = doc.citationIdentifier?.labelled
                         if let journal = doc.journal, let year = doc.year {
-                            _ = drawText("  \(journal), \(year) • PMID: \(doc.pmid)", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .gray)
-                        } else {
-                            _ = drawText("  PMID: \(doc.pmid)", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .gray)
+                            let tail = identifierLine.map { " • \($0)" } ?? ""
+                            _ = drawText("  \(journal), \(year)\(tail)", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .gray)
+                        } else if let identifierLine {
+                            _ = drawText("  \(identifierLine)", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .gray)
                         }
                         if let score = doc.relevanceScore {
                             _ = drawText("  Relevance Score: \(score)/5", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .systemBlue)

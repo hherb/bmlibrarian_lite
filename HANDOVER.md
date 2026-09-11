@@ -8,69 +8,7 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-- **Europe PMC's own word for what an identifier is** (#209, PR #211, branch
-  `fix/europepmc-source-kind-209`). Rules that bind:
-  - **The kind is stated, not guessed.** `ArticleIdentifierKind` is built from
-    the record's `source` field (`MED`/`PPR`/`PMC`/anything else) at the decode
-    site, travels on `SearchArticle`, is stored on `Document` as the token
-    itself, and is passed back into `fetchFullText`. The prefix rule survives as
-    `inferred(from:)`, the stand-in for records that stated nothing.
-  - **The stand-in is deliberately not total.** An accession that is neither
-    prefix-marked nor all digits is `.unknown`, which queries `src:med` exactly
-    as before. Calling it `.pubmed` would be the label that puts a non-PubMed
-    value behind a PubMed URL — #202's last-resort defect, which is why
-    `pubmedIdentifier` now tests the *kind* as well as the digits.
-  - **A stored `nil` means "written before the field existed", not "no kind"**,
-    the same rule `fullTextContentKindRaw` follows. Such a document keeps the
-    shape rule and behaves exactly as it did.
-  - **The cache tag names the kind, not the rung.** `pmid_`/`ppr_`/`pmc_`/`doi_`,
-    with `id_` for an identifier nothing classifies. A PMC-only record carries
-    its accession in the primary slot *and* in `pmcId`, so tagging the rung filed
-    one article under two names and downloaded its PDF twice. Both rungs now tag
-    `pmc`. This invalidates entries a second time, on top of #206 — deliberate,
-    and the argument for doing it in the same round.
-  - **One seam for the five fetch surfaces.** `BMLFullTextService.fetchFullText(for:)`
-    replaces five hand-written argument lists; #186 was once fixed on one of
-    the four surfaces that round covered while the other three kept the defect.
-    Same reasoning for
-    `Document.applySearchMetadata(_:provider:)`, which replaces the **three**
-    field-by-field copies in `FactCheckWorkflow` — the third, in
-    `executeAlternativeQuery`, was missed when the seam was written and found in
-    review, having shipped documents with no kind and no preprint flag. Nothing
-    tests those three paths: **#216**.
-  - **The preprint badge lights up for the first time.** `BioMedLitAdapters`
-    hard-coded `isPreprint: false` because nothing downstream of the decode knew.
-    macOS still has no surface that reads the flag — **#210**.
-  - **Only Swift conforms.** The contract's new kind-resolution pseudocode and
-    conformance rows say so; **#205** and **#207** carry the ports, and both
-    issues now name the kind requirement, not just the ladder. Python's row is
-    `no (#207)`, not "n/a": `pdf_utils.py` does keep a PDF cache, an untagged one
-    that commits both defects the section names.
-  - **A lookup by identifier must not filter preprints.** `EuropePMCService.search`
-    appends ` NOT SRC:PPR` unless the query already contains that literal, so the
-    preprint rung only ever worked by substring coincidence and the DOI rung —
-    a preprint's documented recovery path — could not match one at all. The
-    resolution ladder now passes `includePreprints: true`, pinned on the emitted
-    URL because an outcome assertion passes either way.
-  - **The source token is refused outside `[a-z0-9]`, and the refusal is logged.**
-    The token reaches a query as `src:<token>` and a cache filename as a tag,
-    both of which assume a closed set. Every token Europe PMC publishes fits, so
-    reaching the guard means the field changed shape under us — which is
-    otherwise silent, because the kind quietly reverts to the shape rule.
-  - **`isNumber` is not "all digits".** It is true for `½` and for every
-    non-Latin numeral, so `١٢٣` classified as a PubMed ID. Both shape tests now
-    go through `ArticleIdentifierKind.isAllASCIIDigits`.
-  - **`NBK` is not a Europe PMC source token** (`SRC:NBK` → 0 hits), and every
-    fixture for the record class this work is named for used it. Real unmodelled
-    sources are `PAT`, `AGR`, `ETH`, `CBA`, `HIR`, `CTX`. `ETH`/`CBA`/`HIR` carry
-    **bare numeric** accessions, which is the dangerous shape: see **#212**.
-  - **Review round, open follow-ups.** #212 (a numeric non-PubMed accession is
-    handed to the reader as a real but unrelated PubMed article — the highest-harm
-    item, reachable on stored data), #213 (five app surfaces still build a PubMed
-    URL from any identifier, with force-unwraps), #214 (what the chain learns
-    never reaches the reader or the error queue), #215 (cache read/write failures
-    misreported), #216 (untested document-creation paths). **#192 was reopened**:
-    it had been closed by a commit whose message recorded it as deferred.
+Nothing. Pick a slice from **Potential follow-ups** below.
 
 ## Recently landed (context)
 
@@ -78,203 +16,275 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **A PubMed URL may only be built from a stated PubMed ID** (#212 + #213,
+  2026-09-11). Rules that still bind:
+  - **The shape of a number never states a PubMed ID.** Europe PMC's theses
+    (`ETH`), case reports (`CBA`) and `HIR` records carry bare decimal
+    accessions and no PMID — 322,044 with abstracts, measured 2026-09-11
+    (`SRC:ETH OR SRC:CBA OR SRC:HIR`, `resultType=core`). Pasted after the PubMed
+    base URL such an accession returns a **real but unrelated article**: thesis
+    `889149` is also the PMID of a 1977 mouse-courtship paper. A dead link tells
+    the reader something is wrong; a live link to the wrong paper does not.
+  - **`inferred(from:)` is prefix-only.** No query changed: `.unknown` already
+    routed to `src:med`, which is where a bare number went before. The **cache
+    filename does** change: a bare decimal nobody vouches for moves from the
+    `pmid_` tag to `id_`, orphaning any PDF already downloaded for such a
+    record. Same population as the lost link, reclaimed only by a full cache
+    clear.
+  - **Three sources of knowledge, strongest first** — the record's stated token,
+    the identifier's shape where a prefix settles it, then the provider.
+    `SearchProvider.pubmed` vouches for a bare decimal, which is what keeps every
+    legacy row on the default provider linking. **`.both` vouches for nothing**:
+    the app records the *search mode* on every document a merged search
+    produces, including the ones only Europe PMC returned. The provider must
+    therefore reach the resolver unflattened — an adapter that collapsed `both`
+    to `.pubmed` existed and was deleted, because the resolver can only refuse
+    `both` if `both` is still legible when it arrives.
+  - **`PubMedService` states `.pubmed` on every article it builds**, so nothing
+    downstream has to guess for the common path.
+  - **One predicate authorises every PubMed URL and every `PMID:` line** —
+    `ArticleIdentifierKind.pubmedID(in:declared:)`, reached from the app through
+    `Document.pubmedURL` / `Document.citationIdentifier`. Stated as an invariant,
+    not a count of today's callers: the next surface added is the one a census
+    would miss, and the review of this PR found three the first pass had missed
+    — the live PDF exporter, the generated References section, and the
+    transparency analyser, which searched PubMed with the raw slot and filed an
+    unrelated article's funding and conflicts under this document.
+  - **A citation names the namespace it can prove**: `PMID:`, `PMCID:`,
+    `Europe PMC:`, and nothing where neither the record nor the provider names
+    one. Carried as `CitationIdentifier` — namespace and value kept apart,
+    because a printed citation wants `PMID: 12662058` and a clipboard wants
+    `12662058`. Reaches the exported PDF and the saved `EvidenceReport`, both of
+    which outlive the session.
+  - **A stated-but-unmodelled source now tags `src_`, not `id_`.** Latent until
+    this round: once a bare decimal became `.unknown`, a stated `ETH` accession
+    and an unclassified identifier with the same digits would have shared a
+    cache filename — the collision the tagging exists to prevent, reintroduced
+    by the repair that removed a different one.
+  - **The defect is Swift-only by construction.** Only Swift's `SearchArticle`
+    collapses the identifiers into one slot (`pmid ?? id ?? ""`). Kotlin is safe
+    by nullability: `DocumentEntity.pmid` is `String?` and `pubmedUrl` is gated
+    on it. Python is safe by *package boundary*, not nullability — its one URL
+    builder takes a non-optional `pmid: str` on `PubMedArticle`, which is only
+    ever constructed inside the PubMed-only package. Its Europe PMC-facing types
+    have a nullable `pmid` and build no URL. Any port that introduces a collapsed
+    slot, or constructs a `PubMedArticle` from a Europe PMC record, inherits all
+    of this.
+  - **Known cost, accepted:** a document stored before the kind field existed,
+    from a Europe PMC or `both` search, loses its PubMed link, its cached PDF's
+    filename, and — from a `both` search or a row with no recorded provider —
+    its citation identifier. A Europe PMC row keeps a citation identifier, named
+    for the provider. Where the link is gone the card now says so and offers the
+    accession to search with, rather than leaving the empty space that was #187.
+    The default provider is PubMed, so this is a minority setting on legacy rows
+    only.
+  - **A refusal is not a fact about the article.** `FullTextError` gained
+    `identifierKindUnresolved`, thrown where every source was exhausted *and*
+    the kind was never established. It used to share `noFullTextAvailable`, and
+    the callers record that on the document and take the fetch button away — so
+    an internal refusal became a permanent claim that the paper has no full text
+    anywhere. Callers must keep matching `noFullTextAvailable` alone; the new
+    case belongs in the `else`, where its message reaches the reader and the
+    retry survives.
+  - **macOS sources are now compiled in CI.** `Package.swift` excludes
+    `Sources/macOS` from the test target, so `swift test` type-checked none of
+    it — half the app's link and citation surfaces, including four of the five
+    force-unwraps #213 was about. A separate `xcodebuild` job covers it. Verified
+    by inserting invalid Swift into a macOS view and watching `swift test` pass.
+  - Lodged rather than fixed: **#217** (the error queue labels every entry's
+    identifier `PMID`; naming it honestly needs the kind carried onto
+    `TransientErrorEntry`, which is #214's field too), **#219** (make the
+    invariant structural rather than conventional — a cache-tag enum, no
+    defaulted `primaryKind`, a validated source token, and the `pmid` rename),
+    **#220** (Android has the same ungated URL builder), **#221**
+    (`PrintableReportView` exists twice and is instantiated nowhere), **#222**
+    (a legacy card can show a PubMed badge beside no PubMed link), **#223**
+    (a malformed source token warns once per SwiftUI redraw).
+
+- **Europe PMC's own word for what an identifier is** (#209 in PR #211,
+  2026-09-10). Rules that still bind:
+  - **The kind is stated, not guessed.** Built from the record's `source` field
+    at the decode site, carried on `SearchArticle`, stored on `Document` as the
+    token itself, passed back into `fetchFullText`.
+  - **A stored `nil` means "nobody stated one"**, for four reasons one column
+    cannot tell apart — written before the field existed, no `source` sent, the
+    provider was PubMed, or `.unknown` assigned. Do not read it as "pre-dates
+    the field" when planning a backfill.
+  - **The cache tag names the kind, not the rung.** A PMC-only record carries
+    its accession in the primary slot *and* in `pmcId`, so tagging the rung
+    filed one article under two names and downloaded its PDF twice.
+  - **One seam for the five fetch surfaces** and **one writer for document
+    creation** (`applySearchMetadata`). The workflow builds documents in
+    **three** places; the third was found still hand-copying, in review, having
+    shipped documents with no kind and no preprint flag. Nothing tests those
+    paths: **#216**.
+  - **A lookup by identifier must not filter preprints.** `EuropePMCService.search`
+    appends ` NOT SRC:PPR` unless the query already contains that literal, so
+    the DOI rung — a preprint's documented recovery path — could not match one
+    at all. Pinned on the emitted URL, because an outcome assertion passes
+    either way.
+  - **The source token is refused outside `[a-z0-9]`, and the refusal is
+    logged**: it reaches a query as `src:<token>` and a filename as a tag, both
+    of which assume a closed set.
+  - **`isNumber` is not "all digits"** — true for `½` and every non-Latin
+    numeral, so `١٢٣` classified as a PubMed ID.
+  - **`NBK` is not a Europe PMC source token** (`SRC:NBK` → 0 hits). The real
+    unmodelled sources are `PAT`, `AGR`, `ETH`, `CBA`, `HIR`, `CTX`.
+  - **Only Swift conforms**: **#205** (Android) and **#207** (Python) carry the
+    ports, and Python's row is `no (#207)`, not "n/a" — `pdf_utils.py` does keep
+    an untagged PDF cache.
+  - Open from that review: #214, #215, #216, and **#192 reopened** — it had been
+    closed by a commit whose message recorded it as deferred.
+
 - **An article without a PMID can reach its PDF** (#202 in PR #206, 2026-09-10).
   Rules that still bind:
-  - **An article is named by a *ladder*, not by its PMID.** `ArticleCacheKey`
-    takes the primary slot, then the PMC ID, then the DOI, and tags the kind in
-    the filename. `EuropePMCService` fills the primary slot as
-    `result.pmid ?? result.id ?? ""` — that `?? ""` is why it can be empty — so
-    it holds a PubMed ID, a `PPR…` accession, or a PMC ID. Tagging invalidated
-    every earlier entry, re-downloaded once and then **orphaned, not replaced**:
-    `deleteCachedPDF` matches the tagged prefix, so only `clearPDFCache()`
-    reclaims them.
-  - **No two identifiers may share a name**, which is stronger than keeping the
-    kinds apart. `sanitize` is not injective, so the DOI rung is digested
-    outright and the other two carry a digest **whenever sanitising changes the
-    value** — a well-formed PMID or PMC accession keeps its readable name.
+  - **An article is named by a *ladder*, not by its PMID** — the primary slot,
+    then the PMC ID, then the DOI, each tagged with its kind. **No two
+    identifiers may share a name**, which is stronger than keeping the kinds
+    apart: `sanitize` is not injective, so the DOI rung is digested outright and
+    the other two carry a digest whenever sanitising changes the value.
   - **The key comes from the document, never from `resolvedPmcId`.** A key that
     depended on whether a lookup succeeded would file one article under two
-    names across runs.
-  - **Europe PMC answers only in the identifier's own terms**, measured live
-    2026-09-10: `ext_id:PPR… src:ppr` → 1, `ext_id:PPR… src:med` → 0,
-    `PMCID:PMC…` → 1, `ext_id:PMC… src:pmc` → 0. A preprint reaches its full
-    text only through the DOI rung otherwise. Fixing the cache key alone does
-    *not* fix #202 — proven by mutation: drop the PMC rung from
-    `identifierQueries` and the end-to-end test returns `.abstract`.
-  - **Never paste the primary slot after the PubMed base URL.** The last-resort
-    fallback did, and a preprint got `…/PPR1287966/` (404) while an empty slot
-    got `…//` (PubMed's front page), both returned to the reader as the
-    article's full text. Such an article now throws `noFullTextAvailable`.
+    names across runs. Tagging orphans earlier entries rather than replacing
+    them: only `clearPDFCache()` reclaims them.
+  - **Europe PMC answers only in the identifier's own terms**, measured live:
+    `ext_id:PPR… src:ppr` → 1, `ext_id:PPR… src:med` → 0, `PMCID:PMC…` → 1,
+    `ext_id:PMC… src:pmc` → 0. Fixing the cache key alone does *not* fix #202 —
+    proven by mutation.
   - **A query that matches nothing is logged**, or an identifier asked for under
     a source that cannot answer is indistinguishable from an article Europe PMC
     has never heard of.
   - **`doc/cross_platform/fulltext_retrieval.md` is the port contract**, and it
-    specified a ladder Swift never implemented — the real root of #202. It now
-    carries the ladder, identifier-resolution queries, and a **conformance
-    table** naming which platform implements what.
-
+    specified a ladder Swift never implemented — the real root of #202.
 
 - **A downloaded PDF now contributes its text** (PR #198, 2026-09-09). Spec:
   `docs/superpowers/specs/2026-09-09-ios-fulltext-pdf-extraction-design.md`.
   - **Extraction serves analysis; display prefers the document.**
     `Document.displayedFullText` is the single seam deciding what the reader
-    sees; both `cachedFullTextResult` and `MacFullTextViewer` consult it — the
-    macOS viewer had its own chain, #186's drift on a second display surface.
+    sees — the macOS viewer had its own chain, #186's drift on a second surface.
   - **An abstract-only deposit is held back, not returned.** Returned on the
     spot it beat every remaining tier, so an open-access PDF became unreachable
     and the abstract was analysed as the article. When no PDF tier answers the
-    abstract *is* returned and cached, so the consumer must check the kind —
-    `Document.analyzableFullText`, one property, all three transparency call
-    sites. **A `nil` stored content kind means "predates the field", not
-    `.none`.**
-  - **Extraction coverage travels with the text, and is persisted.**
-    `PDFExtractionCoverage` rides `FullTextResult` → `AppFullTextResult` → two
-    `Int` columns → `ParseWarningBanner`. Without it a ten-of-fourteen-page
-    extraction reached the analyser exactly as a whole article did — #181 on a
-    new channel. A scan reports `0` of its page count *with no text*.
-  - **A PDF tier's outcome has four states, not two** — `notAttempted`,
-    `downloadFailed`, `noText`, `extracted`. The first two shared `(nil, nil)`,
-    so a render URL that 404s ended the chain and never reached Unpaywall.
+    abstract *is* returned, so the consumer must check the kind —
+    `Document.analyzableFullText`. **A `nil` stored content kind means
+    "predates the field", not `.none`.**
+  - **Extraction coverage travels with the text, and is persisted.** Without it
+    a ten-of-fourteen-page extraction reached the analyser exactly as a whole
+    article did — #181 on a new channel.
+  - **A PDF tier's outcome has four states, not two.** The first two shared
+    `(nil, nil)`, so a render URL that 404s ended the chain and never reached
+    Unpaywall.
   - **`fullTextPDFPath` holds a path or a URL string, and only the writer knows
     which.** Ask `Document.localPDFFilePath`; route writes through
-    `applyFullTextResult`, since a direct assignment cannot set the companion
-    flag. **The PDF fixtures are not byte-reproducible**
-    (`make_pdf_fixtures.swift` embeds a run-varying `/ID`).
+    `applyFullTextResult`. **The PDF fixtures are not byte-reproducible.**
 
 - **Four CodeQL alerts, and what fixing them turned up** (PR #195, 2026-08-23).
   CodeQL reports `results=0` for python and swift. **A redaction placeholder is
-  only as good as the load path**: `--json` prints `<redacted>`, a *truthy
-  string* that saved back as config.json would shadow `NCBI_API_KEY` and go to
-  NCBI as a credential — `_reject_redaction_placeholder` discards it on load.
-  **`bmll config` without `--json` had been dead since `config.llm` became
-  `config.models`**, so the only working view of the configuration was the
-  leaking one; both are now tested. **A guard must name its own cause** — a
-  non-https base URL reported "Invalid DOI format". **Prefix-anchor a publisher
-  branch, and check its neighbours**: PeerJ's `doi.split(".")[-1]` dropped the
-  series, so every `peerj-cs` DOI resolved to an unrelated article — a wrong
-  PDF, not a missing one; `dx.doi.org` was never stripped either.
+  only as good as the load path**: `--json` printed `<redacted>`, a *truthy
+  string* that saved back would go to NCBI as a credential. **A guard must name
+  its own cause** — a non-https base URL reported "Invalid DOI format".
+  **Prefix-anchor a publisher branch, and check its neighbours**: PeerJ's
+  `doi.split(".")[-1]` dropped the series, so every `peerj-cs` DOI resolved to
+  an unrelated article — a wrong PDF, not a missing one.
 
-- **An unreachable source is not an absent one** (#186/#187 in PR #191,
-  2026-08-23). **A source that answered "nothing" and a source we could not reach
-  are opposite answers**, and only the first is the evidence base's fault — hence
-  `europePMCUnreachable` beside `jatsParseFailed`, and `unspecified` as the only
-  honest answer to a loss this build cannot name. **Raw values stay explicit**,
-  never round-tripped through `init(rawValue:)`, which would agree with a rename
-  and pin nothing. **`lostTheSource` is `searchFailed && !matchedARecord`**.
-  **Accumulate as a fold, never per branch.** **Fix all four fetch surfaces** —
-  `ScoredDocumentsView`, `ReportView`, `MacScoredDocumentsView`, `MacReportView`
-  run the same retrieval and had drifted four ways.
+- **An unreachable source is not an absent one** (#186/#187, 2026-08-23). **A
+  source that answered "nothing" and a source we could not reach are opposite
+  answers**, and only the first is the evidence base's fault. **Raw values stay
+  explicit**, never round-tripped through `init(rawValue:)`, which would agree
+  with a rename and pin nothing. **Accumulate as a fold, never per branch.**
+  **Fix all four fetch surfaces** — they run the same retrieval and had drifted
+  four ways.
 
-- **Typed parse losses, and a fallback that admits its cost** (#184/#183 in
-  PR #185, 2026-08-23). **A reader-facing payload must not be rendered English**:
-  `JATSParseWarnings` carries one `Loss` per audited counter plus
-  `.noContent`/`.unspecified`, and `diagnostics` is *derived*, so persistence,
-  `Equatable` and the tests key off `losses`. **A tagged union's persisted form
-  needs named keys and a `schemaVersion`** — synthesised `Codable` emits
-  `{"_0":2}` (#163); legacy bare-`[String]` records land on `.unspecified`,
-  which *is* the migration, pinned by test. **A 404 is not a degradation**, and
-  the fallback PDF is complete — a warning over content that is fine trains a
-  reader to dismiss the banner on the article that really lost text. **A view's
-  private computed state cannot be tested**, so the banner's choice is
-  `ParseWarningMessage`, a pure value; never nest such a type in a view and call
-  it `State`. **A mutation run only proves what its assertions reach** — every
-  literal-JSON test asserted a *throw*, so nothing pinned the `schemaVersion` or
-  the key names. **Read a retrieval note from the stored fields, never through a
-  rebuild of the content**: a `.webURL` fallback caches nothing.
+- **Typed parse losses, and a fallback that admits its cost** (#184/#183,
+  2026-08-23). **A reader-facing payload must not be rendered English**:
+  `JATSParseWarnings` carries one `Loss` per audited counter and `diagnostics`
+  is *derived*, so persistence, `Equatable` and the tests key off `losses`. **A
+  tagged union's persisted form needs named keys and a `schemaVersion`** —
+  synthesised `Codable` emits `{"_0":2}` (#163); legacy bare-`[String]` records
+  land on `.unspecified`, which *is* the migration. **A 404 is not a
+  degradation**: a warning over content that is fine trains a reader to dismiss
+  the banner on the article that really lost text. **A view's private computed
+  state cannot be tested**, so the banner's choice is a pure value. **A mutation
+  run only proves what its assertions reach.**
 
-- **The unwind audit's two blind spots** (#180/#181 in PR #182, 2026-08-22).
-  **The clamp erased the evidence**: counters decremented as `max(0, n - 1)` and
-  the audit only tested `> 0`, so a counter that clamped to 0 read "balanced"
-  and the audit **certified a defective parse as clean**. Every counter now
-  records the underflow, and **a stack hides an over-pop just as the clamp did**.
-  The clamp stays: `inSubArticle` is `subArticleDepth > 0`, so an unclamped -1 is
-  brought back by the next `<sub-article>` and a reviewer report is emitted as
-  the article's body. **Logging is not reporting** — `JATSParseWarnings` travels
-  parser → `FullTextService` → `Document` → banner, persisted because macOS
-  renders only from the cache. **`isBalanced` is pinned against the losses via a
-  `Mirror` of the struct**; a hand-written field list passes when a field is
-  added to neither. **A refactor onto a shared writer is only safe where every
-  caller wanted everything that writer does** — `applyFullTextResult` never wrote
-  `fullTextPDFPath`, so every PDF-sourced article read as never-fetched, and the
-  upload path never cleared the warnings. **A pbxproj UUID collision silently
-  drops a file from the build** (guarded by `xcode_project_guards.py`, which does
-  not catch a file absent from the project — #190). And **#183 was once closed by
-  a commit whose message listed it as deferred**: check that a closing commit did
-  what the closure claims.
+- **The unwind audit's two blind spots** (#180/#181, 2026-08-22). **The clamp
+  erased the evidence**: counters decremented as `max(0, n - 1)` and the audit
+  only tested `> 0`, so a counter that clamped to 0 read "balanced" and the
+  audit **certified a defective parse as clean**. Every counter now records the
+  underflow, and **a stack hides an over-pop just as the clamp did**. **Logging
+  is not reporting** — the warnings travel parser → service → document → banner,
+  persisted because macOS renders only from the cache. **`isBalanced` is pinned
+  against the losses via a `Mirror` of the struct**; a hand-written field list
+  passes when a field is added to neither. **A refactor onto a shared writer is
+  only safe where every caller wanted everything that writer does.** **A pbxproj
+  UUID collision silently drops a file from the build.** And **#183 was once
+  closed by a commit whose message listed it as deferred** — check that a
+  closing commit did what the closure claims.
 
-- **One exhibit collector, and routing by the owning element** (#170/#173/#175 in
-  PR #179; #156/#157/#161 in PR #166; #167/#169 in PR #171 — all 2026-08-22).
-  Eight defects, one mistake: markup routed on *ambient* parser state — `inFigure`,
-  `inTableWrap`, "is a section open?" — rather than on the element it belongs to.
-  `<fig>` and `<table-wrap>` share one `ExhibitCollector`, and every exhibit flag
-  is **derived from it and never stored**: a stored flag is what an inner
-  exhibit's close tag clears while the outer one is still open — **a parser-wide
-  counter has the same flaw** (#173). **Read `elementStack`, not ambient state**
-  (`enclosingElement`, `innermostExhibit`, `graphicOwner`). **Fix every site the
-  question is asked at**, grepping for the *predicate*; **a counter's two ends
-  must test the same predicate as the routing**. **A safety net installed where
-  production never runs is not installed** (#175). **`jats_parsing.md` is the
-  port contract** and still specified the deleted algorithm. **Fixture table
-  cells must hold `<p>`**; **`<graphic>` deposits are ranked, not positional**
-  (`archival` < `thumbnail` < `full`, from `content-type` **or** `specific-use`,
-  never the extension); **one parse per `JATSXMLParser` instance** (#168).
-  **bmlib is ahead of Swift — port from it**; Kotlin has none (**#165**).
+- **One exhibit collector, and routing by the owning element** (#170/#173/#175,
+  #156/#157/#161, #167/#169, 2026-08-22). Eight defects, one mistake: markup
+  routed on *ambient* parser state rather than on the element it belongs to.
+  **Read `elementStack`, not ambient state**; every exhibit flag is derived from
+  one shared `ExhibitCollector` and never stored, because a stored flag is what
+  an inner exhibit's close tag clears while the outer one is still open — **a
+  parser-wide counter has the same flaw**. **Fix every site the question is
+  asked at**, grepping for the *predicate*; **a counter's two ends must test the
+  same predicate as the routing**. **A safety net installed where production
+  never runs is not installed.** **`jats_parsing.md` is the port contract** and
+  still specified the deleted algorithm. **`<graphic>` deposits are ranked, not
+  positional** (`archival` < `thumbnail` < `full`, from `content-type` **or**
+  `specific-use`, never the extension); **one parse per `JATSXMLParser`
+  instance**. **bmlib is ahead of Swift — port from it**; Kotlin has none (#165).
 
-- **JATS structural survey** (#164, PR #178, 2026-08-22): `scripts/jats_survey.py`
-  counts prevalence from the XML directly, **never through `JATSXMLParser`** —
-  asking the parser would agree with its own bugs, which is how #161/#162 survived
-  a green suite. Re-derive a figure before quoting it, sample deliberately
-  (`PUB_TYPE:"research-article"`, or abstract-only deposits dominate the draw),
-  and hand-check a flagged counterexample — two detector bugs once manufactured
-  false ones. Rationale in the script's docstring.
+- **JATS structural survey** (#164, 2026-08-22): `scripts/jats_survey.py` counts
+  prevalence from the XML directly, **never through `JATSXMLParser`** — asking
+  the parser would agree with its own bugs, which is how #161/#162 survived a
+  green suite. Re-derive a figure before quoting it, sample deliberately, and
+  hand-check a flagged counterexample.
 
-- **Real PMC JATS corpus** (#146, 2026-08-21): seven open-access Europe PMC
-  articles committed verbatim under `doc/cross_platform/jats_corpus/`, each with
-  a stored structural digest, parsed offline on every PR. **Read that directory's
+- **Real PMC JATS corpus** (#146, 2026-08-21): seven open-access articles
+  committed verbatim under `doc/cross_platform/jats_corpus/`, each with a stored
+  structural digest, parsed offline on every PR. **Read that directory's
   `README.md` before touching it.** Two traps it omits: **the fixture walk stops
   at the checkout root** in both `JATSRealCorpusTests` and
   `TransparencyParityTests` and they must not drift (worktrees live *inside* the
   checkout, so a climb to `/` validates a branch against the main checkout's
-  fixtures and passes); and **`testParsingReportsNoContentLoss` only hears what
-  the logger records** — the recorder ignored `debug`, where discarded captions
-  are announced, so the corpus dropped 21 of 62 captions under a green test of
-  that name. Open follow-up **#163**: digest JSON key naming and a schema version.
+  fixtures and passes); and **a test only hears what the logger records** — the
+  recorder ignored `debug`, where discarded captions are announced, so the
+  corpus dropped 21 of 62 captions under a green test of that name. Open: #163.
 
 - **Funder classification and sponsor tiers, Python↔Swift** (#143/#147/#152,
-  PR #153, 2026-08-21). Both platforms score precision 0.909 / recall 0.333.
+  2026-08-21). Both platforms score precision 0.909 / recall 0.333.
   `sponsor_patterns.json` (schema_version 3) is the contract, asserted from both
-  sides; `confidence_probes` are checked *behaviourally* (Swift's constants are
-  private) and every pattern must match ≥1 `pattern_probe` — a typo transcribed
-  faithfully into every copy agrees with itself. **Never merge the funder lists
-  into `INDUSTRY_KEYWORDS`** — that list is COI *prose*, where corporate suffixes
-  match far too freely. **A stem and a whole word are different kinds of thing**,
-  and the failure mode is *silent*. **`NONPROFIT` means "not recognised"**, the
-  modal outcome at 325/417 corpus names, raising a caveat keyed off the *funder*,
-  not the tier. Deliberate and pinned by `TestKnownPatternCollisions`: Wellcome
-  and the MRC tier GOVERNMENT, `government`/`federal`/`state` sit in the
-  *academic* half, `\bva\b` tiers "…, Richmond VA" as GOVERNMENT — revisit on
-  both platforms or neither. Deferred: **#159**, **#160**.
+  sides; `confidence_probes` are checked *behaviourally* and every pattern must
+  match ≥1 `pattern_probe` — a typo transcribed faithfully into every copy
+  agrees with itself. **Never merge the funder lists into `INDUSTRY_KEYWORDS`**,
+  which is COI *prose*, where corporate suffixes match far too freely. **A stem
+  and a whole word are different kinds of thing**, and the failure is *silent*.
+  **`NONPROFIT` means "not recognised"**, the modal outcome at 325/417 corpus
+  names, raising a caveat keyed off the *funder*, not the tier. Deliberate and
+  pinned by `TestKnownPatternCollisions` — revisit on both platforms or neither.
+  Deferred: #159, #160.
 
-- **CI on all three platforms** (#129, 2026-08-20): `python-tests.yml`,
-  `swift-tests.yml` (`macos-15`, both Swift packages), `android-tests.yml`.
-  **No job may gain a `paths:` filter** — the parity fixtures live outside `src/`
-  and `tests/`, so any plausible filter skips the run for a contract-only edit.
-  **A Qt preflight constructs a `QApplication` before pytest**, since the widget
-  suites open with `importorskip("PySide6")` and a broken Qt install would skip
-  ~100 tests green. **`lint_delta.py` compares against the merge base** in a
-  throwaway worktree outside the repo; identity is `(tool, path, code, message)`,
-  no line/column. **Ruff config must stay in `[tool.ruff.lint]`** — under the
-  deprecated top-level spelling, head and base would one day shrink together and
-  the gate stay green over no rules.
+- **CI on all three platforms** (#129, 2026-08-20). **No job may gain a `paths:`
+  filter** — the parity fixtures live outside `src/` and `tests/`, so any
+  plausible filter skips the run for a contract-only edit. **A Qt preflight
+  constructs a `QApplication` before pytest**, since the widget suites open with
+  `importorskip("PySide6")` and a broken Qt install would skip ~100 tests green.
+  **`lint_delta.py` compares against the merge base** in a throwaway worktree
+  outside the repo; identity is `(tool, path, code, message)`, no line/column.
+  **Ruff config must stay in `[tool.ruff.lint]`** — under the deprecated
+  top-level spelling, head and base would one day shrink together and the gate
+  stay green over no rules.
 
-- **Model fetch failures are errors, not fallbacks** (PR #135 review follow-up):
+- **Model fetch failures are errors, not fallbacks** (PR #135):
   `ModelFetchService.fetchModels` *throws* on Swift and Kotlin instead of
   returning the hardcoded catalogue — a caller that cannot tell a live line-up
   from a hardcoded one cannot tell a retired model ID from a current one, which
   is how the DeepSeek V3 retirement went unnoticed. **Do not reintroduce a
-  fallback inside the service**: `dropRetiredModelSelection` /
-  `LLMModel.resolveSelection` must only ever see a provider-supplied list, or
-  they rewrite a valid stored selection whenever the network is down.
+  fallback inside the service**: the healing logic must only ever see a
+  provider-supplied list, or it rewrites a valid stored selection whenever the
+  network is down.
 
 - **Cross-platform parity drift guard** (#105, 2026-07-19) and the
   **data-availability classifier's July slices** (#101–#125). Python
@@ -290,15 +300,22 @@ the rest.
   openness is matched forward, because Python forbids a variable-length
   lookbehind, so the pins only work at specific sentence shapes); and **Kotlin's
   `negatedOpennessPatterns` must stay declared *before* `restrictedPatterns`**,
-  since object properties initialise in declaration order and a forward reference
-  silently appends nothing. `RegexHelper` compiles with `(?U)`.
+  since object properties initialise in declaration order and a forward
+  reference silently appends nothing. `RegexHelper` compiles with `(?U)`.
 
 ## Potential follow-ups
 
 ### The #206 round: identifier identity, on the other two platforms
 
 The Swift fix is one platform's half of a contract change. All of these are
-independent of each other. (#209 is in flight — see above.)
+independent of each other.
+
+- **#214 — what the retrieval chain learns never reaches the reader or the error
+  queue**, and **#215 — cache read and write failures are misreported as download
+  failures**. Both are in `FullTextService`, and both are honesty-of-reporting
+  work of the shape #183/#186/#187 established.
+- **#216 — nothing tests `FactCheckWorkflow`'s three document-creation paths.**
+  How the third hand-copying site survived the whole of #209.
 
 - **#210 — macOS shows a preprint as plain "Europe PMC".** `MacScoredDocumentsView`
   draws `MacProviderBadge`, which takes no preprint flag, while the macOS badge
@@ -340,37 +357,32 @@ Three ways, all opened by PR #198 and all needing a decision that covers Python,
 Swift and Kotlin rather than a Swift-side patch.
 
 - **#199 — the extractors over-capture on PDF prose.** `PDFPage.string`
-  separates lines within a page with a single `\n` and emits no blank runs;
+  separates lines within a page with a single `\n` and emits no blank runs, so
   page joins are the only `\n\n`. All eight patterns in
-  `TransparencyAnalysisService` (`extractCOISection`,
-  `extractDataAvailabilitySection`) terminate on `(?=\n\n|\z)`, so a header
-  found mid-page captures the rest of that page, and on the last page the rest
-  of the document. An article can then be recorded as having industry ties it
-  never declared. **The obvious fix is already disproved**: a bounded cap
-  (0c2c268, reverted in a2b5cd8) pushed "…all other authors declare no competing
+  `TransparencyAnalysisService` terminate on `(?=\n\n|\z)`, so a header found
+  mid-page captures the rest of that page, and on the last page the rest of the
+  document. An article can then be recorded as having industry ties it never
+  declared. **The obvious fix is already disproved**: a bounded cap (0c2c268,
+  reverted in a2b5cd8) pushed "…all other authors declare no competing
   interests" past the cap on a long, *well-formed* JATS disclosure, storing a
   conflict the article had explicitly declared away — a worse failure, on the
-  common path. Measured: 2222-char section, uncapped `noConflictDeclaration=true`,
-  capped `false` with `hasIndustryTies=true`. The repair is section segmentation
-  of extracted text, which `doc/cross_platform/ios_bmlib_alignment.md` scopes.
-- **#203 — a negative finding from partial text is recorded as absence.**
-  `analyzeCOI` and `analyzeDataAvailability` pass `nil` when the regex finds
-  nothing, and the detail view prints "No COI statement found". The pages that
-  fail to extract are disproportionately the last ones — exactly where funding,
-  competing-interest and data-availability statements live — so the error is
-  concentrated on the fields the assessment is made of. Coverage is on the
-  document (#198) but does not reach analysis; the contract needs an "unknown
-  because the source was partial" state, which changes what a stored verdict
-  means on all three platforms.
-- **#200 — `isComplete` is satisfied by one character per page.** Swift counts a
-  page when its trimmed `PDFPage.string` is non-empty; Python's
-  `bmlib/fulltext/pdf_converter.py` `PyMuPDFConverter.convert` when
-  `page_text.strip()` is truthy. A scanned article with a per-page download
-  stamp, watermark or DOI therefore reports a whole extraction, warns about
-  nothing, and delivers a list of download stamps to the analyser. Wants a
-  per-page minimum and a total minimum, named constants, agreed once for both.
-  **The two already diverge deliberately** (#198): Python counts a text-free page
-  as converted, Swift does not. Resolve that in the same pass.
+  common path. The repair is section segmentation of extracted text, which
+  `doc/cross_platform/ios_bmlib_alignment.md` scopes.
+- **#203 — a negative finding from partial text is recorded as absence.** The
+  analysers pass `nil` when the regex finds nothing, and the detail view prints
+  "No COI statement found". The pages that fail to extract are
+  disproportionately the last ones — exactly where funding, competing-interest
+  and data-availability statements live. Coverage is on the document (#198) but
+  does not reach analysis; the contract needs an "unknown because the source was
+  partial" state, which changes what a stored verdict means on all three
+  platforms.
+- **#200 — `isComplete` is satisfied by one character per page.** A scanned
+  article with a per-page download stamp, watermark or DOI reports a whole
+  extraction, warns about nothing, and delivers a list of download stamps to the
+  analyser. Wants a per-page minimum and a total minimum, named constants,
+  agreed once for both. **The two already diverge deliberately** (#198): Python
+  counts a text-free page as converted, Swift does not. Resolve that in the same
+  pass.
 
 ### The rest of the #198 round
 
@@ -384,36 +396,31 @@ Swift and Kotlin rather than a Swift-side patch.
 
 - **#196 — the NCBI key still reaches a user file in clear text.** The route PR
   #195 did not close: `study_transparency_analyzer.py:929` puts the key in a GET
-  query, `requests.HTTPError.__str__` embeds the whole URL, `batch_analyzer.py:194`
-  stores it in `result.errors`, and `export_to_json` writes it into a **user-chosen
-  file with default permissions** while the config file is 0600.
-  `pubmed/search_client.py:_make_request` models the fix: log `status_code`,
-  never the URL.
+  query, `requests.HTTPError.__str__` embeds the whole URL,
+  `batch_analyzer.py:194` stores it in `result.errors`, and `export_to_json`
+  writes it into a **user-chosen file with default permissions** while the
+  config file is 0600. `pubmed/search_client.py:_make_request` models the fix:
+  log `status_code`, never the URL.
 - **#190 — CI never builds either app target.** `swift test` compiles the
   iOS-only sources to nothing on a macOS host, the SPM target excludes
-  `Sources/macOS`, and no workflow runs `xcodebuild` at all — so the union of the
-  checks compiles neither app. That is how a missing `project.pbxproj` entry left
-  the iOS target unbuildable (fixed in the #186/#187 PR). Wants two build jobs,
-  macOS and iOS Simulator, and — cheaper, and the exact defect that occurred — a
-  guard that fails when a `.swift` file under `ios/MedicalFactChecker/Sources/`
-  is referenced by no target.
+  `Sources/macOS`, and no workflow runs `xcodebuild` at all — so the union of
+  the checks compiles neither app. Wants two build jobs, macOS and iOS
+  Simulator, and — cheaper, and the exact defect that occurred — a guard that
+  fails when a `.swift` file under `ios/MedicalFactChecker/Sources/` is
+  referenced by no target.
 - **#189 — a failed Unpaywall lookup reads as an article with no OA PDF.** The
   same collapse #183 fixed for Europe PMC's XML and #186 for its search, one
-  source along. It cannot reuse `europePMCUnreachable` — Unpaywall is a different
-  source, and saying Europe PMC was unreachable would be untrue — so it wants its
-  own reason and sentence. Smaller in consequence: the fallback below Unpaywall
-  is a publisher link either way, and no machine-readable text is at stake.
-- **#192 — an answered-but-unmodelled status reports as "could not be reached".**
-  A 403/410, and a malformed PMC ID of ours, land in the catch-all `else` and get
-  the one sentence that *invites a retry*. Wants a fourth reason, so a
-  `jats_parsing.md` change and a three-port change.
-- **#194 — make `unspecified` unwritable by construction.** One debug `assert` on
-  the wrong type holds a rule the persisted contract depends on, and reading a
-  newer build's reason *downgrades* it. Wants the write-side enum split from a
-  lossless read-side one, and the unused `Codable` deleted (its decoder throws on
-  exactly the value `unspecified` exists to absorb). **#193** — the same file's
-  PDF cache swallows its failures (golden rule 8), all latent: nothing calls
-  `deleteCachedPDF` or `clearPDFCache` yet.
+  source along. It cannot reuse `europePMCUnreachable` — saying Europe PMC was
+  unreachable would be untrue — so it wants its own reason and sentence.
+- **#192 — an answered-but-unmodelled status reports as "could not be
+  reached".** A 403/410, and a malformed PMC ID of ours, land in the catch-all
+  `else` and get the one sentence that *invites a retry*. Wants a fourth reason,
+  so a `jats_parsing.md` change and a three-port change.
+- **#194 — make `unspecified` unwritable by construction.** One debug `assert`
+  on the wrong type holds a rule the persisted contract depends on, and reading
+  a newer build's reason *downgrades* it. Wants the write-side enum split from a
+  lossless read-side one. **#193** — the same file's PDF cache swallows its
+  failures (golden rule 8), all latent.
 - **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
   entry is `\bpharma(?:ceutical)?s?\b`, Swift's is `\bpharma(?:ceutical)?\b`. All
   17 other entries are byte-identical. `\b` lands before the "s", so a COI
@@ -430,8 +437,8 @@ Swift and Kotlin rather than a Swift-side patch.
   included, which here is a number a citation may carry. bmlib already models a
   table's `graphic_url`, so #172 is a port. #177 wants publisher spread first.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
-  open** (#156, #157, #161, #167, #169 landed; see above). Fixing any of them
-  moves the corpus digests and needs the sibling parsers checked — see **Verify**.
+  open.** Fixing any of them moves the corpus digests and needs the sibling
+  parsers checked — see **Verify**.
   - **#154 — author affiliations are never captured.** `currentAffiliations` is
     written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
     98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
@@ -441,9 +448,8 @@ Swift and Kotlin rather than a Swift-side patch.
     so it degrades quietly.
   - **#162 — `rowspan` is never read.** A spanning cell contributes to its first
     row only, every later row is a cell short, and `padRow` pads the gap so the
-    columns after it shift. 11 real cells. `markdownRowCount` could never see it —
-    a misalignment does not change the row count — which is why the digest now
-    stores a `markdownDigest` hash of the rendering.
+    columns after it shift. `markdownRowCount` could never see it — which is why
+    the digest now stores a `markdownDigest` hash of the rendering.
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry the acronyms but no "National Institute of X"
   form, while CrossRef returns it routinely, so a US federal agency tiers

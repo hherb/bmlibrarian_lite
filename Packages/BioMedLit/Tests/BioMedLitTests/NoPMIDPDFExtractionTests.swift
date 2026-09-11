@@ -330,15 +330,58 @@ final class NoPMIDPDFExtractionTests: XCTestCase {
 
     /// The fallback that was always correct, pinned so narrowing it did not
     /// cost a real PubMed article its last-resort link.
-    func testARealPubMedIdentifierStillGetsItsPubMedLink() async throws {
+    ///
+    /// The kind is stated because from #212 the digits alone no longer state
+    /// it: a Europe PMC thesis accession has the same shape and names a
+    /// different article on PubMed.
+    func testAStatedPubMedIdentifierStillGetsItsPubMedLink() async throws {
         let result = try await makeExhaustedService().fetchFullText(
-            pmcId: nil, doi: nil, pmid: "12662058"
+            pmcId: nil, doi: nil, pmid: "12662058", primaryKind: .pubmed
         )
 
         guard case .doi(let webURL) = result.content else {
             return XCTFail("expected a link, got \(result.content)")
         }
         XCTAssertEqual(webURL.absoluteString, "https://pubmed.ncbi.nlm.nih.gov/12662058/")
+    }
+
+    /// The same digits with nobody vouching for them. Europe PMC's theses, case
+    /// reports and `HIR` records carry bare numeric accessions and no PubMed ID,
+    /// so this shape reaches the last resort on stored data and used to resolve
+    /// to a real, unrelated article (#212).
+    func testABareNumberNobodyVouchedForDoesNotGetAPubMedLink() async throws {
+        do {
+            let result = try await makeExhaustedService().fetchFullText(
+                pmcId: nil, doi: nil, pmid: "889149"
+            )
+            XCTFail("expected no full text, got \(result.content)")
+        } catch FullTextError.identifierKindUnresolved(let identifier) {
+            // Changed claim: this used to expect `noFullTextAvailable`, and that
+            // was the app telling the reader an article has no full text
+            // anywhere in order to explain a decision of its own. The refusal is
+            // ours — nobody named this accession — so the error says that, and
+            // carries the accession the reader can search with. The caller does
+            // not mark the document permanently unavailable on it.
+            XCTAssertEqual(identifier, "889149")
+        }
+    }
+
+    /// The other half of the distinction, so neither error can absorb the other.
+    ///
+    /// A stated preprint is fully classified: we know what the identifier is, it
+    /// has no PubMed record by definition, and every other rung was tried. That
+    /// really is "nothing left", and it must keep saying so — otherwise the
+    /// honest answer disappears into the refusal and the fetch button never
+    /// stops being offered for articles that genuinely have nothing.
+    func testAKnownKindWithNothingLeftStillSaysNoFullText() async throws {
+        do {
+            let result = try await makeExhaustedService().fetchFullText(
+                pmcId: nil, doi: nil, pmid: "PPR1287966", primaryKind: .preprint
+            )
+            XCTFail("expected no full text, got \(result.content)")
+        } catch FullTextError.noFullTextAvailable {
+            // The honest answer: nothing left that is known to name this article.
+        }
     }
 
     // MARK: - Cache stability

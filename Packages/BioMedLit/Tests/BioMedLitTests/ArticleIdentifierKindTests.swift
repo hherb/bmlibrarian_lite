@@ -81,10 +81,13 @@ final class ArticleIdentifierKindTests: XCTestCase {
         XCTAssertEqual(ArticleIdentifierKind.inferred(from: "PMC1082889"), .pmc)
     }
 
-    /// A PubMed ID is all digits, which is the same test the last-resort PubMed
-    /// URL applies before pasting a value after `pubmed.ncbi.nlm.nih.gov`.
-    func testAnAllDigitsAccessionIsAPubMedIdentifier() {
-        XCTAssertEqual(ArticleIdentifierKind.inferred(from: "12662058"), .pubmed)
+    /// A PubMed ID is all digits — and so is a Europe PMC thesis, case report
+    /// or `HIR` accession, none of which carry a PubMed ID at all. The shape
+    /// cannot separate them, and calling the whole class `.pubmed` handed the
+    /// reader a real but unrelated PubMed article (#212). Only a stated source
+    /// or a PubMed search may name one now; see `PubMedIdentityTests`.
+    func testAnAllDigitsAccessionIsNotNamedByItsShapeAlone() {
+        XCTAssertEqual(ArticleIdentifierKind.inferred(from: "12662058"), .unknown)
     }
 
     /// `CN…` is neither a preprint, a PMC accession nor a PubMed ID, and the

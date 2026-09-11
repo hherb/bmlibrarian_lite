@@ -156,18 +156,30 @@ final class StatedIdentifierKindTests: XCTestCase {
         }
     }
 
-    /// The same accession with nothing stated keeps the shape rule's answer, so
-    /// a document stored before the kind was recorded behaves exactly as it did.
-    func testAnUnstatedNumericAccessionStillReachesThePubMedFallback() async throws {
+    /// The same accession with nothing stated no longer reaches that fallback.
+    ///
+    /// It used to, on the shape rule alone — and that is #212: Europe PMC's
+    /// theses, case reports and `HIR` records carry bare numeric accessions and
+    /// no PubMed ID, so the number went behind the PubMed URL and named a real
+    /// but unrelated article. A stated kind, or a PubMed search, is now what
+    /// authorises that link.
+    func testAnUnstatedNumericAccessionNoLongerReachesThePubMedFallback() async throws {
         StubURLProtocol.routes = ["search": (200, Data(#"{"resultList": {"result": []}}"#.utf8))]
         StubURLProtocol.stubbed = (404, Data())
         let service = makeService(session: stubbedSession())
 
-        let result = try await service.fetchFullText(pmcId: nil, doi: nil, pmid: accession)
-
-        XCTAssertEqual(
-            result.webURL,
-            URL(string: "\(BioMedLitConstants.pubmedWebBaseURL)/\(accession)/")
-        )
+        do {
+            let result = try await service.fetchFullText(pmcId: nil, doi: nil, pmid: accession)
+            XCTFail("expected no full text, got \(String(describing: result.webURL))")
+        } catch let error as FullTextError {
+            // Changed claim: `noFullTextAvailable` until the two answers were
+            // separated. Nothing named this accession, so the chain refused its
+            // own last resort — a fact about us, not about the article, and the
+            // one the reader needs in order to know the record may still be
+            // findable by hand.
+            guard case .identifierKindUnresolved = error else {
+                return XCTFail("expected identifierKindUnresolved, got \(error)")
+            }
+        }
     }
 }

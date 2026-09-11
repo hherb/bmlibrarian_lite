@@ -86,7 +86,16 @@ public actor TransparencyAnalysisService {
     ///
     /// - Parameters:
     ///   - doi: Digital Object Identifier (optional if PMID provided).
-    ///   - pmid: PubMed ID (optional if DOI provided).
+    ///   - pmid: PubMed ID (optional if DOI provided). **Must be one the caller
+    ///     established, not an article's primary identifier slot passed through.**
+    ///     This value is searched on PubMed and the first hit's title, journal,
+    ///     authors and DOI are adopted as this article's, so a Europe PMC thesis
+    ///     or case-report accession — a bare decimal, indistinguishable from a
+    ///     PubMed ID — files an unrelated article's funding and conflicts under
+    ///     this one, with nothing shown to the reader that could reveal the
+    ///     substitution (#212). Use `ArticleIdentifierKind.pubmedID(in:declared:)`,
+    ///     or the app's `Document.pubmedID`, which answers `nil` unless something
+    ///     stated the identifier is a PubMed ID.
     ///   - fullText: Optional full text for enhanced analysis of data availability
     ///     and COI statements embedded in the article.
     /// - Returns: TransparencyResult with complete analysis including score and risk level.

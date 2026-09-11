@@ -107,8 +107,21 @@ public enum ReportFormatter {
         /// Journal name (optional).
         public let journal: String?
 
-        /// PubMed identifier.
-        public let pmid: String
+        /// The article's identifier, already carrying the namespace that
+        /// resolves it — `PMID: 12662058`, `Europe PMC: 889149` — or `nil`.
+        ///
+        /// Deliberately not a bare `pmid: String`. It was one, printed as
+        /// `PMID: \(pmid)` with no test applied, and the slot it was filled
+        /// from also holds preprint, PMC and Europe PMC thesis accessions; a
+        /// thesis accession is a bare decimal that resolves, on PubMed, to a
+        /// real but unrelated article (#212). This formatter cannot tell the
+        /// difference, so it is not asked to: the caller establishes the
+        /// namespace and passes the labelled form, or passes `nil`.
+        ///
+        /// `nil` where nothing can name the identifier. A reference with no
+        /// locator is honest; one with a locator that resolves to the wrong
+        /// paper is not, and the reference list outlives the app.
+        public let identifier: String?
 
         /// Initialize with reference data.
         ///
@@ -117,13 +130,14 @@ public enum ReportFormatter {
         ///   - year: Publication year (optional).
         ///   - title: Document title.
         ///   - journal: Journal name (optional).
-        ///   - pmid: PubMed identifier.
-        public init(authors: String, year: Int?, title: String, journal: String?, pmid: String) {
+        ///   - identifier: The namespace-labelled identifier, or `nil` when
+        ///     nothing establishes one. See ``identifier``.
+        public init(authors: String, year: Int?, title: String, journal: String?, identifier: String?) {
             self.authors = authors
             self.year = year
             self.title = title
             self.journal = journal
-            self.pmid = pmid
+            self.identifier = identifier
         }
     }
 
@@ -142,7 +156,7 @@ public enum ReportFormatter {
             ref += ".** "
             ref += doc.title
             if let journal = doc.journal { ref += ". *\(journal)*" }
-            ref += ". PMID: \(doc.pmid)"
+            if let identifier = doc.identifier { ref += ". \(identifier)" }
             return ref
         }.joined(separator: "\n\n")
     }

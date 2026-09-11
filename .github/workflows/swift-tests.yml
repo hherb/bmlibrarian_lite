@@ -42,3 +42,33 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.package }}
         run: swift test
+
+  macos-build:
+    name: xcodebuild (macOS app)
+    # `swift test` above compiles neither of the app's macOS-only source trees:
+    # Package.swift excludes Sources/macOS from the target, so a syntax error or
+    # a broken call site in MacScoredDocumentsView, MacReportView, MacFullTextTab
+    # or their siblings passes every check in this workflow. Verified by inserting
+    # invalid Swift into one of them and watching `swift test` report 297 tests,
+    # 0 failures. Half the app's link and citation surfaces live under that path,
+    # including four of the five force-unwraps #213 was about, so "reviewed" was
+    # the strongest claim available for them until this job existed.
+    #
+    # Build only, not test: the macOS views have no test target to run against.
+    # Catching "does it still compile" is the whole of what is missing.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build macOS app
+        working-directory: ios/MedicalFactChecker
+        run: |
+          xcodebuild build \
+            -project MedicalFactChecker.xcodeproj \
+            -scheme MedicalFactChecker \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO

@@ -196,13 +196,19 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
 
     /// The filename tag naming an identifier's kind.
     ///
-    /// A kind this cache does not tag separately — an unrecognised Europe PMC
-    /// source, or an identifier nobody classified — takes
+    /// An identifier nobody classified takes
     /// ``BioMedLitConstants/primaryCacheKeyTag``, the untyped bucket every
-    /// primary-slot value shared before the kinds were separated. Two such
-    /// identifiers that are byte-identical still collide; the alternative, a tag
-    /// built from an arbitrary source token, would put a caller-supplied string
-    /// where the filename format needs a closed set.
+    /// primary-slot value shared before the kinds were separated. A record that
+    /// *stated* a source this build does not model takes
+    /// ``BioMedLitConstants/europePMCSourceCacheKeyTag`` — a different
+    /// situation, and since #212 a materially different one, because an
+    /// unvouched decimal accession is now `unknown` rather than a PubMed ID and
+    /// would otherwise share a name with a stated thesis carrying the same
+    /// digits.
+    ///
+    /// Neither tag names the source token itself. The token is network-supplied
+    /// and the filename format needs a fixed vocabulary, so two identifiers
+    /// within one of these buckets that are byte-identical still collide.
     ///
     /// - Parameter kind: The identifier's kind.
     /// - Returns: The tag to file it under.
@@ -211,7 +217,8 @@ public struct ArticleCacheKey: Equatable, Hashable, Sendable {
         case .pubmed: return BioMedLitConstants.pubmedCacheKeyTag
         case .preprint: return BioMedLitConstants.preprintCacheKeyTag
         case .pmc: return BioMedLitConstants.pmcCacheKeyTag
-        case .europePMCSource, .unknown: return BioMedLitConstants.primaryCacheKeyTag
+        case .europePMCSource: return BioMedLitConstants.europePMCSourceCacheKeyTag
+        case .unknown: return BioMedLitConstants.primaryCacheKeyTag
         }
     }
 

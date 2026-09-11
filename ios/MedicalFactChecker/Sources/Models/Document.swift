@@ -563,7 +563,135 @@ final class Document {
         if let doi = doi, !doi.isEmpty, let url = PlatformHelper.doiURL(for: doi) {
             return url
         }
-        return PlatformHelper.pubmedURL(for: pmid)
+        return pubmedURL
+    }
+
+    /// Why this record offers no browser link, for a card that would show one.
+    ///
+    /// `nil` whenever ``fullTextLinkDestination`` answers a URL, so a caller can
+    /// render this in the `else` and never show both.
+    ///
+    /// Gating the PubMed fallback on a *stated* kind (#212) made this state
+    /// reachable for the first time: a record with no DOI whose identifier
+    /// nothing vouches for now has no destination at all. Rendering nothing
+    /// there recreates #187 exactly — a notice saying a substitute exists,
+    /// above the empty space where the way to reach it used to be. The reader
+    /// is told what happened and given the accession to search with, which is
+    /// the one thing the app still knows to be true about the record.
+    var unresolvableIdentifierNotice: String? {
+        guard fullTextLinkDestination == nil else { return nil }
+        let identifier = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identifier.isEmpty else {
+            return "This record carries no identifier that can be looked up."
+        }
+        return """
+            This record's identifier could not be confirmed as a PubMed ID, so \
+            no lookup link is offered. Search Europe PMC for \(identifier).
+            """
+    }
+
+    // MARK: - PubMed Identity
+
+    /// The provider that returned this record, as the package names it.
+    ///
+    /// A straight mapping, `both` included — the package models a merged search
+    /// too (`BioMedLit.SearchProvider.both`), and what matters is that the value
+    /// arrives at the resolver unflattened. Collapsing `both` to `.pubmed`, as
+    /// an earlier adapter did, would have a merged search vouch for every
+    /// document it produced including the ones only Europe PMC returned, which
+    /// is the defect this property exists to close (#212). The resolver refuses
+    /// to let `both` vouch for anything; that decision is only available to it
+    /// if `both` is still legible when it gets there.
+    ///
+    /// `nil` where nothing was recorded. Documents predating provider tracking
+    /// have no source, and the app guesses one for the provider badge; a guess
+    /// is fine for a badge and is not fine for a link, so nothing is guessed
+    /// here. Note the asymmetry with ``searchSourceEnum``, which *does* fall
+    /// back to `.pubmed` for those rows: that fallback feeds display only, and
+    /// unifying the two would silently reopen #212 for the oldest documents in
+    /// the store.
+    private var recordedProvider: BioMedLit.SearchProvider? {
+        switch searchSource {
+        case SearchProvider.pubmed.rawValue: return .pubmed
+        case SearchProvider.europePMC.rawValue: return .europePMC
+        case SearchProvider.both.rawValue: return .both
+        default: return nil
+        }
+    }
+
+    /// What is known about what ``pmid`` holds.
+    ///
+    /// The record's stated kind, the identifier's shape where a prefix settles
+    /// it, and finally the provider — a PubMed search vouches for a bare decimal
+    /// that nothing else names, which is what keeps documents stored before the
+    /// kind field existed reaching their PubMed record.
+    ///
+    /// This, not ``identifierKind``, is what the retrieval chain is given: the
+    /// chain has no provider of its own, so a document that resolved its kind
+    /// only from the provider would arrive with nothing stated and be guessed
+    /// about all over again.
+    var resolvedIdentifierKind: ArticleIdentifierKind {
+        ArticleIdentifierKind.resolved(
+            declared: identifierKind,
+            accession: pmid,
+            provider: recordedProvider
+        )
+    }
+
+    /// ``pmid`` when it really is a PubMed ID, and `nil` otherwise.
+    var pubmedID: String? {
+        ArticleIdentifierKind.pubmedID(in: pmid, declared: resolvedIdentifierKind)
+    }
+
+    /// This article's PubMed record, when it has one that can be named.
+    ///
+    /// The one accessor every PubMed link in either app goes through. Nine
+    /// surfaces used to paste ``pmid`` after the base URL directly, so a
+    /// preprint was offered a 404, an identifier-less record was offered
+    /// PubMed's front page as its own full text, and a Europe PMC thesis
+    /// accession — a bare decimal, indistinguishable from a PubMed ID — was
+    /// offered a **real but unrelated article** (#212, #213).
+    ///
+    /// Optional, and never force-unwrapped: five of those surfaces wrote
+    /// `URL(string:)!` over a network-supplied value, and `URL(string:)` answers
+    /// `nil` for a string containing a space, so drawing a context menu over
+    /// such a document brought the app down.
+    var pubmedURL: URL? {
+        guard let pubmedID else { return nil }
+        return PlatformHelper.pubmedURL(for: pubmedID)
+    }
+
+    /// The identifier line for a citation, naming the namespace that resolves it.
+    ///
+    /// A citation outlives the app — it goes into an exported report someone
+    /// else reads — so `PMID: PPR1287966` is the most consequential form a
+    /// fabricated identifier takes. Each kind is named as what it is instead,
+    /// and where neither the record nor the provider names a namespace there is
+    /// no honest label to print: a bare number under any label invites the
+    /// reader to take it for a PubMed ID.
+    ///
+    /// The one exception to "the kind names the namespace" is ``/BioMedLit/ArticleIdentifierKind/unknown``
+    /// on a Europe PMC record: nothing stated the kind, but the search that
+    /// returned it can still resolve the accession, so the *provider* names the
+    /// namespace where the kind cannot. A record from any other search, or from
+    /// none, gets no label — see ``recordedProvider`` for why a merged search is
+    /// not allowed to speak here either.
+    var citationIdentifier: CitationIdentifier? {
+        let identifier = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identifier.isEmpty else { return nil }
+
+        switch resolvedIdentifierKind {
+        case .pubmed:
+            guard let pubmedID else { return nil }
+            return CitationIdentifier(namespace: "PMID", value: pubmedID)
+        case .pmc:
+            return CitationIdentifier(namespace: "PMCID", value: identifier)
+        case .preprint, .europePMCSource:
+            return CitationIdentifier(namespace: "Europe PMC", value: identifier)
+        case .unknown:
+            guard recordedProvider == .europePMC else { return nil }
+            return CitationIdentifier(namespace: "Europe PMC", value: identifier)
+        }
     }
 
     /// Display name for the full text source.
@@ -589,8 +717,8 @@ final class Document {
         if let journal = journal {
             parts.append("*\(journal)*")
         }
-        if !pmid.isEmpty {
-            parts.append("PMID: \(pmid)")
+        if let citationIdentifier {
+            parts.append(citationIdentifier.labelled)
         }
         return parts.joined(separator: ". ")
     }
@@ -1148,6 +1276,35 @@ final class Document {
 
         return result
     }
+}
+
+// MARK: - Citation Identifier
+
+/// An article identifier together with the namespace that resolves it.
+///
+/// Kept as two fields rather than one pre-joined string because the two halves
+/// are wanted in different places, and joining them early is what made the
+/// clipboard useless: "Copy Identifier" put `PMID: 12345678` on the pasteboard,
+/// which is not what a PubMed search box or a reference manager accepts. A
+/// printed citation wants ``labelled``; a clipboard wants ``value``.
+///
+/// The namespace is never inferred from the value's shape. It comes from the
+/// record's stated kind, or from the provider where the kind is unknown but the
+/// search that returned the record can still resolve it — see
+/// ``Document/citationIdentifier``. A bare number under a guessed label is #212
+/// in the form that outlives the app.
+struct CitationIdentifier: Equatable, Hashable, Sendable {
+    /// The namespace that resolves ``value``, such as `PMID` or `Europe PMC`.
+    ///
+    /// Not localised: these are the namespaces' own names, and a citation is
+    /// read by people who look the identifier up, including in other tools.
+    let namespace: String
+
+    /// The identifier itself, with no label and no surrounding whitespace.
+    let value: String
+
+    /// The form a citation prints: namespace, colon, value.
+    var labelled: String { "\(namespace): \(value)" }
 }
 
 // MARK: - Displayed Full Text

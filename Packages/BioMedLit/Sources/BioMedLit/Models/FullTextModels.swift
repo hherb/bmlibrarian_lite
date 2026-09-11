@@ -424,7 +424,28 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     case networkError(String)
 
     /// No full text available from any source.
+    ///
+    /// A claim about the world: every rung was tried and the article genuinely
+    /// has nothing to show. Distinct from ``identifierKindUnresolved(_:)``,
+    /// which is a claim about *us*.
     case noFullTextAvailable
+
+    /// Every source was exhausted and the primary identifier's kind was never
+    /// established, so the PubMed last resort could not be authorised.
+    ///
+    /// **Not the same as ``noFullTextAvailable``**, and the difference is the
+    /// whole reason this case exists. Gating that last resort on a stated kind
+    /// (#212) made an internal refusal look identical to a fact about the
+    /// literature: the app said "no full text available", the caller recorded
+    /// it on the document, and the fetch control disappeared for good. A reader
+    /// who knows the paper is on PubMed would conclude the app is broken, and be
+    /// right — the record may well be reachable, we just cannot prove which one
+    /// it is.
+    ///
+    /// Carries the identifier so the reader can be handed the one thing still
+    /// known to be true about the record, and callers must **not** mark the
+    /// document permanently unavailable on it.
+    case identifierKindUnresolved(String)
 
     /// PDF download failed.
     case pdfDownloadFailed(String)
@@ -455,6 +476,12 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             return "Network error: \(message)"
         case .noFullTextAvailable:
             return "No full text available from any source"
+        case .identifierKindUnresolved(let identifier):
+            return """
+                Could not confirm \(identifier) is a PubMed ID, so this \
+                article's PubMed record was not opened. Search PubMed or \
+                Europe PMC for \(identifier).
+                """
         case .pdfDownloadFailed(let reason):
             return "Failed to download PDF: \(reason)"
         case .jatsParseFailure(let error):
@@ -474,9 +501,13 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
         case .networkError, .serverError:
             return true
         case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
-             .jatsParseFailure, .cachingFailed, .invalidResponse:
+             .jatsParseFailure, .cachingFailed, .invalidResponse,
+             .identifierKindUnresolved:
             // A parse failure is deterministic: retrying spends the network
-            // budget to reach the same result.
+            // budget to reach the same result. So is an unresolved kind — the
+            // stored record will not name itself on a second attempt — but
+            // unlike the others it must not be recorded as a permanent state of
+            // the article; see the case's own note.
             return false
         }
     }

@@ -343,9 +343,14 @@ struct PrintableReportView: View {
                 }
             }
 
-            Text("PMID: \(document.pmid)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            // The exported report outlives the session and is read by people
+            // who never saw the app, so a mislabelled identifier here is the
+            // most consequential form of #213.
+            if let citationIdentifier = document.citationIdentifier {
+                Text(citationIdentifier.labelled)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(PrintableReportConstants.documentCardPadding)
         .background(Color.gray.opacity(PrintableReportConstants.documentCardBackgroundOpacity))

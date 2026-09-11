@@ -40,6 +40,13 @@ import Foundation
 /// identifier reaching the retrieval chain from somewhere other than a Europe
 /// PMC search. It answers ``unknown`` where the shape does not settle it, which
 /// is what keeps the `src:med` fall-through from claiming to be a decision.
+///
+/// What the shape rule may *not* do is name a PubMed ID. A bare decimal is one
+/// shape shared by PubMed IDs and by Europe PMC's thesis, case-report and `HIR`
+/// accessions, and guessing wrong there hands the reader a real but unrelated
+/// article (#212). Where a bare decimal really is a PubMed ID, either the record
+/// said so or a PubMed search vouches for it —
+/// see ``resolved(declared:accession:provider:)`` and ``pubmedID(in:declared:)``.
 public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
     /// A PubMed ID, Europe PMC's `MED` source.
     ///
@@ -74,14 +81,20 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
     /// The kind Europe PMC stated for a record.
     ///
     /// A token outside `[a-z0-9]` is refused rather than carried. The token is
-    /// network-supplied, and it reaches two places that need a closed set: a
-    /// Europe PMC query as `src:<token>`, where a space or a colon would make
-    /// the query parse as something else and match nothing, and — through
-    /// ``ArticleCacheKey`` — a filename tag, which is interpolated without
-    /// sanitising because every tag is drawn from a fixed vocabulary. Refusing
-    /// here is what keeps that assumption true at both ends. Every source token
-    /// Europe PMC publishes is a short alphanumeric word, so this refuses
+    /// network-supplied and reaches a Europe PMC query as `src:<token>`, where
+    /// a space or a colon would make the query parse as something else and match
+    /// nothing — not a URL injection, since the transport percent-encodes, but a
+    /// widened lookup that quietly answers about the wrong article. Every source
+    /// token Europe PMC publishes is a short alphanumeric word, so this refuses
     /// nothing the provider actually sends.
+    ///
+    /// It does **not** reach a cache filename: ``ArticleCacheKey`` files every
+    /// unmodelled source under one fixed tag. That was the original reason for
+    /// this filter and is no longer one, which is worth saying so nobody removes
+    /// the filter after checking only the filename path.
+    ///
+    /// The case itself is public and its payload is not re-validated, so this
+    /// initialiser is a convention rather than a guarantee — see #219.
     ///
     /// - Parameter europePMCSource: The record's `source` field, as decoded.
     /// - Returns: `nil` when the record carried no token, or one outside the
@@ -121,10 +134,37 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
 
     /// The kind an identifier's shape suggests, for records that stated none.
     ///
-    /// Deliberately not total: an accession that is neither prefix-marked nor
-    /// all digits is ``unknown``, because naming it a PubMed ID would be a label
-    /// that lies and would put a value that is not a PubMed ID behind a PubMed
-    /// URL — what the last-resort fallback did before #202.
+    /// Only the two prefixes settle anything. Everything else is ``unknown``,
+    /// **including a bare decimal number** — the shape of a PubMed ID, and
+    /// equally the shape of a Europe PMC thesis (`ETH`), case report (`CBA`) or
+    /// `HIR` accession, none of which carry a PubMed ID at all. Measured against
+    /// the live Europe PMC API on 2026-09-11, `SRC:ETH OR SRC:CBA OR SRC:HIR`
+    /// with `resultType=core` returned 322,044 such records carrying abstracts,
+    /// so this is not a hypothetical collision. The figure drifts daily and the
+    /// argument does not depend on it: one such record is enough.
+    ///
+    /// Reading that shape as ``pubmed`` was #212. The value went behind the
+    /// PubMed base URL and came back as a **real but unrelated article**: Europe
+    /// PMC thesis `889149` and PubMed article `889149` — a 1977 paper on mouse
+    /// courtship — both exist. A dead link tells the reader something is wrong;
+    /// a live link to the wrong paper does not.
+    ///
+    /// **No query changed.** ``unknown`` already queried `src:med`, which is
+    /// where a bare number went before, so Europe PMC is asked for exactly what
+    /// it was asked for previously. What changed is that the shape no longer
+    /// *claims* a kind, so ``pubmedID(in:declared:)`` refuses it. Where a number
+    /// really is a PubMed ID, something says so — the record's `source`, or the
+    /// provider that returned it; see ``resolved(declared:accession:provider:)``.
+    ///
+    /// The PDF cache filename *does* change, and it is the second consumer of
+    /// this type rather than an afterthought: a bare decimal nobody vouches for
+    /// now files under ``ArticleCacheKey``'s untyped tag instead of the PubMed
+    /// one. An already-downloaded PDF for such a record is orphaned — still on
+    /// disk, no longer found, reclaimed only by a full cache clear. Bounded by
+    /// the same population as the lost link: a legacy row from a Europe PMC or
+    /// merged search. Filing it under the PubMed tag is what the tag has to
+    /// stop meaning, so this is the cost of the repair rather than a defect in
+    /// it.
     ///
     /// Case is ignored: Europe PMC writes these accessions upper-case by
     /// convention, and a convention is not a guarantee.
@@ -141,20 +181,24 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
         if normalised.hasPrefix(BioMedLitConstants.pmcAccessionPrefix) {
             return .pmc
         }
-        if isAllASCIIDigits(normalised) {
-            return .pubmed
-        }
         return .unknown
     }
 
     /// Whether every character is an ASCII digit.
     ///
-    /// `Character.isNumber` is deliberately not used: it is true for `½`, for
-    /// superscripts, and for every non-Latin digit, so `١٢٣` would satisfy it
-    /// and be called a PubMed ID. A PubMed ID is an ASCII decimal integer, and
-    /// anything the shape rule calls ``pubmed`` can be pasted after the PubMed
-    /// URL — which is the one place a wrong label reaches the reader as a real
-    /// but different article.
+    /// `isASCII` is the load-bearing half, and it must not be removed as
+    /// redundant. `isWholeNumber` is true for every non-Latin digit, so `١٢٣`
+    /// satisfies it on its own; `isNumber` additionally admits `½` and the
+    /// superscripts. Given the `isASCII` guard the two number predicates are
+    /// equivalent here, because ASCII holds no fractions and no superscript
+    /// digits — which is exactly why deleting the guard on the strength of that
+    /// equivalence would be the wrong lesson to draw.
+    ///
+    /// A PubMed ID is an ASCII decimal integer, and this is the test standing
+    /// between a slot's value and the PubMed URL — the one place a wrong label
+    /// reaches the reader as a real but different article. An earlier draft of
+    /// this rule tested `isNumber` alone and classified `١٢٣` as a PubMed ID;
+    /// it was caught in review before it shipped.
     ///
     /// - Parameter value: The string to test.
     /// - Returns: `true` when `value` is non-empty and all ASCII digits.
@@ -177,6 +221,91 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
             return inferred(from: accession)
         }
         return declared
+    }
+
+    /// The kind to act on, given what the record stated, what it holds, and who
+    /// returned it.
+    ///
+    /// Three sources of knowledge, strongest first:
+    ///
+    /// 1. **The record's own word**, carried since #209. A thesis found through
+    ///    a merged search is still a thesis.
+    /// 2. **The identifier's shape**, where a prefix settles it. `PPR1287966` is
+    ///    a preprint whoever handed it to us, and a provider's blanket claim
+    ///    must not overrule the value in front of it — calling that accession a
+    ///    PubMed ID would ask Europe PMC for it under `src:med`, where it
+    ///    matches nothing.
+    /// 3. **The provider**, which can vouch for what the record did not.
+    ///
+    /// Only ``SearchProvider/pubmed`` vouches, and only for a bare decimal.
+    /// PubMed returns MEDLINE records and nothing else, so a search of PubMed
+    /// states what a stored document may never have recorded — which is what
+    /// keeps every document written before the kind field existed, on the
+    /// default provider, reaching its PubMed record.
+    ///
+    /// ``SearchProvider/both`` vouches for nothing. A merged search records the
+    /// *mode* on every document it produces, including the ones only Europe PMC
+    /// returned, so it cannot speak for any one article. Making it vouch would
+    /// reopen #212 for exactly the records that issue is about.
+    ///
+    /// - Parameters:
+    ///   - declared: The kind carried from the record, if one was.
+    ///   - accession: The primary slot's value.
+    ///   - provider: The search that returned the record, when one did.
+    /// - Returns: The kind to act on, or ``unknown`` when nothing settles it.
+    public static func resolved(
+        declared: ArticleIdentifierKind?,
+        accession: String,
+        provider: SearchProvider?
+    ) -> ArticleIdentifierKind {
+        let byRecordOrShape = resolved(declared: declared, accession: accession)
+        guard byRecordOrShape == .unknown else { return byRecordOrShape }
+
+        if provider == .pubmed,
+           isAllASCIIDigits(accession.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return .pubmed
+        }
+        return .unknown
+    }
+
+    /// The identifier, when it is one that may be pasted after the PubMed URL.
+    ///
+    /// The single authority for that question, and the invariant it carries is:
+    /// **every PubMed URL and every `PMID:` line in either app resolves through
+    /// here**, by way of the app's `Document.pubmedURL` and
+    /// `Document.citationIdentifier` and the retrieval chain's last resort.
+    /// Stated as an invariant rather than as a census of today's callers,
+    /// because the next surface added is the one a count would not cover — a
+    /// predicate this consequential re-implemented per surface is how #186 came
+    /// to be fixed on one of four, and how #212 and #213 reached a dozen-odd
+    /// screens at once.
+    ///
+    /// Two independent tests, and both must pass:
+    ///
+    /// - **Someone said it is a PubMed ID.** Shape alone never says so, because
+    ///   Europe PMC's numeric accessions are indistinguishable from a PubMed ID
+    ///   and resolve, on PubMed, to a real but unrelated article (#212).
+    /// - **The value can be one.** It is network-supplied and reaches
+    ///   `URL(string:)`, which answers `nil` for a string containing a space —
+    ///   the crash in #213, where surfaces force-unwrapped that result. ASCII
+    ///   digits only; see ``isAllASCIIDigits(_:)`` for why the ASCII half is
+    ///   the half that matters.
+    ///
+    /// - Parameters:
+    ///   - identifier: The raw primary identifier slot.
+    ///   - declared: What is known about the slot — the record's stated kind, or
+    ///     the answer of ``resolved(declared:accession:provider:)`` where a
+    ///     provider had to vouch for it.
+    /// - Returns: The trimmed PubMed ID, or `nil` for anything else.
+    public static func pubmedID(
+        in identifier: String?,
+        declared: ArticleIdentifierKind?
+    ) -> String? {
+        guard let value = identifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              resolved(declared: declared, accession: value) == .pubmed,
+              isAllASCIIDigits(value) else { return nil }
+        return value
     }
 
     /// This kind as the Europe PMC token that names it, for storage.
