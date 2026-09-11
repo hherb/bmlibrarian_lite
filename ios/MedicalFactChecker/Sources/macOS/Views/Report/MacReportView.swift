@@ -570,7 +570,7 @@ struct MacReviewedDocumentsSection: View {
 
             if isExpanded {
                 LazyVStack(spacing: MacSpacing.listItemSpacing) {
-                    ForEach(documents, id: \.pmid) { document in
+                    ForEach(documents, id: \.id) { document in
                         MacReviewedDocumentRow(document: document)
                             .onTapGesture {
                                 onDocumentSelected(document)
@@ -1167,7 +1167,10 @@ struct MacDocumentDetailSheet: View {
             do {
                 let service = TransparencyAnalysisService.create(from: AppSettings.shared)
                 let result = try await service.analyze(
-                    doi: document.doi,
+                    // Not the raw field: it may be an empty string straight
+                    // from a provider's JSON, which `analyze`'s own guard reads
+                    // as present and then searches CrossRef for.
+                    doi: document.usableDOI,
                     // Not the raw slot: it also holds thesis and case-report
                     // accessions, and `analyze` searches PubMed with whatever
                     // it is given, then adopts the first hit's title, journal,

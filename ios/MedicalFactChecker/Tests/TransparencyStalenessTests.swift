@@ -111,8 +111,24 @@ final class TransparencyStalenessTests: XCTestCase {
 
     // MARK: - Eligibility
 
-    func testADocumentWithAPMIDCanBeAnalyzed() {
-        XCTAssertTrue(makeDocument().canAnalyzeTransparency)
+    /// Changed claim: it asserted that a document whose slot holds digits can be
+    /// analysed. The gate now asks ``Document/pubmedID``, the same value the
+    /// analyser is given, and that answers `nil` unless something *stated* the
+    /// slot holds a PubMed ID — so the document needs a stated kind to qualify.
+    /// See `TransparencyEligibilityTests` for why: the slot also holds Europe
+    /// PMC thesis accessions, which are bare decimals, and offering the button
+    /// for one only got `noIdentifiers` thrown back.
+    func testADocumentWithAStatedPubMedIdentifierCanBeAnalyzed() {
+        let document = makeDocument()
+        document.identifierKind = .pubmed
+
+        XCTAssertTrue(document.canAnalyzeTransparency)
+    }
+
+    /// The other half of the same change: nothing vouches for these digits, so
+    /// there is nothing the analyser can look the article up by.
+    func testADocumentWhoseIdentifierNothingVouchesForCannotBeAnalyzed() {
+        XCTAssertFalse(makeDocument().canAnalyzeTransparency)
     }
 
     func testADocumentWithNeitherPMIDNorDOICannotBeAnalyzed() {

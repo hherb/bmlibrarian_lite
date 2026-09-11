@@ -289,7 +289,7 @@ struct PrintableReportView: View {
                 ($0.relevanceScore ?? 0) >= PrintableReportConstants.minRelevanceScoreToShow
             }
 
-            ForEach(relevantDocs, id: \.pmid) { doc in
+            ForEach(relevantDocs, id: \.id) { doc in
                 printableDocumentCard(doc)
             }
 
@@ -590,7 +590,7 @@ struct PrintableMarkdownView: View {
 
     @ViewBuilder
     private func renderParagraph(_ text: String) -> some View {
-        Text(convertReferencesToPlainText(text))
+        Text(ReportFormatter.plainText(fromReportMarkdown: text))
             .font(.body)
             .padding(.vertical, 2)
     }
@@ -609,7 +609,7 @@ struct PrintableMarkdownView: View {
                     .fontWeight(.bold)
                     .frame(width: 20, alignment: .trailing)
             }
-            Text(convertReferencesToPlainText(text))
+            Text(ReportFormatter.plainText(fromReportMarkdown: text))
                 .font(.body)
         }
         .padding(.vertical, 1)
@@ -617,52 +617,6 @@ struct PrintableMarkdownView: View {
     }
 
     // MARK: - Reference Conversion
-
-    /// Convert interactive references to plain text with PMIDs.
-    ///
-    /// Converts `[Author, Year](doc:pmid-12345)` to `Author, Year (PMID: 12345)`.
-    private func convertReferencesToPlainText(_ text: String) -> String {
-        var result = text
-
-        // Pattern for references with document ID: [Author, Year](doc:pmid-12345)
-        let patternWithId = "\\[([^\\]]+)\\]\\(doc:pmid-(\\d+)\\)"
-        if let regex = try? NSRegularExpression(pattern: patternWithId) {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "$1 (PMID: $2)"
-            )
-        }
-
-        // Pattern for references with generic doc ID: [Author, Year](doc:id)
-        let patternGenericId = "\\[([^\\]]+)\\]\\(doc:[^)]+\\)"
-        if let regex = try? NSRegularExpression(pattern: patternGenericId) {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "$1"
-            )
-        }
-
-        // Remove remaining markdown link syntax: [text](url) -> text
-        let linkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
-        if let regex = try? NSRegularExpression(pattern: linkPattern) {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "$1"
-            )
-        }
-
-        // Handle bold/italic markdown
-        result = result.replacingOccurrences(of: "**", with: "")
-        result = result.replacingOccurrences(of: "__", with: "")
-
-        return result
-    }
 
     private func normalizeLineBreaks(_ text: String) -> String {
         var result = text

@@ -316,6 +316,20 @@ public enum BioMedLitConstants {
     /// PDF magic bytes ("%PDF").
     public static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
 
+    /// Markdown link syntax: `[display text](target)`.
+    ///
+    /// Capture group 1 is the display text. The target is matched as an opaque
+    /// run and never inspected: a report's link target is a document's identity,
+    /// and a renderer that cannot see the documents may not decide what it names.
+    public static let markdownLinkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
+
+    /// Markdown emphasis markers, removed for a renderer that shows text verbatim.
+    ///
+    /// Only the paired markers are listed. A single `*` or `_` is far more often
+    /// a literal character in a biomedical title than an emphasis marker, so
+    /// stripping it would corrupt the text it is meant to clean.
+    public static let markdownEmphasisMarkers = ["**", "__"]
+
     // MARK: - Scoring Constants
 
     /// Minimum valid relevance score.

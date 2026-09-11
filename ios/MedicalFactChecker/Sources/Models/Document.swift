@@ -36,8 +36,40 @@ private let documentLog = Logger(
 final class Document {
     // MARK: - Identification
 
-    /// Unique identifier for this document (format: "pmid-12345678").
-    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    /// This row's identity, opaque and unique, assigned once at creation.
+    ///
+    /// It names *this document*, not the article — it is what a saved report's
+    /// `doc:` reference resolves against, and what a list uses to tell two rows
+    /// apart. It deliberately encodes nothing about the article, for two
+    /// reasons it was `"pmid-\(pmid)"` and did both wrong.
+    ///
+    /// **It must be unique, and `.unique` is gone.** The attribute was dropped
+    /// for CloudKit, so nothing rejects a duplicate. An identity derived from
+    /// the article hands the same string to every row describing that article,
+    /// and `documents.first { $0.id == documentId }` then answers with whichever
+    /// comes first (#208). The degenerate case is an empty slot: `pmid` holds
+    /// whatever `EuropePMCService.searchArticle(from:)` put in the primary
+    /// identifier slot — a PubMed ID, a `PPR…` preprint accession or a PMC
+    /// accession — and a record carrying none of them left every such document
+    /// as the literal `"pmid-"`.
+    ///
+    /// That degenerate case is reachable rather than observed: Europe PMC always
+    /// sends `id`, so the slot is never empty from a live search. 0 of 100
+    /// sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records and 0 of 100 `SRC:PPR`
+    /// records lacked one, measured 2026-09-11. Which case was live does not
+    /// change the remedy: a UUID makes uniqueness a property of the value
+    /// rather than an argument about the data, so neither case can return.
+    ///
+    /// **It must not claim a kind.** The slot also holds `PPR…` preprint
+    /// accessions and Europe PMC thesis accessions — bare decimals
+    /// indistinguishable from a PubMed ID — so `pmid-889149` invited every
+    /// reader of that string to treat it as one, and the PDF exporter did,
+    /// printing `(PMID: 889149)` for a thesis (#212). Ask ``citationIdentifier``
+    /// for an identifier that names its own namespace.
+    ///
+    /// Documents stored under the old scheme keep the identity they were given:
+    /// their saved reports name it, and an exact match still resolves it. Only
+    /// new documents get a UUID.
     var id: String = ""
     var pmid: String = ""
     var title: String = ""
@@ -383,11 +415,44 @@ final class Document {
 
     /// Whether transparency analysis can be attempted for this document at all.
     ///
-    /// The analyzer looks the article up by identifier, so a document carrying
-    /// neither a PMID nor a DOI has nothing to look up. Shared so the report views
-    /// and the workflow agree on what is eligible instead of each restating it.
+    /// The two values the analyser is actually given, and nothing else. This is
+    /// deliberately the same pair every call site passes — ``usableDOI`` and
+    /// ``pubmedID`` — because `TransparencyAnalysisService.analyze` throws
+    /// `noIdentifiers` when both are absent, and a gate that admits more than
+    /// the analyser accepts offers the reader a button that cannot work.
+    ///
+    /// It read `!(pmid.isEmpty && doi == nil)`, which asks about the raw slot.
+    /// The slot also holds preprint and Europe PMC thesis accessions, and since
+    /// #212 those reach the analyser as `nil` rather than as a PubMed ID — so a
+    /// thesis with no DOI passed this gate and threw. Not a rare shape: 60 of
+    /// 100 `SRC:ETH OR SRC:CBA OR SRC:HIR` records sampled on 2026-09-11 carry
+    /// no DOI.
+    ///
+    /// ``pmcId`` is deliberately not a third rung. The analyser has no route
+    /// that starts from a PMC ID, so admitting one would re-open the gap this
+    /// closes.
+    ///
+    /// Shared so the report views and the workflow agree on what is eligible
+    /// instead of each restating it. Every caller of the analyser gates on this
+    /// and then passes ``usableDOI`` and ``pubmedID`` — the same two values this
+    /// tests, so the gate cannot drift from the call it guards.
     var canAnalyzeTransparency: Bool {
-        !(pmid.isEmpty && doi == nil)
+        pubmedID != nil || usableDOI != nil
+    }
+
+    /// ``doi`` with surrounding whitespace removed, or nil when it names nothing.
+    ///
+    /// The stored value arrives straight from a provider's JSON through
+    /// ``applySearchMetadata(from:)``, so an empty string is representable. Both
+    /// this gate and `TransparencyAnalysisService.analyze`'s own guard tested
+    /// `doi != nil`, which `""` passes, and the analysis then ran against a
+    /// blank DOI. That is #212's defect class one field over: a value present
+    /// without naming anything. ``pubmedID`` already rejects a blank slot, so
+    /// this is the pair made consistent rather than a new rule.
+    var usableDOI: String? {
+        guard let doi else { return nil }
+        let trimmed = doi.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Shortcut for badge display without full JSON decode.
@@ -421,7 +486,7 @@ final class Document {
         batchNumber: Int = 1,
         resultPosition: Int = 0
     ) {
-        self.id = "pmid-\(pmid)"
+        self.id = UUID().uuidString
         self.pmid = pmid
         self.title = title
         self.abstract = abstract
@@ -683,14 +748,14 @@ final class Document {
         switch resolvedIdentifierKind {
         case .pubmed:
             guard let pubmedID else { return nil }
-            return CitationIdentifier(namespace: "PMID", value: pubmedID)
+            return .pubMed(pubmedID)
         case .pmc:
-            return CitationIdentifier(namespace: "PMCID", value: identifier)
+            return .pmc(identifier)
         case .preprint, .europePMCSource:
-            return CitationIdentifier(namespace: "Europe PMC", value: identifier)
+            return .europePMC(identifier)
         case .unknown:
             guard recordedProvider == .europePMC else { return nil }
-            return CitationIdentifier(namespace: "Europe PMC", value: identifier)
+            return .europePMC(identifier)
         }
     }
 
@@ -1294,17 +1359,73 @@ final class Document {
 /// ``Document/citationIdentifier``. A bare number under a guessed label is #212
 /// in the form that outlives the app.
 struct CitationIdentifier: Equatable, Hashable, Sendable {
-    /// The namespace that resolves ``value``, such as `PMID` or `Europe PMC`.
+    /// A namespace that can actually resolve an identifier.
     ///
-    /// Not localised: these are the namespaces' own names, and a citation is
-    /// read by people who look the identifier up, including in other tools.
-    let namespace: String
+    /// A closed set, because the whole point of this type is that a label is
+    /// never invented. A free `String` here let `CitationIdentifier(namespace:
+    /// "PMID", value: pmid)` compile over the raw slot — #212 rebuilt by hand,
+    /// at any call site — and let a typo such as `"PMC ID"` reach an exported
+    /// citation with nothing to catch it.
+    ///
+    /// Raw values are not localised: these are the namespaces' own names, read
+    /// by people who look the identifier up, including in other tools.
+    enum Namespace: String, Equatable, Hashable, Sendable, CaseIterable {
+        /// A PubMed record, resolvable at pubmed.ncbi.nlm.nih.gov.
+        case pubmed = "PMID"
+
+        /// A PubMed Central record, resolvable at ncbi.nlm.nih.gov/pmc.
+        case pmc = "PMCID"
+
+        /// A Europe PMC record: preprint, thesis or case report accession.
+        case europePMC = "Europe PMC"
+    }
+
+    /// The namespace that resolves ``value``.
+    let namespace: Namespace
 
     /// The identifier itself, with no label and no surrounding whitespace.
     let value: String
 
     /// The form a citation prints: namespace, colon, value.
-    var labelled: String { "\(namespace): \(value)" }
+    var labelled: String { "\(namespace.rawValue): \(value)" }
+
+    /// Private so a namespace is always chosen through a named factory below.
+    ///
+    /// The factories are the whole enforcement: each one states which namespace
+    /// it vouches for, so a caller cannot pair a value with a label the caller
+    /// merely guessed.
+    ///
+    /// - Parameters:
+    ///   - namespace: The namespace that resolves `value`.
+    ///   - value: The identifier, trimmed by the caller.
+    private init(namespace: Namespace, value: String) {
+        self.namespace = namespace
+        self.value = value
+    }
+
+    /// A PubMed ID, which only ``Document/pubmedID`` may vouch for.
+    ///
+    /// - Parameter id: A verified PubMed ID.
+    /// - Returns: The identifier, labelled `PMID`.
+    static func pubMed(_ id: String) -> Self {
+        Self(namespace: .pubmed, value: id)
+    }
+
+    /// A PubMed Central accession.
+    ///
+    /// - Parameter accession: A PMC accession.
+    /// - Returns: The identifier, labelled `PMCID`.
+    static func pmc(_ accession: String) -> Self {
+        Self(namespace: .pmc, value: accession)
+    }
+
+    /// A Europe PMC accession, which names no kind beyond its own provider.
+    ///
+    /// - Parameter accession: A Europe PMC accession.
+    /// - Returns: The identifier, labelled `Europe PMC`.
+    static func europePMC(_ accession: String) -> Self {
+        Self(namespace: .europePMC, value: accession)
+    }
 }
 
 // MARK: - Displayed Full Text

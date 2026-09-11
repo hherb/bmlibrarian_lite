@@ -91,8 +91,19 @@ typealias BMLSearchResultMerger = SearchResultMerger
 struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     // MARK: - Identification
 
-    /// Unique identifier combining source and ID (e.g., "pubmed-12345678").
-    var id: String { "\(source.rawValue)-\(pmid.isEmpty ? (doi ?? title.hashValue.description) : pmid)" }
+    /// `Identifiable` conformance for in-process use only.
+    ///
+    /// This is *not* a document identity and must never be persisted, written
+    /// into a report, or compared across runs. It is derived from the article's
+    /// own fields, which is the shape ``Document/id`` exists to avoid: two
+    /// records describing one article collapse onto one value, and a record
+    /// with an empty slot collapses with every other such record.
+    ///
+    /// The fallback was `title.hashValue`, which is worse than derived — Swift
+    /// seeds `hashValue` per process, so the value differed on every launch.
+    /// Deduplication does not use this; it has its own key in
+    /// `SearchResultMerger.deduplicationKey(for:)`.
+    var id: String { "\(source.rawValue)-\(pmid.isEmpty ? (doi ?? title) : pmid)" }
 
     /// PubMed ID (may be empty for preprints or non-PubMed sources).
     let pmid: String

@@ -31,6 +31,13 @@ enum WorkflowConstants {
     /// alternative search queries to find more evidence.
     static let smartSearchThreshold = 3
 
+    /// Most failed document titles to name in a user-facing notice before counting.
+    ///
+    /// Above this the notice reports a count instead. Naming is more useful —
+    /// the reader can tell which document is missing a result — but a notice
+    /// long enough to be skipped reports nothing at all.
+    static let maxFailedTitlesToName = 3
+
     // MARK: - Concurrency
 
     /// Default number of concurrent requests for cloud LLM providers.

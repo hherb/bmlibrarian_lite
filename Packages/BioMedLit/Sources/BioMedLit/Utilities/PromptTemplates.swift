@@ -255,7 +255,7 @@ public enum PromptTemplates {
 
         CRITICAL - Citation format:
         Use this EXACT format for all inline citations: [Author, Year](doc:ID)
-        Example: [Smith et al., 2021](doc:pmid-12345678)
+        Example: [Smith et al., 2021](doc:8A1D4C22-9F3B-4E77-B0A6-2C51D9E4F108)
         The ID must be copied EXACTLY from the "ID:" field provided for each citation above.
         Do NOT invent or modify IDs - use only the IDs provided.
 
