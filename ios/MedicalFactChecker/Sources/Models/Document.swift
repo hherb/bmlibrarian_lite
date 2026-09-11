@@ -36,8 +36,31 @@ private let documentLog = Logger(
 final class Document {
     // MARK: - Identification
 
-    /// Unique identifier for this document (format: "pmid-12345678").
-    /// Note: @Attribute(.unique) removed for CloudKit compatibility.
+    /// This row's identity, opaque and unique, assigned once at creation.
+    ///
+    /// It names *this document*, not the article — it is what a saved report's
+    /// `doc:` reference resolves against, and what a list uses to tell two rows
+    /// apart. It deliberately encodes nothing about the article, for two
+    /// reasons it was `"pmid-\(pmid)"` and did both wrong.
+    ///
+    /// **It must be unique, and `.unique` is gone.** The attribute was dropped
+    /// for CloudKit, so nothing rejects duplicates, and `pmid` is the primary
+    /// identifier slot — `pmid ?? id ?? ""` at the Europe PMC decode site —
+    /// which is empty for a record carrying none of the three. Every such
+    /// document was `"pmid-"`, and `documents.first { $0.id == documentId }`
+    /// handed back whichever came first (#208). A UUID makes uniqueness a
+    /// property of the value rather than an argument about the data.
+    ///
+    /// **It must not claim a kind.** The slot also holds `PPR…` preprint
+    /// accessions and Europe PMC thesis accessions — bare decimals
+    /// indistinguishable from a PubMed ID — so `pmid-889149` invited every
+    /// reader of that string to treat it as one, and the PDF exporter did,
+    /// printing `(PMID: 889149)` for a thesis (#212). Ask ``citationIdentifier``
+    /// for an identifier that names its own namespace.
+    ///
+    /// Documents stored under the old scheme keep the identity they were given:
+    /// their saved reports name it, and an exact match still resolves it. Only
+    /// new documents get a UUID.
     var id: String = ""
     var pmid: String = ""
     var title: String = ""
@@ -383,11 +406,27 @@ final class Document {
 
     /// Whether transparency analysis can be attempted for this document at all.
     ///
-    /// The analyzer looks the article up by identifier, so a document carrying
-    /// neither a PMID nor a DOI has nothing to look up. Shared so the report views
-    /// and the workflow agree on what is eligible instead of each restating it.
+    /// The two values the analyser is actually given, and nothing else. This is
+    /// deliberately the same pair its three call sites pass — ``doi`` and
+    /// ``pubmedID`` — because `TransparencyAnalysisService.analyze` throws
+    /// `noIdentifiers` when both are absent, and a gate that admits more than
+    /// the analyser accepts offers the reader a button that cannot work.
+    ///
+    /// It read `!(pmid.isEmpty && doi == nil)`, which asks about the raw slot.
+    /// The slot also holds preprint and Europe PMC thesis accessions, and since
+    /// #212 those reach the analyser as `nil` rather than as a PubMed ID — so a
+    /// thesis with no DOI passed this gate and threw. Not a rare shape: 60 of
+    /// 100 `SRC:ETH OR SRC:CBA OR SRC:HIR` records sampled on 2026-09-11 carry
+    /// no DOI.
+    ///
+    /// ``pmcId`` is deliberately not a third rung. The analyser has no route
+    /// that starts from a PMC ID, so admitting one would re-open the gap this
+    /// closes.
+    ///
+    /// Shared so the report views and the workflow agree on what is eligible
+    /// instead of each restating it.
     var canAnalyzeTransparency: Bool {
-        !(pmid.isEmpty && doi == nil)
+        pubmedID != nil || doi != nil
     }
 
     /// Shortcut for badge display without full JSON decode.
@@ -421,7 +460,7 @@ final class Document {
         batchNumber: Int = 1,
         resultPosition: Int = 0
     ) {
-        self.id = "pmid-\(pmid)"
+        self.id = UUID().uuidString
         self.pmid = pmid
         self.title = title
         self.abstract = abstract

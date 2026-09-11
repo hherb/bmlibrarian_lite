@@ -570,7 +570,7 @@ struct MacReviewedDocumentsSection: View {
 
             if isExpanded {
                 LazyVStack(spacing: MacSpacing.listItemSpacing) {
-                    ForEach(documents, id: \.pmid) { document in
+                    ForEach(documents, id: \.id) { document in
                         MacReviewedDocumentRow(document: document)
                             .onTapGesture {
                                 onDocumentSelected(document)

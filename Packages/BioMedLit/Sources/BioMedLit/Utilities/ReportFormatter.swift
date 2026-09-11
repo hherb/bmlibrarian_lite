@@ -36,7 +36,14 @@ public enum ReportFormatter {
 
     /// Input data for formatting a citation.
     public struct CitationData: Sendable {
-        /// Document identifier (e.g., "pmid-12345678").
+        /// The document's identity, opaque and copied verbatim.
+        ///
+        /// It reaches the model in the `ID:` line and comes back in the report
+        /// as `[Author, Year](doc:<id>)`, which is how a reference resolves to
+        /// the row it was drawn from. Nothing here reads it, and nothing
+        /// downstream may: it once looked like `pmid-889149`, and an exported
+        /// report printed that as `PMID: 889149` — a real, unrelated article
+        /// (#212). An identifier meant for a reader is ``ReferenceData/identifier``.
         public let documentId: String
 
         /// Formatted author string (e.g., "Smith et al.").
@@ -54,7 +61,7 @@ public enum ReportFormatter {
         /// Initialize with citation data.
         ///
         /// - Parameters:
-        ///   - documentId: Document identifier (e.g., "pmid-12345678").
+        ///   - documentId: The document's identity. See ``documentId``.
         ///   - authors: Formatted author string (e.g., "Smith et al.").
         ///   - year: Publication year.
         ///   - title: Document title.
@@ -159,6 +166,49 @@ public enum ReportFormatter {
             if let identifier = doc.identifier { ref += ". \(identifier)" }
             return ref
         }.joined(separator: "\n\n")
+    }
+
+    // MARK: - Reference Link Flattening
+
+    /// Report markdown with its interactive document links reduced to plain text.
+    ///
+    /// The report body carries references as `[Smith et al., 2016](doc:<id>)`,
+    /// where the link target is a document's identity and the display text is
+    /// what a reader is meant to see. A renderer that cannot follow a link —
+    /// an exported PDF, a print view — needs the display text alone.
+    ///
+    /// ## The link target is not an identifier
+    ///
+    /// This function once had a branch matching `doc:pmid-<digits>` and
+    /// rendering it as `(PMID: <digits>)`. Documents were identified as
+    /// `pmid-<primary slot>`, and that slot also holds Europe PMC thesis,
+    /// case-report and `HIR` accessions — bare decimals indistinguishable from a
+    /// PubMed ID, of which Europe PMC serves 322,044 with abstracts (#212).
+    /// An exported report therefore printed a locator that resolves, on PubMed,
+    /// to a real but unrelated article.
+    ///
+    /// The argument is a report's markdown and nothing else: this function
+    /// never sees the documents, so it cannot establish what a target names and
+    /// must not guess. The numbered reference list carries the
+    /// namespace-labelled identifier instead — see ``ReferenceData/identifier``,
+    /// filled by a caller that has the document.
+    ///
+    /// Saved reports still carry `doc:pmid-…` targets, so this is not only
+    /// about text written from here on.
+    ///
+    /// - Parameter text: Report markdown.
+    /// - Returns: The same markdown with every link reduced to its display text.
+    public static func flattenedReferenceLinks(in text: String) -> String {
+        // Markdown link syntax, document references included: [text](target).
+        let linkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
+        guard let regex = try? NSRegularExpression(pattern: linkPattern) else {
+            return text
+        }
+        return regex.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: "$1"
+        )
     }
 
     // MARK: - No Evidence Content

@@ -97,7 +97,7 @@ struct ScoredDocumentsView: View {
                 SortingControlsView(selectedSort: sortOptionBinding)
                     .padding(.bottom, 4)
 
-                ForEach(sortedDocuments, id: \.pmid) { document in
+                ForEach(sortedDocuments, id: \.id) { document in
                     DocumentScoreRow(
                         document: document,
                         showEmbeddingScore: showEmbeddingScores
@@ -192,7 +192,7 @@ struct EnhancedScoredDocumentsView: View {
             // Document list
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(sortedDocuments, id: \.pmid) { document in
+                    ForEach(sortedDocuments, id: \.id) { document in
                         DocumentScoreRow(
                             document: document,
                             showEmbeddingScore: showEmbeddingScores

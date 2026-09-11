@@ -711,7 +711,7 @@ struct ReviewedDocumentsSection: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                ForEach(documents, id: \.pmid) { document in
+                ForEach(documents, id: \.id) { document in
                     DocumentCard(document: document)
                 }
             }
@@ -1049,15 +1049,20 @@ struct MarkdownReportView: View {
     /// Parse inline formatting (bold, italic) and references into AttributedString.
     ///
     /// Supports two reference formats:
-    /// 1. New format with embedded ID: [Author, Year](doc:pmid-12345678)
-    /// 2. Legacy format without ID: [Author, Year]
+    /// 1. With an embedded document identity: [Author, Year](doc:<id>)
+    /// 2. Legacy format without one: [Author, Year]
+    ///
+    /// The identity is matched as an opaque run of characters, never as a
+    /// PubMed ID. Documents are identified by UUID since #208, and reports
+    /// saved before that carry `doc:pmid-<primary slot>` targets which resolve
+    /// unchanged by exact match against the identity those rows still hold.
     private func parseInlineFormatting(_ text: String) -> AttributedString {
         var result = AttributedString()
 
-        // Pattern for references with embedded document ID: [Author, Year](doc:pmid-12345678)
+        // Pattern for references with an embedded identity: [Author, Year](doc:<id>)
         // Also matches legacy format: [Author, Year] (without the doc: link)
         // Group 1: display text (e.g., "Smith et al., 2021")
-        // Group 2: optional document ID (e.g., "pmid-12345678")
+        // Group 2: optional document identity, opaque to this parser
         let referencePattern = "\\[([^\\]]+?,\\s*\\d{4}[a-z]?)\\](?:\\(doc:([^)]+)\\))?"
         guard let regex = try? NSRegularExpression(pattern: referencePattern) else {
             return parseBasicFormatting(text)
@@ -1095,7 +1100,7 @@ struct MarkdownReportView: View {
             refAttr.underlineStyle = Text.LineStyle.single
 
             // Use document ID if available, otherwise fall back to display text for lookup
-            // URL format: docref://lookup?type=id&value=pmid-12345 or docref://lookup?type=ref&value=encoded-ref
+            // URL format: docref://lookup?type=id&value=<id> or docref://lookup?type=ref&value=encoded-ref
             if let docId = documentId {
                 let encoded = docId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? docId
                 if let url = URL(string: "docref://lookup?type=id&value=\(encoded)") {
@@ -1144,7 +1149,7 @@ struct MarkdownReportView: View {
             return
         }
 
-        // Parse query parameters: docref://lookup?type=id&value=pmid-12345
+        // Parse query parameters: docref://lookup?type=id&value=<id>
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let queryItems = components.queryItems else {
             return
@@ -1169,7 +1174,12 @@ struct MarkdownReportView: View {
 
     /// Find a document by its unique ID.
     ///
-    /// - Parameter documentId: The document's unique identifier (e.g., "pmid-12345678").
+    /// Matched exactly, which is what keeps a report saved before #208 working:
+    /// its targets name the `pmid-<slot>` identities those rows were given and
+    /// still hold. Nothing here may reconstruct an identity from an article's
+    /// fields — that is how one lookup came to answer for two documents.
+    ///
+    /// - Parameter documentId: The document's identity, as the report names it.
     /// - Returns: The matching document, or nil if not found.
     private func findDocumentById(_ documentId: String) -> Document? {
         return documents.first { $0.id == documentId }

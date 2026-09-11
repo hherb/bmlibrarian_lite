@@ -17,6 +17,7 @@
 #if os(iOS)
 import SwiftUI
 import UIKit
+import BioMedLit
 
 /// Paper size options for PDF export.
 enum PaperSize: String, CaseIterable, Identifiable {
@@ -335,12 +336,12 @@ struct PDFExporter {
                         addSpacing(PDFLayout.headingBottomSpacing)
 
                     case .paragraph(let text):
-                        let cleanedText = convertReferencesToPlainText(text)
+                        let cleanedText = ReportFormatter.flattenedReferenceLinks(in: text)
                         _ = drawFormattedText(cleanedText, baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
                         addSpacing(PDFLayout.paragraphSpacing)
 
                     case .listItem(let text, let ordered, let number):
-                        let cleanedText = convertReferencesToPlainText(text)
+                        let cleanedText = ReportFormatter.flattenedReferenceLinks(in: text)
                         let bullet = ordered ? "\(number ?? 1)." : "•"
                         _ = drawFormattedText("\(bullet) \(cleanedText)", baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
                         addSpacing(PDFLayout.listItemSpacing)
@@ -638,48 +639,6 @@ struct PDFExporter {
             return nil
         }
         return String(line[textRange])
-    }
-
-    /// Convert interactive references to plain text with PMIDs.
-    ///
-    /// Converts `[Author, Year](doc:pmid-12345)` to `Author, Year (PMID: 12345)`.
-    private static func convertReferencesToPlainText(_ text: String) -> String {
-        var result = text
-
-        // Pattern for references with document ID: [Author, Year](doc:pmid-12345)
-        let patternWithId = "\\[([^\\]]+)\\]\\(doc:pmid-(\\d+)\\)"
-        if let regex = try? NSRegularExpression(pattern: patternWithId) {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "$1 (PMID: $2)"
-            )
-        }
-
-        // Pattern for references with generic doc ID: [Author, Year](doc:id)
-        let patternGenericId = "\\[([^\\]]+)\\]\\(doc:[^)]+\\)"
-        if let regex = try? NSRegularExpression(pattern: patternGenericId) {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "$1"
-            )
-        }
-
-        // Remove remaining markdown link syntax: [text](url) -> text
-        let linkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
-        if let regex = try? NSRegularExpression(pattern: linkPattern) {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "$1"
-            )
-        }
-
-        return result
     }
 
     /// Create a temporary file URL for the PDF.
