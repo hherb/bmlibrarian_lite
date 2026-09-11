@@ -590,7 +590,7 @@ struct PrintableMarkdownView: View {
 
     @ViewBuilder
     private func renderParagraph(_ text: String) -> some View {
-        Text(ReportFormatter.flattenedReferenceLinks(in: text))
+        Text(ReportFormatter.plainText(fromReportMarkdown: text))
             .font(.body)
             .padding(.vertical, 2)
     }
@@ -609,7 +609,7 @@ struct PrintableMarkdownView: View {
                     .fontWeight(.bold)
                     .frame(width: 20, alignment: .trailing)
             }
-            Text(ReportFormatter.flattenedReferenceLinks(in: text))
+            Text(ReportFormatter.plainText(fromReportMarkdown: text))
                 .font(.body)
         }
         .padding(.vertical, 1)

@@ -170,45 +170,94 @@ public enum ReportFormatter {
 
     // MARK: - Reference Link Flattening
 
-    /// Report markdown with its interactive document links reduced to plain text.
+    /// Markdown link syntax, compiled once.
+    ///
+    /// The pattern is a literal, so a failure here means the build is broken
+    /// rather than the input is odd. It is still logged rather than dropped,
+    /// because the consequence is otherwise silent and permanent: every caller
+    /// would render raw `[text](doc:…)` onto a page a reader keeps.
+    private static let markdownLinkRegex: NSRegularExpression? = {
+        do {
+            return try NSRegularExpression(
+                pattern: BioMedLitConstants.markdownLinkPattern
+            )
+        } catch {
+            BioMedLitLib.logger?.error(
+                """
+                Markdown link pattern failed to compile, so report links will \
+                render as raw markdown: \(error.localizedDescription)
+                """,
+                category: .parsing
+            )
+            return nil
+        }
+    }()
+
+    /// Every markdown link in a report reduced to its display text.
     ///
     /// The report body carries references as `[Smith et al., 2016](doc:<id>)`,
     /// where the link target is a document's identity and the display text is
-    /// what a reader is meant to see. A renderer that cannot follow a link —
-    /// an exported PDF, a print view — needs the display text alone.
+    /// what a reader is meant to see. A renderer that cannot follow a link needs
+    /// the display text alone. Ordinary links are flattened on the same ground:
+    /// such a renderer has no way to offer their destination either.
+    ///
+    /// Emphasis markers are deliberately left standing, because the caller that
+    /// wants them gone is not the caller that wants them kept — `PDFExporter`
+    /// consumes `**` itself to set a bold font. A renderer that shows text
+    /// verbatim wants ``plainText(fromReportMarkdown:)`` instead.
     ///
     /// ## The link target is not an identifier
     ///
-    /// This function once had a branch matching `doc:pmid-<digits>` and
-    /// rendering it as `(PMID: <digits>)`. Documents were identified as
-    /// `pmid-<primary slot>`, and that slot also holds Europe PMC thesis,
-    /// case-report and `HIR` accessions — bare decimals indistinguishable from a
-    /// PubMed ID, of which Europe PMC serves 322,044 with abstracts (#212).
+    /// Each of the three private copies this replaces had a branch matching
+    /// `doc:pmid-<digits>` and rendering it as `(PMID: <digits>)`. Documents
+    /// were identified as `pmid-<primary slot>`, and that slot also holds
+    /// Europe PMC thesis, case-report and `HIR` accessions: bare decimals
+    /// indistinguishable from a PubMed ID, which Europe PMC serves in bulk.
+    /// See ``ArticleIdentifierKind/pubmed`` for the measurement and its date.
     /// An exported report therefore printed a locator that resolves, on PubMed,
-    /// to a real but unrelated article.
+    /// to a real but unrelated article (#212).
     ///
-    /// The argument is a report's markdown and nothing else: this function
-    /// never sees the documents, so it cannot establish what a target names and
-    /// must not guess. The numbered reference list carries the
-    /// namespace-labelled identifier instead — see ``ReferenceData/identifier``,
-    /// filled by a caller that has the document.
+    /// The argument is a report's markdown and nothing else: this function never
+    /// sees the documents, so it cannot establish what a target names and must
+    /// not guess. The numbered reference list carries the namespace-labelled
+    /// identifier instead. See ``ReferenceData/identifier``, filled by a caller
+    /// that has the document.
     ///
-    /// Saved reports still carry `doc:pmid-…` targets, so this is not only
-    /// about text written from here on.
+    /// Saved reports still carry `doc:pmid-…` targets, so this is not only about
+    /// text written from here on.
     ///
     /// - Parameter text: Report markdown.
     /// - Returns: The same markdown with every link reduced to its display text.
     public static func flattenedReferenceLinks(in text: String) -> String {
-        // Markdown link syntax, document references included: [text](target).
-        let linkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
-        guard let regex = try? NSRegularExpression(pattern: linkPattern) else {
-            return text
-        }
+        guard let regex = markdownLinkRegex else { return text }
         return regex.stringByReplacingMatches(
             in: text,
             range: NSRange(text.startIndex..., in: text),
             withTemplate: "$1"
         )
+    }
+
+    /// A report's markdown reduced to what a verbatim renderer should show.
+    ///
+    /// Links become their display text and emphasis markers are removed. That is
+    /// what a renderer which follows no links and parses no markdown needs:
+    /// SwiftUI's `Text(_:)` over a runtime `String` prints `**` as two literal
+    /// asterisks, and ``formatReferences(_:)`` opens every entry with `**1.**`.
+    ///
+    /// Kept separate from ``flattenedReferenceLinks(in:)`` because the two
+    /// renderers genuinely differ, and conflating them has already cost once:
+    /// three private copies were consolidated on the assumption they were
+    /// identical, when two stripped emphasis and the third relied on it
+    /// surviving to set a bold font (#226).
+    ///
+    /// - Parameter text: Report markdown.
+    /// - Returns: Plain text carrying no link syntax and no emphasis markers.
+    public static func plainText(fromReportMarkdown text: String) -> String {
+        var result = flattenedReferenceLinks(in: text)
+        for marker in BioMedLitConstants.markdownEmphasisMarkers {
+            result = result.replacingOccurrences(of: marker, with: "")
+        }
+        return result
     }
 
     // MARK: - No Evidence Content

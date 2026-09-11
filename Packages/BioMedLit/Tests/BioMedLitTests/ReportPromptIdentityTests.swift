@@ -46,6 +46,50 @@ final class ReportPromptIdentityTests: XCTestCase {
         XCTAssertFalse(prompt.contains("doc:pmid-"), prompt)
     }
 
+    /// The example is a UUID, which is what the app actually issues.
+    ///
+    /// Asserting only the absence of `doc:pmid-` passes if the example is
+    /// deleted, or replaced with `doc:PMC123`, or with a bare `doc:12345678` —
+    /// the same defect wearing a different costume. This pins the shape that is
+    /// meant to be there rather than one of the shapes that is not.
+    func testTheCitationExampleShowsAUUIDShapedIdentity() {
+        let example = prompt
+            .split(separator: "\n")
+            .first { $0.contains("Example:") }
+
+        let exampleLine = try? XCTUnwrap(example, "prompt carries no citation example")
+        guard let exampleLine else { return }
+
+        let target = exampleLine
+            .split(separator: "(doc:")
+            .last?
+            .prefix { $0 != ")" }
+        XCTAssertNotNil(target, String(exampleLine))
+        XCTAssertNotNil(
+            UUID(uuidString: String(target ?? "")),
+            "citation example target is not a UUID: \(exampleLine)"
+        )
+    }
+
+    /// A UUID reaches the model unchanged in the `ID:` field it is told to copy.
+    ///
+    /// The example and the field are two halves of one contract; pinning only
+    /// the example leaves the producing side free to drift.
+    func testAnIdentityReachesThePromptVerbatim() {
+        let identity = UUID().uuidString
+        let citations = ReportFormatter.formatCitationsForPrompt([
+            ReportFormatter.CitationData(
+                documentId: identity,
+                authors: "Smith et al.",
+                year: 2016,
+                title: "A trial",
+                passage: "It helped."
+            )
+        ])
+
+        XCTAssertTrue(citations.contains("ID: \(identity)"), citations)
+    }
+
     /// The instruction the example illustrates is still there: the model copies
     /// an ID rather than composing one.
     func testTheModelIsStillToldToCopyTheIdentityVerbatim() {

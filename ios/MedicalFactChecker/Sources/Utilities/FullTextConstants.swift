@@ -56,17 +56,6 @@ enum FullTextConstants {
     /// Maximum markdown heading level.
     static let maxHeadingLevel = 6
 
-    // MARK: - File Paths
-
-    /// Directory name for storing downloaded PDFs.
-    static let pdfDirectoryName = "PDFs"
-
-    /// Prefix for PDF filenames.
-    static let pdfFilenamePrefix = "pmid-"
-
-    /// Extension for PDF files.
-    static let pdfExtension = "pdf"
-
     // MARK: - Fallback Values
 
     /// Default filename for downloaded articles without a name.

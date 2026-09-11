@@ -33,9 +33,24 @@ the rest.
   - **A renderer that cannot see the documents may not name an identifier.**
     `PDFExporter` and both `PrintableReportView`s turned `doc:pmid-889149` into
     `(PMID: 889149)` in the exported body — #212 exactly, on the three surfaces
-    #218 missed, in a document that outlives the app. One pure
-    `ReportFormatter.flattenedReferenceLinks(in:)` replaces three identical
-    private copies, which is how one defect sat in three places.
+    #218 missed, in a document that outlives the app. `ReportFormatter` now owns
+    this: `flattenedReferenceLinks(in:)` for a renderer that parses emphasis
+    itself, `plainText(fromReportMarkdown:)` for one that does not.
+  - **"Three identical private copies" was wrong, and the review caught it.**
+    They were not identical: both `PrintableReportView` copies also stripped
+    `**` and `__`, while `PDFExporter` needed `**` to survive so
+    `drawFormattedText` could set a bold font. Consolidating onto one function
+    dropped the emphasis stripping into a plain `Text(_:)`, which renders
+    markers literally. Hence two functions. **Before deduplicating, diff the
+    copies — do not trust the claim that they match, including your own.**
+  - **The reader-facing surface is `plainTextReport`, not the print views.**
+    Both `PrintableReportView`s are instantiated nowhere (#221) and macOS PDF
+    export is a stub, so the three surfaces #226 first fixed reach a reader on
+    iOS only. `EvidenceReport.plainTextReport` feeds the clipboard and share
+    sheet on iOS and the clipboard and *Export as Text* on macOS, and it
+    interpolated `fullReport` raw. **When fixing a rendering defect, find the
+    surface a user actually reaches before enumerating the ones that look
+    alike.**
   - **No migration, and none needed.** Stored rows keep the identity they were
     given, so a report saved before this resolves by exact match. Nothing may
     reconstruct an identity from an article's fields.
@@ -45,9 +60,16 @@ the rest.
   - **A gate must ask exactly what the thing it gates asks.**
     `canAnalyzeTransparency` read the raw slot while the analyser is passed
     `Document.pubmedID`, so a thesis with no DOI — 60 of 100 such records — was
-    offered a button that threw `noIdentifiers`. Now `pubmedID != nil || doi !=
-    nil`; `pmcId` is deliberately not a third rung, because the analyser has no
-    route that starts from one.
+    offered a button that threw `noIdentifiers`. Now `pubmedID != nil ||
+    usableDOI != nil`; `pmcId` is deliberately not a third rung, because the
+    analyser has no route that starts from one. `usableDOI` trims, because a
+    provider's JSON can send `""` and `doi != nil` reads that as present.
+  - **A shared gate is only shared if every caller reads it.** The docstring
+    said the report views and the workflow agree on eligibility; the workflow
+    filtered on score and staleness only, called `analyze`, and swallowed the
+    guaranteed `noIdentifiers` into a warning. It now reads the gate, separates
+    cancellation from failure, logs the identity rather than the empty slot, and
+    reports failures to the user. **A claim in a docstring is not a call site.**
   - **Six document lists identified rows by `\.pmid`**, the same mistake one
     layer up; they use `\.id`.
   - Lodged rather than fixed: **#224** (an unresolvable report reference is a

@@ -94,4 +94,54 @@ final class TransparencyEligibilityTests: XCTestCase {
     func testARecordWithNeitherIsNotEligible() {
         XCTAssertFalse(makeDocument(pmid: "").canAnalyzeTransparency)
     }
+
+    /// A PMC accession is deliberately not a third rung.
+    ///
+    /// ``Document/canAnalyzeTransparency`` reasons at length that admitting one
+    /// would re-open the gap it closes, because `TransparencyAnalysisService`
+    /// has no route that starts from a PMC ID. Reasoning is not enforcement: a
+    /// well-meant `|| pmcId != nil` would pass every other test in this file.
+    func testAPMCOnlyRecordIsNotEligible() {
+        let pmcOnly = makeDocument(
+            pmid: "",
+            kind: .pmc,
+            provider: .europePMC
+        )
+        pmcOnly.pmcId = "PMC1234567"
+
+        XCTAssertFalse(pmcOnly.canAnalyzeTransparency)
+    }
+
+    /// A DOI that is present but blank names nothing, and must not open the gate.
+    ///
+    /// ``Document/doi`` comes straight from a provider's JSON, so `""` is
+    /// representable. Both this gate and the analyser's own guard tested
+    /// `doi != nil`, which an empty string passes: the button appeared and the
+    /// analysis then ran against a blank DOI. Same defect class as #212 one
+    /// field over — a value present without naming anything.
+    func testABlankDOIIsNotEligible() {
+        let blank = makeDocument(pmid: "889149", kind: .europePMCSource("eth"), doi: "")
+        let whitespace = makeDocument(
+            pmid: "889149",
+            kind: .europePMCSource("eth"),
+            doi: "   \n "
+        )
+
+        XCTAssertFalse(blank.canAnalyzeTransparency)
+        XCTAssertFalse(whitespace.canAnalyzeTransparency)
+        XCTAssertNil(blank.usableDOI)
+        XCTAssertNil(whitespace.usableDOI)
+    }
+
+    /// A real DOI survives trimming and still reaches the analyser.
+    func testASurroundedDOIIsTrimmedRatherThanRejected() {
+        let padded = makeDocument(
+            pmid: "889149",
+            kind: .europePMCSource("eth"),
+            doi: "  10.1101/2024.01.01.573000\n"
+        )
+
+        XCTAssertTrue(padded.canAnalyzeTransparency)
+        XCTAssertEqual(padded.usableDOI, "10.1101/2024.01.01.573000")
+    }
 }

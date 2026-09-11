@@ -1903,9 +1903,18 @@ final class FactCheckWorkflow {
         // every result from an earlier analyzer permanently excluded — the version
         // stamp would mark it stale forever while nothing ever refreshed it, and
         // the only remedy shipped was a per-document button in a detail sheet.
+        //
+        // The last filter is the same gate the report views use. Without it,
+        // every document whose only identifier is a thesis or preprint
+        // accession was still handed to
+        // `analyze`, which throws `noIdentifiers` by design — a guaranteed
+        // round trip to a guaranteed failure, once per document. 60 of 100
+        // sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records carry no DOI, so this
+        // is the common case for that population rather than an edge.
         let documentsToAnalyze = (session.documents ?? [])
             .filter { $0.meetsThreshold(settings.minScoreThreshold) }
             .filter { !$0.hasTransparencyAnalysis || $0.transparencyAnalysisIsStale }
+            .filter { $0.canAnalyzeTransparency }
 
         guard !documentsToAnalyze.isEmpty else {
             updateProgress(.analyzingTransparency, "No documents to analyze for transparency")
@@ -1913,6 +1922,7 @@ final class FactCheckWorkflow {
         }
 
         let service = TransparencyAnalysisService.create(from: settings)
+        var failures: [String] = []
 
         for (index, document) in documentsToAnalyze.enumerated() {
             if Task.isCancelled { break }
@@ -1924,7 +1934,10 @@ final class FactCheckWorkflow {
 
             do {
                 let result = try await service.analyze(
-                    doi: document.doi,
+                    // Not the raw field: it may be an empty string straight
+                    // from a provider's JSON, which `analyze`'s own guard reads
+                    // as present and then searches CrossRef for.
+                    doi: document.usableDOI,
                     // Not the raw slot: it also holds thesis and case-report
                     // accessions, and `analyze` searches PubMed with whatever
                     // it is given, then adopts the first hit's title, journal,
@@ -1938,12 +1951,54 @@ final class FactCheckWorkflow {
                 )
                 document.storeTransparencyResult(result)
                 try? modelContext.save()
+            } catch is CancellationError {
+                // The user stopped the run. Not a failure, and it must not be
+                // counted as one or reported as though something went wrong.
+                break
             } catch {
-                logger.warning(
-                    "Transparency analysis failed for \(document.pmid): \(error.localizedDescription)"
+                // Keyed by identity, not by `pmid`: that slot is empty for
+                // exactly the documents this workflow has most trouble with,
+                // which made the log line read "failed for : ..." (#208).
+                failures.append(document.title)
+                logger.error(
+                    """
+                    Transparency analysis failed for \(document.id) \
+                    (\(document.title)): \(error.localizedDescription)
+                    """
                 )
             }
         }
+
+        // Golden rule 8: a per-document failure is still a failure the reader
+        // must be told about. Each one leaves a document with no transparency
+        // badge, and a missing badge is otherwise indistinguishable from one
+        // that was analysed and found nothing worth flagging.
+        //
+        // Only when nothing else has claimed the slot: a fatal error stopping
+        // the run matters more than a per-document miss, and must not be
+        // overwritten by it.
+        if !failures.isEmpty, session.errorMessage == nil {
+            session.errorMessage = Self.transparencyFailureNotice(for: failures)
+        }
+    }
+
+    /// A one-line summary of the documents whose transparency analysis failed.
+    ///
+    /// Names them while the list is short enough to read, because a bare count
+    /// leaves the reader unable to tell *which* badge is missing. Past that it
+    /// counts, since a notice nobody finishes reading reports nothing.
+    ///
+    /// No failure is lost either way: each one is logged individually with the
+    /// document's identity and the underlying error as it happens. This is a
+    /// summary of that log, not a substitute for it.
+    ///
+    /// - Parameter titles: Titles of the documents that failed, in run order.
+    /// - Returns: A sentence naming or counting the failures.
+    private static func transparencyFailureNotice(for titles: [String]) -> String {
+        if titles.count <= WorkflowConstants.maxFailedTitlesToName {
+            return "Transparency analysis failed for: \(titles.joined(separator: "; "))"
+        }
+        return "Transparency analysis could not be completed for \(titles.count) documents"
     }
 
     private func generateReport() async throws {

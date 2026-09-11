@@ -44,12 +44,21 @@ final class Document {
     /// reasons it was `"pmid-\(pmid)"` and did both wrong.
     ///
     /// **It must be unique, and `.unique` is gone.** The attribute was dropped
-    /// for CloudKit, so nothing rejects duplicates, and `pmid` is the primary
-    /// identifier slot — `pmid ?? id ?? ""` at the Europe PMC decode site —
-    /// which is empty for a record carrying none of the three. Every such
-    /// document was `"pmid-"`, and `documents.first { $0.id == documentId }`
-    /// handed back whichever came first (#208). A UUID makes uniqueness a
-    /// property of the value rather than an argument about the data.
+    /// for CloudKit, so nothing rejects a duplicate. An identity derived from
+    /// the article hands the same string to every row describing that article,
+    /// and `documents.first { $0.id == documentId }` then answers with whichever
+    /// comes first (#208). The degenerate case is an empty slot: `pmid` holds
+    /// whatever `EuropePMCService.searchArticle(from:)` put in the primary
+    /// identifier slot — a PubMed ID, a `PPR…` preprint accession or a PMC
+    /// accession — and a record carrying none of them left every such document
+    /// as the literal `"pmid-"`.
+    ///
+    /// That degenerate case is reachable rather than observed: Europe PMC always
+    /// sends `id`, so the slot is never empty from a live search. 0 of 100
+    /// sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records and 0 of 100 `SRC:PPR`
+    /// records lacked one, measured 2026-09-11. Which case was live does not
+    /// change the remedy: a UUID makes uniqueness a property of the value
+    /// rather than an argument about the data, so neither case can return.
     ///
     /// **It must not claim a kind.** The slot also holds `PPR…` preprint
     /// accessions and Europe PMC thesis accessions — bare decimals
@@ -407,7 +416,7 @@ final class Document {
     /// Whether transparency analysis can be attempted for this document at all.
     ///
     /// The two values the analyser is actually given, and nothing else. This is
-    /// deliberately the same pair its three call sites pass — ``doi`` and
+    /// deliberately the same pair every call site passes — ``usableDOI`` and
     /// ``pubmedID`` — because `TransparencyAnalysisService.analyze` throws
     /// `noIdentifiers` when both are absent, and a gate that admits more than
     /// the analyser accepts offers the reader a button that cannot work.
@@ -424,9 +433,26 @@ final class Document {
     /// closes.
     ///
     /// Shared so the report views and the workflow agree on what is eligible
-    /// instead of each restating it.
+    /// instead of each restating it. Every caller of the analyser gates on this
+    /// and then passes ``usableDOI`` and ``pubmedID`` — the same two values this
+    /// tests, so the gate cannot drift from the call it guards.
     var canAnalyzeTransparency: Bool {
-        pubmedID != nil || doi != nil
+        pubmedID != nil || usableDOI != nil
+    }
+
+    /// ``doi`` with surrounding whitespace removed, or nil when it names nothing.
+    ///
+    /// The stored value arrives straight from a provider's JSON through
+    /// ``applySearchMetadata(from:)``, so an empty string is representable. Both
+    /// this gate and `TransparencyAnalysisService.analyze`'s own guard tested
+    /// `doi != nil`, which `""` passes, and the analysis then ran against a
+    /// blank DOI. That is #212's defect class one field over: a value present
+    /// without naming anything. ``pubmedID`` already rejects a blank slot, so
+    /// this is the pair made consistent rather than a new rule.
+    var usableDOI: String? {
+        guard let doi else { return nil }
+        let trimmed = doi.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Shortcut for badge display without full JSON decode.
@@ -722,14 +748,14 @@ final class Document {
         switch resolvedIdentifierKind {
         case .pubmed:
             guard let pubmedID else { return nil }
-            return CitationIdentifier(namespace: "PMID", value: pubmedID)
+            return .pubMed(pubmedID)
         case .pmc:
-            return CitationIdentifier(namespace: "PMCID", value: identifier)
+            return .pmc(identifier)
         case .preprint, .europePMCSource:
-            return CitationIdentifier(namespace: "Europe PMC", value: identifier)
+            return .europePMC(identifier)
         case .unknown:
             guard recordedProvider == .europePMC else { return nil }
-            return CitationIdentifier(namespace: "Europe PMC", value: identifier)
+            return .europePMC(identifier)
         }
     }
 
@@ -1333,17 +1359,73 @@ final class Document {
 /// ``Document/citationIdentifier``. A bare number under a guessed label is #212
 /// in the form that outlives the app.
 struct CitationIdentifier: Equatable, Hashable, Sendable {
-    /// The namespace that resolves ``value``, such as `PMID` or `Europe PMC`.
+    /// A namespace that can actually resolve an identifier.
     ///
-    /// Not localised: these are the namespaces' own names, and a citation is
-    /// read by people who look the identifier up, including in other tools.
-    let namespace: String
+    /// A closed set, because the whole point of this type is that a label is
+    /// never invented. A free `String` here let `CitationIdentifier(namespace:
+    /// "PMID", value: pmid)` compile over the raw slot — #212 rebuilt by hand,
+    /// at any call site — and let a typo such as `"PMC ID"` reach an exported
+    /// citation with nothing to catch it.
+    ///
+    /// Raw values are not localised: these are the namespaces' own names, read
+    /// by people who look the identifier up, including in other tools.
+    enum Namespace: String, Equatable, Hashable, Sendable, CaseIterable {
+        /// A PubMed record, resolvable at pubmed.ncbi.nlm.nih.gov.
+        case pubmed = "PMID"
+
+        /// A PubMed Central record, resolvable at ncbi.nlm.nih.gov/pmc.
+        case pmc = "PMCID"
+
+        /// A Europe PMC record: preprint, thesis or case report accession.
+        case europePMC = "Europe PMC"
+    }
+
+    /// The namespace that resolves ``value``.
+    let namespace: Namespace
 
     /// The identifier itself, with no label and no surrounding whitespace.
     let value: String
 
     /// The form a citation prints: namespace, colon, value.
-    var labelled: String { "\(namespace): \(value)" }
+    var labelled: String { "\(namespace.rawValue): \(value)" }
+
+    /// Private so a namespace is always chosen through a named factory below.
+    ///
+    /// The factories are the whole enforcement: each one states which namespace
+    /// it vouches for, so a caller cannot pair a value with a label the caller
+    /// merely guessed.
+    ///
+    /// - Parameters:
+    ///   - namespace: The namespace that resolves `value`.
+    ///   - value: The identifier, trimmed by the caller.
+    private init(namespace: Namespace, value: String) {
+        self.namespace = namespace
+        self.value = value
+    }
+
+    /// A PubMed ID, which only ``Document/pubmedID`` may vouch for.
+    ///
+    /// - Parameter id: A verified PubMed ID.
+    /// - Returns: The identifier, labelled `PMID`.
+    static func pubMed(_ id: String) -> Self {
+        Self(namespace: .pubmed, value: id)
+    }
+
+    /// A PubMed Central accession.
+    ///
+    /// - Parameter accession: A PMC accession.
+    /// - Returns: The identifier, labelled `PMCID`.
+    static func pmc(_ accession: String) -> Self {
+        Self(namespace: .pmc, value: accession)
+    }
+
+    /// A Europe PMC accession, which names no kind beyond its own provider.
+    ///
+    /// - Parameter accession: A Europe PMC accession.
+    /// - Returns: The identifier, labelled `Europe PMC`.
+    static func europePMC(_ accession: String) -> Self {
+        Self(namespace: .europePMC, value: accession)
+    }
 }
 
 // MARK: - Displayed Full Text

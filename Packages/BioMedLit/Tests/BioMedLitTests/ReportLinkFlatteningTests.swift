@@ -20,9 +20,12 @@ import XCTest
 /// Flattening a report's interactive references for a renderer that cannot
 /// follow links.
 ///
-/// The function lived in three identical private copies — `PDFExporter` and
-/// both `PrintableReportView`s — which is how one defect sat in all three at
-/// once. It is one pure function here so a fix reaches every renderer.
+/// The function lived in three private copies — `PDFExporter` and both
+/// `PrintableReportView`s — which is how one defect sat in all three at once.
+/// They were *not* identical, and consolidating on that assumption dropped
+/// behaviour: the two view copies also stripped `**` and `__`, while
+/// `PDFExporter` relied on `**` surviving so `drawFormattedText` could set a
+/// bold font. That is why there are two functions here and not one.
 final class ReportLinkFlatteningTests: XCTestCase {
     /// A document link is replaced by the text a reader is meant to see.
     func testADocumentLinkIsReducedToItsDisplayText() {
@@ -80,5 +83,56 @@ final class ReportLinkFlatteningTests: XCTestCase {
         let prose = "The trial reported a 12% [sic] reduction in mortality."
 
         XCTAssertEqual(ReportFormatter.flattenedReferenceLinks(in: prose), prose)
+    }
+
+    // MARK: - Emphasis
+
+    /// Emphasis markers survive link flattening, because one caller needs them.
+    ///
+    /// `PDFExporter.drawFormattedText` consumes `**` itself to switch to a bold
+    /// font. Stripping it here would turn real bold in an exported PDF into
+    /// plain text, which is why this function does not do the whole job.
+    func testEmphasisMarkersSurviveForARendererThatUnderstandsThem() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "**Key finding:** it helped [Smith, 2016](doc:abc)."
+        )
+
+        XCTAssertEqual(flattened, "**Key finding:** it helped Smith, 2016.")
+    }
+
+    /// A verbatim renderer gets no markers, because it would print them.
+    ///
+    /// SwiftUI's `Text(_:)` over a runtime `String` does not parse markdown, so
+    /// `**` reaches the page as two asterisks. Both printable report views feed
+    /// it exactly that.
+    func testPlainTextRemovesEmphasisMarkers() {
+        let plain = ReportFormatter.plainText(
+            fromReportMarkdown: "**Key finding:** it __helped__ [Smith, 2016](doc:abc)."
+        )
+
+        XCTAssertEqual(plain, "Key finding: it helped Smith, 2016.")
+    }
+
+    /// The reference list is the worst case, so it is pinned directly.
+    ///
+    /// ``ReportFormatter/formatReferences(_:)`` opens every entry with `**1.**`,
+    /// so a renderer that shows markers verbatim gains four asterisks on every
+    /// line of the list a reader is most likely to read.
+    func testPlainTextCleansAFormattedReferenceLine() {
+        let plain = ReportFormatter.plainText(
+            fromReportMarkdown: "**1.** **Nyby, J (1977).** Mouse courtship. Europe PMC: 889149"
+        )
+
+        XCTAssertEqual(plain, "1. Nyby, J (1977). Mouse courtship. Europe PMC: 889149")
+        XCTAssertFalse(plain.contains("*"), plain)
+    }
+
+    /// A single asterisk is left alone: in a title it is far more often literal.
+    func testPlainTextLeavesUnpairedMarkersAlone() {
+        let plain = ReportFormatter.plainText(
+            fromReportMarkdown: "Survival at 5* years was 80%."
+        )
+
+        XCTAssertEqual(plain, "Survival at 5* years was 80%.")
     }
 }

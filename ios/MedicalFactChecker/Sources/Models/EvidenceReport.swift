@@ -16,6 +16,7 @@
 
 import Foundation
 import SwiftData
+import BioMedLit
 
 /// The final evidence report for a fact-check session.
 ///
@@ -119,6 +120,17 @@ final class EvidenceReport {
     }
 
     /// Plain text version of the report for sharing.
+    ///
+    /// The body is flattened first. ``fullReport`` is markdown carrying its
+    /// references as `[Smith et al., 2016](doc:<identity>)`, and this string
+    /// goes to the clipboard, the share sheet and *Export as Text* — none of
+    /// which can follow a link. Interpolated raw, it put the link syntax and a
+    /// document's identity into prose that a reader keeps and forwards.
+    ///
+    /// The identity must not be shown for the reason ``Document/id`` gives: it
+    /// names a row, not an article, and nothing outside the app can resolve it.
+    /// A reader who wants to look a study up is served by the reference list,
+    /// which carries a namespace-labelled identifier.
     var plainTextReport: String {
         """
         MEDICAL FACT CHECK REPORT
@@ -131,7 +143,7 @@ final class EvidenceReport {
 
         ---
 
-        \(fullReport)
+        \(ReportFormatter.plainText(fromReportMarkdown: fullReport))
 
         ---
         Based on \(uniqueSourceCount) sources, \(citationCount) citations.

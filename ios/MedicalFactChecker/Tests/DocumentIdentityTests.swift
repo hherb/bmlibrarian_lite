@@ -73,8 +73,19 @@ final class DocumentIdentityTests: XCTestCase {
     func testAnIdentityClaimsNoNamespace() {
         let preprint = makeDocument(pmid: "PPR1287966")
 
+        // Asserted first: every other assertion here passes trivially for an
+        // empty identity, which is the #208 value itself.
+        XCTAssertFalse(preprint.id.isEmpty)
         XCTAssertFalse(preprint.id.lowercased().contains("pmid"), preprint.id)
         XCTAssertFalse(preprint.id.contains("PPR1287966"), preprint.id)
+    }
+
+    /// An identity is a UUID, which is what makes uniqueness a property of the
+    /// value rather than an argument about the data.
+    func testAnIdentityIsAUUID() {
+        let document = makeDocument(pmid: "")
+
+        XCTAssertNotNil(UUID(uuidString: document.id), document.id)
     }
 
     /// Identity is assigned once and does not move.
