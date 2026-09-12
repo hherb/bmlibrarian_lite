@@ -316,12 +316,56 @@ public enum BioMedLitConstants {
     /// PDF magic bytes ("%PDF").
     public static let pdfMagicBytes: [UInt8] = [0x25, 0x50, 0x44, 0x46]
 
+    /// The URL scheme a report uses to point a reference at its document.
+    ///
+    /// Written by this app's report prompt and read back by this app alone, so
+    /// a parenthetical opening with it is machine syntax rather than an
+    /// article's prose. That is what licenses the two tolerances below.
+    public static let documentReferenceScheme = "doc:"
+
     /// Markdown link syntax: `[display text](target)`.
     ///
     /// Capture group 1 is the display text. The target is matched as an opaque
     /// run and never inspected: a report's link target is a document's identity,
     /// and a renderer that cannot see the documents may not decide what it names.
-    public static let markdownLinkPattern = "\\[([^\\]]+)\\]\\([^)]+\\)"
+    ///
+    /// Four shapes the first version of this pattern refused, each of which put
+    /// a raw target onto a page a reader keeps (#230):
+    ///
+    /// - **A leading `!`** is consumed with the link it belongs to, so an image
+    ///   does not leave its marker stranded against the caption.
+    /// - **Display text may nest one level of brackets**, so an author's
+    ///   bracketed aside does not end the display text early.
+    /// - **A target may nest one level of parentheses**, because a Wiley DOI
+    ///   embeds one — `10.1002/(SICI)1097-0258` — and stopping at the first `)`
+    ///   left the tail of the URL in the prose.
+    /// - **Whitespace may separate `]` from a ``documentReferenceScheme``
+    ///   target.** A language model writes the report body, and a stray space is
+    ///   ordinary output. The tolerance stops at that scheme deliberately: were
+    ///   it general, `a 12% [sic] (95% CI 4-19) reduction` would lose its
+    ///   confidence interval.
+    ///
+    /// Each alternative in the two nested runs is distinguished by its first
+    /// character, so the pattern cannot backtrack catastrophically.
+    public static let markdownLinkPattern =
+        "!?\\[((?:[^\\[\\]]|\\[[^\\[\\]]*\\])+)\\]"
+        + "(?:[ \\t]*\\(\(documentReferenceScheme)(?:[^()]|\\([^()]*\\))*\\)"
+        + "|\\((?:[^()]|\\([^()]*\\))*\\))"
+
+    /// A document reference left behind once every link has been flattened.
+    ///
+    /// Two shapes reach here: a target with no closing parenthesis, and one with
+    /// no preceding link at all. Neither can be parsed, and neither may be
+    /// printed — a target is a row's identity, which means nothing to a reader,
+    /// and a legacy `pmid-889149` identity pasted into PubMed is a real 1977
+    /// paper on mouse courtship rather than the article cited (#212).
+    ///
+    /// The run stops at whitespace, which bounds what an unterminated target can
+    /// take with it: neither a UUID nor a legacy identity contains a space. One
+    /// preceding space is absorbed so a removed reference does not leave a
+    /// double gap mid-sentence.
+    public static let residualDocumentReferencePattern =
+        "[ \\t]?\\(\(documentReferenceScheme)[^)\\s]*\\)?"
 
     /// Markdown emphasis markers, removed for a renderer that shows text verbatim.
     ///

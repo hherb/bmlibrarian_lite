@@ -170,28 +170,47 @@ public enum ReportFormatter {
 
     // MARK: - Reference Link Flattening
 
-    /// Markdown link syntax, compiled once.
+    /// Compiles one of this type's literal patterns, reporting a failure.
     ///
-    /// The pattern is a literal, so a failure here means the build is broken
+    /// Each pattern is a literal, so a failure here means the build is broken
     /// rather than the input is odd. It is still logged rather than dropped,
     /// because the consequence is otherwise silent and permanent: every caller
     /// would render raw `[text](doc:…)` onto a page a reader keeps.
-    private static let markdownLinkRegex: NSRegularExpression? = {
+    ///
+    /// - Parameters:
+    ///   - pattern: The regular expression source.
+    ///   - consequence: What a reader sees if this pattern is unavailable,
+    ///     phrased to complete "so …".
+    /// - Returns: The compiled expression, or `nil` if it would not compile.
+    private static func compiled(
+        _ pattern: String,
+        consequence: String
+    ) -> NSRegularExpression? {
         do {
-            return try NSRegularExpression(
-                pattern: BioMedLitConstants.markdownLinkPattern
-            )
+            return try NSRegularExpression(pattern: pattern)
         } catch {
             BioMedLitLib.logger?.error(
                 """
-                Markdown link pattern failed to compile, so report links will \
-                render as raw markdown: \(error.localizedDescription)
+                Report formatting pattern failed to compile, so \(consequence): \
+                \(error.localizedDescription)
                 """,
                 category: .parsing
             )
             return nil
         }
-    }()
+    }
+
+    /// Markdown link syntax, compiled once.
+    private static let markdownLinkRegex: NSRegularExpression? = compiled(
+        BioMedLitConstants.markdownLinkPattern,
+        consequence: "report links will render as raw markdown"
+    )
+
+    /// Document references no link pattern could account for, compiled once.
+    private static let residualDocumentReferenceRegex: NSRegularExpression? = compiled(
+        BioMedLitConstants.residualDocumentReferencePattern,
+        consequence: "a malformed reference will print its document identity"
+    )
 
     /// Every markdown link in a report reduced to its display text.
     ///
@@ -226,15 +245,72 @@ public enum ReportFormatter {
     /// Saved reports still carry `doc:pmid-…` targets, so this is not only about
     /// text written from here on.
     ///
+    /// ## A target the pattern cannot parse is still removed
+    ///
+    /// A reference this function does not recognise used to pass through with
+    /// its target intact, which is the same reader-facing outcome by a different
+    /// route. Anything left carrying
+    /// ``BioMedLitConstants/documentReferenceScheme`` is therefore swept away
+    /// and reported — see ``withoutUnparseableDocumentReferences(in:)`` for what
+    /// survives that sweep and why.
+    ///
     /// - Parameter text: Report markdown.
-    /// - Returns: The same markdown with every link reduced to its display text.
+    /// - Returns: The same markdown with every link reduced to its display text
+    ///   and no document reference left standing.
     public static func flattenedReferenceLinks(in text: String) -> String {
         guard let regex = markdownLinkRegex else { return text }
-        return regex.stringByReplacingMatches(
+        let flattened = regex.stringByReplacingMatches(
             in: text,
             range: NSRange(text.startIndex..., in: text),
             withTemplate: "$1"
         )
+        return withoutUnparseableDocumentReferences(in: flattened)
+    }
+
+    /// Removes any document reference the link pattern could not account for,
+    /// and reports what it removed.
+    ///
+    /// Widening a pattern narrows the gap; it does not close it. Whatever the
+    /// link pattern misses used to reach the page with its target intact, and a
+    /// legacy `doc:pmid-889149` target printed there is #212 arriving through a
+    /// different door — `889149` is a real 1977 paper on mouse courtship, not
+    /// the article being cited. A target is a row's identity, which resolves
+    /// nowhere outside this app and means nothing to a reader, so removing one
+    /// discards nothing a reader wanted.
+    ///
+    /// Display text keeps its brackets where it has them. Nothing here can tell
+    /// where an unterminated target was meant to end, so guessing at the
+    /// author's intent would risk eating prose to tidy punctuation.
+    ///
+    /// Golden rule 8: the removal is an error, not a silent repair. Without the
+    /// report, the only symptom is wrong text in a document that outlives the
+    /// app.
+    ///
+    /// - Parameter text: Report markdown with every parseable link flattened.
+    /// - Returns: The same text with no document reference left standing.
+    private static func withoutUnparseableDocumentReferences(in text: String) -> String {
+        guard let regex = residualDocumentReferenceRegex else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: range)
+        guard !matches.isEmpty else { return text }
+
+        let removed = matches
+            .compactMap { Range($0.range, in: text) }
+            .map { text[$0].trimmingCharacters(in: .whitespaces) }
+
+        BioMedLitLib.logger?.error(
+            """
+            Report markdown carried \(matches.count) document \
+            reference(s) this formatter could not parse. Each target was removed \
+            rather than printed, because it names a row rather than an article \
+            and a bare number reads as a PubMed ID: \
+            \(removed.joined(separator: ", ")). A reference is written as \
+            [display text](\(BioMedLitConstants.documentReferenceScheme)<identity>).
+            """,
+            category: .parsing
+        )
+
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 
     /// A report's markdown reduced to what a verbatim renderer should show.
