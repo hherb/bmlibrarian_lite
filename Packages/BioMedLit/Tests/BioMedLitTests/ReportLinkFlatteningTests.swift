@@ -481,4 +481,46 @@ final class ReportLinkFlatteningTests: XCTestCase {
             logger.errors.joined()
         )
     }
+
+    // MARK: - Reporting a whole report at once (#233)
+
+    /// A renderer that parses block by block reports once for the report.
+    ///
+    /// The screen parses each paragraph separately, from inside a SwiftUI
+    /// `body` that runs on every layout pass. Logging per parse would repeat
+    /// one malformed reference per block per pass, which is the diagnostic the
+    /// next reader of the log learns to filter out (#237).
+    func testSeveralParsesAreReportedAsOneDiagnostic() {
+        ReportFormatter.reportUnparseableReferences(in: [
+            ReportInlineText(parsing: "A (doc:abc) first."),
+            ReportInlineText(parsing: "Clean [Smith, 2016](doc:ok)."),
+            ReportInlineText(parsing: "B [Jones, 2019](doc:def second."),
+        ])
+
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
+        let reported = logger.errors.joined(separator: "\n")
+        XCTAssertTrue(reported.contains("2 document"), reported)
+        XCTAssertTrue(reported.contains("(doc:abc)"), reported)
+        XCTAssertTrue(reported.contains("(doc:def"), reported)
+    }
+
+    /// Parses that removed nothing and retain no scheme report nothing.
+    func testCleanParsesReportNothing() {
+        ReportFormatter.reportUnparseableReferences(in: [
+            ReportInlineText(parsing: "Both [Smith, 2016](doc:abc) and [Jones, 2019] agree."),
+        ])
+
+        XCTAssertEqual(logger.recorded, [])
+    }
+
+    /// A scheme retained by any one parse is reported, once.
+    func testARetainedSchemeInAnyParseIsReported() {
+        ReportFormatter.reportUnparseableReferences(in: [
+            ReportInlineText(parsing: "Clean."),
+            ReportInlineText(parsing: "A [Smith, 2016]doc:pmid-889149 study."),
+        ])
+
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
+        XCTAssertTrue(logger.errors.joined().contains("survived"), logger.errors.joined())
+    }
 }

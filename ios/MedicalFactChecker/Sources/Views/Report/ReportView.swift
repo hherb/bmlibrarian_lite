@@ -150,7 +150,7 @@ struct ReportContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Summary")
                     .font(.headline)
-                Text(report.summary)
+                ReportSummaryText(report.summary)
                     .font(.body)
             }
             .padding()
@@ -316,7 +316,7 @@ struct ReportView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Summary")
                             .font(.headline)
-                        Text(report.summary)
+                        ReportSummaryText(report.summary)
                             .font(.body)
                     }
                     .padding()
@@ -835,17 +835,11 @@ struct ScoreBadge: View {
     }
 }
 
-/// A parsed reference from the markdown text.
-struct ParsedReference: Identifiable {
-    let id = UUID()
-    let text: String  // e.g., "Smith et al., 2021"
-    let range: Range<String.Index>
-}
-
 /// Markdown text renderer with clickable references.
 ///
-/// Parses markdown and detects reference patterns like [Author, Year] or [Author et al., Year],
-/// making them tappable to show document details.
+/// Splits the report into blocks and renders each block's references as
+/// tappable links through ``ReportRichText``, so the screen recognises exactly
+/// the references the exported report does (#233).
 struct MarkdownReportView: View {
     let content: String
     let documents: [Document]
@@ -860,9 +854,22 @@ struct MarkdownReportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             let blocks = parseMarkdownBlocks(content)
+            // Above the text it qualifies, so it is read first.
+            if let notice = RemovedCitationNotice(
+                removedReferences: blocks.flatMap { $0.inlineText?.removedReferences ?? [] }
+            ) {
+                RemovedCitationNote(notice: notice)
+            }
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 renderBlock(block)
             }
+        }
+        // Logged once per appearance of this content, not from `body`, which
+        // SwiftUI runs on every layout pass.
+        .task(id: content) {
+            ReportFormatter.reportUnparseableReferences(
+                in: parseMarkdownBlocks(content).compactMap(\.inlineText)
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .documentReferenceClicked)) { notification in
             if let url = notification.userInfo?["url"] as? URL {
@@ -876,11 +883,25 @@ struct MarkdownReportView: View {
 
     // MARK: - Block Parsing
 
+    /// One block of the report, its text already parsed for references.
+    ///
+    /// Parsed once, when the block is built, so the text a block renders and
+    /// the removals the note counts come from the same parse.
     private enum MarkdownBlock {
-        case heading(level: Int, text: String)
-        case paragraph(text: String)
-        case listItem(text: String, ordered: Bool, number: Int?)
+        case heading(level: Int, text: ReportInlineText)
+        case paragraph(text: ReportInlineText)
+        case listItem(text: ReportInlineText, ordered: Bool, number: Int?)
         case empty
+
+        /// The block's text, or `nil` for a block that has none.
+        var inlineText: ReportInlineText? {
+            switch self {
+            case .heading(_, let text), .paragraph(let text), .listItem(let text, _, _):
+                return text
+            case .empty:
+                return nil
+            }
+        }
     }
 
     private func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
@@ -896,7 +917,7 @@ struct MarkdownReportView: View {
             if trimmed.isEmpty {
                 // Flush current paragraph
                 if !currentParagraph.isEmpty {
-                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                    blocks.append(paragraphBlock(currentParagraph))
                     currentParagraph = []
                 }
                 listNumber = 0
@@ -906,7 +927,7 @@ struct MarkdownReportView: View {
             // Check for headers
             if let headingMatch = parseHeading(trimmed) {
                 if !currentParagraph.isEmpty {
-                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                    blocks.append(paragraphBlock(currentParagraph))
                     currentParagraph = []
                 }
                 blocks.append(headingMatch)
@@ -917,7 +938,7 @@ struct MarkdownReportView: View {
             // Check for list items
             if let listMatch = parseListItem(trimmed, currentNumber: &listNumber) {
                 if !currentParagraph.isEmpty {
-                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+                    blocks.append(paragraphBlock(currentParagraph))
                     currentParagraph = []
                 }
                 blocks.append(listMatch)
@@ -930,19 +951,31 @@ struct MarkdownReportView: View {
 
         // Flush remaining paragraph
         if !currentParagraph.isEmpty {
-            blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
+            blocks.append(paragraphBlock(currentParagraph))
         }
 
         return blocks
     }
 
+    /// A paragraph block from its wrapped lines.
+    ///
+    /// Parsed with the line breaks in place and joined afterwards. Joining with
+    /// a space first erased the break an unterminated reference target may not
+    /// cross, and the screen deleted prose that the exported report kept (#233).
+    ///
+    /// - Parameter lines: The paragraph's lines, in order.
+    private func paragraphBlock(_ lines: [String]) -> MarkdownBlock {
+        .paragraph(text: ReportInlineText(parsing: lines.joined(separator: "\n")).joiningWrappedLines())
+    }
+
     private func parseHeading(_ line: String) -> MarkdownBlock? {
+        // A heading carries references like any other block (#235).
         if line.hasPrefix("### ") {
-            return .heading(level: 3, text: String(line.dropFirst(4)))
+            return .heading(level: 3, text: ReportInlineText(parsing: String(line.dropFirst(4))))
         } else if line.hasPrefix("## ") {
-            return .heading(level: 2, text: String(line.dropFirst(3)))
+            return .heading(level: 2, text: ReportInlineText(parsing: String(line.dropFirst(3))))
         } else if line.hasPrefix("# ") {
-            return .heading(level: 1, text: String(line.dropFirst(2)))
+            return .heading(level: 1, text: ReportInlineText(parsing: String(line.dropFirst(2))))
         }
         return nil
     }
@@ -951,17 +984,17 @@ struct MarkdownReportView: View {
         // Unordered list: - item or * item
         if line.hasPrefix("- ") {
             currentNumber = 0
-            return .listItem(text: String(line.dropFirst(2)), ordered: false, number: nil)
+            return .listItem(text: ReportInlineText(parsing: String(line.dropFirst(2))), ordered: false, number: nil)
         }
         if line.hasPrefix("* ") {
             currentNumber = 0
-            return .listItem(text: String(line.dropFirst(2)), ordered: false, number: nil)
+            return .listItem(text: ReportInlineText(parsing: String(line.dropFirst(2))), ordered: false, number: nil)
         }
 
         // Ordered list: 1. item
         if let match = parseOrderedListItem(line) {
             currentNumber += 1
-            return .listItem(text: match, ordered: true, number: currentNumber)
+            return .listItem(text: ReportInlineText(parsing: match), ordered: true, number: currentNumber)
         }
 
         return nil
@@ -998,27 +1031,29 @@ struct MarkdownReportView: View {
     }
 
     @ViewBuilder
-    private func renderHeading(level: Int, text: String) -> some View {
+    private func renderHeading(level: Int, text: ReportInlineText) -> some View {
         let font: Font = switch level {
         case 1: .title.bold()
         case 2: .title2.bold()
         default: .title3.bold()
         }
 
-        Text(text)
+        // `Text(_:)` over a runtime `String` prints markdown verbatim, so a
+        // heading showed a reference's whole link syntax.
+        Text(ReportRichText.attributedString(from: text))
             .font(font)
             .padding(.top, level == 1 ? 16 : 12)
             .padding(.bottom, 6)
     }
 
     @ViewBuilder
-    private func renderParagraph(_ text: String) -> some View {
+    private func renderParagraph(_ text: ReportInlineText) -> some View {
         renderRichText(text)
             .padding(.vertical, 4)
     }
 
     @ViewBuilder
-    private func renderListItem(text: String, ordered: Bool, number: Int?) -> some View {
+    private func renderListItem(text: ReportInlineText, ordered: Bool, number: Int?) -> some View {
         HStack(alignment: .top, spacing: 8) {
             if ordered, let num = number {
                 Text("\(num).")
@@ -1040,135 +1075,27 @@ struct MarkdownReportView: View {
     // MARK: - Rich Text with References
 
     @ViewBuilder
-    private func renderRichText(_ text: String) -> some View {
-        let attributed = parseInlineFormatting(text)
-        Text(attributed)
+    private func renderRichText(_ text: ReportInlineText) -> some View {
+        Text(ReportRichText.attributedString(from: text))
             .font(.body)
-    }
-
-    /// Parse inline formatting (bold, italic) and references into AttributedString.
-    ///
-    /// Supports two reference formats:
-    /// 1. With an embedded document identity: [Author, Year](doc:<id>)
-    /// 2. Legacy format without one: [Author, Year]
-    ///
-    /// The identity is matched as an opaque run of characters, never as a
-    /// PubMed ID. Documents are identified by UUID since #208, and reports
-    /// saved before that carry `doc:pmid-<primary slot>` targets which resolve
-    /// unchanged by exact match against the identity those rows still hold.
-    private func parseInlineFormatting(_ text: String) -> AttributedString {
-        var result = AttributedString()
-
-        // Pattern for references with an embedded identity: [Author, Year](doc:<id>)
-        // Also matches legacy format: [Author, Year] (without the doc: link)
-        // Group 1: display text (e.g., "Smith et al., 2021")
-        // Group 2: optional document identity, opaque to this parser
-        let referencePattern = "\\[([^\\]]+?,\\s*\\d{4}[a-z]?)\\](?:\\(doc:([^)]+)\\))?"
-        guard let regex = try? NSRegularExpression(pattern: referencePattern) else {
-            return parseBasicFormatting(text)
-        }
-
-        var currentIndex = text.startIndex
-        let nsRange = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: nsRange)
-
-        for match in matches {
-            guard let fullRange = Range(match.range, in: text),
-                  let displayRange = Range(match.range(at: 1), in: text) else {
-                continue
-            }
-
-            // Add text before the reference
-            if fullRange.lowerBound > currentIndex {
-                let beforeText = String(text[currentIndex..<fullRange.lowerBound])
-                result.append(parseBasicFormatting(beforeText))
-            }
-
-            // Extract display text and optional document ID
-            let displayText = String(text[displayRange])
-            let documentId: String?
-            if match.range(at: 2).location != NSNotFound,
-               let idRange = Range(match.range(at: 2), in: text) {
-                documentId = String(text[idRange])
-            } else {
-                documentId = nil
-            }
-
-            // Add the reference as a tappable link
-            var refAttr = AttributedString("[\(displayText)]")
-            refAttr.foregroundColor = Color.accentColor
-            refAttr.underlineStyle = Text.LineStyle.single
-
-            // Use document ID if available, otherwise fall back to display text for lookup
-            // URL format: docref://lookup?type=id&value=<id> or docref://lookup?type=ref&value=encoded-ref
-            if let docId = documentId {
-                let encoded = docId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? docId
-                if let url = URL(string: "docref://lookup?type=id&value=\(encoded)") {
-                    refAttr.link = url
-                }
-            } else {
-                let encoded = displayText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? displayText
-                if let url = URL(string: "docref://lookup?type=ref&value=\(encoded)") {
-                    refAttr.link = url
-                }
-            }
-            result.append(refAttr)
-
-            currentIndex = fullRange.upperBound
-        }
-
-        // Add remaining text
-        if currentIndex < text.endIndex {
-            let remainingText = String(text[currentIndex...])
-            result.append(parseBasicFormatting(remainingText))
-        }
-
-        return result
-    }
-
-    /// Parse basic inline formatting (bold, italic) without references.
-    private func parseBasicFormatting(_ text: String) -> AttributedString {
-        // Try to parse as markdown for bold/italic
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(text)
     }
 
     /// Handle taps on document references in the report.
     ///
-    /// Parses the custom `docref://` URL scheme and looks up the referenced document
-    /// to display in a detail sheet.
+    /// Reads the tapped `docref://` URL back through ``ReportReferenceLink``,
+    /// the same type that wrote it, and opens the document it names in a
+    /// detail sheet.
     ///
-    /// - Parameter url: The tapped URL (expected scheme: `docref://`).
+    /// - Parameter url: The tapped URL. Anything that is not a report
+    ///   reference is ignored.
     private func handleReferenceTap(_ url: URL) {
-        guard url.scheme == "docref" else {
+        switch ReportReferenceLink(url: url) {
+        case .documentIdentity(let identity):
+            selectedDocument = findDocumentById(identity)
+        case .citationText(let text):
+            selectedDocument = findDocumentByReference(text)
+        case nil:
             return
-        }
-
-        // Parse query parameters: docref://lookup?type=id&value=<id>
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let queryItems = components.queryItems else {
-            return
-        }
-
-        let type = queryItems.first { $0.name == "type" }?.value
-        let value = queryItems.first { $0.name == "value" }?.value
-
-        guard let lookupType = type, let lookupValue = value else {
-            return
-        }
-
-        if lookupType == "id" {
-            // Direct ID lookup
-            selectedDocument = findDocumentById(lookupValue)
-        } else if lookupType == "ref" {
-            // Legacy reference text lookup
-            let refText = lookupValue.removingPercentEncoding ?? lookupValue
-            selectedDocument = findDocumentByReference(refText)
         }
     }
 

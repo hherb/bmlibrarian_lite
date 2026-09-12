@@ -338,8 +338,13 @@ public enum BioMedLitConstants {
     /// gives up the identity and leaves the comma standing.
     public static let documentIdentityCharacterClass = "[A-Za-z0-9_-]"
 
-    /// One link target: any run that does not cross a line break, nesting at
-    /// most one level of parentheses.
+    /// An ordinary link's target: any run that does not cross a line break,
+    /// nesting at most one level of parentheses.
+    ///
+    /// Not used for a document target, which is confined to an identity's own
+    /// characters: within one line, a run like this still reaches a later `)`
+    /// and swallows the prose before it (#233). An ordinary target has no
+    /// character set to confine it to.
     ///
     /// The line break is the load-bearing part. An unterminated target that
     /// could cross one would run to whatever `)` a later paragraph happened to
@@ -349,9 +354,13 @@ public enum BioMedLitConstants {
 
     /// Markdown link syntax: `[display text](target)`.
     ///
-    /// Capture group 1 is the display text. The target is matched as an opaque
-    /// run and never inspected: a report's link target is a document's identity,
-    /// and a renderer that cannot see the documents may not decide what it names.
+    /// Capture group 1 is the display text. Exactly one of the other two
+    /// participates in a match: group 2 is the run after a
+    /// ``documentReferenceScheme``, which names a document; group 3 is any other
+    /// target. Neither is inspected beyond that: a report's link target is a
+    /// document's identity, and a renderer that cannot see the documents may not
+    /// decide what it names. See ``ReportInlineText``, the one reader of these
+    /// groups.
     ///
     /// Shapes the first version of this pattern got wrong, each leaving text a
     /// reader keeps in a state it should not be in (#230). Two it refused
@@ -378,10 +387,53 @@ public enum BioMedLitConstants {
     /// load-bearing against catastrophic backtracking: rewriting
     /// `\[[^\[\]]*\]` as `\[.*?\]` would preserve the first and destroy the
     /// second.
+    ///
+    /// ## A document target is an identity, not a run of text (#233)
+    ///
+    /// Group 2 is confined to one run of
+    /// ``documentIdentityCharacterClass``, with whitespace allowed around it but
+    /// not inside it. It was ``linkTargetRun``, which accepted anything up to a
+    /// closing parenthesis: an unterminated `(doc:abc` then found the `)` that
+    /// closed a later confidence interval, and every word between became the
+    /// "identity" — removed from the page, and reported nowhere, because from
+    /// this pattern's point of view that parsed. A target that is not
+    /// identity-shaped is left to ``residualDocumentReferencePattern``, which
+    /// removes the target and reports it.
+    ///
+    /// The ordinary branch refuses a target opening with the scheme, so such a
+    /// target cannot fall through and become a link to `doc:…`, which the app
+    /// does not intercept and the system cannot open. Whitespace is tolerated
+    /// between `(` and the scheme for the same reason.
+    ///
+    /// The run between `]` and a document target is written
+    /// `[ \t]*(?:\n[ \t]*)?` rather than `[ \t]*\n?[ \t]*`: the second divides a
+    /// run of spaces between its two halves in every possible way before
+    /// failing, which took seconds on a long one.
     public static let markdownLinkPattern =
         "(?<!\\w)!?\\[((?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]"
-        + "(?:[ \\t]*\\n?[ \\t]*\\(\(documentReferenceScheme)\(linkTargetRun)\\)"
-        + "|\\(\(linkTargetRun)\\))"
+        + "(?:[ \\t]*(?:\\n[ \\t]*)?\\([ \\t]*\(documentReferenceScheme)"
+        + "([ \\t]*\(documentIdentityCharacterClass)+[ \\t]*)\\)"
+        + "|\\((?![ \\t]*\(documentReferenceScheme))(\(linkTargetRun))\\))"
+
+    /// A citation in `Author, Year` form carrying no target: `[Smith et al., 2016a]`.
+    ///
+    /// Reports written before references carried a document's identity cite
+    /// this way, and a reference whose unparseable target was removed is left
+    /// in this form. A renderer able to find a document by author and year may
+    /// offer it as a link; one that is not shows it exactly as written.
+    ///
+    /// Capture group 1 is the text between the brackets. It must end in a comma,
+    /// optional whitespace, a four-digit year and an optional one-letter
+    /// disambiguator, which is what keeps `[sic]` and `[1]` from being taken for
+    /// citations. Unlike ``markdownLinkPattern``'s display text it may not
+    /// contain a bracket at all: with no target anchoring the far end, a stray
+    /// `[` earlier in the sentence would otherwise join the citation, and the
+    /// lookup would search for `also [Smith`.
+    ///
+    /// Once private to each on-screen report view, where it also decided what
+    /// counted as a reference *with* a target — so `[the WHO guideline](doc:…)`
+    /// was not one (#233). It is consulted only where no target exists.
+    public static let untargetedCitationPattern = "\\[([^\\[\\]]+,\\s*\\d{4}[a-z]?)\\]"
 
     /// A document reference left behind once every link has been flattened.
     ///
@@ -397,17 +449,31 @@ public enum BioMedLitConstants {
     ///
     /// Two branches, because what safely bounds a removal differs by shape:
     ///
-    /// - **Terminated.** The whole parenthetical goes, and the identity may
-    ///   carry internal whitespace, because the closing parenthesis establishes
-    ///   where it ends. `(doc:pmid 889149)` leaves nothing behind.
+    /// - **Terminated.** The whole parenthetical goes, whatever it holds short
+    ///   of a parenthesis, a bracket or a line break, because the closing
+    ///   parenthesis establishes where it ends. Since #233 this branch receives
+    ///   every closed target that is not one identity — `(doc:pmid 889149)`,
+    ///   `(doc:pmid-889149; doc:pmid-123456)`, `(doc:pmid:889149)` — and each
+    ///   leaves nothing behind. Bounded by the identity's characters instead, it
+    ///   removed the first identity and printed the rest, `pmid-123456`
+    ///   included. Refusing a nested `(` is what keeps an unterminated target
+    ///   from reaching a later parenthetical's `)` through this branch.
     /// - **Unterminated.** Nothing establishes where the target was meant to
     ///   end, so the run is bounded by ``documentIdentityCharacterClass``. A run
     ///   bounded only by whitespace swallowed the full stop after
     ///   `(doc:pmid-889149.` and fused two sentences.
     ///
+    /// The terminated branch can still take words: in
+    /// `[Smith, 2016](doc:abc, and rose) later`, the target was never closed and
+    /// `, and rose` goes with it. Nothing in the text can tell that from a list
+    /// of identities. It is reported, where the link pattern before #233 took
+    /// the same words silently.
+    ///
     /// Whitespace after the scheme is tolerated in both. ``markdownLinkPattern``
     /// already accepts it on a well-formed reference, and refusing it here is
     /// what let `(doc: pmid-889149` remove its scheme and print its identity.
+    /// Whitespace between `(` and the scheme is tolerated for the same reason:
+    /// that pattern accepts it too.
     ///
     /// One preceding space or tab is absorbed so a removed reference does not
     /// leave a double gap mid-sentence.
@@ -415,10 +481,9 @@ public enum BioMedLitConstants {
     /// Only a *parenthesised* target is matched. A scheme that lost its opening
     /// parenthesis survives this sweep and is reported instead (#236).
     public static let residualDocumentReferencePattern =
-        "[ \\t]?\\(\(documentReferenceScheme)[ \\t]*"
-        + "(?:\(documentIdentityCharacterClass)*"
-        + "(?:[ \\t]+\(documentIdentityCharacterClass)+)*[ \\t]*\\)"
-        + "|\(documentIdentityCharacterClass)*)"
+        "[ \\t]?\\([ \\t]*\(documentReferenceScheme)"
+        + "(?:[^()\\[\\]\\n]*\\)"
+        + "|[ \\t]*\(documentIdentityCharacterClass)*)"
 
     /// Markdown emphasis markers, removed for a renderer that shows text verbatim.
     ///

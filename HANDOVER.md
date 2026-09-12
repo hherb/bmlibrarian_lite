@@ -8,10 +8,10 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#230 — a reference the flattener cannot parse may not print its target.**
-Implemented and green; the PR is open. What it establishes is recorded under
-**Recently landed** below, so move that entry's caveat and delete this section
-once it merges. Otherwise nothing: pick a slice from **Potential follow-ups**.
+**#233 — the screen and the export read references by one parser.** Branch
+`fix/onscreen-report-links-233`, implemented and green; the PR is open. What it
+establishes is under **Recently landed** below, so delete this section once it
+merges. Otherwise nothing: pick a slice from **Potential follow-ups**.
 
 ## Recently landed (context)
 
@@ -19,124 +19,87 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A reference the flattener cannot parse may not print its target** (#230,
-  2026-09-12). Rules that still bind:
-  - **Widening a pattern narrows the gap; it does not close it.** Shapes that
-    now match: a leading `!`, one level of nested brackets in the display text,
-    one level of nested parentheses in the target — a Wiley DOI carries one, and
-    stopping at the first `)` left the tail of the URL in the prose — and
-    whitespace, including one soft wrap, between `]` and a `doc:` target.
-    Whatever still misses is *swept*: the residual run is removed and logged,
-    because the target names a row, and `doc:pmid-889149` printed to a reader is
-    #212 arriving through a different door.
-  - **The whitespace tolerance is confined to the `doc:` scheme**, which this
-    app's own prompt writes and an article's prose never contains. Granted
-    generally, `a 12% [sic] (95% CI 4-19) reduction` loses its confidence
-    interval. Both patterns live in `BioMedLitConstants` with the reasoning.
-  - **A sweep that takes the scheme and leaves the identity is worse than none**,
-    because it strips the one marker saying the text is machine syntax. Review
-    found `(doc: pmid-889149` doing that under a log line asserting the target
-    had been removed. Hence: the removed run is bounded by the identity's own
-    character set, so a sentence keeps its punctuation; and the postcondition is
-    *checked*, not asserted, because a false diagnostic costs more than none.
-  - **A target may not cross a line break**, or an unterminated one runs to
-    whatever `)` a later paragraph offers and deletes everything between —
-    silently, since from the pattern's point of view that parses.
-  - **Flattening belongs to every block carrying prose, not the ones someone
-    remembered.** Headings and the summary bypassed it in all three renderers,
-    so the defect survived in the same `switch` that fixed it.
-  - Lodged rather than fixed: **#233** (the screen was left disagreeing with the
-    export), **#234** (Android's PDF export never flattened links at all),
-    **#236**, **#237**, **#238**, **#239** from the review round below.
+- **The screen and the export read references by one parser** (#233, PR open,
+  2026-09-13). Rules that still bind:
+  - **Recognition lives in `ReportInlineText` (BioMedLit); renderers only
+    style segments.** The export flattens them, and the screen
+    (`ReportRichText`, shared by iOS and macOS) links them. Parsing is pure;
+    `ReportFormatter.reportUnparseableReferences(in:)` logs, and the screen
+    calls it from `.task(id:)`, never from `body`.
+  - **Measure through the real renderer**: the issue's table missed that
+    `Text(String)` summaries printed every citation's UUID.
+  - **A document target is an identity, not a run of text.** The `doc:` branch of
+    `markdownLinkPattern` is confined to `documentIdentityCharacterClass`. As
+    `linkTargetRun` it reached a later `)` on the same line and deleted the
+    prose between, silently, on *both* surfaces. Review found it; #230's
+    line-break guard only covered the multi-line case. **Narrowing one pattern
+    moves work to the next**: the sweep's closed branch then had to take any
+    closed target (short of `(`, `[` or a line break), or
+    `(doc:A, doc:B)` printed `, doc:B)`. A second review caught that.
+  - **Parse wrapped lines with their breaks, then join**
+    (`joiningWrappedLines()`). Joining with a space first erased the guard, and
+    the screen deleted prose the export kept.
+  - **The reader is told** (user's decision): `RemovedCitationNote` sits above
+    the text it describes and counts removed *links*, not citations, because an
+    unterminated target leaves its citation on the page.
+  - **`ReportReferenceLink` owns the `docref://` URL both ways.** Interpolating
+    `.urlQueryAllowed` text left `&` unencoded, so `[Smith & Jones, 2016]`
+    looked up `"Smith "`.
+  - Lodged, not in this PR: **#240** (emphasis spanning a reference prints
+    `**`), **#241** (a reference wrapped after a list item or heading splits
+    across screen blocks); two more #236 shapes added there.
+
+- **A reference the flattener cannot parse may not print its target** (#230 in
+  PR #235, 2026-09-12). **Widening a pattern narrows the gap; it does not close
+  it**: whatever the link pattern misses is *swept* (removed and logged),
+  because a target names a row and `doc:pmid-889149` reads as a PubMed ID
+  (#212). **Whitespace tolerance is confined to the `doc:` scheme**, or
+  `a 12% [sic] (95% CI 4-19) reduction` loses its interval. **A sweep that takes
+  the scheme and leaves the identity is worse than none**: the removed run is
+  bounded by the identity's character set, and the postcondition is checked,
+  not asserted. **Flattening belongs to every block carrying prose.**
 
 - **A document's identity may not claim what the article is** (#208 in PR #226,
   2026-09-11). **An identity is opaque and unique by construction** —
-  `Document.id` is a UUID. `"pmid-<slot>"` was two mistakes: `.unique` is gone
-  for CloudKit, so nothing rejected duplicates, and the string *asserted a
-  namespace* the slot cannot vouch for. **The empty-slot half was narrower than
-  #208 claimed — re-measure before quoting**: Europe PMC always sends `id`, so
-  0 of 100 `SRC:ETH OR SRC:CBA OR SRC:HIR` and 0 of 100 `SRC:PPR` records lacked
-  one (2026-09-11), while the namespace half was live for 1,236,785 preprints
-  and 322,044 thesis and case-report records. **A renderer that cannot see the
-  documents may not name an identifier**, which `ReportFormatter` now owns.
-  **Before deduplicating, diff the copies — including your own claim that they
-  match**: "three identical private copies" was wrong, two stripped emphasis and
-  the third needed it to set a bold font, hence two functions. **Find the
-  surface a reader actually reaches before enumerating the ones that look
-  alike** — both `PrintableReportView`s are instantiated nowhere (#221) and
-  macOS PDF export is a stub, while `EvidenceReport.plainTextReport` feeds the
-  clipboard, the share sheet and *Export as Text*. **No migration, and none
-  needed**: stored rows keep the identity they were given, and nothing may
-  reconstruct an identity from an article's fields. **The report prompt's
-  example is a UUID now**, or a model told to copy IDs verbatim is invited to
-  write "PMID 12345678" into prose no later renderer can correct. **A gate must
-  ask exactly what the thing it gates asks**, and **a shared gate is only shared
-  if every caller reads it** — the workflow swallowed the guaranteed
-  `noIdentifiers` into a warning, so **a claim in a docstring is not a call
-  site**. **Six document lists identified rows by `\.pmid`**, the same mistake
-  one layer up.
+  `Document.id` is a UUID; `"pmid-<slot>"` asserted a namespace the slot cannot
+  vouch for. No migration: stored rows keep the identity they were given, and
+  nothing may reconstruct one from an article's fields. **A renderer that cannot
+  see the documents may not name an identifier.** **Before deduplicating, diff
+  the copies — including your own claim that they match.** **Find the surface a
+  reader actually reaches before enumerating the ones that look alike**: both
+  `PrintableReportView`s are instantiated nowhere (#221), macOS PDF export is a
+  stub, and `EvidenceReport.plainTextReport` feeds clipboard, share sheet and
+  *Export as Text*. **A shared gate is only shared if every caller reads it** —
+  a claim in a docstring is not a call site.
 
 - **A PubMed URL may only be built from a stated PubMed ID** (#212 + #213 in PR
   #218, 2026-09-11). Contract: `doc/cross_platform/fulltext_retrieval.md`.
   **The shape of a number never states a PubMed ID** — Europe PMC's `ETH`, `CBA`
-  and `HIR` records carry bare decimal accessions and no PMID (322,044 with
-  abstracts), and thesis `889149` is also a real 1977 mouse-courtship paper. A
-  dead link tells the reader something is wrong; a live link to the wrong paper
-  does not. **Three sources of knowledge, strongest first**: the record's stated
-  token, the identifier's shape where a prefix settles it, then the provider —
-  and **`.both` vouches for nothing**, since the app records the *search mode*
-  on every document a merged search produces. **One predicate authorises every
-  PubMed URL and every `PMID:` line**, `ArticleIdentifierKind.pubmedID(in:declared:)`,
-  stated as an invariant rather than a count of callers: the review found three
-  surfaces the first pass missed. **A citation names the namespace it can
-  prove**, carried as `CitationIdentifier` with namespace and value kept apart.
-  **A stated-but-unmodelled source tags `src_`, not `id_`**, or two records with
-  the same digits share a cache filename. **A refusal is not a fact about the
-  article** — `identifierKindUnresolved` exists so callers keep matching
-  `noFullTextAvailable` alone. **Known cost, accepted:** a pre-existing Europe
-  PMC or `both` document loses its PubMed link, and the card says so.
-
-- **Europe PMC's own word for what an identifier is** (#209 in PR #211,
-  2026-09-10). **The kind is stated, not guessed** — from the record's `source`
-  at the decode site, carried on `SearchArticle`, stored, passed back into
-  `fetchFullText`; **a stored `nil` means "nobody stated one"**, for four reasons
-  one column cannot tell apart. **The cache tag names the kind, not the rung**,
-  or a PMC-only record is filed under two names and its PDF downloaded twice.
-  **One seam for the five fetch surfaces** and **one writer for document
-  creation** (`applySearchMetadata`) — the workflow's third site was still
-  hand-copying when review found it, and nothing tests those paths (**#216**).
-  **A lookup by identifier must not filter preprints**, pinned on the emitted
-  URL because an outcome assertion passes either way. **The source token is
-  refused outside `[a-z0-9]`, and the refusal is logged**; **`isNumber` is not
-  "all digits"**, being true for `½` and every non-Latin numeral. **Only Swift
-  conforms**: #205 (Android), #207 (Python).
-
-- **An article without a PMID can reach its PDF** (#202 in PR #206, 2026-09-10).
-  **An article is named by a *ladder*, not by its PMID** — primary slot, PMC ID,
-  DOI, each tagged with its kind, and **no two identifiers may share a name**:
-  `sanitize` is not injective, so the DOI rung is digested outright and the
-  other two carry a digest whenever sanitising changes the value. **The key
-  comes from the document, never from `resolvedPmcId`.** **Europe PMC answers
-  only in the identifier's own terms**, measured live, so fixing the cache key
-  alone does not fix #202. **A query that matches nothing is logged.**
-  **`doc/cross_platform/fulltext_retrieval.md` is the port contract**, and it
-  specified a ladder Swift never implemented — the real root of #202.
-
-- **A downloaded PDF now contributes its text** (PR #198, 2026-09-09).
-  **Extraction serves analysis; display prefers the document** —
-  `Document.displayedFullText` is the single seam. **An abstract-only deposit is
-  held back, not returned**: returned on the spot it beat every remaining tier,
-  so an open-access PDF became unreachable. When no PDF tier answers the
-  abstract *is* returned, so the consumer must check the kind
-  (`Document.analyzableFullText`), and **a `nil` stored content kind means
-  "predates the field", not `.none`**. **Extraction coverage travels with the
-  text, and is persisted.** **A PDF tier's outcome has four states, not two** —
-  the first two shared `(nil, nil)`, so a render URL that 404s ended the chain.
-  **`fullTextPDFPath` holds a path or a URL string, and only the writer knows
-  which.** **The PDF fixtures are not byte-reproducible.**
+  and `HIR` records carry bare decimals, and thesis `889149` is also a real 1977
+  mouse-courtship paper; a live link to the wrong paper is worse than a dead one.
+  Knowledge ranks stated token, then a prefix that settles the shape, then the
+  provider, and **`.both` vouches for nothing**. **One predicate authorises every
+  PubMed URL and `PMID:` line**, `ArticleIdentifierKind.pubmedID(in:declared:)`.
+  **A citation names the namespace it can prove** (`CitationIdentifier`).
 
 - **Older rounds, compressed to the rules that still bind.** Git history and the
   `doc/cross_platform/` READMEs carry the rest; each rule below cost a defect.
+  - **Europe PMC's own word for what an identifier is** (#209, PR #211): the kind
+    is *stated* from the record's `source`, stored, and passed back into
+    `fetchFullText`; a stored `nil` means "nobody stated one". The cache tag
+    names the kind, not the rung. One writer for document creation
+    (`applySearchMetadata`), untested on its three workflow paths (**#216**). A
+    lookup by identifier must not filter preprints; `isNumber` is not "all
+    digits". Only Swift conforms: #205 (Android), #207 (Python).
+  - **An article without a PMID can reach its PDF** (#202, PR #206): an article
+    is named by a *ladder* (primary slot, PMC ID, DOI), no two identifiers may
+    share a name, and the key comes from the document, never `resolvedPmcId`.
+    `doc/cross_platform/fulltext_retrieval.md` is the port contract.
+  - **A downloaded PDF contributes its text** (PR #198): extraction serves
+    analysis, display prefers the document (`Document.displayedFullText`); an
+    abstract-only deposit is held back rather than returned, so the consumer
+    checks the kind (`analyzableFullText`); coverage travels with the text; a
+    PDF tier's outcome has four states, not two.
   - **A redaction placeholder is only as good as the load path** (PR #195):
     `--json` printed `<redacted>`, a *truthy string* that saved back would go to
     NCBI as a credential. **A guard must name its own cause.** **Prefix-anchor a
@@ -232,8 +195,12 @@ the rest.
 
 ### The #226 review round: identity, one layer down
 
-Lodged while reviewing #226 (2026-09-11) and #230 (2026-09-12). Independent of
-each other.
+Lodged while reviewing #226, #230 and #233 (2026-09-11 to 09-13). Independent
+of each other.
+
+- **#240 / #241 — where the screen still differs from export**: emphasis spanning
+  a reference prints `**`, and a reference wrapped after a list item or heading
+  splits across the screen's private, duplicated, untested block parsers.
 
 - **#227 — the workflow and the checkpoints still key documents by the ambiguous
   primary slot.** `FactCheckWorkflow` builds three `[String: Document]` maps on
@@ -248,44 +215,39 @@ each other.
   change: the column must stay `String`, since stored rows hold `pmid-12662058`,
   which is not a valid UUID. Related to #219.
 - **#232 — rows written before #208 keep a derived identity, and nothing detects
-  a collision.** Both report-resolution sites use `.first { $0.id == … }`, which
-  picks a winner without saying so; wants a `filter` plus an error log. Also
-  wants `\.persistentModelID` evaluated for the five `ForEach` sites, against
-  the caveat that it is temporary until the model is saved.
+  a collision**: both report-resolution sites pick `.first { $0.id == … }`
+  silently; wants a `filter` plus an error log.
 - **#224 — an unresolvable report reference is a silent no-op**, on both
-  platforms. `findDocumentById` answers `nil`, `selectedDocument` becomes `nil`,
-  and nothing presents: golden rule 8, and untestable where it sits. Lift the
-  resolution out of the view and fall back to the display-text lookup that
-  already exists for references carrying no identity.
+  platforms. `findDocumentById` answers `nil` and nothing presents: golden rule
+  8. Since #233 both views resolve through `ReportReferenceLink`, so the display
+  text can ride in `.documentIdentity` as the fallback the issue asks for. The
+  lookup itself is still private to each view.
 - **#231 — transparency analysis cannot run from full text alone**, though
   `analyzeCOI` and `analyzeDataAvailability` need no identifier. 60 of 100
   sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records carry no DOI, so this is the
   common case for that population. Needs a "not assessed" state, which is what
   makes it a contract change rather than a widened guard — see #203.
-- **#233 — the on-screen renderer leaves a raw `doc:` target on screen**, and
-  now disagrees with the export path #230 fixed. Four of five malformed shapes
-  leak; the pattern is copied into `ReportView` and `MacReportView`.
 - **#234 — Android's PDF export never flattens links**, so every citation prints
   its whole `[Author, Year](doc:pmid-…)` source. #230 ports directly.
-- **#229 — Android and Python still build and parse `pmid-` references.** No
-  report text crosses platforms, so no shared contract breaks; it is divergence
-  worth closing deliberately rather than by drift.
+- **#229 — Android and Python still build and parse `pmid-` references**: no
+  shared contract breaks, but close the divergence deliberately.
 - **#236 — a `doc:` target that lost its opening parenthesis survives the
   sweep**, which is keyed on `(doc:`. Widening it would delete text on the
   strength of a bare scheme in prose, which is golden rule 6 territory and wants
   a decision rather than a patch. Reported meanwhile, and pinned by test.
-- **#237 — the flattener deletes citations and tells only the log.** Golden rule
-  8 wants the user told, and the export sheet has one in front of it. The same
-  `-> String` makes the log unusable: both printable views call it from a
-  SwiftUI `body`, so one bad reference logs per block per layout pass. Wants a
-  result type carrying the diagnostics; touches public API and seven call sites.
-- **#238 — `BioMedLit` defaults to discarding its own diagnostics.** Tolerable
-  while the package only reported; since #230 it also removes text. Both
-  shipping entry points configure a real logger, so this is enforcement, not a
-  live defect.
+- **#237 — the export deletes citations and tells only the log.** Golden rule 8
+  wants the user told, and the export sheet sits right in front of them. Since
+  #233 the parts exist: `ReportInlineText.removedReferences` is the diagnostic
+  and `reportUnparseableReferences(in:)` logs a set of parses once. What remains
+  is for `PDFExporter` and `plainTextReport` to parse once per report and
+  surface a sentence, as the screen's `RemovedCitationNotice` does. The printable
+  views still call the logging `-> String` flattener from `body`.
+- **#238 — `BioMedLit` defaults to discarding its own diagnostics**, though
+  since #230 it removes text. Both apps configure a real logger: enforcement,
+  not a live defect.
 - **#239 — `RecordingLogger` is copy-pasted across three test classes**, each
-  mutating the process-global configuration. The serial-execution assumption
-  that makes that safe is load-bearing and currently unwritten.
+  mutating process-global configuration under an unwritten serial-execution
+  assumption.
 
 ### The #206 round: identifier identity, on the other two platforms
 
@@ -485,20 +447,14 @@ Swift and Kotlin rather than a Swift-side patch.
   regeneration run fails on purpose; re-run without the variable to verify. Then
   check the sibling parsers: bmlib's is Python and can be **run** over the same
   corpus files, which beats reading it; Android's needs a source read until #121.
-- Mutation-testing a source file? **Back it up with `cp`, not `git checkout`** —
-  the restore step wipes every uncommitted change in the file, and the runs after
-  the first then silently measure a tree with the feature missing. Cost an
-  implementation once already.
-  - **Key the harness on `swift test`'s exit code, not on its output.** Scraping
-    the last `with N failures` line reports killed mutants as survivors: the run
-    prints several summaries and the last one is not the overall verdict. Cost a
-    round of false "survivors" in #180/#181.
-  - **A survivor is a claim about the test, and sometimes about the code.** In
-    #186 the test meant to pin a predicate ended on a path that *discards* the
-    value it asserted on, so it could not have failed however the predicate was
-    mutated — and chasing that turned up a real defect behind it. Ask what the
-    asserted value's provenance is on that exact path before assuming the test
-    merely needs strengthening.
+- Mutation-testing a source file? **Back it up with `cp`, not `git checkout`**,
+  whose restore wipes uncommitted work so later runs measure a tree with the
+  feature missing. **Key the harness on `swift test`'s exit code**, not its last
+  summary line. **A survivor is a claim about the test, and sometimes about the
+  code** (#186): check what the asserted value's provenance is on that path.
+- **A silent SwiftPM hang with no second build running** is its manifest binary
+  stuck at launch behind `syspolicyd`. Kill it and rerun with
+  `--disable-sandbox` on both `swift build` and `swift test`.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to
@@ -530,22 +486,12 @@ Swift and Kotlin rather than a Swift-side patch.
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
-Since the standalone macOS app was retired in `c32d707`, Xcode Cloud archives
-`ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`, scheme
-`MedicalFactChecker`. Two things silently break that build, and neither shows up
-locally — verify against a **fresh clone**, which is all Xcode Cloud gets:
-
-- **No Swift package reference may point outside this repository.** A stray
-  `XCLocalSwiftPackageReference` to a sibling checkout
-  (`../../../locumtracker/…`) failed package resolution before any compilation.
-  It resolves fine on a dev machine where the sibling exists, so local builds
-  stay green while every cloud build dies.
-- **`MedicalFactChecker.xcscheme` must stay shared**
-  (`…xcodeproj/xcshareddata/xcschemes/`). Xcode Cloud can only select shared
-  schemes; the autocreated per-user scheme is invisible to it.
-
-Both invariants are enforced on every PR by
-`.github/workflows/xcode-project-guards.yml`. Reproduce a cloud build with:
+Xcode Cloud archives `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`,
+scheme `MedicalFactChecker`, from a **fresh clone**. Two invariants break it
+silently while local builds stay green, both enforced on every PR by
+`.github/workflows/xcode-project-guards.yml`: **no Swift package reference may
+point outside this repository**, and **`MedicalFactChecker.xcscheme` must stay
+shared** (`…xcodeproj/xcshareddata/xcschemes/`). Reproduce a cloud build with:
 
 ```bash
 git clone <repo> /tmp/x && cd /tmp/x/ios/MedicalFactChecker && xcodebuild \

@@ -170,48 +170,6 @@ public enum ReportFormatter {
 
     // MARK: - Reference Link Flattening
 
-    /// Compiles one of this type's literal patterns, reporting a failure.
-    ///
-    /// Each pattern is a literal, so a failure here means the build is broken
-    /// rather than the input is odd. It is still logged rather than dropped,
-    /// because the consequence is otherwise silent and permanent — see each
-    /// caller's `consequence` for what a reader sees.
-    ///
-    /// - Parameters:
-    ///   - pattern: The regular expression source.
-    ///   - consequence: What a reader sees if this pattern is unavailable,
-    ///     phrased to complete "so …".
-    /// - Returns: The compiled expression, or `nil` if it would not compile.
-    private static func compiled(
-        _ pattern: String,
-        consequence: String
-    ) -> NSRegularExpression? {
-        do {
-            return try NSRegularExpression(pattern: pattern)
-        } catch {
-            BioMedLitLib.logger?.error(
-                """
-                Report formatting pattern failed to compile, so \(consequence): \
-                \(error.localizedDescription)
-                """,
-                category: .parsing
-            )
-            return nil
-        }
-    }
-
-    /// Markdown link syntax, compiled once.
-    private static let markdownLinkRegex: NSRegularExpression? = compiled(
-        BioMedLitConstants.markdownLinkPattern,
-        consequence: "report links will render as raw markdown"
-    )
-
-    /// Document references no link pattern could account for, compiled once.
-    private static let residualDocumentReferenceRegex: NSRegularExpression? = compiled(
-        BioMedLitConstants.residualDocumentReferencePattern,
-        consequence: "a malformed reference will print its document identity"
-    )
-
     /// Every markdown link in a report reduced to its display text.
     ///
     /// The report body carries references as `[Smith et al., 2016](doc:<id>)`,
@@ -247,12 +205,12 @@ public enum ReportFormatter {
     ///
     /// ## A target the pattern cannot parse is still removed
     ///
-    /// A reference this function does not recognise used to pass through with
-    /// its target intact, which is the same reader-facing outcome by a different
-    /// route. Anything left carrying a *parenthesised*
-    /// ``BioMedLitConstants/documentReferenceScheme`` is therefore swept away
-    /// and reported. A scheme that lost its opening parenthesis survives the
-    /// sweep; that is reported too, rather than passed over in silence (#236).
+    /// A reference no pattern recognises used to pass through with its target
+    /// intact, which is the same reader-facing outcome by a different route.
+    /// ``ReportInlineText`` removes any parenthesised document reference it
+    /// cannot parse, and this function reports the removal. Recognition lives
+    /// there rather than here so the screen, which draws the same references as
+    /// links, cannot come to disagree with the page (#233).
     ///
     /// - Parameter text: Report markdown.
     /// - Returns: The same markdown with every link reduced to its display text
@@ -260,103 +218,64 @@ public enum ReportFormatter {
     ///   failed to compile, as much of that as remains possible, with the
     ///   failure logged.
     public static func flattenedReferenceLinks(in text: String) -> String {
-        let flattened: String
-        if let regex = markdownLinkRegex {
-            flattened = regex.stringByReplacingMatches(
-                in: text,
-                range: NSRange(text.startIndex..., in: text),
-                withTemplate: "$1"
-            )
-        } else {
-            // The sweep is the last line of defence. Dropping it because the
-            // first pass is unavailable discards the belt along with the braces.
-            flattened = text
-        }
-        let swept = withoutUnparseableDocumentReferences(in: flattened)
-        reportAnySurvivingDocumentReference(in: swept)
-        return swept
+        let parsed = ReportInlineText(parsing: text)
+        reportUnparseableReferences(in: [parsed])
+        return parsed.flattened
     }
 
-    /// Removes any document reference the link pattern could not account for,
-    /// and reports what it removed.
+    /// Reports what a set of parses removed, and any reference that outlived
+    /// the removal, as at most one diagnostic of each kind.
     ///
-    /// Widening a pattern narrows the gap; it does not close it. Whatever the
-    /// link pattern misses used to reach the page with its target intact, and a
-    /// legacy `doc:pmid-889149` target printed there is #212 arriving through a
-    /// different door — `889149` is a real 1977 paper on mouse courtship, not
-    /// the article being cited. A target is a row's identity, which resolves
-    /// nowhere outside this app and means nothing to a reader, so removing one
-    /// discards nothing a reader wanted.
+    /// A renderer that parses block by block collects its parses and calls this
+    /// once for what it shows, when it appears: one call per block, from a
+    /// SwiftUI `body`, repeats one malformed reference per block per layout
+    /// pass, and a diagnostic that fires hundreds of times is one the next
+    /// reader of the log filters out. Nothing here remembers earlier calls, so
+    /// a renderer that appears twice reports twice.
     ///
-    /// Display text keeps its brackets where it has them. Nothing here can tell
-    /// where an unterminated target was meant to end, so guessing at the
-    /// author's intent would risk eating prose to tidy punctuation. For the same
-    /// reason the removed run is bounded by
-    /// ``BioMedLitConstants/documentIdentityCharacterClass`` rather than by
-    /// whitespace: a sentence keeps the punctuation that followed its reference.
-    ///
-    /// Golden rule 8: the removal is an error, not a silent repair. Without the
+    /// Golden rule 8: a removal is an error, not a silent repair. Without the
     /// report, the only symptom is wrong text in a document that outlives the
-    /// app.
+    /// app. Telling the *reader* is the renderer's business, since only it
+    /// knows where the reader is looking.
     ///
-    /// - Parameter text: Report markdown with every parseable link flattened.
-    /// - Returns: The same text with no parenthesised document reference left
-    ///   standing.
-    private static func withoutUnparseableDocumentReferences(in text: String) -> String {
-        guard let regex = residualDocumentReferenceRegex else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-        guard !matches.isEmpty else { return text }
-
-        let removed = matches
-            .compactMap { Range($0.range, in: text) }
-            .map { text[$0].trimmingCharacters(in: .whitespaces) }
-
-        // Counted from what can be named, so the number and the list cannot
-        // disagree: a report that says three and shows two is read as a
-        // formatting quirk rather than as a dropped diagnostic.
-        BioMedLitLib.logger?.error(
-            """
-            Report markdown carried \(removed.count) document \
-            reference(s) this formatter could not parse. Each target was removed \
-            rather than printed, because it names a row rather than an article \
-            and a bare number reads as a PubMed ID: \
-            \(removed.joined(separator: ", ")). A reference is written as \
-            [display text](\(BioMedLitConstants.documentReferenceScheme)<identity>).
-            """,
-            category: .parsing
-        )
-
-        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
-    }
-
-    /// Reports a document reference that outlived the sweep meant to remove it.
+    /// The retained-scheme report is checked against the rendered text rather
+    /// than inferred from the removals, so it cannot vouch for a clean page it
+    /// never saw. It also covers the shape removal deliberately does not match:
+    /// a target that lost its opening parenthesis (#236). Widening the removal
+    /// to take it would delete text on the strength of a bare `doc:` in prose,
+    /// which nobody has agreed to (golden rule 6).
     ///
-    /// The sweep's own diagnostic tells the next reader of the log that every
-    /// target was removed. Nothing established that. A sweep that takes the
-    /// scheme and leaves the identity prints `pmid-889149` under a message
-    /// claiming the opposite, and a false report costs more than no report at
-    /// all — so the claim is checked rather than asserted.
-    ///
-    /// It also catches the shape the sweep deliberately does not match: a target
-    /// that lost its opening parenthesis (#236). Widening the sweep to take it
-    /// would remove text on the strength of a bare `doc:` in prose, which is a
-    /// removal nobody has agreed to (golden rule 6). Reporting it commits to
-    /// nothing and leaves the evidence.
-    ///
-    /// - Parameter text: Text the sweep has already run over.
-    private static func reportAnySurvivingDocumentReference(in text: String) {
-        guard text.contains(BioMedLitConstants.documentReferenceScheme) else { return }
+    /// - Parameter parsedTexts: Every parse that produced one report's rendering.
+    public static func reportUnparseableReferences(in parsedTexts: [ReportInlineText]) {
+        let removed = parsedTexts.flatMap(\.removedReferences)
+        if !removed.isEmpty {
+            // Counted from what can be named, so the number and the list cannot
+            // disagree: a report that says three and shows two is read as a
+            // formatting quirk rather than as a dropped diagnostic.
+            BioMedLitLib.logger?.error(
+                """
+                Report markdown carried \(removed.count) document \
+                reference(s) this formatter could not parse. Each target was removed \
+                rather than printed, because it names a row rather than an article \
+                and a bare number reads as a PubMed ID: \
+                \(removed.joined(separator: ", ")). A reference is written as \
+                [display text](\(BioMedLitConstants.documentReferenceScheme)<identity>).
+                """,
+                category: .parsing
+            )
+        }
 
-        BioMedLitLib.logger?.error(
-            """
-            A document reference survived the sweep meant to remove it: report \
-            text still carries \(BioMedLitConstants.documentReferenceScheme) \
-            after flattening, so a row's identity is about to reach a reader who \
-            cannot resolve it and may read it as a PubMed ID.
-            """,
-            category: .parsing
-        )
+        if parsedTexts.contains(where: \.retainsDocumentReferenceScheme) {
+            BioMedLitLib.logger?.error(
+                """
+                A document reference survived the sweep meant to remove it: report \
+                text still carries \(BioMedLitConstants.documentReferenceScheme) \
+                after flattening, so a row's identity is about to reach a reader who \
+                cannot resolve it and may read it as a PubMed ID.
+                """,
+                category: .parsing
+            )
+        }
     }
 
     /// A report's markdown reduced to what a verbatim renderer should show.

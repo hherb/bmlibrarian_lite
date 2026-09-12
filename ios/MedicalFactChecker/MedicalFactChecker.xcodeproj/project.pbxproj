@@ -76,6 +76,8 @@
 		A1000047001 /* FetchMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000047000 /* FetchMoreView.swift */; };
 		A1000048001 /* FullTextSourceBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000048000 /* FullTextSourceBadge.swift */; };
 		A1000099001 /* ParseWarningBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000099000 /* ParseWarningBanner.swift */; };
+		A10000A0001 /* ReportRichText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000A0000 /* ReportRichText.swift */; };
+		A10000A1001 /* ReportReferenceLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000A1000 /* ReportReferenceLink.swift */; };
 		A1000049001 /* SearchProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049000 /* SearchProgressView.swift */; };
 		A1000050001 /* SearchOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000050000 /* SearchOptionsView.swift */; };
 		A1000051001 /* FullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051000 /* FullTextViewer.swift */; };
@@ -186,6 +188,8 @@
 		A1000047000 /* FetchMoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FetchMoreView.swift; sourceTree = "<group>"; };
 		A1000048000 /* FullTextSourceBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSourceBadge.swift; sourceTree = "<group>"; };
 		A1000099000 /* ParseWarningBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseWarningBanner.swift; sourceTree = "<group>"; };
+		A10000A0000 /* ReportRichText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportRichText.swift; sourceTree = "<group>"; };
+		A10000A1000 /* ReportReferenceLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportReferenceLink.swift; sourceTree = "<group>"; };
 		A1000049000 /* SearchProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProgressView.swift; sourceTree = "<group>"; };
 		A1000050000 /* SearchOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOptionsView.swift; sourceTree = "<group>"; };
 		A1000051000 /* FullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextViewer.swift; sourceTree = "<group>"; };
@@ -356,6 +360,7 @@
 				A1000042000 /* PlatformHelper.swift */,
 				A1000043000 /* QueryTranslator.swift */,
 				A1000044000 /* QueryValidator.swift */,
+				A10000A1000 /* ReportReferenceLink.swift */,
 				A1000015000 /* ResponseParser.swift */,
 				A1000045000 /* SearchResultMerger.swift */,
 				A1000030000 /* StringArrayTransformer.swift */,
@@ -439,6 +444,7 @@
 				A1000047000 /* FetchMoreView.swift */,
 				A1000048000 /* FullTextSourceBadge.swift */,
 				A1000099000 /* ParseWarningBanner.swift */,
+				A10000A0000 /* ReportRichText.swift */,
 				1408F7E3EA6F0A6637CD5A65 /* ProcessingProgressView.swift */,
 				A1000050000 /* SearchOptionsView.swift */,
 				A1000049000 /* SearchProgressView.swift */,
@@ -673,6 +679,8 @@
 				A1000047001 /* FetchMoreView.swift in Sources */,
 				A1000048001 /* FullTextSourceBadge.swift in Sources */,
 				A1000099001 /* ParseWarningBanner.swift in Sources */,
+				A10000A0001 /* ReportRichText.swift in Sources */,
+				A10000A1001 /* ReportReferenceLink.swift in Sources */,
 				A1000049001 /* SearchProgressView.swift in Sources */,
 				A1000050001 /* SearchOptionsView.swift in Sources */,
 				A1000051001 /* FullTextViewer.swift in Sources */,

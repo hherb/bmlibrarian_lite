@@ -164,7 +164,9 @@ struct PrintableReportView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Summary")
                 .font(.headline)
-            Text(report.summary)
+            // The summary carries references like the body does, and
+            // `Text(_:)` over a runtime `String` parses no markdown (#233).
+            Text(ReportFormatter.plainText(fromReportMarkdown: report.summary))
                 .font(.body)
         }
         .padding()
