@@ -332,7 +332,10 @@ struct PDFExporter {
                         case 2: .boldSystemFont(ofSize: PDFLayout.heading2FontSize)
                         default: .boldSystemFont(ofSize: PDFLayout.heading3FontSize)
                         }
-                        _ = drawText(text, font: font)
+                        // A heading carries references like any other block,
+                        // and `drawText` renders verbatim (#235).
+                        let cleanedText = ReportFormatter.plainText(fromReportMarkdown: text)
+                        _ = drawText(cleanedText, font: font)
                         addSpacing(PDFLayout.headingBottomSpacing)
 
                     case .paragraph(let text):
@@ -455,7 +458,10 @@ struct PDFExporter {
             // Summary
             _ = drawText("Summary", font: .boldSystemFont(ofSize: PDFLayout.sectionHeadingFontSize))
             addSpacing(PDFLayout.paragraphSpacing)
-            _ = drawText(report.summary, font: .systemFont(ofSize: PDFLayout.bodyFontSize))
+            _ = drawText(
+                ReportFormatter.plainText(fromReportMarkdown: report.summary),
+                font: .systemFont(ofSize: PDFLayout.bodyFontSize)
+            )
             addSpacing(PDFLayout.sectionSpacing)
 
             drawDivider()

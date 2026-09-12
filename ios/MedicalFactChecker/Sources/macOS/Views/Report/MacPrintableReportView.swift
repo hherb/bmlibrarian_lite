@@ -582,7 +582,9 @@ struct PrintableMarkdownView: View {
         default: .headline
         }
 
-        Text(text)
+        // A heading carries references like any other block, and `Text(_:)`
+        // over a runtime `String` parses no markdown (#235).
+        Text(ReportFormatter.plainText(fromReportMarkdown: text))
             .font(font)
             .padding(.top, level == 1 ? 12 : 8)
             .padding(.bottom, 4)

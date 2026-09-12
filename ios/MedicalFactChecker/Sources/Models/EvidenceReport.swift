@@ -139,7 +139,7 @@ final class EvidenceReport {
         VERDICT: \(verdict.rawValue)
 
         SUMMARY:
-        \(summary)
+        \(ReportFormatter.plainText(fromReportMarkdown: summary))
 
         ---
 
