@@ -318,10 +318,34 @@ public enum BioMedLitConstants {
 
     /// The URL scheme a report uses to point a reference at its document.
     ///
-    /// Written by this app's report prompt and read back by this app alone, so
-    /// a parenthetical opening with it is machine syntax rather than an
-    /// article's prose. That is what licenses the two tolerances below.
+    /// Written by this app's report prompt — ``PromptTemplates`` spells it out
+    /// literally — and read back by this app alone, so a parenthetical opening
+    /// with it is machine syntax rather than an article's prose. That is what
+    /// licenses the tolerances below.
+    ///
+    /// Interpolated unescaped into ``markdownLinkPattern`` and
+    /// ``residualDocumentReferencePattern``. It carries no regular expression
+    /// metacharacter today; one introduced here would change what both patterns
+    /// mean without producing a compile error.
     public static let documentReferenceScheme = "doc:"
+
+    /// The characters a document's identity is built from.
+    ///
+    /// An identity is a `UUID` string or a legacy `pmid-<digits>`, so it is
+    /// alphanumerics, hyphen and underscore and nothing else. Bounding an
+    /// unterminated target by this set rather than by "not whitespace" is what
+    /// keeps a sentence's own punctuation out of a removed run: `(doc:abc, and`
+    /// gives up the identity and leaves the comma standing.
+    public static let documentIdentityCharacterClass = "[A-Za-z0-9_-]"
+
+    /// One link target: any run that does not cross a line break, nesting at
+    /// most one level of parentheses.
+    ///
+    /// The line break is the load-bearing part. An unterminated target that
+    /// could cross one would run to whatever `)` a later paragraph happened to
+    /// offer and delete everything in between — silently, because from the
+    /// pattern's point of view that parses, so no sweep ever sees it.
+    private static let linkTargetRun = "(?:[^()\\n]|\\([^()\\n]*\\))*"
 
     /// Markdown link syntax: `[display text](target)`.
     ///
@@ -329,43 +353,72 @@ public enum BioMedLitConstants {
     /// run and never inspected: a report's link target is a document's identity,
     /// and a renderer that cannot see the documents may not decide what it names.
     ///
-    /// Four shapes the first version of this pattern refused, each of which put
-    /// a raw target onto a page a reader keeps (#230):
+    /// Shapes the first version of this pattern got wrong, each leaving text a
+    /// reader keeps in a state it should not be in (#230). Two it refused
+    /// outright, leaving a raw target on the page; two it matched and damaged.
     ///
     /// - **A leading `!`** is consumed with the link it belongs to, so an image
-    ///   does not leave its marker stranded against the caption.
+    ///   does not leave its marker stranded against the caption. A `!` preceded
+    ///   by a word character belongs to the sentence and is left alone.
     /// - **Display text may nest one level of brackets**, so an author's
     ///   bracketed aside does not end the display text early.
     /// - **A target may nest one level of parentheses**, because a Wiley DOI
     ///   embeds one — `10.1002/(SICI)1097-0258` — and stopping at the first `)`
     ///   left the tail of the URL in the prose.
-    /// - **Whitespace may separate `]` from a ``documentReferenceScheme``
-    ///   target.** A language model writes the report body, and a stray space is
+    /// - **Whitespace, including one line break, may separate `]` from a
+    ///   ``documentReferenceScheme`` target.** A language model writes the report
+    ///   body and soft-wraps it, so a stray space or a wrap mid-reference is
     ///   ordinary output. The tolerance stops at that scheme deliberately: were
     ///   it general, `a 12% [sic] (95% CI 4-19) reduction` would lose its
     ///   confidence interval.
     ///
     /// Each alternative in the two nested runs is distinguished by its first
-    /// character, so the pattern cannot backtrack catastrophically.
+    /// character, and each has exactly one possible match length because the
+    /// inner run excludes its own closing delimiter. Both conditions are
+    /// load-bearing against catastrophic backtracking: rewriting
+    /// `\[[^\[\]]*\]` as `\[.*?\]` would preserve the first and destroy the
+    /// second.
     public static let markdownLinkPattern =
-        "!?\\[((?:[^\\[\\]]|\\[[^\\[\\]]*\\])+)\\]"
-        + "(?:[ \\t]*\\(\(documentReferenceScheme)(?:[^()]|\\([^()]*\\))*\\)"
-        + "|\\((?:[^()]|\\([^()]*\\))*\\))"
+        "(?<!\\w)!?\\[((?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]"
+        + "(?:[ \\t]*\\n?[ \\t]*\\(\(documentReferenceScheme)\(linkTargetRun)\\)"
+        + "|\\(\(linkTargetRun)\\))"
 
     /// A document reference left behind once every link has been flattened.
     ///
-    /// Two shapes reach here: a target with no closing parenthesis, and one with
-    /// no preceding link at all. Neither can be parsed, and neither may be
-    /// printed — a target is a row's identity, which means nothing to a reader,
-    /// and a legacy `pmid-889149` identity pasted into PubMed is a real 1977
-    /// paper on mouse courtship rather than the article cited (#212).
+    /// Whatever ``markdownLinkPattern`` does not match reaches here: a target
+    /// with no closing parenthesis, a target with no preceding link, display
+    /// text nested deeper than that pattern allows. The set is that pattern's
+    /// complement and shifts whenever it changes, so it is not enumerated.
     ///
-    /// The run stops at whitespace, which bounds what an unterminated target can
-    /// take with it: neither a UUID nor a legacy identity contains a space. One
-    /// preceding space is absorbed so a removed reference does not leave a
-    /// double gap mid-sentence.
+    /// None of it may be printed. A target is a row's identity, which means
+    /// nothing to a reader, and a legacy `pmid-889149` identity pasted into
+    /// PubMed is a real 1977 paper on mouse courtship rather than the article
+    /// cited (#212).
+    ///
+    /// Two branches, because what safely bounds a removal differs by shape:
+    ///
+    /// - **Terminated.** The whole parenthetical goes, and the identity may
+    ///   carry internal whitespace, because the closing parenthesis establishes
+    ///   where it ends. `(doc:pmid 889149)` leaves nothing behind.
+    /// - **Unterminated.** Nothing establishes where the target was meant to
+    ///   end, so the run is bounded by ``documentIdentityCharacterClass``. A run
+    ///   bounded only by whitespace swallowed the full stop after
+    ///   `(doc:pmid-889149.` and fused two sentences.
+    ///
+    /// Whitespace after the scheme is tolerated in both. ``markdownLinkPattern``
+    /// already accepts it on a well-formed reference, and refusing it here is
+    /// what let `(doc: pmid-889149` remove its scheme and print its identity.
+    ///
+    /// One preceding space or tab is absorbed so a removed reference does not
+    /// leave a double gap mid-sentence.
+    ///
+    /// Only a *parenthesised* target is matched. A scheme that lost its opening
+    /// parenthesis survives this sweep and is reported instead (#236).
     public static let residualDocumentReferencePattern =
-        "[ \\t]?\\(\(documentReferenceScheme)[^)\\s]*\\)?"
+        "[ \\t]?\\(\(documentReferenceScheme)[ \\t]*"
+        + "(?:\(documentIdentityCharacterClass)*"
+        + "(?:[ \\t]+\(documentIdentityCharacterClass)+)*[ \\t]*\\)"
+        + "|\(documentIdentityCharacterClass)*)"
 
     /// Markdown emphasis markers, removed for a renderer that shows text verbatim.
     ///

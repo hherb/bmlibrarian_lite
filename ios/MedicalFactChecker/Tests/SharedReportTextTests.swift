@@ -36,10 +36,13 @@ final class SharedReportTextTests: XCTestCase {
         StringArrayTransformer.register()
     }
 
-    private func makeReport(fullReport: String) -> EvidenceReport {
+    private func makeReport(
+        summary: String = "A summary",
+        fullReport: String
+    ) -> EvidenceReport {
         EvidenceReport(
             verdict: .supported,
-            summary: "A summary",
+            summary: summary,
             fullReport: fullReport,
             citationCount: 1,
             uniqueSourceCount: 1,
@@ -109,5 +112,26 @@ final class SharedReportTextTests: XCTestCase {
         )
 
         XCTAssertTrue(report.plainTextReport.contains("Europe PMC: 889149"))
+    }
+
+    /// The summary is a report surface too, and carried its references raw.
+    ///
+    /// ``EvidenceReport/plainTextReport`` flattened ``EvidenceReport/fullReport``
+    /// and interpolated ``EvidenceReport/summary`` verbatim beside it. A citation
+    /// the model put in the summary therefore reached the reader as
+    /// `[Smith et al., 2016](doc:<identity>)` while the identical citation in the
+    /// body was cleaned — the same leak, one field over (#235).
+    func testASummaryCarriesNoDocumentIdentity() {
+        let identity = "8A1D4C22-0000-4000-8000-000000000001"
+        let report = makeReport(
+            summary: "Mixed evidence [Smith et al., 2016](doc:\(identity)).",
+            fullReport: "Body text."
+        )
+
+        let shared = report.plainTextReport
+
+        XCTAssertTrue(shared.contains("Mixed evidence Smith et al., 2016."), shared)
+        XCTAssertFalse(shared.contains(identity), shared)
+        XCTAssertFalse(shared.contains("doc:"), shared)
     }
 }

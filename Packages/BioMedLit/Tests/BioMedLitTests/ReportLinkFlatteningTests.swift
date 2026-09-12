@@ -331,4 +331,154 @@ final class ReportLinkFlatteningTests: XCTestCase {
 
         XCTAssertEqual(logger.errors, [], "\(logger.recorded)")
     }
+
+    // MARK: - The sweep must take the identity, not just the scheme (#235)
+
+    /// A space after the scheme does not leave the identity on the page.
+    ///
+    /// The sweep's run was once bounded by "not whitespace", so it stopped at
+    /// the space and removed `(doc:` alone — while the log said the target had
+    /// been removed. `889149` then printed onto an exported page reading as a
+    /// PubMed ID, which is #212 surviving its own repair. The link pattern
+    /// already accepts this space on a well-formed reference, so refusing it
+    /// here was the inconsistency.
+    func testASpaceAfterTheSchemeDoesNotStrandTheIdentity() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "A [Smith, 2016](doc: pmid-889149 study."
+        )
+
+        XCTAssertEqual(flattened, "A [Smith, 2016] study.")
+        XCTAssertFalse(flattened.contains("889149"), flattened)
+    }
+
+    /// A tab after the scheme is treated exactly as a space is.
+    func testATabAfterTheSchemeDoesNotStrandTheIdentity() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "A [Smith, 2016](doc:\tpmid-889149 study."
+        )
+
+        XCTAssertEqual(flattened, "A [Smith, 2016] study.")
+        XCTAssertFalse(flattened.contains("889149"), flattened)
+    }
+
+    /// Whitespace inside a closed target is taken with it.
+    ///
+    /// The closing parenthesis says where the target ends, so the whole
+    /// parenthetical can go even though the identity is not one run.
+    func testAClosedTargetWhoseIdentityCarriesWhitespaceIsFullyRemoved() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "Ref (doc:pmid 889149) here."
+        )
+
+        XCTAssertEqual(flattened, "Ref here.")
+        XCTAssertFalse(flattened.contains("889149"), flattened)
+    }
+
+    // MARK: - A removed target may not take the sentence with it (#235)
+
+    /// An unterminated target gives up the identity and leaves the full stop.
+    ///
+    /// Bounded only by whitespace, the run swallowed the `.` and fused two
+    /// sentences on a page a reader keeps. A document identity is alphanumerics,
+    /// hyphen and underscore, so bounding the run by that set stops it at the
+    /// punctuation instead.
+    func testAnUnterminatedTargetLeavesTheSentencePunctuation() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "A thesis reported this [Nyby, 1977](doc:pmid-889149. Later trials disagreed."
+        )
+
+        XCTAssertEqual(
+            flattened,
+            "A thesis reported this [Nyby, 1977]. Later trials disagreed."
+        )
+        XCTAssertFalse(flattened.contains("889149"), flattened)
+    }
+
+    /// The same holds for a comma, so a clause keeps its separator.
+    func testAnUnterminatedTargetLeavesAFollowingComma() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "Mortality fell [Smith, 2016](doc:abc, and rose later."
+        )
+
+        XCTAssertEqual(flattened, "Mortality fell [Smith, 2016], and rose later.")
+    }
+
+    /// An unterminated target may not reach into a later paragraph.
+    ///
+    /// A target run that crossed a line break would find whatever `)` a later
+    /// paragraph offered and delete everything between — silently, because from
+    /// the link pattern's point of view that parses, so the sweep never sees it.
+    func testAnUnterminatedTargetDoesNotReachIntoALaterParagraph() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "Mortality fell [Smith, 2016](doc:abc by 12% (95% CI 4-19) overall.\n\n1) dose"
+        )
+
+        XCTAssertEqual(
+            flattened,
+            "Mortality fell [Smith, 2016] by 12% (95% CI 4-19) overall.\n\n1) dose"
+        )
+    }
+
+    // MARK: - Shapes ordinary model output produces (#235)
+
+    /// A reference broken across a soft wrap is still a reference.
+    ///
+    /// A model wraps its prose, and the whole report reaches
+    /// ``ReportFormatter/plainText(fromReportMarkdown:)`` at once for the share
+    /// sheet. Refusing the wrap left the display text bracketed and reduced the
+    /// reference to a line carrying a lone full stop.
+    func testAReferenceBrokenAcrossOneLineWrapIsFlattened() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "Mortality fell 12% [Smith et al., 2016]\n(doc:8A1D4C22-0000-4000-8000-000000000001)."
+        )
+
+        XCTAssertEqual(flattened, "Mortality fell 12% Smith et al., 2016.")
+        XCTAssertEqual(logger.errors, [], "\(logger.recorded)")
+    }
+
+    /// A sentence's own exclamation mark is not an image marker.
+    ///
+    /// `!?` consumed whatever `!` preceded a link, so a sentence ending in one
+    /// lost it and ran into the reference's display text.
+    func testASentencesOwnExclamationMarkIsNotConsumed() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "It works![Smith, 2016](doc:abc)."
+        )
+
+        XCTAssertEqual(flattened, "It works!Smith, 2016.")
+    }
+
+    /// Every unparseable reference is counted and named, not only the first.
+    func testEveryUnparseableReferenceIsCountedAndNamed() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "A [Smith, 2016](doc:abc and [Jones, 2019](doc:def agree."
+        )
+
+        XCTAssertEqual(flattened, "A [Smith, 2016] and [Jones, 2019] agree.")
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
+
+        let reported = logger.errors.joined(separator: "\n")
+        XCTAssertTrue(reported.contains("2 document"), reported)
+        XCTAssertTrue(reported.contains("(doc:abc"), reported)
+        XCTAssertTrue(reported.contains("(doc:def"), reported)
+    }
+
+    /// A target the sweep cannot reach is reported rather than passed over.
+    ///
+    /// The sweep matches a *parenthesised* target only, so a scheme that lost
+    /// its opening parenthesis survives it (#236). The formatter may not claim
+    /// a clean page it has not got: golden rule 8 applies to the case being
+    /// carried as much as to the one being fixed.
+    func testADocumentReferenceSurvivingTheSweepIsReported() {
+        let flattened = ReportFormatter.flattenedReferenceLinks(
+            in: "A [Smith, 2016]doc:pmid-889149 study."
+        )
+
+        XCTAssertTrue(flattened.contains("doc:pmid-889149"), flattened)
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
+        XCTAssertTrue(
+            logger.errors.joined().contains("survived"),
+            logger.errors.joined()
+        )
+    }
 }

@@ -21,20 +21,33 @@ the rest.
 
 - **A reference the flattener cannot parse may not print its target** (#230,
   2026-09-12). Rules that still bind:
-  - **Widening a pattern narrows the gap; it does not close it.** Four shapes
-    now match that did not: a leading `!`, one level of nested brackets in the
-    display text, one level of nested parentheses in the target — a Wiley DOI
-    carries one, and stopping at the first `)` left the tail of the URL in the
-    prose — and whitespace between `]` and a `doc:` target. Whatever still
-    misses is *swept*: a residual `doc:` run is removed and logged, because the
-    target names a row, and `doc:pmid-889149` printed to a reader is #212
-    arriving through a different door.
+  - **Widening a pattern narrows the gap; it does not close it.** Shapes that
+    now match: a leading `!`, one level of nested brackets in the display text,
+    one level of nested parentheses in the target — a Wiley DOI carries one, and
+    stopping at the first `)` left the tail of the URL in the prose — and
+    whitespace, including one soft wrap, between `]` and a `doc:` target.
+    Whatever still misses is *swept*: the residual run is removed and logged,
+    because the target names a row, and `doc:pmid-889149` printed to a reader is
+    #212 arriving through a different door.
   - **The whitespace tolerance is confined to the `doc:` scheme**, which this
     app's own prompt writes and an article's prose never contains. Granted
     generally, `a 12% [sic] (95% CI 4-19) reduction` loses its confidence
     interval. Both patterns live in `BioMedLitConstants` with the reasoning.
+  - **A sweep that takes the scheme and leaves the identity is worse than none**,
+    because it strips the one marker saying the text is machine syntax. Review
+    found `(doc: pmid-889149` doing that under a log line asserting the target
+    had been removed. Hence: the removed run is bounded by the identity's own
+    character set, so a sentence keeps its punctuation; and the postcondition is
+    *checked*, not asserted, because a false diagnostic costs more than none.
+  - **A target may not cross a line break**, or an unterminated one runs to
+    whatever `)` a later paragraph offers and deletes everything between —
+    silently, since from the pattern's point of view that parses.
+  - **Flattening belongs to every block carrying prose, not the ones someone
+    remembered.** Headings and the summary bypassed it in all three renderers,
+    so the defect survived in the same `switch` that fixed it.
   - Lodged rather than fixed: **#233** (the screen was left disagreeing with the
-    export) and **#234** (Android's PDF export never flattened links at all).
+    export), **#234** (Android's PDF export never flattened links at all),
+    **#236**, **#237**, **#238**, **#239** from the review round below.
 
 - **A document's identity may not claim what the article is** (#208 in PR #226,
   2026-09-11). **An identity is opaque and unique by construction** —
@@ -257,6 +270,22 @@ each other.
 - **#229 — Android and Python still build and parse `pmid-` references.** No
   report text crosses platforms, so no shared contract breaks; it is divergence
   worth closing deliberately rather than by drift.
+- **#236 — a `doc:` target that lost its opening parenthesis survives the
+  sweep**, which is keyed on `(doc:`. Widening it would delete text on the
+  strength of a bare scheme in prose, which is golden rule 6 territory and wants
+  a decision rather than a patch. Reported meanwhile, and pinned by test.
+- **#237 — the flattener deletes citations and tells only the log.** Golden rule
+  8 wants the user told, and the export sheet has one in front of it. The same
+  `-> String` makes the log unusable: both printable views call it from a
+  SwiftUI `body`, so one bad reference logs per block per layout pass. Wants a
+  result type carrying the diagnostics; touches public API and seven call sites.
+- **#238 — `BioMedLit` defaults to discarding its own diagnostics.** Tolerable
+  while the package only reported; since #230 it also removes text. Both
+  shipping entry points configure a real logger, so this is enforcement, not a
+  live defect.
+- **#239 — `RecordingLogger` is copy-pasted across three test classes**, each
+  mutating the process-global configuration. The serial-execution assumption
+  that makes that safe is load-bearing and currently unwritten.
 
 ### The #206 round: identifier identity, on the other two platforms
 

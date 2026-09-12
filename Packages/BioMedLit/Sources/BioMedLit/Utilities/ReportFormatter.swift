@@ -174,8 +174,8 @@ public enum ReportFormatter {
     ///
     /// Each pattern is a literal, so a failure here means the build is broken
     /// rather than the input is odd. It is still logged rather than dropped,
-    /// because the consequence is otherwise silent and permanent: every caller
-    /// would render raw `[text](doc:…)` onto a page a reader keeps.
+    /// because the consequence is otherwise silent and permanent — see each
+    /// caller's `consequence` for what a reader sees.
     ///
     /// - Parameters:
     ///   - pattern: The regular expression source.
@@ -232,7 +232,7 @@ public enum ReportFormatter {
     /// were identified as `pmid-<primary slot>`, and that slot also holds
     /// Europe PMC thesis, case-report and `HIR` accessions: bare decimals
     /// indistinguishable from a PubMed ID, which Europe PMC serves in bulk.
-    /// See ``ArticleIdentifierKind/pubmed`` for the measurement and its date.
+    /// See ``ArticleIdentifierKind/inferred(from:)`` for the measurement and its date.
     /// An exported report therefore printed a locator that resolves, on PubMed,
     /// to a real but unrelated article (#212).
     ///
@@ -249,22 +249,32 @@ public enum ReportFormatter {
     ///
     /// A reference this function does not recognise used to pass through with
     /// its target intact, which is the same reader-facing outcome by a different
-    /// route. Anything left carrying
+    /// route. Anything left carrying a *parenthesised*
     /// ``BioMedLitConstants/documentReferenceScheme`` is therefore swept away
-    /// and reported — see ``withoutUnparseableDocumentReferences(in:)`` for what
-    /// survives that sweep and why.
+    /// and reported. A scheme that lost its opening parenthesis survives the
+    /// sweep; that is reported too, rather than passed over in silence (#236).
     ///
     /// - Parameter text: Report markdown.
     /// - Returns: The same markdown with every link reduced to its display text
-    ///   and no document reference left standing.
+    ///   and no parenthesised document reference left standing. If a pattern
+    ///   failed to compile, as much of that as remains possible, with the
+    ///   failure logged.
     public static func flattenedReferenceLinks(in text: String) -> String {
-        guard let regex = markdownLinkRegex else { return text }
-        let flattened = regex.stringByReplacingMatches(
-            in: text,
-            range: NSRange(text.startIndex..., in: text),
-            withTemplate: "$1"
-        )
-        return withoutUnparseableDocumentReferences(in: flattened)
+        let flattened: String
+        if let regex = markdownLinkRegex {
+            flattened = regex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "$1"
+            )
+        } else {
+            // The sweep is the last line of defence. Dropping it because the
+            // first pass is unavailable discards the belt along with the braces.
+            flattened = text
+        }
+        let swept = withoutUnparseableDocumentReferences(in: flattened)
+        reportAnySurvivingDocumentReference(in: swept)
+        return swept
     }
 
     /// Removes any document reference the link pattern could not account for,
@@ -280,14 +290,18 @@ public enum ReportFormatter {
     ///
     /// Display text keeps its brackets where it has them. Nothing here can tell
     /// where an unterminated target was meant to end, so guessing at the
-    /// author's intent would risk eating prose to tidy punctuation.
+    /// author's intent would risk eating prose to tidy punctuation. For the same
+    /// reason the removed run is bounded by
+    /// ``BioMedLitConstants/documentIdentityCharacterClass`` rather than by
+    /// whitespace: a sentence keeps the punctuation that followed its reference.
     ///
     /// Golden rule 8: the removal is an error, not a silent repair. Without the
     /// report, the only symptom is wrong text in a document that outlives the
     /// app.
     ///
     /// - Parameter text: Report markdown with every parseable link flattened.
-    /// - Returns: The same text with no document reference left standing.
+    /// - Returns: The same text with no parenthesised document reference left
+    ///   standing.
     private static func withoutUnparseableDocumentReferences(in text: String) -> String {
         guard let regex = residualDocumentReferenceRegex else { return text }
         let range = NSRange(text.startIndex..., in: text)
@@ -298,9 +312,12 @@ public enum ReportFormatter {
             .compactMap { Range($0.range, in: text) }
             .map { text[$0].trimmingCharacters(in: .whitespaces) }
 
+        // Counted from what can be named, so the number and the list cannot
+        // disagree: a report that says three and shows two is read as a
+        // formatting quirk rather than as a dropped diagnostic.
         BioMedLitLib.logger?.error(
             """
-            Report markdown carried \(matches.count) document \
+            Report markdown carried \(removed.count) document \
             reference(s) this formatter could not parse. Each target was removed \
             rather than printed, because it names a row rather than an article \
             and a bare number reads as a PubMed ID: \
@@ -311,6 +328,35 @@ public enum ReportFormatter {
         )
 
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+    }
+
+    /// Reports a document reference that outlived the sweep meant to remove it.
+    ///
+    /// The sweep's own diagnostic tells the next reader of the log that every
+    /// target was removed. Nothing established that. A sweep that takes the
+    /// scheme and leaves the identity prints `pmid-889149` under a message
+    /// claiming the opposite, and a false report costs more than no report at
+    /// all — so the claim is checked rather than asserted.
+    ///
+    /// It also catches the shape the sweep deliberately does not match: a target
+    /// that lost its opening parenthesis (#236). Widening the sweep to take it
+    /// would remove text on the strength of a bare `doc:` in prose, which is a
+    /// removal nobody has agreed to (golden rule 6). Reporting it commits to
+    /// nothing and leaves the evidence.
+    ///
+    /// - Parameter text: Text the sweep has already run over.
+    private static func reportAnySurvivingDocumentReference(in text: String) {
+        guard text.contains(BioMedLitConstants.documentReferenceScheme) else { return }
+
+        BioMedLitLib.logger?.error(
+            """
+            A document reference survived the sweep meant to remove it: report \
+            text still carries \(BioMedLitConstants.documentReferenceScheme) \
+            after flattening, so a row's identity is about to reach a reader who \
+            cannot resolve it and may read it as a PubMed ID.
+            """,
+            category: .parsing
+        )
     }
 
     /// A report's markdown reduced to what a verbatim renderer should show.
