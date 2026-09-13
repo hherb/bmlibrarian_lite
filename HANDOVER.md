@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#196 — the NCBI API key reaches NCBI and nothing else.** Branch
-`fix/ncbi-key-leak-196`, implemented and green; the PR is open. What it
+`fix/ncbi-key-leak-196`, implemented and green; PR #246 is open. What it
 establishes is under **Recently landed**, so delete this section once it
 merges. Otherwise nothing: pick a slice from **Potential follow-ups**.
 
@@ -19,7 +19,7 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A credential never travels in a URL** (#196, PR open, 2026-09-13). Both
+- **A credential never travels in a URL** (#196 in PR #246, 2026-09-13). Both
   Python NCBI clients (`PubMedClient` in the transparency analyser,
   `PubMedSearchClient`) send every E-utilities request as a POST with the
   parameters in the body. **A URL is what error text and HTTP logging print**:
