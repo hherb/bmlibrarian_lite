@@ -240,7 +240,7 @@ struct MacReportView: View {
                 .font(.title3)
                 .fontWeight(.semibold)
 
-            Text(report.summary)
+            ReportSummaryText(report.summary)
                 .font(.body)
                 .lineSpacing(MacSpacing.xSmall)
         }
@@ -442,47 +442,29 @@ struct MacReportView: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    /// Opens the document a tapped report reference names.
+    ///
+    /// Reads the URL back through ``ReportReferenceLink``, the same type that
+    /// wrote it; anything that is not a report reference is ignored. A citation
+    /// with no identity opens a document only when exactly one fits it
+    /// (``ReportCitation``): the wrong paper is worse than none.
+    ///
+    /// - Parameters:
+    ///   - url: The tapped URL.
+    ///   - documents: The documents the report was written from.
     private func handleReferenceTap(_ url: URL, documents: [Document]) {
-        guard url.scheme == "docref",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let queryItems = components.queryItems else {
+        switch ReportReferenceLink(url: url) {
+        case .documentIdentity(let identity):
+            selectedDocument = documents.first { $0.id == identity }
+        case .citationText(let text):
+            selectedDocument = ReportCitation.uniqueMatch(
+                forCitationText: text,
+                among: documents,
+                authors: \.authors,
+                year: \.year
+            )
+        case nil:
             return
-        }
-
-        let type = queryItems.first { $0.name == "type" }?.value
-        let value = queryItems.first { $0.name == "value" }?.value
-
-        guard let lookupType = type, let lookupValue = value else { return }
-
-        if lookupType == "id" {
-            selectedDocument = documents.first { $0.id == lookupValue }
-        } else if lookupType == "ref" {
-            let refText = lookupValue.removingPercentEncoding ?? lookupValue
-            selectedDocument = findDocumentByReference(refText, in: documents)
-        }
-    }
-
-    private func findDocumentByReference(_ reference: String, in documents: [Document]) -> Document? {
-        let parts = reference.components(separatedBy: ",")
-        guard parts.count >= 2 else { return nil }
-
-        let authorPart = parts[0].trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: " et al.", with: "")
-            .lowercased()
-        let yearPart = parts.last?.trimmingCharacters(in: .whitespaces)
-            .trimmingCharacters(in: .letters)
-
-        guard let yearString = yearPart, let year = Int(yearString) else { return nil }
-
-        return documents.first { doc in
-            guard doc.year == year else { return false }
-            for author in doc.authors {
-                let lastName = author.components(separatedBy: " ").first?.lowercased() ?? ""
-                if lastName == authorPart || author.lowercased().contains(authorPart) {
-                    return true
-                }
-            }
-            return false
         }
     }
 }
@@ -629,8 +611,10 @@ struct MacReviewedDocumentRow: View {
 
 /// Markdown renderer for macOS reports.
 ///
-/// Parses markdown content and renders it as styled SwiftUI views,
-/// including support for clickable document references.
+/// Splits the report into blocks with ``ReportMarkdownBlock`` — the splitter the
+/// PDF export uses — and renders each block's references as clickable links
+/// through ``ReportRichText``, so the screen and the PDF recognise the same
+/// references in the same blocks (#233).
 struct MacMarkdownReportView: View {
     /// The markdown content to render.
     let content: String
@@ -644,137 +628,66 @@ struct MacMarkdownReportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.medium) {
-            let blocks = parseMarkdownBlocks(content)
+            let blocks = ReportMarkdownBlock.blocks(fromReportMarkdown: content)
+            // Above the text it qualifies, so it is read first.
+            if let notice = RemovedCitationNotice(parses: blocks.map(\.inlineText)) {
+                RemovedCitationNote(notice: notice)
+            }
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 renderBlock(block)
             }
         }
+        // Logged once per appearance of this content, not from `body`, which
+        // SwiftUI evaluates again whenever its inputs change. Splitting again
+        // here gives the same blocks, because splitting and parsing are pure.
+        .task(id: content) {
+            ReportFormatter.logUnparseableReferences(
+                in: ReportMarkdownBlock.blocks(fromReportMarkdown: content).map(\.inlineText)
+            )
+        }
     }
 
-    // MARK: - Block Parsing
-
-    private enum MarkdownBlock {
-        case heading(level: Int, text: String)
-        case paragraph(text: String)
-        case listItem(text: String, ordered: Bool, number: Int?)
-    }
-
-    private func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
-        let normalized = normalizeLineBreaks(text)
-        let lines = normalized.components(separatedBy: "\n")
-        var blocks: [MarkdownBlock] = []
-        var currentParagraph: [String] = []
-        var listNumber = 0
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.isEmpty {
-                if !currentParagraph.isEmpty {
-                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
-                    currentParagraph = []
-                }
-                listNumber = 0
-                continue
-            }
-
-            if let headingMatch = parseHeading(trimmed) {
-                if !currentParagraph.isEmpty {
-                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
-                    currentParagraph = []
-                }
-                blocks.append(headingMatch)
-                listNumber = 0
-                continue
-            }
-
-            if let listMatch = parseListItem(trimmed, currentNumber: &listNumber) {
-                if !currentParagraph.isEmpty {
-                    blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
-                    currentParagraph = []
-                }
-                blocks.append(listMatch)
-                continue
-            }
-
-            currentParagraph.append(trimmed)
-        }
-
-        if !currentParagraph.isEmpty {
-            blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
-        }
-
-        return blocks
-    }
-
-    private func parseHeading(_ line: String) -> MarkdownBlock? {
-        if line.hasPrefix("### ") {
-            return .heading(level: 3, text: String(line.dropFirst(4)))
-        } else if line.hasPrefix("## ") {
-            return .heading(level: 2, text: String(line.dropFirst(3)))
-        } else if line.hasPrefix("# ") {
-            return .heading(level: 1, text: String(line.dropFirst(2)))
-        }
-        return nil
-    }
-
-    private func parseListItem(_ line: String, currentNumber: inout Int) -> MarkdownBlock? {
-        if line.hasPrefix("- ") {
-            currentNumber = 0
-            return .listItem(text: String(line.dropFirst(2)), ordered: false, number: nil)
-        }
-        if line.hasPrefix("* ") {
-            currentNumber = 0
-            return .listItem(text: String(line.dropFirst(2)), ordered: false, number: nil)
-        }
-
-        let pattern = "^\\d+\\.\\s+(.+)$"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let textRange = Range(match.range(at: 1), in: line) else {
-            return nil
-        }
-        currentNumber += 1
-        return .listItem(text: String(line[textRange]), ordered: true, number: currentNumber)
-    }
+    // MARK: - Block Rendering
 
     @ViewBuilder
-    private func renderBlock(_ block: MarkdownBlock) -> some View {
+    private func renderBlock(_ block: ReportMarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
             renderHeading(level: level, text: text)
         case .paragraph(let text):
             renderParagraph(text)
-        case .listItem(let text, let ordered, let number):
-            renderListItem(text: text, ordered: ordered, number: number)
+        case .listItem(let text, let ordinal):
+            renderListItem(text: text, ordinal: ordinal)
         }
     }
 
     @ViewBuilder
-    private func renderHeading(level: Int, text: String) -> some View {
+    private func renderHeading(level: Int, text: ReportInlineText) -> some View {
         let font: Font = switch level {
         case 1: .title.bold()
         case 2: .title2.bold()
         default: .title3.bold()
         }
 
-        Text(text)
+        // A heading carries references like any other block, and `Text(_:)`
+        // over a runtime `String` would print their link syntax verbatim.
+        Text(ReportRichText.attributedString(from: text))
             .font(font)
             .padding(.top, level == 1 ? MacSpacing.large : MacSpacing.standard)
             .padding(.bottom, MacSpacing.small)
     }
 
     @ViewBuilder
-    private func renderParagraph(_ text: String) -> some View {
+    private func renderParagraph(_ text: ReportInlineText) -> some View {
         renderRichText(text)
             .padding(.vertical, MacSpacing.xSmall)
     }
 
     @ViewBuilder
-    private func renderListItem(text: String, ordered: Bool, number: Int?) -> some View {
+    private func renderListItem(text: ReportInlineText, ordinal: Int?) -> some View {
         HStack(alignment: .top, spacing: MacSpacing.medium) {
-            if ordered, let num = number {
-                Text("\(num).")
+            if let ordinal {
+                Text("\(ordinal).")
                     .font(.body)
                     .fontWeight(.semibold)
                     .frame(width: MacIconSize.listNumberWidth, alignment: .trailing)
@@ -791,90 +704,10 @@ struct MacMarkdownReportView: View {
     }
 
     @ViewBuilder
-    private func renderRichText(_ text: String) -> some View {
-        let attributed = parseInlineFormatting(text)
-        Text(attributed)
+    private func renderRichText(_ text: ReportInlineText) -> some View {
+        Text(ReportRichText.attributedString(from: text))
             .font(.body)
             .textSelection(.enabled)
-    }
-
-    private func parseInlineFormatting(_ text: String) -> AttributedString {
-        var result = AttributedString()
-
-        let referencePattern = "\\[([^\\]]+?,\\s*\\d{4}[a-z]?)\\](?:\\(doc:([^)]+)\\))?"
-        guard let regex = try? NSRegularExpression(pattern: referencePattern) else {
-            return parseBasicFormatting(text)
-        }
-
-        var currentIndex = text.startIndex
-        let nsRange = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: nsRange)
-
-        for match in matches {
-            guard let fullRange = Range(match.range, in: text),
-                  let displayRange = Range(match.range(at: 1), in: text) else {
-                continue
-            }
-
-            if fullRange.lowerBound > currentIndex {
-                let beforeText = String(text[currentIndex..<fullRange.lowerBound])
-                result.append(parseBasicFormatting(beforeText))
-            }
-
-            let displayText = String(text[displayRange])
-            let documentId: String?
-            if match.range(at: 2).location != NSNotFound,
-               let idRange = Range(match.range(at: 2), in: text) {
-                documentId = String(text[idRange])
-            } else {
-                documentId = nil
-            }
-
-            var refAttr = AttributedString("[\(displayText)]")
-            refAttr.foregroundColor = Color.accentColor
-            refAttr.underlineStyle = Text.LineStyle.single
-
-            if let docId = documentId {
-                let encoded = docId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? docId
-                if let url = URL(string: "docref://lookup?type=id&value=\(encoded)") {
-                    refAttr.link = url
-                }
-            } else {
-                let encoded = displayText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? displayText
-                if let url = URL(string: "docref://lookup?type=ref&value=\(encoded)") {
-                    refAttr.link = url
-                }
-            }
-            result.append(refAttr)
-
-            currentIndex = fullRange.upperBound
-        }
-
-        if currentIndex < text.endIndex {
-            let remainingText = String(text[currentIndex...])
-            result.append(parseBasicFormatting(remainingText))
-        }
-
-        return result
-    }
-
-    private func parseBasicFormatting(_ text: String) -> AttributedString {
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(text)
-    }
-
-    private func normalizeLineBreaks(_ text: String) -> String {
-        var result = text
-        result = result.replacingOccurrences(of: "\\n", with: "\n")
-        while result.contains("\n\n\n") {
-            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
-        }
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

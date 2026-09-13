@@ -181,6 +181,18 @@ final class ReportLinkFlatteningTests: XCTestCase {
         XCTAssertEqual(plain, "Key finding: it helped Smith, 2016.")
     }
 
+    /// Text already flattened loses its markers without being parsed again.
+    ///
+    /// The PDF flattens a heading from a block it has parsed; running the
+    /// markdown through ``ReportFormatter/plainText(fromReportMarkdown:)`` again
+    /// would log each malformed reference a second time.
+    func testMarkersAreRemovedFromAlreadyFlattenedTextWithoutParsingIt() {
+        let plain = ReportFormatter.removingEmphasisMarkers(from: "**Key** __finding__ (doc:abc")
+
+        XCTAssertEqual(plain, "Key finding (doc:abc")
+        XCTAssertEqual(logger.recorded, [])
+    }
+
     /// The reference list is the worst case, so it is pinned directly.
     ///
     /// ``ReportFormatter/formatReferences(_:)`` opens every entry with `**1.**`,
@@ -406,8 +418,10 @@ final class ReportLinkFlatteningTests: XCTestCase {
     /// An unterminated target may not reach into a later paragraph.
     ///
     /// A target run that crossed a line break would find whatever `)` a later
-    /// paragraph offered and delete everything between — silently, because from
-    /// the link pattern's point of view that parses, so the sweep never sees it.
+    /// paragraph offered and delete everything between. A document target is
+    /// now confined to an identity, and the removal to identity-shaped lists,
+    /// so neither can; `ReportInlineTextTests` pins the same guard for the
+    /// removal and for an ordinary link.
     func testAnUnterminatedTargetDoesNotReachIntoALaterParagraph() {
         let flattened = ReportFormatter.flattenedReferenceLinks(
             in: "Mortality fell [Smith, 2016](doc:abc by 12% (95% CI 4-19) overall.\n\n1) dose"
@@ -458,7 +472,7 @@ final class ReportLinkFlatteningTests: XCTestCase {
         XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
 
         let reported = logger.errors.joined(separator: "\n")
-        XCTAssertTrue(reported.contains("2 document"), reported)
+        XCTAssertTrue(reported.contains("carried 2 document"), reported)
         XCTAssertTrue(reported.contains("(doc:abc"), reported)
         XCTAssertTrue(reported.contains("(doc:def"), reported)
     }
@@ -480,5 +494,61 @@ final class ReportLinkFlatteningTests: XCTestCase {
             logger.errors.joined().contains("survived"),
             logger.errors.joined()
         )
+    }
+
+    // MARK: - Reporting a whole report at once (#233)
+
+    /// A renderer that parses block by block reports once for the report.
+    ///
+    /// The screen parses each paragraph separately, from inside a SwiftUI
+    /// `body` that runs on every layout pass. Logging per parse would repeat
+    /// one malformed reference per block per pass, which is the diagnostic the
+    /// next reader of the log learns to filter out (#237).
+    func testSeveralParsesAreReportedAsOneDiagnostic() {
+        ReportFormatter.logUnparseableReferences(in: [
+            ReportInlineText(parsing: "A (doc:abc) first."),
+            ReportInlineText(parsing: "Clean [Smith, 2016](doc:ok)."),
+            ReportInlineText(parsing: "B [Jones, 2019](doc:def second."),
+        ])
+
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
+        let reported = logger.errors.joined(separator: "\n")
+        XCTAssertTrue(reported.contains("carried 2 document"), reported)
+        XCTAssertTrue(reported.contains("(doc:abc)"), reported)
+        XCTAssertTrue(reported.contains("(doc:def"), reported)
+    }
+
+    /// Parses that removed nothing and retain no scheme report nothing.
+    func testCleanParsesReportNothing() {
+        ReportFormatter.logUnparseableReferences(in: [
+            ReportInlineText(parsing: "Both [Smith, 2016](doc:abc) and [Jones, 2019] agree."),
+        ])
+
+        XCTAssertEqual(logger.recorded, [])
+    }
+
+    /// A scheme retained by any one parse is reported, once.
+    func testARetainedSchemeInAnyParseIsReported() {
+        ReportFormatter.logUnparseableReferences(in: [
+            ReportInlineText(parsing: "Clean."),
+            ReportInlineText(parsing: "A [Smith, 2016]doc:pmid-889149 study."),
+        ])
+
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.recorded)")
+        XCTAssertTrue(logger.errors.joined().contains("survived"), logger.errors.joined())
+    }
+
+    /// A removal and a retained scheme in the same parse are both reported.
+    ///
+    /// Reported only as a removal, the log would say every target had gone
+    /// while an identity was still on the page.
+    func testARemovalAndARetainedSchemeAreBothReported() {
+        ReportFormatter.logUnparseableReferences(in: [
+            ReportInlineText(parsing: "A (doc:abc) and [Smith, 2016]doc:pmid-889149 b"),
+        ])
+
+        XCTAssertEqual(logger.errors.count, 2, "\(logger.recorded)")
+        XCTAssertTrue(logger.errors.contains { $0.contains("(doc:abc)") }, "\(logger.recorded)")
+        XCTAssertTrue(logger.errors.contains { $0.contains("survived") }, "\(logger.recorded)")
     }
 }

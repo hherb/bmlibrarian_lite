@@ -331,27 +331,95 @@ public enum BioMedLitConstants {
 
     /// The characters a document's identity is built from.
     ///
-    /// An identity is a `UUID` string or a legacy `pmid-<digits>`, so it is
+    /// An identity is a `UUID` string or a legacy `pmid-<slot>`, so it is
     /// alphanumerics, hyphen and underscore and nothing else. Bounding an
     /// unterminated target by this set rather than by "not whitespace" is what
     /// keeps a sentence's own punctuation out of a removed run: `(doc:abc, and`
     /// gives up the identity and leaves the comma standing.
     public static let documentIdentityCharacterClass = "[A-Za-z0-9_-]"
 
-    /// One link target: any run that does not cross a line break, nesting at
-    /// most one level of parentheses.
+    /// One character of space within a line: a tab or any Unicode space
+    /// separator.
+    ///
+    /// Not merely `[ \t]`. A no-break space before `doc:` escaped the check
+    /// that keeps a document target from becoming an ordinary link, and the
+    /// renderer, trimming with the wider `CharacterSet.whitespaces`, then
+    /// linked to `doc:<identity>` — a citation that opens nothing (#233).
+    private static let referenceSpace = "[\\t\\p{Zs}]"
+
+    /// Space that may carry one line break, as a soft wrap does.
+    ///
+    /// A model wraps its prose anywhere, `(doc: pmid-889149)` included, and a
+    /// target broken at its space used to lose `(doc:` and print the identity.
+    /// One break, not two: a blank line ends a paragraph.
+    ///
+    /// Possessive (`*+`), because what follows it never begins with a space, so
+    /// giving characters back could never help a match — only slow a failure.
+    private static let referenceGap = "\(referenceSpace)*+(?:\\n\(referenceSpace)*+)?"
+
+    /// A legacy identity as a model may have respelled it: `pmid-889149`,
+    /// `pmid 889149`, `PMID:889149`.
+    ///
+    /// Recognised only so it can be removed whole. The slot must hold a digit,
+    /// which is what keeps `pmid in` from reading as one.
+    private static let legacyIdentityToken =
+        "(?i:pmid)[-:\\t\\p{Zs}]?[A-Za-z]*+[0-9][A-Za-z0-9]*+"
+
+    /// A document identity in `UUID` form.
+    private static let uuidIdentityToken =
+        "[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+
+    /// What may follow ``documentReferenceScheme`` directly: a legacy identity
+    /// in any spelling, or one run of identity characters.
+    ///
+    /// Following the scheme is what makes it machine syntax, so any run of
+    /// identity characters qualifies here.
+    private static let schemeTarget =
+        "(?:\(legacyIdentityToken)|\(documentIdentityCharacterClass)++)"
+
+    /// What separates the identities in a list: a comma or semicolon, space,
+    /// at most one line break, or several of those.
+    private static let identityListSeparator =
+        "\(referenceSpace)*+(?:[,;]\(referenceSpace)*+)?(?:\\n\(referenceSpace)*+)?"
+
+    /// An identity after the first in a list.
+    ///
+    /// Unlike the first, it has no scheme before it vouching that it is machine
+    /// syntax, so it must vouch for itself: carry its own scheme, or be shaped
+    /// like an identity. A plain word is neither, which is what stops the list
+    /// at `in 400 children` rather than removing the clause (#233).
+    private static let identityListEntry =
+        "(?:\(documentReferenceScheme)\(referenceGap)\(schemeTarget)"
+        + "|\(legacyIdentityToken)|\(uuidIdentityToken))"
+
+    /// An ordinary link's target: any run that does not cross a line break,
+    /// nesting at most one level of parentheses.
+    ///
+    /// Not used for a document target, which is confined to an identity's own
+    /// characters: within one line, a run like this still reaches a later `)`
+    /// and swallows the prose before it (#233). An ordinary target has no
+    /// character set to confine it to.
     ///
     /// The line break is the load-bearing part. An unterminated target that
     /// could cross one would run to whatever `)` a later paragraph happened to
     /// offer and delete everything in between — silently, because from the
     /// pattern's point of view that parses, so no sweep ever sees it.
+    ///
+    /// Within one line it still can, and that is an accepted cost: in
+    /// `as [the guideline](https://x.org showed in adults (95% CI 1-2)).` the
+    /// words up to the last `)` become the target and are not shown. Nothing
+    /// reports it, since no document reference is involved. A report's links
+    /// are document references, which this run no longer reads.
     private static let linkTargetRun = "(?:[^()\\n]|\\([^()\\n]*\\))*"
 
     /// Markdown link syntax: `[display text](target)`.
     ///
-    /// Capture group 1 is the display text. The target is matched as an opaque
-    /// run and never inspected: a report's link target is a document's identity,
-    /// and a renderer that cannot see the documents may not decide what it names.
+    /// Capture group 1 is the display text. Exactly one of the other two
+    /// participates in a match: group 2 is the run after a
+    /// ``documentReferenceScheme``, which names a document; group 3 is any other
+    /// target. Neither is inspected beyond that: a document target is a row's
+    /// identity, and a renderer that cannot see the documents may not decide
+    /// what it names. See ``ReportInlineText``, the one reader of these groups.
     ///
     /// Shapes the first version of this pattern got wrong, each leaving text a
     /// reader keeps in a state it should not be in (#230). Two it refused
@@ -359,7 +427,9 @@ public enum BioMedLitConstants {
     ///
     /// - **A leading `!`** is consumed with the link it belongs to, so an image
     ///   does not leave its marker stranded against the caption. A `!` preceded
-    ///   by a word character belongs to the sentence and is left alone.
+    ///   by a word character belongs to the sentence and is left alone. The
+    ///   lookbehind guards the `!` alone: applied to the `[` as well, it refused
+    ///   `reduction[Smith, 2016](doc:…)`, and the reference lost its identity.
     /// - **Display text may nest one level of brackets**, so an author's
     ///   bracketed aside does not end the display text early.
     /// - **A target may nest one level of parentheses**, because a Wiley DOI
@@ -378,47 +448,131 @@ public enum BioMedLitConstants {
     /// load-bearing against catastrophic backtracking: rewriting
     /// `\[[^\[\]]*\]` as `\[.*?\]` would preserve the first and destroy the
     /// second.
-    public static let markdownLinkPattern =
-        "(?<!\\w)!?\\[((?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]"
-        + "(?:[ \\t]*\\n?[ \\t]*\\(\(documentReferenceScheme)\(linkTargetRun)\\)"
-        + "|\\(\(linkTargetRun)\\))"
-
-    /// A document reference left behind once every link has been flattened.
     ///
-    /// Whatever ``markdownLinkPattern`` does not match reaches here: a target
-    /// with no closing parenthesis, a target with no preceding link, display
-    /// text nested deeper than that pattern allows. The set is that pattern's
+    /// ## A document target is an identity, not a run of text (#233)
+    ///
+    /// Group 2 is confined to one run of
+    /// ``documentIdentityCharacterClass``, with space and one line break
+    /// (``referenceGap``) allowed around it but not inside it. It was
+    /// ``linkTargetRun``, which accepted anything up to a closing parenthesis:
+    /// an unterminated `(doc:abc` then found the `)` that closed a later
+    /// confidence interval, and every word between became the "identity" —
+    /// removed from the page, and reported nowhere, because from this
+    /// pattern's point of view that parsed. A target that is not identity-shaped
+    /// is left to ``residualDocumentReferencePattern``, which removes the target
+    /// and reports it.
+    ///
+    /// The ordinary branch refuses a target opening with the scheme, so such a
+    /// target cannot fall through and become a link to `doc:…`, which the app
+    /// does not intercept and the system cannot open. Space and a line break
+    /// are tolerated between `(` and the scheme for the same reason, and the
+    /// refusal tolerates exactly what the document branch does: were it
+    /// narrower, the gap between them would be a dead link.
+    ///
+    /// Every run of space here is ``referenceGap``, never `[ \t]*\n?[ \t]*`: the
+    /// second divides a run of spaces between its two halves in every possible
+    /// way before failing, which took seconds on a long one.
+    public static let markdownLinkPattern =
+        "(?:(?<!\\w)!)?\\[((?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]"
+        + "(?:\(referenceGap)\\(\(referenceGap)\(documentReferenceScheme)"
+        + "(\(referenceGap)\(documentIdentityCharacterClass)++\(referenceGap))\\)"
+        + "|\\((?!\(referenceGap)\(documentReferenceScheme))(\(linkTargetRun))\\))"
+
+    /// A citation in `Author, Year` form carrying no target: `[Smith et al., 2016a]`.
+    ///
+    /// Reports written before references carried a document's identity cite
+    /// this way, and a reference whose unparseable target was removed is left
+    /// in this form. A renderer able to find a document by author and year may
+    /// offer it as a link; one that is not shows it exactly as written.
+    ///
+    /// Capture group 1 is the text between the brackets. It must end in a comma,
+    /// optional whitespace, a four-digit year and an optional one-letter
+    /// disambiguator, which is what keeps `[sic]` and `[1]` from being taken for
+    /// citations. Unlike ``markdownLinkPattern``'s display text it may not
+    /// contain a bracket at all: with no target anchoring the far end, a stray
+    /// `[` earlier in the sentence would otherwise join the citation, and the
+    /// lookup would search for `also [Smith`.
+    ///
+    /// Once private to each on-screen report view, where it also decided what
+    /// counted as a reference *with* a target — so `[the WHO guideline](doc:…)`
+    /// was not one (#233). It is consulted only where no target exists.
+    public static let untargetedCitationPattern = "\\[([^\\[\\]]+,\\s*\\d{4}[a-z]?)\\]"
+
+    /// An ordered list item in a report, `1. text`: capture group 1 is the text.
+    ///
+    /// The number is not captured. ``ReportMarkdownBlock`` counts items itself,
+    /// because a model's own numbering is not reliable.
+    public static let orderedListItemPattern = "^\\d+\\.\\s+(.+)$"
+
+    /// A citation's year as it closes `Author, Year`: four digits and an
+    /// optional one-letter disambiguator, `2016` or `2016a`.
+    ///
+    /// Capture group 1 is the year. Anchored, because the text it is matched
+    /// against is the whole of what follows the citation's last comma.
+    public static let citationYearPattern = "^([0-9]{4})[a-z]?$"
+
+    /// `et al.` in a citation's author part, which names no author.
+    public static let citationEtAlPattern = "\\bet\\s+al\\b\\.?"
+
+    /// What separates the authors a citation names: a comma, `&`, or `and`.
+    public static let citationAuthorSeparatorPattern = "\\s*(?:,|&|\\band\\b)\\s*"
+
+    /// What separates citations in a list: `[Smith, 2016; Jones, 2019]`.
+    ///
+    /// A list names more than one document, so no single one may be opened
+    /// for it.
+    public static let citationListSeparator: Character = ";"
+
+    /// A parenthesised document reference no link could account for.
+    ///
+    /// ``ReportInlineText`` removes these from the prose between links and from
+    /// each link's display text. Whatever ``markdownLinkPattern`` does not match
+    /// reaches here: a target with no closing parenthesis, a target with no
+    /// preceding link, a closed target that is not one identity, display text
+    /// nested deeper than that pattern allows. The set is that pattern's
     /// complement and shifts whenever it changes, so it is not enumerated.
     ///
     /// None of it may be printed. A target is a row's identity, which means
     /// nothing to a reader, and a legacy `pmid-889149` identity pasted into
     /// PubMed is a real 1977 paper on mouse courtship rather than the article
-    /// cited (#212).
+    /// cited (#212). But neither may the report's own words go with it
+    /// (golden rule 6), so a removal is bounded by what can be told apart from
+    /// prose. Two branches, because what bounds it safely differs by shape:
     ///
-    /// Two branches, because what safely bounds a removal differs by shape:
+    /// - **A closed list of identities.** The whole parenthetical goes when
+    ///   everything before its `)` is identity-shaped: the target after the
+    ///   scheme, then any further identities that carry their own scheme, are
+    ///   UUIDs, or are legacy `pmid` identities, separated by commas,
+    ///   semicolons, space or one line break. `(doc:pmid 889149)`,
+    ///   `(doc:A, doc:B)` and `(doc:pmid-889149, pmid-123456)` leave nothing
+    ///   behind; bounded by the first identity alone, the last printed
+    ///   `pmid-123456`, which reads as a PubMed ID.
+    /// - **Anything else.** Only the scheme and the identity after it go,
+    ///   bounded by ``documentIdentityCharacterClass``. A run bounded by the
+    ///   closing parenthesis took whole clauses — `No benefit was seen
+    ///   (doc:pmid-889149 in 400 children, contrary to earlier claims) overall.`
+    ///   printed "No benefit was seen overall." — and a run bounded only by
+    ///   whitespace swallowed the full stop after `(doc:pmid-889149.` and fused
+    ///   two sentences. The stray `)` left standing costs a reader far less.
     ///
-    /// - **Terminated.** The whole parenthetical goes, and the identity may
-    ///   carry internal whitespace, because the closing parenthesis establishes
-    ///   where it ends. `(doc:pmid 889149)` leaves nothing behind.
-    /// - **Unterminated.** Nothing establishes where the target was meant to
-    ///   end, so the run is bounded by ``documentIdentityCharacterClass``. A run
-    ///   bounded only by whitespace swallowed the full stop after
-    ///   `(doc:pmid-889149.` and fused two sentences.
+    /// What is left can still show a number: `(doc:pmid-889149, 123456)` keeps
+    /// `, 123456)`, because a bare number is also a word a report may write.
     ///
-    /// Whitespace after the scheme is tolerated in both. ``markdownLinkPattern``
-    /// already accepts it on a well-formed reference, and refusing it here is
-    /// what let `(doc: pmid-889149` remove its scheme and print its identity.
+    /// Space, and one line break, are tolerated between `(` and the scheme and
+    /// after it, exactly as ``markdownLinkPattern`` tolerates them on a
+    /// well-formed reference. Refusing them here is what let
+    /// `(doc: pmid-889149` remove its scheme and print its identity.
     ///
-    /// One preceding space or tab is absorbed so a removed reference does not
-    /// leave a double gap mid-sentence.
+    /// One preceding space is absorbed so a removed reference does not leave a
+    /// double gap mid-sentence.
     ///
     /// Only a *parenthesised* target is matched. A scheme that lost its opening
     /// parenthesis survives this sweep and is reported instead (#236).
     public static let residualDocumentReferencePattern =
-        "[ \\t]?\\(\(documentReferenceScheme)[ \\t]*"
-        + "(?:\(documentIdentityCharacterClass)*"
-        + "(?:[ \\t]+\(documentIdentityCharacterClass)+)*[ \\t]*\\)"
-        + "|\(documentIdentityCharacterClass)*)"
+        "\(referenceSpace)?\\(\(referenceGap)\(documentReferenceScheme)\(referenceGap)"
+        + "(?:(?:\(schemeTarget)(?:\(identityListSeparator)\(identityListEntry))*)?"
+        + "\(referenceGap)\\)"
+        + "|\(legacyIdentityToken)|\(documentIdentityCharacterClass)*+)"
 
     /// Markdown emphasis markers, removed for a renderer that shows text verbatim.
     ///
