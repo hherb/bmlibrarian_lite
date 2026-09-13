@@ -8,10 +8,9 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#196 — the NCBI API key reaches NCBI and nothing else.** Branch
-`fix/ncbi-key-leak-196`, implemented and green; PR #246 is open. What it
-establishes is under **Recently landed**, so delete this section once it
-merges. Otherwise nothing: pick a slice from **Potential follow-ups**.
+**#196 — the NCBI API key reaches NCBI and nothing else.** PR #246 is open, its
+review round addressed; delete this section once it merges (the rules are under
+**Recently landed**). Otherwise pick a slice from **Potential follow-ups**.
 
 ## Recently landed (context)
 
@@ -19,18 +18,19 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A credential never travels in a URL** (#196 in PR #246, 2026-09-13). Both
-  Python NCBI clients (`PubMedClient` in the transparency analyser,
-  `PubMedSearchClient`) send every E-utilities request as a POST with the
-  parameters in the body. **A URL is what error text and HTTP logging print**:
-  `HTTPError` embeds it, `ConnectionError` says "Max retries exceeded with url:
-  …", urllib3 logs the request line at any DEBUG level, so a routine 429 wrote
-  the key into a batch JSON export. **Redacting the text would chase each
-  printer; removing the key from the URL covers all of them.** NCBI reads
-  `api_key` from a POST body (checked live with an invalid key). The tests
-  drive a real local server, and **each test that reaches it also asserts the
-  key arrived**, so none can pass by no longer sending it. Swift and Android
-  still use query parameters: **#243**.
+- **A credential never travels in a URL, nor follows a redirect** (#196 in PR
+  #246, 2026-09-13). Both Python NCBI clients (`PubMedClient`,
+  `PubMedSearchClient`) POST every E-utilities request with the parameters in
+  the body. **A URL is what error text and HTTP logging print** — `HTTPError`,
+  `ConnectionError`, urllib3 at DEBUG — and the `HTTPError` text is what a
+  routine 429 wrote into a batch JSON export. **Redacting would chase each
+  printer; taking the key out of the URL covers all of them.** NCBI reads
+  `api_key` from a body (an invalid key is rejected identically over POST and
+  GET). **A body opens one route a query string lacked**: a 307/308 re-sends
+  it wherever it points, so a redirect is a failed request (`raise_for_status`
+  passes a 3xx). **Each test that reaches the local server also asserts the
+  key arrived.** Credential files go through `write_owner_only_file` (`mkstemp`
+  then `os.replace`, never `open` then `chmod`). Swift and Android: **#243**.
 
 - **The screen and the export read references by one parser** (#233 in PR #242,
   2026-09-13). **Recognition lives in `ReportInlineText`; renderers only style
@@ -56,6 +56,7 @@ the rest.
   `doc:pmid-889149` reads as a PubMed ID. **Whitespace tolerance only in the
   `doc:` scheme**, or `(95% CI 4-19)` is lost. **A sweep that leaves the
   identity is worse than none**; the postcondition is checked, not asserted.
+  **Flattening belongs to every block carrying prose.**
 
 - **A document's identity may not claim what the article is** (#208 in PR #226,
   2026-09-11). **An identity is opaque and unique by construction** —
@@ -80,8 +81,7 @@ the rest.
   PubMed URL and `PMID:` line**, `ArticleIdentifierKind.pubmedID(in:declared:)`.
   **A citation names the namespace it can prove** (`CitationIdentifier`).
 
-- **Older rounds, compressed to the rules that still bind.** Git history and the
-  `doc/cross_platform/` READMEs carry the rest; each rule below cost a defect.
+- **Older rounds, compressed further**; each rule below cost a defect.
   - **Europe PMC's own word for what an identifier is** (#209, PR #211): the kind
     is *stated* from the record's `source`, stored, and passed back into
     `fetchFullText`; a stored `nil` means "nobody stated one". The cache tag
@@ -323,19 +323,22 @@ Swift and Kotlin rather than a Swift-side patch.
   (#196's parity half). Swift logs `url.absoluteString` through
   `BioMedLitOSLogLogger.debug` as `privacy: .public`, release builds included;
   Android's `HttpLoggingInterceptor` at `BASIC` logs it in debug builds. Port
-  the rule (form-encoded POST), and check every place a `URLError` is persisted,
-  since its `userInfo` carries the failing URL.
-- **#244 — `bmll -v` never enables DEBUG**: `study_transparency_analyzer.py`
-  and `batch_analyzer.py` call `logging.basicConfig(INFO)` at import. The GUI
-  entry point configures no logging and gets INFO only from that side effect,
-  so the fix needs a GUI logging setup too. **#245** — those two standalone
+  both rules (form-encoded POST; a redirect is a failure), and check every
+  place a `URLError` is persisted, since its `userInfo` carries the failing URL.
+- **#244 — `bmll -v` never enables DEBUG**: the analyser and `batch_analyzer.py`
+  call `logging.basicConfig(INFO)` at import, and the GUI configures no logging
+  at all, so the fix needs a GUI setup too. **#245** — those two standalone
   CLIs take the NCBI key only as `--api-key` (shell history, `ps`).
-- **#190 — CI never builds either app target.** `swift test` compiles the
-  iOS-only sources to nothing on a macOS host and the SPM target excludes
-  `Sources/macOS`. Partly addressed: #218 added a macOS `xcodebuild` job. Still
-  wants an iOS Simulator job and — cheaper, and the exact defect that occurred —
-  a guard that fails when a `.swift` file under
-  `ios/MedicalFactChecker/Sources/` is referenced by no target.
+- **#247–#250 — failures that read as findings** (the #246 review). A failed
+  PubMed search returns zero results, so the GUI and MCP say "No documents
+  found" (**#247**; carry only the status, as `e.request.body` holds the key);
+  a failed batch silently shortens the set (**#248**); nothing connects
+  `analysis_failed` (**#249**); an efetch with no article yields "No conflict of
+  interest statement found" (**#250**, #203's shape).
+- **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
+  **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
+  cheaper, and the exact defect that occurred — a guard failing when a `.swift`
+  file under `ios/MedicalFactChecker/Sources/` belongs to no target.
 - **Reporting honestly about full-text retrieval**, all one family. **#189** — a
   failed Unpaywall lookup reads as an article with no OA PDF; it cannot reuse
   `europePMCUnreachable`, so it wants its own reason and sentence. **#192** — a
@@ -415,15 +418,12 @@ Swift and Kotlin rather than a Swift-side patch.
   persistence + `DocumentCard` UI. **#109 — LLM-assisted disambiguation of repo +
   soft-restriction**: kept FULL_OPEN today; wants an optional config-gated LLM
   layer at the orchestration layer, classifier and parity tests unchanged.
-- **#136/#137 — pricing is hardcoded in six places per platform and has already
-  drifted**: GPT-5.2 is advertised at $2.00/$8.00 but billed at $1.75/$14.00, and
-  `mistral-large-latest` matches no pricing key so it bills at the
-  `defaultPricing` placeholder. #136 needs a decision on which figures are
-  current; #137 is the duplication that caused it. **#138 — the model-list fetch
-  has no retry/backoff** (golden rule 7). **#139 — four providers still filter
-  models by whitelist** (OpenAI, Groq, Mistral, Anthropic), the pattern that broke
-  DeepSeek — riskier now that the healing logic rewrites a valid selection when a
-  whitelist drops a model.
+- **#136/#137 — pricing is hardcoded in six places per platform and has
+  drifted** (GPT-5.2 billed at the wrong rate; `mistral-large-latest` at the
+  `defaultPricing` placeholder); #136 needs a decision on current figures.
+  **#138** — the model-list fetch has no retry/backoff. **#139** — four
+  providers still filter models by whitelist, the pattern that broke DeepSeek,
+  riskier now that the healing logic rewrites a selection a whitelist drops.
 - **Small and cosmetic.** **#140** — `ThinkingConfig.type` is a raw `String` for
   a two-valued toggle. **#126** — redundant "Data not openly available" label
   (tiers are correct). **#111** — cache compiled regexes in Swift `RegexHelper`,
@@ -458,7 +458,7 @@ Swift and Kotlin rather than a Swift-side patch.
   code** (#186): check what the asserted value's provenance is on that path.
 - **A silent SwiftPM hang with no second build running** is its manifest binary
   stuck at `_dyld_start` behind `syspolicyd`; each invocation can stall 7–11
-  minutes and `--disable-sandbox` does not help. Check with `swiftc -typecheck`
+  minutes, and `--disable-sandbox` did not prevent it (2026-09-13). Check with `swiftc -typecheck`
   first, then chain build, test and `xcodebuild` in one background job. The
   lasting fix is the user's: Privacy & Security → Developer Tools.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a

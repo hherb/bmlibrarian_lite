@@ -33,20 +33,26 @@ This document captures lessons learned from implementing Europe PMC and PubMed i
 
 **Base URL:** `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/`
 
-**Key Endpoints:**
-- Search: `esearch.fcgi?db=pubmed&term={query}&retmax={n}&retstart={offset}`
-- Fetch: `efetch.fcgi?db=pubmed&id={pmids}&rettype=xml`
+**Key Endpoints** (parameters shown are sent as a POST body; see below):
+- Search: `esearch.fcgi` with `db=pubmed&term={query}&retmax={n}&retstart={offset}`
+- Fetch: `efetch.fcgi` with `db=pubmed&id={pmids}&rettype=xml`
 
 **Recommended:** Include `email` parameter for identification. API key optional but increases rate limits.
 
 **Never put the API key in a URL.** Send E-utilities parameters as a
-form-encoded POST body, which NCBI accepts on `esearch`, `efetch` and the
-history server, `api_key` included. A query string is part of the URL, and a
-URL is what HTTP error text (`requests.HTTPError`, `ConnectionError`,
-`URLError`'s `userInfo`) and HTTP logging (urllib3 at DEBUG, OkHttp's
-`HttpLoggingInterceptor`) print. In Python a routine 429 carried the key into
-batch transparency exports (#196). Swift and Android still send it as a query
-parameter (#243).
+form-encoded POST body, which NCBI accepts on `esearch` and `efetch`,
+history-server (`WebEnv`/`query_key`) requests and `api_key` included. A query
+string is part of the URL, and a URL is what HTTP error text
+(`requests.HTTPError`, `ConnectionError`, `URLError`'s `userInfo`), HTTP
+logging (urllib3 at DEBUG, OkHttp's `HttpLoggingInterceptor`) and any code
+that logs the request URL itself (BioMedLit's `PubMedService` does) print. In
+Python a routine 429 carried the key into batch transparency exports (#196).
+Swift and Android still send it as a query parameter (#243).
+
+**Treat a redirect as a failed request; never follow it.** A 307 or 308
+re-sends the POST body, key included, to whatever host it names; a 301, 302 or
+303 re-sends the request as a GET without its parameters, which NCBI answers
+as a search for nothing.
 
 ---
 
@@ -123,8 +129,8 @@ GET /search?query=...&pageSize=25&cursorMark=*
 ### PubMed: Offset-Based Pagination
 
 ```
-GET esearch.fcgi?db=pubmed&term=...&retmax=100&retstart=0
-GET esearch.fcgi?db=pubmed&term=...&retmax=100&retstart=100
+POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=0
+POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=100
 ```
 
 **Limitation:** Maximum offset is 9999.

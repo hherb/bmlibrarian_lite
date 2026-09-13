@@ -145,15 +145,23 @@ class PubMedSearchClient:
         Every request is a POST with the parameters in the body. The API key
         is among them, and a query string is part of the URL that urllib3
         writes to any DEBUG-level log and that ``requests`` embeds in its
-        exception text (#196). POST also removes any URL-length limit on long
-        queries. E-utilities accepts POST on every endpoint used here.
+        exception text (#196). POST also avoids the HTTP 414 a long query
+        would meet as a GET.
+
+        A redirect is a failed request, never followed: a 307 or 308 would
+        re-send the body, key included, to whatever host it names, and a 301,
+        302 or 303 would re-send the request as a GET without its parameters.
 
         Args:
-            url: API endpoint URL
-            params: Request parameters, sent as a form-encoded body
+            url: An E-utilities endpoint that accepts POST. Today that is
+                ``esearch.fcgi`` (history-server requests included) and
+                ``efetch.fcgi``.
+            params: Request parameters, sent as a form-encoded body.
+                ``email`` and ``api_key`` are added to this dict in place.
 
         Returns:
-            Response object or None if all retries failed
+            Response object, or None if all retries failed. Every HTTP error
+            is retried, a refused redirect and a non-retryable 4xx included.
         """
         # Add authentication
         if self.email:
@@ -168,7 +176,14 @@ class PubMedSearchClient:
                 # Rate limiting
                 time.sleep(self.request_delay)
 
-                response = requests.post(url, data=params, timeout=self.timeout)
+                response = requests.post(
+                    url, data=params, timeout=self.timeout, allow_redirects=False
+                )
+                if response.is_redirect:
+                    raise requests.HTTPError(
+                        f"{response.status_code} redirect not followed for url: {url}",
+                        response=response,
+                    )
                 response.raise_for_status()
                 return response
 

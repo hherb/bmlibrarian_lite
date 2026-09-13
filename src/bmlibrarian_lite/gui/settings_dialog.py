@@ -54,7 +54,12 @@ from PySide6.QtCore import Qt, QThread, Signal
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-from ..config import LiteConfig, TaskModelConfig, BenchmarkModelConfig
+from ..config import (
+    LiteConfig,
+    TaskModelConfig,
+    BenchmarkModelConfig,
+    write_owner_only_file,
+)
 from ..embeddings import LiteEmbedder
 from ..constants import (
     DEFAULT_LLM_MODEL,
@@ -1190,16 +1195,16 @@ class SettingsDialog(QDialog):
 
     def _save_api_key(self, key: str, value: str) -> None:
         """
-        Save an API key to .env file.
+        Save an API key to .env file, owner-only.
 
         Args:
             key: Environment variable name
             value: API key value
+
+        Raises:
+            OSError: If the file cannot be read or written.
         """
         env_path = self.config.storage.env_file
-
-        # Ensure directory exists
-        env_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Read existing .env
         lines = []
@@ -1218,15 +1223,7 @@ class SettingsDialog(QDialog):
         if not found:
             lines.append(f"{key}={value}\n")
 
-        # Write back
-        with open(env_path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-
-        # Set restrictive permissions
-        try:
-            env_path.chmod(0o600)
-        except OSError:
-            pass  # May fail on Windows
+        write_owner_only_file(env_path, "".join(lines))
 
         # Also set in current environment
         os.environ[key] = value
