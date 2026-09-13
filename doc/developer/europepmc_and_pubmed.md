@@ -45,14 +45,29 @@ history-server (`WebEnv`/`query_key`) requests and `api_key` included. A query
 string is part of the URL, and a URL is what HTTP error text
 (`requests.HTTPError`, `ConnectionError`, `URLError`'s `userInfo`), HTTP
 logging (urllib3 at DEBUG, OkHttp's `HttpLoggingInterceptor`) and any code
-that logs the request URL itself (BioMedLit's `PubMedService` does) print. In
-Python a routine 429 carried the key into batch transparency exports (#196).
-Swift and Android still send it as a query parameter (#243).
+that logs the request URL itself print. In Python a routine 429 carried the key
+into batch transparency exports (#196); BioMedLit's `PubMedService` logged the
+URL as a public value in release builds, and Android's debug builds wrote it to
+logcat (#243).
 
 **Treat a redirect as a failed request; never follow it.** A 307 or 308
 re-sends the POST body, key included, to whatever host it names; a 301, 302 or
 303 re-sends the request as a GET without its parameters, which NCBI answers
 as a search for nothing.
+
+Where each platform enforces both rules, and the test that pins them:
+
+| Platform | POST body | Redirect refused | Test |
+|----------|-----------|------------------|------|
+| Python | `requests.post(data=…)` in both NCBI clients | `allow_redirects=False`, raise on `is_redirect` | `tests/test_ncbi_api_key_confinement.py` |
+| Swift | `EutilsRequest.post` | `RedirectRefusingTaskDelegate`, passed per task | `PubMedCredentialConfinementTests` |
+| Android | `@FormUrlEncoded` + `@Field` on `PubMedApi` | `pubMedHttpClient`: `followRedirects(false)` on a client derived for PubMed only, since Unpaywall and PDF links need redirects | `PubMedCredentialConfinementTest` |
+
+A refused redirect has its own error on each port
+(`PubMedError.redirectRefused` / `RedirectRefusedError`) and is not retried.
+On Android the key is read by `PubMedService` itself, from
+`NcbiCredentialSource`, never passed by callers: every workflow call site used
+to omit it, so the saved key never reached NCBI.
 
 ---
 
