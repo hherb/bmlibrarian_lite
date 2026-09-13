@@ -923,13 +923,20 @@ class PubMedClient:
         self._last_request_time = time.time()
 
     def _make_request(self, endpoint: str, params: Dict) -> requests.Response:
-        """Make rate-limited request to PubMed API."""
+        """Make rate-limited request to PubMed API.
+
+        The parameters travel as a POST body, never a query string: the API
+        key is among them, and a URL is what ``HTTPError``,
+        ``ConnectionError`` and urllib3's debug log print. A key in the URL
+        reached batch exports and logs that way (#196). E-utilities accepts
+        POST on every endpoint used here.
+        """
         self._rate_limit()
         params['email'] = self.email
         if self.api_key:
             params['api_key'] = self.api_key
         url = f"{self.BASE_URL}/{endpoint}"
-        response = self.session.get(url, params=params, timeout=30)
+        response = self.session.post(url, data=params, timeout=30)
         response.raise_for_status()
         return response
 

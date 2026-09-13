@@ -39,6 +39,15 @@ This document captures lessons learned from implementing Europe PMC and PubMed i
 
 **Recommended:** Include `email` parameter for identification. API key optional but increases rate limits.
 
+**Never put the API key in a URL.** Send E-utilities parameters as a
+form-encoded POST body, which NCBI accepts on `esearch`, `efetch` and the
+history server, `api_key` included. A query string is part of the URL, and a
+URL is what HTTP error text (`requests.HTTPError`, `ConnectionError`,
+`URLError`'s `userInfo`) and HTTP logging (urllib3 at DEBUG, OkHttp's
+`HttpLoggingInterceptor`) print. In Python a routine 429 carried the key into
+batch transparency exports (#196). Swift and Android still send it as a query
+parameter (#243).
+
 ---
 
 ## Query Formatting

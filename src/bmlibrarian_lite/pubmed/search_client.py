@@ -60,7 +60,6 @@ from .constants import (
     ENV_NCBI_EMAIL,
     ENV_NCBI_API_KEY,
     EMAIL_VALIDATION_PATTERN,
-    URL_LENGTH_POST_THRESHOLD,
 )
 from .data_types import (
     PubMedQuery,
@@ -139,15 +138,19 @@ class PubMedSearchClient:
         self,
         url: str,
         params: Dict[str, Any],
-        method: str = "GET",
     ) -> Optional[requests.Response]:
         """
         Make an HTTP request with retry logic and rate limiting.
 
+        Every request is a POST with the parameters in the body. The API key
+        is among them, and a query string is part of the URL that urllib3
+        writes to any DEBUG-level log and that ``requests`` embeds in its
+        exception text (#196). POST also removes any URL-length limit on long
+        queries. E-utilities accepts POST on every endpoint used here.
+
         Args:
             url: API endpoint URL
-            params: Query parameters
-            method: HTTP method (GET or POST)
+            params: Request parameters, sent as a form-encoded body
 
         Returns:
             Response object or None if all retries failed
@@ -165,11 +168,7 @@ class PubMedSearchClient:
                 # Rate limiting
                 time.sleep(self.request_delay)
 
-                if method.upper() == "POST":
-                    response = requests.post(url, data=params, timeout=self.timeout)
-                else:
-                    response = requests.get(url, params=params, timeout=self.timeout)
-
+                response = requests.post(url, data=params, timeout=self.timeout)
                 response.raise_for_status()
                 return response
 
@@ -268,14 +267,7 @@ class PubMedSearchClient:
             params["usehistory"] = "y"
             params["retmax"] = 0  # Just get count and WebEnv
 
-        # Use POST for long queries to avoid HTTP 414 (URI Too Long) errors
-        # Estimate URL length based on query string length
-        query_length = len(query.query_string)
-        method = "POST" if query_length > URL_LENGTH_POST_THRESHOLD else "GET"
-        if method == "POST":
-            logger.debug(f"Using POST method for long query ({query_length} chars)")
-
-        response = self._make_request(ESEARCH_URL, params, method=method)
+        response = self._make_request(ESEARCH_URL, params)
 
         if not response:
             return SearchResult(
@@ -447,11 +439,7 @@ class PubMedSearchClient:
         params["retstart"] = start_offset
         params["sort"] = "relevance"
 
-        # Use POST for long queries
-        query_length = len(query.query_string)
-        method = "POST" if query_length > URL_LENGTH_POST_THRESHOLD else "GET"
-
-        response = self._make_request(ESEARCH_URL, params, method=method)
+        response = self._make_request(ESEARCH_URL, params)
 
         if not response:
             return SearchResult(
@@ -505,11 +493,7 @@ class PubMedSearchClient:
         params["retmax"] = 0
         params["rettype"] = "count"
 
-        # Use POST for long queries to avoid HTTP 414 (URI Too Long) errors
-        query_length = len(query.query_string)
-        method = "POST" if query_length > URL_LENGTH_POST_THRESHOLD else "GET"
-
-        response = self._make_request(ESEARCH_URL, params, method=method)
+        response = self._make_request(ESEARCH_URL, params)
         if not response:
             return 0
 
