@@ -66,6 +66,15 @@ final class ReportRichTextTests: XCTestCase {
         XCTAssertFalse(found.contains { $0.url.scheme == "doc" }, "\(found)")
     }
 
+    /// A reference with any kind of space before its scheme still opens its
+    /// document, rather than being a link to `doc:` that opens nothing.
+    func testAReferenceSpacedWithANoBreakSpaceIsNotADeadLink() {
+        let found = links("As [Smith, 2016](\u{00A0}doc:\(identity)) says.")
+
+        XCTAssertEqual(found.map { ReportReferenceLink(url: $0.url) }, [.documentIdentity(identity)])
+        XCTAssertFalse(found.contains { $0.url.scheme == "doc" }, "\(found)")
+    }
+
     /// A citation with no target opens the document its text names, whatever
     /// characters that text carries.
     func testACitationWithNoTargetLeadsToItsText() {
@@ -86,6 +95,9 @@ final class ReportRichTextTests: XCTestCase {
             ("A [Smith, 2016](doc:pmid-889149 study.", "A [Smith, 2016] study."),
             ("A (doc:pmid-889149) bare target.", "A bare target."),
             ("Nested [Smith [Jr], 2016](doc:pmid-889149) case.", "Nested [Smith [Jr], 2016] case."),
+            ("A [Smith, 2016](doc:\npmid-889149) study.", "A [Smith, 2016] study."),
+            ("A [Smith, 2016]( doc:pmid-889149 study.", "A [Smith, 2016] study."),
+            ("Benefit (\ndoc:pmid-889149) in adults.", "Benefit in adults."),
         ]
 
         for (markdown, shown) in cases {
@@ -117,6 +129,37 @@ final class ReportRichTextTests: XCTestCase {
         XCTAssertEqual(found.map(\.url), [URL(string: "https://example.org/guideline")])
     }
 
+    /// A destination written with a title or in angle brackets still links to
+    /// the destination.
+    ///
+    /// SwiftUI's markdown parser read both forms. Handed to `URL(string:)`
+    /// whole, each was refused and the link was lost.
+    func testALinkDestinationWithATitleOrAngleBracketsStillLinks() {
+        let expected = URL(string: "https://example.org/guideline")
+
+        XCTAssertEqual(links("See [the guideline](https://example.org/guideline \"WHO\").").map(\.url), [expected])
+        XCTAssertEqual(links("See [the guideline](<https://example.org/guideline>).").map(\.url), [expected])
+    }
+
+    /// A destination nothing can open is shown as text, not as a link.
+    ///
+    /// `URL(string:)` accepts nearly anything, so `see appendix` became a link
+    /// with no scheme: tinted, underlined and dead. A `docref:` destination the
+    /// model wrote itself may not pose as a reference this app built.
+    func testADestinationNothingCanOpenIsNotALink() {
+        let cases = [
+            "See [the guideline](see appendix).",
+            "See [the guideline](javascript:alert(1)).",
+            "See [the guideline](docref://lookup?type=id&value=abc).",
+            "See [the guideline](PMID: 889149).",
+        ]
+
+        for markdown in cases {
+            XCTAssertEqual(shownText(markdown), "See the guideline.", markdown)
+            XCTAssertTrue(links(markdown).isEmpty, markdown)
+        }
+    }
+
     /// Emphasis is rendered, not printed.
     func testEmphasisIsRenderedRatherThanPrinted() {
         let attributed = ReportRichText.attributedString(
@@ -139,24 +182,52 @@ final class ReportRichTextTests: XCTestCase {
 
     // MARK: - Telling the reader
 
-    /// Nothing removed, nothing said.
+    /// Nothing removed and nothing left showing, nothing said.
     ///
     /// A note over a report that is fine teaches the reader to ignore the one
     /// over a report that is not.
     func testNoNoticeWhenNothingWasRemoved() {
-        XCTAssertNil(RemovedCitationNotice(removedReferences: []))
+        XCTAssertNil(RemovedCitationNotice(parses: [
+            ReportInlineText(parsing: "Both [Smith, 2016](doc:abc) and [Jones, 2019] agree."),
+        ]))
+        XCTAssertNil(RemovedCitationNotice(parses: []))
     }
 
-    /// The note counts removed links, in agreement with the number.
+    /// The note counts removed links across every parse, in agreement with the
+    /// number.
     ///
     /// It counts links, not citations: an unterminated target leaves its
     /// citation on the page, and one reference can lose two targets, so a count
     /// of "citations" would claim losses that did not happen.
     func testTheNoticeCountsRemovedLinks() throws {
-        let one = try XCTUnwrap(RemovedCitationNotice(removedReferences: ["(doc:abc"]))
-        let three = try XCTUnwrap(RemovedCitationNotice(removedReferences: ["(doc:a", "(doc:b)", "(doc:c"]))
+        let one = try XCTUnwrap(RemovedCitationNotice(parses: [
+            ReportInlineText(parsing: "A [Smith, 2016](doc:abc study."),
+        ]))
+        let three = try XCTUnwrap(RemovedCitationNotice(parses: [
+            ReportInlineText(parsing: "A (doc:a and (doc:b)."),
+            ReportInlineText(parsing: "B [Smith, 2016](doc:c study."),
+        ]))
 
         XCTAssertTrue(one.sentence.hasPrefix("1 malformed citation link was "), one.sentence)
         XCTAssertTrue(three.sentence.hasPrefix("3 malformed citation links were "), three.sentence)
+    }
+
+    /// A reference code still showing is the reader's business too.
+    ///
+    /// A scheme that lost its parenthesis is not removed (#236), so the page
+    /// shows `doc:pmid-889149`. The note spoke only of removals, and so said
+    /// nothing in the one case where the harm was on the page.
+    func testTheNoticeSaysWhenAReferenceCodeIsStillShown() throws {
+        let shown = try XCTUnwrap(RemovedCitationNotice(parses: [
+            ReportInlineText(parsing: "A [Smith, 2016]doc:pmid-889149 study."),
+        ]))
+        let both = try XCTUnwrap(RemovedCitationNotice(parses: [
+            ReportInlineText(parsing: "A (doc:abc) and [Smith, 2016]doc:pmid-889149 b"),
+        ]))
+
+        XCTAssertFalse(shown.sentence.contains("removed"), shown.sentence)
+        XCTAssertTrue(shown.sentence.contains("not a PubMed ID"), shown.sentence)
+        XCTAssertTrue(both.sentence.hasPrefix("1 malformed citation link was "), both.sentence)
+        XCTAssertTrue(both.sentence.contains("not a PubMed ID"), both.sentence)
     }
 }

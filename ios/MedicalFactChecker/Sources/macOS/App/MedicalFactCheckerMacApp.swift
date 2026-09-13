@@ -63,8 +63,9 @@ struct MedicalFactCheckerMacApp: App {
             MacContentView()
                 .environment(AppSettings.shared)
                 .environment(\.openURL, OpenURLAction { url in
-                    // Intercept our custom docref:// URLs
-                    if url.scheme == "docref" {
+                    // A tapped report reference: the report view on screen
+                    // reads it back through `ReportReferenceLink`.
+                    if url.scheme == ReportReferenceLink.scheme {
                         NotificationCenter.default.post(
                             name: .documentReferenceClicked,
                             object: nil,

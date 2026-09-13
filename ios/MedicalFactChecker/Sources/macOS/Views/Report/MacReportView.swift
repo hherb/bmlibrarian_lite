@@ -445,7 +445,9 @@ struct MacReportView: View {
     /// Opens the document a tapped report reference names.
     ///
     /// Reads the URL back through ``ReportReferenceLink``, the same type that
-    /// wrote it; anything that is not a report reference is ignored.
+    /// wrote it; anything that is not a report reference is ignored. A citation
+    /// with no identity opens a document only when exactly one fits it
+    /// (``ReportCitation``): the wrong paper is worse than none.
     ///
     /// - Parameters:
     ///   - url: The tapped URL.
@@ -455,33 +457,14 @@ struct MacReportView: View {
         case .documentIdentity(let identity):
             selectedDocument = documents.first { $0.id == identity }
         case .citationText(let text):
-            selectedDocument = findDocumentByReference(text, in: documents)
+            selectedDocument = ReportCitation.uniqueMatch(
+                forCitationText: text,
+                among: documents,
+                authors: \.authors,
+                year: \.year
+            )
         case nil:
             return
-        }
-    }
-
-    private func findDocumentByReference(_ reference: String, in documents: [Document]) -> Document? {
-        let parts = reference.components(separatedBy: ",")
-        guard parts.count >= 2 else { return nil }
-
-        let authorPart = parts[0].trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: " et al.", with: "")
-            .lowercased()
-        let yearPart = parts.last?.trimmingCharacters(in: .whitespaces)
-            .trimmingCharacters(in: .letters)
-
-        guard let yearString = yearPart, let year = Int(yearString) else { return nil }
-
-        return documents.first { doc in
-            guard doc.year == year else { return false }
-            for author in doc.authors {
-                let lastName = author.components(separatedBy: " ").first?.lowercased() ?? ""
-                if lastName == authorPart || author.lowercased().contains(authorPart) {
-                    return true
-                }
-            }
-            return false
         }
     }
 }
@@ -628,9 +611,10 @@ struct MacReviewedDocumentRow: View {
 
 /// Markdown renderer for macOS reports.
 ///
-/// Splits the report into blocks and renders each block's references as
-/// clickable links through ``ReportRichText``, so the screen recognises exactly
-/// the references the exported report does (#233).
+/// Splits the report into blocks with ``ReportMarkdownBlock`` — the splitter the
+/// PDF export uses — and renders each block's references as clickable links
+/// through ``ReportRichText``, so the screen and the PDF recognise the same
+/// references in the same blocks (#233).
 struct MacMarkdownReportView: View {
     /// The markdown content to render.
     let content: String
@@ -644,11 +628,9 @@ struct MacMarkdownReportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.medium) {
-            let blocks = parseMarkdownBlocks(content)
+            let blocks = ReportMarkdownBlock.blocks(fromReportMarkdown: content)
             // Above the text it qualifies, so it is read first.
-            if let notice = RemovedCitationNotice(
-                removedReferences: blocks.flatMap(\.inlineText.removedReferences)
-            ) {
+            if let notice = RemovedCitationNotice(parses: blocks.map(\.inlineText)) {
                 RemovedCitationNote(notice: notice)
             }
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
@@ -656,134 +638,26 @@ struct MacMarkdownReportView: View {
             }
         }
         // Logged once per appearance of this content, not from `body`, which
-        // SwiftUI runs on every layout pass.
+        // SwiftUI evaluates again whenever its inputs change. Splitting again
+        // here gives the same blocks, because splitting and parsing are pure.
         .task(id: content) {
-            ReportFormatter.reportUnparseableReferences(
-                in: parseMarkdownBlocks(content).map(\.inlineText)
+            ReportFormatter.logUnparseableReferences(
+                in: ReportMarkdownBlock.blocks(fromReportMarkdown: content).map(\.inlineText)
             )
         }
     }
 
-    // MARK: - Block Parsing
-
-    /// One block of the report, its text already parsed for references.
-    ///
-    /// Parsed once, when the block is built, so the text a block renders and
-    /// the removals the note counts come from the same parse.
-    private enum MarkdownBlock {
-        case heading(level: Int, text: ReportInlineText)
-        case paragraph(text: ReportInlineText)
-        case listItem(text: ReportInlineText, ordered: Bool, number: Int?)
-
-        /// The block's text.
-        var inlineText: ReportInlineText {
-            switch self {
-            case .heading(_, let text), .paragraph(let text), .listItem(let text, _, _):
-                return text
-            }
-        }
-    }
-
-    private func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
-        let normalized = normalizeLineBreaks(text)
-        let lines = normalized.components(separatedBy: "\n")
-        var blocks: [MarkdownBlock] = []
-        var currentParagraph: [String] = []
-        var listNumber = 0
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.isEmpty {
-                if !currentParagraph.isEmpty {
-                    blocks.append(paragraphBlock(currentParagraph))
-                    currentParagraph = []
-                }
-                listNumber = 0
-                continue
-            }
-
-            if let headingMatch = parseHeading(trimmed) {
-                if !currentParagraph.isEmpty {
-                    blocks.append(paragraphBlock(currentParagraph))
-                    currentParagraph = []
-                }
-                blocks.append(headingMatch)
-                listNumber = 0
-                continue
-            }
-
-            if let listMatch = parseListItem(trimmed, currentNumber: &listNumber) {
-                if !currentParagraph.isEmpty {
-                    blocks.append(paragraphBlock(currentParagraph))
-                    currentParagraph = []
-                }
-                blocks.append(listMatch)
-                continue
-            }
-
-            currentParagraph.append(trimmed)
-        }
-
-        if !currentParagraph.isEmpty {
-            blocks.append(paragraphBlock(currentParagraph))
-        }
-
-        return blocks
-    }
-
-    /// A paragraph block from its wrapped lines.
-    ///
-    /// Parsed with the line breaks in place and joined afterwards. Joining with
-    /// a space first erased the break an unterminated reference target may not
-    /// cross, and the screen deleted prose that the exported report kept (#233).
-    ///
-    /// - Parameter lines: The paragraph's lines, in order.
-    private func paragraphBlock(_ lines: [String]) -> MarkdownBlock {
-        .paragraph(text: ReportInlineText(parsing: lines.joined(separator: "\n")).joiningWrappedLines())
-    }
-
-    private func parseHeading(_ line: String) -> MarkdownBlock? {
-        // A heading carries references like any other block (#235).
-        if line.hasPrefix("### ") {
-            return .heading(level: 3, text: ReportInlineText(parsing: String(line.dropFirst(4))))
-        } else if line.hasPrefix("## ") {
-            return .heading(level: 2, text: ReportInlineText(parsing: String(line.dropFirst(3))))
-        } else if line.hasPrefix("# ") {
-            return .heading(level: 1, text: ReportInlineText(parsing: String(line.dropFirst(2))))
-        }
-        return nil
-    }
-
-    private func parseListItem(_ line: String, currentNumber: inout Int) -> MarkdownBlock? {
-        if line.hasPrefix("- ") {
-            currentNumber = 0
-            return .listItem(text: ReportInlineText(parsing: String(line.dropFirst(2))), ordered: false, number: nil)
-        }
-        if line.hasPrefix("* ") {
-            currentNumber = 0
-            return .listItem(text: ReportInlineText(parsing: String(line.dropFirst(2))), ordered: false, number: nil)
-        }
-
-        let pattern = "^\\d+\\.\\s+(.+)$"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let textRange = Range(match.range(at: 1), in: line) else {
-            return nil
-        }
-        currentNumber += 1
-        return .listItem(text: ReportInlineText(parsing: String(line[textRange])), ordered: true, number: currentNumber)
-    }
+    // MARK: - Block Rendering
 
     @ViewBuilder
-    private func renderBlock(_ block: MarkdownBlock) -> some View {
+    private func renderBlock(_ block: ReportMarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
             renderHeading(level: level, text: text)
         case .paragraph(let text):
             renderParagraph(text)
-        case .listItem(let text, let ordered, let number):
-            renderListItem(text: text, ordered: ordered, number: number)
+        case .listItem(let text, let ordinal):
+            renderListItem(text: text, ordinal: ordinal)
         }
     }
 
@@ -795,8 +669,8 @@ struct MacMarkdownReportView: View {
         default: .title3.bold()
         }
 
-        // `Text(_:)` over a runtime `String` prints markdown verbatim, so a
-        // heading showed a reference's whole link syntax.
+        // A heading carries references like any other block, and `Text(_:)`
+        // over a runtime `String` would print their link syntax verbatim.
         Text(ReportRichText.attributedString(from: text))
             .font(font)
             .padding(.top, level == 1 ? MacSpacing.large : MacSpacing.standard)
@@ -810,10 +684,10 @@ struct MacMarkdownReportView: View {
     }
 
     @ViewBuilder
-    private func renderListItem(text: ReportInlineText, ordered: Bool, number: Int?) -> some View {
+    private func renderListItem(text: ReportInlineText, ordinal: Int?) -> some View {
         HStack(alignment: .top, spacing: MacSpacing.medium) {
-            if ordered, let num = number {
-                Text("\(num).")
+            if let ordinal {
+                Text("\(ordinal).")
                     .font(.body)
                     .fontWeight(.semibold)
                     .frame(width: MacIconSize.listNumberWidth, alignment: .trailing)
@@ -834,15 +708,6 @@ struct MacMarkdownReportView: View {
         Text(ReportRichText.attributedString(from: text))
             .font(.body)
             .textSelection(.enabled)
-    }
-
-    private func normalizeLineBreaks(_ text: String) -> String {
-        var result = text
-        result = result.replacingOccurrences(of: "\\n", with: "\n")
-        while result.contains("\n\n\n") {
-            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
-        }
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

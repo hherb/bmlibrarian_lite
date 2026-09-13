@@ -39,8 +39,9 @@ public enum ReportInlineSegment: Equatable, Sendable {
     /// `documentIdentity` names a row in this app's store. It resolves nowhere
     /// else and must never be shown: a legacy `pmid-889149` identity reads as a
     /// PubMed ID, and on PubMed `889149` is a real 1977 paper on mouse courtship
-    /// rather than the article cited (#212). Surrounding whitespace is removed,
-    /// since a lookup by ` pmid-889149` matches nothing.
+    /// rather than the article cited (#212). As ``ReportInlineText`` builds it,
+    /// it is one non-empty run of identity characters: surrounding space and
+    /// line breaks are removed, since a lookup by ` pmid-889149` matches nothing.
     case documentReference(displayText: String, documentIdentity: String)
 
     /// A citation in `Author, Year` form with no target: `[Smith, 2016]`.
@@ -56,8 +57,8 @@ public enum ReportInlineSegment: Equatable, Sendable {
     /// What a renderer that follows no links shows for this segment.
     ///
     /// A link of either kind becomes its display text. A citation with no
-    /// target keeps its brackets, because it was written that way and nothing
-    /// was taken from it.
+    /// target keeps its brackets, because it reached the parser with them —
+    /// even where a malformed target was removed from after them.
     public var flattened: String {
         switch self {
         case .prose(let text):
@@ -75,31 +76,33 @@ public enum ReportInlineSegment: Equatable, Sendable {
 /// Report markdown split into the segments a renderer draws, and what could not
 /// be drawn.
 ///
-/// The one place a report's references are recognised. Export flattens these
-/// segments (``ReportFormatter/flattenedReferenceLinks(in:)``) and the screen
-/// renders them as links, so both apply the same rules to a given run of text.
-/// That is not the same as agreeing on every report: export parses the whole
-/// report at once, while the screen splits it into blocks first, and a
-/// reference wrapped onto the line after a list item or heading lands in a
-/// different block. Parse wrapped lines with their breaks and join them
-/// afterwards (``joiningWrappedLines()``), or the screen deletes prose the
-/// export keeps.
+/// The one place a report's references are recognised. The text export
+/// flattens these segments (``ReportFormatter/flattenedReferenceLinks(in:)``),
+/// the PDF flattens them block by block, and the screen renders them as links,
+/// so all three apply the same rules to a given run of text.
 ///
-/// Parsing is pure: it neither logs nor reports. A renderer parsing block by
-/// block from a SwiftUI `body` would otherwise repeat one malformed reference
-/// per block per layout pass, so the caller collects the parses and hands them
-/// to ``ReportFormatter/reportUnparseableReferences(in:)`` once.
+/// That is not the same as agreeing on every report. The text export parses the
+/// whole report at once, while the PDF and the screen split it into blocks first
+/// (``ReportMarkdownBlock``), and a reference wrapped onto the line after a list
+/// item or heading lands in a different block (#241).
+///
+/// Parsing logs nothing about its input. A renderer parsing block by block from
+/// a SwiftUI `body`, which is evaluated again whenever its inputs change, would
+/// otherwise repeat one malformed reference per block per evaluation, so the
+/// caller collects the parses and hands them to
+/// ``ReportFormatter/logUnparseableReferences(in:)`` once.
 ///
 /// ## What is removed
 ///
-/// Widening a pattern narrows the gap; it does not close it. Any document
-/// reference ``BioMedLitConstants/markdownLinkPattern`` could not match — a
-/// target with no closing parenthesis, one with no preceding link — is removed
-/// from the text and named in ``removedReferences`` rather than shown. A target
-/// is a row's identity and means nothing to a reader, so removing one discards
-/// nothing a reader wanted, while showing one is #212 through a different door.
-/// See ``BioMedLitConstants/residualDocumentReferencePattern`` for how the
-/// removed run is bounded so that it cannot take the sentence with it.
+/// Widening a pattern narrows the gap; it does not close it. Any parenthesised
+/// document reference ``BioMedLitConstants/markdownLinkPattern`` could not
+/// match — a target with no closing parenthesis, one with no preceding link, a
+/// closed target that is not one identity — is removed from the text and named
+/// in ``removedReferences`` rather than shown. A target is a row's identity and
+/// means nothing to a reader, so removing one discards nothing a reader wanted,
+/// while showing one is #212 through a different door. See
+/// ``BioMedLitConstants/residualDocumentReferencePattern`` for how the removed
+/// run is bounded so that the report's own words stay.
 ///
 /// Only a *parenthesised* target is removed. A scheme that lost its opening
 /// parenthesis stays in the text (#236), and ``retainsDocumentReferenceScheme``
@@ -109,9 +112,13 @@ public struct ReportInlineText: Equatable, Sendable {
     /// is never empty prose.
     public let segments: [ReportInlineSegment]
 
-    /// Each document reference removed because nothing could parse it, as it
-    /// appeared in the source with surrounding whitespace trimmed, in source
-    /// order.
+    /// Each document reference removed because nothing could parse it, with
+    /// surrounding space trimmed, in the order removed.
+    ///
+    /// That is source order, except where one removal assembled another from
+    /// the text around it: `((doc:x)doc:a)` names `(doc:x)`, then
+    /// `(doc:a)` as assembled. For diagnostics only — each carries an identity,
+    /// which a reader must not be shown.
     public let removedReferences: [String]
 
     /// Parses one run of report markdown.
@@ -136,17 +143,27 @@ public struct ReportInlineText: Equatable, Sendable {
                   let displayRange = Range(link.range(at: 1), in: markdown) else {
                 // Unreachable for a range the regex took from this same string.
                 // Leaving the run to the prose still sweeps any target out of it.
+                assertionFailure("A link match's range did not convert back to its string")
+                continue
+            }
+            let identityRange = Range(link.range(at: 2), in: markdown)
+            let targetRange = Range(link.range(at: 3), in: markdown)
+            guard identityRange != nil || targetRange != nil else {
+                // Unreachable while exactly one target group participates in a
+                // match. Were the groups renumbered, dropping the link would
+                // delete its text unseen; left to the prose, it is still swept.
+                assertionFailure("A link matched with neither target group: the pattern's groups changed")
                 continue
             }
             builder.appendProse(markdown[cursor..<linkRange.lowerBound])
 
             let displayText = builder.sweptOfDocumentReferences(String(markdown[displayRange]))
-            if let identityRange = Range(link.range(at: 2), in: markdown) {
+            if let identityRange {
                 builder.append(.documentReference(
                     displayText: displayText,
-                    documentIdentity: markdown[identityRange].trimmingCharacters(in: .whitespaces)
+                    documentIdentity: markdown[identityRange].trimmingCharacters(in: .whitespacesAndNewlines)
                 ))
-            } else if let targetRange = Range(link.range(at: 3), in: markdown) {
+            } else if let targetRange {
                 builder.append(.link(
                     displayText: displayText,
                     target: String(markdown[targetRange])
@@ -171,10 +188,10 @@ public struct ReportInlineText: Equatable, Sendable {
     ///
     /// For a renderer that shows a wrapped paragraph as one flowing line. It
     /// must parse the lines *with* their breaks and join them afterwards:
-    /// joining first erases the break that
-    /// ``BioMedLitConstants/markdownLinkPattern`` relies on to stop an
-    /// unterminated target, which is how the screen came to delete prose the
-    /// export kept (#233). What was removed is unchanged.
+    /// joining first erases the break that stops an ordinary link's unclosed
+    /// target in ``BioMedLitConstants/markdownLinkPattern``, and the words up to
+    /// a `)` on the next line vanish unreported (#233). ``ReportMarkdownBlock``
+    /// builds paragraphs this way. What was removed is unchanged.
     ///
     /// - Returns: The parse with each `\n` in prose and display text a space.
     public func joiningWrappedLines() -> ReportInlineText {
@@ -210,21 +227,28 @@ public struct ReportInlineText: Equatable, Sendable {
     /// Whether what a reader is shown still carries the document reference
     /// scheme after removal.
     ///
-    /// Checked against the rendered text rather than inferred from what was
-    /// removed. A removal that took the scheme and left the identity once
-    /// printed `pmid-889149` under a diagnostic claiming the target was gone,
-    /// and a false report costs more than none. It also catches the shape the
-    /// removal deliberately does not match (#236).
+    /// Checked against the flattened text rather than inferred from what was
+    /// removed, so it catches the shape removal deliberately does not match: a
+    /// scheme that lost its parenthesis (#236).
+    ///
+    /// It looks for the scheme, not for identities, so it cannot see an
+    /// identity whose scheme was removed without it. Removal is written so that
+    /// cannot happen — a target broken across a line after `doc:` is taken
+    /// whole — and the tests pin those shapes, because a diagnostic saying the
+    /// target was removed over a page printing `pmid-889149` costs more than no
+    /// diagnostic at all.
     public var retainsDocumentReferenceScheme: Bool {
         flattened.contains(BioMedLitConstants.documentReferenceScheme)
     }
 
     // MARK: - Patterns
 
-    /// Compiles one of this type's literal patterns, reporting a failure.
+    /// Compiles one of the report formatter's literal patterns, reporting a
+    /// failure.
     ///
     /// Each pattern is a literal, so a failure here means the build is broken
-    /// rather than the input is odd. It is still logged rather than dropped,
+    /// rather than the input is odd: debug builds stop, and a test asserts that
+    /// every pattern compiles. A release build logs rather than crashing,
     /// because the consequence is otherwise silent and permanent.
     ///
     /// - Parameters:
@@ -232,7 +256,7 @@ public struct ReportInlineText: Equatable, Sendable {
     ///   - consequence: What a reader sees if this pattern is unavailable,
     ///     phrased to complete "so …".
     /// - Returns: The compiled expression, or `nil` if it would not compile.
-    private static func compiled(
+    static func compiled(
         _ pattern: String,
         consequence: String
     ) -> NSRegularExpression? {
@@ -246,24 +270,28 @@ public struct ReportInlineText: Equatable, Sendable {
                 """,
                 category: .parsing
             )
+            assertionFailure("Report formatting pattern failed to compile: \(error)")
             return nil
         }
     }
 
     /// Markdown link syntax, compiled once.
-    fileprivate static let markdownLinkRegex: NSRegularExpression? = compiled(
+    static let markdownLinkRegex: NSRegularExpression? = compiled(
         BioMedLitConstants.markdownLinkPattern,
-        consequence: "report links will render as raw markdown"
+        consequence: """
+            every reference will be reported as malformed and found by author \
+            and year, and ordinary links will lose their destination
+            """
     )
 
     /// Document references no link pattern could account for, compiled once.
-    fileprivate static let residualDocumentReferenceRegex: NSRegularExpression? = compiled(
+    static let residualDocumentReferenceRegex: NSRegularExpression? = compiled(
         BioMedLitConstants.residualDocumentReferencePattern,
         consequence: "a malformed reference will print its document identity"
     )
 
     /// Citations in `Author, Year` form with no target, compiled once.
-    fileprivate static let untargetedCitationRegex: NSRegularExpression? = compiled(
+    static let untargetedCitationRegex: NSRegularExpression? = compiled(
         BioMedLitConstants.untargetedCitationPattern,
         consequence: "a citation with no target will not be offered as a link"
     )
@@ -276,7 +304,7 @@ private struct SegmentBuilder {
     /// Segments built so far, in source order.
     private(set) var segments: [ReportInlineSegment] = []
 
-    /// Document references removed so far, in source order.
+    /// Document references removed so far, in the order removed.
     private(set) var removedReferences: [String] = []
 
     /// Appends a segment, merging prose into prose and dropping empty prose.
@@ -307,6 +335,9 @@ private struct SegmentBuilder {
         for citation in regex.matches(in: swept, range: whole) {
             guard let citationRange = Range(citation.range, in: swept),
                   let displayRange = Range(citation.range(at: 1), in: swept) else {
+                // Unreachable for a range the regex took from this same string.
+                // The citation's text stays in the prose that follows.
+                assertionFailure("A citation match's range did not convert back to its string")
                 continue
             }
             append(.prose(String(swept[cursor..<citationRange.lowerBound])))

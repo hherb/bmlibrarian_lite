@@ -319,9 +319,15 @@ struct PDFExporter {
             // MARK: - Markdown Rendering Helpers
 
             /// Render markdown text with proper formatting for headers, bold, lists, etc.
+            ///
+            /// Split by ``ReportMarkdownBlock``, the splitter the on-screen report
+            /// uses. This exporter's own copy joined a paragraph's wrapped lines
+            /// before parsing them, so the PDF — the copy a reader keeps — lost
+            /// words the screen showed (#233). The blocks' removals are logged
+            /// once, here, rather than once per block.
             func drawMarkdown(_ markdown: String) {
-                let normalizedText = normalizeLineBreaks(markdown)
-                let blocks = parseMarkdownBlocks(normalizedText)
+                let blocks = ReportMarkdownBlock.blocks(fromReportMarkdown: markdown)
+                ReportFormatter.logUnparseableReferences(in: blocks.map(\.inlineText))
 
                 for block in blocks {
                     switch block {
@@ -333,20 +339,19 @@ struct PDFExporter {
                         default: .boldSystemFont(ofSize: PDFLayout.heading3FontSize)
                         }
                         // A heading carries references like any other block,
-                        // and `drawText` renders verbatim (#235).
-                        let cleanedText = ReportFormatter.plainText(fromReportMarkdown: text)
+                        // and `drawText` renders verbatim, markers included.
+                        let cleanedText = ReportFormatter.removingEmphasisMarkers(from: text.flattened)
                         _ = drawText(cleanedText, font: font)
                         addSpacing(PDFLayout.headingBottomSpacing)
 
                     case .paragraph(let text):
-                        let cleanedText = ReportFormatter.flattenedReferenceLinks(in: text)
-                        _ = drawFormattedText(cleanedText, baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
+                        // `**` is left for `drawFormattedText` to set in bold.
+                        _ = drawFormattedText(text.flattened, baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
                         addSpacing(PDFLayout.paragraphSpacing)
 
-                    case .listItem(let text, let ordered, let number):
-                        let cleanedText = ReportFormatter.flattenedReferenceLinks(in: text)
-                        let bullet = ordered ? "\(number ?? 1)." : "•"
-                        _ = drawFormattedText("\(bullet) \(cleanedText)", baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
+                    case .listItem(let text, let ordinal):
+                        let bullet = ordinal.map { "\($0)." } ?? "•"
+                        _ = drawFormattedText("\(bullet) \(text.flattened)", baseFont: .systemFont(ofSize: PDFLayout.bodyFontSize))
                         addSpacing(PDFLayout.listItemSpacing)
                     }
                 }
@@ -547,104 +552,6 @@ struct PDFExporter {
         }
 
         return data
-    }
-
-    // MARK: - Markdown Parsing Types
-
-    /// Block types for markdown parsing.
-    private enum MarkdownBlock {
-        case heading(level: Int, text: String)
-        case paragraph(text: String)
-        case listItem(text: String, ordered: Bool, number: Int?)
-    }
-
-    // MARK: - Markdown Parsing
-
-    /// Normalize line breaks in markdown text.
-    private static func normalizeLineBreaks(_ text: String) -> String {
-        var result = text
-        result = result.replacingOccurrences(of: "\\n", with: "\n")
-        while result.contains("\n\n\n") {
-            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
-        }
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Parse markdown text into structured blocks.
-    private static func parseMarkdownBlocks(_ text: String) -> [MarkdownBlock] {
-        let lines = text.components(separatedBy: "\n")
-        var blocks: [MarkdownBlock] = []
-        var currentParagraph: [String] = []
-        var listNumber = 0
-
-        func flushParagraph() {
-            if !currentParagraph.isEmpty {
-                blocks.append(.paragraph(text: currentParagraph.joined(separator: " ")))
-                currentParagraph = []
-            }
-        }
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.isEmpty {
-                flushParagraph()
-                listNumber = 0
-                continue
-            }
-
-            // Headers
-            if trimmed.hasPrefix("### ") {
-                flushParagraph()
-                blocks.append(.heading(level: 3, text: String(trimmed.dropFirst(4))))
-                listNumber = 0
-                continue
-            }
-            if trimmed.hasPrefix("## ") {
-                flushParagraph()
-                blocks.append(.heading(level: 2, text: String(trimmed.dropFirst(3))))
-                listNumber = 0
-                continue
-            }
-            if trimmed.hasPrefix("# ") {
-                flushParagraph()
-                blocks.append(.heading(level: 1, text: String(trimmed.dropFirst(2))))
-                listNumber = 0
-                continue
-            }
-
-            // Unordered list
-            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
-                flushParagraph()
-                blocks.append(.listItem(text: String(trimmed.dropFirst(2)), ordered: false, number: nil))
-                listNumber = 0
-                continue
-            }
-
-            // Ordered list
-            if let match = parseOrderedListItem(trimmed) {
-                flushParagraph()
-                listNumber += 1
-                blocks.append(.listItem(text: match, ordered: true, number: listNumber))
-                continue
-            }
-
-            currentParagraph.append(trimmed)
-        }
-
-        flushParagraph()
-        return blocks
-    }
-
-    /// Parse an ordered list item line.
-    private static func parseOrderedListItem(_ line: String) -> String? {
-        let pattern = "^\\d+\\.\\s+(.+)$"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let textRange = Range(match.range(at: 1), in: line) else {
-            return nil
-        }
-        return String(line[textRange])
     }
 
     /// Create a temporary file URL for the PDF.

@@ -22,32 +22,40 @@ the rest.
 - **The screen and the export read references by one parser** (#233, PR open,
   2026-09-13). Rules that still bind:
   - **Recognition lives in `ReportInlineText` (BioMedLit); renderers only
-    style segments.** The export flattens them, and the screen
+    style segments.** The text export flattens them, the screen
     (`ReportRichText`, shared by iOS and macOS) links them. Parsing is pure;
-    `ReportFormatter.reportUnparseableReferences(in:)` logs, and the screen
-    calls it from `.task(id:)`, never from `body`.
+    `ReportFormatter.logUnparseableReferences(in:)` logs, and a view calls it
+    from `.task(id:)`, never from `body`.
+  - **One block splitter, `ReportMarkdownBlock` (BioMedLit), for the iOS
+    screen, the macOS screen and the PDF.** Three private copies agreed until
+    the screens learned to parse a paragraph before joining its lines and the
+    PDF did not — so the copy a reader keeps lost words the screen showed.
   - **Measure through the real renderer**: the issue's table missed that
     `Text(String)` summaries printed every citation's UUID.
-  - **A document target is an identity, not a run of text.** The `doc:` branch of
-    `markdownLinkPattern` is confined to `documentIdentityCharacterClass`. As
-    `linkTargetRun` it reached a later `)` on the same line and deleted the
-    prose between, silently, on *both* surfaces. Review found it; #230's
-    line-break guard only covered the multi-line case. **Narrowing one pattern
-    moves work to the next**: the sweep's closed branch then had to take any
-    closed target (short of `(`, `[` or a line break), or
-    `(doc:A, doc:B)` printed `, doc:B)`. A second review caught that.
-  - **Parse wrapped lines with their breaks, then join**
-    (`joiningWrappedLines()`). Joining with a space first erased the guard, and
-    the screen deleted prose the export kept.
-  - **The reader is told** (user's decision): `RemovedCitationNote` sits above
-    the text it describes and counts removed *links*, not citations, because an
-    unterminated target leaves its citation on the page.
-  - **`ReportReferenceLink` owns the `docref://` URL both ways.** Interpolating
-    `.urlQueryAllowed` text left `&` unencoded, so `[Smith & Jones, 2016]`
-    looked up `"Smith "`.
+  - **A document target is an identity, not a run of text**, and **a removal
+    takes machine syntax, never the report's words** (golden rule 6, user's
+    decision). The `doc:` link branch is one identity run; the removal takes a
+    whole parenthetical only when everything in it is identity-shaped (scheme,
+    UUID, `pmid…`), otherwise just `(doc:<identity>`, leaving a stray `)`. The
+    first wide version deleted `in 400 children, contrary to earlier claims`.
+    **Narrowing one pattern moves work to the next**, so review each pattern
+    change against the other two.
+  - **Space around the scheme means any Unicode space and one line break**,
+    identically in the link branch, its `doc:` refusal and the removal. A
+    mismatch in either direction is a dead `doc:` link or a stranded identity.
+    Runs of space are possessive (`*+`): the old `[ \t]*\n?[ \t]*` took seconds.
+  - **The reader is told** (user's decision): `RemovedCitationNotice` is built
+    from the same parses as the log, counts removed *links*, and says so
+    separately when a reference code is still showing (#236).
+  - **A citation without an identity opens a document only if exactly one
+    fits** (`ReportCitation`, user's decision): whole-word surnames, `&`/`and`,
+    `;` lists refused. The wrong paper is worse than none.
+  - **`ReportReferenceLink` owns the `docref://` URL both ways**, and both
+    `OpenURLAction`s match on its `scheme`. Ordinary links follow only
+    `http`/`https`: `URL(string:)` accepts nearly anything.
   - Lodged, not in this PR: **#240** (emphasis spanning a reference prints
     `**`), **#241** (a reference wrapped after a list item or heading splits
-    across screen blocks); two more #236 shapes added there.
+    across blocks); two more #236 shapes added there.
 
 - **A reference the flattener cannot parse may not print its target** (#230 in
   PR #235, 2026-09-12). **Widening a pattern narrows the gap; it does not close
@@ -198,9 +206,10 @@ the rest.
 Lodged while reviewing #226, #230 and #233 (2026-09-11 to 09-13). Independent
 of each other.
 
-- **#240 / #241 — where the screen still differs from export**: emphasis spanning
-  a reference prints `**`, and a reference wrapped after a list item or heading
-  splits across the screen's private, duplicated, untested block parsers.
+- **#240 / #241 — where block-by-block rendering still differs from the text
+  export**: emphasis spanning a reference prints `**`, and a reference wrapped
+  after a list item or heading splits across blocks. Since #233 both live in one
+  tested place, `ReportMarkdownBlock`, shared by both screens and the PDF.
 
 - **#227 — the workflow and the checkpoints still key documents by the ambiguous
   primary slot.** `FactCheckWorkflow` builds three `[String: Document]` maps on
@@ -219,9 +228,12 @@ of each other.
   silently; wants a `filter` plus an error log.
 - **#224 — an unresolvable report reference is a silent no-op**, on both
   platforms. `findDocumentById` answers `nil` and nothing presents: golden rule
-  8. Since #233 both views resolve through `ReportReferenceLink`, so the display
-  text can ride in `.documentIdentity` as the fallback the issue asks for. The
-  lookup itself is still private to each view.
+  8. Since #233 both views resolve through `ReportReferenceLink`, and a
+  citation without an identity through `ReportCitation`, which logs a tap that
+  fits no document or several — but the reader still sees nothing. A display-text
+  fallback for `.documentIdentity` needs a second associated value first.
+  `ReportSummaryText` handles no taps itself: its citations work only beside a
+  report body that listens.
 - **#231 — transparency analysis cannot run from full text alone**, though
   `analyzeCOI` and `analyzeDataAvailability` need no identifier. 60 of 100
   sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records carry no DOI, so this is the
@@ -237,11 +249,11 @@ of each other.
   a decision rather than a patch. Reported meanwhile, and pinned by test.
 - **#237 — the export deletes citations and tells only the log.** Golden rule 8
   wants the user told, and the export sheet sits right in front of them. Since
-  #233 the parts exist: `ReportInlineText.removedReferences` is the diagnostic
-  and `reportUnparseableReferences(in:)` logs a set of parses once. What remains
-  is for `PDFExporter` and `plainTextReport` to parse once per report and
-  surface a sentence, as the screen's `RemovedCitationNotice` does. The printable
-  views still call the logging `-> String` flattener from `body`.
+  #233 the parts exist: `PDFExporter` already parses once per report through
+  `ReportMarkdownBlock` and logs once; `RemovedCitationNotice(parses:)` is the
+  sentence. What remains is to surface it on the PDF and in `plainTextReport`
+  (which also leaves literal `\n` unconverted, unlike the screen and PDF). The
+  printable views still call the logging `-> String` flattener from `body`.
 - **#238 — `BioMedLit` defaults to discarding its own diagnostics**, though
   since #230 it removes text. Both apps configure a real logger: enforcement,
   not a live defect.
@@ -453,8 +465,13 @@ Swift and Kotlin rather than a Swift-side patch.
   summary line. **A survivor is a claim about the test, and sometimes about the
   code** (#186): check what the asserted value's provenance is on that path.
 - **A silent SwiftPM hang with no second build running** is its manifest binary
-  stuck at launch behind `syspolicyd`. Kill it and rerun with
-  `--disable-sandbox` on both `swift build` and `swift test`.
+  stuck at `_dyld_start` behind `syspolicyd`. Every `swift build`/`swift test`
+  invocation re-evaluates the manifest, so each can stall 7–11 minutes;
+  `--disable-sandbox` did not prevent it on 2026-09-13, waiting did. Chain
+  build, test and `xcodebuild` in one sequential background job, and check a
+  change first with `swiftc -typecheck` (no binary is launched). The lasting
+  fix is the user's: add the editor/terminal under Privacy & Security →
+  Developer Tools.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to

@@ -21,8 +21,8 @@ import XCTest
 ///
 /// SwiftUI's `Text` hands a tap back only as a URL, so what a reference points
 /// at is written into one by the renderer and read out again by the report
-/// view. Those were two hand-written halves in different files: one built the
-/// query by string interpolation, and two views parsed it separately.
+/// view. Each report view used to build the query by string interpolation and
+/// parse it again by hand.
 final class ReportReferenceLinkTests: XCTestCase {
 
     /// A document's identity survives the round trip.
@@ -59,12 +59,23 @@ final class ReportReferenceLinkTests: XCTestCase {
 
     /// An ordinary link is not mistaken for a reference.
     ///
-    /// The report view receives every tapped URL it did not hand to the system,
-    /// so a web address shaped like our query must not open a document sheet.
+    /// The type reads back only what it wrote, so a web address shaped like
+    /// its query must not open a document sheet.
     func testAnOrdinaryURLIsNotAReference() throws {
         let url = try XCTUnwrap(URL(string: "https://example.org/lookup?type=id&value=abc"))
 
         XCTAssertNil(ReportReferenceLink(url: url))
+    }
+
+    /// Text that looks percent-encoded is carried as written and decoded once.
+    ///
+    /// Decoded twice, `Smith%26Jones` would come back as `Smith&Jones`.
+    func testCitationTextCarryingAPercentEscapeIsDecodedOnce() throws {
+        let link = ReportReferenceLink.citationText("Smith%26Jones, 2016")
+
+        let url = try XCTUnwrap(link.url)
+
+        XCTAssertEqual(ReportReferenceLink(url: url), link)
     }
 
     /// A reference URL naming no lookup kind this build knows is refused.
@@ -76,8 +87,10 @@ final class ReportReferenceLinkTests: XCTestCase {
 
     /// A reference URL with nothing to look up is refused.
     func testAReferenceWithNoValueIsRefused() throws {
-        let url = try XCTUnwrap(URL(string: "docref://lookup?type=id"))
+        let missing = try XCTUnwrap(URL(string: "docref://lookup?type=id"))
+        let empty = try XCTUnwrap(URL(string: "docref://lookup?type=id&value="))
 
-        XCTAssertNil(ReportReferenceLink(url: url))
+        XCTAssertNil(ReportReferenceLink(url: missing))
+        XCTAssertNil(ReportReferenceLink(url: empty))
     }
 }

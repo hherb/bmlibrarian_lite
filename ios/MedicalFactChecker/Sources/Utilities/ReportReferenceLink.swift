@@ -24,9 +24,10 @@ import Foundation
 /// `.documentReferenceClicked`, and the report view reads the URL back here to
 /// decide which document to open.
 ///
-/// Both halves live in this one type. The URL used to be built by string
-/// interpolation in one file and parsed in two others, and the builder encoded
-/// its value with `.urlQueryAllowed`, which leaves `&` alone: a citation of
+/// Both halves live in this one type, and the app's two `OpenURLAction`s match
+/// on its ``scheme``. Each report view used to build the URL by string
+/// interpolation and parse it again by hand, and the builder encoded its value
+/// with `.urlQueryAllowed`, which leaves `&` alone: a citation of
 /// `[Smith & Jones, 2016]` looked up `"Smith "` and the tap did nothing.
 enum ReportReferenceLink: Equatable {
     /// A reference that names its document: resolved by exact identity match.
@@ -56,10 +57,12 @@ enum ReportReferenceLink: Equatable {
 
     /// The URL a renderer attaches to the reference's text.
     ///
-    /// Built from `URLComponents` query items, which percent-encode whatever
-    /// the query syntax would otherwise read — `&`, `=`, `+`, `#`, `%`.
-    /// `nil` only if Foundation refuses to assemble the URL at all, in which
-    /// case the renderer shows the reference as plain text.
+    /// Built from `URLComponents` query items, which percent-encode `&`, `=`,
+    /// `#` and `%` in a value. `+` stays literal, and survives only because
+    /// ``init(url:)`` reads the value back through `URLComponents` too, which
+    /// does not take `+` for a space. `nil` only if Foundation refuses to
+    /// assemble the URL at all, in which case the renderer shows the reference
+    /// as plain text.
     var url: URL? {
         let (kind, value): (String, String) = switch self {
         case .documentIdentity(let identity): (Self.identityKind, identity)
@@ -79,13 +82,16 @@ enum ReportReferenceLink: Equatable {
     /// Reads a tapped URL back, or `nil` when it is not a report reference.
     ///
     /// Refuses any other scheme, a lookup kind this build does not know, and a
-    /// URL with no value. `URLComponents` decodes the value exactly once.
+    /// URL whose value is missing or empty. `URLComponents` decodes the value
+    /// exactly once, so citation text that itself looks percent-encoded comes
+    /// back as written.
     ///
     /// - Parameter url: The URL the tap delivered.
     init?(url: URL) {
         guard url.scheme == Self.scheme,
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
-              let value = items.first(where: { $0.name == Self.valueItemName })?.value else {
+              let value = items.first(where: { $0.name == Self.valueItemName })?.value,
+              !value.isEmpty else {
             return nil
         }
 

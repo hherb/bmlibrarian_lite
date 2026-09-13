@@ -230,6 +230,11 @@ final class ReportInlineTextTests: XCTestCase {
                 "A [Smith, 2016] b",
                 "(doc:pmid:889149)"
             ),
+            (
+                "A [Smith, 2016](doc:pmid-889149,\ndoc:pmid-123456) b",
+                "A [Smith, 2016] b",
+                "(doc:pmid-889149,\ndoc:pmid-123456)"
+            ),
         ]
 
         for (markdown, flattened, removed) in cases {
@@ -264,13 +269,221 @@ final class ReportInlineTextTests: XCTestCase {
         XCTAssertFalse(parsed.retainsDocumentReferenceScheme)
     }
 
+    /// A closed parenthetical holding prose after the identity keeps the prose.
+    ///
+    /// The removal took everything up to the `)`, so this sentence lost the
+    /// finding it reported and read "No benefit was seen overall." — the
+    /// opposite of what the model wrote, with the reader told only that a link
+    /// had gone. Golden rule 6: the report's own words are not machine syntax,
+    /// and the stray `)` left behind costs a reader far less than the clause.
+    func testAClosedTargetCarryingProseKeepsTheProse() {
+        let parsed = ReportInlineText(
+            parsing: "No benefit was seen (doc:pmid-889149 in 400 children, contrary to earlier claims) overall."
+        )
+
+        XCTAssertEqual(
+            parsed.flattened,
+            "No benefit was seen in 400 children, contrary to earlier claims) overall."
+        )
+        XCTAssertEqual(parsed.removedReferences, ["(doc:pmid-889149"])
+    }
+
+    /// A reference whose target was never closed keeps the sentences after it,
+    /// up to a later closing parenthesis.
+    func testAReferenceWhoseTargetRunsIntoProseKeepsTheProse() {
+        let cases: [(markdown: String, flattened: String)] = [
+            (
+                "Mortality fell (as reported by [Smith, 2016](doc:abc. The effect reversed in the elderly) overall.",
+                "Mortality fell (as reported by [Smith, 2016]. The effect reversed in the elderly) overall."
+            ),
+            (
+                "Mortality fell [Smith, 2016](doc:abc, and rose) later.",
+                "Mortality fell [Smith, 2016], and rose) later."
+            ),
+            (
+                "Benefit (see [Smith, 2016](doc:\(identity), which enrolled 120 patients) was modest.",
+                "Benefit (see [Smith, 2016], which enrolled 120 patients) was modest."
+            ),
+        ]
+
+        for (markdown, flattened) in cases {
+            let parsed = ReportInlineText(parsing: markdown)
+            XCTAssertEqual(parsed.flattened, flattened, markdown)
+            XCTAssertEqual(parsed.removedReferences.count, 1, markdown)
+        }
+    }
+
+    /// A removal does not cross a bracket, so the citation after it survives.
+    func testARemovalDoesNotCrossABracket() {
+        let parsed = ReportInlineText(parsing: "Benefit ([Smith, 2016](doc:abc; [Jones, 2019]) in adults.")
+
+        XCTAssertEqual(parsed.segments, [
+            .prose("Benefit ("),
+            .untargetedCitation(displayText: "Smith, 2016"),
+            .prose("; "),
+            .untargetedCitation(displayText: "Jones, 2019"),
+            .prose(") in adults."),
+        ])
+        XCTAssertEqual(parsed.removedReferences, ["(doc:abc"])
+    }
+
+    /// A removal does not cross a paragraph to reach a later `)`.
+    func testARemovalDoesNotCrossAParagraph() {
+        let parsed = ReportInlineText(
+            parsing: "Mortality fell [Smith, 2016](doc:abc overall.\n\nDeaths fell in the next cohort) too."
+        )
+
+        XCTAssertEqual(
+            parsed.flattened,
+            "Mortality fell [Smith, 2016] overall.\n\nDeaths fell in the next cohort) too."
+        )
+        XCTAssertEqual(parsed.removedReferences, ["(doc:abc"])
+    }
+
+    /// An empty target is removed, and the citation found by its text.
+    func testAnEmptyTargetIsRemoved() {
+        let parsed = ReportInlineText(parsing: "[Smith, 2016](doc:)")
+
+        XCTAssertEqual(parsed.segments, [.untargetedCitation(displayText: "Smith, 2016")])
+        XCTAssertEqual(parsed.removedReferences, ["(doc:)"])
+    }
+
+    // MARK: - Line breaks and other spaces beside the scheme
+
+    /// A line break after the scheme does not strand the identity.
+    ///
+    /// A model wraps `(doc: pmid-889149)` at its space. The reference was
+    /// neither a link nor wholly removed: `(doc:` went, `pmid-889149)` was
+    /// printed, and the diagnostic said the target had been removed.
+    func testALineBreakAfterTheSchemeStillNamesTheDocument() {
+        let parsed = ReportInlineText(parsing: "A [Smith, 2016](doc:\npmid-889149) study.")
+
+        XCTAssertEqual(parsed.segments, [
+            .prose("A "),
+            .documentReference(displayText: "Smith, 2016", documentIdentity: "pmid-889149"),
+            .prose(" study."),
+        ])
+        XCTAssertEqual(parsed.removedReferences, [])
+    }
+
+    /// A line break between the parenthesis and the scheme is tolerated too.
+    func testALineBreakBeforeTheSchemeStillNamesTheDocument() {
+        let parsed = ReportInlineText(parsing: "[Smith, 2016](\ndoc:pmid-889149)")
+
+        XCTAssertEqual(parsed.segments, [
+            .documentReference(displayText: "Smith, 2016", documentIdentity: "pmid-889149"),
+        ])
+    }
+
+    /// An unterminated target broken after its scheme gives up the identity.
+    func testAnUnterminatedTargetBrokenAfterTheSchemeGivesUpTheIdentity() {
+        let parsed = ReportInlineText(parsing: "A [Smith, 2016](doc:\npmid-889149 study.")
+
+        XCTAssertEqual(parsed.flattened, "A [Smith, 2016] study.")
+        XCTAssertEqual(parsed.removedReferences, ["(doc:\npmid-889149"])
+    }
+
+    /// A bare target broken before its scheme is removed whole.
+    ///
+    /// Joined for the screen, it became `( doc:pmid-889149)` in prose: the
+    /// identity shown, and the reader told nothing.
+    func testABareTargetBrokenBeforeTheSchemeIsRemoved() {
+        let parsed = ReportInlineText(parsing: "Benefit (\ndoc:pmid-889149) in adults.")
+
+        XCTAssertEqual(parsed.joiningWrappedLines().flattened, "Benefit in adults.")
+        XCTAssertEqual(parsed.removedReferences, ["(\ndoc:pmid-889149)"])
+        XCTAssertFalse(parsed.joiningWrappedLines().retainsDocumentReferenceScheme)
+    }
+
+    /// A space other than a space or tab before the scheme still names the
+    /// document.
+    ///
+    /// The ordinary-link branch refused only spaces and tabs before `doc:`, so
+    /// a no-break space let the target through as an ordinary link to
+    /// `doc:pmid-889149`: a tinted citation that opens nothing, and nothing
+    /// logged.
+    func testAnyHorizontalSpaceBeforeTheSchemeStillNamesTheDocument() {
+        for space in ["\u{00A0}", "\u{202F}", "\u{2009}", "\u{3000}"] {
+            let parsed = ReportInlineText(parsing: "[Smith, 2016](\(space)doc:pmid-889149\(space))")
+
+            XCTAssertEqual(parsed.segments, [
+                .documentReference(displayText: "Smith, 2016", documentIdentity: "pmid-889149"),
+            ], space.unicodeScalars.first.map { String($0.value, radix: 16) } ?? "")
+        }
+    }
+
+    /// A space before the scheme of an unterminated target is removed with it.
+    func testASpaceBeforeTheSchemeOfAnUnterminatedTargetIsRemovedWithIt() {
+        let parsed = ReportInlineText(parsing: "A [Smith, 2016]( doc:pmid-889149 study.")
+
+        XCTAssertEqual(parsed.segments, [
+            .prose("A "),
+            .untargetedCitation(displayText: "Smith, 2016"),
+            .prose(" study."),
+        ])
+        XCTAssertEqual(parsed.removedReferences, ["( doc:pmid-889149"])
+    }
+
+    /// A space before the scheme does not let a closed target that is not one
+    /// identity become an ordinary link.
+    func testASpaceBeforeTheSchemeOfAClosedTargetDoesNotMakeALink() {
+        let parsed = ReportInlineText(parsing: "[Smith, 2016]( doc:pmid 889149)")
+
+        XCTAssertEqual(parsed.segments, [.untargetedCitation(displayText: "Smith, 2016")])
+        XCTAssertEqual(parsed.removedReferences, ["( doc:pmid 889149)"])
+    }
+
+    // MARK: - Where a reference may start
+
+    /// A reference written against the word before it still names its document.
+    ///
+    /// The lookbehind meant for an image's `!` applied to the `[` as well, so
+    /// the reference lost its identity: the reader was told a malformed link
+    /// had been removed, and a tap searched by author and year instead.
+    func testAReferenceAgainstAWordStillNamesItsDocument() {
+        let parsed = ReportInlineText(parsing: "reduction[Smith, 2016](doc:8A1D4C22).")
+
+        XCTAssertEqual(parsed.segments, [
+            .prose("reduction"),
+            .documentReference(displayText: "Smith, 2016", documentIdentity: "8A1D4C22"),
+            .prose("."),
+        ])
+        XCTAssertEqual(parsed.removedReferences, [])
+    }
+
+    /// Long runs of whitespace and repeated fragments parse in linear time.
+    ///
+    /// `[ \t]*\n?[ \t]*` divided a run of spaces between its halves in every
+    /// possible way before failing: 30,000 spaces took over five seconds. The
+    /// bound here is generous, so a slow machine does not fail it, and still
+    /// far below what a quadratic pattern needs at this length.
+    func testLongRunsParseInLinearTime() {
+        let run = String(repeating: " ", count: 100_000)
+        let fragments = String(repeating: " doc:abc,", count: 20_000)
+        let inputs = [
+            "[Smith, 2016]" + run + "x",
+            "[Smith, 2016]" + run + "\n" + run + "x",
+            "[Smith, 2016](doc:" + run + "x",
+            "[Smith, 2016](" + run,
+            "[Smith," + run + "x]",
+            "A (doc:abc" + fragments,
+            "A (doc:pmid" + run + "x",
+        ]
+        let clock = ContinuousClock()
+
+        for input in inputs {
+            let elapsed = clock.measure { _ = ReportInlineText(parsing: input) }
+            XCTAssertLessThan(elapsed, .seconds(5), String(input.prefix(20)))
+        }
+    }
+
     // MARK: - Wrapped lines
 
     /// A paragraph parsed with its line breaks is shown with spaces for them.
     ///
-    /// A renderer that joined wrapped lines with a space *before* parsing
-    /// erased the line break the target run is forbidden to cross, and the
-    /// screen deleted prose that the export kept. Parse first, then join.
+    /// Why the order matters — joining first lets an ordinary link's target
+    /// cross the break — is pinned where paragraphs are built, in
+    /// `ReportMarkdownBlocksTests`.
     func testJoiningWrappedLinesReplacesLineBreaksWithSpaces() {
         let parsed = ReportInlineText(
             parsing: "Mortality fell [Smith et al.,\n2016](doc:abc)\nin adults."
@@ -304,6 +517,20 @@ final class ReportInlineTextTests: XCTestCase {
             .link(displayText: "the guideline", target: "https://example.org/guideline"),
             .prose(" for detail."),
         ])
+    }
+
+    /// An ordinary link's target may not cross a line break.
+    ///
+    /// Its target has no character set to confine it, so the line break is
+    /// all that stops an unclosed one reaching a `)` in a later paragraph and
+    /// deleting everything between — silently, since it is not a document
+    /// reference and nothing reports it.
+    func testAnOrdinaryLinkMayNotCrossALineBreak() {
+        let prose = "See [the guideline](https://example.org/a\n\n1) dose"
+        let parsed = ReportInlineText(parsing: prose)
+
+        XCTAssertEqual(parsed.flattened, prose)
+        XCTAssertEqual(parsed.removedReferences, [])
     }
 
     /// A parenthesis inside a destination does not end it — Wiley's DOIs carry one.
@@ -352,6 +579,17 @@ final class ReportInlineTextTests: XCTestCase {
     /// Empty text has nothing to draw.
     func testEmptyTextHasNoSegments() {
         XCTAssertEqual(ReportInlineText(parsing: "").segments, [])
+    }
+
+    /// Every pattern the parser relies on compiles.
+    ///
+    /// Each is a literal, and a failure to compile degrades quietly: with no
+    /// link pattern every well-formed reference is reported as malformed, and
+    /// with no removal pattern an identity reaches the page.
+    func testEveryPatternCompiles() {
+        XCTAssertNotNil(ReportInlineText.markdownLinkRegex)
+        XCTAssertNotNil(ReportInlineText.residualDocumentReferenceRegex)
+        XCTAssertNotNil(ReportInlineText.untargetedCitationRegex)
     }
 
     // MARK: - Flattening

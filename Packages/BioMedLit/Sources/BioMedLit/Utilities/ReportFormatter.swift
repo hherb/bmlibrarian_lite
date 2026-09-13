@@ -208,7 +208,7 @@ public enum ReportFormatter {
     /// A reference no pattern recognises used to pass through with its target
     /// intact, which is the same reader-facing outcome by a different route.
     /// ``ReportInlineText`` removes any parenthesised document reference it
-    /// cannot parse, and this function reports the removal. Recognition lives
+    /// cannot parse, and this function logs the removal. Recognition lives
     /// there rather than here so the screen, which draws the same references as
     /// links, cannot come to disagree with the page (#233).
     ///
@@ -219,26 +219,28 @@ public enum ReportFormatter {
     ///   failure logged.
     public static func flattenedReferenceLinks(in text: String) -> String {
         let parsed = ReportInlineText(parsing: text)
-        reportUnparseableReferences(in: [parsed])
+        logUnparseableReferences(in: [parsed])
         return parsed.flattened
     }
 
-    /// Reports what a set of parses removed, and any reference that outlived
-    /// the removal, as at most one diagnostic of each kind.
+    /// Logs what a set of parses removed, and any reference that outlived the
+    /// removal, as at most one diagnostic of each kind.
     ///
     /// A renderer that parses block by block collects its parses and calls this
-    /// once for what it shows, when it appears: one call per block, from a
-    /// SwiftUI `body`, repeats one malformed reference per block per layout
-    /// pass, and a diagnostic that fires hundreds of times is one the next
-    /// reader of the log filters out. Nothing here remembers earlier calls, so
-    /// a renderer that appears twice reports twice.
+    /// once for what it shows, when it appears. One call per block from a
+    /// SwiftUI `body`, which is evaluated again whenever its inputs change,
+    /// repeats one malformed reference per block per evaluation, and a
+    /// diagnostic that fires hundreds of times is one the next reader of the log
+    /// filters out. Nothing here remembers earlier calls, so a renderer that
+    /// appears twice logs twice.
     ///
     /// Golden rule 8: a removal is an error, not a silent repair. Without the
-    /// report, the only symptom is wrong text in a document that outlives the
-    /// app. Telling the *reader* is the renderer's business, since only it
-    /// knows where the reader is looking.
+    /// log, the only symptom is wrong text in a document that outlives the app.
+    /// This only logs. Telling the *reader* is the renderer's business, since
+    /// only it knows where the reader is looking; an on-screen renderer shows a
+    /// `RemovedCitationNotice` built from the same parses.
     ///
-    /// The retained-scheme report is checked against the rendered text rather
+    /// The retained-scheme diagnostic is checked against the parsed text rather
     /// than inferred from the removals, so it cannot vouch for a clean page it
     /// never saw. It also covers the shape removal deliberately does not match:
     /// a target that lost its opening parenthesis (#236). Widening the removal
@@ -246,7 +248,7 @@ public enum ReportFormatter {
     /// which nobody has agreed to (golden rule 6).
     ///
     /// - Parameter parsedTexts: Every parse that produced one report's rendering.
-    public static func reportUnparseableReferences(in parsedTexts: [ReportInlineText]) {
+    public static func logUnparseableReferences(in parsedTexts: [ReportInlineText]) {
         let removed = parsedTexts.flatMap(\.removedReferences)
         if !removed.isEmpty {
             // Counted from what can be named, so the number and the list cannot
@@ -255,8 +257,8 @@ public enum ReportFormatter {
             BioMedLitLib.logger?.error(
                 """
                 Report markdown carried \(removed.count) document \
-                reference(s) this formatter could not parse. Each target was removed \
-                rather than printed, because it names a row rather than an article \
+                reference(s) that could not be parsed. Each was removed rather than \
+                printed, because its target names a row rather than an article \
                 and a bare number reads as a PubMed ID: \
                 \(removed.joined(separator: ", ")). A reference is written as \
                 [display text](\(BioMedLitConstants.documentReferenceScheme)<identity>).
@@ -270,7 +272,7 @@ public enum ReportFormatter {
                 """
                 A document reference survived the sweep meant to remove it: report \
                 text still carries \(BioMedLitConstants.documentReferenceScheme) \
-                after flattening, so a row's identity is about to reach a reader who \
+                after parsing, so a row's identity is about to reach a reader who \
                 cannot resolve it and may read it as a PubMed ID.
                 """,
                 category: .parsing
@@ -294,11 +296,22 @@ public enum ReportFormatter {
     /// - Parameter text: Report markdown.
     /// - Returns: Plain text carrying no link syntax and no emphasis markers.
     public static func plainText(fromReportMarkdown text: String) -> String {
-        var result = flattenedReferenceLinks(in: text)
-        for marker in BioMedLitConstants.markdownEmphasisMarkers {
-            result = result.replacingOccurrences(of: marker, with: "")
+        removingEmphasisMarkers(from: flattenedReferenceLinks(in: text))
+    }
+
+    /// Text with its paired emphasis markers removed, for a renderer that shows
+    /// text verbatim and has already flattened its references.
+    ///
+    /// ``plainText(fromReportMarkdown:)`` is this over a report's markdown. A
+    /// renderer holding a ``ReportMarkdownBlock`` has parsed its references
+    /// already, and parsing them again would log them twice.
+    ///
+    /// - Parameter text: Flattened report text.
+    /// - Returns: The same text without ``BioMedLitConstants/markdownEmphasisMarkers``.
+    public static func removingEmphasisMarkers(from text: String) -> String {
+        BioMedLitConstants.markdownEmphasisMarkers.reduce(text) {
+            $0.replacingOccurrences(of: $1, with: "")
         }
-        return result
     }
 
     // MARK: - No Evidence Content
