@@ -26,50 +26,7 @@ import XCTest
 /// `[Smith & Jones, 2016]` searched for an author called "smith & jones" and
 /// opened nothing. Opening the wrong paper is worse than opening none, so a
 /// citation that fits more than one document opens neither.
-final class ReportCitationTests: XCTestCase {
-
-    // MARK: - Capturing what the lookup reports
-
-    /// Records the library's diagnostics so a test can assert on them.
-    ///
-    /// `@unchecked Sendable` with a lock because `BioMedLitLogger` requires
-    /// `Sendable` and this is mutable; the lock is what makes that claim true.
-    private final class RecordingLogger: BioMedLitLogger, @unchecked Sendable {
-        private let lock = NSLock()
-        private var messages: [String] = []
-
-        private func record(_ message: String) {
-            lock.lock(); defer { lock.unlock() }
-            messages.append(message)
-        }
-
-        func debug(_ message: String, category: BioMedLitLogCategory) { record(message) }
-        func info(_ message: String, category: BioMedLitLogCategory) { record(message) }
-        func warning(_ message: String, category: BioMedLitLogCategory) { record(message) }
-        func error(_ message: String, category: BioMedLitLogCategory) { record(message) }
-
-        var recorded: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return messages
-        }
-    }
-
-    private let logger = RecordingLogger()
-
-    override func setUp() {
-        super.setUp()
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: logger
-        ))
-    }
-
-    /// Restore the configuration the rest of the package's tests expect.
-    override func tearDown() {
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: nil
-        ))
-        super.tearDown()
-    }
+final class ReportCitationTests: RecordingLoggerTestCase {
 
     /// A document as the lookup sees it.
     private struct Candidate: Equatable {
