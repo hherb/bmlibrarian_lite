@@ -27,11 +27,13 @@ All paths are resolved relative to the data directory.
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Any
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import stat
+import tempfile
 
 from .constants import (
     CONFIG_DIR_PERMISSIONS,
@@ -92,6 +94,51 @@ def _reject_redaction_placeholder(value: str | None) -> str | None:
         )
         return None
     return value
+
+
+def write_owner_only_file(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text``, readable and writable by its owner only.
+
+    For files that hold a credential. The text goes to a temporary file beside
+    the target, which :func:`tempfile.mkstemp` creates owner-only, and that
+    file then replaces the target in one step. The credential therefore never
+    sits in a file anyone else can read: not for the moment before a
+    ``chmod``, and not after a ``chmod`` that fails, as one can on a filesystem
+    without POSIX modes. A write that fails part-way leaves the previous file
+    whole.
+
+    Args:
+        path: The file to create or replace. A symlink is followed, so the
+            link survives and its target is what changes. If the directory
+            holding the file is missing, it is created owner-only; any
+            missing directories above it get default permissions.
+        text: The file's complete new content.
+
+    Raises:
+        OSError: If the file cannot be written or moved into place. The
+            previous file, if any, is unchanged, and no temporary file is
+            left behind.
+    """
+    path = Path(os.path.realpath(path))
+    path.parent.mkdir(mode=CONFIG_DIR_PERMISSIONS, parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        try:
+            os.chmod(temporary, CONFIG_FILE_PERMISSIONS)
+        except OSError as e:
+            logger.warning(
+                f"Could not apply mode {oct(CONFIG_FILE_PERMISSIONS)} to {path}; "
+                f"it keeps the owner-only mode it was created with: {e}"
+            )
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 @dataclass
@@ -892,31 +939,23 @@ class LiteConfig:
         """
         Save configuration to file.
 
-        The configuration file is saved with restricted permissions (600)
-        to protect sensitive data like API keys.
+        The file holds the NCBI API key, so it is written owner-only by
+        :func:`write_owner_only_file`, and a save that fails leaves the
+        previous file intact.
 
         Args:
             config_path: Optional path to save to.
                         If None, saves to data_dir/config.json
+
+        Raises:
+            TypeError: If the configuration cannot be serialised; nothing is
+                written.
+            OSError: If the file cannot be written.
         """
         if config_path is None:
             config_path = self.storage.data_dir / "config.json"
 
-        # Ensure directory exists with secure permissions
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write config
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
-        # Set secure file permissions (owner read/write only)
-        # This protects API keys and other sensitive configuration
-        try:
-            os.chmod(config_path, CONFIG_FILE_PERMISSIONS)
-            logger.debug(f"Set file permissions to {oct(CONFIG_FILE_PERMISSIONS)} for {config_path}")
-        except OSError as e:
-            # Log but don't fail - permissions may not be settable on all filesystems
-            logger.warning(f"Could not set file permissions for {config_path}: {e}")
+        write_owner_only_file(config_path, json.dumps(self.to_dict(), indent=2))
 
         # Invalidate validation cache after save
         self._validation_cache.clear()

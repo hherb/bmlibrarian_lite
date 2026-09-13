@@ -169,7 +169,7 @@ class DateRange:
     date_type: str = "pdat"  # publication date
 
     def to_pubmed_params(self) -> Dict[str, str]:
-        """Convert to E-utilities URL parameters."""
+        """Convert to E-utilities request parameters, sent as a POST body."""
         params = {}
         if self.start_date:
             params["mindate"] = self.start_date.strftime("%Y/%m/%d")
@@ -216,10 +216,13 @@ class PubMedQuery:
 
     def to_url_params(self) -> Dict[str, str]:
         """
-        Convert to E-utilities URL parameters.
+        Convert to E-utilities request parameters.
+
+        Despite the name, these never go into a URL: the search client sends
+        them as a POST body, beside the API key (#196).
 
         Returns:
-            Dictionary of URL parameters for esearch
+            Dictionary of esearch parameters
         """
         params = {
             "db": "pubmed",

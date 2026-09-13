@@ -922,14 +922,45 @@ class PubMedClient:
             time.sleep(min_interval - elapsed)
         self._last_request_time = time.time()
 
-    def _make_request(self, endpoint: str, params: Dict) -> requests.Response:
-        """Make rate-limited request to PubMed API."""
+    def _make_request(self, endpoint: str, params: Dict[str, Any]) -> requests.Response:
+        """Make a rate-limited E-utilities request.
+
+        The parameters travel as a POST body, never a query string: the API
+        key is among them, and a URL is what ``HTTPError``,
+        ``ConnectionError`` and urllib3's debug log print. A key in the URL
+        reached batch exports and logs that way (#196).
+
+        A redirect is refused, never followed: a 307 or 308 would re-send the
+        body, key included, to whatever host it names, and a 301, 302 or 303
+        would re-send the request as a GET without its parameters.
+
+        Args:
+            endpoint: An E-utilities endpoint that accepts POST, relative to
+                ``BASE_URL``: ``esearch.fcgi`` or ``efetch.fcgi``.
+                ``convert_ids`` does not come through here; it calls the PMC
+                ID converter directly, by GET, and sends no key.
+            params: Request parameters. ``email`` and ``api_key`` are added
+                to this dict in place.
+
+        Returns:
+            The successful response.
+
+        Raises:
+            requests.HTTPError: On an error status, or on a redirect.
+            requests.RequestException: If no response arrived at all
+                (connection failure, timeout).
+        """
         self._rate_limit()
         params['email'] = self.email
         if self.api_key:
             params['api_key'] = self.api_key
         url = f"{self.BASE_URL}/{endpoint}"
-        response = self.session.get(url, params=params, timeout=30)
+        response = self.session.post(url, data=params, timeout=30, allow_redirects=False)
+        if response.is_redirect:
+            raise requests.HTTPError(
+                f"{response.status_code} redirect not followed for url: {url}",
+                response=response,
+            )
         response.raise_for_status()
         return response
 
