@@ -9,9 +9,9 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#243 — the NCBI API key reaches NCBI and nothing else, on Swift and Android**
-(#196's parity half; the rules are under **Recently landed**). Branch
-`fix/ncbi-key-parity-243`. Once it merges, delete this section and pick a slice
-from **Potential follow-ups**.
+(#196's parity half), with #251 and #239 on the same branch. PR #254 is open;
+the rules are under **Recently landed**. Once it merges, delete this section and
+pick a slice from **Potential follow-ups**.
 
 ## Recently landed (context)
 
@@ -31,7 +31,25 @@ the rest.
   it wherever it points, so a redirect is a failed request (`raise_for_status`
   passes a 3xx). **Each test that reaches the local server also asserts the
   key arrived.** Credential files go through `write_owner_only_file` (`mkstemp`
-  then `os.replace`, never `open` then `chmod`). Swift and Android: **#243**.
+  then `os.replace`, never `open` then `chmod`).
+  **Swift and Android** (#243 in PR #254): the enforcement points and tests
+  are tabled in `doc/developer/europepmc_and_pubmed.md`. **Swift refuses per
+  task** (`RedirectRefusingTaskDelegate` via `data(for:delegate:)`); **Android
+  refuses on a client derived for PubMed only** — Unpaywall and PDF links need
+  redirects, and the shared `scalarsAndJson` Retrofit builder is a mutable
+  singleton, so a client set on it leaks into every later API. **A redirect test
+  needs a control that a followed redirect is observable**, or a stub that never
+  redirects passes it; both were mutation-tested. **Android reads the key in
+  `PubMedService`** (`NcbiCredentialSource`): all four workflow call sites
+  omitted it, so a saved key never reached NCBI. Test traps: a `URLProtocol`
+  gets the body as `httpBodyStream`; `com.sun.net.httpserver` is not on the
+  Android unit-test classpath (use MockWebServer).
+  **#251, same PR**: Swift's `PubMedService.search` returned the batch size as
+  `totalCount`, so no PubMed search paginated past batch one; the app now also
+  advances by the PMIDs consumed (`pubMedPositionsAdvanced`), since a
+  `PubmedBookArticle` parses to no article. **NCBI's 400 for a bad key echoes
+  the key in its body** (checked live): never log or persist an E-utilities
+  error body.
 
 - **The screen and the export read references by one parser** (#233 in PR #242,
   2026-09-13). **Recognition lives in `ReportInlineText`; renderers only style
@@ -236,9 +254,6 @@ of each other.
 - **#238 — `BioMedLit` defaults to discarding its own diagnostics**, though
   since #230 it removes text. Both apps configure a real logger: enforcement,
   not a live defect.
-- **#239 — `RecordingLogger` is copy-pasted across three test classes**, each
-  mutating process-global configuration under an unwritten serial-execution
-  assumption.
 - **#222 — a card can show a "PubMed" badge next to no PubMed link**: for a row
   with no `searchSource`, `searchSourceEnum` falls back to `.pubmed` (badge)
   while `recordedProvider` refuses to guess (link). Decide with #219.
@@ -320,12 +335,6 @@ Swift and Kotlin rather than a Swift-side patch.
 
 ### The rest of the #198 round
 
-- **#243 — Swift and Android send the NCBI key in the URL and log that URL**
-  (#196's parity half). Swift logs `url.absoluteString` through
-  `BioMedLitOSLogLogger.debug` as `privacy: .public`, release builds included;
-  Android's `HttpLoggingInterceptor` at `BASIC` logs it in debug builds. Port
-  both rules (form-encoded POST; a redirect is a failure), and check every
-  place a `URLError` is persisted, since its `userInfo` carries the failing URL.
 - **#244 — `bmll -v` never enables DEBUG**: the analyser and `batch_analyzer.py`
   call `logging.basicConfig(INFO)` at import, and the GUI configures no logging
   at all, so the fix needs a GUI setup too. **#245** — those two standalone
@@ -335,7 +344,10 @@ Swift and Kotlin rather than a Swift-side patch.
   found" (**#247**; carry only the status, as `e.request.body` holds the key);
   a failed batch silently shortens the set (**#248**); nothing connects
   `analysis_failed` (**#249**); an efetch with no article yields "No conflict of
-  interest statement found" (**#250**, #203's shape).
+  interest statement found" (**#250**, #203's shape). **#252** — Android drops
+  every failed PubMed and Europe PMC search with no `else`, #247's shape; a bad
+  saved key now lands there too. **#253** — the app never applies PubMed's
+  9,999 offset cap, reachable since #251.
 - **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
   **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
   cheaper, and the exact defect that occurred — a guard failing when a `.swift`
@@ -357,20 +369,14 @@ Swift and Kotlin rather than a Swift-side patch.
   `<string-name>` (#154's neighbourhood). A faithful Kotlin port would rebuild
   both from the spec. #175's lesson: the port contract is a place a fixed defect
   survives.
-- **#148 — `INDUSTRY_KEYWORDS` has already drifted Python↔Swift**: Python's first
-  entry is `\bpharma(?:ceutical)?s?\b`, Swift's is `\bpharma(?:ceutical)?\b`, and
-  `\b` lands before the "s", so a COI statement using the plural raises the
-  industry-ties indicator on desktop and not on iOS/macOS. All 17 other entries
-  are byte-identical and nothing compares the two lists. One-character fix, but
-  wants a shared fixture or it recurs — #147 added `sponsor_patterns.json` for
-  the government/academic lists, the guard `INDUSTRY_KEYWORDS` still has none of.
-- **#172, #174, #177 — what is left of the #171 review round.** **#172 and #174
-  go together** — both are a table or figure the renderer cannot honestly
-  describe: #172 drops a table deposited as a `<graphic>` entirely (all 8 in
-  `PMC12759138`), #174 gives an unlabelled exhibit a fabricated `"Figure N"` from
-  its array position, `alt` text included, which here is a number a citation may
-  carry. bmlib already models a table's `graphic_url`, so #172 is a port. #177
-  wants publisher spread first.
+- **#148 — `INDUSTRY_KEYWORDS` has drifted Python↔Swift**: Python matches
+  `pharma(?:ceutical)?s?`, Swift lacks the `s?`, so a plural raises the
+  industry-ties indicator on desktop only. One-character fix, but wants a shared
+  fixture like #147's `sponsor_patterns.json`, or it recurs.
+- **#172, #174, #177 — what is left of the #171 review round.** #172 (a table
+  deposited as a `<graphic>` is dropped; bmlib's `graphic_url` is the port) and
+  #174 (an unlabelled exhibit gets a fabricated `"Figure N"`, `alt` included) go
+  together. #177 wants publisher spread first.
 - **#154, #155, #162 — the JATS parser defects the corpus found that are still
   open.** Fixing any of them moves the corpus digests and needs the sibling
   parsers checked — see **Verify**.
@@ -392,28 +398,21 @@ Swift and Kotlin rather than a Swift-side patch.
   `known_industry_doi` or the ladder test needs rework. **#160**: Swift never
   raises Python's unrecognised-funder caveat (78% of corpus names) nor the two
   trial-registry caveats (ISRCTN/EudraCT only; ClinicalTrials.gov unreachable).
-- **#150 — spelled-out NIH institute names match no government pattern**, on
-  either platform: the lists carry the acronyms but no "National Institute of X"
-  form, while CrossRef returns it routinely, so a US federal agency tiers
-  NONPROFIT. Only `sponsor_type` is affected. Pinned as the behaviour we *want*,
-  `xfail(strict=True)`, so fixing it XPASSes and the marker must come off.
-  Widening to `\bnational institutes? of\b` also reaches non-US bodies, so
-  measure on both platforms before widening.
+- **#150 — spelled-out NIH institute names match no government pattern** on
+  either platform, so a US federal agency tiers NONPROFIT (`sponsor_type` only).
+  Pinned `xfail(strict=True)`; `\bnational institutes? of\b` also reaches non-US
+  bodies, so measure on both platforms before widening.
 - **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
   dropped**: no longer corrupting the enclosing section, but there is no model to
   capture them into. 417 occurrences across 386 articles. **#145** — stale
   transparency results still feed report aggregates and the exported PDF:
   `TransparencySummarySection` and `PrintableReportView` average v1 and v2 scores
   into one unlabelled figure.
-- **#123 — Android parse errors are swallowed (golden rule 8)**: `parseArticleXml`
-  ends its catch with `printStackTrace()` — the only such call left in
-  `app/src/main` — so a truncated EFetch batch silently under-reports articles.
-  Blocked on a JVM-portable logging seam: a plain `Log.e` reintroduces the
-  untestable Android dependency `PubMedService` (#119) escaped by parsing on a
-  pure-JVM JAXP SAX parser (`setXIncludeAware` deliberately left uncalled — JAXP's
-  base implementation throws it into the same swallowed path on-device while JVM
-  tests stay green). Overlaps **#121 — the JATS parser is untestable the same
-  way**; migrating it to JAXP SAX fixes both.
+- **#123 — Android's `parseArticleXml` swallows parse errors** with
+  `printStackTrace()`, so a truncated EFetch batch under-reports silently.
+  Blocked on a JVM-portable logging seam (`Log.e` would undo #119's pure-JVM SAX
+  parsing; leave `setXIncludeAware` uncalled, it throws on-device only).
+  Overlaps **#121** (the JATS parser, same fix).
 - **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
   indicators, funding/trial (network), JATS statement extraction, Room
   persistence + `DocumentCard` UI. **#109 — LLM-assisted disambiguation of repo +
