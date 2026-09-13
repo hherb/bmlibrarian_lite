@@ -8,9 +8,9 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#233 — the screen and the export read references by one parser.** Branch
-`fix/onscreen-report-links-233`, implemented and green; the PR is open. What it
-establishes is under **Recently landed** below, so delete this section once it
+**#196 — the NCBI API key reaches NCBI and nothing else.** Branch
+`fix/ncbi-key-leak-196`, implemented and green; the PR is open. What it
+establishes is under **Recently landed**, so delete this section once it
 merges. Otherwise nothing: pick a slice from **Potential follow-ups**.
 
 ## Recently landed (context)
@@ -19,53 +19,43 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **The screen and the export read references by one parser** (#233, PR open,
-  2026-09-13). Rules that still bind:
-  - **Recognition lives in `ReportInlineText` (BioMedLit); renderers only
-    style segments.** The text export flattens them, the screen
-    (`ReportRichText`, shared by iOS and macOS) links them. Parsing is pure;
-    `ReportFormatter.logUnparseableReferences(in:)` logs, and a view calls it
-    from `.task(id:)`, never from `body`.
-  - **One block splitter, `ReportMarkdownBlock` (BioMedLit), for the iOS
-    screen, the macOS screen and the PDF.** Three private copies agreed until
-    the screens learned to parse a paragraph before joining its lines and the
-    PDF did not — so the copy a reader keeps lost words the screen showed.
-  - **Measure through the real renderer**: the issue's table missed that
-    `Text(String)` summaries printed every citation's UUID.
-  - **A document target is an identity, not a run of text**, and **a removal
-    takes machine syntax, never the report's words** (golden rule 6, user's
-    decision). The `doc:` link branch is one identity run; the removal takes a
-    whole parenthetical only when everything in it is identity-shaped (scheme,
-    UUID, `pmid…`), otherwise just `(doc:<identity>`, leaving a stray `)`. The
-    first wide version deleted `in 400 children, contrary to earlier claims`.
-    **Narrowing one pattern moves work to the next**, so review each pattern
-    change against the other two.
-  - **Space around the scheme means any Unicode space and one line break**,
-    identically in the link branch, its `doc:` refusal and the removal. A
-    mismatch in either direction is a dead `doc:` link or a stranded identity.
-    Runs of space are possessive (`*+`): the old `[ \t]*\n?[ \t]*` took seconds.
-  - **The reader is told** (user's decision): `RemovedCitationNotice` is built
-    from the same parses as the log, counts removed *links*, and says so
-    separately when a reference code is still showing (#236).
-  - **A citation without an identity opens a document only if exactly one
-    fits** (`ReportCitation`, user's decision): whole-word surnames, `&`/`and`,
-    `;` lists refused. The wrong paper is worse than none.
-  - **`ReportReferenceLink` owns the `docref://` URL both ways**, and both
-    `OpenURLAction`s match on its `scheme`. Ordinary links follow only
-    `http`/`https`: `URL(string:)` accepts nearly anything.
-  - Lodged, not in this PR: **#240** (emphasis spanning a reference prints
-    `**`), **#241** (a reference wrapped after a list item or heading splits
-    across blocks); two more #236 shapes added there.
+- **A credential never travels in a URL** (#196, PR open, 2026-09-13). Both
+  Python NCBI clients (`PubMedClient` in the transparency analyser,
+  `PubMedSearchClient`) send every E-utilities request as a POST with the
+  parameters in the body. **A URL is what error text and HTTP logging print**:
+  `HTTPError` embeds it, `ConnectionError` says "Max retries exceeded with url:
+  …", urllib3 logs the request line at any DEBUG level, so a routine 429 wrote
+  the key into a batch JSON export. **Redacting the text would chase each
+  printer; removing the key from the URL covers all of them.** NCBI reads
+  `api_key` from a POST body (checked live with an invalid key). The tests
+  drive a real local server, and **each test that reaches it also asserts the
+  key arrived**, so none can pass by no longer sending it. Swift and Android
+  still use query parameters: **#243**.
+
+- **The screen and the export read references by one parser** (#233 in PR #242,
+  2026-09-13). **Recognition lives in `ReportInlineText`; renderers only style
+  segments** — the export flattens, `ReportRichText` (iOS + macOS) links;
+  logging is `ReportFormatter.logUnparseableReferences(in:)` from `.task(id:)`,
+  never `body`. **One block splitter, `ReportMarkdownBlock`, for both screens
+  and the PDF**: three private copies drifted until the PDF lost words the
+  screen showed. **Measure through the real renderer** (`Text(String)` printed
+  every citation's UUID). **A removal takes machine syntax, never the report's
+  words** (golden rule 6, user's decision): a whole parenthetical only when all
+  of it is identity-shaped, else just `(doc:<identity>` — the first wide version
+  deleted `in 400 children, contrary to earlier claims`. **Narrowing one pattern
+  moves work to the next**; review each change against the other two. **Space
+  around the scheme is any Unicode space and one line break**, identically in
+  all three patterns, runs possessive (`*+`). **The reader is told**
+  (`RemovedCitationNotice`, user's decision). **A citation without an identity
+  opens a document only if exactly one fits** (`ReportCitation`). **`ReportReferenceLink`
+  owns `docref://` both ways**; ordinary links follow only `http`/`https`.
 
 - **A reference the flattener cannot parse may not print its target** (#230 in
-  PR #235, 2026-09-12). **Widening a pattern narrows the gap; it does not close
-  it**: whatever the link pattern misses is *swept* (removed and logged),
-  because a target names a row and `doc:pmid-889149` reads as a PubMed ID
-  (#212). **Whitespace tolerance is confined to the `doc:` scheme**, or
-  `a 12% [sic] (95% CI 4-19) reduction` loses its interval. **A sweep that takes
-  the scheme and leaves the identity is worse than none**: the removed run is
-  bounded by the identity's character set, and the postcondition is checked,
-  not asserted. **Flattening belongs to every block carrying prose.**
+  PR #235). **Widening a pattern narrows the gap; it does not close it**: what
+  the link pattern misses is *swept* (removed and logged), since
+  `doc:pmid-889149` reads as a PubMed ID. **Whitespace tolerance only in the
+  `doc:` scheme**, or `(95% CI 4-19)` is lost. **A sweep that leaves the
+  identity is worse than none**; the postcondition is checked, not asserted.
 
 - **A document's identity may not claim what the article is** (#208 in PR #226,
   2026-09-11). **An identity is opaque and unique by construction** —
@@ -165,39 +155,27 @@ the rest.
     of thing**, and the failure is *silent*. **`NONPROFIT` means "not
     recognised"**, the modal outcome at 325/417 corpus names, raising a caveat
     keyed off the *funder*, not the tier — revisit on both platforms or neither.
-  - **CI on all three platforms** (#129). **No job may gain a `paths:` filter** —
-    the parity fixtures live outside `src/` and `tests/`, so any plausible
-    filter skips the run for a contract-only edit. **A Qt preflight constructs a
-    `QApplication` before pytest**, since the widget suites open with
-    `importorskip("PySide6")` and a broken Qt install would skip ~100 tests
-    green. **`lint_delta.py` compares against the merge base** in a throwaway
-    worktree outside the repo; identity is `(tool, path, code, message)`, no
-    line/column. **Ruff config must stay in `[tool.ruff.lint]`**, or head and
-    base would one day shrink together and the gate stay green over no rules.
+  - **CI on all three platforms** (#129). **No job may gain a `paths:` filter**
+    (the parity fixtures live outside `src/` and `tests/`). **A Qt preflight
+    constructs a `QApplication` before pytest**, or a broken Qt install skips
+    ~100 `importorskip` tests green. **`lint_delta.py`** diffs against the merge
+    base in a throwaway worktree, identity `(tool, path, code, message)`; **ruff
+    config stays in `[tool.ruff.lint]`**, or head and base shrink together.
   - **Model fetch failures are errors, not fallbacks** (PR #135):
-    `ModelFetchService.fetchModels` *throws* rather than returning the hardcoded
-    catalogue — a caller that cannot tell a live line-up from a hardcoded one
-    cannot tell a retired model ID from a current one, which is how the DeepSeek
-    V3 retirement went unnoticed. **Do not reintroduce a fallback inside the
-    service**: the healing logic must only ever see a provider-supplied list, or
-    it rewrites a valid stored selection whenever the network is down.
-  - **Cross-platform parity drift guard** (#105) and the data-availability
-    classifier's July slices (#101–#125). Python
-    `study_transparency_analyzer.py` is canonical; Swift and Android mirror it
-    byte-for-byte — for this classifier and, since #143, the funder-name one,
-    but *not* `INDUSTRY_KEYWORDS` (#148). **The contract is
-    `doc/cross_platform/transparency_parity/`, and its `README.md` carries the
-    rationale, structural traps, mutation evidence and the two fixtures'
-    division of labour — read it before touching a pattern.** Three things it
-    does *not* carry: **do not remove the `inputs.dir` declaration in
-    `app/build.gradle.kts`**, without which Gradle reports `UP-TO-DATE` for a
-    contract-only edit and skips the Android parity test; **do not reword the
-    pattern test fixtures**, because negated openness is matched forward —
-    Python forbids a variable-length lookbehind — so the pins only work at
-    specific sentence shapes; and **Kotlin's `negatedOpennessPatterns` must stay
-    declared *before* `restrictedPatterns`**, since object properties initialise
-    in declaration order and a forward reference silently appends nothing.
-    `RegexHelper` compiles with `(?U)`.
+    `ModelFetchService.fetchModels` *throws*; a hardcoded fallback hid the
+    DeepSeek V3 retirement, and inside the service it would let the healing logic
+    rewrite a valid stored selection whenever the network is down.
+  - **Cross-platform parity drift guard** (#105, #101–#125). Python
+    `study_transparency_analyzer.py` is canonical; Swift and Android mirror the
+    data-availability and funder-name classifiers byte-for-byte, *not*
+    `INDUSTRY_KEYWORDS` (#148). **Read
+    `doc/cross_platform/transparency_parity/README.md` before touching a
+    pattern.** Not in it: **keep `inputs.dir` in `app/build.gradle.kts`** (else
+    Gradle skips the Android parity test on a contract-only edit); **do not
+    reword the pattern fixtures** (negated openness is matched forward, so the
+    pins only work at specific sentence shapes); **Kotlin's
+    `negatedOpennessPatterns` stays declared before `restrictedPatterns`**
+    (declaration-order init silently appends nothing). `RegexHelper` uses `(?U)`.
 
 ## Potential follow-ups
 
@@ -260,6 +238,12 @@ of each other.
 - **#239 — `RecordingLogger` is copy-pasted across three test classes**, each
   mutating process-global configuration under an unwritten serial-execution
   assumption.
+- **#222 — a card can show a "PubMed" badge next to no PubMed link**: for a row
+  with no `searchSource`, `searchSourceEnum` falls back to `.pubmed` (badge)
+  while `recordedProvider` refuses to guess (link). Decide with #219.
+- **#223 — a malformed Europe PMC source token warns once per SwiftUI redraw**:
+  `Document.identifierKind`'s getter re-validates on every read from view
+  bodies. Validate once in `applySearchMetadata` and record an `ErrorEntry`.
 
 ### The #206 round: identifier identity, on the other two platforms
 
@@ -281,6 +265,9 @@ independent of each other.
   and never asks for a PMC ID at all. A verbatim port of the Swift repair, plus
   the revised "Cache Keys" section **and the stated kind** (#209): route on the
   record's `source`, persist the token, tag the cache on the kind.
+- **#220 — Android builds a PubMed URL from an unvouched `pmid`**
+  (`Document.kt:167`, `ReportViewModel.kt:347`). Unreachable under today's
+  mapping, which is the shape Swift had before #212; port the rule, not the fix.
 - **#207 — Python has no preprint routing, runs only the first matching rung,
   and puts the PMC rung first** (`europepmc.py`, `get_article_info`). Less
   severe than the Swift defect was, because Python keeps the identifiers in
@@ -332,13 +319,17 @@ Swift and Kotlin rather than a Swift-side patch.
 
 ### The rest of the #198 round
 
-- **#196 — the NCBI key still reaches a user file in clear text.** The route PR
-  #195 did not close: `study_transparency_analyzer.py:929` puts the key in a GET
-  query, `requests.HTTPError.__str__` embeds the whole URL,
-  `batch_analyzer.py:194` stores it in `result.errors`, and `export_to_json`
-  writes it into a **user-chosen file with default permissions** while the
-  config file is 0600. `pubmed/search_client.py:_make_request` models the fix:
-  log `status_code`, never the URL.
+- **#243 — Swift and Android send the NCBI key in the URL and log that URL**
+  (#196's parity half). Swift logs `url.absoluteString` through
+  `BioMedLitOSLogLogger.debug` as `privacy: .public`, release builds included;
+  Android's `HttpLoggingInterceptor` at `BASIC` logs it in debug builds. Port
+  the rule (form-encoded POST), and check every place a `URLError` is persisted,
+  since its `userInfo` carries the failing URL.
+- **#244 — `bmll -v` never enables DEBUG**: `study_transparency_analyzer.py`
+  and `batch_analyzer.py` call `logging.basicConfig(INFO)` at import. The GUI
+  entry point configures no logging and gets INFO only from that side effect,
+  so the fix needs a GUI logging setup too. **#245** — those two standalone
+  CLIs take the NCBI key only as `--api-key` (shell history, `ps`).
 - **#190 — CI never builds either app target.** `swift test` compiles the
   iOS-only sources to nothing on a macOS host and the SPM target excludes
   `Sources/macOS`. Partly addressed: #218 added a macOS `xcodebuild` job. Still
@@ -390,6 +381,13 @@ Swift and Kotlin rather than a Swift-side patch.
     row only, every later row is a cell short, and `padRow` pads the gap so the
     columns after it shift. `markdownRowCount` could never see it — which is why
     the digest now stores a `markdownDigest` hash of the rendering.
+- **#159 / #160 — transparency caveats and confidences, Python↔Swift.** **#159**:
+  when only ClinicalTrials.gov names an industry sponsor, both platforms report
+  `industry_funding_detected=True` at confidence 0.0 ("YES (0%)"); wants one
+  named confidence in `sponsor_patterns.json`, strictly below
+  `known_industry_doi` or the ladder test needs rework. **#160**: Swift never
+  raises Python's unrecognised-funder caveat (78% of corpus names) nor the two
+  trial-registry caveats (ISRCTN/EudraCT only; ClinicalTrials.gov unreachable).
 - **#150 — spelled-out NIH institute names match no government pattern**, on
   either platform: the lists carry the acronyms but no "National Institute of X"
   form, while CrossRef returns it routinely, so a US federal agency tiers
@@ -437,12 +435,9 @@ Swift and Kotlin rather than a Swift-side patch.
 ### Verify
 
 - **Closing an issue is a claim; check the commit made it true.** #183, #192,
-  #217 and #219 have each been closed by a commit whose own message listed them
-  as deferred. The mechanism is GitHub's keyword parser: "Lodged rather than
-  fixed: #217" contains `fixed: #217`. Only the *first* number after the keyword
-  closes, which is why #220–#223 in the same sentence stayed open — so the
-  failure is easy to miss twice. Write a deferral with no closing keyword before
-  an issue number.
+  #217 and #219 were closed by commits listing them as deferred: "Lodged rather
+  than fixed: #217" contains `fixed: #217`, and only the *first* number closes,
+  so it is easy to miss twice. No closing keyword before a deferred number.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.
@@ -451,27 +446,21 @@ Swift and Kotlin rather than a Swift-side patch.
   `pytest tests/test_funder_classification.py` and
   `cd Packages/BioMedLit && swift test --filter 'Funder|IndustryPattern'`.
 - Touching the JATS parser? The corpus digests are *expected* to move. Run
-  `cd Packages/BioMedLit && swift test --filter JATSRealCorpusTests`, read what it
-  names, then regenerate with `UPDATE_JATS_DIGESTS=1` and read
-  `git diff doc/cross_platform/jats_corpus/` line by line — that diff is the
-  evidence a fix worked, and regenerating unread is how a regression becomes a
-  committed expectation, the one failure the corpus cannot survive. The
-  regeneration run fails on purpose; re-run without the variable to verify. Then
-  check the sibling parsers: bmlib's is Python and can be **run** over the same
-  corpus files, which beats reading it; Android's needs a source read until #121.
+  `swift test --filter JATSRealCorpusTests` in `Packages/BioMedLit`, regenerate
+  with `UPDATE_JATS_DIGESTS=1` (that run fails on purpose), and read `git diff
+  doc/cross_platform/jats_corpus/` line by line — regenerating unread is how a
+  regression becomes a committed expectation. Then **run** bmlib's Python parser
+  over the same files; Android's needs a source read until #121.
 - Mutation-testing a source file? **Back it up with `cp`, not `git checkout`**,
   whose restore wipes uncommitted work so later runs measure a tree with the
   feature missing. **Key the harness on `swift test`'s exit code**, not its last
   summary line. **A survivor is a claim about the test, and sometimes about the
   code** (#186): check what the asserted value's provenance is on that path.
 - **A silent SwiftPM hang with no second build running** is its manifest binary
-  stuck at `_dyld_start` behind `syspolicyd`. Every `swift build`/`swift test`
-  invocation re-evaluates the manifest, so each can stall 7–11 minutes;
-  `--disable-sandbox` did not prevent it on 2026-09-13, waiting did. Chain
-  build, test and `xcodebuild` in one sequential background job, and check a
-  change first with `swiftc -typecheck` (no binary is launched). The lasting
-  fix is the user's: add the editor/terminal under Privacy & Security →
-  Developer Tools.
+  stuck at `_dyld_start` behind `syspolicyd`; each invocation can stall 7–11
+  minutes and `--disable-sandbox` does not help. Check with `swiftc -typecheck`
+  first, then chain build, test and `xcodebuild` in one background job. The
+  lasting fix is the user's: Privacy & Security → Developer Tools.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to
@@ -484,22 +473,15 @@ Swift and Kotlin rather than a Swift-side patch.
   from the build** with "cannot find X in scope" in an unrelated file as the only
   symptom. `xcode_project_guards.py` checks duplicate IDs and out-of-repo
   references, not absent files, so check the new IDs are unused before building.
-- `pytest tests/` → 0 failures (Python is the reference).
-- `cd Packages/BioMedLit && swift test` → 0 failures.
-- `cd ios/MedicalFactChecker && swift test` → 0 failures.
-- Android: `cd android/MedicalFactChecker && ./gradlew test` → 0 failures.
-- macOS app still builds: `xcodebuild -scheme MedicalFactChecker -destination
-  'platform=macOS' build` from `ios/MedicalFactChecker/`.
-- `ruff check .` / `mypy src/` carry pre-existing debt, so a clean run is
-  unreachable and the gate is **no new findings vs. the merge base**. CI enforces
-  this on PRs; reproduce it locally with
-  `python .github/scripts/lint_delta.py --base-ref origin/master`.
-  - **Don't record an absolute baseline count — the mypy total is
-    platform-dependent**, differing between macOS and the Linux runner from the
-    platform-specific branches it analyses, and drifting with every commit. No
-    number is written here for that reason. The gate is immune because it
-    compares two measurements from the same machine in the same run; a committed
-    baseline number would be wrong by ~a dozen the moment it changed hosts.
+- 0 failures from `pytest tests/` (Python is the reference), `swift test` in
+  `Packages/BioMedLit` and in `ios/MedicalFactChecker`, and `./gradlew test` in
+  `android/MedicalFactChecker`; the macOS app builds with `xcodebuild -scheme
+  MedicalFactChecker -destination 'platform=macOS' build`.
+- `ruff check .` / `mypy src/` carry pre-existing debt, so the gate is **no new
+  findings vs. the merge base**, enforced in CI and reproduced locally with
+  `python .github/scripts/lint_delta.py --base-ref origin/master`. **Never record
+  an absolute baseline count**: the mypy total differs between macOS and the
+  Linux runner and drifts with every commit.
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
