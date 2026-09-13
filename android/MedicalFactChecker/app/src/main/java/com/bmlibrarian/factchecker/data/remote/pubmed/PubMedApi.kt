@@ -19,13 +19,22 @@
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import retrofit2.Response
-import retrofit2.http.GET
-import retrofit2.http.Query
+import retrofit2.http.Field
+import retrofit2.http.FormUrlEncoded
+import retrofit2.http.POST
 
 /**
  * Retrofit interface for NCBI E-utilities PubMed API.
  *
  * Base URL: https://eutils.ncbi.nlm.nih.gov/entrez/eutils/
+ *
+ * Every request is a form-encoded POST with its parameters in the body, so the
+ * API key never appears in a URL (#243, the Android half of #196). A query
+ * string is part of the URL, and a URL is what gets printed: OkHttp's
+ * `HttpLoggingInterceptor` writes `--> GET <url>` to logcat, and exception text
+ * carries it. NCBI reads `api_key` from a POST body on `esearch` and `efetch`
+ * exactly as from a query string. Build the interface with [createPubMedApi],
+ * whose client refuses redirects, which would re-send the body elsewhere.
  *
  * Rate limits:
  * - Without API key: 3 requests/second
@@ -42,20 +51,22 @@ interface PubMedApi {
      * @param retMax Maximum number of results to return
      * @param retStart Starting position for pagination
      * @param useHistory Whether to use web history for large result sets
-     * @param apiKey Optional NCBI API key (increases rate limit)
+     * @param apiKey Optional NCBI API key (increases rate limit); a null field
+     *   is omitted from the body
      * @param email Contact email (recommended by NCBI)
      * @return ESearch response with PMIDs
      */
-    @GET("esearch.fcgi")
+    @FormUrlEncoded
+    @POST("esearch.fcgi")
     suspend fun search(
-        @Query("db") db: String = "pubmed",
-        @Query("term") term: String,
-        @Query("retmode") retMode: String = "json",
-        @Query("retmax") retMax: Int = DEFAULT_BATCH_SIZE,
-        @Query("retstart") retStart: Int = 0,
-        @Query("usehistory") useHistory: String = "y",
-        @Query("api_key") apiKey: String? = null,
-        @Query("email") email: String? = null
+        @Field("db") db: String = "pubmed",
+        @Field("term") term: String,
+        @Field("retmode") retMode: String = "json",
+        @Field("retmax") retMax: Int = DEFAULT_BATCH_SIZE,
+        @Field("retstart") retStart: Int = 0,
+        @Field("usehistory") useHistory: String = "y",
+        @Field("api_key") apiKey: String? = null,
+        @Field("email") email: String? = null
     ): Response<ESearchResponse>
 
     /**
@@ -71,14 +82,15 @@ interface PubMedApi {
      * @param email Contact email
      * @return XML string containing article data
      */
-    @GET("efetch.fcgi")
+    @FormUrlEncoded
+    @POST("efetch.fcgi")
     suspend fun fetch(
-        @Query("db") db: String = "pubmed",
-        @Query("id") ids: String,
-        @Query("retmode") retMode: String = "xml",
-        @Query("rettype") retType: String = "abstract",
-        @Query("api_key") apiKey: String? = null,
-        @Query("email") email: String? = null
+        @Field("db") db: String = "pubmed",
+        @Field("id") ids: String,
+        @Field("retmode") retMode: String = "xml",
+        @Field("rettype") retType: String = "abstract",
+        @Field("api_key") apiKey: String? = null,
+        @Field("email") email: String? = null
     ): Response<String>
 
     companion object {

@@ -29,8 +29,11 @@ import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchService
 import com.bmlibrarian.factchecker.data.remote.llm.OllamaApi
 import com.bmlibrarian.factchecker.data.remote.llm.OpenAIApi
 import com.bmlibrarian.factchecker.BuildConfig
+import com.bmlibrarian.factchecker.data.remote.debugHttpLoggingInterceptor
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
+import com.bmlibrarian.factchecker.data.remote.pubmed.createPubMedApi
+import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.bmlibrarian.factchecker.util.Constants
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -41,7 +44,6 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import java.util.concurrent.TimeUnit
@@ -81,13 +83,10 @@ object NetworkModule {
             .writeTimeout(Constants.NETWORK_WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
 
-        // Only add logging interceptor in debug builds, and use BASIC level
-        // to avoid the performance overhead of logging full request/response bodies
+        // Only add logging interceptor in debug builds, at BASIC level: bodies
+        // and headers carry credentials (see debugHttpLoggingInterceptor)
         if (BuildConfig.DEBUG) {
-            val loggingInterceptor = HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-            }
-            builder.addInterceptor(loggingInterceptor)
+            builder.addInterceptor(debugHttpLoggingInterceptor())
         }
 
         return builder.build()
@@ -235,32 +234,36 @@ object NetworkModule {
     /**
      * Provides the PubMed API interface.
      *
-     * Uses scalars converter for XML responses from efetch.
+     * Built by [createPubMedApi] on a client that refuses redirects, and not from
+     * the shared Retrofit builder, whose client follows them (#243).
      *
-     * @param retrofitBuilder The Retrofit builder with scalars support
+     * @param okHttpClient The shared client the PubMed client is derived from
+     * @param json The Json instance for esearch responses
      * @return PubMed API interface
      */
     @Provides
     @Singleton
     fun providePubMedApi(
-        @Named("scalarsAndJson") retrofitBuilder: Retrofit.Builder
+        okHttpClient: OkHttpClient,
+        json: Json
     ): PubMedApi {
-        return retrofitBuilder
-            .baseUrl(Constants.PUBMED_BASE_URL)
-            .build()
-            .create(PubMedApi::class.java)
+        return createPubMedApi(okHttpClient, json)
     }
 
     /**
      * Provides the PubMed service.
      *
      * @param api PubMed API interface
+     * @param settingsRepository Source of the NCBI API key and email the user saved
      * @return PubMed service instance
      */
     @Provides
     @Singleton
-    fun providePubMedService(api: PubMedApi): PubMedService {
-        return PubMedService(api)
+    fun providePubMedService(
+        api: PubMedApi,
+        settingsRepository: SettingsRepository
+    ): PubMedService {
+        return PubMedService(api, settingsRepository)
     }
 
     // ==================== Europe PMC API ====================

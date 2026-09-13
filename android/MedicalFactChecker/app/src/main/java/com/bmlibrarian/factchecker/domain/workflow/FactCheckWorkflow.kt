@@ -761,8 +761,7 @@ class FactCheckWorkflow @Inject constructor(
                 val result = pubMedService.search(
                     query = query,
                     offset = offset,
-                    batchSize = config.batchSize,
-                    email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                    batchSize = config.batchSize
                 )
 
                 if (result.isSuccess) {
@@ -827,8 +826,7 @@ class FactCheckWorkflow @Inject constructor(
                     val pubmedResult = pubMedService.search(
                         query = pubmedQuery,
                         offset = pubmedOffset,
-                        batchSize = halfBatch,
-                        email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                        batchSize = halfBatch
                     )
 
                     if (pubmedResult.isSuccess) {
@@ -1357,8 +1355,7 @@ class FactCheckWorkflow @Inject constructor(
                 val result = pubMedService.search(
                     query = queryString,
                     offset = 0,
-                    batchSize = config.batchSize,
-                    email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                    batchSize = config.batchSize
                 )
                 if (result.isSuccess) {
                     val searchResult = result.getOrThrow()
@@ -1399,8 +1396,7 @@ class FactCheckWorkflow @Inject constructor(
                     val pubmedResult = pubMedService.search(
                         query = pubmedQuery,
                         offset = 0,
-                        batchSize = halfBatch,
-                        email = settingsRepository.getNcbiEmail().ifEmpty { null }
+                        batchSize = halfBatch
                     )
                     if (pubmedResult.isSuccess) {
                         val sr = pubmedResult.getOrThrow()

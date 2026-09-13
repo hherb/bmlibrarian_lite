@@ -18,6 +18,8 @@
 
 package com.bmlibrarian.factchecker.domain.model
 
+import com.bmlibrarian.factchecker.util.Constants
+
 /**
  * Sealed class representing errors from PubMed/NCBI E-utilities operations.
  *
@@ -121,6 +123,22 @@ sealed class PubMedError(
     ) : PubMedError(message)
 
     /**
+     * NCBI answered with a redirect, which is never followed (#243).
+     *
+     * E-utilities parameters, the API key included, travel in the request body.
+     * A 307 or 308 would re-send that body to whatever host it names; a 301,
+     * 302 or 303 would re-send the request as a GET without its parameters.
+     * Not retryable: a redirect does not go away on a second attempt.
+     *
+     * @property message Error message
+     * @property statusCode The 3xx status NCBI answered with
+     */
+    data class RedirectRefusedError(
+        override val message: String,
+        val statusCode: Int
+    ) : PubMedError(message)
+
+    /**
      * Invalid offset - pagination offset out of range.
      *
      * PubMed limits offset to 9999.
@@ -157,6 +175,10 @@ sealed class PubMedError(
                 400 -> SearchError(
                     message = "Invalid search query: $message",
                     query = ""
+                )
+                in Constants.HTTP_REDIRECT_STATUS_CODES -> RedirectRefusedError(
+                    message = "PubMed answered with a redirect (HTTP $statusCode), which was not followed",
+                    statusCode = statusCode
                 )
                 429 -> RateLimitError()
                 in 500..599 -> ServerError(

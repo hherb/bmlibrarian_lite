@@ -24,6 +24,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentialSource
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -55,7 +57,7 @@ import javax.inject.Singleton
 @Singleton
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context
-) {
+) : NcbiCredentialSource {
 
     private val masterKey: MasterKey by lazy {
         MasterKey.Builder(context)
@@ -288,6 +290,14 @@ class SettingsRepository @Inject constructor(
         encryptedPrefs.edit().putString(KEY_NCBI_API_KEY, apiKey).apply()
         apiKeyCache[KEY_NCBI_API_KEY] = apiKey
     }
+
+    /**
+     * The NCBI API key and email as saved, for the PubMed service to send.
+     *
+     * @return The saved credentials, with an unset key or email as null
+     */
+    override fun ncbiCredentials(): NcbiCredentials =
+        NcbiCredentials.of(apiKey = getNcbiApiKey(), email = getNcbiEmail())
 
     // ==================== Individual Setting Accessors ====================
 

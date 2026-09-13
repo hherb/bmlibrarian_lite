@@ -38,6 +38,9 @@ object Constants {
     /** Write timeout for HTTP requests in seconds. */
     const val NETWORK_WRITE_TIMEOUT_SECONDS = 60L
 
+    /** HTTP redirection status codes (3xx). */
+    val HTTP_REDIRECT_STATUS_CODES = 300..399
+
     /** Maximum number of retry attempts for failed network requests. */
     const val NETWORK_MAX_RETRIES = 4
 
