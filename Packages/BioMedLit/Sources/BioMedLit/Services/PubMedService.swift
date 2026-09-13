@@ -83,13 +83,13 @@ public actor PubMedService {
         // Respect rate limits
         await waitForRateLimit()
 
-        // Step 1: Search to get PMIDs
-        let pmids = try await searchForPMIDs(query: query, maxResults: maxResults, offset: offset)
+        // Step 1: Search to get this batch's PMIDs and how many articles match
+        let (pmids, totalCount) = try await searchForPMIDs(query: query, maxResults: maxResults, offset: offset)
 
         guard !pmids.isEmpty else {
             return SearchResult(
                 articles: [],
-                totalCount: 0,
+                totalCount: totalCount,
                 nextOffset: nil,
                 query: query,
                 provider: .pubmed
@@ -97,7 +97,7 @@ public actor PubMedService {
         }
 
         // Step 2: Fetch article details
-        let (articles, totalCount) = try await fetchArticleDetails(pmids: pmids)
+        let articles = try await fetchArticleDetails(pmids: pmids)
 
         // Calculate next offset
         let nextOffset = offset + pmids.count < totalCount && offset + pmids.count < BioMedLitConstants.pubmedMaxOffset
@@ -127,12 +127,22 @@ public actor PubMedService {
         lastRequestTime = Date()
     }
 
-    /// Search PubMed and return PMIDs.
+    /// Search PubMed for one batch of PMIDs and the number of matches in all.
+    ///
+    /// - Parameters:
+    ///   - query: PubMed search query.
+    ///   - maxResults: Maximum number of PMIDs in the batch.
+    ///   - offset: Position of the batch's first PMID among all matches.
+    /// - Returns: The batch's PMIDs, and esearch's `count` of every matching
+    ///   article. The total once came from the batch size instead, so no PubMed
+    ///   search paginated past its first batch (#251). Without a usable `count`,
+    ///   the total is the articles seen so far, which ends pagination here, and a
+    ///   warning says so.
     private func searchForPMIDs(
         query: String,
         maxResults: Int,
         offset: Int
-    ) async throws -> [String] {
+    ) async throws -> (pmids: [String], totalCount: Int) {
         let parameters = [
             (name: "db", value: "pubmed"),
             (name: "term", value: query),
@@ -151,19 +161,34 @@ public actor PubMedService {
         // Parse response
         let response = try JSONDecoder().decode(PubMedSearchResponse.self, from: data)
         let pmids = response.esearchresult?.idlist ?? []
+        let articlesSeen = offset + pmids.count
+
+        let totalCount: Int
+        if let statedCount = response.esearchresult?.count.flatMap({ Int($0) }) {
+            totalCount = statedCount
+        } else {
+            totalCount = articlesSeen
+            BioMedLitLib.logger?.warning(
+                "PubMed search answered without a usable result count; treating the \(articlesSeen) articles seen as all there are",
+                category: .search
+            )
+        }
 
         BioMedLitLib.logger?.info(
-            "PubMed search found \(pmids.count) PMIDs (total: \(response.esearchresult?.count ?? "0"))",
+            "PubMed search found \(pmids.count) PMIDs (total: \(totalCount))",
             category: .search
         )
 
-        return pmids
+        return (pmids, totalCount)
     }
 
     /// Fetch article details for given PMIDs.
+    ///
+    /// - Parameter pmids: The PMIDs to fetch.
+    /// - Returns: The articles the efetch answer describes.
     private func fetchArticleDetails(
         pmids: [String]
-    ) async throws -> ([SearchArticle], Int) {
+    ) async throws -> [SearchArticle] {
         await waitForRateLimit()
 
         let parameters = [
@@ -177,9 +202,7 @@ public actor PubMedService {
 
         // Parse XML response
         let parser = PubMedXMLParser(data: data)
-        let articles = parser.parse()
-
-        return (articles, pmids.count)
+        return parser.parse()
     }
 
     /// Send one E-utilities request and return the body of its answer.
