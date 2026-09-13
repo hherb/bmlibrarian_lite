@@ -8,9 +8,10 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#196 — the NCBI API key reaches NCBI and nothing else.** PR #246 is open, its
-review round addressed; delete this section once it merges (the rules are under
-**Recently landed**). Otherwise pick a slice from **Potential follow-ups**.
+**#243 — the NCBI API key reaches NCBI and nothing else, on Swift and Android**
+(#196's parity half; the rules are under **Recently landed**). Branch
+`fix/ncbi-key-parity-243`. Once it merges, delete this section and pick a slice
+from **Potential follow-ups**.
 
 ## Recently landed (context)
 
@@ -19,7 +20,7 @@ not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
-  #246, 2026-09-13). Both Python NCBI clients (`PubMedClient`,
+  #246, merged 2026-09-13). Both Python NCBI clients (`PubMedClient`,
   `PubMedSearchClient`) POST every E-utilities request with the parameters in
   the body. **A URL is what error text and HTTP logging print** — `HTTPError`,
   `ConnectionError`, urllib3 at DEBUG — and the `HTTPError` text is what a
