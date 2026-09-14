@@ -32,24 +32,23 @@ the rest.
   passes a 3xx). **Each test that reaches the local server also asserts the
   key arrived.** Credential files go through `write_owner_only_file` (`mkstemp`
   then `os.replace`, never `open` then `chmod`).
-  **Swift and Android** (#243 in PR #254): the enforcement points and tests
-  are tabled in `doc/developer/europepmc_and_pubmed.md`. **Swift refuses per
-  task** (`RedirectRefusingTaskDelegate` via `data(for:delegate:)`); **Android
-  refuses on a client derived for PubMed only** — Unpaywall and PDF links need
-  redirects, and the shared `scalarsAndJson` Retrofit builder is a mutable
-  singleton, so a client set on it leaks into every later API. **A redirect test
-  needs a control that a followed redirect is observable**, or a stub that never
-  redirects passes it; both were mutation-tested. **Android reads the key in
-  `PubMedService`** (`NcbiCredentialSource`): all four workflow call sites
-  omitted it, so a saved key never reached NCBI. Test traps: a `URLProtocol`
-  gets the body as `httpBodyStream`; `com.sun.net.httpserver` is not on the
-  Android unit-test classpath (use MockWebServer).
-  **#251, same PR**: Swift's `PubMedService.search` returned the batch size as
-  `totalCount`, so no PubMed search paginated past batch one; the app now also
-  advances by the PMIDs consumed (`pubMedPositionsAdvanced`), since a
-  `PubmedBookArticle` parses to no article. **NCBI's 400 for a bad key echoes
-  the key in its body** (checked live): never log or persist an E-utilities
-  error body.
+  **Swift and Android** (#243 in PR #254): enforcement points, tests and the
+  ports' differences from Python are tabled in `doc/developer/europepmc_and_pubmed.md`.
+  **Swift refuses per task** (`RedirectRefusingTaskDelegate`); **Android on a
+  client derived for PubMed only** — Unpaywall and PDF links need redirects, and
+  the shared `scalarsAndJson` Retrofit builder is a mutable singleton. **A
+  redirect test needs a control that a followed redirect is observable**; all
+  guards were mutation-tested. **Android reads the key in `PubMedService`**
+  (`NcbiCredentialSource`; all four workflow call sites omitted it), and a 400 on
+  a keyed request is `InvalidApiKeyError`. **Retrofit's `Invocation` tag holds
+  the key and `Request.toString()` prints it**, so `pubMedHttpClient` drops it
+  first. Test traps: a `URLProtocol` gets the body as `httpBodyStream`; use
+  MockWebServer. **#251, same PR**: Swift returned the batch size as `totalCount`.
+  The app advances by the PMIDs consumed (a `PubmedBookArticle` parses to no
+  article), and **a `nil` `nextOffset` means no next page**: advance to the end,
+  or a last batch that parsed to nothing is re-requested forever. **NCBI's 400
+  for a bad key echoes the key in its body** (checked live): never log or
+  persist an E-utilities error body.
 
 - **The screen and the export read references by one parser** (#233 in PR #242,
   2026-09-13). **Recognition lives in `ReportInlineText`; renderers only style
@@ -345,9 +344,10 @@ Swift and Kotlin rather than a Swift-side patch.
   a failed batch silently shortens the set (**#248**); nothing connects
   `analysis_failed` (**#249**); an efetch with no article yields "No conflict of
   interest statement found" (**#250**, #203's shape). **#252** — Android drops
-  every failed PubMed and Europe PMC search with no `else`, #247's shape; a bad
-  saved key now lands there too. **#253** — the app never applies PubMed's
-  9,999 offset cap, reachable since #251.
+  every failed search (a rejected key, a broken keystore) with no `else`; **#256**
+  — iOS `searchBoth` with a `print`. **#255** — an `ERROR` in an HTTP 200 reads
+  as no results everywhere. **#253** — both-provider paging judges PubMed's next
+  page by the combined total; PubMed-only paging stops at the cap since #254.
 - **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
   **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
   cheaper, and the exact defect that occurred — a guard failing when a `.swift`
