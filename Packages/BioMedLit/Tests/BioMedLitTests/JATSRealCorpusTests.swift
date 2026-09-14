@@ -48,6 +48,11 @@ import XCTest
 /// things that must hold for any real article whatever the stored digest says.
 /// Without it a total collapse to zero could be regenerated into the
 /// expectations and would then read as correct forever.
+///
+/// The parser reports content loss by logging, not throwing: an unbalanced
+/// `<sub-article>` nesting and a zero-author parse at `warning`, and every
+/// discarded caption at `debug`. So the suite runs under
+/// ``RecordingLoggerTestCase``, which hears every level.
 final class JATSRealCorpusTests: RecordingLoggerTestCase {
 
     // MARK: - Fixture location
@@ -614,16 +619,6 @@ final class JATSRealCorpusTests: RecordingLoggerTestCase {
             htmlScalarCount: html.unicodeScalars.count
         )
     }
-
-    // MARK: - Capturing what the parser reports
-
-    // The parser reports content loss by logging rather than throwing: an
-    // unbalanced `<sub-article>` nesting and a zero-author parse at `warning`,
-    // and every caption discarded for want of a model at `debug`.
-    // `BioMedLitLib.logger` is `nil` until the library is configured, and no JATS
-    // test configured it, so those diagnostics went nowhere: a parse that said in
-    // as many words that it had discarded content still produced a green test.
-    // `RecordingLoggerTestCase` installs a logger that hears every level.
 
     // MARK: - Reading the corpus
 

@@ -54,7 +54,11 @@ public actor PubMedService {
     ///     session, which follows redirects without asking.
     public init(email: String, apiKey: String? = nil, session: URLSession? = nil) {
         self.email = email
-        self.apiKey = (apiKey?.isEmpty ?? true) ? nil : apiKey
+        if let apiKey = apiKey, !apiKey.isEmpty {
+            self.apiKey = apiKey
+        } else {
+            self.apiKey = nil
+        }
 
         if let session = session {
             self.session = session
@@ -73,16 +77,19 @@ public actor PubMedService {
     ///   - query: PubMed search query.
     ///   - maxResults: Maximum number of results to return.
     ///   - offset: Starting offset for pagination.
-    /// - Returns: Search results with articles and pagination info.
+    /// - Returns: Search results with articles and pagination info. Only
+    ///   `PubmedArticle` records become articles, so a batch can hold fewer
+    ///   articles than the PMIDs it consumed: a `PubmedBookArticle` yields none.
+    ///   `nextOffset` is therefore the position after the PMIDs consumed, not
+    ///   after the articles. It is `nil` when there is no next page: the batch
+    ///   reached the last match, the next page would pass PubMed's offset cap
+    ///   (``BioMedLitConstants/pubmedMaxOffset``), or esearch gave no usable count.
     /// - Throws: `PubMedError` if the search fails.
     public func search(
         query: String,
         maxResults: Int = BioMedLitConstants.pubmedDefaultBatchSize,
         offset: Int = 0
     ) async throws -> SearchResult {
-        // Respect rate limits
-        await waitForRateLimit()
-
         // Step 1: Search to get this batch's PMIDs and how many articles match
         let (pmids, totalCount) = try await searchForPMIDs(query: query, maxResults: maxResults, offset: offset)
 
@@ -134,10 +141,8 @@ public actor PubMedService {
     ///   - maxResults: Maximum number of PMIDs in the batch.
     ///   - offset: Position of the batch's first PMID among all matches.
     /// - Returns: The batch's PMIDs, and esearch's `count` of every matching
-    ///   article. The total once came from the batch size instead, so no PubMed
-    ///   search paginated past its first batch (#251). Without a usable `count`,
-    ///   the total is the articles seen so far, which ends pagination here, and a
-    ///   warning says so.
+    ///   article (#251). Without a usable `count`, the total is the articles seen
+    ///   so far, which ends pagination here, and a warning says so.
     private func searchForPMIDs(
         query: String,
         maxResults: Int,
@@ -169,7 +174,7 @@ public actor PubMedService {
         } else {
             totalCount = articlesSeen
             BioMedLitLib.logger?.warning(
-                "PubMed search answered without a usable result count; treating the \(articlesSeen) articles seen as all there are",
+                "PubMed search answered without a usable result count; ending pagination at the \(articlesSeen) articles seen",
                 category: .search
             )
         }
@@ -185,12 +190,12 @@ public actor PubMedService {
     /// Fetch article details for given PMIDs.
     ///
     /// - Parameter pmids: The PMIDs to fetch.
-    /// - Returns: The articles the efetch answer describes.
+    /// - Returns: The `PubmedArticle` records the efetch answer holds. Other
+    ///   records, such as a `PubmedBookArticle`, are skipped, so there can be
+    ///   fewer articles than PMIDs.
     private func fetchArticleDetails(
         pmids: [String]
     ) async throws -> [SearchArticle] {
-        await waitForRateLimit()
-
         let parameters = [
             (name: "db", value: "pubmed"),
             (name: "id", value: pmids.joined(separator: ",")),
@@ -207,20 +212,27 @@ public actor PubMedService {
 
     /// Send one E-utilities request and return the body of its answer.
     ///
-    /// The parameters travel in a POST body together with the email and API key,
-    /// and a redirect is refused rather than followed; ``EutilsRequest`` says
-    /// why. Rate-limit and server statuses are retried with backoff, and every
-    /// other status fails at once.
+    /// Every request waits its turn under the rate limit first, as Python's
+    /// `_make_request` does. The parameters travel in a POST body together with
+    /// the email and API key (``EutilsRequest`` says why), and a redirect is
+    /// refused rather than followed (``RedirectRefusingTaskDelegate`` says why).
+    /// The statuses in ``BioMedLitConstants/retryableStatusCodes`` and transient
+    /// transport errors are retried with backoff; every other status fails at
+    /// once. The body of a failed answer is never read: NCBI's 400 for a bad key
+    /// echoes the key in it.
     ///
     /// - Parameters:
     ///   - endpoint: The E-utilities endpoint, such as
     ///     ``BioMedLitConstants/pubmedSearchURL``.
     ///   - parameters: The request's own parameters. Identification is added here.
     /// - Returns: The body of a 200 response.
-    /// - Throws: ``PubMedError/redirectRefused(statusCode:)`` for a 3xx,
-    ///   ``PubMedError/serverError(statusCode:)`` for a retryable status that
-    ///   stayed retryable, ``PubMedError/httpError(statusCode:)`` for any other
-    ///   status, or the transport's own error.
+    /// - Throws: ``PubMedError/redirectRefused(statusCode:)`` for a 3xx;
+    ///   ``PubMedError/rateLimited`` for a 429 and
+    ///   ``PubMedError/serverError(statusCode:)`` for another retryable status,
+    ///   when still failing after the last attempt;
+    ///   ``PubMedError/httpError(statusCode:)`` for any other status;
+    ///   ``PubMedError/networkError(_:)`` for an endpoint that is not a URL or
+    ///   an answer that is not HTTP; or the transport's own error.
     private func send(
         to endpoint: String,
         parameters: [(name: String, value: String)]
@@ -231,7 +243,15 @@ public actor PubMedService {
             throw PubMedError.networkError(reason)
         }
 
-        let request = EutilsRequest.post(to: url, parameters: parameters + identificationParameters)
+        // Outside the retry, so a retry's backoff is not lengthened by a second wait
+        await waitForRateLimit()
+
+        // Identification goes last, and only ever into the body
+        var bodyParameters = parameters + [(name: "email", value: email)]
+        if let apiKey = apiKey {
+            bodyParameters.append((name: "api_key", value: apiKey))
+        }
+        let request = EutilsRequest.post(to: url, parameters: bodyParameters)
         let session = self.session
 
         return try await RetryHelper.retry(
@@ -257,25 +277,21 @@ public actor PubMedService {
                 throw PubMedError.redirectRefused(statusCode: statusCode)
             }
 
+            if statusCode == BioMedLitConstants.httpStatusRateLimited {
+                throw PubMedError.rateLimited
+            }
+
             if BioMedLitConstants.retryableStatusCodes.contains(statusCode) {
                 throw PubMedError.serverError(statusCode: statusCode)
             }
 
+            // `data` is dropped unread on every failure: it may echo the key
             guard statusCode == BioMedLitConstants.httpStatusOK else {
                 throw PubMedError.httpError(statusCode: statusCode)
             }
 
             return data
         }
-    }
-
-    /// The email and, when there is one, the API key, as E-utilities parameters.
-    private var identificationParameters: [(name: String, value: String)] {
-        var parameters = [(name: "email", value: email)]
-        if let apiKey = apiKey {
-            parameters.append((name: "api_key", value: apiKey))
-        }
-        return parameters
     }
 }
 
@@ -290,8 +306,9 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
     case parseError(String)
     case rateLimited
     case noResults
-    /// NCBI answered with a redirect, which is never followed: it would re-send
-    /// the request, API key included, to another address (#243).
+    /// NCBI answered with a redirect, which is never followed (#243). A 307 or
+    /// 308 would re-send the body, API key included, to whatever host it names;
+    /// a 301, 302 or 303 would re-send the request as a GET without its parameters.
     case redirectRefused(statusCode: Int)
 
     public var errorDescription: String? {
@@ -303,7 +320,7 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
         case .httpError(let statusCode):
             return "HTTP error: \(statusCode)"
         case .serverError(let statusCode):
-            return "Server error (HTTP \(statusCode)). Retrying..."
+            return "PubMed server error (HTTP \(statusCode)). Try again later."
         case .parseError(let message):
             return "Failed to parse response: \(message)"
         case .rateLimited:

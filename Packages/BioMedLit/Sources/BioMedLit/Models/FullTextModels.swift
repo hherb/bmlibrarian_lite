@@ -491,7 +491,7 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
         case .invalidResponse(let reason):
             return "Invalid API response: \(reason)"
         case .serverError(let statusCode):
-            return "Server temporarily unavailable (HTTP \(statusCode)). Retrying..."
+            return "Server temporarily unavailable (HTTP \(statusCode)). Try again later."
         }
     }
 

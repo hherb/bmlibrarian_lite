@@ -18,126 +18,6 @@ import Foundation
 import XCTest
 @testable import BioMedLit
 
-/// Serves canned E-utilities answers and records every request in full.
-///
-/// Unlike ``RecordingURLProtocol``, which keeps only URLs, this keeps method,
-/// headers and body, because the subject is where the API key travels.
-final class EutilsRecordingURLProtocol: URLProtocol {
-    /// One request as the transport saw it.
-    struct Recorded {
-        /// The URL requested.
-        let url: URL
-        /// The HTTP method.
-        let method: String?
-        /// The `Content-Type` header, if any.
-        let contentType: String?
-        /// The request body, read from its stream.
-        let body: Data
-    }
-
-    /// How the stub answers one request.
-    enum Reply {
-        /// A 200 with this body.
-        case ok(Data)
-        /// An empty response with this status.
-        case status(Int)
-        /// A redirect with this status to this location.
-        case redirect(Int, to: URL)
-    }
-
-    /// Size of each read from a request's body stream.
-    private static let bodyReadChunkSize = 4096
-
-    /// Every request made through this protocol, in order.
-    nonisolated(unsafe) static var recorded: [Recorded] = []
-
-    /// Chooses the reply, given the request and how many earlier requests went
-    /// to the same path.
-    nonisolated(unsafe) static var reply: (URLRequest, Int) -> Reply = { _, _ in .status(404) }
-
-    /// Forget recorded requests and restore the default reply.
-    static func reset() {
-        recorded = []
-        reply = { _, _ in .status(404) }
-    }
-
-    /// A session whose every request is served by this protocol.
-    static func session() -> URLSession {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [EutilsRecordingURLProtocol.self]
-        return URLSession(configuration: config)
-    }
-
-    /// Serve every request, whatever its scheme or host.
-    override class func canInit(with request: URLRequest) -> Bool { true }
-
-    /// Leave the request as it is, so what is recorded is what was sent.
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    /// Record the request, then answer it as ``reply`` says.
-    override func startLoading() {
-        guard let url = request.url else { return }
-        let earlier = Self.recorded.filter { $0.url.path == url.path }.count
-        Self.recorded.append(Recorded(
-            url: url,
-            method: request.httpMethod,
-            contentType: request.value(forHTTPHeaderField: EutilsRequest.contentTypeHeader),
-            body: Self.body(of: request)
-        ))
-
-        switch Self.reply(request, earlier) {
-        case .ok(let data):
-            finish(url: url, statusCode: BioMedLitConstants.httpStatusOK, headers: [:], body: data)
-        case .status(let statusCode):
-            finish(url: url, statusCode: statusCode, headers: [:], body: Data())
-        case .redirect(let statusCode, let location):
-            let response = HTTPURLResponse(
-                url: url, statusCode: statusCode, httpVersion: "HTTP/1.1",
-                headerFields: ["Location": location.absoluteString]
-            )!
-            var redirected = request
-            redirected.url = location
-            client?.urlProtocol(self, wasRedirectedTo: redirected, redirectResponse: response)
-            // Reached as the task's result only if the redirect is declined;
-            // following it stops this protocol and starts a new request instead.
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocolDidFinishLoading(self)
-        }
-    }
-
-    /// Nothing to cancel: every answer is delivered synchronously.
-    override func stopLoading() {}
-
-    /// Deliver a complete response.
-    private func finish(url: URL, statusCode: Int, headers: [String: String], body: Data) {
-        let response = HTTPURLResponse(
-            url: url, statusCode: statusCode, httpVersion: "HTTP/1.1", headerFields: headers
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    /// The body of a request as a protocol receives it.
-    ///
-    /// `URLSession` hands a protocol the body as `httpBodyStream`, not
-    /// `httpBody`, so reading only the property would record every body empty.
-    private static func body(of request: URLRequest) -> Data {
-        if let body = request.httpBody { return body }
-        guard let stream = request.httpBodyStream else { return Data() }
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: bodyReadChunkSize)
-        while stream.hasBytesAvailable {
-            let count = stream.read(&buffer, maxLength: buffer.count)
-            guard count > 0 else { break }
-            data.append(buffer, count: count)
-        }
-        return data
-    }
-}
-
 /// The NCBI API key reaches NCBI and nothing else (#243, the Swift half of #196).
 ///
 /// A query string is part of the URL, and a URL is what gets printed: this
@@ -145,27 +25,12 @@ final class EutilsRecordingURLProtocol: URLProtocol {
 /// `URLError` carries it in its `userInfo`. So the key must travel in a POST
 /// body, and because a body is re-sent by a 307 or 308, a redirect must be
 /// refused rather than followed.
-final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
+final class PubMedCredentialConfinementTests: EutilsStubTestCase {
     /// A key shaped like a real one, distinctive enough to find anywhere.
     private let apiKey = "0123456789abcdef0123456789abcdef0123"
 
     /// The contact address sent with each request.
     private let email = "researcher@example.org"
-
-    /// A host that is not NCBI, where a followed redirect would land.
-    private let elsewhere = URL(string: "https://collector.example/eutils")!
-
-    /// Start each test with no recorded requests and the default reply.
-    override func setUp() {
-        super.setUp()
-        EutilsRecordingURLProtocol.reset()
-    }
-
-    /// Leave the stub's shared state clean for the next test class.
-    override func tearDown() {
-        EutilsRecordingURLProtocol.reset()
-        super.tearDown()
-    }
 
     // MARK: - Fixtures
 
@@ -174,22 +39,12 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
         PubMedService(email: email, apiKey: apiKey, session: EutilsRecordingURLProtocol.session())
     }
 
-    /// An esearch answer naming one PMID.
-    private let searchAnswer = Data(#"{"esearchresult":{"count":"1","idlist":["12345"]}}"#.utf8)
-
-    /// An efetch answer for that PMID.
-    private let fetchAnswer = Data("""
-        <PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>12345</PMID>\
-        <Article><ArticleTitle>A title</ArticleTitle></Article></MedlineCitation>\
-        </PubmedArticle></PubmedArticleSet>
-        """.utf8)
-
     /// Answer esearch and efetch as NCBI would for a one-article search.
     private func serveOneArticle() {
-        let searchAnswer = searchAnswer
-        let fetchAnswer = fetchAnswer
         EutilsRecordingURLProtocol.reply = { request, _ in
-            request.url?.lastPathComponent == "esearch.fcgi" ? .ok(searchAnswer) : .ok(fetchAnswer)
+            request.url?.lastPathComponent == "esearch.fcgi"
+                ? .ok(EutilsFixture.searchAnswer)
+                : .ok(EutilsFixture.fetchAnswer)
         }
     }
 
@@ -209,6 +64,14 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
     /// The value of the first field with this name.
     private func field(_ name: String, in body: Data) -> String? {
         formFields(body).first { $0.name == name }?.value
+    }
+
+    /// Fail the test for every recorded log line that names the key.
+    private func assertNoLogLineCarriesTheKey(file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertFalse(logger.recorded.isEmpty, "nothing was logged, so nothing was checked", file: file, line: line)
+        for logged in logger.recorded {
+            XCTAssertFalse(logged.contains(apiKey), "logged the key: \(logged)", file: file, line: line)
+        }
     }
 
     // MARK: - Where the key travels
@@ -295,22 +158,42 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
             XCTAssertFalse(error.localizedDescription.contains(apiKey), "the error carried the key")
         }
 
-        XCTAssertFalse(logger.recorded.isEmpty, "nothing was logged, so nothing was checked")
-        for line in logger.recorded {
-            XCTAssertFalse(line.contains(apiKey), "logged the key: \(line)")
+        assertNoLogLineCarriesTheKey()
+    }
+
+    /// A failed answer whose body echoes the key leaves the key unprinted.
+    ///
+    /// NCBI's HTTP 400 for a bad key repeats the key in its body, so the body of
+    /// a failed answer must never reach an error or a log line.
+    func testAFailedAnswerThatEchoesTheKeyPrintsNoKey() async throws {
+        let echo = Data(#"{"error":"API key invalid","api-key":"\#(apiKey)"}"#.utf8)
+        EutilsRecordingURLProtocol.reply = { _, _ in .status(400, body: echo) }
+
+        do {
+            _ = try await service(apiKey: apiKey).search(query: "aspirin")
+            XCTFail("a 400 should fail the search")
+        } catch {
+            XCTAssertFalse("\(error)".contains(apiKey), "the error carried the key")
+            XCTAssertFalse(error.localizedDescription.contains(apiKey), "the error carried the key")
+            guard case PubMedError.httpError(statusCode: 400) = error else {
+                return XCTFail("expected httpError(400), got \(error)")
+            }
         }
+
+        assertNoLogLineCarriesTheKey()
     }
 
     // MARK: - Redirects
 
     /// The stub can make the transport follow a redirect.
     ///
-    /// Without this control, the refusal test below would pass just as well if
+    /// Without this control, the refusal tests below would pass just as well if
     /// the stub's redirect never reached the transport at all.
     func testTheHarnessCanObserveAFollowedRedirect() async throws {
-        let elsewhere = elsewhere
         EutilsRecordingURLProtocol.reply = { request, _ in
-            request.url?.host == elsewhere.host ? .status(BioMedLitConstants.httpStatusOK) : .redirect(307, to: elsewhere)
+            request.url?.host == EutilsFixture.elsewhere.host
+                ? .status(BioMedLitConstants.httpStatusOK)
+                : .redirect(307, to: EutilsFixture.elsewhere)
         }
         var request = URLRequest(url: URL(string: BioMedLitConstants.pubmedSearchURL)!)
         request.httpMethod = "POST"
@@ -319,11 +202,11 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
 
         XCTAssertEqual(
             EutilsRecordingURLProtocol.recorded.map { $0.url.host },
-            [URL(string: BioMedLitConstants.pubmedSearchURL)!.host, elsewhere.host]
+            [EutilsFixture.ncbiHost, EutilsFixture.elsewhere.host]
         )
     }
 
-    /// A redirect fails the request and is not followed, whatever its status.
+    /// A redirect fails the search and is not followed, whatever its status.
     ///
     /// 307 and 308 would re-send the body, key included, to the new host; 301,
     /// 302 and 303 would re-send the request as a GET without its parameters.
@@ -331,21 +214,54 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
         for statusCode in [301, 302, 303, 307, 308] {
             EutilsRecordingURLProtocol.reset()
             logger.reset()
-            let elsewhere = elsewhere
-            EutilsRecordingURLProtocol.reply = { _, _ in .redirect(statusCode, to: elsewhere) }
+            EutilsRecordingURLProtocol.reply = { _, _ in .redirect(statusCode, to: EutilsFixture.elsewhere) }
 
-            do {
-                _ = try await service(apiKey: apiKey).search(query: "aspirin")
-                XCTFail("HTTP \(statusCode): a redirect should fail the search")
-            } catch PubMedError.redirectRefused(let refused) {
-                XCTAssertEqual(refused, statusCode)
-            } catch {
-                XCTFail("HTTP \(statusCode): expected redirectRefused, got \(error)")
-            }
+            await assertRedirectRefused(statusCode)
 
             let hosts = EutilsRecordingURLProtocol.recorded.map { $0.url.host }
-            XCTAssertEqual(hosts, ["eutils.ncbi.nlm.nih.gov"], "HTTP \(statusCode) was followed")
+            XCTAssertEqual(hosts, [EutilsFixture.ncbiHost], "HTTP \(statusCode) was followed")
             XCTAssertEqual(logger.errors.count, 1, "HTTP \(statusCode): \(logger.recorded)")
+        }
+    }
+
+    /// A redirect on the fetch is refused as well as one on the search.
+    ///
+    /// The refusal is passed per request, so a fetch that stopped going through
+    /// the shared sender would silently lose it and follow a 307 with the key.
+    func testARedirectOnTheFetchIsRefusedNotFollowed() async throws {
+        for statusCode in [301, 302, 303, 307, 308] {
+            EutilsRecordingURLProtocol.reset()
+            EutilsRecordingURLProtocol.reply = { request, _ in
+                request.url?.lastPathComponent == "esearch.fcgi"
+                    ? .ok(EutilsFixture.searchAnswer)
+                    : .redirect(statusCode, to: EutilsFixture.elsewhere)
+            }
+
+            await assertRedirectRefused(statusCode)
+
+            let requests = EutilsRecordingURLProtocol.recorded
+            XCTAssertEqual(
+                requests.map(\.url.lastPathComponent), ["esearch.fcgi", "efetch.fcgi"],
+                "HTTP \(statusCode) on the fetch"
+            )
+            XCTAssertEqual(
+                requests.map { $0.url.host }, [EutilsFixture.ncbiHost, EutilsFixture.ncbiHost],
+                "HTTP \(statusCode) on the fetch was followed"
+            )
+        }
+    }
+
+    /// Run a search that must fail with ``PubMedError/redirectRefused(statusCode:)``.
+    private func assertRedirectRefused(
+        _ statusCode: Int, file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        do {
+            _ = try await service(apiKey: apiKey).search(query: "aspirin")
+            XCTFail("HTTP \(statusCode): a redirect should fail the search", file: file, line: line)
+        } catch PubMedError.redirectRefused(let refused) {
+            XCTAssertEqual(refused, statusCode, file: file, line: line)
+        } catch {
+            XCTFail("HTTP \(statusCode): expected redirectRefused, got \(error)", file: file, line: line)
         }
     }
 
@@ -356,11 +272,9 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
     /// Before both requests shared one sender, the fetch reported a 429 or 503
     /// as a final, non-retryable `httpError`.
     func testAFetchThatMeetsAServerErrorIsRetried() async throws {
-        let searchAnswer = searchAnswer
-        let fetchAnswer = fetchAnswer
         EutilsRecordingURLProtocol.reply = { request, earlier in
-            if request.url?.lastPathComponent == "esearch.fcgi" { return .ok(searchAnswer) }
-            return earlier == 0 ? .status(503) : .ok(fetchAnswer)
+            if request.url?.lastPathComponent == "esearch.fcgi" { return .ok(EutilsFixture.searchAnswer) }
+            return earlier == 0 ? .status(503) : .ok(EutilsFixture.fetchAnswer)
         }
 
         let result = try await service(apiKey: apiKey).search(query: "aspirin")
@@ -370,6 +284,34 @@ final class PubMedCredentialConfinementTests: RecordingLoggerTestCase {
             EutilsRecordingURLProtocol.recorded.map(\.url.lastPathComponent),
             ["esearch.fcgi", "efetch.fcgi", "efetch.fcgi"]
         )
+    }
+
+    /// A 429 that outlasts every retry is reported as rate limiting.
+    ///
+    /// It was reported as a server error whose text promised a retry that had
+    /// already run out.
+    func testARateLimitThatPersistsIsReportedAsRateLimited() async throws {
+        EutilsRecordingURLProtocol.reply = { _, _ in .status(BioMedLitConstants.httpStatusRateLimited) }
+
+        do {
+            _ = try await service(apiKey: apiKey).search(query: "aspirin")
+            XCTFail("a persistent 429 should fail the search")
+        } catch PubMedError.rateLimited {
+            XCTAssertEqual(
+                EutilsRecordingURLProtocol.recorded.count, RetryConfiguration.networkDefault.maxAttempts,
+                "a 429 is retried"
+            )
+        } catch {
+            XCTFail("expected rateLimited, got \(error)")
+        }
+    }
+
+    /// A final server error does not promise a retry.
+    func testAServerErrorDescriptionPromisesNoRetry() throws {
+        let description = try XCTUnwrap(PubMedError.serverError(statusCode: 503).errorDescription)
+
+        XCTAssertFalse(description.contains("Retrying"), description)
+        XCTAssertTrue(description.contains("503"), description)
     }
 }
 

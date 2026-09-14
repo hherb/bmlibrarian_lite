@@ -102,6 +102,11 @@ enum EutilsRequest {
 /// task to finish with the 3xx response itself, which the caller reports as
 /// ``PubMedError/redirectRefused(statusCode:)``.
 ///
+/// Not even a redirect to an NCBI host is followed. These endpoints never
+/// legitimately redirect, following a 301, 302 or 303 can never yield a correct
+/// answer, and a same-host redirect can still downgrade to `http://` and carry
+/// the key in cleartext. Matching hosts would be logic to get wrong for no gain.
+///
 /// Passed per task (`URLSession.data(for:delegate:)`), so it applies whatever
 /// session the service was given. Background sessions always follow redirects
 /// and never ask, so a PubMed request must not run on one.

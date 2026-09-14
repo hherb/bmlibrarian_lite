@@ -25,8 +25,8 @@ import XCTest
 ///
 /// **Every level is recorded, including `debug`.** Ignoring the quiet levels is
 /// a defect in its own right, and it was live: `debug` is where the JATS parser
-/// announces a discarded caption, and the real corpus dropped 21 of its 62
-/// captions on every run with nothing to hear it.
+/// announces a discarded caption, and the real corpus dropped captions on every
+/// run with nothing to hear it.
 ///
 /// `@unchecked Sendable` with a lock because `BioMedLitLogger` requires
 /// `Sendable` and this is mutable; the lock is what makes that claim true. An
@@ -95,36 +95,38 @@ final class RecordingLogger: BioMedLitLogger, @unchecked Sendable {
 /// A test case that hears everything the library logs while each test runs.
 ///
 /// The library holds its logger in process-global configuration, so installing
-/// one is process-wide. That is safe only because XCTest runs the methods of a
-/// test process one at a time and CI runs plain `swift test`, without
-/// `--parallel`: **the serial execution is load-bearing** (#239). Run in
-/// parallel, two classes would install loggers over each other, and a logger
-/// assertion would pass or fail by scheduling.
+/// one is process-wide. **One test at a time per process is load-bearing**
+/// (#239). XCTest runs one test method at a time, and `swift test --parallel`
+/// and Xcode's parallel testing both spread tests across separate processes, so
+/// none of those overlap. What would overlap is a Swift Testing `@Test`, which
+/// runs concurrently inside the process by default, or work a test leaves
+/// running after it ends. Either would install or log over these tests' logger,
+/// and a logger assertion would pass or fail by scheduling.
 ///
-/// For the same reason, a subclass must not install a logger of its own in a
-/// class-level `setUp()`: the per-test `tearDown()` here resets the library to
-/// "configured, no logger" after every method and would silently remove it.
+/// The logger is installed around the whole test, in `invokeTest()`, not in
+/// `setUp()`: a subclass that overrides `setUp()` and forgets `super` still has
+/// it, where otherwise `logger.recorded == []` would pass having heard nothing.
+/// The configuration is reset after every test, so a subclass must not install
+/// a logger of its own in a class-level `setUp()`; each test replaces it.
 class RecordingLoggerTestCase: XCTestCase {
     /// The logger installed for the duration of each test.
     let logger = RecordingLogger()
 
-    /// Install the recording logger, emptied, for one test.
-    override func setUp() {
-        super.setUp()
+    /// Run one test, its `setUp()` and `tearDown()` included, with the recording
+    /// logger installed and emptied.
+    ///
+    /// Afterwards the library is put back to what the rest of the package's tests
+    /// have always run with: configured, but no logger. It cannot be un-configured.
+    override func invokeTest() {
         logger.reset()
         BioMedLitLib.configure(with: BioMedLitConfiguration(
             ncbiEmail: "tests@example.com", logger: logger
         ))
-    }
-
-    /// Restore the configuration the rest of the package's tests expect.
-    ///
-    /// The library cannot be un-configured, so this puts back what the rest of
-    /// the package's tests have always run with: configured, but no logger.
-    override func tearDown() {
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: nil
-        ))
-        super.tearDown()
+        defer {
+            BioMedLitLib.configure(with: BioMedLitConfiguration(
+                ncbiEmail: "tests@example.com", logger: nil
+            ))
+        }
+        super.invokeTest()
     }
 }

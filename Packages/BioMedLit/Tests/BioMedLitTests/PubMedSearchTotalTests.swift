@@ -21,31 +21,16 @@ import XCTest
 /// A PubMed search reports how many articles match, not how many it fetched (#251).
 ///
 /// The total came from the batch size, so a query with thousands of matches
-/// reported one batch's worth and `nextOffset` was `nil` on the first page: the
-/// app stored the batch size as the number of matches and never fetched more.
-final class PubMedSearchTotalTests: RecordingLoggerTestCase {
-    /// Start each test with no recorded requests and the default reply.
-    override func setUp() {
-        super.setUp()
-        EutilsRecordingURLProtocol.reset()
-    }
-
-    /// Leave the stub's shared state clean for the next test class.
-    override func tearDown() {
-        EutilsRecordingURLProtocol.reset()
-        super.tearDown()
-    }
-
-    /// Answer esearch with this body and efetch with one article per PMID.
+/// reported one batch's worth and `nextOffset` was `nil` on the first page. The
+/// app then offered more only when a batch held a record that parsed to no
+/// article, and asked for it from the wrong offset.
+final class PubMedSearchTotalTests: EutilsStubTestCase {
+    /// Answer esearch with this body and efetch with one article.
     private func serve(searchAnswer: String) {
         let searchData = Data(searchAnswer.utf8)
         EutilsRecordingURLProtocol.reply = { request, _ in
             guard request.url?.lastPathComponent == "efetch.fcgi" else { return .ok(searchData) }
-            return .ok(Data("""
-                <PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>12345</PMID>\
-                <Article><ArticleTitle>A title</ArticleTitle></Article></MedlineCitation>\
-                </PubmedArticle></PubmedArticleSet>
-                """.utf8))
+            return .ok(EutilsFixture.fetchAnswer)
         }
     }
 
