@@ -45,14 +45,48 @@ history-server (`WebEnv`/`query_key`) requests and `api_key` included. A query
 string is part of the URL, and a URL is what HTTP error text
 (`requests.HTTPError`, `ConnectionError`, `URLError`'s `userInfo`), HTTP
 logging (urllib3 at DEBUG, OkHttp's `HttpLoggingInterceptor`) and any code
-that logs the request URL itself (BioMedLit's `PubMedService` does) print. In
-Python a routine 429 carried the key into batch transparency exports (#196).
-Swift and Android still send it as a query parameter (#243).
+that logs the request URL itself print. In Python a routine 429 carried the key
+into batch transparency exports (#196); BioMedLit's `PubMedService` logged the
+URL as a public value in release builds, and Android's debug builds wrote it to
+logcat (#243).
 
 **Treat a redirect as a failed request; never follow it.** A 307 or 308
 re-sends the POST body, key included, to whatever host it names; a 301, 302 or
 303 re-sends the request as a GET without its parameters, which NCBI answers
-as a search for nothing.
+as a search for nothing. Not even a redirect to an NCBI host is followed: these
+endpoints never legitimately redirect, following a 301, 302 or 303 can never
+give a correct answer, and a same-host redirect can still downgrade to
+`http://` and carry the key in cleartext.
+
+**Never log, persist or display the body of a failed E-utilities answer.**
+NCBI's HTTP 400 for a bad key repeats the key in its body (checked live). Every
+port builds its errors from the status code, and at most the reason phrase.
+
+Where each platform enforces these rules, and the test that pins them:
+
+| Platform | POST body | Redirect refused | Test |
+|----------|-----------|------------------|------|
+| Python | `post(data=…)` in both NCBI clients (`requests.post` in `PubMedSearchClient`, `session.post` in the transparency analyzer's `PubMedClient`) | `allow_redirects=False`, raise on `is_redirect` | `tests/test_ncbi_api_key_confinement.py` |
+| Swift | `EutilsRequest.post` | `RedirectRefusingTaskDelegate`, passed per task | `PubMedCredentialConfinementTests` |
+| Android | `@FormUrlEncoded` + `@Field` on `PubMedApi` | `pubMedHttpClient`: `followRedirects(false)` on a client derived for PubMed only, since Unpaywall and PDF links need redirects | `PubMedCredentialConfinementTest` |
+
+On Android, `pubMedHttpClient` also drops Retrofit's `Invocation` tag before any
+interceptor runs. The tag holds the call's arguments, the key among them, and
+OkHttp's `Request.toString()` prints it. On Android the key is read by
+`PubMedService` itself, from `NcbiCredentialSource`, never passed by callers:
+every workflow call site used to omit it, so the saved key never reached NCBI. A
+400 on a request that carried a key is reported as `InvalidApiKeyError`.
+
+The ports differ in a few places. Python is the reference, so align a port with
+it, or record the difference here:
+
+| Case | Python | Swift | Android |
+|------|--------|-------|---------|
+| Which 3xx is refused | 301, 302, 303, 307, 308 with a `Location` header (`is_redirect`) | every 3xx | every 3xx |
+| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`PubMedError.redirectRefused`) | no (`RedirectRefusedError`) |
+| A 429 that outlasts the retries | logged, request returns `None` | `PubMedError.rateLimited` | `RateLimitError` |
+| What counts as "no key" | an empty string | an empty string | a blank string, whitespace included |
+| esearch answer without a usable `count` | total 0 | total is the articles seen so far, with a warning | total 0 |
 
 ---
 
@@ -134,6 +168,15 @@ POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=100
 ```
 
 **Limitation:** Maximum offset is 9999.
+
+**Advance by the PMIDs consumed, not the articles parsed.** efetch returns only
+`PubmedArticle` records as articles, so a batch holding a `PubmedBookArticle`
+(a StatPearls chapter, say) yields fewer articles than PMIDs. Advancing by the
+article count re-requests PMIDs already fetched, and a last batch that parsed to
+nothing is requested again on every "fetch more". BioMedLit's `SearchResult`
+reports `nextOffset` as the position after the PMIDs consumed, and `nil` when
+there is no next page (the last match, the offset cap, or no usable count);
+Android's `PubMedSearchResult` advances by `pmids.size`.
 
 ---
 

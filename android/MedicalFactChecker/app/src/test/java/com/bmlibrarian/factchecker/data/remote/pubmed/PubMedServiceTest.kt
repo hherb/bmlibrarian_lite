@@ -18,12 +18,15 @@
 
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
 import com.bmlibrarian.factchecker.domain.model.PubMedError
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import okhttp3.Protocol
+import okhttp3.Request
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,6 +35,7 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Unit tests for PubMedService.
@@ -49,10 +53,13 @@ class PubMedServiceTest {
     private lateinit var api: PubMedApi
     private lateinit var service: PubMedService
 
+    /** What the credential source answers; a test changes it to change what is sent. */
+    private var savedCredentials = NcbiCredentials.of(apiKey = null, email = null)
+
     @Before
     fun setup() {
         api = mockk()
-        service = PubMedService(api)
+        service = PubMedService(api) { savedCredentials }
     }
 
     // ==================== Search Success Tests ====================
@@ -907,10 +914,11 @@ class PubMedServiceTest {
     // ==================== API Key and Email Tests ====================
 
     @Test
-    fun `search passes API key and email when provided`() = runTest {
+    fun `search sends the saved API key and email with both requests`() = runTest {
         // Arrange
         val apiKey = "test-api-key"
         val email = "test@example.com"
+        savedCredentials = NcbiCredentials.of(apiKey = apiKey, email = email)
 
         coEvery {
             api.search(any(), any(), any(), any(), any(), any(), apiKey = apiKey, email = email)
@@ -928,16 +936,155 @@ class PubMedServiceTest {
         } returns Response.success(createSampleXml(listOf("12345")))
 
         // Act
-        service.search(
-            query = "test",
-            apiKey = apiKey,
-            email = email
-        )
+        service.search(query = "test")
 
         // Assert
         coVerify {
             api.search(any(), any(), any(), any(), any(), any(), apiKey = apiKey, email = email)
             api.fetch(any(), any(), any(), any(), apiKey = apiKey, email = email)
+        }
+    }
+
+    @Test
+    fun `a key cleared in settings is not sent, not even empty`() = runTest {
+        // Arrange: settings store "not set" as a blank string
+        savedCredentials = NcbiCredentials.of(apiKey = "", email = " ")
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.success(
+            ESearchResponse(esearchResult = ESearchResult(count = "1", idList = listOf("12345")))
+        )
+        coEvery {
+            api.fetch(any(), any(), any(), any(), any(), any())
+        } returns Response.success(createSampleXml(listOf("12345")))
+
+        // Act
+        service.search(query = "test")
+
+        // Assert
+        coVerify {
+            api.search(any(), any(), any(), any(), any(), any(), apiKey = null, email = null)
+            api.fetch(any(), any(), any(), any(), apiKey = null, email = null)
+        }
+    }
+
+    @Test
+    fun `a key saved after the service was built applies to the next search`() = runTest {
+        // Arrange
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.success(
+            ESearchResponse(esearchResult = ESearchResult(count = "0", idList = emptyList()))
+        )
+        service.search(query = "before")
+
+        // Act
+        savedCredentials = NcbiCredentials.of(apiKey = "saved-later", email = null)
+        service.search(query = "after")
+
+        // Assert
+        coVerify {
+            api.search(any(), term = "before", any(), any(), any(), any(), apiKey = null, email = null)
+            api.search(any(), term = "after", any(), any(), any(), any(), apiKey = "saved-later", email = null)
+        }
+    }
+
+    @Test
+    fun `unreadable saved credentials fail the search instead of throwing`() = runTest {
+        // Arrange: encrypted preferences throw on a broken keystore
+        val failing = PubMedService(api) { throw java.security.GeneralSecurityException("keystore unavailable") }
+
+        // Act
+        val result = failing.search(query = "test")
+
+        // Assert
+        val error = result.exceptionOrNull()
+        assertTrue("expected UnknownError, got $error", error is PubMedError.UnknownError)
+        assertTrue(error?.message.orEmpty().contains("NCBI API key"))
+        coVerify(exactly = 0) {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `a 400 while a key is saved reports the key as rejected, without its body`() = runTest {
+        // Arrange: NCBI's 400 for a bad key repeats the key in its body
+        val apiKey = "rejected-key-0123456789"
+        savedCredentials = NcbiCredentials.of(apiKey = apiKey, email = null)
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error(400, """{"error":"API key invalid","api-key":"$apiKey"}""".toResponseBody(null))
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        val error = result.exceptionOrNull()
+        assertTrue("expected InvalidApiKeyError, got $error", error is PubMedError.InvalidApiKeyError)
+        assertFalse("the error carried the key", error?.message.orEmpty().contains(apiKey))
+        coVerify(exactly = 1) {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `a 400 without a saved key is a rejected search`() = runTest {
+        // Arrange
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error(400, "".toResponseBody(null))
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        val error = result.exceptionOrNull()
+        assertTrue("expected SearchError, got $error", error is PubMedError.SearchError)
+    }
+
+    @Test
+    fun `a cancelled search stays cancelled`() = runTest {
+        // Arrange
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } throws CancellationException("the claim was abandoned")
+
+        // Act
+        val thrown = try {
+            service.search(query = "test")
+            null
+        } catch (e: CancellationException) {
+            e
+        }
+
+        // Assert
+        assertTrue("cancellation became a failed result instead", thrown != null)
+    }
+
+    @Test
+    fun `a redirect fails the search and is not retried`() = runTest {
+        // Arrange: Response.error(code, body) refuses codes below 400, so the
+        // 3xx is built from the raw response a no-redirect client returns
+        val redirect = okhttp3.Response.Builder()
+            .request(Request.Builder().url(Constants.PUBMED_BASE_URL + "esearch.fcgi").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(307)
+            .message("Temporary Redirect")
+            .header("Location", "https://collector.example/")
+            .build()
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error("".toResponseBody(null), redirect)
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        val error = result.exceptionOrNull()
+        assertTrue("expected RedirectRefusedError, got $error", error is PubMedError.RedirectRefusedError)
+        assertEquals(307, (error as PubMedError.RedirectRefusedError).statusCode)
+        coVerify(exactly = 1) {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
         }
     }
 

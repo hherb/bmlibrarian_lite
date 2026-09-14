@@ -38,6 +38,18 @@ object Constants {
     /** Write timeout for HTTP requests in seconds. */
     const val NETWORK_WRITE_TIMEOUT_SECONDS = 60L
 
+    /** HTTP redirection status codes (3xx). */
+    val HTTP_REDIRECT_STATUS_CODES = 300..399
+
+    /** HTTP 400: a malformed request, or for NCBI a rejected API key. */
+    const val HTTP_BAD_REQUEST = 400
+
+    /** HTTP 429: rate limited. */
+    const val HTTP_TOO_MANY_REQUESTS = 429
+
+    /** HTTP server error status codes (5xx). */
+    val HTTP_SERVER_ERROR_STATUS_CODES = 500..599
+
     /** Maximum number of retry attempts for failed network requests. */
     const val NETWORK_MAX_RETRIES = 4
 

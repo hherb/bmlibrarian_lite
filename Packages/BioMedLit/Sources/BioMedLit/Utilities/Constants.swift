@@ -183,6 +183,9 @@ public enum BioMedLitConstants {
     /// Retryable HTTP status codes.
     public static let retryableStatusCodes: Set<Int> = [429, 500, 502, 503, 504]
 
+    /// HTTP redirection status codes (3xx).
+    public static let httpRedirectStatusCodes: ClosedRange<Int> = 300...399
+
     // MARK: - File Management
 
     /// Default email for API identification when none configured.

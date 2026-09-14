@@ -311,7 +311,7 @@ public enum CrossRefError: LocalizedError, RetryableError, Sendable {
         case .httpError(let statusCode):
             return "HTTP error: \(statusCode)"
         case .serverError(let statusCode):
-            return "Server error (HTTP \(statusCode)). Retrying..."
+            return "CrossRef server error (HTTP \(statusCode)). Try again later."
         case .parseError(let message):
             return "Failed to parse response: \(message)"
         }

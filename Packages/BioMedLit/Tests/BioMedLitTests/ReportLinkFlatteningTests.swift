@@ -26,72 +26,7 @@ import XCTest
 /// behaviour: the two view copies also stripped `**` and `__`, while
 /// `PDFExporter` relied on `**` surviving so `drawFormattedText` could set a
 /// bold font. That is why there are two functions here and not one.
-final class ReportLinkFlatteningTests: XCTestCase {
-
-    // MARK: - Capturing what the flattener reports
-
-    /// Records the library's diagnostics so a test can assert on them.
-    ///
-    /// `@unchecked Sendable` with a lock because `BioMedLitLogger` requires
-    /// `Sendable` and this is mutable; the lock is what makes that claim true.
-    private final class RecordingLogger: BioMedLitLogger, @unchecked Sendable {
-        private let lock = NSLock()
-        private var messages: [String] = []
-
-        private func record(_ level: String, _ message: String) {
-            lock.lock(); defer { lock.unlock() }
-            messages.append("\(level): \(message)")
-        }
-
-        func debug(_ message: String, category: BioMedLitLogCategory) {
-            record("DEBUG", message)
-        }
-
-        func info(_ message: String, category: BioMedLitLogCategory) {
-            record("INFO", message)
-        }
-
-        func warning(_ message: String, category: BioMedLitLogCategory) {
-            record("WARNING", message)
-        }
-
-        func error(_ message: String, category: BioMedLitLogCategory) {
-            record("ERROR", message)
-        }
-
-        var recorded: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return messages
-        }
-
-        var errors: [String] {
-            recorded.filter { $0.hasPrefix("ERROR") }
-        }
-
-        func reset() {
-            lock.lock(); defer { lock.unlock() }
-            messages.removeAll()
-        }
-    }
-
-    private let logger = RecordingLogger()
-
-    override func setUp() {
-        super.setUp()
-        logger.reset()
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: logger
-        ))
-    }
-
-    /// Restore the configuration the rest of the package's tests expect: the
-    /// library cannot be un-configured, so put back "configured, no logger".
-    override func tearDown() {
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: nil
-        ))
-        super.tearDown()
-    }
+final class ReportLinkFlatteningTests: RecordingLoggerTestCase {
 
     // MARK: - Well-formed references
 

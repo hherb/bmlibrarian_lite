@@ -18,6 +18,8 @@
 
 package com.bmlibrarian.factchecker.domain.model
 
+import com.bmlibrarian.factchecker.util.Constants
+
 /**
  * Sealed class representing errors from PubMed/NCBI E-utilities operations.
  *
@@ -79,12 +81,17 @@ sealed class PubMedError(
     ) : PubMedError(message)
 
     /**
-     * Invalid API key.
+     * NCBI refused a request that carried an API key, most likely because the key
+     * is invalid.
+     *
+     * NCBI answers a bad key with HTTP 400, and its body repeats the key, so the
+     * body is never read; the status and the fact that a key was sent are enough.
      *
      * @property message Error message
      */
     data class InvalidApiKeyError(
-        override val message: String = "Invalid NCBI API key"
+        override val message: String = "NCBI refused the request (HTTP 400), most likely because " +
+            "the saved NCBI API key is invalid. Check or clear it in Settings."
     ) : PubMedError(message)
 
     /**
@@ -121,6 +128,22 @@ sealed class PubMedError(
     ) : PubMedError(message)
 
     /**
+     * NCBI answered with a redirect, which is never followed (#243).
+     *
+     * E-utilities parameters, the API key included, travel in the request body.
+     * A 307 or 308 would re-send that body to whatever host it names; a 301,
+     * 302 or 303 would re-send the request as a GET without its parameters.
+     * Not retryable: a redirect does not go away on a second attempt.
+     *
+     * @property message Error message
+     * @property statusCode The 3xx status NCBI answered with
+     */
+    data class RedirectRefusedError(
+        override val message: String,
+        val statusCode: Int
+    ) : PubMedError(message)
+
+    /**
      * Invalid offset - pagination offset out of range.
      *
      * PubMed limits offset to 9999.
@@ -146,25 +169,40 @@ sealed class PubMedError(
 
     companion object {
         /**
-         * Create an appropriate PubMedError from an HTTP status code.
+         * Create an appropriate PubMedError from an unsuccessful HTTP response.
+         *
+         * Takes the status line's reason phrase and never the response body:
+         * NCBI's 400 for a bad key repeats the key in its body, so a body in an
+         * error message would carry the key into logs and onto the screen.
          *
          * @param statusCode HTTP status code
-         * @param message Error message
+         * @param reasonPhrase The status line's reason phrase; blank under HTTP/2
+         * @param apiKeySent Whether the request carried an NCBI API key, which
+         *   makes a 400 a rejected key rather than a rejected search
          * @return Appropriate PubMedError subclass
          */
-        fun fromHttpError(statusCode: Int, message: String): PubMedError {
+        fun fromHttpError(statusCode: Int, reasonPhrase: String, apiKeySent: Boolean = false): PubMedError {
+            val status = if (reasonPhrase.isBlank()) "HTTP $statusCode" else "HTTP $statusCode $reasonPhrase"
             return when (statusCode) {
-                400 -> SearchError(
-                    message = "Invalid search query: $message",
-                    query = ""
+                Constants.HTTP_BAD_REQUEST -> if (apiKeySent) {
+                    InvalidApiKeyError()
+                } else {
+                    SearchError(
+                        message = "NCBI rejected the search ($status)",
+                        query = ""
+                    )
+                }
+                in Constants.HTTP_REDIRECT_STATUS_CODES -> RedirectRefusedError(
+                    message = "PubMed answered with a redirect (HTTP $statusCode), which was not followed",
+                    statusCode = statusCode
                 )
-                429 -> RateLimitError()
-                in 500..599 -> ServerError(
-                    message = "NCBI server error: $message",
+                Constants.HTTP_TOO_MANY_REQUESTS -> RateLimitError()
+                in Constants.HTTP_SERVER_ERROR_STATUS_CODES -> ServerError(
+                    message = "NCBI server error ($status)",
                     statusCode = statusCode
                 )
                 else -> UnknownError(
-                    message = "PubMed error $statusCode: $message"
+                    message = "PubMed error ($status)"
                 )
             }
         }
@@ -172,15 +210,17 @@ sealed class PubMedError(
         /**
          * Check if an error is retryable.
          *
+         * Lists every error type, so a new one must be classified here to compile.
+         *
          * @param error The error to check
          * @return true if the error may succeed on retry
          */
         fun isRetryable(error: PubMedError): Boolean {
             return when (error) {
-                is RateLimitError -> true
-                is ServerError -> true
-                is NetworkError -> true
-                else -> false
+                is RateLimitError, is ServerError, is NetworkError -> true
+                is SearchError, is FetchError, is ParseError, is InvalidApiKeyError,
+                is NoResultsError, is RedirectRefusedError, is InvalidOffsetError,
+                is UnknownError -> false
             }
         }
     }

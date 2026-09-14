@@ -48,11 +48,17 @@ public actor PubMedService {
     ///
     /// - Parameters:
     ///   - email: Email address for NCBI identification (recommended).
-    ///   - apiKey: Optional NCBI API key for higher rate limits.
-    ///   - session: URLSession to use for requests.
+    ///   - apiKey: Optional NCBI API key for higher rate limits. It is sent only
+    ///     in request bodies, never in a URL. An empty key counts as none.
+    ///   - session: URLSession to use for requests. It must not be a background
+    ///     session, which follows redirects without asking.
     public init(email: String, apiKey: String? = nil, session: URLSession? = nil) {
         self.email = email
-        self.apiKey = apiKey
+        if let apiKey = apiKey, !apiKey.isEmpty {
+            self.apiKey = apiKey
+        } else {
+            self.apiKey = nil
+        }
 
         if let session = session {
             self.session = session
@@ -71,23 +77,26 @@ public actor PubMedService {
     ///   - query: PubMed search query.
     ///   - maxResults: Maximum number of results to return.
     ///   - offset: Starting offset for pagination.
-    /// - Returns: Search results with articles and pagination info.
+    /// - Returns: Search results with articles and pagination info. Only
+    ///   `PubmedArticle` records become articles, so a batch can hold fewer
+    ///   articles than the PMIDs it consumed: a `PubmedBookArticle` yields none.
+    ///   `nextOffset` is therefore the position after the PMIDs consumed, not
+    ///   after the articles. It is `nil` when there is no next page: the batch
+    ///   reached the last match, the next page would pass PubMed's offset cap
+    ///   (``BioMedLitConstants/pubmedMaxOffset``), or esearch gave no usable count.
     /// - Throws: `PubMedError` if the search fails.
     public func search(
         query: String,
         maxResults: Int = BioMedLitConstants.pubmedDefaultBatchSize,
         offset: Int = 0
     ) async throws -> SearchResult {
-        // Respect rate limits
-        await waitForRateLimit()
-
-        // Step 1: Search to get PMIDs
-        let pmids = try await searchForPMIDs(query: query, maxResults: maxResults, offset: offset)
+        // Step 1: Search to get this batch's PMIDs and how many articles match
+        let (pmids, totalCount) = try await searchForPMIDs(query: query, maxResults: maxResults, offset: offset)
 
         guard !pmids.isEmpty else {
             return SearchResult(
                 articles: [],
-                totalCount: 0,
+                totalCount: totalCount,
                 nextOffset: nil,
                 query: query,
                 provider: .pubmed
@@ -95,7 +104,7 @@ public actor PubMedService {
         }
 
         // Step 2: Fetch article details
-        let (articles, totalCount) = try await fetchArticleDetails(pmids: pmids, query: query)
+        let articles = try await fetchArticleDetails(pmids: pmids)
 
         // Calculate next offset
         let nextOffset = offset + pmids.count < totalCount && offset + pmids.count < BioMedLitConstants.pubmedMaxOffset
@@ -125,115 +134,164 @@ public actor PubMedService {
         lastRequestTime = Date()
     }
 
-    /// Search PubMed and return PMIDs.
+    /// Search PubMed for one batch of PMIDs and the number of matches in all.
+    ///
+    /// - Parameters:
+    ///   - query: PubMed search query.
+    ///   - maxResults: Maximum number of PMIDs in the batch.
+    ///   - offset: Position of the batch's first PMID among all matches.
+    /// - Returns: The batch's PMIDs, and esearch's `count` of every matching
+    ///   article (#251). Without a usable `count`, the total is the articles seen
+    ///   so far, which ends pagination here, and a warning says so.
     private func searchForPMIDs(
         query: String,
         maxResults: Int,
         offset: Int
-    ) async throws -> [String] {
-        var components = URLComponents(string: BioMedLitConstants.pubmedSearchURL)!
-        var queryItems = [
-            URLQueryItem(name: "db", value: "pubmed"),
-            URLQueryItem(name: "term", value: query),
-            URLQueryItem(name: "retmax", value: String(maxResults)),
-            URLQueryItem(name: "retstart", value: String(offset)),
-            URLQueryItem(name: "retmode", value: "json"),
-            URLQueryItem(name: "email", value: email)
+    ) async throws -> (pmids: [String], totalCount: Int) {
+        let parameters = [
+            (name: "db", value: "pubmed"),
+            (name: "term", value: query),
+            (name: "retmax", value: String(maxResults)),
+            (name: "retstart", value: String(offset)),
+            (name: "retmode", value: "json")
         ]
 
-        if let apiKey = apiKey {
-            queryItems.append(URLQueryItem(name: "api_key", value: apiKey))
-        }
+        BioMedLitLib.logger?.debug(
+            "PubMed search request to \(BioMedLitConstants.pubmedSearchURL) (retstart \(offset), retmax \(maxResults))",
+            category: .search
+        )
 
-        components.queryItems = queryItems
-
-        guard let url = components.url else {
-            throw PubMedError.invalidQuery(query)
-        }
-
-        BioMedLitLib.logger?.debug("PubMed search URL: \(url.absoluteString)", category: .search)
-
-        let data = try await RetryHelper.retry(
-            config: .networkDefault,
-            shouldRetry: RetryHelper.retryOnlyTransient
-        ) {
-            let (data, response) = try await self.session.data(from: url)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw PubMedError.networkError("Invalid response")
-            }
-
-            if BioMedLitConstants.retryableStatusCodes.contains(httpResponse.statusCode) {
-                throw PubMedError.serverError(statusCode: httpResponse.statusCode)
-            }
-
-            guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
-                throw PubMedError.httpError(statusCode: httpResponse.statusCode)
-            }
-
-            return data
-        }
+        let data = try await send(to: BioMedLitConstants.pubmedSearchURL, parameters: parameters)
 
         // Parse response
         let response = try JSONDecoder().decode(PubMedSearchResponse.self, from: data)
         let pmids = response.esearchresult?.idlist ?? []
+        let articlesSeen = offset + pmids.count
+
+        let totalCount: Int
+        if let statedCount = response.esearchresult?.count.flatMap({ Int($0) }) {
+            totalCount = statedCount
+        } else {
+            totalCount = articlesSeen
+            BioMedLitLib.logger?.warning(
+                "PubMed search answered without a usable result count; ending pagination at the \(articlesSeen) articles seen",
+                category: .search
+            )
+        }
 
         BioMedLitLib.logger?.info(
-            "PubMed search found \(pmids.count) PMIDs (total: \(response.esearchresult?.count ?? "0"))",
+            "PubMed search found \(pmids.count) PMIDs (total: \(totalCount))",
             category: .search
         )
 
-        return pmids
+        return (pmids, totalCount)
     }
 
     /// Fetch article details for given PMIDs.
+    ///
+    /// - Parameter pmids: The PMIDs to fetch.
+    /// - Returns: The `PubmedArticle` records the efetch answer holds. Other
+    ///   records, such as a `PubmedBookArticle`, are skipped, so there can be
+    ///   fewer articles than PMIDs.
     private func fetchArticleDetails(
-        pmids: [String],
-        query: String
-    ) async throws -> ([SearchArticle], Int) {
-        await waitForRateLimit()
-
-        var components = URLComponents(string: BioMedLitConstants.pubmedFetchURL)!
-        var queryItems = [
-            URLQueryItem(name: "db", value: "pubmed"),
-            URLQueryItem(name: "id", value: pmids.joined(separator: ",")),
-            URLQueryItem(name: "rettype", value: "xml"),
-            URLQueryItem(name: "retmode", value: "xml"),
-            URLQueryItem(name: "email", value: email)
+        pmids: [String]
+    ) async throws -> [SearchArticle] {
+        let parameters = [
+            (name: "db", value: "pubmed"),
+            (name: "id", value: pmids.joined(separator: ",")),
+            (name: "rettype", value: "xml"),
+            (name: "retmode", value: "xml")
         ]
 
+        let data = try await send(to: BioMedLitConstants.pubmedFetchURL, parameters: parameters)
+
+        // Parse XML response
+        let parser = PubMedXMLParser(data: data)
+        return parser.parse()
+    }
+
+    /// Send one E-utilities request and return the body of its answer.
+    ///
+    /// Every request waits its turn under the rate limit first, as Python's
+    /// `_make_request` does. The parameters travel in a POST body together with
+    /// the email and API key (``EutilsRequest`` says why), and a redirect is
+    /// refused rather than followed (``RedirectRefusingTaskDelegate`` says why).
+    /// The statuses in ``BioMedLitConstants/retryableStatusCodes`` and transient
+    /// transport errors are retried with backoff; every other status fails at
+    /// once. The body of a failed answer is never read: NCBI's 400 for a bad key
+    /// echoes the key in it.
+    ///
+    /// - Parameters:
+    ///   - endpoint: The E-utilities endpoint, such as
+    ///     ``BioMedLitConstants/pubmedSearchURL``.
+    ///   - parameters: The request's own parameters. Identification is added here.
+    /// - Returns: The body of a 200 response.
+    /// - Throws: ``PubMedError/redirectRefused(statusCode:)`` for a 3xx;
+    ///   ``PubMedError/rateLimited`` for a 429 and
+    ///   ``PubMedError/serverError(statusCode:)`` for another retryable status,
+    ///   when still failing after the last attempt;
+    ///   ``PubMedError/httpError(statusCode:)`` for any other status;
+    ///   ``PubMedError/networkError(_:)`` for an endpoint that is not a URL or
+    ///   an answer that is not HTTP; or the transport's own error.
+    private func send(
+        to endpoint: String,
+        parameters: [(name: String, value: String)]
+    ) async throws -> Data {
+        guard let url = URL(string: endpoint) else {
+            let reason = "E-utilities endpoint '\(endpoint)' is not a URL"
+            BioMedLitLib.logger?.error(reason, category: .search)
+            throw PubMedError.networkError(reason)
+        }
+
+        // Outside the retry, so a retry's backoff is not lengthened by a second wait
+        await waitForRateLimit()
+
+        // Identification goes last, and only ever into the body
+        var bodyParameters = parameters + [(name: "email", value: email)]
         if let apiKey = apiKey {
-            queryItems.append(URLQueryItem(name: "api_key", value: apiKey))
+            bodyParameters.append((name: "api_key", value: apiKey))
         }
+        let request = EutilsRequest.post(to: url, parameters: bodyParameters)
+        let session = self.session
 
-        components.queryItems = queryItems
-
-        guard let url = components.url else {
-            throw PubMedError.invalidQuery(query)
-        }
-
-        let data = try await RetryHelper.retry(
+        return try await RetryHelper.retry(
             config: .networkDefault,
             shouldRetry: RetryHelper.retryOnlyTransient
         ) {
-            let (data, response) = try await self.session.data(from: url)
+            let (data, response) = try await session.data(
+                for: request,
+                delegate: RedirectRefusingTaskDelegate()
+            )
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw PubMedError.networkError("Invalid response")
             }
 
-            guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
-                throw PubMedError.httpError(statusCode: httpResponse.statusCode)
+            let statusCode = httpResponse.statusCode
+
+            if BioMedLitConstants.httpRedirectStatusCodes.contains(statusCode) {
+                BioMedLitLib.logger?.error(
+                    "PubMed answered \(url.path) with HTTP \(statusCode), a redirect; not followed",
+                    category: .search
+                )
+                throw PubMedError.redirectRefused(statusCode: statusCode)
+            }
+
+            if statusCode == BioMedLitConstants.httpStatusRateLimited {
+                throw PubMedError.rateLimited
+            }
+
+            if BioMedLitConstants.retryableStatusCodes.contains(statusCode) {
+                throw PubMedError.serverError(statusCode: statusCode)
+            }
+
+            // `data` is dropped unread on every failure: it may echo the key
+            guard statusCode == BioMedLitConstants.httpStatusOK else {
+                throw PubMedError.httpError(statusCode: statusCode)
             }
 
             return data
         }
-
-        // Parse XML response
-        let parser = PubMedXMLParser(data: data)
-        let articles = parser.parse()
-
-        return (articles, pmids.count)
     }
 }
 
@@ -248,6 +306,10 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
     case parseError(String)
     case rateLimited
     case noResults
+    /// NCBI answered with a redirect, which is never followed (#243). A 307 or
+    /// 308 would re-send the body, API key included, to whatever host it names;
+    /// a 301, 302 or 303 would re-send the request as a GET without its parameters.
+    case redirectRefused(statusCode: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -258,13 +320,15 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
         case .httpError(let statusCode):
             return "HTTP error: \(statusCode)"
         case .serverError(let statusCode):
-            return "Server error (HTTP \(statusCode)). Retrying..."
+            return "PubMed server error (HTTP \(statusCode)). Try again later."
         case .parseError(let message):
             return "Failed to parse response: \(message)"
         case .rateLimited:
             return "Rate limited. Please wait and try again."
         case .noResults:
             return "No results found for the search query"
+        case .redirectRefused(let statusCode):
+            return "PubMed answered with a redirect (HTTP \(statusCode)), which was not followed"
         }
     }
 
@@ -272,7 +336,7 @@ public enum PubMedError: LocalizedError, RetryableError, Sendable {
         switch self {
         case .serverError, .networkError, .rateLimited:
             return true
-        case .invalidQuery, .httpError, .parseError, .noResults:
+        case .invalidQuery, .httpError, .parseError, .noResults, .redirectRefused:
             return false
         }
     }

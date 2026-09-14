@@ -48,7 +48,12 @@ import XCTest
 /// things that must hold for any real article whatever the stored digest says.
 /// Without it a total collapse to zero could be regenerated into the
 /// expectations and would then read as correct forever.
-final class JATSRealCorpusTests: XCTestCase {
+///
+/// The parser reports content loss by logging, not throwing: an unbalanced
+/// `<sub-article>` nesting and a zero-author parse at `warning`, and every
+/// discarded caption at `debug`. So the suite runs under
+/// ``RecordingLoggerTestCase``, which hears every level.
+final class JATSRealCorpusTests: RecordingLoggerTestCase {
 
     // MARK: - Fixture location
 
@@ -613,112 +618,6 @@ final class JATSRealCorpusTests: XCTestCase {
             markdownScalarCount: markdown.unicodeScalars.count,
             htmlScalarCount: html.unicodeScalars.count
         )
-    }
-
-    // MARK: - Capturing what the parser reports
-
-    /// Collects the library's diagnostics so a test can assert on them.
-    ///
-    /// The parser reports content loss by logging rather than throwing:
-    /// an unbalanced `<sub-article>` nesting and a zero-author parse at `warning`,
-    /// and every caption discarded for want of a model at `debug`.
-    /// `BioMedLitLib.logger` is `nil` until the library is configured, and no JATS
-    /// test configured it, so those diagnostics went nowhere: a parse that said in
-    /// as many words that it had discarded content still produced a green test.
-    ///
-    /// **Every level is recorded, including `debug`.** Ignoring the two quiet
-    /// levels is the same defect one rung down, and it was live: `debug` is where
-    /// the discarded captions are announced, so the corpus dropped 21 of its 62
-    /// captions on every run with nothing to hear it.
-    ///
-    /// `@unchecked Sendable` with a lock because `BioMedLitLogger` requires
-    /// `Sendable` and this is mutable; the lock is what makes that claim true.
-    /// An actor cannot satisfy the protocol's synchronous requirements, and
-    /// `Synchronization.Mutex` needs a newer deployment target than this package's.
-    private final class RecordingLogger: BioMedLitLogger, @unchecked Sendable {
-        /// Lead-in of the message `JATSXMLParser.appendCaptionText` logs when it
-        /// discards a caption. Coupled to that string on purpose — it is the only
-        /// channel the parser offers for the event.
-        static let unmodelledCaptionPrefix = "Dropped caption text"
-
-        /// Guards ``messages``; the whole basis of the `@unchecked Sendable` claim.
-        private let lock = NSLock()
-
-        /// Everything logged since the last ``reset()``, each line prefixed by level.
-        private var messages: [String] = []
-
-        /// Append one message under its level.
-        ///
-        /// - Parameters:
-        ///   - level: Level name, used as the line's prefix.
-        ///   - message: The logged text.
-        private func record(_ level: String, _ message: String) {
-            lock.lock(); defer { lock.unlock() }
-            messages.append("\(level): \(message)")
-        }
-
-        func debug(_ message: String, category: BioMedLitLogCategory) {
-            record("DEBUG", message)
-        }
-
-        func info(_ message: String, category: BioMedLitLogCategory) {
-            record("INFO", message)
-        }
-
-        func warning(_ message: String, category: BioMedLitLogCategory) {
-            record("WARNING", message)
-        }
-
-        func error(_ message: String, category: BioMedLitLogCategory) {
-            record("ERROR", message)
-        }
-
-        /// Everything logged at any level since the last ``reset()``.
-        var recorded: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return messages
-        }
-
-        /// Only the levels that report a problem rather than a characterised loss.
-        var problems: [String] {
-            recorded.filter { $0.hasPrefix("WARNING: ") || $0.hasPrefix("ERROR: ") }
-        }
-
-        /// How many caption texts the parser reported discarding.
-        var unmodelledCaptionDropCount: Int {
-            recorded.filter { $0.contains(Self.unmodelledCaptionPrefix) }.count
-        }
-
-        /// Forget everything recorded so far.
-        func reset() {
-            lock.lock(); defer { lock.unlock() }
-            messages.removeAll()
-        }
-    }
-
-    /// The logger installed for the duration of each test.
-    private let logger = RecordingLogger()
-
-    /// Install the recording logger for the duration of one test.
-    ///
-    /// The library holds its logger in global state, so this is process-wide for
-    /// the test's lifetime and is undone in ``tearDown()``.
-    override func setUp() {
-        super.setUp()
-        logger.reset()
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: logger
-        ))
-    }
-
-    /// Restore the configuration the rest of the package's tests expect.
-    override func tearDown() {
-        // The library cannot be un-configured, so restore what the rest of the
-        // package's tests have always run with: configured, but no logger.
-        BioMedLitLib.configure(with: BioMedLitConfiguration(
-            ncbiEmail: "tests@example.com", logger: nil
-        ))
-        super.tearDown()
     }
 
     // MARK: - Reading the corpus
@@ -1482,5 +1381,19 @@ final class JATSRealCorpusTests: XCTestCase {
                 "\(entry.pmcId): stored digest missing or unreadable"
             )
         }
+    }
+}
+
+// MARK: - Caption drops
+
+private extension RecordingLogger {
+    /// Lead-in of the message `JATSXMLParser.appendCaptionText` logs when it
+    /// discards a caption. Coupled to that string on purpose — it is the only
+    /// channel the parser offers for the event.
+    static let unmodelledCaptionPrefix = "Dropped caption text"
+
+    /// How many caption texts the parser reported discarding.
+    var unmodelledCaptionDropCount: Int {
+        recorded.filter { $0.contains(Self.unmodelledCaptionPrefix) }.count
     }
 }
