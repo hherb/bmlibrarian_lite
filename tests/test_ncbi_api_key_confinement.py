@@ -48,6 +48,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
+from bmlibrarian_lite.data_models import RequestFailureKind
+from bmlibrarian_lite.exceptions import SourceRequestError
 from bmlibrarian_lite.pubmed import search_client
 from bmlibrarian_lite.pubmed.constants import ENV_NCBI_API_KEY
 from bmlibrarian_lite.pubmed.data_types import PubMedQuery
@@ -422,7 +424,12 @@ class TestPubMedSearchClient:
         caplog.set_level(logging.DEBUG)
         client = PubMedSearchClient(email=TEST_EMAIL, api_key=FAKE_API_KEY, max_retries=1)
 
-        make_request(client)
+        # A search reports the failure by raising (#247); a batch fetch and the
+        # connection test record it instead. Either way the error travels on.
+        try:
+            make_request(client)
+        except SourceRequestError as error:
+            assert FAKE_API_KEY not in str(error)
 
         assert _search_client_reported_failure(caplog)
         assert "urllib3" in {record.name.split(".")[0] for record in caplog.records}
@@ -449,8 +456,10 @@ class TestPubMedSearchClient:
         caplog.set_level(logging.WARNING)
         client = PubMedSearchClient(email=TEST_EMAIL, api_key=FAKE_API_KEY, max_retries=1)
 
-        client.get_count(ASPIRIN)
+        with pytest.raises(SourceRequestError) as raised:
+            client.get_count(ASPIRIN)
 
+        assert raised.value.failure.kind is RequestFailureKind.REDIRECT_REFUSED
         assert elsewhere.recorded == []
         assert any(str(status.value) in message for message in _search_client_warnings(caplog))
         assert_key_arrived_outside_the_url(redirecting)

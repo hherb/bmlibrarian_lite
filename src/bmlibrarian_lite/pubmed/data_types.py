@@ -27,6 +27,8 @@ from enum import Enum
 from typing import Optional, List, Dict, Any
 import uuid
 
+from ..data_models import RequestFailure
+
 
 class PublicationType(Enum):
     """PubMed publication type filters for search refinement."""
@@ -289,6 +291,10 @@ class SearchResult:
         search_time_seconds: Time taken for the search
         web_env: WebEnv for history server (for large result sets)
         query_key: QueryKey for history server
+        unlisted_count: PMIDs the search should have listed but could not,
+            because a history-server page failed (#248)
+        listing_failure: Why the first such page failed, or None when every
+            page was listed
     """
 
     query: PubMedQuery
@@ -298,6 +304,8 @@ class SearchResult:
     search_time_seconds: float = 0.0
     web_env: Optional[str] = None
     query_key: Optional[str] = None
+    unlisted_count: int = 0
+    listing_failure: RequestFailure | None = None
 
     @property
     def has_more_results(self) -> bool:
@@ -342,6 +350,28 @@ class ArticleMetadata:
         """Set URL if not provided."""
         if not self.url and self.pmid:
             self.url = f"https://pubmed.ncbi.nlm.nih.gov/{self.pmid}/"
+
+
+@dataclass
+class ArticleFetchResult:
+    """Articles fetched for a list of PMIDs, and the PMIDs that could not be.
+
+    A failed efetch batch is recorded here rather than skipped (#248), so a
+    review knows how much of its result set is missing and can tell the user.
+    PMIDs PubMed answered for without an article (withdrawn records, book
+    articles) are not failures and are not listed.
+
+    Attributes:
+        articles: The articles fetched, in batch order
+        pmids_not_fetched: PMIDs whose batch failed after its retries
+        failure: Why the first failed batch failed, or None when none did
+        records_unreadable: Articles PubMed sent that could not be parsed
+    """
+
+    articles: list[ArticleMetadata] = field(default_factory=list)
+    pmids_not_fetched: list[str] = field(default_factory=list)
+    failure: RequestFailure | None = None
+    records_unreadable: int = 0
 
 
 @dataclass

@@ -485,16 +485,23 @@ class IncrementalSearchWorker(QThread):
     This enables re-running a research question to find additional
     documents that haven't been scored yet.
 
+    A failed request is never read as the end of the results (#247): a
+    failure before any new document was found is an error, and a failure
+    after some were found ends the search with those documents and the
+    shortfalls saying what is missing. Records a failed batch could not
+    fetch, or the parser could not read, are shortfalls too.
+
     Signals:
         progress: Emitted with (new_docs_found, target, message)
         batch_complete: Emitted when a batch is fetched (batch_docs)
-        finished: Emitted when search completes (all_new_docs)
-        error: Emitted on error (error message)
+        finished: Emitted when search completes (all_new_docs, shortfalls);
+            the shortfalls list is empty unless part of the search failed
+        error: Emitted on error (error message, with advice for a failed search)
     """
 
     progress = Signal(int, int, str)  # new_docs_found, target, message
     batch_complete = Signal(list)  # batch of new LiteDocuments
-    finished = Signal(list)  # all new LiteDocuments
+    finished = Signal(list, list)  # all new LiteDocuments, List[RetrievalShortfall]
     error = Signal(str)
 
     def __init__(
@@ -532,7 +539,10 @@ class IncrementalSearchWorker(QThread):
         """Execute incremental search in background thread."""
         try:
             from ..pubmed import PubMedSearchClient
-            from ..data_models import LiteDocument, DocumentSource
+            from ..data_models import DocumentSource, LiteDocument, RetrievalShortfall
+            from ..search_failures import search_failure_advice
+            from ..exceptions import SearchFailedError, SourceRequestError
+            from ..search_service import pubmed_shortfalls
             from ..constants import (
                 INCREMENTAL_SEARCH_BATCH_SIZE,
                 MAX_PUBMED_SEARCH_OFFSET,
@@ -544,6 +554,8 @@ class IncrementalSearchWorker(QThread):
             )
 
             all_new_docs: List["LiteDocument"] = []
+            shortfalls: list[RetrievalShortfall] = []
+            last_total_count: int | None = None
             offset = 0
             batch_size = INCREMENTAL_SEARCH_BATCH_SIZE
 
@@ -562,11 +574,31 @@ class IncrementalSearchWorker(QThread):
                     f"Searching PubMed (offset {offset})...",
                 )
 
-                result = client.search_with_offset(
-                    query_string=self.pubmed_query,
-                    max_results=batch_size,
-                    start_offset=offset,
-                )
+                page_failure: RetrievalShortfall | None = None
+                try:
+                    result = client.search_with_offset(
+                        query_string=self.pubmed_query,
+                        max_results=batch_size,
+                        start_offset=offset,
+                    )
+                except SourceRequestError as e:
+                    # A first page that fails leaves PubMed unsearched; a later
+                    # one loses that page, and the search stops there.
+                    page_failure = RetrievalShortfall(
+                        e.provider,
+                        e.failure,
+                        records_missing=(
+                            None
+                            if last_total_count is None
+                            else min(batch_size, max(0, last_total_count - offset))
+                        ),
+                    )
+                if page_failure is not None:
+                    shortfalls.append(page_failure)
+                    if not all_new_docs:
+                        raise SearchFailedError(shortfalls)
+                    break
+                last_total_count = result.total_count
 
                 if not result.pmids:
                     logger.info("No more results from PubMed")
@@ -579,7 +611,9 @@ class IncrementalSearchWorker(QThread):
                     f"Fetching {len(result.pmids)} article details...",
                 )
 
-                articles = client.fetch_articles(result.pmids)
+                fetched = client.fetch_articles(result.pmids)
+                shortfalls.extend(pubmed_shortfalls(result, fetched))
+                articles = fetched.articles
 
                 # Filter out already scored documents
                 batch_new_docs: List["LiteDocument"] = []
@@ -626,8 +660,9 @@ class IncrementalSearchWorker(QThread):
                 # Move to next batch
                 offset += batch_size
 
-                # If we got fewer results than batch size, we've exhausted results
-                if len(result.pmids) < batch_size:
+                # If we got fewer results than batch size, we've exhausted
+                # results -- unless PubMed left some of the page unlisted
+                if len(result.pmids) + result.unlisted_count < batch_size:
                     logger.info(
                         f"Got {len(result.pmids)} < {batch_size}, "
                         "results exhausted"
@@ -635,8 +670,12 @@ class IncrementalSearchWorker(QThread):
                     break
 
             if not self._cancelled:
-                self.finished.emit(all_new_docs)
+                self.finished.emit(all_new_docs, shortfalls)
 
+        except SearchFailedError as e:
+            logger.warning(f"Incremental search failed: {e}")
+            if not self._cancelled:
+                self.error.emit(f"{e}\n\n{search_failure_advice(e.shortfalls)}")
         except Exception as e:
             logger.exception("Incremental search failed")
             if not self._cancelled:

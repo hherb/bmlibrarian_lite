@@ -743,6 +743,14 @@ DEFAULT_TARGET_NEW_DOCUMENTS = 50
 MAX_PUBMED_SEARCH_OFFSET = 9999
 
 # =============================================================================
+# Search Failure Reporting (#247)
+# =============================================================================
+
+# Search-session metadata key under which the parts of a search that failed
+# are recorded (a list of RetrievalShortfall.to_dict() values)
+RETRIEVAL_SHORTFALLS_METADATA_KEY = "retrieval_shortfalls"
+
+# =============================================================================
 # Model Pricing (per 1M tokens, USD)
 # =============================================================================
 

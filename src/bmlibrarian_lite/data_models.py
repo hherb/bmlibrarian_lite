@@ -27,6 +27,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Optional
 
 from .constants import MAX_PUBMED_SEARCH_OFFSET
@@ -77,6 +78,196 @@ class DocumentSource(Enum):
     LOCAL_TEXT = "local_text"
 
 
+class RequestFailureKind(Enum):
+    """Why a request to a literature source produced no usable answer (#247).
+
+    Each kind reads differently to the user, so a rate limit, an outage and a
+    garbled answer are never reported as the same thing, and none of them as a
+    search that matched nothing.
+    """
+
+    TIMEOUT = "timeout"
+    CONNECTION = "connection"
+    HTTP_STATUS = "http_status"
+    REDIRECT_REFUSED = "redirect_refused"
+    # The source answered, but said the request failed: E-utilities reports
+    # some failures as an ``ERROR`` field inside an HTTP 200 (#255).
+    SERVICE_ERROR = "service_error"
+    MALFORMED_RESPONSE = "malformed_response"
+    # The answer was readable but held less than it said it would: a count of
+    # 57 with an empty list of IDs.
+    INCOMPLETE_RESPONSE = "incomplete_response"
+    REQUEST_FAILED = "request_failed"
+
+
+@dataclass(frozen=True)
+class RequestFailure:
+    """A request that failed after its retries, reduced to what is safe to show.
+
+    Only the kind and the HTTP status are kept. The ``requests`` exception is
+    not: since #196 its ``request.body`` holds the NCBI API key, and a failed
+    E-utilities answer's body can repeat the key too. Nothing built from this
+    type can therefore print either.
+
+    Attributes:
+        kind: What went wrong.
+        status_code: The HTTP status, for ``HTTP_STATUS`` and
+            ``REDIRECT_REFUSED``; ``None`` otherwise or when unknown.
+    """
+
+    kind: RequestFailureKind
+    status_code: int | None = None
+
+    def describe(self) -> str:
+        """Describe the failure as a clause for a sentence shown to the user.
+
+        Returns:
+            For example ``"HTTP 429 Too Many Requests"`` or
+            ``"the request timed out"``.
+        """
+        if self.kind is RequestFailureKind.HTTP_STATUS:
+            if self.status_code is None:
+                return "an HTTP error"
+            return _http_status_label(self.status_code)
+        if self.kind is RequestFailureKind.REDIRECT_REFUSED:
+            status = "" if self.status_code is None else f" (HTTP {self.status_code})"
+            return f"a redirect{status} was refused"
+        return _REQUEST_FAILURE_REASONS[self.kind]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-safe dictionary."""
+        return {"kind": self.kind.value, "status_code": self.status_code}
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "RequestFailure":
+        """Read a stored failure, degrading rather than refusing.
+
+        A kind this build does not know (written by a newer one, or damaged)
+        becomes ``REQUEST_FAILED``: the entry still says a request failed,
+        which is the part the reader must not lose.
+
+        Args:
+            data: The stored value, untrusted.
+
+        Returns:
+            The failure, as specific as the stored value allows.
+        """
+        if not isinstance(data, dict):
+            return cls(RequestFailureKind.REQUEST_FAILED)
+        try:
+            kind = RequestFailureKind(data.get("kind"))
+        except ValueError:
+            return cls(RequestFailureKind.REQUEST_FAILED)
+        status = data.get("status_code")
+        # bool is an int subclass; a stored ``true`` is not a status code.
+        if not isinstance(status, int) or isinstance(status, bool):
+            status = None
+        return cls(kind, status)
+
+
+_REQUEST_FAILURE_REASONS: dict[RequestFailureKind, str] = {
+    RequestFailureKind.TIMEOUT: "the request timed out",
+    RequestFailureKind.CONNECTION: "the connection failed",
+    RequestFailureKind.SERVICE_ERROR: "the service reported an error",
+    RequestFailureKind.MALFORMED_RESPONSE: "the response could not be read",
+    RequestFailureKind.INCOMPLETE_RESPONSE: "the response was incomplete",
+    RequestFailureKind.REQUEST_FAILED: "the request failed",
+}
+
+
+def _http_status_label(status_code: int) -> str:
+    """Label an HTTP status with its standard reason phrase when it has one.
+
+    Args:
+        status_code: The HTTP status code.
+
+    Returns:
+        For example ``"HTTP 503 Service Unavailable"``, or ``"HTTP 599"``.
+    """
+    try:
+        return f"HTTP {status_code} {HTTPStatus(status_code).phrase}"
+    except ValueError:
+        return f"HTTP {status_code}"
+
+
+# The providers a single request goes to; BOTH names a search, not a source.
+_SINGLE_SOURCE_PROVIDERS = (SearchProvider.PUBMED, SearchProvider.EUROPEPMC)
+
+
+@dataclass(frozen=True)
+class RetrievalShortfall:
+    """Part of a search that a failure left out (#247, #248).
+
+    A search proceeds on what was retrieved, and the user is told what is
+    missing: never silently, and never as a search that found nothing.
+
+    Attributes:
+        provider: The source that failed, ``PUBMED`` or ``EUROPEPMC``.
+        failure: Why.
+        records_missing: How many records could not be retrieved, or ``None``
+            when the source could not be searched at all, so how many it holds
+            is unknown.
+    """
+
+    provider: SearchProvider
+    failure: RequestFailure
+    records_missing: int | None = None
+
+    def describe(self) -> str:
+        """Describe the shortfall as a clause for a sentence shown to the user.
+
+        Returns:
+            For example ``"PubMed could not be searched (HTTP 429 Too Many
+            Requests)"`` or ``"200 PubMed records could not be retrieved (the
+            request timed out)"``.
+        """
+        source = self.provider.display_name
+        reason = self.failure.describe()
+        if self.records_missing is None:
+            return f"{source} could not be searched ({reason})"
+        noun = "record" if self.records_missing == 1 else "records"
+        return f"{self.records_missing:,} {source} {noun} could not be retrieved ({reason})"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-safe dictionary."""
+        return {
+            "provider": self.provider.value,
+            "failure": self.failure.to_dict(),
+            "records_missing": self.records_missing,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "RetrievalShortfall":
+        """Read a stored shortfall.
+
+        The failure and the count degrade: an unreadable count becomes
+        ``None``, which claims more is missing, never less. The source cannot
+        degrade, so an entry that names none is refused.
+
+        Args:
+            data: The stored value, untrusted.
+
+        Returns:
+            The shortfall.
+
+        Raises:
+            ValueError: If the value is not a dictionary naming PubMed or
+                Europe PMC.
+        """
+        if not isinstance(data, dict):
+            raise ValueError(f"A retrieval shortfall must be a dict, not {type(data).__name__}")
+        try:
+            provider = SearchProvider(data.get("provider"))
+        except ValueError:
+            provider = None
+        if provider not in _SINGLE_SOURCE_PROVIDERS:
+            raise ValueError("A retrieval shortfall must name PubMed or Europe PMC")
+        missing = data.get("records_missing")
+        if not isinstance(missing, int) or isinstance(missing, bool) or missing < 0:
+            missing = None
+        return cls(provider, RequestFailure.from_dict(data.get("failure")), missing)
+
+
 @dataclass
 class CursorPaginationState:
     """
@@ -90,12 +281,19 @@ class CursorPaginationState:
         fetched_count: Number of results fetched so far
         current_cursor: Current cursor position
         next_cursor: Cursor for fetching next page (None if no more pages)
+        unretrieved_count: Results the search asked for but could not
+            retrieve, because a later page failed (#247)
+        failure: Why that page failed, or None when every page was retrieved
+        unreadable_count: Results Europe PMC sent that could not be parsed
     """
 
     total_count: int
     fetched_count: int
     current_cursor: str
     next_cursor: Optional[str]
+    unretrieved_count: int = 0
+    failure: RequestFailure | None = None
+    unreadable_count: int = 0
 
     @property
     def has_more(self) -> bool:
@@ -985,6 +1183,8 @@ class ReportMetadata:
             lower bound rather than an exact count (true for "Both" mode, where
             the PubMed/Europe PMC union size is unknowable without full retrieval)
         documents_retrieved: Number of documents actually retrieved
+        search_shortfalls: What failed sources, batches or pages left out of
+            the search (#247); empty when the search was complete
 
         documents_scored: Total documents that were scored
         documents_accepted: Documents that met the score threshold
@@ -1017,6 +1217,7 @@ class ReportMetadata:
     total_results_available: int = 0
     total_is_lower_bound: bool = False
     documents_retrieved: int = 0
+    search_shortfalls: list[RetrievalShortfall] = field(default_factory=list)
 
     # Scoring info
     documents_scored: int = 0
@@ -1058,6 +1259,7 @@ class ReportMetadata:
             "total_results_available": self.total_results_available,
             "total_is_lower_bound": self.total_is_lower_bound,
             "documents_retrieved": self.documents_retrieved,
+            "search_shortfalls": [s.to_dict() for s in self.search_shortfalls],
             "documents_scored": self.documents_scored,
             "documents_accepted": self.documents_accepted,
             "documents_rejected": self.documents_rejected,
@@ -1088,6 +1290,12 @@ class ReportMetadata:
         if isinstance(search_date, str):
             search_date = datetime.fromisoformat(search_date)
 
+        # Metadata saved before #247 has no shortfalls. Anything else that is
+        # not a list is refused rather than read as a complete search.
+        stored_shortfalls = data.get("search_shortfalls", [])
+        if not isinstance(stored_shortfalls, list):
+            raise ValueError("search_shortfalls must be a list")
+
         return cls(
             version=data.get("version", 1),
             generated_at=generated_at,
@@ -1097,6 +1305,7 @@ class ReportMetadata:
             total_results_available=data.get("total_results_available", 0),
             total_is_lower_bound=data.get("total_is_lower_bound", False),
             documents_retrieved=data.get("documents_retrieved", 0),
+            search_shortfalls=[RetrievalShortfall.from_dict(s) for s in stored_shortfalls],
             documents_scored=data.get("documents_scored", 0),
             documents_accepted=data.get("documents_accepted", 0),
             documents_rejected=data.get("documents_rejected", 0),

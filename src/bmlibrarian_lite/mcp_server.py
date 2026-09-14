@@ -44,13 +44,25 @@ from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
-from bmlibrarian_lite.data_models import SearchProvider
-from bmlibrarian_lite.exceptions import LiteError
+from bmlibrarian_lite.data_models import RetrievalShortfall, SearchProvider
+from bmlibrarian_lite.exceptions import LiteError, SearchFailedError
 from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
 from bmlibrarian_lite.llm import LLMClient
+from bmlibrarian_lite.search_failures import (
+    retrieval_shortfalls_from_metadata,
+    search_failure_advice,
+    with_search_shortfall_notice,
+)
 from bmlibrarian_lite.storage import LiteStorage
 
 logger = logging.getLogger(__name__)
+
+# Tells a calling agent how an incomplete search is reported (#247).
+_INCOMPLETE_SEARCH_DESCRIPTION = (
+    "If a literature source or part of a retrieval fails, the result lists "
+    "what is missing in retrieval_shortfalls; if failures leave nothing "
+    "retrieved, an error is returned rather than an empty result."
+)
 
 _PROVIDER_MAP = {
     "pubmed": SearchProvider.PUBMED,
@@ -142,7 +154,9 @@ TOOLS = [
             "literature. Searches PubMed/Europe PMC, scores documents for "
             "relevance, extracts supporting citations, and generates an "
             "evidence synthesis report with references. "
-            "Long-running operation (1-5 minutes depending on result count)."
+            "Long-running operation (1-5 minutes depending on result count). "
+            "An incomplete search's report opens with a notice saying what is missing. "
+            + _INCOMPLETE_SEARCH_DESCRIPTION
         ),
         inputSchema={
             "type": "object",
@@ -182,7 +196,8 @@ TOOLS = [
             "Search biomedical literature databases (PubMed, Europe PMC) for "
             "articles matching a research question. Returns document metadata "
             "including title, authors, abstract, and identifiers. "
-            "Does not score or analyse results."
+            "Does not score or analyse results. "
+            + _INCOMPLETE_SEARCH_DESCRIPTION
         ),
         inputSchema={
             "type": "object",
@@ -268,6 +283,19 @@ TOOLS = [
 # -- Handlers ----------------------------------------------------------------
 
 
+def _shortfalls_payload(shortfalls: list[RetrievalShortfall]) -> list[dict[str, Any]]:
+    """Describe what a search is missing, for a calling agent.
+
+    Args:
+        shortfalls: What the search is missing.
+
+    Returns:
+        One entry per shortfall: its stored fields plus a sentence-ready
+        ``description``. Empty when the search was complete.
+    """
+    return [{**shortfall.to_dict(), "description": shortfall.describe()} for shortfall in shortfalls]
+
+
 def _handle_fact_check(
     args: dict[str, Any],
     ctx: _AgentsContext,
@@ -285,7 +313,13 @@ def _handle_fact_check(
         progress: Optional progress reporter for client notifications.
 
     Returns:
-        Dictionary with report markdown, search metadata, and scored sources.
+        Dictionary with report markdown, search metadata, scored sources, and
+        ``retrieval_shortfalls``. When the search was incomplete, every report
+        text opens with a notice saying what is missing.
+
+    Raises:
+        SearchFailedError: If failures left the search with nothing; the
+            server returns it as an error, never as "No documents found".
     """
     claim = args["claim"]
     max_results = int(args.get("max_results", 20))
@@ -302,15 +336,20 @@ def _handle_fact_check(
         provider=provider,
         include_preprints=include_preprints,
     )
+    shortfalls = retrieval_shortfalls_from_metadata(session.metadata)
+    shortfalls_payload = _shortfalls_payload(shortfalls)
 
     if not documents:
         return {
-            "report": "No documents found matching the query.",
+            "report": with_search_shortfall_notice(
+                "No documents found matching the query.", shortfalls
+            ),
             "search_query": session.query,
             "documents_found": 0,
             "documents_relevant": 0,
             "citations_extracted": 0,
             "sources": [],
+            "retrieval_shortfalls": shortfalls_payload,
         }
 
     # Now we know document count — set total for remaining steps.
@@ -336,15 +375,17 @@ def _handle_fact_check(
 
     if not scored_documents:
         return {
-            "report": (
+            "report": with_search_shortfall_notice(
                 f"Found {len(documents)} documents but none scored above "
-                f"the relevance threshold ({min_score}/5)."
+                f"the relevance threshold ({min_score}/5).",
+                shortfalls,
             ),
             "search_query": session.query,
             "documents_found": len(documents),
             "documents_relevant": 0,
             "citations_extracted": 0,
             "sources": [],
+            "retrieval_shortfalls": shortfalls_payload,
         }
 
     # 3. Extract citations
@@ -382,12 +423,13 @@ def _handle_fact_check(
         })
 
     return {
-        "report": report,
+        "report": with_search_shortfall_notice(report, shortfalls),
         "search_query": session.query,
         "documents_found": len(documents),
         "documents_relevant": len(scored_documents),
         "citations_extracted": len(citations),
         "sources": sources,
+        "retrieval_shortfalls": shortfalls_payload,
     }
 
 
@@ -400,7 +442,11 @@ def _handle_search(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any]:
         ctx: Shared agent context.
 
     Returns:
-        Dictionary with generated query and list of document metadata dicts.
+        Dictionary with generated query, list of document metadata dicts, and
+        ``retrieval_shortfalls``.
+
+    Raises:
+        SearchFailedError: If failures left the search with nothing.
     """
     query = args["query"]
     max_results = int(args.get("max_results", 20))
@@ -418,6 +464,9 @@ def _handle_search(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any]:
         "search_query": session.query,
         "total_results": len(documents),
         "documents": [doc.to_dict() for doc in documents],
+        "retrieval_shortfalls": _shortfalls_payload(
+            retrieval_shortfalls_from_metadata(session.metadata)
+        ),
     }
 
 
@@ -510,6 +559,34 @@ def _handle_ask_document(args: dict[str, Any], ctx: _AgentsContext) -> dict[str,
 
 # -- Dispatch ----------------------------------------------------------------
 
+
+class _ToolCallFailedError(Exception):
+    """Carries a failed tool call's JSON payload to the MCP server.
+
+    The server turns an exception raised by a tool handler into a result with
+    ``isError`` set, its text the exception's message (#247 review): returned
+    as ordinary content, a failure read as a successful call.
+    """
+
+
+def _error_payload(exc: Exception) -> dict[str, Any]:
+    """Describe a failed tool call for the calling agent.
+
+    Args:
+        exc: What the tool raised.
+
+    Returns:
+        The error message and type; for a failed search also what failed
+        (``retrieval_shortfalls``) and what to do about it (``advice``).
+    """
+    payload: dict[str, Any] = {"error": str(exc), "error_type": type(exc).__name__}
+    if isinstance(exc, SearchFailedError):
+        shortfalls = list(exc.shortfalls)
+        payload["retrieval_shortfalls"] = _shortfalls_payload(shortfalls)
+        payload["advice"] = search_failure_advice(shortfalls)
+    return payload
+
+
 _HANDLERS: dict[str, Any] = {
     "fact_check_claim": _handle_fact_check,
     "search_literature": _handle_search,
@@ -578,6 +655,7 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        failure: dict[str, Any] | None = None
         try:
             loop = asyncio.get_running_loop()
 
@@ -596,12 +674,14 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
             )
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
         except LiteError as exc:
-            payload = {"error": str(exc), "error_type": type(exc).__name__}
-            return [TextContent(type="text", text=json.dumps(payload))]
+            logger.warning("Tool %s failed: %s", name, exc)
+            failure = _error_payload(exc)
         except Exception as exc:
             logger.exception("Unexpected error in tool %s", name)
-            payload = {"error": str(exc), "error_type": type(exc).__name__}
-            return [TextContent(type="text", text=json.dumps(payload))]
+            failure = _error_payload(exc)
+        # Raised outside the except blocks, so the original exception is not
+        # kept as context; the server reports it with isError set.
+        raise _ToolCallFailedError(json.dumps(failure))
 
     return server, ctx
 
@@ -611,16 +691,16 @@ async def run_server() -> None:
     config = LiteConfig.load()
     config.ensure_directories()
 
-    server, ctx = _make_server(config)
-    try:
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
-            )
-    finally:
-        ctx.storage.close()
+    # LiteStorage opens a connection per operation, so there is nothing to
+    # close on the way out. Its missing close() used to raise here and mask the
+    # error that ended the server.
+    server, _ = _make_server(config)
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options(),
+        )
 
 
 def main() -> None:

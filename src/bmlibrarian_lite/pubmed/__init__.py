@@ -25,10 +25,11 @@ Usage:
 
     client = PubMedSearchClient(email="user@example.com")
     result = client.search_simple("cardiovascular exercise", max_results=100)
-    articles = client.fetch_articles(result.pmids)
+    articles = client.fetch_articles(result.pmids).articles
 """
 
 from .data_types import (
+    ArticleFetchResult,
     ArticleMetadata,
     DateRange,
     ImportResult,
@@ -51,6 +52,7 @@ from .constants import (
 
 __all__ = [
     # Data types
+    "ArticleFetchResult",
     "ArticleMetadata",
     "DateRange",
     "ImportResult",

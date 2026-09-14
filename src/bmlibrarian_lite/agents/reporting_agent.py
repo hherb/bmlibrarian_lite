@@ -23,6 +23,7 @@ professional research summary with proper attribution.
 import logging
 
 from ..data_models import Citation, ReportMetadata
+from ..search_failures import describe_search_shortfalls, with_search_shortfall_notice
 from ..transparency.transparency_models import TransparencyResult
 from .base import LiteBaseAgent
 from .report_risk_helpers import (
@@ -81,6 +82,32 @@ class LiteReportingAgent(LiteBaseAgent):
         transparency_results: dict[str, TransparencyResult] | None = None,
     ) -> str:
         """Generate a research report from citations.
+
+        Args:
+            question: Research question
+            citations: List of citations to synthesize
+            metadata: Optional report metadata for methodology section
+            transparency_results: Optional dict mapping document_id to TransparencyResult
+
+        Returns:
+            Formatted research report as markdown. When the search behind it
+            was incomplete, the report opens with a notice saying what is
+            missing (#247).
+        """
+        shortfalls = metadata.search_shortfalls if metadata else []
+        report = self._generate_report_body(
+            question, citations, metadata, transparency_results
+        )
+        return with_search_shortfall_notice(report, shortfalls)
+
+    def _generate_report_body(
+        self,
+        question: str,
+        citations: list[Citation],
+        metadata: ReportMetadata | None,
+        transparency_results: dict[str, TransparencyResult] | None,
+    ) -> str:
+        """Generate the report itself, without the incomplete-search notice.
 
         Args:
             question: Research question
@@ -490,6 +517,13 @@ Key passages:
         lines.extend([
             f"- **Total Results Available:** {total_prefix}{metadata.total_results_available:,}",
             f"- **Documents Retrieved:** {metadata.documents_retrieved:,}",
+        ])
+        if metadata.search_shortfalls:
+            lines.append(
+                "- **Search Completeness:** Incomplete: "
+                f"{describe_search_shortfalls(metadata.search_shortfalls)}"
+            )
+        lines.extend([
             "",
             "### Document Screening",
             f"- **Scoring Threshold:** ≥{metadata.min_score_threshold}/5",

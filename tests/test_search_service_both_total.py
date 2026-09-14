@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from bmlibrarian_lite.pubmed.data_types import ArticleFetchResult
 from bmlibrarian_lite.search_service import SearchService
 
 
@@ -30,15 +31,17 @@ def _make_service(pubmed_total: int, epmc_total: int) -> SearchService:
 
     pubmed_client = MagicMock()
     pubmed_client.search.return_value = MagicMock(
-        total_count=pubmed_total, pmids=["1"]
+        total_count=pubmed_total, pmids=["1"], unlisted_count=0, listing_failure=None
     )
-    pubmed_client.fetch_articles.return_value = [pubmed_article]
+    pubmed_client.fetch_articles.return_value = ArticleFetchResult(
+        articles=[pubmed_article]
+    )
     service._pubmed_client = pubmed_client
 
     epmc_client = MagicMock()
     epmc_client.search.return_value = (
         [epmc_article],
-        MagicMock(total_count=epmc_total),
+        MagicMock(total_count=epmc_total, unretrieved_count=0, failure=None, unreadable_count=0),
     )
     service._europepmc_client = epmc_client
 

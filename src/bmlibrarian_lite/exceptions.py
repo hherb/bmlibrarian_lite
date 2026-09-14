@@ -27,7 +27,12 @@ Exception Hierarchy:
     ├── EmbeddingError
     ├── ConfigurationError
     ├── NetworkError
+    │   ├── SourceRequestError
+    │   ├── SearchFailedError
+    │   └── RetryExhaustedError
     └── LLMError
+        ├── JSONParseError
+        └── APIError
 
 Usage:
     from bmlibrarian_lite.exceptions import SQLiteError
@@ -37,6 +42,12 @@ Usage:
     except SQLiteError as e:
         logger.error(f"Storage operation failed: {e}")
 """
+
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .data_models import RequestFailure, RetrievalShortfall, SearchProvider
 
 
 class LiteError(Exception):
@@ -165,6 +176,60 @@ class LLMError(LiteError):
     """
 
     pass
+
+
+class SourceRequestError(NetworkError):
+    """A literature source could not answer a request (#247).
+
+    Raised by the PubMed and Europe PMC clients when a request fails after its
+    retries, or the source answers with an error instead of a result. It is
+    never an empty result: a source that failed is not a source with no
+    evidence.
+
+    Only the provider and a ``RequestFailure`` are kept, so the message cannot
+    carry a URL, a request body or a response body -- all of which can hold
+    the NCBI API key (#196).
+
+    Example:
+        try:
+            result = client.search(query)
+        except SourceRequestError as e:
+            shortfall = RetrievalShortfall(e.provider, e.failure)
+    """
+
+    def __init__(self, provider: "SearchProvider", failure: "RequestFailure") -> None:
+        """Initialize the source request error.
+
+        Args:
+            provider: The source that failed, PubMed or Europe PMC.
+            failure: Why, reduced to its kind and HTTP status.
+        """
+        super().__init__(f"{provider.display_name} could not be searched ({failure.describe()})")
+        self.provider = provider
+        self.failure = failure
+
+
+class SearchFailedError(NetworkError):
+    """A search was left with nothing to proceed on because of failures (#247).
+
+    A search that loses part of its sources proceeds on the rest and says what
+    is missing. When the failures leave no documents at all, the honest answer
+    is not "No documents found" -- nobody knows whether there are any -- so the
+    search raises this instead.
+
+    Example:
+        raise SearchFailedError([RetrievalShortfall(provider, failure)])
+    """
+
+    def __init__(self, shortfalls: "Sequence[RetrievalShortfall]") -> None:
+        """Initialize the search failed error.
+
+        Args:
+            shortfalls: What failed, at least one.
+        """
+        details = "; ".join(shortfall.describe() for shortfall in shortfalls)
+        super().__init__(f"The search could not be completed: {details}.")
+        self.shortfalls = tuple(shortfalls)
 
 
 class RetryExhaustedError(NetworkError):
