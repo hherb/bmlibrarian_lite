@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialSource
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
@@ -28,11 +29,16 @@ import kotlinx.coroutines.delay
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
+import retrofit2.Response
 import java.io.StringReader
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.xml.XMLConstants
 import javax.xml.parsers.SAXParserFactory
+import kotlin.coroutines.cancellation.CancellationException
+
+/** Log tag for PubMed search diagnostics. */
+private const val TAG = "PubMedService"
 
 /**
  * SAX feature flags that disable external DTD loading and entity expansion.
@@ -80,8 +86,13 @@ private val TEXT_ELEMENTS: Set<String> = setOf(
  * - XML parsing for article metadata
  *
  * The API key and email come from [credentialSource], read at the start of each
- * search, so no caller passes them and none can forget to. [api] must come from
- * [createPubMedApi], which sends them in a POST body and refuses redirects.
+ * search, so no caller passes them and none can forget to. [PubMedApi] sends
+ * them in a POST body; [api] must come from [createPubMedApi], whose client
+ * refuses redirects.
+ *
+ * The app's Hilt graph builds this with `NetworkModule.providePubMedService`,
+ * passing `SettingsRepository` as the credential source; nothing binds
+ * [NcbiCredentialSource] for the `@Inject` constructor on its own.
  *
  * @param api PubMed API interface, built by [createPubMedApi]
  * @param credentialSource Where the NCBI API key and email are read from
@@ -100,7 +111,8 @@ class PubMedService @Inject constructor(
      * 2. EFetch to get article details for those PMIDs
      *
      * The NCBI API key and email are read from the credential source once per
-     * search and sent with both of its requests.
+     * search and sent with both of its requests. Every failure is logged and
+     * returned; cancellation is rethrown, so a cancelled search stays cancelled.
      *
      * @param query PubMed search query
      * @param offset Starting position for pagination
@@ -114,7 +126,7 @@ class PubMedService @Inject constructor(
     ): Result<PubMedSearchResult> {
         // Validate offset
         if (offset > PubMedApi.MAX_OFFSET) {
-            return Result.failure(
+            return failure(
                 PubMedError.InvalidOffsetError(
                     message = "Offset cannot exceed ${PubMedApi.MAX_OFFSET}",
                     offset = offset
@@ -122,14 +134,14 @@ class PubMedService @Inject constructor(
             )
         }
 
-        // Reading the saved key is the first touch of encrypted preferences,
-        // which throw on a broken keystore; that is a failed search, not a crash
+        // The saved key lives in encrypted preferences, which throw on a broken
+        // keystore; that is a failed search, not a crash
         val credentials = try {
             credentialSource.ncbiCredentials()
         } catch (e: Exception) {
-            return Result.failure(
+            return failure(
                 PubMedError.UnknownError(
-                    message = "Could not read the saved NCBI API key or email: ${e.message}",
+                    message = "Could not read the saved NCBI API key or email",
                     cause = e
                 )
             )
@@ -142,16 +154,35 @@ class PubMedService @Inject constructor(
             ) {
                 performSearch(query, offset, batchSize, credentials)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: PubMedError) {
-            Result.failure(e)
+            failure(e)
         } catch (e: Exception) {
-            Result.failure(
+            failure(
                 PubMedError.NetworkError(
                     message = "Network error: ${e.message}",
                     cause = e
                 )
             )
         }
+    }
+
+    /**
+     * Log a failed search and return it as a failed result.
+     *
+     * Logs the error's message and its cause's class. No message here carries a
+     * response body or the key: an HTTP failure's is built from the status and
+     * reason phrase, and a network failure's quotes the transport, whose request
+     * URLs hold no credential. A cause's own message is not logged separately.
+     *
+     * @param error Why the search failed
+     * @return The failed result
+     */
+    private fun failure(error: PubMedError): Result<PubMedSearchResult> {
+        val cause = error.cause?.let { " (cause: ${it.javaClass.simpleName})" }.orEmpty()
+        Log.w(TAG, "PubMed search failed, ${error.javaClass.simpleName}: ${error.message}$cause")
+        return Result.failure(error)
     }
 
     /**
@@ -308,12 +339,7 @@ class PubMedService @Inject constructor(
             email = credentials.email
         )
 
-        if (!searchResponse.isSuccessful) {
-            throw PubMedError.fromHttpError(
-                searchResponse.code(),
-                searchResponse.message()
-            )
-        }
+        throwIfUnsuccessful(searchResponse, credentials)
 
         val searchResult = searchResponse.body()?.esearchResult
             ?: throw PubMedError.SearchError(
@@ -350,12 +376,7 @@ class PubMedService @Inject constructor(
             email = credentials.email
         )
 
-        if (!fetchResponse.isSuccessful) {
-            throw PubMedError.fromHttpError(
-                fetchResponse.code(),
-                fetchResponse.message()
-            )
-        }
+        throwIfUnsuccessful(fetchResponse, credentials)
 
         val xml = fetchResponse.body()
             ?: throw PubMedError.FetchError(
@@ -374,6 +395,29 @@ class PubMedService @Inject constructor(
                 hasMore = (offset + pmids.size) < totalResults && (offset + pmids.size) <= PubMedApi.MAX_OFFSET
             )
         )
+    }
+
+    /**
+     * Throw the [PubMedError] for an E-utilities response that did not succeed.
+     *
+     * Uses the status and reason phrase only. The body is never read, because
+     * NCBI's 400 for a bad key repeats the key in it. The PubMed client follows
+     * no redirect ([pubMedHttpClient]), so a 3xx arrives here too and becomes
+     * [PubMedError.RedirectRefusedError].
+     *
+     * @param response The Retrofit response to check
+     * @param credentials The credentials the request carried; a 400 on a request
+     *   with a key is reported as a rejected key
+     * @throws PubMedError when the status is not 2xx
+     */
+    private fun throwIfUnsuccessful(response: Response<*>, credentials: NcbiCredentials) {
+        if (!response.isSuccessful) {
+            throw PubMedError.fromHttpError(
+                statusCode = response.code(),
+                reasonPhrase = response.message(),
+                apiKeySent = credentials.apiKey != null
+            )
+        }
     }
 
     /**

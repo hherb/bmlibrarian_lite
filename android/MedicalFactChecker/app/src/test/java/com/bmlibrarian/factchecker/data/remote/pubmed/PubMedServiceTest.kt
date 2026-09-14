@@ -35,6 +35,7 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Unit tests for PubMedService.
@@ -1003,6 +1004,61 @@ class PubMedServiceTest {
         coVerify(exactly = 0) {
             api.search(any(), any(), any(), any(), any(), any(), any(), any())
         }
+    }
+
+    @Test
+    fun `a 400 while a key is saved reports the key as rejected, without its body`() = runTest {
+        // Arrange: NCBI's 400 for a bad key repeats the key in its body
+        val apiKey = "rejected-key-0123456789"
+        savedCredentials = NcbiCredentials.of(apiKey = apiKey, email = null)
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error(400, """{"error":"API key invalid","api-key":"$apiKey"}""".toResponseBody(null))
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        val error = result.exceptionOrNull()
+        assertTrue("expected InvalidApiKeyError, got $error", error is PubMedError.InvalidApiKeyError)
+        assertFalse("the error carried the key", error?.message.orEmpty().contains(apiKey))
+        coVerify(exactly = 1) {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `a 400 without a saved key is a rejected search`() = runTest {
+        // Arrange
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error(400, "".toResponseBody(null))
+
+        // Act
+        val result = service.search(query = "test")
+
+        // Assert
+        val error = result.exceptionOrNull()
+        assertTrue("expected SearchError, got $error", error is PubMedError.SearchError)
+    }
+
+    @Test
+    fun `a cancelled search stays cancelled`() = runTest {
+        // Arrange
+        coEvery {
+            api.search(any(), any(), any(), any(), any(), any(), any(), any())
+        } throws CancellationException("the claim was abandoned")
+
+        // Act
+        val thrown = try {
+            service.search(query = "test")
+            null
+        } catch (e: CancellationException) {
+            e
+        }
+
+        // Assert
+        assertTrue("cancellation became a failed result instead", thrown != null)
     }
 
     @Test

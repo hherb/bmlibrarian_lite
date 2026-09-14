@@ -21,13 +21,26 @@ package com.bmlibrarian.factchecker.data.remote.pubmed
 import com.bmlibrarian.factchecker.util.Constants
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import retrofit2.Invocation
 import retrofit2.Retrofit
 import retrofit2.converter.scalars.ScalarsConverterFactory
 
 /** Media type of the JSON bodies esearch returns. */
 private const val JSON_MEDIA_TYPE = "application/json"
+
+/**
+ * Removes Retrofit's [Invocation] tag from a request before anything else sees it.
+ *
+ * Retrofit tags every request with the interface call's arguments, the API key
+ * among them, and OkHttp's `Request.toString()` prints tags. Without this, any
+ * interceptor or log line that printed a PubMed request would print the key.
+ */
+private val dropInvocationTag = Interceptor { chain ->
+    chain.proceed(chain.request().newBuilder().tag(Invocation::class.java, null).build())
+}
 
 /**
  * Derive the HTTP client every E-utilities request goes through.
@@ -39,6 +52,12 @@ private const val JSON_MEDIA_TYPE = "application/json"
  * without its parameters, which NCBI answers as a search for nothing. Unfollowed,
  * the 3xx arrives as the response itself, which [PubMedService] reports as
  * [com.bmlibrarian.factchecker.domain.model.PubMedError.RedirectRefusedError].
+ * Not even a redirect to an NCBI host is followed: these endpoints never
+ * legitimately redirect, and a same-host redirect can still downgrade to
+ * `http://` and carry the key in cleartext.
+ *
+ * Its first interceptor also drops Retrofit's [Invocation] tag, which holds the
+ * API key and which `Request.toString()` would print.
  *
  * Only PubMed gets this client: Unpaywall and publisher PDF links depend on
  * redirects, so the shared client must keep following them.
@@ -48,6 +67,7 @@ private const val JSON_MEDIA_TYPE = "application/json"
  */
 fun pubMedHttpClient(base: OkHttpClient): OkHttpClient =
     base.newBuilder()
+        .apply { interceptors().add(0, dropInvocationTag) }
         .followRedirects(false)
         .followSslRedirects(false)
         .build()

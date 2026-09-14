@@ -66,7 +66,8 @@ object NetworkModule {
      * Provides a configured OkHttpClient for all network requests.
      *
      * Configuration:
-     * - Logging interceptor for debugging (body level in debug builds)
+     * - BASIC-level logging interceptor in debug builds; never HEADERS or BODY,
+     *   which would log credentials (see [debugHttpLoggingInterceptor])
      * - Connection timeout: 30 seconds
      * - Read timeout: 120 seconds (allows for slow LLM responses)
      * - Write timeout: 60 seconds
@@ -252,6 +253,10 @@ object NetworkModule {
 
     /**
      * Provides the PubMed service.
+     *
+     * This is the binding Hilt uses. `PubMedService` also has an `@Inject`
+     * constructor, but nothing binds its `NcbiCredentialSource` parameter, so
+     * deleting this provider fails the build with a missing-binding error.
      *
      * @param api PubMed API interface
      * @param settingsRepository Source of the NCBI API key and email the user saved

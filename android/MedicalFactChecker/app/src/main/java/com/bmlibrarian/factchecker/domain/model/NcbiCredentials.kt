@@ -22,17 +22,20 @@ package com.bmlibrarian.factchecker.domain.model
  * What identifies this app to NCBI's E-utilities: an optional API key and an
  * optional contact email.
  *
- * Build one with [of], which turns a blank setting into `null`, so a cleared
- * key sends no `api_key` field at all rather than an empty one.
+ * [of] is the only way to build one, and it turns a blank setting into `null`.
+ * Two things depend on that: a cleared key sends no `api_key` field at all
+ * rather than an empty one, and a key's presence picks the faster rate limit.
+ * A plain class with a private constructor, not a data class, so neither a
+ * constructor call nor a generated `copy` can skip the rule.
  *
- * [toString] never prints the key. The generated `toString` of a data class
- * would, and a credential that reaches a log line or an error message has left
- * the request it was meant for (#243).
+ * [toString] never prints the key. A data class's generated `toString` would,
+ * and a credential that reaches a log line or an error message has left the
+ * request it was meant for (#243).
  *
  * @property apiKey The NCBI API key, or null when none is configured
  * @property email The contact email, or null when none is configured
  */
-data class NcbiCredentials(
+class NcbiCredentials private constructor(
     val apiKey: String?,
     val email: String?
 ) {

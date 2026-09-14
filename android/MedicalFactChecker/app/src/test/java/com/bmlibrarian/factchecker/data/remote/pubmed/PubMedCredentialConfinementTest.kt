@@ -19,10 +19,13 @@
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import com.bmlibrarian.factchecker.data.remote.debugHttpLoggingInterceptor
+import com.bmlibrarian.factchecker.di.NetworkModule
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
 import com.bmlibrarian.factchecker.domain.model.PubMedError
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -38,6 +41,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.Invocation
 import java.net.URLDecoder
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -45,7 +49,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * The NCBI API key reaches NCBI and nothing else (#243, the Android half of #196).
  *
  * A query string is part of the URL, and a URL is what gets printed: debug
- * builds log `--> GET <url>` to logcat for every request. So the key travels in
+ * builds log each request line, URL included, to logcat. So the key travels in
  * a form-encoded POST body, and because a 307 or 308 re-sends a body, a redirect
  * is refused rather than followed.
  *
@@ -69,6 +73,8 @@ class PubMedCredentialConfinementTest {
     private sealed class Reply {
         /** A 200 with this body. */
         data class Ok(val body: String) : Reply()
+        /** A response with this status and body. */
+        data class Status(val statusCode: Int, val body: String) : Reply()
         /** A redirect with this status to this location. */
         data class Redirect(val statusCode: Int, val location: String) : Reply()
     }
@@ -92,6 +98,7 @@ class PubMedCredentialConfinementTest {
                     recorded.add(received)
                     return when (val answer = reply(received)) {
                         is Reply.Ok -> MockResponse().setResponseCode(HTTP_OK).setBody(answer.body)
+                        is Reply.Status -> MockResponse().setResponseCode(answer.statusCode).setBody(answer.body)
                         is Reply.Redirect -> MockResponse()
                             .setResponseCode(answer.statusCode)
                             .addHeader("Location", answer.location)
@@ -217,6 +224,49 @@ class PubMedCredentialConfinementTest {
         }
     }
 
+    @Test
+    fun `a failed answer that echoes the key reports a rejected key and prints no key`() = runBlocking {
+        // NCBI's 400 for a bad key repeats the key in its body
+        ncbi.reply = { Reply.Status(HTTP_BAD_REQUEST, """{"error":"API key invalid","api-key":"$apiKey"}""") }
+        val lines = CopyOnWriteArrayList<String>()
+        val loggingClient = OkHttpClient.Builder()
+            .addInterceptor(debugHttpLoggingInterceptor { lines.add(it) })
+            .build()
+
+        val result = service(loggingClient).search(query = "aspirin")
+
+        val error = result.exceptionOrNull()
+        assertTrue("expected InvalidApiKeyError, got $error", error is PubMedError.InvalidApiKeyError)
+        var link: Throwable? = error
+        while (link != null) {
+            assertFalse("the error carried the key: $link", "$link ${link.message}".contains(apiKey))
+            link = link.cause
+        }
+        assertTrue("nothing was logged, so nothing was checked", lines.isNotEmpty())
+        for (line in lines) {
+            assertFalse("logged the key: $line", line.contains(apiKey))
+        }
+    }
+
+    @Test
+    fun `no interceptor sees a request that would print the key`() = runBlocking {
+        // Retrofit tags each request with the call's arguments, and
+        // Request.toString() prints tags
+        serveOneArticle()
+        val seen = CopyOnWriteArrayList<Request>()
+        val watchingClient = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain -> seen.add(chain.request()); chain.proceed(chain.request()) })
+            .build()
+
+        service(watchingClient).search(query = "aspirin")
+
+        assertEquals(2, seen.size)
+        for (request in seen) {
+            assertNull("${request.url} kept the Invocation tag", request.tag(Invocation::class.java))
+            assertFalse("printed the key: $request", request.toString().contains(apiKey))
+        }
+    }
+
     // ==================== Redirects ====================
 
     @Test
@@ -253,14 +303,37 @@ class PubMedCredentialConfinementTest {
     }
 
     @Test
-    fun `the PubMed client follows no redirect while the shared client still does`() {
-        val shared = OkHttpClient()
-
-        val pubMed = pubMedHttpClient(shared)
+    fun `the PubMed client follows no redirect of either kind`() {
+        val pubMed = pubMedHttpClient(OkHttpClient())
 
         assertFalse(pubMed.followRedirects)
         assertFalse(pubMed.followSslRedirects)
-        assertTrue("Unpaywall and PDF links need redirects", shared.followRedirects)
+    }
+
+    @Test
+    fun `the app's PubMed binding refuses redirects`() = runBlocking {
+        // NetworkModule.providePubMedApi targets the real NCBI host, so an
+        // application interceptor on the shared client sends its requests to the
+        // local NCBI. It runs before OkHttp's redirect handling, so a followed
+        // redirect would still reach the foreign host.
+        val local = ncbi.baseUrl.toHttpUrl()
+        val toLocalNcbi = Interceptor { chain ->
+            val request = chain.request()
+            val url = request.url.newBuilder().scheme(local.scheme).host(local.host).port(local.port).build()
+            chain.proceed(request.newBuilder().url(url).build())
+        }
+        val shared = OkHttpClient.Builder().addInterceptor(toLocalNcbi).build()
+        val service = PubMedService(NetworkModule.providePubMedApi(shared, json)) {
+            NcbiCredentials.of(apiKey = apiKey, email = email)
+        }
+        ncbi.reply = { Reply.Redirect(HTTP_TEMPORARY_REDIRECT, elsewhere.baseUrl + "collect") }
+
+        val result = service.search(query = "aspirin")
+
+        val error = result.exceptionOrNull()
+        assertTrue("expected RedirectRefusedError, got $error", error is PubMedError.RedirectRefusedError)
+        assertEquals("requests to the local NCBI: one, not retried", 1, ncbi.recorded.size)
+        assertEquals("the redirect was followed", 0, elsewhere.recorded.size)
     }
 
     // ==================== Credentials ====================
@@ -277,5 +350,11 @@ class PubMedCredentialConfinementTest {
     private companion object {
         /** HTTP 200. */
         const val HTTP_OK = 200
+
+        /** HTTP 307, a redirect that re-sends the body. */
+        const val HTTP_TEMPORARY_REDIRECT = 307
+
+        /** HTTP 400, NCBI's answer to a bad key. */
+        const val HTTP_BAD_REQUEST = 400
     }
 }
