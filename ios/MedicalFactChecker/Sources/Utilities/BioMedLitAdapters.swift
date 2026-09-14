@@ -342,22 +342,29 @@ enum BioMedLitAdapters {
     /// articles can be fewer, since a `PubmedBookArticle` (a StatPearls chapter,
     /// say) yields none. Advancing by the article count would then re-request
     /// PMIDs already fetched, and a batch that parsed to nothing would be
-    /// requested again on every "fetch more". Until #251 the total was the batch
-    /// size, so no second batch was ever requested and this never showed.
+    /// requested again on every "fetch more", never reaching the end.
+    ///
+    /// A `nil` `nextOffset` is BioMedLit saying there is no next page: the batch
+    /// reached the last match, the next page would pass PubMed's offset cap, or
+    /// esearch gave no usable count. The batch then advances to the end of the
+    /// result set, so `hasMore` is false and a PubMed search offers no page
+    /// PubMed cannot serve. A search of both providers still judges PubMed's next
+    /// page against the combined total (#253).
     ///
     /// - Parameters:
     ///   - result: The BioMedLit PubMed result.
     ///   - basePosition: The offset the batch was requested at.
     ///   - articleCount: How many articles the batch produced.
     /// - Returns: The PMIDs consumed when BioMedLit states a next page, otherwise
-    ///   the article count, which is all that is known of a last page.
+    ///   the positions left to the end of the result set, and never fewer than
+    ///   the articles the batch produced.
     static func pubMedPositionsAdvanced(
         by result: BMLSearchResult,
         basePosition: Int,
         articleCount: Int
     ) -> Int {
         guard let nextOffset = result.nextOffset, nextOffset > basePosition else {
-            return articleCount
+            return max(articleCount, result.totalCount - basePosition)
         }
         return nextOffset - basePosition
     }
