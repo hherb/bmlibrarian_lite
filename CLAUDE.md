@@ -44,6 +44,7 @@ storage.py            # LiteStorage (SQLite + sqlite-vec)
 data_models.py        # LiteDocument, ScoredDocument, Citation, SearchProvider, pagination models
 europepmc.py          # EuropePMCClient (cursor pagination)
 search_service.py     # Unified search across PubMed + Europe PMC
+search_failures.py    # A failed source is not an empty one: failure → shortfall → notice
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query
 fulltext_discovery.py # Europe PMC XML → Unpaywall PDF → DOI fallback

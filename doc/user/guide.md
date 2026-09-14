@@ -92,6 +92,14 @@ The Systematic Review tab provides a complete workflow for conducting literature
 - **Europe PMC**: Alternative provider with cursor-based pagination and full-text access
 - Results from multiple providers are automatically deduplicated by PMID, DOI, PMC ID, or title similarity
 
+#### When a Search Is Incomplete
+
+A database that cannot be reached is never reported as one with no articles.
+
+- **The search failed outright** (for example PubMed rate-limited the request, or the connection failed): the review stops with an error naming the database and the reason. Try again later, or search the other provider.
+- **Part of the search failed** (one of two providers, or a batch of records): the review continues on what was retrieved. A warning appears under Progress, the report opens with an **Incomplete search** notice, and its Methodology section lists what is missing and why.
+- **Research Questions → search for more documents** keeps the documents it found before a failure and tells you why it stopped.
+
 #### Search Tips
 
 - Be specific in your research question
