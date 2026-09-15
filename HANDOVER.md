@@ -8,11 +8,13 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#247 + #248 + #255 (Python half) — a failed source is not an empty one**, on
-branch `fix/failed-search-is-not-empty-247`, PR #260. The rules are under
-**Recently landed**. Once it merges, delete this section. The natural next slice
-ports the contract (`doc/cross_platform/search_failure_reporting.md`): **#252**
-(Android) and **#256** + **#255** (Swift), both of which said "mirror #247".
+**#252 + #255 (Android half) — a failed source is not an empty one**, on branch
+`fix/android-failed-search-is-not-empty-252`: porting the #247 contract
+(`doc/cross_platform/search_failure_reporting.md`) to Android. **User's
+decisions (2026-09-15): Android before Swift; Android's report, which has no
+Methodology section, gains a code-built `## Methodology` holding only the
+Search Completeness line, for an incomplete search only.** Swift (**#256** +
+**#255** + **#253**) is the slice after.
 
 ## Recently landed (context)
 
@@ -20,7 +22,8 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A failed source is not an empty one** (#247, #248, Python #255; PR #260).
+- **A failed source is not an empty one** (#247, #248, Python #255; PR #260,
+  merged 2026-09-15).
   Contract: `doc/cross_platform/search_failure_reporting.md`. **User's
   decisions (2026-09-14): a provider failing in a both-provider search, and a
   batch or page failing after retries, proceed on what was retrieved and tell
