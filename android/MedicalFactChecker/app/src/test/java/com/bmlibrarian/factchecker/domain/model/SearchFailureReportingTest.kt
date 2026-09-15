@@ -86,6 +86,57 @@ class SearchFailureReportingTest {
     }
 
     @Test
+    fun `a source that could not be searched is reported once, however often it failed`() {
+        val unavailable = RetrievalShortfall(SearchProvider.PUBMED, UNAVAILABLE)
+        val shortfalls = listOf(PUBMED_DOWN, RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 4), PUBMED_DOWN, unavailable)
+
+        assertEquals(
+            listOf(PUBMED_DOWN, RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 4), unavailable),
+            SearchFailureReporting.combinedShortfalls(shortfalls)
+        )
+    }
+
+    @Test
+    fun `an alternative search that could not be completed is reported once, however many queries failed`() {
+        val lost = RetrievalShortfall(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.CONNECTION), query = ShortfallQuery.ALTERNATIVE)
+
+        assertEquals(
+            listOf(PUBMED_DOWN, lost),
+            SearchFailureReporting.combinedShortfalls(listOf(PUBMED_DOWN, lost, lost, lost))
+        )
+    }
+
+    @Test
+    fun `counts too large to add are kept apart, neither overflowing nor cut short`() {
+        // A stored count can be any whole number a count holds
+        val stored = RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, Int.MAX_VALUE)
+        val more = RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 5)
+
+        assertEquals(listOf(stored, more), SearchFailureReporting.combinedShortfalls(listOf(stored, more)))
+    }
+
+    @Test
+    fun `the warning an incomplete search shows names what failed`() {
+        assertEquals(
+            "Incomplete search: PubMed could not be searched (HTTP 429 Too Many Requests).",
+            SearchFailureReporting.incompleteSearchWarning(listOf(PUBMED_DOWN))
+        )
+        assertNull(SearchFailureReporting.incompleteSearchWarning(emptyList()))
+    }
+
+    @Test
+    fun `a report's notice is split from its text as plain text`() {
+        val report = SearchFailureReporting.withSearchShortfallNotice("## Analysis", listOf(PUBMED_DOWN))
+
+        assertEquals(
+            "Incomplete search: PubMed could not be searched (HTTP 429 Too Many Requests). " +
+                "Everything below rests only on the records that were retrieved." to "## Analysis",
+            SearchFailureReporting.splitPlainSearchShortfallNotice(report)
+        )
+        assertEquals(null to "## Analysis", SearchFailureReporting.splitPlainSearchShortfallNotice("## Analysis"))
+    }
+
+    @Test
     fun `an alternative search's loss is not merged into the original query's`() {
         val shortfalls = listOf(
             RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 20),
@@ -111,15 +162,6 @@ class SearchFailureReportingTest {
                 "5 Europe PMC records could not be retrieved (the request timed out)",
             SearchFailureReporting.describeSearchShortfalls(shortfalls)
         )
-    }
-
-    @Test
-    fun `an esearch page lists at most what PubMed holds past its offset, and the first 9,999`() {
-        assertEquals(20, SearchFailureReporting.expectedEsearchListing(totalCount = 57, retstart = 0, retmax = 20))
-        assertEquals(17, SearchFailureReporting.expectedEsearchListing(totalCount = 57, retstart = 40, retmax = 20))
-        assertEquals(0, SearchFailureReporting.expectedEsearchListing(totalCount = 57, retstart = 60, retmax = 20))
-        assertEquals(19, SearchFailureReporting.expectedEsearchListing(totalCount = 25_000, retstart = 9_980, retmax = 20))
-        assertEquals(0, SearchFailureReporting.expectedEsearchListing(totalCount = 25_000, retstart = 9_999, retmax = 20))
     }
 
     // ==================== The notice ====================

@@ -99,7 +99,7 @@ class PdfExporter @Inject constructor(
         )
 
         // An incomplete search's notice precedes the verdict, not only the analysis (#252)
-        val (searchNotice, reportBody) = SearchFailureReporting.splitSearchShortfallNotice(report.fullReportMarkdown)
+        val (searchNotice, reportBody) = SearchFailureReporting.splitPlainSearchShortfallNotice(report.fullReportMarkdown)
 
         try {
             // Add content to PDF
@@ -157,10 +157,10 @@ class PdfExporter @Inject constructor(
      * Add the notice that the report's search was incomplete (#252).
      *
      * @param document The PDF document
-     * @param notice The notice as the report stores it
+     * @param notice The notice, as plain text
      */
     private fun addSearchNotice(document: Document, notice: String) {
-        val paragraph = Paragraph(SearchFailureReporting.plainNotice(notice))
+        val paragraph = Paragraph(notice)
             .setFontSize(Constants.PDF_BODY_FONT_SIZE)
             .setMultipliedLeading(Constants.PDF_LINE_SPACING)
             .setBold()
@@ -283,10 +283,10 @@ class PdfExporter @Inject constructor(
      * @return The text without bold or italic markers
      */
     private fun withoutInlineMarkup(text: String): String = text
-        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1") // Bold
-        .replace(Regex("\\*(.+?)\\*"), "$1") // Italic
-        .replace(Regex("__(.+?)__"), "$1") // Bold
-        .replace(Regex("_(.+?)_"), "$1") // Italic
+        .replace(BOLD_ASTERISKS, "$1")
+        .replace(ITALIC_ASTERISK, "$1")
+        .replace(BOLD_UNDERSCORES, "$1")
+        .replace(ITALIC_UNDERSCORE, "$1")
 
     /**
      * Add statistics section.
@@ -470,5 +470,17 @@ class PdfExporter @Inject constructor(
 
         /** Extra length for section heading underlines. */
         private const val UNDERLINE_EXTRA_LENGTH = 5
+
+        /** Bold text marked with asterisks, keeping the text. */
+        private val BOLD_ASTERISKS = Regex("\\*\\*(.+?)\\*\\*")
+
+        /** Italic text marked with an asterisk, keeping the text. */
+        private val ITALIC_ASTERISK = Regex("\\*(.+?)\\*")
+
+        /** Bold text marked with underscores, keeping the text. */
+        private val BOLD_UNDERSCORES = Regex("__(.+?)__")
+
+        /** Italic text marked with an underscore, keeping the text. */
+        private val ITALIC_UNDERSCORE = Regex("_(.+?)_")
     }
 }

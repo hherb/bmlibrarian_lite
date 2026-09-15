@@ -25,6 +25,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailedException
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.SearchPaging
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.ShortfallQuery
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
@@ -50,6 +51,14 @@ data class PubMedPaging(val offset: Int, val totalResults: Int)
 data class EuropePMCPaging(val cursor: String?, val totalResults: Int, val resultsReceived: Int?)
 
 /**
+ * Where a session's paging stands with both providers.
+ *
+ * @property pubMed Where its PubMed paging stands
+ * @property europePMC Where its Europe PMC paging stands
+ */
+data class SessionPaging(val pubMed: PubMedPaging, val europePMC: EuropePMCPaging)
+
+/**
  * One page of a fact-check's literature search.
  *
  * @property provider Which providers to search; [SearchProvider.BOTH] halves the batch between them
@@ -57,9 +66,8 @@ data class EuropePMCPaging(val cursor: String?, val totalResults: Int, val resul
  * @property europePMCQuery The query in Europe PMC syntax; empty to leave Europe PMC out
  * @property batchSize How many results to ask for in all
  * @property includePreprints Whether Europe PMC may return preprints
- * @property isNextBatch False for a search's first page; true to continue from the session's paging
- * @property pubMedPaging Where the session's PubMed paging stands; read only for a next batch
- * @property europePMCPaging Where the session's Europe PMC paging stands; read only for a next batch
+ * @property continuation Where the session's paging stands, for a page that
+ *   continues it; null for a search's first page
  * @property query Whether this is the claim's own query or an alternative one smart search generated
  * @property sessionId The session the documents belong to
  * @property batchNumber The batch number the documents are stored with
@@ -72,9 +80,7 @@ data class SearchPageRequest(
     val europePMCQuery: String,
     val batchSize: Int,
     val includePreprints: Boolean,
-    val isNextBatch: Boolean,
-    val pubMedPaging: PubMedPaging,
-    val europePMCPaging: EuropePMCPaging,
+    val continuation: SessionPaging?,
     val query: ShortfallQuery,
     val sessionId: String,
     val batchNumber: Int,
@@ -89,13 +95,22 @@ data class SearchPageRequest(
  * @property shortfalls What the page failed to retrieve, the same failure of the same source once
  * @property pubMedPaging Where PubMed's paging goes next, or null to leave it as it was
  * @property europePMCPaging Where Europe PMC's paging goes next, or null to leave it as it was
+ * @throws IllegalArgumentException if it holds shortfalls but no document: a
+ *   page that failures leave with nothing is a [SearchFailedException], never an
+ *   empty page
  */
 data class SearchPageOutcome(
     val documents: List<DocumentEntity>,
     val shortfalls: List<RetrievalShortfall>,
     val pubMedPaging: PubMedPaging?,
     val europePMCPaging: EuropePMCPaging?
-)
+) {
+    init {
+        require(documents.isNotEmpty() || shortfalls.isEmpty()) {
+            "A page that failures left with no document is a failed search, not an outcome"
+        }
+    }
+}
 
 /**
  * Searches the providers a fact-check uses, one page at a time (#252).
@@ -177,26 +192,25 @@ class LiteratureSearch @Inject constructor(
      * @return PubMed's documents, shortfalls and paging
      */
     private suspend fun searchPubMed(request: SearchPageRequest, batchSize: Int): ProviderPage {
-        val paging = request.pubMedPaging
-        val offset = if (request.isNextBatch) paging.offset else 0
-        if (request.isNextBatch &&
-            SearchFailureReporting.expectedEsearchListing(paging.totalResults, offset, batchSize) == 0
-        ) {
+        val continuation = request.continuation?.pubMed
+        val offset = continuation?.offset ?: 0
+        // How many PMIDs a continuing page should list; unknown before the first page counts them
+        val expected = continuation?.let { SearchPaging.expectedEsearchListing(it.totalResults, offset, batchSize) }
+        if (expected == 0) {
             return ProviderPage.NOT_SEARCHED
         }
 
         val result = pubMedService.search(query = request.pubMedQuery, offset = offset, batchSize = batchSize)
         val page = result.getOrElse { error ->
             val failure = sourceFailure(error)
-            if (!request.isNextBatch) {
+            if (continuation == null || expected == null) {
                 return ProviderPage(emptyList(), listOf(RetrievalShortfall(SearchProvider.PUBMED, failure)))
             }
             // Asked only for a page that lists something, so at least one record is missing
-            val missing = SearchFailureReporting.expectedEsearchListing(paging.totalResults, offset, batchSize)
             return ProviderPage(
                 emptyList(),
-                listOf(RetrievalShortfall(SearchProvider.PUBMED, failure, missing)),
-                pubMedPaging = PubMedPaging(offset + missing, paging.totalResults)
+                listOf(RetrievalShortfall(SearchProvider.PUBMED, failure, expected)),
+                pubMedPaging = PubMedPaging(offset + expected, continuation.totalResults)
             )
         }
 
@@ -223,9 +237,9 @@ class LiteratureSearch @Inject constructor(
         batchSize: Int,
         excludedPmids: Set<String>
     ): ProviderPage {
-        val paging = request.europePMCPaging
-        val cursor = if (request.isNextBatch) paging.cursor ?: return ProviderPage.NOT_SEARCHED else null
-        val received = if (request.isNextBatch) paging.resultsReceived else 0
+        val continuation = request.continuation?.europePMC
+        val cursor = if (continuation != null) continuation.cursor ?: return ProviderPage.NOT_SEARCHED else null
+        val received = if (continuation != null) continuation.resultsReceived else 0
 
         val result = europePMCService.search(
             query = request.europePMCQuery,
@@ -236,16 +250,16 @@ class LiteratureSearch @Inject constructor(
         )
         val page = result.getOrElse { error ->
             val failure = sourceFailure(error)
-            if (!request.isNextBatch) {
+            if (continuation == null) {
                 return ProviderPage(emptyList(), listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, failure)))
             }
             // The cursor promised more, so at least one record is missing; not knowing
             // how many came before claims the most the page could have held
-            val missing = maxOf(1, minOf(batchSize, paging.totalResults - (received ?: 0)))
+            val missing = maxOf(1, SearchPaging.expectedEuropePmcPage(continuation.totalResults, received ?: 0, batchSize))
             return ProviderPage(
                 emptyList(),
                 listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, failure, missing)),
-                europePMCPaging = EuropePMCPaging(cursor = null, totalResults = paging.totalResults, resultsReceived = received)
+                europePMCPaging = EuropePMCPaging(cursor = null, totalResults = continuation.totalResults, resultsReceived = received)
             )
         }
 

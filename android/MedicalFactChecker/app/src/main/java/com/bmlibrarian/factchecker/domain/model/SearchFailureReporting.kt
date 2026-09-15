@@ -36,25 +36,30 @@ import kotlinx.serialization.json.putJsonObject
  * Pure functions that carry a search failure to the reader: they build the
  * [RetrievalShortfall]s a search records, turn them into the notice, the
  * Methodology line and the failure message the user sees, and keep them in a
- * session. The sentences are shared verbatim with Python (`search_failures.py`)
- * and Swift; the contract is `doc/cross_platform/search_failure_reporting.md`.
+ * session. The sentences are the contract's
+ * (`doc/cross_platform/search_failure_reporting.md`), shared verbatim with
+ * Python's `search_failures.py`; Python runs no alternative queries, so it
+ * writes none of their clauses.
  */
 object SearchFailureReporting {
 
     /** Opens the notice that precedes whatever an incomplete search produced. */
     private const val NOTICE_OPENING = "> **Incomplete search:** "
 
-    /** The notice's Markdown markup, which a plain-text renderer leaves out. */
+    /** The notice's opening as plain text, its block-quote and bold markup left out. */
     private const val NOTICE_PLAIN_OPENING = "Incomplete search: "
+
+    /**
+     * The mark Android's history list shows beside a verdict whose search was
+     * incomplete, where the report's notice is not shown and nothing names what failed.
+     */
+    const val INCOMPLETE_REPORT_MARK = "${NOTICE_PLAIN_OPENING}the report rests only on the records that were retrieved."
 
     /** Separates the notice from the text it precedes. */
     private const val NOTICE_SEPARATOR = "\n\n"
 
     /** Separates the clauses of several shortfalls. */
     private const val CLAUSE_SEPARATOR = "; "
-
-    /** The largest number of records PubMed lists for one search (checked live 2026-09-15). */
-    const val PUBMED_LISTABLE_RECORDS = 9_999
 
     // Persisted keys and provider values. The stored strings are the contract's:
     // never rename one, and never derive a provider from SearchProvider's own names.
@@ -85,7 +90,7 @@ object SearchFailureReporting {
      * What NCBI answers a request whose API key it does not accept (400, checked
      * live for #243); 401 and 403 are refusals of the same kind.
      */
-    private val REFUSED_KEY_STATUSES = setOf(Constants.HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED, HTTP_FORBIDDEN)
+    private val REFUSED_KEY_STATUSES = setOf(Constants.HTTP_BAD_REQUEST, Constants.HTTP_UNAUTHORIZED, Constants.HTTP_FORBIDDEN)
 
     // ==================== Building shortfalls ====================
 
@@ -114,13 +119,15 @@ object SearchFailureReporting {
     /**
      * Report the same failure of the same source once, its counts added.
      *
-     * A session that meets one failure page after page would otherwise repeat
-     * one clause per page.
+     * A session that meets one failure page after page, or alternative query
+     * after alternative query, would otherwise repeat one clause each time.
      *
      * @param shortfalls What a search is missing, in the order it was recorded
-     * @return The shortfalls in first-seen order, with the counts of those naming
-     *   the same source and failure added together. A source that could not be
-     *   searched at all (no count) is never merged into a count.
+     * @return The shortfalls in first-seen order. Those naming the same source,
+     *   failure and query have their counts added, unless the sum is more than a
+     *   count holds: then they stay apart, so no count is cut short. A source that
+     *   could not be searched at all (no count) is never merged into a count, and
+     *   is reported once for each failure and query however often it failed.
      */
     fun combinedShortfalls(shortfalls: List<RetrievalShortfall>): List<RetrievalShortfall> {
         val combined = mutableListOf<RetrievalShortfall>()
@@ -129,32 +136,33 @@ object SearchFailureReporting {
                 earlier.provider == shortfall.provider &&
                     earlier.failure == shortfall.failure &&
                     earlier.query == shortfall.query &&
-                    earlier.recordsMissing != null &&
-                    shortfall.recordsMissing != null
+                    countsCombine(earlier.recordsMissing, shortfall.recordsMissing)
             }
             if (index < 0) {
                 combined.add(shortfall)
-            } else {
-                val earlier = combined[index]
-                combined[index] = earlier.copy(
-                    recordsMissing = checkNotNull(earlier.recordsMissing) + checkNotNull(shortfall.recordsMissing)
-                )
+                continue
             }
+            // A source that could not be searched is already reported
+            val earlierMissing = combined[index].recordsMissing ?: continue
+            combined[index] = combined[index].copy(recordsMissing = earlierMissing + checkNotNull(shortfall.recordsMissing))
         }
         return combined
     }
 
     /**
-     * How many PMIDs an esearch page should list.
+     * Whether two shortfalls of the same source, failure and query read as one clause.
      *
-     * @param totalCount The search's `count`
-     * @param retstart The page's offset
-     * @param retmax The page size asked for
-     * @return The PMIDs PubMed holds from [retstart] on, up to [retmax] and to
-     *   the first [PUBMED_LISTABLE_RECORDS]; 0 past the end of what can be listed
+     * @param earlier The count already reported, or null for a source not searched
+     * @param later The count to report, or null for a source not searched
+     * @return True for two sources not searched, or two counts whose sum a count
+     *   can hold; false when one has a count and the other has none
      */
-    fun expectedEsearchListing(totalCount: Int, retstart: Int, retmax: Int): Int =
-        maxOf(0, minOf(retmax, totalCount - retstart, PUBMED_LISTABLE_RECORDS - retstart))
+    private fun countsCombine(earlier: Int?, later: Int?): Boolean =
+        if (earlier == null || later == null) {
+            earlier == later
+        } else {
+            earlier.toLong() + later <= Int.MAX_VALUE
+        }
 
     // ==================== Telling the reader ====================
 
@@ -219,6 +227,30 @@ object SearchFailureReporting {
      */
     fun plainNotice(notice: String): String =
         if (notice.startsWith(NOTICE_OPENING)) NOTICE_PLAIN_OPENING + notice.removePrefix(NOTICE_OPENING) else notice
+
+    /**
+     * Separate the incomplete-search notice from the text behind it, the notice as plain text.
+     *
+     * For a surface that draws the notice ahead of the verdict and draws no
+     * Markdown for it: the report screen, the PDF and the shared text.
+     *
+     * @param text A report, with or without the notice
+     * @return The notice as [plainNotice] renders it and the text after it; or
+     *   null and the text unchanged when it does not open with one
+     */
+    fun splitPlainSearchShortfallNotice(text: String): Pair<String?, String> {
+        val (notice, body) = splitSearchShortfallNotice(text)
+        return notice?.let(::plainNotice) to body
+    }
+
+    /**
+     * Build the persistent warning an incomplete search shows while its session goes on.
+     *
+     * @param shortfalls What the session's searches failed to retrieve
+     * @return "Incomplete search: {clauses}.", or null when the searches were complete
+     */
+    fun incompleteSearchWarning(shortfalls: List<RetrievalShortfall>): String? =
+        if (shortfalls.isEmpty()) null else "$NOTICE_PLAIN_OPENING${describeSearchShortfalls(shortfalls)}."
 
     /**
      * Build the report's Methodology section for an incomplete search.
@@ -318,8 +350,8 @@ object SearchFailureReporting {
      * @param stored The stored value, untrusted; null when nothing was stored (a
      *   complete search, or a session saved before #252)
      * @return The shortfalls
-     * @throws IllegalArgumentException if the value is not a JSON array (`null`
-     *   included), or an entry is not an object naming PubMed or Europe PMC.
+     * @throws IllegalArgumentException if the value is not a JSON array (the JSON
+     *   literal `null` included), or an entry is not an object naming PubMed or Europe PMC.
      *   Nothing is skipped: a dropped shortfall would let a report claim a
      *   complete search.
      */
@@ -406,9 +438,3 @@ object SearchFailureReporting {
         SearchProvider.BOTH -> throw IllegalArgumentException("A retrieval shortfall must name PubMed or Europe PMC")
     }
 }
-
-/** HTTP 401, a refusal of the credentials sent. */
-private const val HTTP_UNAUTHORIZED = 401
-
-/** HTTP 403, a refusal of the request. */
-private const val HTTP_FORBIDDEN = 403

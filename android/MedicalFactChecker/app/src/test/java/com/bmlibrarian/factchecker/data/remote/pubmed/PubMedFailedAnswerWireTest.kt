@@ -30,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.QueueDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,15 +49,26 @@ class PubMedFailedAnswerWireTest {
 
     private lateinit var server: MockWebServer
 
+    /** How many answers the test queued: each is asked for once, and nothing more is. */
+    private var answersQueued = 0
+
     @Before
     fun setUp() {
-        server = MockWebServer().apply { start() }
+        // An unexpected request is answered at once, rather than waiting out the client's timeout on each retry
+        server = MockWebServer().apply {
+            (dispatcher as QueueDispatcher).setFailFast(true)
+            start()
+        }
         Log.clear()
     }
 
     @After
     fun tearDown() {
-        server.shutdown()
+        try {
+            assertEquals("requests the server received", answersQueued, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
     }
 
     /** A service on the production client and converters, pointed at the local server. */
@@ -68,6 +80,7 @@ class PubMedFailedAnswerWireTest {
     /** Answer the next request with an HTTP 200 and this body. */
     private fun answer(body: String) {
         server.enqueue(MockResponse().setResponseCode(HTTP_OK).setBody(body))
+        answersQueued++
     }
 
     @Test

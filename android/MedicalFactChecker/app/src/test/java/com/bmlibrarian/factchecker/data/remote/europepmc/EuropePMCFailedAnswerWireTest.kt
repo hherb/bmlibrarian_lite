@@ -30,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.QueueDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,15 +48,26 @@ class EuropePMCFailedAnswerWireTest {
 
     private lateinit var server: MockWebServer
 
+    /** How many answers the test queued: each is asked for once, and nothing more is. */
+    private var answersQueued = 0
+
     @Before
     fun setUp() {
-        server = MockWebServer().apply { start() }
+        // An unexpected request is answered at once, rather than waiting out the client's timeout on each retry
+        server = MockWebServer().apply {
+            (dispatcher as QueueDispatcher).setFailFast(true)
+            start()
+        }
         Log.clear()
     }
 
     @After
     fun tearDown() {
-        server.shutdown()
+        try {
+            assertEquals("requests the server received", answersQueued, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
     }
 
     /** A service on the app's converters, pointed at the local server. */
@@ -70,6 +82,7 @@ class EuropePMCFailedAnswerWireTest {
     /** Answer the next request with an HTTP 200 and this body. */
     private fun answer(body: String) {
         server.enqueue(MockResponse().setResponseCode(HTTP_OK).setBody(body))
+        answersQueued++
     }
 
     @Test
@@ -77,7 +90,7 @@ class EuropePMCFailedAnswerWireTest {
         // Europe PMC's answer for an unknown cursorMark (checked live 2026-09-14)
         answer("""{"version":"6.9"}""")
 
-        val error = service().search(query = "aspirin", cursor = "AoJwunknown").exceptionOrNull()
+        val error = service().search(query = "aspirin", cursor = "AoJwunknown", resultsReceived = 0).exceptionOrNull()
 
         assertEquals(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), (error as SourceRequestException).failure)
     }
@@ -86,10 +99,11 @@ class EuropePMCFailedAnswerWireTest {
     fun `an answer that is no JSON cannot be read, and is not quoted`() = runBlocking {
         answer("<html><body>BODY_TEXT</body></html>")
 
-        val error = service().search(query = "aspirin").exceptionOrNull()
+        val error = service().search(query = "aspirin", resultsReceived = 0).exceptionOrNull()
 
         assertEquals(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), (error as SourceRequestException).failure)
         assertFalse(error.message.orEmpty().contains("BODY_TEXT"))
+        assertTrue("nothing was logged, so nothing was checked", Log.lines.isNotEmpty())
         for (line in Log.lines) {
             assertFalse("logged the body: $line", line.contains("BODY_TEXT"))
         }
@@ -104,7 +118,7 @@ class EuropePMCFailedAnswerWireTest {
                 """{"pmid":"3","title":"Also kept","source":"MED"}]}}"""
         )
 
-        val searched = service().search(query = "aspirin", batchSize = 3).getOrThrow()
+        val searched = service().search(query = "aspirin", batchSize = 3, resultsReceived = 0).getOrThrow()
 
         assertEquals(listOf("1", "3"), searched.articles.map { it.pmid })
         assertEquals(
@@ -123,7 +137,7 @@ class EuropePMCFailedAnswerWireTest {
     fun `a result list that is no list cannot be read`() = runBlocking {
         answer("""{"hitCount":3,"resultList":{"result":{"pmid":"1"}}}""")
 
-        val error = service().search(query = "aspirin").exceptionOrNull()
+        val error = service().search(query = "aspirin", resultsReceived = 0).exceptionOrNull()
 
         assertEquals(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), (error as SourceRequestException).failure)
     }

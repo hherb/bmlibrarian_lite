@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchPaging
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -71,7 +72,13 @@ data class ESearchResult(
      */
     @SerialName("ERROR")
     val error: JsonElement? = null
-)
+) {
+    /** The result without [error]'s text, which is shown only as present or absent. */
+    override fun toString(): String =
+        "ESearchResult(count=$count, retMax=$retMax, retStart=$retStart, idList=$idList, webEnv=$webEnv, " +
+            "queryKey=$queryKey, queryTranslation=$queryTranslation, errorList=$errorList, " +
+            "error=${if (error == null) "null" else "(not shown)"})"
+}
 
 /**
  * Search error list.
@@ -141,10 +148,12 @@ data class PubMedSearchResult(
     val articles: List<ParsedArticle>,
     /** Total number of results for the query. */
     val totalResults: Int,
-    /** Offset for next page of results. */
+    /** The next page's offset: past the PMIDs this page listed, and past those it should have listed but did not. */
     val nextOffset: Int,
-    /** Whether there are more results available. */
-    val hasMore: Boolean,
     /** What this page failed to retrieve: PMIDs left unlisted or unfetched, and unreadable articles. */
-    val shortfalls: List<RetrievalShortfall> = emptyList()
-)
+    val shortfalls: List<RetrievalShortfall>
+) {
+    /** Whether PubMed has a next page to list. */
+    val hasMore: Boolean
+        get() = SearchPaging.pubMedHasNextPage(nextOffset, totalResults)
+}

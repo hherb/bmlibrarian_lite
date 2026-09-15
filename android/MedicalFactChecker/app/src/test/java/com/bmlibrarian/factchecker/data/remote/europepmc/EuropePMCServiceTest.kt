@@ -80,7 +80,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        val result = service.search(query = "aspirin cardiovascular")
+        val result = service.search(query = "aspirin cardiovascular", resultsReceived = 0)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -105,7 +105,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        val result = service.search(query = "nonexistent query")
+        val result = service.search(query = "nonexistent query", resultsReceived = 0)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -136,7 +136,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        service.search(query = "test", cursor = null)
+        service.search(query = "test", cursor = null, resultsReceived = 0)
 
         // Assert
         coVerify {
@@ -167,7 +167,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        service.search(query = "test", cursor = cursor)
+        service.search(query = "test", cursor = cursor, resultsReceived = 0)
 
         // Assert
         coVerify {
@@ -197,7 +197,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        service.search(query = "test", batchSize = batchSize)
+        service.search(query = "test", batchSize = batchSize, resultsReceived = 0)
 
         // Assert
         coVerify {
@@ -228,7 +228,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        service.search(query = "aspirin", includePreprints = false)
+        service.search(query = "aspirin", includePreprints = false, resultsReceived = 0)
 
         // Assert
         coVerify {
@@ -263,7 +263,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        service.search(query = "aspirin", includePreprints = true)
+        service.search(query = "aspirin", includePreprints = true, resultsReceived = 0)
 
         // Assert
         coVerify {
@@ -296,7 +296,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        val result = service.search(query = "test", cursor = currentCursor)
+        val result = service.search(query = "test", cursor = currentCursor, resultsReceived = 0)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -320,7 +320,7 @@ class EuropePMCServiceTest {
         )
 
         // Act
-        val result = service.search(query = "test")
+        val result = service.search(query = "test", resultsReceived = 0)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -359,7 +359,7 @@ class EuropePMCServiceTest {
         } returns Response.error(500, "Server error".toResponseBody(null))
 
         // Act
-        val result = service.search(query = "test")
+        val result = service.search(query = "test", resultsReceived = 0)
 
         // Assert
         assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 500), (result.exceptionOrNull() as SourceRequestException).failure)
@@ -373,7 +373,7 @@ class EuropePMCServiceTest {
         } returns Response.error(400, "Bad request".toResponseBody(null))
 
         // Act
-        val result = service.search(query = "invalid query")
+        val result = service.search(query = "invalid query", resultsReceived = 0)
 
         // Assert
         assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 400), (result.exceptionOrNull() as SourceRequestException).failure)
@@ -387,7 +387,7 @@ class EuropePMCServiceTest {
         } returns Response.success(null)
 
         // Act
-        val result = service.search(query = "test")
+        val result = service.search(query = "test", resultsReceived = 0)
 
         // Assert
         assertEquals(
@@ -420,7 +420,7 @@ class EuropePMCServiceTest {
         }
 
         // Act
-        val result = service.search(query = "test")
+        val result = service.search(query = "test", resultsReceived = 0)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -450,7 +450,7 @@ class EuropePMCServiceTest {
         }
 
         // Act
-        val result = service.search(query = "test")
+        val result = service.search(query = "test", resultsReceived = 0)
 
         // Assert
         assertTrue(result.isSuccess)

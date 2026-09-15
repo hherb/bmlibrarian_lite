@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.domain.workflow
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCArticle
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCResultList
@@ -41,6 +42,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -67,6 +69,7 @@ class LiteratureSearchTest {
             PubMedService(pubMedApi) { NcbiCredentials.of(apiKey = null, email = null) },
             EuropePMCService(europePMCApi)
         )
+        Log.clear()
     }
 
     // ==================== A first page ====================
@@ -126,6 +129,26 @@ class LiteratureSearchTest {
     }
 
     @Test
+    fun `a record both providers return on one page is kept once`() = runTest {
+        pubMedAnswers(count = 1, pmids = listOf("1"))
+        europePMCAnswers(hitCount = 2, cursor = null, pmids = listOf("1", "2"))
+
+        val page = search.searchPage(request(SearchProvider.BOTH, batchSize = 4))
+
+        assertEquals(listOf("1", "2"), page.documents.map { it.pmid })
+        assertEquals("PubMed's copy is the one kept", "T1", page.documents.first().title)
+    }
+
+    @Test
+    fun `a page outcome cannot hold losses without a document`() {
+        val lost = RetrievalShortfall(SearchProvider.PUBMED, http(429))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            SearchPageOutcome(documents = emptyList(), shortfalls = listOf(lost), pubMedPaging = null, europePMCPaging = null)
+        }
+    }
+
+    @Test
     fun `both providers share the batch`() = runTest {
         pubMedAnswers(count = 0, pmids = emptyList())
         europePMCAnswers(hitCount = 0, cursor = null, pmids = emptyList())
@@ -177,7 +200,7 @@ class LiteratureSearchTest {
     }
 
     @Test
-    fun `a later page that failed everywhere is an error that changes no paging`() = runTest {
+    fun `a later page that failed everywhere is an error that counts the page's records`() = runTest {
         pubMedFailsWith(429)
 
         val error = failedSearch(
@@ -236,7 +259,7 @@ class LiteratureSearchTest {
     }
 
     @Test
-    fun `a session that never counted its Europe PMC records pages on without claiming any missing`() = runTest {
+    fun `a session that never counted its Europe PMC records ends its cursor at an empty page, claiming none missing`() = runTest {
         pubMedAnswers(count = 0, pmids = emptyList())
         coEvery { europePMCApi.search(any(), any(), any(), any(), any()) } returns Response.success(
             EuropePMCSearchResponse(hitCount = 40, nextCursorMark = "AoK", resultList = EuropePMCResultList(result = emptyList()))
@@ -317,9 +340,7 @@ class LiteratureSearchTest {
         europePMCQuery = "aspirin",
         batchSize = batchSize,
         includePreprints = false,
-        isNextBatch = isNextBatch,
-        pubMedPaging = pubMed,
-        europePMCPaging = europePMC,
+        continuation = if (isNextBatch) SessionPaging(pubMed, europePMC) else null,
         query = query,
         sessionId = "session",
         batchNumber = 1,

@@ -24,6 +24,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
+import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -67,7 +68,7 @@ class EuropePMCSearchFailureTest {
     fun `an HTTP error that outlasts the retries keeps only its status`() = runTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } returns Response.error(500, "BODY_TEXT".toResponseBody(null))
 
-        val result = service.search(query = "aspirin")
+        val result = service.search(query = "aspirin", resultsReceived = 0)
 
         assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 500), failureOf(result))
         assertFalse(result.exceptionOrNull()?.message.orEmpty().contains("BODY_TEXT"))
@@ -77,25 +78,25 @@ class EuropePMCSearchFailureTest {
     fun `a rate limit is retried, then reported as HTTP 429`() = runTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } returns Response.error(429, "".toResponseBody(null))
 
-        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 429), failureOf(service.search(query = "aspirin")))
-        coVerify(atLeast = 2) { api.search(any(), any(), any(), any(), any()) }
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 429), failureOf(service.search(query = "aspirin", resultsReceived = 0)))
+        coVerify(exactly = Constants.NETWORK_MAX_RETRIES + 1) { api.search(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `a rejected query is an HTTP 400, not retried`() = runTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } returns Response.error(400, "".toResponseBody(null))
 
-        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 400), failureOf(service.search(query = "((")))
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 400), failureOf(service.search(query = "((", resultsReceived = 0)))
         coVerify(exactly = 1) { api.search(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `a connection that keeps failing is a connection failure, and a timeout a timeout`() = runTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } throws IOException("reset")
-        assertEquals(RequestFailure(RequestFailureKind.CONNECTION), failureOf(service.search(query = "aspirin")))
+        assertEquals(RequestFailure(RequestFailureKind.CONNECTION), failureOf(service.search(query = "aspirin", resultsReceived = 0)))
 
         coEvery { api.search(any(), any(), any(), any(), any()) } throws SocketTimeoutException()
-        assertEquals(RequestFailure(RequestFailureKind.TIMEOUT), failureOf(service.search(query = "aspirin")))
+        assertEquals(RequestFailure(RequestFailureKind.TIMEOUT), failureOf(service.search(query = "aspirin", resultsReceived = 0)))
     }
 
     @Test
@@ -103,7 +104,7 @@ class EuropePMCSearchFailureTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } throws
             SerializationException("Unexpected JSON token at offset 0: BODY_TEXT")
 
-        val result = service.search(query = "aspirin")
+        val result = service.search(query = "aspirin", resultsReceived = 0)
 
         assertEquals(MALFORMED, failureOf(result))
         assertFalse(result.exceptionOrNull()?.message.orEmpty().contains("BODY_TEXT"))
@@ -115,7 +116,7 @@ class EuropePMCSearchFailureTest {
     fun `an answer without a body cannot be read`() = runTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } returns Response.success(null)
 
-        assertEquals(MALFORMED, failureOf(service.search(query = "aspirin")))
+        assertEquals(MALFORMED, failureOf(service.search(query = "aspirin", resultsReceived = 0)))
     }
 
     @Test
@@ -124,7 +125,7 @@ class EuropePMCSearchFailureTest {
         for (hitCount in listOf(null, -1)) {
             answer(EuropePMCSearchResponse(hitCount = hitCount, resultList = EuropePMCResultList(result = emptyList())))
 
-            assertEquals("hitCount $hitCount", MALFORMED, failureOf(service.search(query = "aspirin", cursor = "AoJ")))
+            assertEquals("hitCount $hitCount", MALFORMED, failureOf(service.search(query = "aspirin", cursor = "AoJ", resultsReceived = 0)))
         }
     }
 
@@ -133,7 +134,7 @@ class EuropePMCSearchFailureTest {
         for (resultList in listOf(null, EuropePMCResultList(result = null))) {
             answer(EuropePMCSearchResponse(hitCount = 5, resultList = resultList))
 
-            assertEquals("$resultList", MALFORMED, failureOf(service.search(query = "aspirin")))
+            assertEquals("$resultList", MALFORMED, failureOf(service.search(query = "aspirin", resultsReceived = 0)))
         }
     }
 
@@ -141,7 +142,7 @@ class EuropePMCSearchFailureTest {
     fun `an empty first page the hit count promised results for is a failed request`() = runTest {
         answer(EuropePMCSearchResponse(hitCount = 57, nextCursorMark = "AoJ", resultList = EuropePMCResultList(result = emptyList())))
 
-        assertEquals(INCOMPLETE, failureOf(service.search(query = "aspirin")))
+        assertEquals(INCOMPLETE, failureOf(service.search(query = "aspirin", resultsReceived = 0)))
     }
 
     @Test
@@ -156,7 +157,7 @@ class EuropePMCSearchFailureTest {
         coEvery { api.search(any(), any(), any(), any(), any()) } throws CancellationException("abandoned")
 
         val thrown = try {
-            service.search(query = "aspirin")
+            service.search(query = "aspirin", resultsReceived = 0)
             null
         } catch (e: CancellationException) {
             e
@@ -171,7 +172,7 @@ class EuropePMCSearchFailureTest {
     fun `no hits and an empty page is a search that matched nothing`() = runTest {
         answer(EuropePMCSearchResponse(hitCount = 0, nextCursorMark = "*", resultList = EuropePMCResultList(result = emptyList())))
 
-        val searched = service.search(query = "aspirin").getOrThrow()
+        val searched = service.search(query = "aspirin", resultsReceived = 0).getOrThrow()
 
         assertTrue(searched.articles.isEmpty())
         assertTrue(searched.shortfalls.isEmpty())
@@ -180,14 +181,15 @@ class EuropePMCSearchFailureTest {
     }
 
     @Test
-    fun `a cursor that ends before the page's hits arrived records the rest as missing`() = runTest {
+    fun `a cursor that ends before its hits arrived records every hit it never sent as missing`() = runTest {
         // The cursor ends only once every hit was sent (checked live 2026-09-15)
         answer(EuropePMCSearchResponse(hitCount = 50, nextCursorMark = null, resultList = results(5)))
 
-        val searched = service.search(query = "aspirin", batchSize = 20).getOrThrow()
+        val searched = service.search(query = "aspirin", batchSize = 20, resultsReceived = 0).getOrThrow()
 
         assertEquals(5, searched.articles.size)
-        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, INCOMPLETE, 15)), searched.shortfalls)
+        // Nothing past an ended cursor can be asked for: 50 - 5 hits are out of reach
+        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, INCOMPLETE, 45)), searched.shortfalls)
         assertNull(searched.nextCursor)
         assertFalse(searched.hasMore)
     }
@@ -198,12 +200,31 @@ class EuropePMCSearchFailureTest {
 
         val searched = service.search(query = "aspirin", cursor = "AoJ", batchSize = 20, resultsReceived = 20).getOrThrow()
 
-        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, INCOMPLETE, 15)), searched.shortfalls)
+        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, INCOMPLETE, 25)), searched.shortfalls)
         assertFalse(searched.hasMore)
     }
 
     @Test
-    fun `the last page ends the cursor with nothing missing`() = runTest {
+    fun `a full page whose cursor ends early records the hits beyond it as missing`() = runTest {
+        answer(EuropePMCSearchResponse(hitCount = 500, nextCursorMark = null, resultList = results(25)))
+
+        val searched = service.search(query = "aspirin", batchSize = 25, resultsReceived = 0).getOrThrow()
+
+        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, INCOMPLETE, 475)), searched.shortfalls)
+    }
+
+    @Test
+    fun `what an earlier short page lost is counted once the cursor ends`() = runTest {
+        // An earlier page held 5 of 20 while its cursor went on; this one is full, and the cursor ends
+        answer(EuropePMCSearchResponse(hitCount = 50, nextCursorMark = null, resultList = results(20)))
+
+        val searched = service.search(query = "aspirin", cursor = "AoK", batchSize = 20, resultsReceived = 5).getOrThrow()
+
+        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, INCOMPLETE, 25)), searched.shortfalls)
+    }
+
+    @Test
+    fun `a last page loses nothing even while a cursor is offered`() = runTest {
         answer(EuropePMCSearchResponse(hitCount = 45, nextCursorMark = "AoK", resultList = results(5)))
 
         val searched = service.search(query = "aspirin", cursor = "AoJ", batchSize = 20, resultsReceived = 40).getOrThrow()
@@ -217,7 +238,7 @@ class EuropePMCSearchFailureTest {
     fun `a short page with a cursor that goes on loses nothing yet`() = runTest {
         answer(EuropePMCSearchResponse(hitCount = 50, nextCursorMark = "AoK", resultList = results(5)))
 
-        val searched = service.search(query = "aspirin", batchSize = 20).getOrThrow()
+        val searched = service.search(query = "aspirin", batchSize = 20, resultsReceived = 0).getOrThrow()
 
         assertTrue(searched.shortfalls.isEmpty())
         assertEquals("AoK", searched.nextCursor)
@@ -225,7 +246,7 @@ class EuropePMCSearchFailureTest {
     }
 
     @Test
-    fun `when how many records came before is unknown, an empty later page ends the cursor as it always did`() = runTest {
+    fun `when how many records came before is unknown, an empty later page ends the cursor`() = runTest {
         // A session saved before #252 kept a cursor but no count of what it received
         answer(EuropePMCSearchResponse(hitCount = 57, nextCursorMark = "AoK", resultList = EuropePMCResultList(result = emptyList())))
 
@@ -250,7 +271,7 @@ class EuropePMCSearchFailureTest {
         val page = listOf(article("1", "Kept"), null, article("3", " "), article("4", null), article("5", "Also kept"))
         answer(EuropePMCSearchResponse(hitCount = 5, nextCursorMark = "AoK", resultList = EuropePMCResultList(result = page)))
 
-        val searched = service.search(query = "aspirin", batchSize = 20).getOrThrow()
+        val searched = service.search(query = "aspirin", batchSize = 20, resultsReceived = 0).getOrThrow()
 
         assertEquals(listOf("1", "5"), searched.articles.map { it.pmid })
         assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, MALFORMED, 3)), searched.shortfalls)
@@ -284,6 +305,7 @@ class EuropePMCSearchFailureTest {
 
     /** Assert that no logged line contains this text. */
     private fun assertNothingLogged(text: String) {
+        assertTrue("nothing was logged, so nothing was checked", Log.lines.isNotEmpty())
         for (line in Log.lines) {
             assertFalse("logged \"$text\": $line", line.contains(text))
         }

@@ -45,6 +45,10 @@ class ReportEntitySearchNoticeTest {
     @Test
     fun `a report written from a complete search does not`() {
         assertFalse(report(ReportText.fullReport("Analysis.", "Refs.", emptyList())).searchWasIncomplete)
+    }
+
+    @Test
+    fun `a notice's opening with no text after it is not a notice`() {
         assertFalse(report("> **Incomplete search:** quoted inside, with no blank line after").searchWasIncomplete)
     }
 

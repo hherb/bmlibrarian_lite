@@ -26,6 +26,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
+import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -77,6 +78,14 @@ class PubMedSearchFailureTest {
         assertEquals(RequestFailure(RequestFailureKind.SERVICE_ERROR), failure)
         coVerify(exactly = 1) { api.search(any(), any(), any(), any(), any(), any(), any(), any()) }
         assertNothingLogged("SERVER_TEXT")
+    }
+
+    @Test
+    fun `an esearch result printed anywhere does not print its ERROR text`() {
+        val result = ESearchResult(count = "0", error = JsonPrimitive("Search Backend failed: SERVER_TEXT"))
+
+        assertFalse(result.toString().contains("SERVER_TEXT"))
+        assertTrue("the ERROR's presence is still shown: $result", result.toString().contains("error="))
     }
 
     @Test
@@ -167,7 +176,7 @@ class PubMedSearchFailureTest {
             Response.error(429, "".toResponseBody(null))
 
         assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 429), failureOf(service.search(query = "aspirin")))
-        coVerify(atLeast = 2) { api.search(any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = Constants.NETWORK_MAX_RETRIES + 1) { api.search(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -375,6 +384,7 @@ class PubMedSearchFailureTest {
 
     /** Assert that no logged line contains this text. */
     private fun assertNothingLogged(text: String) {
+        assertTrue("nothing was logged, so nothing was checked", Log.lines.isNotEmpty())
         for (line in Log.lines) {
             assertFalse("logged \"$text\": $line", line.contains(text))
         }

@@ -315,6 +315,17 @@ class TestBuildingShortfalls:
 
         assert combined_shortfalls(shortfalls) == shortfalls
 
+    def test_a_source_that_could_not_be_searched_is_reported_once(self) -> None:
+        """The same source failing the same way again repeats nothing the reader needs twice."""
+        unavailable = RetrievalShortfall(SearchProvider.PUBMED, UNAVAILABLE)
+        partial = RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=4)
+
+        assert combined_shortfalls([PUBMED_DOWN, partial, PUBMED_DOWN, unavailable]) == [
+            PUBMED_DOWN,
+            partial,
+            unavailable,
+        ]
+
 
 class TestSearchShortfallNotice:
     """The notice a report or message carries when the search was incomplete."""

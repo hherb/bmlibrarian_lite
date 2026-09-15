@@ -23,6 +23,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.SearchPaging
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import java.util.Date
@@ -182,7 +183,7 @@ data class SessionEntity(
 
     /** Whether PubMed has a next page: past the offset, and within the records PubMed lists. */
     private val pubMedHasMore: Boolean
-        get() = pubmedOffset < minOf(pubmedTotalResults, SearchFailureReporting.PUBMED_LISTABLE_RECORDS)
+        get() = SearchPaging.pubMedHasNextPage(pubmedOffset, pubmedTotalResults)
 
     /**
      * Read what the session's searches failed to retrieve.

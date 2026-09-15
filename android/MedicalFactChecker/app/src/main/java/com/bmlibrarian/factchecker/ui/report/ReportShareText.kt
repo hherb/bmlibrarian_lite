@@ -38,12 +38,12 @@ object ReportShareText {
      *   report and its footnotes
      */
     fun build(report: ReportEntity): String = buildString {
-        val (notice, body) = SearchFailureReporting.splitSearchShortfallNotice(report.fullReportMarkdown)
+        val (notice, body) = SearchFailureReporting.splitPlainSearchShortfallNotice(report.fullReportMarkdown)
         appendLine("Medical Fact Check Report")
         appendLine("========================")
         appendLine()
         notice?.let {
-            appendLine(SearchFailureReporting.plainNotice(it))
+            appendLine(it)
             appendLine()
         }
         appendLine("Verdict: ${report.verdict.displayName}")

@@ -44,6 +44,12 @@ object Constants {
     /** HTTP 400: a malformed request, or for NCBI a rejected API key. */
     const val HTTP_BAD_REQUEST = 400
 
+    /** HTTP 401: the credentials sent were refused. */
+    const val HTTP_UNAUTHORIZED = 401
+
+    /** HTTP 403: the request was refused. */
+    const val HTTP_FORBIDDEN = 403
+
     /** HTTP 429: rate limited. */
     const val HTTP_TOO_MANY_REQUESTS = 429
 
@@ -222,6 +228,12 @@ object Constants {
 
     /** Maximum tokens for query conversion responses. Matches iOS value for cross-platform consistency. */
     const val LLM_QUERY_MAX_TOKENS = 512
+
+    /**
+     * How many more times smart search asks the model for alternative queries
+     * when its answer holds none that can be used. Each answer is a paid call.
+     */
+    const val MAX_QUERY_RETRIES = 2
 
     /** Estimated characters per token for token count estimation. */
     const val TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4

@@ -43,13 +43,19 @@ class RetrievalShortfallTest {
 
     @Test
     fun `the persisted values are the contract's`() {
-        // Renaming one would make stored shortfalls read as a failed request
+        // Renaming one would make stored shortfalls read as a failed request; swapping two, as another kind
         assertEquals(
-            setOf(
-                "timeout", "connection", "http_status", "redirect_refused",
-                "service_error", "malformed_response", "incomplete_response", "request_failed"
+            mapOf(
+                RequestFailureKind.TIMEOUT to "timeout",
+                RequestFailureKind.CONNECTION to "connection",
+                RequestFailureKind.HTTP_STATUS to "http_status",
+                RequestFailureKind.REDIRECT_REFUSED to "redirect_refused",
+                RequestFailureKind.SERVICE_ERROR to "service_error",
+                RequestFailureKind.MALFORMED_RESPONSE to "malformed_response",
+                RequestFailureKind.INCOMPLETE_RESPONSE to "incomplete_response",
+                RequestFailureKind.REQUEST_FAILED to "request_failed",
             ),
-            RequestFailureKind.entries.map { it.persistedValue }.toSet()
+            RequestFailureKind.entries.associateWith { it.persistedValue }
         )
     }
 
@@ -97,10 +103,43 @@ class RetrievalShortfallTest {
     @Test
     fun `the reason phrases are the contract's, not a library's`() {
         // Python 3.13 renamed 413 and 414; the contract fixes the wording
-        assertEquals("HTTP 413 Content Too Large", RequestFailure(RequestFailureKind.HTTP_STATUS, 413).describe())
-        assertEquals("HTTP 414 URI Too Long", RequestFailure(RequestFailureKind.HTTP_STATUS, 414).describe())
+        val phrases = mapOf(
+            400 to "Bad Request",
+            401 to "Unauthorized",
+            403 to "Forbidden",
+            404 to "Not Found",
+            408 to "Request Timeout",
+            413 to "Content Too Large",
+            414 to "URI Too Long",
+            429 to "Too Many Requests",
+            500 to "Internal Server Error",
+            502 to "Bad Gateway",
+            503 to "Service Unavailable",
+            504 to "Gateway Timeout",
+        )
+
+        for ((status, phrase) in phrases) {
+            assertEquals("HTTP $status $phrase", RequestFailure(RequestFailureKind.HTTP_STATUS, status).describe())
+        }
         assertEquals("HTTP 422", RequestFailure(RequestFailureKind.HTTP_STATUS, 422).describe())
-        assertEquals("HTTP 401 Unauthorized", RequestFailure(RequestFailureKind.HTTP_STATUS, 401).describe())
+    }
+
+    @Test
+    fun `a source failure carries no cause, even one attached after it was built`() {
+        val error = SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.TIMEOUT))
+
+        error.initCause(IOException("BODY_TEXT"))
+
+        assertNull(error.cause)
+    }
+
+    @Test
+    fun `a failed search carries no cause, even one attached after it was built`() {
+        val error = SearchFailedException(listOf(RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.TIMEOUT))))
+
+        error.initCause(IOException("BODY_TEXT"))
+
+        assertNull(error.cause)
     }
 
     // ==================== Constructing a failure ====================

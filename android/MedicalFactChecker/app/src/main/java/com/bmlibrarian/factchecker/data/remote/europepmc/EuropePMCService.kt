@@ -20,17 +20,20 @@ package com.bmlibrarian.factchecker.data.remote.europepmc
 
 import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.sendSourceRequest
+import com.bmlibrarian.factchecker.data.remote.unreadableSourceAnswer
+import com.bmlibrarian.factchecker.data.remote.withSourceRetries
 import com.bmlibrarian.factchecker.domain.model.EuropePMCError
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.SearchPaging
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.cancellation.CancellationException
 
 /** Log tag for Europe PMC search diagnostics. */
 private const val TAG = "EuropePMCService"
@@ -55,19 +58,20 @@ class EuropePMCService @Inject constructor(
      * its retries, an answer that cannot be read (such as the bare `version`
      * Europe PMC sends for an unknown cursor), and an empty page the hit count
      * promised results for all fail with a [SourceRequestException]. A page that
-     * answered but holds less than it should (a cursor that ends before the
-     * page's hits arrived, records that could not be read or have no title)
-     * succeeds, and says what is missing in [EuropePMCSearchResult.shortfalls].
-     * Cancellation is rethrown, so a cancelled search stays cancelled.
+     * answered but holds less than it should (a cursor that ends before every hit
+     * arrived, records that could not be read or have no title) succeeds, and says
+     * what is missing in [EuropePMCSearchResult.shortfalls]. Cancellation is
+     * rethrown, so a cancelled search stays cancelled.
      *
      * @param query Search query (supports Europe PMC syntax)
      * @param cursor Cursor for pagination (null or "*" for first page)
      * @param batchSize Number of results per page
      * @param includePreprints Whether to include preprints in results
      * @param resultsReceived How many records the search's earlier pages held,
-     *   readable or not; with the hit count, it says how many this page should hold.
+     *   readable or not, 0 for a first page; with the hit count, it says how many
+     *   this page should hold and, once the cursor ends, how many never arrived.
      *   Null when nobody counted (a session saved before #252): then an empty page
-     *   ends the cursor, as it always did, and no count is expected of the page
+     *   ends the cursor, and nothing is expected of the page
      * @return The page, or a [SourceRequestException] carrying why the search failed
      */
     suspend fun search(
@@ -75,15 +79,10 @@ class EuropePMCService @Inject constructor(
         cursor: String? = null,
         batchSize: Int = EuropePMCApi.DEFAULT_PAGE_SIZE,
         includePreprints: Boolean = false,
-        resultsReceived: Int? = 0
+        resultsReceived: Int?
     ): Result<EuropePMCSearchResult> {
         return try {
-            val page = NetworkRetry.withExponentialBackoff(
-                maxRetries = Constants.NETWORK_MAX_RETRIES,
-                shouldRetry = { e -> e is SourceRequestException && e.failure.isRetryable }
-            ) {
-                requestSearchPage(query, cursor, batchSize, includePreprints)
-            }
+            val page = withSourceRetries { requestSearchPage(query, cursor, batchSize, includePreprints) }
             Result.success(readSearchPage(page, cursor, batchSize, resultsReceived))
         } catch (e: SourceRequestException) {
             Log.w(TAG, "Europe PMC search failed: ${e.message}")
@@ -142,9 +141,6 @@ class EuropePMCService @Inject constructor(
     /**
      * Request one search page and refuse an unsuccessful answer.
      *
-     * An error the transport raised is reduced to its [RequestFailure] and not
-     * kept: a converter's message quotes the body it could not read.
-     *
      * @param query Search query
      * @param cursor Cursor for pagination, or null for the first page
      * @param batchSize Number of results per page
@@ -166,22 +162,16 @@ class EuropePMCService @Inject constructor(
             query
         }
 
-        val response = try {
+        val response = sendSourceRequest(
+            SearchProvider.EUROPE_PMC,
+            TAG,
+            statusFailure = { status -> RequestFailure(RequestFailureKind.HTTP_STATUS, status) }
+        ) {
             api.search(
                 query = fullQuery,
                 pageSize = batchSize,
                 cursorMark = cursor ?: EuropePMCApi.INITIAL_CURSOR
             )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            val failure = RequestFailure.fromException(e)
-            Log.w(TAG, "Europe PMC request failed: ${failure.describe()} (${e.javaClass.simpleName})")
-            throw SourceRequestException(SearchProvider.EUROPE_PMC, failure)
-        }
-
-        if (!response.isSuccessful) {
-            throw SourceRequestException(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.HTTP_STATUS, response.code()))
         }
         return response.body() ?: throw unreadableAnswer("answer has no body")
     }
@@ -208,7 +198,7 @@ class EuropePMCService @Inject constructor(
         val records = page.resultList?.result ?: throw unreadableAnswer("answer has no resultList.result list")
 
         // Unknown when nobody counted what came before: then nothing is expected of the page
-        val expected = resultsReceived?.let { maxOf(0, minOf(batchSize, hitCount - it)) } ?: 0
+        val expected = resultsReceived?.let { SearchPaging.expectedEuropePmcPage(hitCount, it, batchSize) } ?: 0
         if (records.isEmpty() && expected > 0) {
             Log.e(TAG, "Europe PMC sent an empty page after $resultsReceived of $hitCount results")
             throw SourceRequestException(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
@@ -218,10 +208,16 @@ class EuropePMCService @Inject constructor(
         val nextCursor = page.nextCursorMark?.takeIf {
             it != cursor && it != EuropePMCApi.INITIAL_CURSOR && records.isNotEmpty()
         }
-        // The cursor ends only once every hit was sent (checked live 2026-09-15)
-        val cutShort = if (nextCursor == null) maxOf(0, expected - records.size) else 0
+        // The cursor ends only once every hit was sent (checked live 2026-09-15). Nothing
+        // past an ended cursor can be asked for, so every hit not received is missing,
+        // including those an earlier page left out while its cursor went on
+        val cutShort = if (nextCursor == null && resultsReceived != null) {
+            maxOf(0, hitCount - (resultsReceived + records.size))
+        } else {
+            0
+        }
         if (cutShort > 0) {
-            Log.e(TAG, "Europe PMC's cursor ended after ${records.size} of $expected results on a page")
+            Log.e(TAG, "Europe PMC's cursor ended after ${resultsReceived?.plus(records.size)} of $hitCount results")
         }
 
         val articles = records.filterNotNull().filter { !it.title.isNullOrBlank() }
@@ -234,7 +230,6 @@ class EuropePMCService @Inject constructor(
             articles = articles,
             totalResults = hitCount,
             nextCursor = nextCursor,
-            hasMore = nextCursor != null,
             resultsReceived = records.size,
             shortfalls = SearchFailureReporting.shortfallsForMissingRecords(
                 SearchProvider.EUROPE_PMC,
@@ -254,10 +249,8 @@ class EuropePMCService @Inject constructor(
      * @param reason What was wrong, naming fields only
      * @return The error to throw
      */
-    private fun unreadableAnswer(reason: String): SourceRequestException {
-        Log.e(TAG, "Unreadable Europe PMC search answer: $reason")
-        return SourceRequestException(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
-    }
+    private fun unreadableAnswer(reason: String): SourceRequestException =
+        unreadableSourceAnswer(SearchProvider.EUROPE_PMC, TAG, reason)
 
     /**
      * Perform full text retrieval.

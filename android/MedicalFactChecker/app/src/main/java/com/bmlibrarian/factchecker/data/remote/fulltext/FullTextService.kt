@@ -333,7 +333,8 @@ class FullTextService @Inject constructor(
         return try {
             val result = europePmcService.search(
                 query = query,
-                batchSize = 1
+                batchSize = 1,
+                resultsReceived = 0
             )
             val article = result.getOrNull()?.articles?.firstOrNull()
             val pmcId = article?.pmcid?.takeIf { it.isNotEmpty() }

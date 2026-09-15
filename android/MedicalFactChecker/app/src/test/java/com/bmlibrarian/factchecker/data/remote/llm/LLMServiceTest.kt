@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.llm
 
 import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -697,4 +698,49 @@ class LLMServiceTest {
             )
         }
     }
+
+    // ==================== Alternative Query Tests ====================
+
+    @Test
+    fun `an alternative-query answer that holds no query is an unusable answer, not a failed request`() = runTest {
+        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.success(
+            OpenAIChatResponse(
+                choices = listOf(OpenAIChatChoice(message = OpenAIChatMessage("assistant", "I cannot suggest any.")))
+            )
+        )
+
+        val result = generateAlternativeQueries()
+
+        assertEquals(emptyList<StructuredQuery>(), result.getOrThrow())
+    }
+
+    @Test
+    fun `an alternative-query answer with no content is an unusable answer`() = runTest {
+        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.success(OpenAIChatResponse())
+
+        val result = generateAlternativeQueries()
+
+        assertEquals(emptyList<StructuredQuery>(), result.getOrThrow())
+    }
+
+    @Test
+    fun `an alternative-query request that failed stays a failure`() = runTest {
+        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.error(401, "".toResponseBody(null))
+
+        val result = generateAlternativeQueries()
+
+        assertTrue("got $result", result.exceptionOrNull() is LLMError.AuthenticationError)
+    }
+
+    /** Ask the service for alternative queries, over the OpenAI-compatible API. */
+    private suspend fun generateAlternativeQueries(): Result<List<StructuredQuery>> =
+        service.generateAlternativeQueries(
+            provider = LLMProvider.OPENAI,
+            apiKey = "test-key",
+            model = "gpt-4o",
+            claim = "Aspirin prevents strokes",
+            initialQuery = "aspirin",
+            totalResults = 5,
+            relevantCount = 0
+        )
 }

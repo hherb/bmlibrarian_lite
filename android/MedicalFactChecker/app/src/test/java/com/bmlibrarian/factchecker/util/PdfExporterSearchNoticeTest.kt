@@ -33,6 +33,7 @@ import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -58,6 +59,7 @@ class PdfExporterSearchNoticeTest {
         val verdict = text.indexOf("VERDICT")
         assertTrue("no notice in: $text", notice >= 0)
         assertTrue("the notice follows the verdict in: $text", notice < verdict)
+        assertEquals("the notice is drawn more than once in: $text", notice, text.lastIndexOf("Incomplete search:"))
         assertFalse("markup printed literally in: $text", text.contains("> ") || text.contains("**"))
     }
 

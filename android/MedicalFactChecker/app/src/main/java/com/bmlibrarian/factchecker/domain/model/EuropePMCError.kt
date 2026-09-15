@@ -19,10 +19,11 @@
 package com.bmlibrarian.factchecker.domain.model
 
 /**
- * Sealed class representing errors from Europe PMC API operations.
+ * Sealed class representing errors from Europe PMC full-text retrieval.
  *
- * Provides type-safe error handling for all Europe PMC-related failures,
- * enabling exhaustive when-matching for error handling.
+ * Provides type-safe error handling for full-text failures, enabling
+ * exhaustive when-matching. A failed search is not one of these: it is a
+ * [SourceRequestException] carrying only its kind and HTTP status (#252).
  *
  * @property message Human-readable error message
  * @property cause Underlying exception, if any

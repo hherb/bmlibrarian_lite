@@ -289,10 +289,12 @@ data class EuropePMCSearchResult(
     val totalResults: Int,
     /** Cursor for next page of results (null if no more results). */
     val nextCursor: String?,
-    /** Whether there are more results available. */
-    val hasMore: Boolean,
     /** Every record this page held, readable or not: what the next page's count starts from. */
     val resultsReceived: Int,
-    /** What this page failed to retrieve: records a cursor ended before, and unreadable records. */
+    /** What this page failed to retrieve: hits an ended cursor never sent, and unreadable records. */
     val shortfalls: List<RetrievalShortfall>
-)
+) {
+    /** Whether there are more results available. */
+    val hasMore: Boolean
+        get() = nextCursor != null
+}

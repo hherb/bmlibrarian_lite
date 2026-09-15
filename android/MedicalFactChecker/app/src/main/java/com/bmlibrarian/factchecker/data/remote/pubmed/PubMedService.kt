@@ -20,6 +20,9 @@ package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.sendSourceRequest
+import com.bmlibrarian.factchecker.data.remote.unreadableSourceAnswer
+import com.bmlibrarian.factchecker.data.remote.withSourceRetries
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialSource
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
@@ -27,10 +30,10 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.SearchPaging
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
-import com.bmlibrarian.factchecker.util.NetworkRetry
 import kotlinx.coroutines.delay
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
@@ -44,7 +47,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import javax.xml.XMLConstants
 import javax.xml.parsers.SAXParserFactory
-import kotlin.coroutines.cancellation.CancellationException
 
 /** Log tag for PubMed search diagnostics. */
 private const val TAG = "PubMedService"
@@ -142,23 +144,24 @@ class PubMedService @Inject constructor(
      * search stays cancelled.
      *
      * @param query PubMed search query
-     * @param offset Starting position for pagination, from 0 to 9998: PubMed lists
-     *   no more of a search
+     * @param offset Starting position for pagination, below
+     *   [SearchPaging.PUBMED_LISTABLE_RECORDS]: PubMed lists no more of a search
      * @param batchSize Number of results to fetch
      * @return The page, or a [SourceRequestException] carrying why the search failed
-     * @throws IllegalArgumentException if [offset] is past what PubMed can list;
-     *   a caller never asks for a page past the end
+     * @throws IllegalArgumentException if [offset] is negative or past what PubMed
+     *   can list; a caller never asks for a page past the end
      * @throws NcbiCredentialsUnavailableException if the saved NCBI API key or
      *   email cannot be read: nothing is sent, and the user must fix Settings
+     * @throws IllegalStateException if this device cannot build the XML parser
+     *   that reads the articles: a defect of the device, not a PubMed failure
      */
     suspend fun search(
         query: String,
         offset: Int = 0,
         batchSize: Int = PubMedApi.DEFAULT_BATCH_SIZE
     ): Result<PubMedSearchResult> {
-        require(offset in 0 until SearchFailureReporting.PUBMED_LISTABLE_RECORDS) {
-            "PubMed lists a search's records from offset 0 to " +
-                "${SearchFailureReporting.PUBMED_LISTABLE_RECORDS - 1}, not $offset"
+        require(offset in 0 until SearchPaging.PUBMED_LISTABLE_RECORDS) {
+            "PubMed lists a search's records from offset 0 to ${SearchPaging.PUBMED_LISTABLE_RECORDS - 1}, not $offset"
         }
 
         // The saved key lives in encrypted preferences, which throw on a broken
@@ -171,7 +174,7 @@ class PubMedService @Inject constructor(
         }
 
         val listing = try {
-            withRetries { listPmids(query, offset, batchSize, credentials) }
+            withSourceRetries { listPmids(query, offset, batchSize, credentials) }
         } catch (e: SourceRequestException) {
             return failure(e.failure)
         }
@@ -189,7 +192,6 @@ class PubMedService @Inject constructor(
                 articles = fetched.articles,
                 totalResults = listing.totalCount,
                 nextOffset = nextOffset,
-                hasMore = nextOffset < minOf(listing.totalCount, SearchFailureReporting.PUBMED_LISTABLE_RECORDS),
                 shortfalls = SearchFailureReporting.shortfallsForMissingRecords(
                     SearchProvider.PUBMED,
                     RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE),
@@ -372,24 +374,10 @@ class PubMedService @Inject constructor(
     )
 
     /**
-     * Run one E-utilities request, retrying it while its failure is transient.
-     *
-     * @param block The request, failing with a [SourceRequestException]
-     * @return What the request returned
-     * @throws SourceRequestException when it failed and retrying would not help, or the retries ran out
-     */
-    private suspend fun <T> withRetries(block: suspend () -> T): T =
-        NetworkRetry.withExponentialBackoff(
-            maxRetries = Constants.NETWORK_MAX_RETRIES,
-            shouldRetry = { e -> e is SourceRequestException && e.failure.isRetryable }
-        ) { block() }
-
-    /**
      * Send one E-utilities request and refuse an unsuccessful answer.
      *
-     * An error the transport raised is reduced to its [RequestFailure] and not
-     * kept. An unsuccessful status is read from the status line only: the body
-     * is never read, because NCBI's 400 for a bad key repeats the key in it. The
+     * An unsuccessful status is read from the status line only: the body is
+     * never read, because NCBI's 400 for a bad key repeats the key in it. The
      * PubMed client follows no redirect ([pubMedHttpClient]), so a 3xx arrives
      * here too, as a refused redirect.
      *
@@ -397,22 +385,8 @@ class PubMedService @Inject constructor(
      * @return The successful response
      * @throws SourceRequestException if the request failed or the status is not 2xx
      */
-    private suspend fun <T> send(request: suspend () -> Response<T>): Response<T> {
-        val response = try {
-            request()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            val failure = RequestFailure.fromException(e)
-            // The class only: a converter's message quotes the body
-            Log.w(TAG, "E-utilities request failed: ${failure.describe()} (${e.javaClass.simpleName})")
-            throw SourceRequestException(SearchProvider.PUBMED, failure)
-        }
-        if (!response.isSuccessful) {
-            throw SourceRequestException(SearchProvider.PUBMED, RequestFailure.forHttpStatus(response.code()))
-        }
-        return response
-    }
+    private suspend fun <T> send(request: suspend () -> Response<T>): Response<T> =
+        sendSourceRequest(SearchProvider.PUBMED, TAG, RequestFailure::forHttpStatus, request)
 
     /**
      * Build the error for an E-utilities answer that cannot be read, and log why.
@@ -420,10 +394,8 @@ class PubMedService @Inject constructor(
      * @param reason What was wrong, naming fields only, never their values
      * @return The error to throw
      */
-    private fun unreadableAnswer(reason: String): SourceRequestException {
-        Log.e(TAG, "Unreadable E-utilities answer: $reason")
-        return SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
-    }
+    private fun unreadableAnswer(reason: String): SourceRequestException =
+        unreadableSourceAnswer(SearchProvider.PUBMED, TAG, reason)
 
     /**
      * List one page of a search's PMIDs with esearch.
@@ -474,7 +446,7 @@ class PubMedService @Inject constructor(
             ?: throw unreadableAnswer("esearch result has no numeric count")
         val pmids = result.idList ?: throw unreadableAnswer("esearch result has no idlist")
 
-        val expected = SearchFailureReporting.expectedEsearchListing(totalCount, offset, batchSize)
+        val expected = SearchPaging.expectedEsearchListing(totalCount, offset, batchSize)
         if (expected > 0 && pmids.isEmpty()) {
             Log.e(TAG, "Incomplete E-utilities answer: esearch listed 0 of $expected PMIDs")
             throw SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
@@ -506,7 +478,7 @@ class PubMedService @Inject constructor(
         delay(delayMs)
 
         val parsed = try {
-            withRetries {
+            withSourceRetries {
                 val response = send {
                     api.fetch(ids = pmids.joinToString(","), apiKey = credentials.apiKey, email = credentials.email)
                 }
@@ -555,6 +527,7 @@ class PubMedService @Inject constructor(
      *   document, which E-utilities can send with HTTP 200 (#255), or has any other
      *   root than `PubmedArticleSet`, or no root at all. Neither the error's text
      *   nor the root's name is logged.
+     * @throws IllegalStateException if this device cannot build the XML parser
      */
     private fun parseArticleSet(xml: String): ParsedArticleSet {
         val handler = PubMedXmlHandler()
@@ -568,11 +541,10 @@ class PubMedService @Inject constructor(
             // Deliberately NOT calling setXIncludeAware: JAXP's base implementation
             // throws UnsupportedOperationException unless an implementation
             // overrides it, and Android's Expat-backed factory is not guaranteed
-            // to. That would fail every on-device parse while JVM unit tests
-            // stayed green - the #119 failure mode, silent before #252 and now
-            // every fetch reported as unreadable. XInclude is off by default and
-            // requires namespace awareness (disabled above), so there is nothing
-            // to disable.
+            // to. That would fail every on-device search, as a parser that cannot
+            // be built, while JVM unit tests stayed green (the #119 failure mode).
+            // XInclude is off by default and requires namespace awareness
+            // (disabled above), so there is nothing to disable.
             // Harden against XXE and external-DTD network fetches. Not every SAX
             // implementation recognises every feature, so apply each defensively.
             for ((feature, enabled) in SAFE_SAX_FEATURES) {

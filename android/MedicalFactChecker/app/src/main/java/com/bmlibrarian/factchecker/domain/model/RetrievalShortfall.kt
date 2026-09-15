@@ -31,8 +31,8 @@ import java.util.Locale
  * A failed source is not a source with no evidence: each kind reads differently
  * to the user, and none of them as a search that matched nothing. The
  * [persistedValue]s are stored in a session's retrieval shortfalls and are the
- * same strings Python and Swift write
- * (`doc/cross_platform/search_failure_reporting.md`): never rename one.
+ * contract's strings (`doc/cross_platform/search_failure_reporting.md`), which
+ * Python writes too: never rename one.
  *
  * @property persistedValue The value stored for this kind
  */
@@ -83,7 +83,7 @@ private const val HTTP_STATUS_CODE_MIN = 100
 /** The highest three-digit HTTP status code. */
 private const val HTTP_STATUS_CODE_MAX = 999
 
-/** The kinds that do not go away on another attempt only because time passed. */
+/** The kinds another attempt may get past, whatever the answer's status: a timeout and a broken connection. */
 private val TRANSIENT_KINDS = setOf(RequestFailureKind.TIMEOUT, RequestFailureKind.CONNECTION)
 
 /** The reason clause of each kind that names no HTTP status. */
@@ -314,12 +314,14 @@ private fun requireSingleSource(provider: SearchProvider) {
  *
  * Returned by the PubMed and Europe PMC clients when a request fails after its
  * retries, the source answers with an error instead of a result, or its answer
- * cannot be read or holds less than it counts. It is never an empty result.
+ * cannot be read or lists none of what it counts. It is never an empty result;
+ * an answer that holds part of what it counts is a page with shortfalls instead.
  *
- * Only the provider and a [RequestFailure] are kept, and no cause: the message
- * cannot carry a request or an answer body. The message is for logs; text shown
- * to the user comes from [RetrievalShortfall.describe], which also covers a
- * failed page rather than a whole search.
+ * Only the provider and a [RequestFailure] are kept, and never a cause, not even
+ * one attached later: the message cannot carry a request or an answer body. The
+ * message is for logs; text shown to the user comes from
+ * [RetrievalShortfall.describe], which also covers a failed page rather than a
+ * whole search.
  *
  * @property provider The source that failed, PubMed or Europe PMC
  * @property failure Why, reduced to its kind and HTTP status
@@ -332,6 +334,10 @@ class SourceRequestException(
     init {
         requireSingleSource(provider)
     }
+
+    /** Always null: a cause would carry what the failure was reduced from. */
+    override val cause: Throwable?
+        get() = null
 }
 
 /**
@@ -350,6 +356,10 @@ class SearchFailedException(shortfalls: List<RetrievalShortfall>) : Exception(me
 
     /** What failed, in the order it was recorded. */
     val shortfalls: List<RetrievalShortfall> = shortfalls.toList()
+
+    /** Always null: what failed is in [shortfalls], reduced to what is safe to show. */
+    override val cause: Throwable?
+        get() = null
 
     private companion object {
         /**

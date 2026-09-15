@@ -71,6 +71,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
+import com.bmlibrarian.factchecker.ui.common.IncompleteSearchCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
@@ -179,11 +180,11 @@ fun FactCheckScreen(
             // What the session's searches failed to retrieve (#252): persistent while it goes on
             uiState.incompleteSearchWarning?.let { warning ->
                 item(key = "incomplete_search") {
-                    IncompleteSearchWarning(warning = warning)
+                    IncompleteSearchCard(text = warning)
                 }
             }
 
-            // Why a search for more documents failed, while the session carries on
+            // Why a search or smart search could not do what was asked, while the session carries on
             uiState.searchFailureMessage?.let { message ->
                 item(key = "search_failure") {
                     SearchFailureMessage(
@@ -526,42 +527,7 @@ private fun ErrorMessage(
 }
 
 /**
- * Persistent warning that the session's searches could not retrieve everything (#252).
- *
- * Stays while the session goes on: the documents and the report below rest only
- * on what was retrieved.
- *
- * @param warning The warning, naming what failed
- */
-@Composable
-private fun IncompleteSearchWarning(warning: String) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Spacer(modifier = Modifier.width(Constants.UI_ICON_TEXT_SPACING.dp))
-            Text(
-                text = warning,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-        }
-    }
-}
-
-/**
- * Why a search for more documents failed, and what to do about it (#252).
+ * Why a search or smart search could not do what was asked, and what to do about it (#252).
  *
  * The session keeps what it had, so the message can be dismissed.
  *

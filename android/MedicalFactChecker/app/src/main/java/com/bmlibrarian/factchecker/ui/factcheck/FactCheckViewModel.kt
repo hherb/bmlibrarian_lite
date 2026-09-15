@@ -102,7 +102,7 @@ data class FactCheckUiState(
     /** What the session's searches failed to retrieve (#252); empty when they were complete. */
     val searchShortfalls: List<RetrievalShortfall> = emptyList(),
 
-    /** Why a search for more documents failed while the session goes on, with advice; null when none. */
+    /** Why a search or smart search could not do what was asked while the session goes on, with advice; null when none. */
     val searchFailureMessage: String? = null,
 
     /** Whether the session's record of what its searches missed is damaged (#252). */
@@ -111,14 +111,15 @@ data class FactCheckUiState(
     /**
      * The persistent warning an incomplete search shows.
      *
-     * @return "Incomplete search: {clauses}.", or null when the searches were complete
+     * @return That the session's record of what its searches missed is damaged,
+     *   when it is; otherwise "Incomplete search: {clauses}.", or null when the
+     *   searches were complete
      */
     val incompleteSearchWarning: String?
         get() = if (searchRecordDamaged) {
             DAMAGED_RECORD_WARNING
         } else {
-            searchShortfalls.takeIf { it.isNotEmpty() }
-                ?.let { "Incomplete search: ${SearchFailureReporting.describeSearchShortfalls(it)}." }
+            SearchFailureReporting.incompleteSearchWarning(searchShortfalls)
         }
 
     /**
