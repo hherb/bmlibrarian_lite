@@ -18,8 +18,18 @@
 
 package com.bmlibrarian.factchecker.data.remote.europepmc
 
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 
 /**
  * Europe PMC search response.
@@ -39,9 +49,61 @@ data class EuropePMCSearchResponse(
  */
 @Serializable
 data class EuropePMCResultList(
-    /** List of articles. */
-    val result: List<EuropePMCArticle>? = null
+    /**
+     * The page's records, null where a record could not be decoded.
+     *
+     * Decoded one record at a time ([LossyArticleListSerializer]), so a damaged
+     * record costs itself, not the page, and is counted rather than lost.
+     */
+    @Serializable(with = LossyArticleListSerializer::class)
+    val result: List<EuropePMCArticle?>? = null
 )
+
+/**
+ * Decodes a result list record by record, keeping a null for each record that fails.
+ *
+ * Decoding the list as a whole would fail the entire page on one record of an
+ * unexpected shape. A value that is not a JSON array still fails, since then
+ * the answer itself cannot be read.
+ */
+object LossyArticleListSerializer : KSerializer<List<EuropePMCArticle?>> {
+
+    private val listSerializer = ListSerializer(EuropePMCArticle.serializer().nullable)
+
+    override val descriptor: SerialDescriptor = listSerializer.descriptor
+
+    /**
+     * Decode each record on its own.
+     *
+     * @param decoder A JSON decoder
+     * @return The records, null for each that did not decode
+     * @throws SerializationException if the value is not a JSON array, or the format is not JSON
+     */
+    override fun deserialize(decoder: Decoder): List<EuropePMCArticle?> {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("Europe PMC results decode from JSON only")
+        val records = input.decodeJsonElement() as? JsonArray
+            ?: throw SerializationException("resultList.result is not a list")
+        return records.map { record ->
+            try {
+                input.json.decodeFromJsonElement(EuropePMCArticle.serializer(), record)
+            } catch (_: SerializationException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+        }
+    }
+
+    /**
+     * Encode the records as a JSON array.
+     *
+     * @param encoder The encoder
+     * @param value The records
+     */
+    override fun serialize(encoder: Encoder, value: List<EuropePMCArticle?>) {
+        listSerializer.serialize(encoder, value)
+    }
+}
 
 /**
  * Article from Europe PMC API.
@@ -201,25 +263,23 @@ data class FullTextUrlEntry(
 )
 
 /**
- * Search result from Europe PMC service.
+ * One page of a Europe PMC search that answered.
+ *
+ * A search that failed is never one of these: [EuropePMCService.search] returns
+ * a [com.bmlibrarian.factchecker.domain.model.SourceRequestException] instead.
+ * What a search that answered still failed to retrieve is in [shortfalls].
  */
 data class EuropePMCSearchResult(
-    /** List of parsed articles. */
+    /** The readable articles, each with a title. */
     val articles: List<EuropePMCArticle>,
     /** Total number of results for the query. */
     val totalResults: Int,
     /** Cursor for next page of results (null if no more results). */
     val nextCursor: String?,
     /** Whether there are more results available. */
-    val hasMore: Boolean
-) {
-    companion object {
-        /** Empty search result. */
-        val EMPTY = EuropePMCSearchResult(
-            articles = emptyList(),
-            totalResults = 0,
-            nextCursor = null,
-            hasMore = false
-        )
-    }
-}
+    val hasMore: Boolean,
+    /** Every record this page held, readable or not: what the next page's count starts from. */
+    val resultsReceived: Int,
+    /** What this page failed to retrieve: records a cursor ended before, and unreadable records. */
+    val shortfalls: List<RetrievalShortfall>
+)
