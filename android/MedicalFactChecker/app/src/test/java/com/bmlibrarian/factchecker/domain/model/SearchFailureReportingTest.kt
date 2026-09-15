@@ -86,6 +86,23 @@ class SearchFailureReportingTest {
     }
 
     @Test
+    fun `an alternative search's loss is not merged into the original query's`() {
+        val shortfalls = listOf(
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 20),
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 10, ShortfallQuery.ALTERNATIVE),
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 5, ShortfallQuery.ALTERNATIVE),
+        )
+
+        assertEquals(
+            listOf(
+                RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 20),
+                RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, 15, ShortfallQuery.ALTERNATIVE),
+            ),
+            SearchFailureReporting.combinedShortfalls(shortfalls)
+        )
+    }
+
+    @Test
     fun `the combined description keeps every shortfall, in order`() {
         val shortfalls = listOf(PUBMED_DOWN, RetrievalShortfall(SearchProvider.EUROPE_PMC, TIMED_OUT, 5))
 
@@ -246,6 +263,33 @@ class SearchFailureReportingTest {
                 """{"provider":"pubmed","failure":{"kind":"timeout","status_code":null},"records_missing":null}]""",
             stored
         )
+    }
+
+    @Test
+    fun `an alternative search's shortfall is marked, and the original query's is not`() {
+        val stored = SearchFailureReporting.retrievalShortfallsToJson(
+            listOf(RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, query = ShortfallQuery.ALTERNATIVE), PUBMED_DOWN)
+        )
+
+        assertEquals(
+            """[{"provider":"pubmed","failure":{"kind":"http_status","status_code":429},"records_missing":null,"query":"alternative"},""" +
+                """{"provider":"pubmed","failure":{"kind":"http_status","status_code":429},"records_missing":null}]""",
+            stored
+        )
+        assertEquals(
+            listOf(RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, query = ShortfallQuery.ALTERNATIVE), PUBMED_DOWN),
+            SearchFailureReporting.retrievalShortfallsFromJson(stored)
+        )
+    }
+
+    @Test
+    fun `a query marker this build does not know reads as the original query`() {
+        // The original query's clause claims more is missing, never less
+        for (marker in listOf("\"from-a-newer-build\"", "true", "null", "{}")) {
+            val stored = """[{"provider":"pubmed","failure":{"kind":"timeout"},"records_missing":null,"query":$marker}]"""
+
+            assertEquals(marker, listOf(PUBMED_TIMED_OUT), SearchFailureReporting.retrievalShortfallsFromJson(stored))
+        }
     }
 
     @Test

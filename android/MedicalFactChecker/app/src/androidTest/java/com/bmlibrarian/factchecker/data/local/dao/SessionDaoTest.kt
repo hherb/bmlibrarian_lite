@@ -304,11 +304,24 @@ class SessionDaoTest {
         val session = SessionEntity(claimText = "Test claim")
         sessionDao.insert(session)
 
-        sessionDao.updateEpmcPagination(session.id, "cursor123", 1000)
+        sessionDao.updateEpmcPagination(session.id, "cursor123", 1000, 40)
 
         val retrieved = sessionDao.getById(session.id)
         assertEquals("cursor123", retrieved?.epmcCursor)
         assertEquals(1000, retrieved?.epmcTotalResults)
+        assertEquals(40, retrieved?.epmcResultsReceived)
+    }
+
+    @Test
+    fun retrievalShortfallsAreStoredAndCleared() = runTest {
+        val session = SessionEntity(claimText = "Test claim")
+        sessionDao.insert(session)
+
+        sessionDao.updateRetrievalShortfalls(session.id, """[{"provider":"pubmed"}]""")
+        assertEquals("""[{"provider":"pubmed"}]""", sessionDao.getById(session.id)?.retrievalShortfallsJson)
+
+        sessionDao.updateRetrievalShortfalls(session.id, null)
+        assertEquals(null, sessionDao.getById(session.id)?.retrievalShortfallsJson)
     }
 
     // ==================== Search Provider Tests ====================

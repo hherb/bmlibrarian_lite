@@ -63,6 +63,7 @@ object SearchFailureReporting {
     private const val KEY_KIND = "kind"
     private const val KEY_STATUS_CODE = "status_code"
     private const val KEY_RECORDS_MISSING = "records_missing"
+    private const val KEY_QUERY = "query"
     private const val STORED_PUBMED = "pubmed"
     private const val STORED_EUROPE_PMC = "europepmc"
 
@@ -127,6 +128,7 @@ object SearchFailureReporting {
             val index = combined.indexOfFirst { earlier ->
                 earlier.provider == shortfall.provider &&
                     earlier.failure == shortfall.failure &&
+                    earlier.query == shortfall.query &&
                     earlier.recordsMissing != null &&
                     shortfall.recordsMissing != null
             }
@@ -296,6 +298,7 @@ object SearchFailureReporting {
                         put(KEY_STATUS_CODE, shortfall.failure.statusCode)
                     }
                     put(KEY_RECORDS_MISSING, shortfall.recordsMissing)
+                    shortfall.query.persistedValue?.let { put(KEY_QUERY, it) }
                 }
             }
         }.toString()
@@ -304,11 +307,13 @@ object SearchFailureReporting {
     /**
      * Read what a session stored about its search's shortfalls.
      *
-     * The failure and the count degrade: an unknown kind, or a failure that is
-     * missing or not an object, reads as a failed request; a status code that is
-     * not a whole number from 100 to 999, or that belongs to a kind carrying
-     * none, reads as null; a count that is not a whole number of at least one
-     * reads as null, which claims more is missing, never less.
+     * The failure, the count and the query degrade: an unknown kind, or a
+     * failure that is missing or not an object, reads as a failed request; a
+     * status code that is not a whole number from 100 to 999, or that belongs to
+     * a kind carrying none, reads as null; a count that is not a whole number of
+     * at least one reads as null, and a query marker this build does not know
+     * reads as the original query, both of which claim more is missing, never
+     * less.
      *
      * @param stored The stored value, untrusted; null when nothing was stored (a
      *   complete search, or a session saved before #252)
@@ -353,7 +358,11 @@ object SearchFailureReporting {
             else -> throw IllegalArgumentException("A retrieval shortfall must name PubMed or Europe PMC")
         }
         val missing = wholeNumber(fields[KEY_RECORDS_MISSING])?.takeIf { it in 1..Int.MAX_VALUE }?.toInt()
-        return RetrievalShortfall(provider, failureFrom(fields[KEY_FAILURE]), missing)
+        // An unknown marker reads as the original query, whose clause claims more is missing
+        val marker = (fields[KEY_QUERY] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val query = ShortfallQuery.entries.firstOrNull { it.persistedValue != null && it.persistedValue == marker }
+            ?: ShortfallQuery.ORIGINAL
+        return RetrievalShortfall(provider, failureFrom(fields[KEY_FAILURE]), missing, query)
     }
 
     /**

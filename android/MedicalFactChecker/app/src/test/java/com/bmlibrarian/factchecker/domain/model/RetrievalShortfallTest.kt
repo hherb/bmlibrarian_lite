@@ -211,6 +211,37 @@ class RetrievalShortfallTest {
         assertTrue(shortfall.describe().startsWith("1 PubMed record could not"))
     }
 
+    @Test
+    fun `an alternative search that could not be run says so, not that the source was never searched`() {
+        // User's decision (2026-09-15): the original query's results are in the report
+        val shortfall = RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, query = ShortfallQuery.ALTERNATIVE)
+
+        assertEquals(
+            "an alternative search of PubMed could not be completed (HTTP 429 Too Many Requests)",
+            shortfall.describe()
+        )
+    }
+
+    @Test
+    fun `records an alternative search lost are counted as its own`() {
+        val one = RetrievalShortfall(SearchProvider.EUROPE_PMC, TIMED_OUT, 1, ShortfallQuery.ALTERNATIVE)
+        val many = RetrievalShortfall(SearchProvider.EUROPE_PMC, TIMED_OUT, 1200, ShortfallQuery.ALTERNATIVE)
+
+        assertEquals(
+            "1 Europe PMC record from an alternative search could not be retrieved (the request timed out)",
+            one.describe()
+        )
+        assertEquals(
+            "1,200 Europe PMC records from an alternative search could not be retrieved (the request timed out)",
+            many.describe()
+        )
+    }
+
+    @Test
+    fun `a shortfall belongs to the search's own query unless it says otherwise`() {
+        assertEquals(ShortfallQuery.ORIGINAL, PUBMED_DOWN.query)
+    }
+
     // ==================== Constructing a shortfall ====================
 
     @Test

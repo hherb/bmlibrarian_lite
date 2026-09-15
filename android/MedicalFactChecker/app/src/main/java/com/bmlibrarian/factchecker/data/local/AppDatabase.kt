@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -226,6 +226,21 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE sessions ADD COLUMN smart_search_enabled INTEGER NOT NULL DEFAULT 0")
                 database.execSQL("ALTER TABLE sessions ADD COLUMN alternative_queries_json TEXT")
                 database.execSQL("ALTER TABLE sessions ADD COLUMN fetched_pmids TEXT")
+            }
+        }
+
+        /**
+         * Migration from version 5 to 6.
+         *
+         * Adds what a session's searches failed to retrieve (#252), and how many
+         * Europe PMC records its pages held, which says how many a later page
+         * should hold. A session saved before has no shortfalls recorded, which
+         * reads as a complete search: nothing recorded one.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE sessions ADD COLUMN epmc_results_received INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE sessions ADD COLUMN retrieval_shortfalls_json TEXT")
             }
         }
     }

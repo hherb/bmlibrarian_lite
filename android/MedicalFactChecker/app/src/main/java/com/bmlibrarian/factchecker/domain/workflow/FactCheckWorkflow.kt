@@ -23,9 +23,7 @@ import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ProcessingCheckpointEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
-import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
-import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
@@ -36,7 +34,11 @@ import com.bmlibrarian.factchecker.domain.model.EuropePMCQueryBuilder
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.PubMedQueryBuilder
 import com.bmlibrarian.factchecker.domain.model.QueryBuilderFactory
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchFailedException
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.model.ShortfallQuery
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
@@ -71,8 +73,7 @@ import kotlin.coroutines.coroutineContext
 @Singleton
 class FactCheckWorkflow @Inject constructor(
     private val llmService: LLMService,
-    private val pubMedService: PubMedService,
-    private val europePMCService: EuropePMCService,
+    private val literatureSearch: LiteratureSearch,
     private val sessionRepository: SessionRepository,
     private val documentRepository: DocumentRepository,
     private val reportRepository: ReportRepository,
@@ -88,6 +89,12 @@ class FactCheckWorkflow @Inject constructor(
 
     companion object {
         private const val TAG = "FactCheckWorkflow"
+
+        /** Shown when a restored session's record of what its search missed cannot be read. */
+        private const val DAMAGED_SHORTFALLS_MESSAGE =
+            "This session's record of what its search could not retrieve is damaged, so the " +
+                "warning about an incomplete search cannot be shown. The report's own text still says " +
+                "whether its search was incomplete."
     }
 
     // ==================== Observable State ====================
@@ -103,6 +110,20 @@ class FactCheckWorkflow @Inject constructor(
     /** Current session ID for document observation. Emits immediately when session is created. */
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
+
+    /**
+     * What the current session's searches failed to retrieve (#252); empty when
+     * they were complete. Shown as a persistent warning while the session goes on.
+     */
+    private val _searchShortfalls = MutableStateFlow<List<RetrievalShortfall>>(emptyList())
+    val searchShortfalls: StateFlow<List<RetrievalShortfall>> = _searchShortfalls.asStateFlow()
+
+    /**
+     * Why a search for more documents failed while the session carries on with
+     * what it has (#252), with advice; null when there is nothing to tell.
+     */
+    private val _searchFailureMessage = MutableStateFlow<String?>(null)
+    val searchFailureMessage: StateFlow<String?> = _searchFailureMessage.asStateFlow()
 
     // ==================== Current Session ====================
 
@@ -154,6 +175,8 @@ class FactCheckWorkflow @Inject constructor(
         }
 
         currentConfig = config
+        _searchShortfalls.value = emptyList()
+        _searchFailureMessage.value = null
 
         // Load monthly usage for budget checking
         monthlyUsageUsd = usageRepository.getCurrentMonthSpend()
@@ -190,6 +213,8 @@ class FactCheckWorkflow @Inject constructor(
             runWorkflow(session, config)
         } catch (e: BudgetError) {
             handleBudgetError(e, session)
+        } catch (e: SearchFailedException) {
+            handleFailedSearch(e, session, config)
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
@@ -217,11 +242,15 @@ class FactCheckWorkflow @Inject constructor(
         currentConfig = config
         monthlyUsageUsd = usageRepository.getCurrentMonthSpend()
         isResumedSession = true  // Enable checkpoint loading
+        _searchFailureMessage.value = null
 
         try {
+            _searchShortfalls.value = session.retrievalShortfalls()
             runWorkflow(session, config)
         } catch (e: BudgetError) {
             handleBudgetError(e, session)
+        } catch (e: SearchFailedException) {
+            handleFailedSearch(e, session, config)
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         } finally {
@@ -231,11 +260,15 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Continue workflow after user approves fetching more documents.
+     *
+     * A search for more that failures leave with nothing returns to the decision,
+     * with the failure shown, rather than ending the session (#252).
      */
     suspend fun continueWithMoreDocuments() {
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         val config = currentConfig ?: WorkflowConfig.default()
+        _searchFailureMessage.value = null
 
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.SEARCHING_PUBMED)
 
@@ -253,6 +286,8 @@ class FactCheckWorkflow @Inject constructor(
             runWorkflow(updatedSession, config)
         } catch (e: BudgetError) {
             handleBudgetError(e, updatedSession)
+        } catch (e: SearchFailedException) {
+            handleFailedSearch(e, updatedSession, config)
         } catch (e: Exception) {
             handleWorkflowError(e, updatedSession)
         }
@@ -285,11 +320,15 @@ class FactCheckWorkflow @Inject constructor(
      * Fetch additional evidence after initial report generation.
      *
      * Allows users to gather more evidence when initial report is incomplete.
+     * A search for more that failures leave with nothing keeps the session's
+     * report as it was and shows the failure (#252); smart search, if that was
+     * what failed, stays available to try again.
      */
     suspend fun fetchMoreEvidence() {
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         val config = currentConfig ?: WorkflowConfig.default()
+        _searchFailureMessage.value = null
 
         _state.value = WorkflowState.FetchingMoreEvidence()
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FETCHING_MORE_EVIDENCE)
@@ -328,7 +367,18 @@ class FactCheckWorkflow @Inject constructor(
             } else if (!freshSession.smartSearchEnabled && config.smartSearchEnabled) {
                 // Pagination exhausted but smart search not tried — try alternative queries
                 updateProgress("Trying alternative search strategies...", WorkflowProgress.PROGRESS_SEARCHING_START)
-                executeSmartSearch(freshSession, config)
+                val smartSearch = executeSmartSearch(freshSession, config)
+                if (smartSearch.newDocuments == 0 && smartSearch.shortfalls.isNotEmpty()) {
+                    // Nothing new, and something failed: let the user try smart search again
+                    sessionRepository.updateSmartSearchState(
+                        sessionId = session.id,
+                        enabled = false,
+                        queriesJson = null,
+                        fetchedPmids = null
+                    )
+                    throw SearchFailedException(smartSearch.shortfalls)
+                }
+                recordShortfalls(session.id, smartSearch.shortfalls)
 
                 // Extract citations from any new relevant documents found by smart search
                 val allRelevantDocs = documentRepository.getDocumentsBySessionSync(session.id)
@@ -356,6 +406,14 @@ class FactCheckWorkflow @Inject constructor(
 
         } catch (e: BudgetError) {
             handleBudgetError(e, session)
+        } catch (e: SearchFailedException) {
+            // The report stands on the evidence it had; the user is told what failed
+            Log.w(TAG, "Search for more evidence failed: ${e.message}")
+            _searchFailureMessage.value = SearchFailureReporting.formatSearchFailureMessage(e)
+            sessionRepository.updateWorkflowStep(session.id, WorkflowStep.COMPLETED)
+            val report = reportRepository.getReportBySession(session.id)
+            _state.value = report?.let { WorkflowState.Completed(reportId = it.id) } ?: WorkflowState.Idle
+            updateProgress("Complete", WorkflowProgress.PROGRESS_COMPLETE)
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
@@ -511,8 +569,17 @@ class FactCheckWorkflow @Inject constructor(
         isResumedSession = false
         structuredQuery = null
         _currentSessionId.value = null
+        _searchShortfalls.value = emptyList()
+        _searchFailureMessage.value = null
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
+    }
+
+    /**
+     * Stop showing why a search for more documents failed.
+     */
+    fun dismissSearchFailure() {
+        _searchFailureMessage.value = null
     }
 
     /**
@@ -537,6 +604,15 @@ class FactCheckWorkflow @Inject constructor(
 
         // Emit session ID so UI can observe documents
         _currentSessionId.value = session.id
+        _searchFailureMessage.value = null
+        _searchShortfalls.value = try {
+            session.retrievalShortfalls()
+        } catch (e: IllegalArgumentException) {
+            // The report's own text still carries its notice; the warning cannot be rebuilt
+            Log.e(TAG, "Session ${session.id} holds a damaged record of its search's shortfalls: ${e.message}")
+            _searchFailureMessage.value = DAMAGED_SHORTFALLS_MESSAGE
+            emptyList()
+        }
 
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
@@ -575,7 +651,10 @@ class FactCheckWorkflow @Inject constructor(
             )
             updateProgress("Searching for documents...", WorkflowProgress.PROGRESS_SEARCHING_START)
 
-            val documents = searchForDocuments(updatedSession, config)
+            // A session that holds documents is fetching more: continue its paging
+            // rather than asking for the first page again
+            val isNextBatch = documentRepository.getDocumentCount(session.id) > 0
+            val documents = searchForDocuments(updatedSession, config, isNextBatch)
 
             if (documents.isEmpty() && documentRepository.getDocumentCount(session.id) == 0) {
                 _state.value = WorkflowState.Failed("No documents found for this claim")
@@ -609,7 +688,8 @@ class FactCheckWorkflow @Inject constructor(
             // Try smart search if enabled and not enough relevant docs
             if (config.smartSearchEnabled && relevantCount < config.smartSearchThreshold &&
                 !updatedSession.smartSearchEnabled) {
-                executeSmartSearch(updatedSession, config)
+                val smartSearch = executeSmartSearch(updatedSession, config)
+                recordShortfalls(session.id, smartSearch.shortfalls)
                 // Re-check after smart search
                 val relevantAfterSmart = documentRepository.getRelevantCount(session.id, config.relevanceThreshold)
                 if (relevantAfterSmart >= config.targetRelevantDocuments) {
@@ -729,20 +809,29 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Search for documents from the configured provider(s).
+     * Search one page of documents from the configured provider(s), and keep what it found.
      *
      * Uses the stored structured query to build provider-specific query strings,
      * ensuring optimal query syntax for each provider. This mirrors the iOS
      * approach for cross-platform consistency.
+     *
+     * A failed source is not an empty one (#252): what a provider failed to
+     * retrieve is recorded on the session, beside the documents the page found.
+     * A page that failures leave with nothing fails instead, and then nothing is
+     * kept: no documents, no paging, no shortfalls, so asking again asks for the
+     * same page.
+     *
+     * @param session The session to search for
+     * @param config Workflow configuration
+     * @param isNextBatch False for the search's first page; true to continue its paging
+     * @return The documents the page found, saved
+     * @throws SearchFailedException if failures left the page with no document
      */
     private suspend fun searchForDocuments(
         session: SessionEntity,
         config: WorkflowConfig,
         isNextBatch: Boolean = false
     ): List<DocumentEntity> {
-        val allDocuments = mutableListOf<DocumentEntity>()
-        val batchNumber = if (isNextBatch) session.currentBatch + 1 else session.currentBatch
-
         // Build provider-specific query from stored structured query, or fall back to session query
         fun getQueryForProvider(provider: SearchProvider): String {
             return structuredQuery?.let { sq ->
@@ -752,136 +841,62 @@ class FactCheckWorkflow @Inject constructor(
             } ?: session.pubmedQuery ?: ""
         }
 
-        when (config.searchProvider) {
-            SearchProvider.PUBMED -> {
-                val query = getQueryForProvider(SearchProvider.PUBMED)
-                if (query.isEmpty()) return emptyList()
+        val outcome = literatureSearch.searchPage(
+            SearchPageRequest(
+                provider = config.searchProvider,
+                pubMedQuery = getQueryForProvider(SearchProvider.PUBMED),
+                europePMCQuery = getQueryForProvider(SearchProvider.EUROPE_PMC),
+                batchSize = config.batchSize,
+                includePreprints = config.includePreprints,
+                isNextBatch = isNextBatch,
+                pubMedPaging = PubMedPaging(session.pubmedOffset, session.pubmedTotalResults),
+                europePMCPaging = EuropePMCPaging(session.epmcCursor, session.epmcTotalResults, session.epmcResultsReceived),
+                query = ShortfallQuery.ORIGINAL,
+                sessionId = session.id,
+                batchNumber = if (isNextBatch) session.currentBatch + 1 else session.currentBatch,
+                existingDocumentCount = documentRepository.getDocumentCount(session.id)
+            )
+        )
 
-                val offset = if (isNextBatch) session.pubmedOffset else 0
-                val result = pubMedService.search(
-                    query = query,
-                    offset = offset,
-                    batchSize = config.batchSize
-                )
-
-                if (result.isSuccess) {
-                    val searchResult = result.getOrThrow()
-                    val entities = pubMedService.toDocumentEntities(
-                        articles = searchResult.articles,
-                        sessionId = session.id,
-                        batchNumber = batchNumber,
-                        startPosition = offset
-                    )
-                    allDocuments.addAll(entities)
-
-                    // Update session pagination state
-                    sessionRepository.updatePubMedPagination(
-                        sessionId = session.id,
-                        offset = searchResult.nextOffset,
-                        totalResults = searchResult.totalResults
-                    )
-                }
-            }
-
-            SearchProvider.EUROPE_PMC -> {
-                // Build Europe PMC-specific query using the correct syntax
-                val query = getQueryForProvider(SearchProvider.EUROPE_PMC)
-                if (query.isEmpty()) return emptyList()
-
-                val cursor = if (isNextBatch) session.epmcCursor else null
-                val result = europePMCService.search(
-                    query = query,
-                    cursor = cursor,
-                    batchSize = config.batchSize,
-                    includePreprints = config.includePreprints
-                )
-
-                if (result.isSuccess) {
-                    val searchResult = result.getOrThrow()
-                    val entities = europePMCService.toDocumentEntities(
-                        articles = searchResult.articles,
-                        sessionId = session.id,
-                        batchNumber = batchNumber,
-                        startPosition = documentRepository.getDocumentCount(session.id)
-                    )
-                    allDocuments.addAll(entities)
-
-                    // Update session pagination state
-                    sessionRepository.updateEpmcPagination(
-                        sessionId = session.id,
-                        cursor = searchResult.nextCursor,
-                        totalResults = searchResult.totalResults
-                    )
-                }
-            }
-
-            SearchProvider.BOTH -> {
-                // Search both providers with half batch size each
-                val halfBatch = config.batchSize / 2
-
-                // PubMed - use PubMed-specific query
-                val pubmedQuery = getQueryForProvider(SearchProvider.PUBMED)
-                if (pubmedQuery.isNotEmpty()) {
-                    val pubmedOffset = if (isNextBatch) session.pubmedOffset else 0
-                    val pubmedResult = pubMedService.search(
-                        query = pubmedQuery,
-                        offset = pubmedOffset,
-                        batchSize = halfBatch
-                    )
-
-                    if (pubmedResult.isSuccess) {
-                        val sr = pubmedResult.getOrThrow()
-                        allDocuments.addAll(
-                            pubMedService.toDocumentEntities(
-                                articles = sr.articles,
-                                sessionId = session.id,
-                                batchNumber = batchNumber,
-                                startPosition = pubmedOffset
-                            )
-                        )
-                        sessionRepository.updatePubMedPagination(session.id, sr.nextOffset, sr.totalResults)
-                    }
-                }
-
-                // Europe PMC - use Europe PMC-specific query
-                val epmcQuery = getQueryForProvider(SearchProvider.EUROPE_PMC)
-                if (epmcQuery.isNotEmpty()) {
-                    val epmcCursor = if (isNextBatch) session.epmcCursor else null
-                    val epmcResult = europePMCService.search(
-                        query = epmcQuery,
-                        cursor = epmcCursor,
-                        batchSize = halfBatch,
-                        includePreprints = config.includePreprints
-                    )
-
-                    if (epmcResult.isSuccess) {
-                        val sr = epmcResult.getOrThrow()
-                        // Deduplicate by PMID
-                        val existingPmids = allDocuments.mapNotNull { it.pmid }.toSet()
-                        val newEntities = europePMCService.toDocumentEntities(
-                            articles = sr.articles,
-                            sessionId = session.id,
-                            batchNumber = batchNumber,
-                            startPosition = documentRepository.getDocumentCount(session.id)
-                        ).filter { it.pmid !in existingPmids }
-                        allDocuments.addAll(newEntities)
-                        sessionRepository.updateEpmcPagination(session.id, sr.nextCursor, sr.totalResults)
-                    }
-                }
-            }
+        outcome.pubMedPaging?.let { sessionRepository.updatePubMedPagination(session.id, it.offset, it.totalResults) }
+        outcome.europePMCPaging?.let {
+            sessionRepository.updateEpmcPagination(session.id, it.cursor, it.totalResults, it.resultsReceived)
         }
+        recordShortfalls(session.id, outcome.shortfalls)
+        saveSearchedDocuments(outcome.documents, session.claimText)
+        return outcome.documents
+    }
 
-        // Save documents to database
-        if (allDocuments.isNotEmpty()) {
-            documentRepository.saveDocuments(allDocuments)
+    /**
+     * Add what a search failed to retrieve to what the session recorded, and show it.
+     *
+     * @param sessionId The session
+     * @param shortfalls What the search failed to retrieve
+     * @throws IllegalArgumentException if the session's stored record is damaged
+     */
+    private suspend fun recordShortfalls(sessionId: String, shortfalls: List<RetrievalShortfall>) {
+        if (shortfalls.isEmpty()) return
+        Log.w(TAG, "Search incomplete: ${SearchFailureReporting.describeSearchShortfalls(shortfalls)}")
+        val session = sessionRepository.getSession(sessionId) ?: return
+        val recorded = SearchFailureReporting.combinedShortfalls(session.retrievalShortfalls() + shortfalls)
+        sessionRepository.updateRetrievalShortfalls(sessionId, recorded)
+        _searchShortfalls.value = recorded
+    }
 
-            // Compute embedding scores if enabled
-            if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
-                computeEmbeddingScores(allDocuments, session.claimText)
-            }
+    /**
+     * Save a search's new documents, and score them by embedding when enabled.
+     *
+     * @param documents The documents a search found
+     * @param claim The claim being fact-checked
+     */
+    private suspend fun saveSearchedDocuments(documents: List<DocumentEntity>, claim: String) {
+        if (documents.isEmpty()) return
+        documentRepository.saveDocuments(documents)
+
+        // Compute embedding scores if enabled
+        if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
+            computeEmbeddingScores(documents, claim)
         }
-
-        return allDocuments
     }
 
     /**
@@ -1142,6 +1157,9 @@ class FactCheckWorkflow @Inject constructor(
 
         checkBudget(session, config)
 
+        // What the searches missed goes into the report by code, never left to the LLM (#252)
+        val shortfalls = (sessionRepository.getSession(sessionId) ?: session).retrievalShortfalls()
+
         // Get all citations with their documents
         val citations = documentRepository.getCitationsBySessionSync(sessionId)
         val documents = documentRepository.getDocumentsBySessionSync(sessionId)
@@ -1163,7 +1181,7 @@ class FactCheckWorkflow @Inject constructor(
         // Handle no citations case
         if (citationData.isEmpty()) {
             val relevantCount = documents.count { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
-            return createNoEvidenceReport(sessionId, claim, relevantCount, model, config)
+            return createNoEvidenceReport(sessionId, claim, relevantCount, model, shortfalls)
         }
 
         val result = llmService.generateReport(
@@ -1190,7 +1208,7 @@ class FactCheckWorkflow @Inject constructor(
         // Build references section
         val relevantDocs = documents.filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
         val references = buildReferencesSection(relevantDocs)
-        val fullReport = generation.report + "\n\n## References\n\n$references"
+        val fullReport = ReportText.fullReport(generation.report, references, shortfalls)
 
         // Create and save report
         val report = reportRepository.createReport(
@@ -1210,6 +1228,14 @@ class FactCheckWorkflow @Inject constructor(
 
     // ==================== Smart Search ====================
 
+    /** What smart search's alternative queries found, and what they failed to retrieve. */
+    private data class SmartSearchOutcome(
+        /** How many new documents the alternative queries found. */
+        val newDocuments: Int,
+        /** What they failed to retrieve, each marked as an alternative search's. */
+        val shortfalls: List<RetrievalShortfall>
+    )
+
     /**
      * Execute smart search by generating and trying alternative queries.
      *
@@ -1217,10 +1243,15 @@ class FactCheckWorkflow @Inject constructor(
      * asks the LLM to generate 2-3 alternative structured queries and searches
      * with each one, deduplicating by PMID. Mirrors the iOS `executeSmartSearch()`.
      *
+     * An alternative query that fails does not end smart search: the next one is
+     * still tried, and what the failed one could not retrieve is returned for the
+     * caller to record or report (#252).
+     *
      * @param session The current session
      * @param config Workflow configuration
+     * @return How many new documents the alternative queries found, and their shortfalls
      */
-    private suspend fun executeSmartSearch(session: SessionEntity, config: WorkflowConfig) {
+    private suspend fun executeSmartSearch(session: SessionEntity, config: WorkflowConfig): SmartSearchOutcome {
         val provider = getLLMProvider()
         val apiKey = settingsRepository.getLlmApiKey()
         val model = settingsRepository.getLlmModel()
@@ -1258,7 +1289,7 @@ class FactCheckWorkflow @Inject constructor(
                 queriesJson = null,
                 fetchedPmids = null
             )
-            return
+            return SmartSearchOutcome(newDocuments = 0, shortfalls = emptyList())
         }
 
         // Track already-fetched PMIDs to avoid duplicates
@@ -1280,6 +1311,9 @@ class FactCheckWorkflow @Inject constructor(
             fetchedPmids = fetchedPmids.joinToString(",")
         )
 
+        var newDocumentCount = 0
+        val shortfalls = mutableListOf<RetrievalShortfall>()
+
         // Execute each alternative query
         for ((index, altQuery) in alternatives.withIndex()) {
             checkBudget(session, config)
@@ -1296,14 +1330,23 @@ class FactCheckWorkflow @Inject constructor(
             val altWithPreprints = altQuery.copy(excludePreprints = !config.includePreprints)
 
             // Search using the appropriate provider
-            val newDocs = executeAlternativeSearch(
-                altStructuredQuery = altWithPreprints,
-                session = updatedSession,
-                config = config,
-                fetchedPmids = fetchedPmids
-            )
+            val outcome = try {
+                executeAlternativeSearch(
+                    altStructuredQuery = altWithPreprints,
+                    session = updatedSession,
+                    config = config,
+                    fetchedPmids = fetchedPmids
+                )
+            } catch (e: SearchFailedException) {
+                Log.w(TAG, "Smart search ${index + 1}/${alternatives.size} failed: ${e.message}")
+                shortfalls += e.shortfalls
+                continue
+            }
+            shortfalls += outcome.shortfalls
+            val newDocs = outcome.documents
 
             if (newDocs.isNotEmpty()) {
+                newDocumentCount += newDocs.size
                 // Update fetched PMIDs
                 newDocs.mapNotNull { it.pmid }.forEach { fetchedPmids.add(it) }
                 sessionRepository.updateSmartSearchState(
@@ -1328,6 +1371,8 @@ class FactCheckWorkflow @Inject constructor(
                 break
             }
         }
+
+        return SmartSearchOutcome(newDocumentCount, SearchFailureReporting.combinedShortfalls(shortfalls))
     }
 
     /**
@@ -1337,115 +1382,34 @@ class FactCheckWorkflow @Inject constructor(
      * @param session Current session
      * @param config Workflow configuration
      * @param fetchedPmids Set of PMIDs already fetched (for deduplication)
-     * @return List of new document entities saved to database
+     * @return The new documents, saved, and what the search failed to retrieve beside them
+     * @throws SearchFailedException if failures left the search with no new document
      */
     private suspend fun executeAlternativeSearch(
         altStructuredQuery: StructuredQuery,
         session: SessionEntity,
         config: WorkflowConfig,
         fetchedPmids: Set<String>
-    ): List<DocumentEntity> {
-        val allDocuments = mutableListOf<DocumentEntity>()
-        val batchNumber = session.currentBatch + 1
-
-        when (config.searchProvider) {
-            SearchProvider.PUBMED -> {
-                val queryString = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED)
-                if (queryString.isEmpty()) return emptyList()
-                val result = pubMedService.search(
-                    query = queryString,
-                    offset = 0,
-                    batchSize = config.batchSize
-                )
-                if (result.isSuccess) {
-                    val searchResult = result.getOrThrow()
-                    val entities = pubMedService.toDocumentEntities(
-                        articles = searchResult.articles,
-                        sessionId = session.id,
-                        batchNumber = batchNumber,
-                        startPosition = documentRepository.getDocumentCount(session.id)
-                    ).filter { it.pmid !in fetchedPmids }
-                    allDocuments.addAll(entities)
-                }
-            }
-            SearchProvider.EUROPE_PMC -> {
-                val queryString = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC)
-                if (queryString.isEmpty()) return emptyList()
-                val result = europePMCService.search(
-                    query = queryString,
-                    cursor = null,
-                    batchSize = config.batchSize,
-                    includePreprints = config.includePreprints
-                )
-                if (result.isSuccess) {
-                    val searchResult = result.getOrThrow()
-                    val entities = europePMCService.toDocumentEntities(
-                        articles = searchResult.articles,
-                        sessionId = session.id,
-                        batchNumber = batchNumber,
-                        startPosition = documentRepository.getDocumentCount(session.id)
-                    ).filter { it.pmid !in fetchedPmids }
-                    allDocuments.addAll(entities)
-                }
-            }
-            SearchProvider.BOTH -> {
-                val halfBatch = config.batchSize / 2
-                // Search PubMed
-                val pubmedQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED)
-                if (pubmedQuery.isNotEmpty()) {
-                    val pubmedResult = pubMedService.search(
-                        query = pubmedQuery,
-                        offset = 0,
-                        batchSize = halfBatch
-                    )
-                    if (pubmedResult.isSuccess) {
-                        val sr = pubmedResult.getOrThrow()
-                        allDocuments.addAll(
-                            pubMedService.toDocumentEntities(
-                                articles = sr.articles,
-                                sessionId = session.id,
-                                batchNumber = batchNumber,
-                                startPosition = documentRepository.getDocumentCount(session.id)
-                            ).filter { it.pmid !in fetchedPmids }
-                        )
-                    }
-                }
-                // Search Europe PMC
-                val epmcQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC)
-                if (epmcQuery.isNotEmpty()) {
-                    val existingPmids = fetchedPmids + allDocuments.mapNotNull { it.pmid }.toSet()
-                    val epmcResult = europePMCService.search(
-                        query = epmcQuery,
-                        cursor = null,
-                        batchSize = halfBatch,
-                        includePreprints = config.includePreprints
-                    )
-                    if (epmcResult.isSuccess) {
-                        val sr = epmcResult.getOrThrow()
-                        allDocuments.addAll(
-                            europePMCService.toDocumentEntities(
-                                articles = sr.articles,
-                                sessionId = session.id,
-                                batchNumber = batchNumber,
-                                startPosition = documentRepository.getDocumentCount(session.id)
-                            ).filter { it.pmid !in existingPmids }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Save new documents
-        if (allDocuments.isNotEmpty()) {
-            documentRepository.saveDocuments(allDocuments)
-
-            // Compute embedding scores if enabled
-            if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
-                computeEmbeddingScores(allDocuments, session.claimText)
-            }
-        }
-
-        return allDocuments
+    ): SearchPageOutcome {
+        val outcome = literatureSearch.searchPage(
+            SearchPageRequest(
+                provider = config.searchProvider,
+                pubMedQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED),
+                europePMCQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC),
+                batchSize = config.batchSize,
+                includePreprints = config.includePreprints,
+                isNextBatch = false,
+                pubMedPaging = PubMedPaging(offset = 0, totalResults = 0),
+                europePMCPaging = EuropePMCPaging(cursor = null, totalResults = 0, resultsReceived = 0),
+                query = ShortfallQuery.ALTERNATIVE,
+                sessionId = session.id,
+                batchNumber = session.currentBatch + 1,
+                existingDocumentCount = documentRepository.getDocumentCount(session.id),
+                excludedPmids = fetchedPmids
+            )
+        )
+        saveSearchedDocuments(outcome.documents, session.claimText)
+        return outcome
     }
 
     // ==================== Helper Methods ====================
@@ -1597,13 +1561,21 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Create a report when no evidence/citations were found.
+     *
+     * @param sessionId The session
+     * @param claim The claim being fact-checked
+     * @param relevantDocCount How many documents met the relevance threshold
+     * @param model The LLM model the session used
+     * @param shortfalls What the session's searches failed to retrieve; the
+     *   message opens with the incomplete-search notice when there are any
+     * @return The saved report
      */
     private suspend fun createNoEvidenceReport(
         sessionId: String,
         claim: String,
         relevantDocCount: Int,
         model: String,
-        config: WorkflowConfig
+        shortfalls: List<RetrievalShortfall>
     ): com.bmlibrarian.factchecker.data.local.entity.ReportEntity {
         val (summary, fullReport) = if (relevantDocCount > 0) {
             // Documents found but citation extraction failed
@@ -1663,7 +1635,7 @@ class FactCheckWorkflow @Inject constructor(
             sessionId = sessionId,
             verdict = Verdict.UNCLEAR,
             summary = summary,
-            fullReportMarkdown = fullReport,
+            fullReportMarkdown = ReportText.standInReport(fullReport, shortfalls),
             footnotes = null,
             modelUsed = model,
             totalDocumentsReviewed = 0,
@@ -1696,5 +1668,38 @@ class FactCheckWorkflow @Inject constructor(
         )
         sessionRepository.setError(session.id, error.message ?: "Unknown error")
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FAILED)
+    }
+
+    /**
+     * Handle a search that failures left with nothing (#252).
+     *
+     * A session's first search that fails ends it as failed, with what failed
+     * and what to do about it: never as "No documents found", since nobody knows
+     * whether there are any. A search for more documents that fails leaves the
+     * session with the documents it has, back at the decision to fetch more or
+     * go on, and shows the failure.
+     *
+     * @param error The failed search
+     * @param session The session it searched for
+     * @param config Workflow configuration
+     */
+    private suspend fun handleFailedSearch(error: SearchFailedException, session: SessionEntity, config: WorkflowConfig) {
+        val message = SearchFailureReporting.formatSearchFailureMessage(error)
+        Log.w(TAG, "Search failed: ${error.message}")
+        if (documentRepository.getDocumentCount(session.id) == 0) {
+            _state.value = WorkflowState.Failed(error = message, cause = error)
+            sessionRepository.setError(session.id, message)
+            sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FAILED)
+            return
+        }
+
+        _searchFailureMessage.value = message
+        val freshSession = sessionRepository.getSession(session.id) ?: session
+        sessionRepository.updateWorkflowStep(session.id, WorkflowStep.AWAITING_USER_DECISION)
+        _state.value = WorkflowState.AwaitingUserDecision(
+            relevantCount = documentRepository.getRelevantCount(session.id, config.relevanceThreshold),
+            targetCount = config.targetRelevantDocuments,
+            availableCount = calculateAvailableDocuments(freshSession)
+        )
     }
 }

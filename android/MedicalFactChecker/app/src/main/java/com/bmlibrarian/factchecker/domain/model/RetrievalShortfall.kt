@@ -228,6 +228,25 @@ data class RequestFailure(
 }
 
 /**
+ * Which query of a fact-check a shortfall belongs to.
+ *
+ * Smart search runs alternative queries when the claim's own query finds too
+ * little. An alternative search that fails must not read as the source never
+ * having been searched, since the original query's results from that source
+ * are in the report (user's decision, 2026-09-15).
+ *
+ * @property persistedValue The stored marker, or null for the original query,
+ *   which stores none
+ */
+enum class ShortfallQuery(val persistedValue: String?) {
+    /** The query the claim was converted to. */
+    ORIGINAL(null),
+
+    /** An alternative query smart search generated. */
+    ALTERNATIVE("alternative")
+}
+
+/**
  * Part of a search that a failure left out (#252).
  *
  * A search proceeds on what was retrieved, and the user is told what is
@@ -238,6 +257,8 @@ data class RequestFailure(
  * @property recordsMissing How many records could not be retrieved, at least
  *   one; or null when the source could not be searched at all, so how many it
  *   holds is unknown
+ * @property query Whether the loss belongs to the claim's own query or to an
+ *   alternative query smart search ran
  * @throws IllegalArgumentException if the provider is [SearchProvider.BOTH] or
  *   the count is below one: a shortfall with nothing missing would tell the user
  *   a complete search was incomplete
@@ -245,7 +266,8 @@ data class RequestFailure(
 data class RetrievalShortfall(
     val provider: SearchProvider,
     val failure: RequestFailure,
-    val recordsMissing: Int? = null
+    val recordsMissing: Int? = null,
+    val query: ShortfallQuery = ShortfallQuery.ORIGINAL
 ) {
     init {
         requireSingleSource(provider)
@@ -258,15 +280,22 @@ data class RetrievalShortfall(
      * Describe the shortfall as a clause for a sentence shown to the user.
      *
      * @return For example "PubMed could not be searched (HTTP 429 Too Many
-     *   Requests)" or "1,200 Europe PMC records could not be retrieved (the
-     *   request timed out)"
+     *   Requests)", "1,200 Europe PMC records could not be retrieved (the
+     *   request timed out)", or for an alternative query "an alternative search
+     *   of PubMed could not be completed (HTTP 429 Too Many Requests)"
      */
     fun describe(): String {
         val source = provider.displayName
         val reason = failure.describe()
-        val missing = recordsMissing ?: return "$source could not be searched ($reason)"
+        val alternative = query == ShortfallQuery.ALTERNATIVE
+        val missing = recordsMissing ?: return if (alternative) {
+            "an alternative search of $source could not be completed ($reason)"
+        } else {
+            "$source could not be searched ($reason)"
+        }
         val noun = if (missing == 1) "record" else "records"
-        return "${String.format(Locale.US, "%,d", missing)} $source $noun could not be retrieved ($reason)"
+        val origin = if (alternative) " from an alternative search" else ""
+        return "${String.format(Locale.US, "%,d", missing)} $source $noun$origin could not be retrieved ($reason)"
     }
 }
 
