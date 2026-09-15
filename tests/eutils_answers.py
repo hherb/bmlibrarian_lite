@@ -4,10 +4,24 @@
 
 """E-utilities answers for the scripted test server, shaped like NCBI's real ones."""
 
+import pytest
+
+from bmlibrarian_lite.pubmed import search_client
 from tests.scripted_http_server import ScriptedAnswer, json_answer, xml_answer
 
 ESEARCH_PATH = "/esearch.fcgi"
 EFETCH_PATH = "/efetch.fcgi"
+
+
+def point_pubmed_client_at(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    """Send the PubMed search client's esearch and efetch requests to a local server.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture, which restores the URLs.
+        url: The server's base URL.
+    """
+    monkeypatch.setattr(search_client, "ESEARCH_URL", f"{url}{ESEARCH_PATH}")
+    monkeypatch.setattr(search_client, "EFETCH_URL", f"{url}{EFETCH_PATH}")
 
 
 def esearch_hits(pmids: list[str], count: int | None = None, **extra: str) -> ScriptedAnswer:

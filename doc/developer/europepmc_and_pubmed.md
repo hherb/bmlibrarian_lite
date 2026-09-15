@@ -172,7 +172,10 @@ POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=0
 POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=100
 ```
 
-**Limitation:** Maximum offset is 9999.
+**Limitation:** PubMed lists only the first 9,999 records of a search, so
+`retstart` can be at most 9998 (checked live 2026-09-15: `retstart=9900&retmax=100`
+lists 99 PMIDs, and `retstart=9999` answers with an `ERROR`). A page counted
+against 10,000 reads its honest last page as incomplete.
 
 **Advance by the PMIDs consumed, not the articles parsed.** efetch returns only
 `PubmedArticle` records as articles, so a batch holding a `PubmedBookArticle`

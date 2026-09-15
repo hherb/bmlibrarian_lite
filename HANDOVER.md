@@ -27,11 +27,21 @@ the rest.
   the user; failures that leave nothing are `SearchFailedError`**, never "No
   documents found" (so no session is saved). Clients raise `SourceRequestError`
   carrying only `RequestFailure` (kind + status): **the `requests` exception is
-  never kept**, since its body holds the key. **An `ERROR` inside HTTP 200 is a
-  failure** (esearch `ERROR`, efetch `<eFetchResult>`, Europe PMC's
-  `{"version":"6.9"}` for an unknown cursor, all checked live); a missing
+  never kept**, since its body holds the key. **An HTTP 200 that is not a result
+  is a failure**: esearch `ERROR` and efetch `<eFetchResult>` are
+  `service_error`; Europe PMC's bare `{"version":…}` for an unknown cursor is
+  `malformed_response` (esearch and Europe PMC checked live); a missing
   `count`/`hitCount` is malformed, not 0, and **a listing shorter than its count
   is `incomplete_response`**; records the parser drops are a shortfall too.
+  **PubMed lists only 9,999 records** (`retstart` ≤ 9998, checked live): counting
+  against 10,000 read an honest last page as incomplete. **A spent urllib3
+  read-timeout retry reaches `requests` as a `ConnectionError`**, so the
+  classifier unwraps it. **The search for more never asks for a page past the
+  end** (a failure there read "0 records could not be retrieved"), and failures
+  that leave it nothing new are an error. The review round also pinned the
+  stored provider strings, the reason phrases and `null` handling in the
+  contract, and lodged #261–#266 (LLM-side failures read as absence, book
+  records, test timeouts).
   **efetch batches and history pages continue past a failure; a Europe PMC
   cursor cannot, so it stops.** Shortfalls ride session metadata
   (`retrieval_shortfalls`) to the report (opening notice + Methodology line,

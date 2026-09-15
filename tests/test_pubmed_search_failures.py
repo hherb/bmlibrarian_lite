@@ -22,15 +22,22 @@ import pytest
 
 from bmlibrarian_lite.data_models import RequestFailure, RequestFailureKind, SearchProvider
 from bmlibrarian_lite.exceptions import SourceRequestError
-from bmlibrarian_lite.pubmed import search_client
+from bmlibrarian_lite.pubmed import expected_esearch_listing, search_client
 from bmlibrarian_lite.pubmed.data_types import PubMedQuery
 from bmlibrarian_lite.pubmed.search_client import PubMedSearchClient
-from tests.eutils_answers import EFETCH_PATH, ESEARCH_PATH, esearch_hits, pubmed_articles
+from tests.eutils_answers import (
+    EFETCH_PATH,
+    ESEARCH_PATH,
+    esearch_hits,
+    point_pubmed_client_at,
+    pubmed_articles,
+)
 from tests.scripted_http_server import (
     ScriptedAnswer,
     ScriptedServer,
     json_answer,
     running,
+    silent,
     status_answer,
     xml_answer,
 )
@@ -40,6 +47,8 @@ ASPIRIN = PubMedQuery(original_question="aspirin", query_string="aspirin")
 RATE_LIMITED = RequestFailure(RequestFailureKind.HTTP_STATUS, 429)
 SERVICE_ERROR = RequestFailure(RequestFailureKind.SERVICE_ERROR)
 MALFORMED = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+INCOMPLETE = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+SHORT_TIMEOUT_SECONDS = 0.2
 # What NCBI really sent for an esearch of "((" on 2026-09-14, with the key
 # spliced in: the text of a failed answer may echo the request, so it must never
 # reach an exception, a log or the user.
@@ -75,8 +84,7 @@ def serve(monkeypatch: pytest.MonkeyPatch) -> Iterator[ServeScript]:
 
         def start(script: dict[str, list[ScriptedAnswer]]) -> ScriptedServer:
             server = stack.enter_context(running(script))
-            monkeypatch.setattr(search_client, "ESEARCH_URL", f"{server.url}{ESEARCH_PATH}")
-            monkeypatch.setattr(search_client, "EFETCH_URL", f"{server.url}{EFETCH_PATH}")
+            point_pubmed_client_at(monkeypatch, server.url)
             return server
 
         yield start
@@ -159,6 +167,29 @@ class TestAFailedSearchRaises:
             make_client().search(ASPIRIN)
 
         assert raised.value.failure == RequestFailure(RequestFailureKind.CONNECTION)
+        assert raised.value.__context__ is None
+        assert FAKE_API_KEY not in str(raised.value)
+
+    def test_a_service_too_slow_to_answer_raises_a_timeout(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The connection is made and the answer never comes."""
+        caplog.set_level(logging.DEBUG)
+        client = PubMedSearchClient(
+            email="test@example.com", api_key=FAKE_API_KEY, max_retries=1,
+            timeout=SHORT_TIMEOUT_SECONDS,
+        )
+        client.request_delay = 0.0
+        with silent() as url:
+            monkeypatch.setattr(search_client, "ESEARCH_URL", f"{url}{ESEARCH_PATH}")
+
+            with pytest.raises(SourceRequestError) as raised:
+                client.search(ASPIRIN)
+
+        assert raised.value.failure == RequestFailure(RequestFailureKind.TIMEOUT)
+        assert raised.value.__context__ is None
+        assert FAKE_API_KEY not in str(raised.value)
+        assert FAKE_API_KEY not in caplog.text
 
 
 class TestAnErrorInsideHttp200:
@@ -178,6 +209,22 @@ class TestAnErrorInsideHttp200:
         assert FAKE_API_KEY not in str(raised.value)
         assert "Search Backend failed" not in caplog.text
         assert FAKE_API_KEY not in caplog.text
+
+    def test_an_error_text_holding_a_raw_newline_is_still_a_service_error(
+        self, serve: ServeScript
+    ) -> None:
+        """NCBI's answer past the 9,999-record cap is not strict JSON (checked live 2026-09-15)."""
+        # The newline below is a raw control character inside a JSON string.
+        body = (
+            b'{"header":{"type":"esearch","version":"0.3"},"esearchresult":{"ERROR":'
+            b'"Search Backend failed: Exception:\n\'retstart\' cannot be larger than 9998."}}'
+        )
+        serve({ESEARCH_PATH: [ScriptedAnswer(HTTPStatus.OK, body)]})
+
+        with pytest.raises(SourceRequestError) as raised:
+            make_client().search_with_offset("aspirin")
+
+        assert raised.value.failure == SERVICE_ERROR
 
     def test_an_answer_without_a_count_is_malformed_not_zero(self, serve: ServeScript) -> None:
         """A missing total is not a total of nothing."""
@@ -259,8 +306,11 @@ class TestAFailedBatchIsRecorded:
         assert result.failure == RATE_LIMITED
         assert len(server.requests_to(EFETCH_PATH)) == 3
 
-    def test_an_efetch_error_inside_http_200_fails_the_batch(self, serve: ServeScript) -> None:
+    def test_an_efetch_error_inside_http_200_fails_the_batch(
+        self, serve: ServeScript, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """An ``eFetchResult`` holding an ``ERROR`` is not a batch with no articles."""
+        caplog.set_level(logging.DEBUG)
         serve(
             {
                 EFETCH_PATH: [
@@ -278,6 +328,9 @@ class TestAFailedBatchIsRecorded:
         assert result.articles == []
         assert result.pmids_not_fetched == ["1", "2"]
         assert result.failure == SERVICE_ERROR
+        assert "Backend failed" not in caplog.text
+        assert FAKE_API_KEY not in caplog.text
+        assert FAKE_API_KEY not in repr(result)
 
     def test_unparseable_xml_fails_the_batch(self, serve: ServeScript) -> None:
         """A truncated body is a failed batch, not an empty one."""
@@ -326,7 +379,7 @@ class TestAFailedHistoryPageIsRecorded:
     def test_the_pages_after_a_failed_page_are_still_listed(
         self, serve: ServeScript, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """NCBI answers an expired WebEnv with an ERROR inside HTTP 200."""
+        """A failed page (NCBI's ERROR for an expired WebEnv) is counted, and later pages listed."""
         monkeypatch.setattr(search_client, "HISTORY_SERVER_THRESHOLD", 1)
         monkeypatch.setattr(search_client, "DEFAULT_BATCH_SIZE", 2)
         serve(
@@ -355,9 +408,6 @@ def test_a_failed_connection_test_is_false_not_raised(serve: ServeScript) -> Non
     assert make_client().test_connection() is False
 
 
-INCOMPLETE = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
-
-
 class TestTheErrorCarriesNothingOfTheAnswer:
     """What a failed answer said stays out of the error, its chain and the log.
 
@@ -366,8 +416,11 @@ class TestTheErrorCarriesNothingOfTheAnswer:
     the whole body -- which NCBI can fill with the request, key included.
     """
 
-    def test_an_unreadable_answer_leaves_no_exception_chain(self, serve: ServeScript) -> None:
-        """Nothing that holds the body hangs off the error."""
+    def test_an_unreadable_answer_leaves_no_exception_chain(
+        self, serve: ServeScript, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Nothing that holds the body hangs off the error, or reaches the log."""
+        caplog.set_level(logging.DEBUG)
         serve({ESEARCH_PATH: [ScriptedAnswer(HTTPStatus.OK, f"api_key={FAKE_API_KEY}".encode())]})
 
         with pytest.raises(SourceRequestError) as raised:
@@ -375,6 +428,57 @@ class TestTheErrorCarriesNothingOfTheAnswer:
 
         assert raised.value.__context__ is None
         assert raised.value.__cause__ is None
+        assert FAKE_API_KEY not in str(raised.value)
+        assert FAKE_API_KEY not in caplog.text
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            ScriptedAnswer(
+                HTTPStatus.BAD_REQUEST,
+                f'{{"error":"API key invalid","api-key":"{FAKE_API_KEY}"}}'.encode(),
+            ),
+            status_answer(HTTPStatus.TOO_MANY_REQUESTS),
+        ],
+        ids=["bad-key-echoed", "rate-limited"],
+    )
+    def test_an_http_error_leaves_no_exception_chain(
+        self, answer: ScriptedAnswer, serve: ServeScript, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The HTTPError's request body holds the key; NCBI's 400 body repeats it."""
+        caplog.set_level(logging.DEBUG)
+        serve({ESEARCH_PATH: [answer]})
+
+        with pytest.raises(SourceRequestError) as raised:
+            make_client(max_retries=2).search(ASPIRIN)
+
+        assert raised.value.__context__ is None
+        assert raised.value.__cause__ is None
+        assert FAKE_API_KEY not in str(raised.value)
+        assert FAKE_API_KEY not in caplog.text
+        assert "API key invalid" not in caplog.text
+
+    def test_an_xml_parse_error_is_logged_without_the_body(
+        self, serve: ServeScript, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An XML parse error names an undefined entity, which is text from the body."""
+        caplog.set_level(logging.DEBUG)
+        serve(
+            {
+                EFETCH_PATH: [
+                    xml_answer(
+                        '<!DOCTYPE PubmedArticleSet SYSTEM "x.dtd">'
+                        f"<PubmedArticleSet>&k{FAKE_API_KEY};</PubmedArticleSet>"
+                    )
+                ]
+            }
+        )
+
+        result = make_client().fetch_articles(["1"])
+
+        assert result.failure == MALFORMED
+        assert "not well-formed XML" in caplog.text
+        assert FAKE_API_KEY not in caplog.text
 
     def test_unparseable_efetch_leaves_no_exception_chain(self) -> None:
         """The parse error is dropped once its kind is known."""
@@ -398,7 +502,7 @@ class TestTheErrorCarriesNothingOfTheAnswer:
 
 
 class TestAListingShorterThanItsCount:
-    """PMIDs PubMed counted but did not list are missing, not absent (#247 review)."""
+    """PMIDs PubMed counted but did not list are missing, not absent (#247)."""
 
     def test_a_count_with_no_pmids_raises(self, serve: ServeScript) -> None:
         """57 matches and an empty list is a failed listing, not a search with no hits."""
@@ -420,7 +524,7 @@ class TestAListingShorterThanItsCount:
         assert result.listing_failure == INCOMPLETE
 
     def test_an_empty_page_before_the_end_raises(self, serve: ServeScript) -> None:
-        """The search for more documents read this as the end of the results."""
+        """An empty page at offset 100 of 300 raises; before #247 it read as the end of the results."""
         serve({ESEARCH_PATH: [esearch_hits([], count=300)]})
 
         with pytest.raises(SourceRequestError) as raised:
@@ -474,3 +578,49 @@ def test_an_article_the_parser_cannot_read_is_counted(serve: ServeScript) -> Non
     assert [article.pmid for article in result.articles] == ["1"]
     assert result.records_unreadable == 1
     assert result.pmids_not_fetched == []
+
+
+class TestTheListingCap:
+    """PubMed lists only the first 9,999 records of a search (checked live 2026-09-15)."""
+
+    @pytest.mark.parametrize(
+        "total_count, retstart, retmax, expected",
+        [
+            (50_000, 0, 100, 100),
+            (50_000, 9_900, 100, 99),
+            (50_000, 9_998, 10, 1),
+            (50_000, 9_999, 10, 0),
+            (5, 4, 2, 1),
+            (5, 5, 2, 0),
+        ],
+    )
+    def test_a_page_should_list_what_can_be_listed(
+        self, total_count: int, retstart: int, retmax: int, expected: int
+    ) -> None:
+        """Up to the page size, the matches left, and the cap."""
+        assert expected_esearch_listing(total_count, retstart, retmax) == expected
+
+    def test_the_last_page_before_the_cap_is_complete(self, serve: ServeScript) -> None:
+        """99 PMIDs at offset 9,900 is everything PubMed will list, not one missing."""
+        serve({ESEARCH_PATH: [esearch_hits([str(n) for n in range(99)], count=50_000)]})
+
+        result = make_client().search_with_offset("aspirin", max_results=100, start_offset=9_900)
+
+        assert result.unlisted_count == 0
+        assert result.listing_failure is None
+
+    def test_an_offset_past_the_cap_asks_for_the_last_record(self, serve: ServeScript) -> None:
+        """``retstart`` above 9998 is an E-utilities ERROR."""
+        server = serve({ESEARCH_PATH: [esearch_hits(["9999"], count=50_000)]})
+
+        make_client().search_with_offset("aspirin", max_results=10, start_offset=20_000)
+
+        [request] = server.requests_to(ESEARCH_PATH)
+        assert request.parameters["retstart"] == ["9998"]
+
+
+def test_a_count_answer_needs_no_pmid_list(serve: ServeScript) -> None:
+    """``rettype=count`` answers legitimately carry no ``idlist``."""
+    serve({ESEARCH_PATH: [json_answer({"esearchresult": {"count": "57"}})]})
+
+    assert make_client().get_count(ASPIRIN) == 57

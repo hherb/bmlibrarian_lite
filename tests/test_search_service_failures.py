@@ -308,7 +308,7 @@ class TestASearchOfBothProviders:
         )
 
     def test_a_failed_provider_beside_an_empty_one_raises(self) -> None:
-        """Europe PMC's zero does not speak for PubMed, which was never asked."""
+        """Europe PMC's zero does not speak for PubMed, which did not answer."""
         service = service_with(
             pubmed=StubPubMed(pubmed_failed(RATE_LIMITED)),
             europepmc=StubEuropePMC(epmc_page([])),
@@ -316,6 +316,18 @@ class TestASearchOfBothProviders:
 
         with pytest.raises(SearchFailedError):
             service.search(QUERY, max_results=10, provider=SearchProvider.BOTH)
+
+    def test_two_providers_that_matched_nothing_are_empty_not_failed(self) -> None:
+        """Only a search with no failures may report that it found nothing."""
+        service = service_with(
+            pubmed=StubPubMed(pubmed_hits([])),
+            europepmc=StubEuropePMC(epmc_page([])),
+        )
+
+        result = service.search(QUERY, max_results=10, provider=SearchProvider.BOTH)
+
+        assert result.documents == []
+        assert result.shortfalls == []
 
     def test_partial_retrievals_from_both_are_both_recorded(self) -> None:
         """Every shortfall is kept, in provider order."""
@@ -342,7 +354,7 @@ MALFORMED = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
 
 
 class TestWhatTheReviewCannotSee:
-    """Records a parser dropped, and the error's own chain (#247 review)."""
+    """Records a parser dropped, and the error's own chain (#247)."""
 
     def test_unreadable_pubmed_articles_are_a_shortfall(self) -> None:
         """A dropped record is missing from the review like a failed batch."""
@@ -369,6 +381,19 @@ class TestWhatTheReviewCannotSee:
         assert result.shortfalls == [
             RetrievalShortfall(SearchProvider.EUROPEPMC, MALFORMED, records_missing=1)
         ]
+
+    def test_europepmc_results_all_unreadable_raise(self) -> None:
+        """Three hits sent, none readable: the search failed, it did not find nothing."""
+        service = service_with(
+            europepmc=StubEuropePMC(epmc_page([], total=3, unreadable_count=3))
+        )
+
+        with pytest.raises(SearchFailedError) as raised:
+            service.search(QUERY, max_results=10, provider=SearchProvider.EUROPEPMC)
+
+        assert raised.value.shortfalls == (
+            RetrievalShortfall(SearchProvider.EUROPEPMC, MALFORMED, records_missing=3),
+        )
 
     def test_a_failed_search_error_has_no_exception_chain(self) -> None:
         """The client's error, and the frames holding the request, are not kept."""

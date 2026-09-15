@@ -43,7 +43,7 @@ Usage:
         logger.error(f"Storage operation failed: {e}")
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -182,13 +182,15 @@ class SourceRequestError(NetworkError):
     """A literature source could not answer a request (#247).
 
     Raised by the PubMed and Europe PMC clients when a request fails after its
-    retries, or the source answers with an error instead of a result. It is
-    never an empty result: a source that failed is not a source with no
-    evidence.
+    retries, the source answers with an error instead of a result, or its
+    answer cannot be read or holds less than it counts. It is never an empty
+    result: a source that failed is not a source with no evidence.
 
     Only the provider and a ``RequestFailure`` are kept, so the message cannot
     carry a URL, a request body or a response body -- all of which can hold
-    the NCBI API key (#196).
+    the NCBI API key (#196). The message is for logs: text shown to the user
+    comes from ``RetrievalShortfall.describe()``, which also covers a failed
+    batch or page rather than a whole search.
 
     Example:
         try:
@@ -221,15 +223,27 @@ class SearchFailedError(NetworkError):
         raise SearchFailedError([RetrievalShortfall(provider, failure)])
     """
 
-    def __init__(self, shortfalls: "Sequence[RetrievalShortfall]") -> None:
+    def __init__(self, shortfalls: "Iterable[RetrievalShortfall]") -> None:
         """Initialize the search failed error.
 
         Args:
             shortfalls: What failed, at least one.
+
+        Raises:
+            ValueError: If there are no shortfalls: a failure that names
+                nothing tells the user nothing.
         """
-        details = "; ".join(shortfall.describe() for shortfall in shortfalls)
-        super().__init__(f"The search could not be completed: {details}.")
-        self.shortfalls = tuple(shortfalls)
+        # Imported here: search_failures imports requests, which this module
+        # otherwise stays free of.
+        from .search_failures import describe_search_shortfalls
+
+        recorded = tuple(shortfalls)
+        if not recorded:
+            raise ValueError("A failed search names at least one shortfall")
+        super().__init__(
+            f"The search could not be completed: {describe_search_shortfalls(recorded)}."
+        )
+        self.shortfalls = recorded
 
 
 class RetryExhaustedError(NetworkError):

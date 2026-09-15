@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -283,7 +283,7 @@ TOOLS = [
 # -- Handlers ----------------------------------------------------------------
 
 
-def _shortfalls_payload(shortfalls: list[RetrievalShortfall]) -> list[dict[str, Any]]:
+def _shortfalls_payload(shortfalls: Sequence[RetrievalShortfall]) -> list[dict[str, Any]]:
     """Describe what a search is missing, for a calling agent.
 
     Args:
@@ -294,6 +294,44 @@ def _shortfalls_payload(shortfalls: list[RetrievalShortfall]) -> list[dict[str, 
         ``description``. Empty when the search was complete.
     """
     return [{**shortfall.to_dict(), "description": shortfall.describe()} for shortfall in shortfalls]
+
+
+def _fact_check_result(
+    report: str,
+    search_query: str,
+    shortfalls: Sequence[RetrievalShortfall],
+    *,
+    documents_found: int,
+    documents_relevant: int = 0,
+    citations_extracted: int = 0,
+    sources: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a fact-check result, qualified when its search was incomplete.
+
+    Every exit of the fact check goes through here, so none can return a
+    report without the incomplete-search notice or the shortfalls (#247).
+
+    Args:
+        report: The report, or a message standing in for one.
+        search_query: The query the search ran.
+        shortfalls: What the search is missing.
+        documents_found: Documents the search returned.
+        documents_relevant: Documents that scored at or above the threshold.
+        citations_extracted: Citations extracted from them.
+        sources: Summaries of the relevant documents.
+
+    Returns:
+        The tool result.
+    """
+    return {
+        "report": with_search_shortfall_notice(report, shortfalls),
+        "search_query": search_query,
+        "documents_found": documents_found,
+        "documents_relevant": documents_relevant,
+        "citations_extracted": citations_extracted,
+        "sources": sources or [],
+        "retrieval_shortfalls": _shortfalls_payload(shortfalls),
+    }
 
 
 def _handle_fact_check(
@@ -337,20 +375,14 @@ def _handle_fact_check(
         include_preprints=include_preprints,
     )
     shortfalls = retrieval_shortfalls_from_metadata(session.metadata)
-    shortfalls_payload = _shortfalls_payload(shortfalls)
 
     if not documents:
-        return {
-            "report": with_search_shortfall_notice(
-                "No documents found matching the query.", shortfalls
-            ),
-            "search_query": session.query,
-            "documents_found": 0,
-            "documents_relevant": 0,
-            "citations_extracted": 0,
-            "sources": [],
-            "retrieval_shortfalls": shortfalls_payload,
-        }
+        return _fact_check_result(
+            "No documents found matching the query.",
+            session.query,
+            shortfalls,
+            documents_found=0,
+        )
 
     # Now we know document count — set total for remaining steps.
     # Total = search(done) + score(N) + cite(N) + report(1)
@@ -374,19 +406,13 @@ def _handle_fact_check(
     )
 
     if not scored_documents:
-        return {
-            "report": with_search_shortfall_notice(
-                f"Found {len(documents)} documents but none scored above "
-                f"the relevance threshold ({min_score}/5).",
-                shortfalls,
-            ),
-            "search_query": session.query,
-            "documents_found": len(documents),
-            "documents_relevant": 0,
-            "citations_extracted": 0,
-            "sources": [],
-            "retrieval_shortfalls": shortfalls_payload,
-        }
+        return _fact_check_result(
+            f"Found {len(documents)} documents but none scored above "
+            f"the relevance threshold ({min_score}/5).",
+            session.query,
+            shortfalls,
+            documents_found=len(documents),
+        )
 
     # 3. Extract citations
     citations = ctx.citation_agent.extract_all_citations(
@@ -422,15 +448,15 @@ def _handle_fact_check(
             "document_id": doc.id,
         })
 
-    return {
-        "report": with_search_shortfall_notice(report, shortfalls),
-        "search_query": session.query,
-        "documents_found": len(documents),
-        "documents_relevant": len(scored_documents),
-        "citations_extracted": len(citations),
-        "sources": sources,
-        "retrieval_shortfalls": shortfalls_payload,
-    }
+    return _fact_check_result(
+        report,
+        session.query,
+        shortfalls,
+        documents_found=len(documents),
+        documents_relevant=len(scored_documents),
+        citations_extracted=len(citations),
+        sources=sources,
+    )
 
 
 def _handle_search(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any]:
@@ -563,9 +589,9 @@ def _handle_ask_document(args: dict[str, Any], ctx: _AgentsContext) -> dict[str,
 class _ToolCallFailedError(Exception):
     """Carries a failed tool call's JSON payload to the MCP server.
 
-    The server turns an exception raised by a tool handler into a result with
-    ``isError`` set, its text the exception's message (#247 review): returned
-    as ordinary content, a failure read as a successful call.
+    The MCP server turns an exception raised from ``call_tool`` into a result
+    with ``isError`` set and the exception's message as its text. Returned as
+    ordinary content, a failure read as a successful call (#247).
     """
 
 
@@ -581,9 +607,8 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     """
     payload: dict[str, Any] = {"error": str(exc), "error_type": type(exc).__name__}
     if isinstance(exc, SearchFailedError):
-        shortfalls = list(exc.shortfalls)
-        payload["retrieval_shortfalls"] = _shortfalls_payload(shortfalls)
-        payload["advice"] = search_failure_advice(shortfalls)
+        payload["retrieval_shortfalls"] = _shortfalls_payload(exc.shortfalls)
+        payload["advice"] = search_failure_advice(exc.shortfalls)
     return payload
 
 
@@ -692,8 +717,7 @@ async def run_server() -> None:
     config.ensure_directories()
 
     # LiteStorage opens a connection per operation, so there is nothing to
-    # close on the way out. Its missing close() used to raise here and mask the
-    # error that ended the server.
+    # close on the way out.
     server, _ = _make_server(config)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(

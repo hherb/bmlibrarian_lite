@@ -36,6 +36,7 @@ Example usage:
     print(f"Found {result.total_count} articles, retrieved {result.retrieved_count}")
 """
 
+import json
 import logging
 import os
 import re
@@ -113,7 +114,7 @@ def _incomplete_answer(reason: str) -> SourceRequestError:
     )
 
 
-def _expected_listing(total_count: int, retstart: int, retmax: int) -> int:
+def expected_esearch_listing(total_count: int, retstart: int, retmax: int) -> int:
     """How many PMIDs an esearch page should list.
 
     Args:
@@ -123,7 +124,8 @@ def _expected_listing(total_count: int, retstart: int, retmax: int) -> int:
 
     Returns:
         The PMIDs PubMed holds from ``retstart`` on, up to ``retmax`` and to
-        the most E-utilities will list for one search.
+        the first 9,999 records, the most E-utilities lists for one search
+        (``MAX_RESULTS_LIMIT``). 0 past the end of what can be listed.
     """
     return max(0, min(retmax, total_count - retstart, MAX_RESULTS_LIMIT - retstart))
 
@@ -131,9 +133,14 @@ def _expected_listing(total_count: int, retstart: int, retmax: int) -> int:
 def _decoded_json(response: requests.Response) -> Any:
     """Decode a JSON answer without keeping the decoder's exception.
 
-    ``requests``' ``JSONDecodeError`` holds the whole body as ``doc``. Raised
-    inside an ``except`` block, any error would keep it reachable as
-    ``__context__`` even with ``from None``, so it is dropped here.
+    ``JSONDecodeError`` holds the whole body as ``doc``. Raised inside an
+    ``except`` block, any error would keep it reachable as ``__context__``
+    even with ``from None``, so it is dropped here.
+
+    Control characters inside strings are accepted: E-utilities writes a raw
+    newline into some ``ERROR`` texts (checked live 2026-09-15, past the
+    9,999-record cap), and that answer is a service error, not an unreadable
+    one.
 
     Args:
         response: The answer.
@@ -142,7 +149,7 @@ def _decoded_json(response: requests.Response) -> Any:
         The decoded value, or ``_NOT_JSON`` when the body is not JSON.
     """
     try:
-        return response.json()
+        return json.loads(response.content, strict=False)
     except ValueError:
         return _NOT_JSON
 
@@ -176,13 +183,18 @@ def _parsed_xml(xml_content: bytes) -> ET.Element | None:
         xml_content: The answer body.
 
     Returns:
-        The root element, or None when the body is not well-formed XML. The
-        parse error's position is logged; it holds no text of the body.
+        The root element, or None when the body is not well-formed XML. Only
+        the parse error's code and position are logged: its message can
+        quote the body, such as the name of an undefined entity.
     """
     try:
         return ET.fromstring(xml_content)
     except ET.ParseError as e:
-        logger.error(f"efetch answer is not well-formed XML: {e}")
+        line, column = e.position
+        logger.error(
+            f"efetch answer is not well-formed XML (expat error {e.code} "
+            f"at line {line}, column {column})"
+        )
         return None
 
 
@@ -259,7 +271,7 @@ class PubMedSearchClient:
         self,
         email: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: int = REQUEST_TIMEOUT_SECONDS,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
         max_retries: int = MAX_RETRIES,
     ) -> None:
         """
@@ -418,9 +430,10 @@ class PubMedSearchClient:
             progress_callback: Optional callback(step, message) for progress updates
 
         Returns:
-            SearchResult with PMIDs and metadata. When a history-server page
-            failed, the PMIDs it should have listed are counted in
-            ``unlisted_count`` and the pages after it are still listed.
+            SearchResult with PMIDs and metadata. PMIDs PubMed counted but did
+            not list -- on a history-server page that failed, or on any page
+            that listed fewer than its count said -- are counted in
+            ``unlisted_count``, and later history pages are still listed.
 
         Raises:
             SourceRequestError: If the search itself failed. A failed search
@@ -462,7 +475,7 @@ class PubMedSearchClient:
         unlisted_count = 0
         listing_failure: RequestFailure | None = None
         if not history_requested:
-            expected = _expected_listing(total_count, 0, max_results)
+            expected = expected_esearch_listing(total_count, 0, max_results)
             unlisted_count = _unlisted_or_raise(expected, pmids)
             if unlisted_count:
                 listing_failure = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
@@ -514,8 +527,9 @@ class PubMedSearchClient:
             progress_callback: Optional progress callback
 
         Returns:
-            The PMIDs listed; how many PMIDs the failed pages should have
-            listed; and why the first failed page failed, or None.
+            The PMIDs listed; how many PMIDs the pages left out, whether a
+            page failed or listed fewer than its size; and why the first
+            such page fell short, or None.
         """
         all_pmids: list[str] = []
         unlisted_count = 0
@@ -640,7 +654,7 @@ class PubMedSearchClient:
         total_count = _esearch_count(result)
         pmids = _esearch_pmids(result)
         unlisted_count = _unlisted_or_raise(
-            _expected_listing(total_count, start_offset, retmax), pmids
+            expected_esearch_listing(total_count, start_offset, retmax), pmids
         )
 
         search_time = time.time() - start_time
@@ -700,8 +714,8 @@ class PubMedSearchClient:
             progress_callback: Optional progress callback
 
         Returns:
-            The articles fetched, the PMIDs whose batch failed, and why the
-            first failed batch failed.
+            The articles fetched, the PMIDs whose batch failed, why the first
+            failed batch failed, and how many articles could not be read.
         """
         result = ArticleFetchResult()
         if not pmids:
@@ -755,14 +769,16 @@ class PubMedSearchClient:
 
         Returns:
             The articles, and how many ``PubmedArticle`` records could not be
-            read. No articles and none unreadable only when PubMed answered
-            with an empty ``PubmedArticleSet``, as it does for PMIDs it does
-            not hold.
+            read. No articles and none unreadable when the
+            ``PubmedArticleSet`` holds no ``PubmedArticle``: PubMed's answer
+            for PMIDs it does not hold, or for book records
+            (``PubmedBookArticle``), which are not read.
 
         Raises:
-            SourceRequestError: If the answer is not XML, or is efetch's
-                ``eFetchResult`` error document, which E-utilities can send
-                with HTTP 200 (#255). Neither the error's text nor the root's
+            SourceRequestError: If the answer is not XML, is efetch's
+                ``eFetchResult`` error document (which E-utilities can send
+                with HTTP 200, #255), or has any other root than
+                ``PubmedArticleSet``. Neither the error's text nor the root's
                 tag is logged: a namespaced tag holds text the server chose.
         """
         root = _parsed_xml(xml_content)

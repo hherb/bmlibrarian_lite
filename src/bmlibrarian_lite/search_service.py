@@ -74,9 +74,13 @@ from .pubmed import (
     SearchResult,
 )
 from .query_translator import QueryTranslator
+from .search_failures import shortfalls_for_missing_records
 from .search_merger import MergedArticle, SearchResultMerger
 
 logger = logging.getLogger(__name__)
+
+# The failure recorded for records a source sent but the parser could not read.
+_UNREADABLE = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
 
 
 def pubmed_shortfalls(
@@ -93,32 +97,17 @@ def pubmed_shortfalls(
         A shortfall each for the unlisted PMIDs, the unfetched PMIDs and the
         articles that could not be read, each only when there are any.
     """
-    shortfalls: list[RetrievalShortfall] = []
-    if search_result.listing_failure is not None and search_result.unlisted_count > 0:
-        shortfalls.append(
-            RetrievalShortfall(
-                SearchProvider.PUBMED,
-                search_result.listing_failure,
-                records_missing=search_result.unlisted_count,
-            )
-        )
-    if fetched.failure is not None and fetched.pmids_not_fetched:
-        shortfalls.append(
-            RetrievalShortfall(
-                SearchProvider.PUBMED,
-                fetched.failure,
-                records_missing=len(fetched.pmids_not_fetched),
-            )
-        )
-    if fetched.records_unreadable > 0:
-        shortfalls.append(
-            RetrievalShortfall(
-                SearchProvider.PUBMED,
-                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
-                records_missing=fetched.records_unreadable,
-            )
-        )
-    return shortfalls
+    return [
+        *shortfalls_for_missing_records(
+            SearchProvider.PUBMED, search_result.listing_failure, search_result.unlisted_count
+        ),
+        *shortfalls_for_missing_records(
+            SearchProvider.PUBMED, fetched.failure, len(fetched.pmids_not_fetched)
+        ),
+        *shortfalls_for_missing_records(
+            SearchProvider.PUBMED, _UNREADABLE, fetched.records_unreadable
+        ),
+    ]
 
 
 def europepmc_shortfalls(pagination: CursorPaginationState) -> list[RetrievalShortfall]:
@@ -128,31 +117,22 @@ def europepmc_shortfalls(pagination: CursorPaginationState) -> list[RetrievalSho
         pagination: The search's pagination state.
 
     Returns:
-        A shortfall for the results a failed later page left out, and one for
-        the results that could not be read, each only when there are any.
+        A shortfall for the results a later page or an early end of the
+        cursor left out, and one for the results that could not be read,
+        each only when there are any.
     """
-    shortfalls: list[RetrievalShortfall] = []
-    if pagination.failure is not None and pagination.unretrieved_count > 0:
-        shortfalls.append(
-            RetrievalShortfall(
-                SearchProvider.EUROPEPMC,
-                pagination.failure,
-                records_missing=pagination.unretrieved_count,
-            )
-        )
-    if pagination.unreadable_count > 0:
-        shortfalls.append(
-            RetrievalShortfall(
-                SearchProvider.EUROPEPMC,
-                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
-                records_missing=pagination.unreadable_count,
-            )
-        )
-    return shortfalls
+    return [
+        *shortfalls_for_missing_records(
+            SearchProvider.EUROPEPMC, pagination.failure, pagination.unretrieved_count
+        ),
+        *shortfalls_for_missing_records(
+            SearchProvider.EUROPEPMC, _UNREADABLE, pagination.unreadable_count
+        ),
+    ]
 
 
 def raise_if_failures_left_nothing(
-    merged: list["MergedArticle"],
+    merged: list[MergedArticle],
     shortfalls: list[RetrievalShortfall],
 ) -> None:
     """Refuse to return an empty result that a failure produced.
@@ -187,7 +167,9 @@ class UnifiedSearchResult:
         duplicates_removed: Number of duplicates removed in merge
         pagination: Pagination state for continuation
         shortfalls: What failures left out of this result; empty when the
-            search retrieved everything it asked for
+            search retrieved everything it asked for. Never set on a result
+            without articles: failures that leave nothing raise
+            ``SearchFailedError`` instead.
     """
 
     articles: list[MergedArticle] = field(default_factory=list)
@@ -260,6 +242,22 @@ class SearchService:
         except SourceRequestError as e:
             logger.warning(f"PubMed search failed: {e}")
             return RetrievalShortfall(e.provider, e.failure)
+
+    def _fetch_pubmed_articles(
+        self, search_result: SearchResult
+    ) -> tuple[list[ArticleMetadata], list[RetrievalShortfall]]:
+        """Fetch the articles a PubMed search listed.
+
+        Args:
+            search_result: The search, which may have failed to list some PMIDs.
+
+        Returns:
+            The articles fetched, and what the listing and the fetch left out.
+        """
+        fetched = ArticleFetchResult()
+        if search_result.pmids:
+            fetched = self.pubmed_client.fetch_articles(search_result.pmids)
+        return fetched.articles, pubmed_shortfalls(search_result, fetched)
 
     def _search_europepmc_source(
         self, query: str, max_results: int, include_preprints: bool
@@ -365,12 +363,7 @@ class SearchService:
         if progress_callback:
             progress_callback(f"Found {search_result.total_count} results, fetching details...")
 
-        # Fetch article details
-        fetched = ArticleFetchResult()
-        if search_result.pmids:
-            fetched = self.pubmed_client.fetch_articles(search_result.pmids)
-        articles: list[ArticleMetadata] = fetched.articles
-        shortfalls = pubmed_shortfalls(search_result, fetched)
+        articles, shortfalls = self._fetch_pubmed_articles(search_result)
 
         # Convert to merged articles
         merged = [
@@ -458,8 +451,8 @@ class SearchService:
         """Search both PubMed and Europe PMC, merging results.
 
         A provider that fails is recorded as a shortfall and the search
-        proceeds on the other (the user's decision, 2026-09-14), so the result
-        can rest on one provider alone -- and says so.
+        proceeds on the other, so the result can rest on one provider alone
+        -- and says so.
         """
         # Prepare queries for both providers
         if QueryTranslator.is_pubmed_syntax(query):
@@ -495,11 +488,8 @@ class SearchService:
             shortfalls.append(pubmed_result)
         else:
             pubmed_total = pubmed_result.total_count
-            fetched = ArticleFetchResult()
-            if pubmed_result.pmids:
-                fetched = self.pubmed_client.fetch_articles(pubmed_result.pmids)
-            pubmed_articles = fetched.articles
-            shortfalls.extend(pubmed_shortfalls(pubmed_result, fetched))
+            pubmed_articles, pubmed_missing = self._fetch_pubmed_articles(pubmed_result)
+            shortfalls.extend(pubmed_missing)
 
         # Search Europe PMC
         if progress_callback:

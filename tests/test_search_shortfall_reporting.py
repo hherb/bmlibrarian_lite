@@ -319,7 +319,7 @@ class TestTheMcpTools:
         assert result["report"] == "No documents found matching the query."
 
     def test_a_failed_fact_check_search_stays_a_failure(self) -> None:
-        """The server turns the raised error into an error payload, not a report."""
+        """The handler raises; it does not return a report."""
         context = mcp_context(incomplete_session(), [])
         context.search_agent.search.side_effect = SearchFailedError([PUBMED_DOWN])
 
@@ -337,7 +337,7 @@ class TestTheMcpTools:
 
 
 class TestTheMcpServer:
-    """A failed tool call is an MCP error result, carrying what failed (#247 review)."""
+    """A failed tool call is an MCP error result, carrying what failed (#247)."""
 
     @pytest.fixture
     def server_and_context(self, tmp_path: Any) -> Any:
@@ -370,6 +370,32 @@ class TestTheMcpServer:
         assert PUBMED_DOWN_TEXT in payload["error"]
         assert payload["retrieval_shortfalls"] == EXPECTED_PAYLOAD_SHORTFALLS
         assert payload["advice"].startswith("The service is limiting")
+
+    def test_a_failed_fact_check_is_an_error_result_too(self, server_and_context: Any) -> None:
+        """fact_check_claim fails the same way search_literature does."""
+        server, context = server_and_context
+        context.search_agent = MagicMock()
+        context.search_agent.search.side_effect = SearchFailedError([PUBMED_DOWN])
+
+        result = self.call(server, "fact_check_claim", {"claim": QUESTION})
+
+        assert result.isError is True
+        assert json.loads(result.content[0].text)["retrieval_shortfalls"] == (
+            EXPECTED_PAYLOAD_SHORTFALLS
+        )
+
+    def test_a_complete_search_carries_an_empty_list(self, server_and_context: Any) -> None:
+        """The field is always present, so a caller need not guess its absence."""
+        server, context = server_and_context
+        session = incomplete_session()
+        session.metadata = {"provider": "pubmed"}
+        context.search_agent = MagicMock()
+        context.search_agent.search.return_value = (session, [make_document()])
+
+        result = self.call(server, "search_literature", {"query": QUESTION})
+
+        assert result.isError is False
+        assert json.loads(result.content[0].text)["retrieval_shortfalls"] == []
 
     def test_a_successful_call_is_not_an_error_result(self, server_and_context: Any) -> None:
         """The error flag is not set on every result."""

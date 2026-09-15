@@ -223,24 +223,13 @@ class LiteSearchAgent(LiteBaseAgent):
                 "Search incomplete: " + describe_search_shortfalls(search_result.shortfalls)
             )
 
-        if not search_result.documents:
-            # No results found
-            session = self.storage.create_search_session(
-                query=pubmed_query.query_string,
-                natural_language_query=question,
-                document_count=0,
-                metadata=search_session_metadata(provider, search_result),
-            )
-            return session, []
-
         # Use documents directly from search result
         documents = search_result.documents
 
-        if progress_callback:
-            progress_callback(f"Caching {len(documents)} documents...")
-
         # Store documents with embeddings
         if documents:
+            if progress_callback:
+                progress_callback(f"Caching {len(documents)} documents...")
             self.storage.add_documents(documents, embedding_function=self.embedder)
 
         # Create search session with provider metadata
@@ -316,15 +305,6 @@ class LiteSearchAgent(LiteBaseAgent):
             logger.warning(
                 "Search incomplete: " + describe_search_shortfalls(search_result.shortfalls)
             )
-
-        if not search_result.documents:
-            session = self.storage.create_search_session(
-                query=query_string,
-                natural_language_query=natural_language_query or query_string,
-                document_count=0,
-                metadata=search_session_metadata(provider, search_result),
-            )
-            return session, []
 
         documents = search_result.documents
 

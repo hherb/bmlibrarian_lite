@@ -8,29 +8,82 @@ A source that failed is not a source with no evidence (#247). These types are
 what carries the difference from a client to the reader: the reason a request
 produced no usable answer, and how much of a search is missing because of it.
 Every sentence built here reaches a report, the GUI or an MCP caller, so none
-may carry a response body or a request: NCBI echoes the API key in both.
+may carry a response body or a request: NCBI echoes the API key in both. The
+strings are shared verbatim with the Swift and Android ports
+(``doc/cross_platform/search_failure_reporting.md``), so the tests pin them.
 """
+
+from collections.abc import Iterator
 
 import pytest
 import requests
+from urllib3.exceptions import MaxRetryError, NewConnectionError, ReadTimeoutError
 
 from bmlibrarian_lite.data_models import (
+    ReportMetadata,
     RequestFailure,
     RequestFailureKind,
     RetrievalShortfall,
     SearchProvider,
 )
+from bmlibrarian_lite.exceptions import SearchFailedError
 from bmlibrarian_lite.search_failures import (
+    combined_shortfalls,
     describe_search_shortfalls,
+    format_search_failure_message,
     format_search_shortfall_notice,
     request_failure_from_exception,
     retrieval_shortfalls_from_metadata,
     retrieval_shortfalls_to_metadata,
     search_failure_advice,
+    shortfalls_for_missing_records,
+    with_search_shortfall_notice,
+    without_search_shortfall_notice,
 )
 
 RATE_LIMITED = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=429)
+UNAVAILABLE = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
+BAD_REQUEST = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=400)
 TIMED_OUT = RequestFailure(RequestFailureKind.TIMEOUT)
+CONNECTION_FAILED = RequestFailure(RequestFailureKind.CONNECTION)
+SERVICE_ERROR = RequestFailure(RequestFailureKind.SERVICE_ERROR)
+PUBMED_DOWN = RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED)
+
+RATE_LIMIT_ADVICE = (
+    "The service is limiting how often it can be searched: wait a minute and try again."
+)
+PUBMED_KEY_ADVICE = "An NCBI API key, set in Settings, raises PubMed's limit."
+PUBMED_REFUSED_KEY_ADVICE = (
+    "If an NCBI API key is set in Settings, check that it is correct: "
+    "PubMed refuses a request whose key it does not accept."
+)
+SERVICE_ERROR_ADVICE = (
+    "If it happens again, rephrase the question: the service may be unable to process the query."
+)
+CONNECTIVITY_ADVICE = "Check the internet connection and try again."
+FALLBACK_ADVICE = "Try again later."
+
+
+class TestRequestFailureKind:
+    """The raw values are persisted and shared with the ports."""
+
+    def test_the_raw_values_are_the_contracts(self) -> None:
+        """Renaming one would make stored shortfalls read as a failed request."""
+        assert {kind.value for kind in RequestFailureKind} == {
+            "timeout",
+            "connection",
+            "http_status",
+            "redirect_refused",
+            "service_error",
+            "malformed_response",
+            "incomplete_response",
+            "request_failed",
+        }
+
+    @pytest.mark.parametrize("kind", list(RequestFailureKind))
+    def test_every_kind_has_a_reason(self, kind: RequestFailureKind) -> None:
+        """A kind added without a reason would raise inside a report."""
+        assert RequestFailure(kind).describe()
 
 
 class TestRequestFailureDescription:
@@ -40,16 +93,17 @@ class TestRequestFailureDescription:
         "failure, expected",
         [
             (RATE_LIMITED, "HTTP 429 Too Many Requests"),
-            (RequestFailure(RequestFailureKind.HTTP_STATUS, 503), "HTTP 503 Service Unavailable"),
+            (UNAVAILABLE, "HTTP 503 Service Unavailable"),
             (RequestFailure(RequestFailureKind.HTTP_STATUS, 599), "HTTP 599"),
             (RequestFailure(RequestFailureKind.HTTP_STATUS), "an HTTP error"),
             (
                 RequestFailure(RequestFailureKind.REDIRECT_REFUSED, 307),
                 "a redirect (HTTP 307) was refused",
             ),
+            (RequestFailure(RequestFailureKind.REDIRECT_REFUSED), "a redirect was refused"),
             (TIMED_OUT, "the request timed out"),
-            (RequestFailure(RequestFailureKind.CONNECTION), "the connection failed"),
-            (RequestFailure(RequestFailureKind.SERVICE_ERROR), "the service reported an error"),
+            (CONNECTION_FAILED, "the connection failed"),
+            (SERVICE_ERROR, "the service reported an error"),
             (
                 RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
                 "the response could not be read",
@@ -65,6 +119,33 @@ class TestRequestFailureDescription:
         """Two different failures must not read the same to the user."""
         assert failure.describe() == expected
 
+    @pytest.mark.parametrize(
+        "status, expected",
+        [
+            (413, "HTTP 413 Content Too Large"),
+            (414, "HTTP 414 URI Too Long"),
+            (422, "HTTP 422"),
+        ],
+    )
+    def test_the_phrases_do_not_follow_the_python_release(self, status: int, expected: str) -> None:
+        """Python 3.13 renamed these; the contract's clause stays the same."""
+        assert RequestFailure(RequestFailureKind.HTTP_STATUS, status).describe() == expected
+
+
+class TestRequestFailureConstruction:
+    """A failure cannot carry a status its kind does not have."""
+
+    def test_a_status_on_a_timeout_is_refused(self) -> None:
+        """Only an HTTP answer has a status."""
+        with pytest.raises(ValueError, match="carries no HTTP status"):
+            RequestFailure(RequestFailureKind.TIMEOUT, 429)
+
+    @pytest.mark.parametrize("status", [99, 1000, True])
+    def test_a_status_that_is_no_http_status_is_refused(self, status: int) -> None:
+        """A status code is three digits, and ``True`` is not one."""
+        with pytest.raises(ValueError, match="HTTP status code"):
+            RequestFailure(RequestFailureKind.HTTP_STATUS, status)
+
 
 class TestRequestFailureFromException:
     """A ``requests`` exception is reduced to its kind and status, never kept."""
@@ -79,7 +160,23 @@ class TestRequestFailureFromException:
         """A refused or reset connection is not a timeout."""
         failure = request_failure_from_exception(requests.exceptions.ConnectionError())
 
-        assert failure == RequestFailure(RequestFailureKind.CONNECTION)
+        assert failure == CONNECTION_FAILED
+
+    def test_a_read_timeout_that_spent_its_retries_is_a_timeout(self) -> None:
+        """``requests`` re-raises urllib3's spent read-timeout retry as a ConnectionError."""
+        spent = MaxRetryError(None, "/search", ReadTimeoutError(None, "/search", "read timed out"))
+
+        failure = request_failure_from_exception(requests.exceptions.ConnectionError(spent))
+
+        assert failure == TIMED_OUT
+
+    def test_a_refused_connection_that_spent_its_retries_is_a_connection_failure(self) -> None:
+        """urllib3's ``NewConnectionError`` subclasses its timeout error; it is no timeout."""
+        spent = MaxRetryError(None, "/search", NewConnectionError(None, "refused"))
+
+        failure = request_failure_from_exception(requests.exceptions.ConnectionError(spent))
+
+        assert failure == CONNECTION_FAILED
 
     def test_an_http_error_keeps_only_its_status(self) -> None:
         """The response is dropped: its request body carries the NCBI key."""
@@ -116,11 +213,9 @@ class TestRequestFailureFromException:
 class TestRetrievalShortfallDescription:
     """A shortfall says which source, how much, and why."""
 
-    def test_a_source_that_answered_nothing_is_named(self) -> None:
-        """``records_missing=None`` means the source was never searched."""
-        shortfall = RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED)
-
-        assert shortfall.describe() == (
+    def test_a_source_that_could_not_be_searched_is_named(self) -> None:
+        """``records_missing=None`` means the source could not be searched."""
+        assert PUBMED_DOWN.describe() == (
             "PubMed could not be searched (HTTP 429 Too Many Requests)"
         )
 
@@ -141,7 +236,7 @@ class TestRetrievalShortfallDescription:
     def test_the_combined_description_keeps_every_shortfall(self) -> None:
         """Two sources failing are both reported, in order."""
         shortfalls = [
-            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED),
+            PUBMED_DOWN,
             RetrievalShortfall(SearchProvider.EUROPEPMC, TIMED_OUT, records_missing=5),
         ]
 
@@ -151,21 +246,155 @@ class TestRetrievalShortfallDescription:
         )
 
 
+class TestRetrievalShortfallConstruction:
+    """A shortfall names one source and misses at least one record."""
+
+    def test_both_providers_is_no_source(self) -> None:
+        """``both`` names a search; stored, it would be refused on reading."""
+        with pytest.raises(ValueError, match="PubMed or Europe PMC"):
+            RetrievalShortfall(SearchProvider.BOTH, RATE_LIMITED)
+
+    @pytest.mark.parametrize("records_missing", [0, -1, True])
+    def test_nothing_missing_is_not_a_shortfall(self, records_missing: int) -> None:
+        """It would tell the user a complete search was incomplete."""
+        with pytest.raises(ValueError, match="at least one record"):
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=records_missing)
+
+
+class TestBuildingShortfalls:
+    """The helpers every search records its shortfalls through."""
+
+    @pytest.mark.parametrize(
+        "failure, records_missing",
+        [(None, 0), (RATE_LIMITED, 0), (RATE_LIMITED, -2)],
+        ids=["nothing-failed", "nothing-missing", "negative"],
+    )
+    def test_nothing_is_recorded_without_a_loss(
+        self, failure: RequestFailure | None, records_missing: int
+    ) -> None:
+        """A shortfall with nothing missing would call a complete search incomplete."""
+        assert shortfalls_for_missing_records(SearchProvider.PUBMED, failure, records_missing) == []
+
+    def test_a_loss_without_a_reason_is_still_recorded(self) -> None:
+        """The count degrades to a failed request; it is never dropped."""
+        assert shortfalls_for_missing_records(SearchProvider.PUBMED, None, 5) == [
+            RetrievalShortfall(
+                SearchProvider.PUBMED,
+                RequestFailure(RequestFailureKind.REQUEST_FAILED),
+                records_missing=5,
+            )
+        ]
+
+    def test_a_loss_is_recorded_with_its_count(self) -> None:
+        """What failed, and how much it cost."""
+        assert shortfalls_for_missing_records(SearchProvider.EUROPEPMC, UNAVAILABLE, 3) == [
+            RetrievalShortfall(SearchProvider.EUROPEPMC, UNAVAILABLE, records_missing=3)
+        ]
+
+    def test_the_same_failure_of_the_same_source_is_reported_once(self) -> None:
+        """Page after page of one rate limit reads as one clause, the counts added."""
+        shortfalls = [
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=100),
+            RetrievalShortfall(SearchProvider.PUBMED, UNAVAILABLE, records_missing=7),
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=50),
+            RetrievalShortfall(SearchProvider.EUROPEPMC, RATE_LIMITED, records_missing=1),
+        ]
+
+        assert combined_shortfalls(shortfalls) == [
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=150),
+            RetrievalShortfall(SearchProvider.PUBMED, UNAVAILABLE, records_missing=7),
+            RetrievalShortfall(SearchProvider.EUROPEPMC, RATE_LIMITED, records_missing=1),
+        ]
+
+    def test_a_source_that_could_not_be_searched_is_not_merged_into_a_count(self) -> None:
+        """"Could not be searched" and "N records missing" are different statements."""
+        shortfalls = [
+            PUBMED_DOWN,
+            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=4),
+        ]
+
+        assert combined_shortfalls(shortfalls) == shortfalls
+
+
 class TestSearchShortfallNotice:
     """The notice a report or message carries when the search was incomplete."""
 
     def test_no_shortfall_adds_no_notice(self) -> None:
         """A complete search must not read as a qualified one."""
         assert format_search_shortfall_notice([]) == ""
+        assert with_search_shortfall_notice("Report.", []) == "Report."
 
     def test_the_notice_says_the_search_was_incomplete_and_why(self) -> None:
         """The reader learns the evidence base is partial before reading it."""
-        notice = format_search_shortfall_notice(
-            [RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED)]
+        assert format_search_shortfall_notice([PUBMED_DOWN]) == (
+            "> **Incomplete search:** PubMed could not be searched "
+            "(HTTP 429 Too Many Requests). Everything below rests only on the "
+            "records that were retrieved."
         )
 
-        assert notice.startswith("> **Incomplete search:**")
-        assert "PubMed could not be searched (HTTP 429 Too Many Requests)" in notice
+    def test_the_notice_is_followed_by_a_blank_line_and_the_text(self) -> None:
+        """The notice is its own Markdown block."""
+        assert with_search_shortfall_notice("Report.", [PUBMED_DOWN]) == (
+            f"{format_search_shortfall_notice([PUBMED_DOWN])}\n\nReport."
+        )
+
+    def test_the_text_behind_the_notice_can_be_read(self) -> None:
+        """A check of what a text is must see through the notice."""
+        text = "No documents scored 3 or higher.\n\nTry lowering the threshold."
+
+        assert without_search_shortfall_notice(with_search_shortfall_notice(text, [PUBMED_DOWN])) == (
+            text
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        ["A report.\n\nWith paragraphs.", "> **Incomplete search:** with no blank line after"],
+        ids=["no-notice", "no-separator"],
+    )
+    def test_a_text_without_the_notice_is_left_alone(self, text: str) -> None:
+        """Nothing that is not the notice is taken off."""
+        assert without_search_shortfall_notice(text) == text
+
+
+class TestSearchFailedError:
+    """The error a search raises when failures left it with nothing."""
+
+    def test_the_message_names_every_shortfall(self) -> None:
+        """The contract's sentence, verbatim."""
+        error = SearchFailedError(
+            [PUBMED_DOWN, RetrievalShortfall(SearchProvider.EUROPEPMC, TIMED_OUT)]
+        )
+
+        assert str(error) == (
+            "The search could not be completed: PubMed could not be searched "
+            "(HTTP 429 Too Many Requests); Europe PMC could not be searched "
+            "(the request timed out)."
+        )
+
+    def test_a_failure_naming_nothing_is_refused(self) -> None:
+        """"The search could not be completed: ." tells the user nothing."""
+        with pytest.raises(ValueError, match="at least one shortfall"):
+            SearchFailedError([])
+
+    def test_a_generator_of_shortfalls_is_kept_whole(self) -> None:
+        """The message and the shortfalls a caller reads agree."""
+
+        def shortfalls() -> Iterator[RetrievalShortfall]:
+            yield PUBMED_DOWN
+
+        error = SearchFailedError(shortfalls())
+
+        assert error.shortfalls == (PUBMED_DOWN,)
+        assert "PubMed could not be searched" in str(error)
+
+    def test_the_failure_message_adds_the_advice_after_a_blank_line(self) -> None:
+        """What failed, then what to do."""
+        message = format_search_failure_message(SearchFailedError([PUBMED_DOWN]))
+
+        assert message == (
+            "The search could not be completed: PubMed could not be searched "
+            f"(HTTP 429 Too Many Requests).\n\n{RATE_LIMIT_ADVICE} {PUBMED_KEY_ADVICE}"
+        )
 
 
 class TestShortfallsInSessionMetadata:
@@ -174,13 +403,29 @@ class TestShortfallsInSessionMetadata:
     def test_shortfalls_survive_the_metadata_round_trip(self) -> None:
         """What the agent writes is what the GUI and MCP read."""
         shortfalls = [
-            RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED),
+            PUBMED_DOWN,
             RetrievalShortfall(SearchProvider.EUROPEPMC, TIMED_OUT, records_missing=40),
         ]
 
         metadata = {"provider": "both", **retrieval_shortfalls_to_metadata(shortfalls)}
 
         assert retrieval_shortfalls_from_metadata(metadata) == shortfalls
+
+    def test_the_stored_form_is_the_contracts(self) -> None:
+        """The ports read and write these exact keys and values."""
+        stored = retrieval_shortfalls_to_metadata(
+            [RetrievalShortfall(SearchProvider.EUROPEPMC, RATE_LIMITED, records_missing=3)]
+        )
+
+        assert stored == {
+            "retrieval_shortfalls": [
+                {
+                    "provider": "europepmc",
+                    "failure": {"kind": "http_status", "status_code": 429},
+                    "records_missing": 3,
+                }
+            ]
+        }
 
     def test_metadata_without_shortfalls_reads_as_none(self) -> None:
         """Sessions written before #247 carry no key at all."""
@@ -190,41 +435,117 @@ class TestShortfallsInSessionMetadata:
         """A complete search leaves session metadata as it was."""
         assert retrieval_shortfalls_to_metadata([]) == {}
 
-    def test_an_unreadable_failure_still_reports_the_shortfall(self) -> None:
-        """Dropping it would let the report claim a complete search."""
-        metadata = {
-            "retrieval_shortfalls": [
+    @pytest.mark.parametrize(
+        "stored, expected",
+        [
+            (
                 {
                     "provider": "pubmed",
-                    "failure": {"kind": "from-a-newer-build", "status_code": "429"},
+                    "failure": {"kind": "from-a-newer-build", "status_code": 429},
                     "records_missing": -3,
-                }
-            ]
-        }
+                },
+                RetrievalShortfall(
+                    SearchProvider.PUBMED, RequestFailure(RequestFailureKind.REQUEST_FAILED)
+                ),
+            ),
+            (
+                {"provider": "pubmed", "failure": "x", "records_missing": 0},
+                RetrievalShortfall(
+                    SearchProvider.PUBMED, RequestFailure(RequestFailureKind.REQUEST_FAILED)
+                ),
+            ),
+            (
+                {
+                    "provider": "europepmc",
+                    "failure": {"kind": "http_status", "status_code": True},
+                    "records_missing": True,
+                },
+                RetrievalShortfall(
+                    SearchProvider.EUROPEPMC, RequestFailure(RequestFailureKind.HTTP_STATUS)
+                ),
+            ),
+            (
+                {
+                    "provider": "pubmed",
+                    "failure": {"kind": "http_status", "status_code": 10**30},
+                    "records_missing": 2,
+                },
+                RetrievalShortfall(
+                    SearchProvider.PUBMED,
+                    RequestFailure(RequestFailureKind.HTTP_STATUS),
+                    records_missing=2,
+                ),
+            ),
+            (
+                {
+                    "provider": "pubmed",
+                    "failure": {"kind": "timeout", "status_code": 429},
+                    "records_missing": None,
+                },
+                RetrievalShortfall(SearchProvider.PUBMED, TIMED_OUT),
+            ),
+        ],
+        ids=[
+            "unknown-kind",
+            "failure-not-an-object",
+            "booleans",
+            "status-out-of-range",
+            "status-on-a-kind-without-one",
+        ],
+    )
+    def test_an_unreadable_field_degrades_but_the_shortfall_stays(
+        self, stored: dict[str, object], expected: RetrievalShortfall
+    ) -> None:
+        """Dropping it would let the report claim a complete search.
 
-        assert retrieval_shortfalls_from_metadata(metadata) == [
-            RetrievalShortfall(
-                SearchProvider.PUBMED, RequestFailure(RequestFailureKind.REQUEST_FAILED)
-            )
-        ]
+        A count degrades to ``None``, which claims more is missing, never less.
+        """
+        metadata = {"retrieval_shortfalls": [stored]}
+
+        assert retrieval_shortfalls_from_metadata(metadata) == [expected]
 
     @pytest.mark.parametrize(
         "entries",
         [
             [{"provider": "nowhere", "failure": {"kind": "timeout"}}],
+            [{"provider": "both", "failure": {"kind": "timeout"}}],
+            [{"failure": {"kind": "timeout"}}],
             ["not a dict"],
             "not a list",
+            None,
         ],
-        ids=["unknown-provider", "entry-not-a-dict", "value-not-a-list"],
+        ids=[
+            "unknown-provider",
+            "both-providers",
+            "no-provider",
+            "entry-not-a-dict",
+            "value-not-a-list",
+            "value-null",
+        ],
     )
-    def test_an_entry_naming_no_source_is_refused_not_dropped(self, entries: object) -> None:
+    def test_a_malformed_entry_is_refused_not_dropped(self, entries: object) -> None:
         """Skipping it would let the report claim a complete search.
 
-        Only this process writes the key, so an entry that names no source is a
-        defect to surface, not data to guess a source for.
+        Only this process writes the key, so an entry that names no single
+        source, or a key that holds no list, is a defect to surface, not data
+        to guess from.
         """
         with pytest.raises(ValueError, match="retrieval shortfall"):
             retrieval_shortfalls_from_metadata({"retrieval_shortfalls": entries})
+
+
+class TestShortfallsInReportMetadata:
+    """The report's metadata refuses what the session reader refuses."""
+
+    @pytest.mark.parametrize("stored", ["not a list", None], ids=["string", "null"])
+    def test_a_value_that_is_not_a_list_is_refused(self, stored: object) -> None:
+        """The two readers agree on ``null``."""
+        with pytest.raises(ValueError, match="search_shortfalls must be a list"):
+            ReportMetadata.from_dict({"search_shortfalls": stored})
+
+    def test_metadata_saved_before_247_reads_as_complete(self) -> None:
+        """Only a missing key means no shortfalls were recorded."""
+        assert ReportMetadata.from_dict({}).search_shortfalls == []
 
 
 class TestSearchFailureAdvice:
@@ -234,41 +555,77 @@ class TestSearchFailureAdvice:
         "shortfalls, expected",
         [
             (
-                [RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED)],
-                "The service is limiting how often it can be searched: wait a minute "
-                "and try again. An NCBI API key, set in Settings, raises PubMed's limit.",
+                [PUBMED_DOWN],
+                f"{RATE_LIMIT_ADVICE} {PUBMED_KEY_ADVICE}",
             ),
             (
                 [RetrievalShortfall(SearchProvider.EUROPEPMC, RATE_LIMITED)],
-                "The service is limiting how often it can be searched: wait a minute "
-                "and try again.",
+                RATE_LIMIT_ADVICE,
             ),
             (
                 [RetrievalShortfall(SearchProvider.PUBMED, TIMED_OUT)],
-                "Check the internet connection and try again.",
+                CONNECTIVITY_ADVICE,
             ),
             (
-                [
-                    RetrievalShortfall(
-                        SearchProvider.EUROPEPMC, RequestFailure(RequestFailureKind.SERVICE_ERROR)
-                    )
-                ],
-                "Try again later.",
+                [RetrievalShortfall(SearchProvider.EUROPEPMC, CONNECTION_FAILED)],
+                CONNECTIVITY_ADVICE,
+            ),
+            (
+                [RetrievalShortfall(SearchProvider.PUBMED, BAD_REQUEST)],
+                PUBMED_REFUSED_KEY_ADVICE,
+            ),
+            (
+                [RetrievalShortfall(SearchProvider.EUROPEPMC, BAD_REQUEST)],
+                FALLBACK_ADVICE,
+            ),
+            (
+                [RetrievalShortfall(SearchProvider.EUROPEPMC, SERVICE_ERROR)],
+                SERVICE_ERROR_ADVICE,
+            ),
+            (
+                [RetrievalShortfall(SearchProvider.PUBMED, UNAVAILABLE)],
+                FALLBACK_ADVICE,
             ),
             (
                 [
                     RetrievalShortfall(SearchProvider.EUROPEPMC, TIMED_OUT),
-                    RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED),
+                    RetrievalShortfall(SearchProvider.PUBMED, SERVICE_ERROR, records_missing=2),
+                    RetrievalShortfall(
+                        SearchProvider.PUBMED,
+                        RequestFailure(RequestFailureKind.HTTP_STATUS, 403),
+                        records_missing=9,
+                    ),
+                    PUBMED_DOWN,
                 ],
-                "The service is limiting how often it can be searched: wait a minute "
-                "and try again. An NCBI API key, set in Settings, raises PubMed's limit. "
-                "Check the internet connection and try again.",
+                f"{RATE_LIMIT_ADVICE} {PUBMED_KEY_ADVICE} {PUBMED_REFUSED_KEY_ADVICE} "
+                f"{SERVICE_ERROR_ADVICE} {CONNECTIVITY_ADVICE}",
+            ),
+            (
+                [
+                    PUBMED_DOWN,
+                    RetrievalShortfall(SearchProvider.EUROPEPMC, RATE_LIMITED),
+                    RetrievalShortfall(SearchProvider.PUBMED, RATE_LIMITED, records_missing=4),
+                    RetrievalShortfall(SearchProvider.PUBMED, TIMED_OUT, records_missing=1),
+                    RetrievalShortfall(SearchProvider.EUROPEPMC, CONNECTION_FAILED),
+                ],
+                f"{RATE_LIMIT_ADVICE} {PUBMED_KEY_ADVICE} {CONNECTIVITY_ADVICE}",
             ),
         ],
-        ids=["pubmed-rate-limit", "europepmc-rate-limit", "timeout", "service-error", "mixed"],
+        ids=[
+            "pubmed-rate-limit",
+            "europepmc-rate-limit",
+            "timeout",
+            "connection",
+            "pubmed-refused-key",
+            "europepmc-bad-request",
+            "service-error",
+            "other-status",
+            "every-condition-in-order",
+            "each-sentence-once",
+        ],
     )
     def test_the_advice_fits_the_failure(
         self, shortfalls: list[RetrievalShortfall], expected: str
     ) -> None:
-        """A rate limit, a network fault and an outage need different next steps."""
+        """A rate limit, a refused key, a network fault and an outage need different next steps."""
         assert search_failure_advice(shortfalls) == expected

@@ -91,26 +91,28 @@ def _malformed_search_answer(reason: str) -> SourceRequestError:
 def _validated_search_page(data: object) -> dict[str, Any]:
     """Check that a search answer has the fields a result depends on.
 
-    Europe PMC answers some failures with HTTP 200: an unknown cursor gets
-    ``{"version": "6.9"}`` and nothing else (checked live 2026-09-14). Read as
-    ``hitCount`` 0, that was a search that matched nothing (#247).
+    Europe PMC answers some failures with HTTP 200: an unknown cursor gets an
+    answer holding only a ``version`` field (6.9 when checked live on
+    2026-09-14). Read as ``hitCount`` 0, that was a search that matched
+    nothing (#247).
 
     Args:
         data: The decoded JSON answer, untrusted.
 
     Returns:
-        The answer, with an integer ``hitCount`` and a ``resultList.result``
-        list.
+        The answer, with a non-negative integer ``hitCount`` and a
+        ``resultList.result`` list.
 
     Raises:
-        SourceRequestError: If either is missing or of the wrong type.
+        SourceRequestError: If either is missing or of the wrong type, or
+            ``hitCount`` is negative.
     """
     if not isinstance(data, dict):
         raise _malformed_search_answer("answer is not a JSON object")
     hit_count = data.get("hitCount")
     # bool is an int subclass; ``true`` is not a count.
     if not isinstance(hit_count, int) or isinstance(hit_count, bool) or hit_count < 0:
-        raise _malformed_search_answer("answer has no hitCount")
+        raise _malformed_search_answer("answer has no non-negative integer hitCount")
     result_list = data.get("resultList")
     if not isinstance(result_list, dict) or not isinstance(result_list.get("result"), list):
         raise _malformed_search_answer("answer has no resultList.result list")
@@ -326,8 +328,9 @@ class EuropePMCClient:
         except requests.exceptions.RequestException as e:
             failure = request_failure_from_exception(e)
         # Raised here, outside the except block, so the requests exception --
-        # holding the request, the response and any decoded body -- is not
-        # kept as the error's __context__.
+        # holding the request, the response and, for a body that is not
+        # JSON, that raw body as JSONDecodeError.doc -- is not kept as the
+        # error's __context__.
         if failure is not None:
             logger.warning(f"Europe PMC search request failed: {failure.describe()}")
             raise SourceRequestError(SearchProvider.EUROPEPMC, failure)
@@ -346,10 +349,11 @@ class EuropePMCClient:
         Performs a search using the Europe PMC REST API with cursor-based
         pagination for efficient retrieval of large result sets.
 
-        A cursor cannot skip a page, so a later page that fails ends the
-        search there: the articles already retrieved are returned, and the
-        pagination state records how many more were wanted and why they are
-        missing (#247).
+        A cursor cannot skip a page, so a later page that fails, or comes
+        back empty, ends the search there: the articles already retrieved are
+        returned, and the pagination state records how many more were wanted
+        and why they are missing (#247). So does a cursor that ends before
+        ``min(max_results, hitCount)`` results arrived.
 
         Args:
             query: Search query in Europe PMC syntax
@@ -362,7 +366,8 @@ class EuropePMCClient:
             Tuple of (list of ArticleInfo, pagination state)
 
         Raises:
-            SourceRequestError: If the first page could not be retrieved. A
+            SourceRequestError: If the first page failed, could not be read,
+                or held no results although ``hitCount`` said it would. A
                 failed search is never returned as one with no hits.
 
         Example:
@@ -412,25 +417,23 @@ class EuropePMCClient:
                 )
                 break
 
-            was_first_page = first_page
             if first_page:
                 total_count = data["hitCount"]
                 logger.info(f"Europe PMC search found {total_count} total results")
-                first_page = False
+            wanted = min(max_results, total_count)
 
             next_mark = data.get("nextCursorMark")
             next_cursor_value = next_mark if isinstance(next_mark, str) else None
 
             results = data["resultList"]["result"]
             if not results:
-                wanted = min(max_results, total_count)
-                if len(all_articles) + unreadable_count < wanted:
+                received = len(all_articles) + unreadable_count
+                if received < wanted:
                     logger.error(
-                        f"Europe PMC sent an empty page after "
-                        f"{len(all_articles) + unreadable_count} of {wanted} results"
+                        f"Europe PMC sent an empty page after {received} of {wanted} results"
                     )
                     incomplete = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
-                    if was_first_page:
+                    if first_page:
                         raise SourceRequestError(SearchProvider.EUROPEPMC, incomplete)
                     failure = incomplete
                 break
@@ -442,11 +445,20 @@ class EuropePMCClient:
                 else:
                     unreadable_count += 1
 
-            # Check if we've reached the end
             if not next_cursor_value or next_cursor_value == current_cursor:
+                # The cursor ends only once every hit was sent (checked live
+                # 2026-09-15): ending before that is an answer that held less
+                # than it counted, not the end of the results.
+                received = len(all_articles) + unreadable_count
+                if received < wanted:
+                    logger.error(
+                        f"Europe PMC's cursor ended after {received} of {wanted} results"
+                    )
+                    failure = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
                 break
 
             current_cursor = next_cursor_value
+            first_page = False
 
         unretrieved_count = 0
         if failure is not None:
@@ -524,7 +536,7 @@ class EuropePMCClient:
                 "pageSize": EUROPEPMC_COUNT_PAGE_SIZE,
             }
         )
-        return int(data["hitCount"])
+        return data["hitCount"]
 
     def _build_search_query(
         self,

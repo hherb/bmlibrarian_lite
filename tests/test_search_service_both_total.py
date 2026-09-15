@@ -13,7 +13,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bmlibrarian_lite.pubmed.data_types import ArticleFetchResult
+from bmlibrarian_lite.data_models import CursorPaginationState
+from bmlibrarian_lite.pubmed.data_types import ArticleFetchResult, PubMedQuery, SearchResult
 from bmlibrarian_lite.search_service import SearchService
 
 
@@ -22,7 +23,9 @@ def _make_service(pubmed_total: int, epmc_total: int) -> SearchService:
 
     The injected clients return the supplied hit counts and a single
     abstract-bearing article each, so the merge step yields a non-empty
-    result without touching the network.
+    result without touching the network. The search results are the real
+    types: a mock's every unset attribute is truthy, so a failure field the
+    service reads would read as a failure.
     """
     service = SearchService(config=MagicMock())
 
@@ -30,8 +33,11 @@ def _make_service(pubmed_total: int, epmc_total: int) -> SearchService:
     epmc_article = MagicMock(abstract="epmc abstract")
 
     pubmed_client = MagicMock()
-    pubmed_client.search.return_value = MagicMock(
-        total_count=pubmed_total, pmids=["1"], unlisted_count=0, listing_failure=None
+    pubmed_client.search.return_value = SearchResult(
+        query=PubMedQuery(original_question="cancer", query_string="cancer"),
+        total_count=pubmed_total,
+        retrieved_count=1,
+        pmids=["1"],
     )
     pubmed_client.fetch_articles.return_value = ArticleFetchResult(
         articles=[pubmed_article]
@@ -41,7 +47,9 @@ def _make_service(pubmed_total: int, epmc_total: int) -> SearchService:
     epmc_client = MagicMock()
     epmc_client.search.return_value = (
         [epmc_article],
-        MagicMock(total_count=epmc_total, unretrieved_count=0, failure=None, unreadable_count=0),
+        CursorPaginationState(
+            total_count=epmc_total, fetched_count=1, current_cursor="*", next_cursor=None
+        ),
     )
     service._europepmc_client = epmc_client
 

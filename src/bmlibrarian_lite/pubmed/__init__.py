@@ -42,7 +42,7 @@ from .data_types import (
     SearchSession,
     SearchStatus,
 )
-from .search_client import PubMedSearchClient, validate_email
+from .search_client import PubMedSearchClient, expected_esearch_listing, validate_email
 from .constants import (
     DEFAULT_MAX_RESULTS,
     DEFAULT_BATCH_SIZE,
@@ -66,6 +66,7 @@ __all__ = [
     "SearchStatus",
     # Client
     "PubMedSearchClient",
+    "expected_esearch_listing",
     "validate_email",
     # Constants
     "DEFAULT_MAX_RESULTS",

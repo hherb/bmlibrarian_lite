@@ -70,8 +70,8 @@ from ..agents import (
 from ..exceptions import SearchFailedError
 from ..search_failures import (
     describe_search_shortfalls,
+    format_search_failure_message,
     retrieval_shortfalls_from_metadata,
-    search_failure_advice,
     with_search_shortfall_notice,
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
@@ -108,7 +108,7 @@ class WorkflowWorker(QThread):
         error: Emitted on error (step, error message)
         finished: Emitted when workflow completes (final report)
         search_incomplete: Emitted when the search proceeded without part of
-            its sources (what is missing, as a clause)
+            its sources (every shortfall's clause, joined with "; ")
     """
 
     progress = Signal(str, int, int)  # step, current, total
@@ -205,7 +205,7 @@ class WorkflowWorker(QThread):
                 if self.pubmed_query:
                     metadata.pubmed_query = self.pubmed_query
                     self.query_generated.emit(self.pubmed_query, self.question)
-                metadata.search_shortfalls = self.preloaded_search_shortfalls
+                metadata.search_shortfalls = list(self.preloaded_search_shortfalls)
                 self._report_incomplete_search(metadata)
                 self.step_complete.emit("search", documents)
             else:
@@ -224,9 +224,7 @@ class WorkflowWorker(QThread):
                     # A failed search is not an empty one (#247): it ends the
                     # review as an error, never as "No documents found".
                     logger.warning(f"Search failed: {e}")
-                    self.error.emit(
-                        "search", f"{e}\n\n{search_failure_advice(e.shortfalls)}"
-                    )
+                    self.error.emit("search", format_search_failure_message(e))
                     return
 
                 metadata.search_shortfalls = retrieval_shortfalls_from_metadata(
@@ -894,7 +892,8 @@ class SystematicReviewTab(QWidget):
         """Tell the user the review is proceeding on an incomplete search.
 
         Args:
-            missing: What the search is missing, as a clause.
+            missing: What the search is missing: every shortfall's clause,
+                joined with "; ".
         """
         self.search_notice_label.setText(
             f"Incomplete search: {missing}. The review continues on the records "
@@ -906,12 +905,20 @@ class SystematicReviewTab(QWidget):
         """Handle workflow errors.
 
         A failed search also gets a dialog: its message says what failed and
-        what to do next, which a progress label is too small to hold.
+        what to do next, which a progress label is too small to hold, so the
+        label shows only its first line. Any other error shows in full.
+
+        Args:
+            step: The workflow step that failed.
+            message: What went wrong; may be empty or span several lines.
         """
-        self.progress_label.setText(f"Error in {step}: {message.splitlines()[0]}")
         self._reset_ui()
         if step == "search":
+            first_line = message.partition("\n")[0]
+            self.progress_label.setText(f"Error in {step}: {first_line}")
             QMessageBox.warning(self, "Search Failed", message)
+        else:
+            self.progress_label.setText(f"Error in {step}: {message}")
 
     def _on_finished(self, report: str, metadata: Optional[ReportMetadata] = None) -> None:
         """
@@ -1043,6 +1050,10 @@ class SystematicReviewTab(QWidget):
         )
         if self._preloaded_search_shortfalls:
             self._on_search_incomplete(describe_search_shortfalls(self._preloaded_search_shortfalls))
+        else:
+            # A warning left by an earlier review is not about these documents.
+            self.search_notice_label.clear()
+            self.search_notice_label.setVisible(False)
 
     def clear_preloaded_documents(self) -> None:
         """Clear any preloaded documents."""

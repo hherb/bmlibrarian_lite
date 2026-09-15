@@ -291,10 +291,10 @@ class SearchResult:
         search_time_seconds: Time taken for the search
         web_env: WebEnv for history server (for large result sets)
         query_key: QueryKey for history server
-        unlisted_count: PMIDs the search should have listed but could not,
-            because a history-server page failed (#248)
-        listing_failure: Why the first such page failed, or None when every
-            page was listed
+        unlisted_count: PMIDs PubMed counted but did not list: a page that
+            failed, or one that listed fewer than its count said (#248)
+        listing_failure: Why the first such page fell short, or None when
+            every page listed what it should
     """
 
     query: PubMedQuery

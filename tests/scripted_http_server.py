@@ -12,6 +12,7 @@ single answer serves every request to that path.
 """
 
 import json
+import socket
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,6 +24,8 @@ from urllib.parse import parse_qs, urlsplit
 LOOPBACK = "127.0.0.1"
 # serve_forever's default of 0.5 s is what shutdown() waits out per server.
 SERVER_POLL_INTERVAL_SECONDS = 0.05
+# Connections a silent server lets the kernel accept on its behalf.
+SILENT_SERVER_BACKLOG = 16
 JSON_CONTENT_TYPE = "application/json"
 XML_CONTENT_TYPE = "text/xml"
 
@@ -182,3 +185,23 @@ def running(script: dict[str, list[ScriptedAnswer]]) -> Iterator[ScriptedServer]
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+@contextmanager
+def silent() -> Iterator[str]:
+    """Listen without ever answering, for a ``with`` block.
+
+    The kernel completes the connection from its backlog, so a client
+    connects, sends its request and then waits: the read times out, which is
+    the failure a slow service produces. No thread sleeps to cause it.
+
+    Yields:
+        The server's base URL.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind((LOOPBACK, 0))
+        listener.listen(SILENT_SERVER_BACKLOG)
+        yield f"http://{LOOPBACK}:{listener.getsockname()[1]}"
+    finally:
+        listener.close()
