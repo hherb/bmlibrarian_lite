@@ -164,7 +164,9 @@ The failure recorded for several failed batches of one fetch is the first one.
 A shortfall with nothing missing is not recorded. The search for more
 documents, which pages through PubMed one batch at a time, reports the same
 failure of the same source once, the counts added; and when failures leave it
-with no new document, it is an error like any other search.
+with no new document, it is an error like any other search. Combining never
+merges a source that could not be searched into a count, and reports it once
+for each failure however often it failed.
 
 ## Telling the user
 
@@ -175,7 +177,7 @@ The clauses, shared verbatim so the platforms read alike:
 | Source not searched | `"{Provider} could not be searched ({reason})"` |
 | Records missing | `"{n} {Provider} record(s) could not be retrieved ({reason})"`, `n` with thousands separators, `record` when `n == 1` |
 | An alternative query's source not searched | `"an alternative search of {Provider} could not be completed ({reason})"` |
-| Records an alternative query lost | `"{n} {Provider} record(s) from an alternative search could not be retrieved ({reason})"` |
+| Records an alternative query lost | `"{n} {Provider} record(s) from an alternative search could not be retrieved ({reason})"`, `n` and `record` as for records missing |
 
 The last two apply only to [alternative queries](#alternative-queries-smart-search).
 
@@ -269,7 +271,10 @@ Reading back degrades, never drops:
 - a `status_code` that is not an integer from 100 to 999 (`true` included),
   or that belongs to a kind that carries none, reads as null;
 - a `records_missing` that is not an integer of at least 1 (`true` included)
-  reads as null, which claims more is missing, never less.
+  reads as null, which claims more is missing, never less;
+- where a platform runs [alternative queries](#alternative-queries-smart-search),
+  a `query` that is not `"alternative"` reads as the original query, for the
+  same reason.
 
 Refused as a defect, because skipping it would let a report claim a complete
 search:
@@ -291,22 +296,41 @@ it belongs to:
 enum ShortfallQuery:          # persisted marker: never rename
     ORIGINAL                  # stores no marker
     ALTERNATIVE = "alternative"
+
+struct RetrievalShortfall:    # the failure record above, plus
+    query: ShortfallQuery     # ORIGINAL unless smart search ran the query
 ```
 
 - It chooses the clause (the alternative-query rows under
   [Telling the user](#telling-the-user)). The advice does not depend on it.
 - Combining adds counts only within the same query: an alternative search's
-  loss is never merged into the original query's.
+  loss is never merged into the original query's. An alternative query's
+  source that could not be searched is reported once, however many queries
+  failed the same way.
 - Persisted as `"query": "alternative"` on the entry, written only for an
-  alternative query. A marker that is not that string reads as the original
-  query, whose clause claims more is missing, never less. Python writes none
-  and ignores the key.
+  alternative query. Reading back, a `query` that is not that string, or no
+  `query`, reads as the original query, whose clause claims more is missing,
+  never less. Python writes none and ignores the key.
 - One alternative query failing does not end smart search: the next is still
   tried. When smart search runs on its own (too few relevant documents), what
   its queries lost is recorded like any shortfall. When the user asked for more
-  evidence and every alternative query failed, leaving nothing new, that is a
-  failed search: the report stays as it was, the failure is shown, and smart
-  search stays available to try again.
+  evidence and failures left smart search with no new document, that is a
+  failed search: nothing it lost is kept, the report stays as it was, the
+  failure is shown, and smart search stays available to try again. Once a query
+  has found a new document, what the queries lose is recorded before any later
+  documents are saved.
+
+Generating the queries is not a source's failure, so it records no shortfall
+(user's decision, 2026-09-16):
+
+- A request to the model that failed (a broken connection, a refused key)
+  shows that alternative searches could not be run and to check the model and
+  its key; smart search stays available, and the request costs nothing.
+- An answer holding no usable query (text that is not a list of queries, or no
+  content) is asked for again, up to `MAX_QUERY_RETRIES` (2) more times, each a
+  paid call. When no answer is usable, smart search is marked as tried, so no
+  later batch asks and pays again, and the user is told the model's answers
+  held no usable query.
 
 ## Android
 
@@ -318,35 +342,42 @@ between the user's requests for more. The contract's stages map as follows:
 |-------|-----------|-------------------|
 | A first page (the claim's search, or an alternative query) | the source could not be searched; its paging stays where it was, so it is not paged later | null |
 | A later PubMed page (Fetch more, Get more evidence) | record it, and page on past it | `min(batch, count − offset, 9999 − offset)` |
-| A later Europe PMC page | record it, and end the cursor | `max(1, min(batch, hitCount − records received so far))`; `min(batch, hitCount)` for a session saved before the count was kept |
+| A later Europe PMC page | record it, and end the cursor | `max(1, min(batch, hitCount − records received so far))`; `max(1, min(batch, hitCount))` for a session saved before the count was kept |
 | esearch lists none of the PMIDs it counts | a failed request, recorded by the first-page or later-page row | as that row |
 | esearch lists fewer PMIDs than expected, some | record it; the next page starts after the unlisted PMIDs | the unlisted PMIDs |
 | efetch of a page's PMIDs fails after its retries, answers `eFetchResult`, is no article set, or breaks off | record it; the page's whole articles are kept | the PMIDs without a readable article |
 | A Europe PMC page that is empty although records remain | a failed request, recorded by the first-page or later-page row | as that row |
-| A Europe PMC cursor that ends before the page's hits arrived | record it | the page's expected records not received |
+| A Europe PMC cursor that ends before every hit arrived | record it: nothing past an ended cursor can be asked for | `hitCount − records received`, this page's included, so what an earlier short page left out is counted too; nothing for a session saved before the count was kept |
 | An unreadable record (no PMID or title, or a Europe PMC record that does not decode) | record it, keep the rest | the unreadable records |
 
 **A page that failures leave with no new document changes nothing**: no
 paging, no document and no shortfall is kept, so asking again asks for the same
 page. A page that fails the same way every time therefore cannot be skipped;
 the user can go on with the documents found. What a page lost is recorded
-before its documents are saved, and both before its paging moves. A first search that fails ends the session as failed (history lists only
-completed sessions, so none is saved). A request for more that fails returns to
-the decision to fetch more (Fetch more) or keeps the report as it was (Get more
-evidence), and shows the failure with its advice. The session stores its
+before its documents are saved, and both before its paging moves. A search
+that fails while the session holds no document ends the session as failed: the
+session is kept, but the history list shows only completed sessions. A request
+for more that fails returns to the decision to fetch more (Fetch more) or keeps
+the report as it was (Get more evidence), and shows the failure with its
+advice. The session stores its
 shortfalls in `sessions.retrieval_shortfalls_json` (Room v6), in the persisted
 form above; `null` is a complete search. `sessions.epmc_results_received` counts
 the Europe PMC records received; it is `null` for a session saved before v6,
 whose cursor can outlive its last hit, and then a later page is expected to
 hold nothing in particular. PubMed is never asked past offset 9998: a provider
 with no next page is not asked for one. A damaged record of shortfalls is a
-persistent warning, and the session refuses more evidence rather than write a
-report that could not say whether its search was complete.
+persistent warning, and the session refuses to go on rather than write a
+report that could not say whether its search was complete: Get more evidence
+keeps the report and says why, and every other step that would search or write
+a report ends the session as failed, saying why, before it searches or spends
+any budget.
 
-Two failures are not a source's, so they are not shortfalls: saved NCBI
+Two failures are not a source's, so they are not shortfalls. Saved NCBI
 credentials that cannot be read (a broken keystore) stop the search with what
-to do in Settings, and smart search that could not generate alternative
-queries says so and stays available to try again.
+to do in Settings: like a failed search, a first search ends as failed, Fetch
+more returns to the decision, and Get more evidence keeps the report. Smart
+search whose queries could not be generated follows
+[Alternative queries](#alternative-queries-smart-search).
 
 Android's report has no metadata and no Methodology section of its own. Code
 adds the notice, and a `## Methodology` section holding only the Search

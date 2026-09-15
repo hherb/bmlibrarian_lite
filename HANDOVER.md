@@ -29,20 +29,40 @@ compress this into **Recently landed**. Next: Swift (**#256** + **#255** +
   outlive its last hit). The notice is drawn **before the verdict** on screen,
   PDF (tested by reading the rendered PDF back) and share text.
 - **Not shortfalls:** an unreadable keystore (`NcbiCredentialsUnavailableException`,
-  fix in Settings) and smart search that cannot generate queries (stays
-  available). A damaged shortfall record is a persistent warning and refuses
-  more evidence. Fixed on the way: Fetch more re-requested page 1; the 9,999 cap;
+  fix in Settings; handled like a failed search, so Get more evidence keeps the
+  report) and query generation. **User's decision (2026-09-16): an answer with
+  no usable query is asked again, up to `MAX_QUERY_RETRIES` (2)**; if none is
+  usable smart search is marked as tried, so no later batch pays again. A
+  request that failed leaves smart search available and records no usage.
+  `LLMService.generateAlternativeQueries` returns an empty list for an unusable
+  answer, a failure only for a failed request. A damaged shortfall record is a
+  persistent warning: Get more evidence keeps the report, and every other step
+  that would search or write a report fails the session before spending
+  anything. Fixed on the way: Fetch more re-requested page 1; the 9,999 cap;
   `printStackTrace` in efetch (PubMed half of #123); Europe PMC cancellation and
   429; one bad record failing a page. `PubMedError` is deleted.
-- **Traps.** The test `Log` shadow records lines: assert no body reaches it. **A
-  Gradle incremental compile once served stale classes**: final check with
-  `--rerun-tasks`. Compile the instrumented `SessionDaoTest` with
+- **Review round (the same PR).** **An ended Europe PMC cursor misses every hit
+  not received** (`hitCount − received`), what earlier short pages left out
+  included. A failed alternative query's losses are held back only until a
+  query finds a document, then recorded before any later save. A source not
+  searched is reported once per failure and query (Python too); counts too large
+  to add stay apart rather than be capped. Paging limits live in
+  `SearchPaging`, the clients' send/retry in `data/remote/SourceRequests.kt`.
+- **Traps.** The test `Log` shadow records lines: assert no body reaches it, and
+  that something was logged. **A Gradle incremental compile once served stale
+  classes**: final check with `--rerun-tasks`. The wire tests' servers fail
+  fast and count requests in `tearDown`, so a new retry fails quickly instead of
+  waiting out timeouts. Compile the instrumented `SessionDaoTest` with
   `compileDebugAndroidTestKotlin`; no migration test exists (#269).
 - **Lodged:** #267 (Dismiss does nothing), #268 (`current_batch` never written),
   #269 (Room schemas 2/3, no migration tests), #270 (PMC lookup, #259 parity),
   #271 (full-text 429), #273 (`errorMessage` never shown), #274 (paging after a
   restore uses another query), #275 (cancellation read as failure; a failed Get
-  More Evidence hides the report).
+  More Evidence hides the report); from the review: #277 (a failed later Europe
+  PMC page counts one page, to decide), #278 (type hardening), #279 (shared
+  parity fixture), #280 (instrumented screen tests). Commented: #265 (listed
+  PMIDs fetched as nothing), #256 (what Swift must adopt; the doubled "could not
+  be completed" wording is still to decide).
 
 ## Recently landed (context)
 

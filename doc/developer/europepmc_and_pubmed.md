@@ -89,7 +89,7 @@ it, or record the difference here:
 | What counts as "no key" | an empty string | an empty string | a blank string, whitespace included |
 | esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | total is the articles seen so far, with a warning (#255) | as Python |
 | A failed search in a search of both providers | proceeds on the other provider and records a shortfall | dropped with a `print` (#256) | as Python |
-| Retries | `_make_request` per request | the whole `send` | esearch and efetch each on their own |
+| Retries | each HTTP request (`_make_request`) | each HTTP request (`send`) | each request with the reading of its answer: esearch and efetch on their own, so a failed fetch does not search again |
 
 **A failed source is not an empty one.** What counts as a failed request, what
 a search does with one, and how the reader is told are specified in
@@ -186,9 +186,10 @@ article count re-requests PMIDs already fetched, and a last batch that parsed to
 nothing is requested again on every "fetch more". BioMedLit's `SearchResult`
 reports `nextOffset` as the position after the PMIDs consumed, and `nil` when
 there is no next page (the last match, the offset cap, or no usable count).
-Android's `PubMedSearchResult.nextOffset` is the position after the PMIDs the
-page should have listed, `min(batch, count − offset, 9999 − offset)`, so PMIDs a
-page left unlisted are recorded as missing rather than asked for again.
+Android's `PubMedSearchResult.nextOffset` is `offset + max(expected, listed)`,
+where `expected` is what the page should have listed,
+`min(batch, count − offset, 9999 − offset)`: PMIDs a page left unlisted are
+recorded as missing rather than asked for again.
 
 ---
 
