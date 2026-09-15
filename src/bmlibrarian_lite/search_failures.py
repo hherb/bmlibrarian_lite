@@ -42,8 +42,7 @@ from collections.abc import Mapping, Sequence
 from http import HTTPStatus
 from typing import Any
 
-# requests ships no type stubs and types-requests is not a dependency.
-import requests  # type: ignore[import-untyped]
+import requests
 from urllib3.exceptions import MaxRetryError, ReadTimeoutError
 
 from .constants import RETRIEVAL_SHORTFALLS_METADATA_KEY
