@@ -394,25 +394,7 @@ class ReportViewModel @Inject constructor(
         val report = _uiState.value.report ?: return
 
         viewModelScope.launch {
-            val shareText = buildString {
-                appendLine("Medical Fact Check Report")
-                appendLine("========================")
-                appendLine()
-                appendLine("Verdict: ${report.verdict.displayName}")
-                appendLine()
-                appendLine(report.summary)
-                appendLine()
-                appendLine("---")
-                appendLine()
-                appendLine(report.fullReportMarkdown)
-                report.footnotes?.let {
-                    appendLine()
-                    appendLine("---")
-                    appendLine()
-                    appendLine("References:")
-                    appendLine(it)
-                }
-            }
+            val shareText = ReportShareText.build(report)
 
             _events.send(
                 ReportUiEvent.ShareText(

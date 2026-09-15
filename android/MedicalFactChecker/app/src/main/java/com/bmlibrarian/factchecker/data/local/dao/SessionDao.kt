@@ -175,7 +175,7 @@ interface SessionDao {
      * @param id Session ID
      * @param cursor New cursor value (null if no more pages)
      * @param totalResults Total available results
-     * @param resultsReceived Records the session's Europe PMC pages held so far, readable or not
+     * @param resultsReceived Records the session's Europe PMC pages held so far, readable or not; null when unknown
      * @param updatedAt Timestamp for the update
      */
     @Query("""
@@ -190,7 +190,7 @@ interface SessionDao {
         id: String,
         cursor: String?,
         totalResults: Int,
-        resultsReceived: Int,
+        resultsReceived: Int?,
         updatedAt: Long = System.currentTimeMillis()
     )
 

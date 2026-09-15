@@ -53,6 +53,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
 
+/** Smart search could not generate alternative queries, so no alternative search ran. */
+private class SmartSearchUnavailableException : Exception("Smart search could not generate alternative queries")
+
 /**
  * Main workflow engine for fact-checking.
  *
@@ -90,11 +93,15 @@ class FactCheckWorkflow @Inject constructor(
     companion object {
         private const val TAG = "FactCheckWorkflow"
 
-        /** Shown when a restored session's record of what its search missed cannot be read. */
-        private const val DAMAGED_SHORTFALLS_MESSAGE =
-            "This session's record of what its search could not retrieve is damaged, so the " +
-                "warning about an incomplete search cannot be shown. The report's own text still says " +
-                "whether its search was incomplete."
+        /** Why more evidence is refused for a session whose record of what its search missed is damaged. */
+        private const val DAMAGED_RECORD_REFUSAL_MESSAGE =
+            "More evidence cannot be added to this session: its record of what its search could not " +
+                "retrieve is damaged, so a new report could not say whether its search was complete."
+
+        /** Shown when smart search could not generate alternative queries. */
+        private const val SMART_SEARCH_UNAVAILABLE_MESSAGE =
+            "Alternative searches could not be run: the language model could not propose alternative " +
+                "queries. Check the model and its API key in Settings, then try again."
     }
 
     // ==================== Observable State ====================
@@ -124,6 +131,13 @@ class FactCheckWorkflow @Inject constructor(
      */
     private val _searchFailureMessage = MutableStateFlow<String?>(null)
     val searchFailureMessage: StateFlow<String?> = _searchFailureMessage.asStateFlow()
+
+    /**
+     * Whether the current session's record of what its searches failed to
+     * retrieve is damaged, so whether they were complete cannot be shown (#252).
+     */
+    private val _searchRecordDamaged = MutableStateFlow(false)
+    val searchRecordDamaged: StateFlow<Boolean> = _searchRecordDamaged.asStateFlow()
 
     // ==================== Current Session ====================
 
@@ -177,6 +191,7 @@ class FactCheckWorkflow @Inject constructor(
         currentConfig = config
         _searchShortfalls.value = emptyList()
         _searchFailureMessage.value = null
+        _searchRecordDamaged.value = false
 
         // Load monthly usage for budget checking
         monthlyUsageUsd = usageRepository.getCurrentMonthSpend()
@@ -238,6 +253,10 @@ class FactCheckWorkflow @Inject constructor(
         val session = sessionRepository.getSession(sessionId)
             ?: throw IllegalArgumentException("Session not found: $sessionId")
 
+        // The structured query lives in memory only: another claim's must not page this session
+        if (currentSession?.id != session.id) {
+            structuredQuery = null
+        }
         currentSession = session
         currentConfig = config
         monthlyUsageUsd = usageRepository.getCurrentMonthSpend()
@@ -300,6 +319,7 @@ class FactCheckWorkflow @Inject constructor(
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         val config = currentConfig ?: WorkflowConfig.default()
+        _searchFailureMessage.value = null
 
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.EXTRACTING_CITATIONS)
 
@@ -338,6 +358,13 @@ class FactCheckWorkflow @Inject constructor(
             val freshSession = sessionRepository.getSession(session.id) ?: session
             currentSession = freshSession
 
+            // A new report could not say whether its search was complete: refuse
+            // before any search runs or budget is spent
+            if (!shortfallRecordReadable(freshSession)) {
+                keepReportAfterFailedSearchForMore(session, DAMAGED_RECORD_REFUSAL_MESSAGE)
+                return
+            }
+
             // Fetch more documents
             if (freshSession.hasMoreDocuments) {
                 updateProgress("Fetching more documents...", WorkflowProgress.PROGRESS_EXTRACTION_START)
@@ -368,6 +395,9 @@ class FactCheckWorkflow @Inject constructor(
                 // Pagination exhausted but smart search not tried — try alternative queries
                 updateProgress("Trying alternative search strategies...", WorkflowProgress.PROGRESS_SEARCHING_START)
                 val smartSearch = executeSmartSearch(freshSession, config)
+                if (smartSearch.generationFailed) {
+                    throw SmartSearchUnavailableException()
+                }
                 if (smartSearch.newDocuments == 0 && smartSearch.shortfalls.isNotEmpty()) {
                     // Nothing new, and something failed: let the user try smart search again
                     sessionRepository.updateSmartSearchState(
@@ -407,16 +437,46 @@ class FactCheckWorkflow @Inject constructor(
         } catch (e: BudgetError) {
             handleBudgetError(e, session)
         } catch (e: SearchFailedException) {
-            // The report stands on the evidence it had; the user is told what failed
             Log.w(TAG, "Search for more evidence failed: ${e.message}")
-            _searchFailureMessage.value = SearchFailureReporting.formatSearchFailureMessage(e)
-            sessionRepository.updateWorkflowStep(session.id, WorkflowStep.COMPLETED)
-            val report = reportRepository.getReportBySession(session.id)
-            _state.value = report?.let { WorkflowState.Completed(reportId = it.id) } ?: WorkflowState.Idle
-            updateProgress("Complete", WorkflowProgress.PROGRESS_COMPLETE)
+            keepReportAfterFailedSearchForMore(session, SearchFailureReporting.formatSearchFailureMessage(e))
+        } catch (e: SmartSearchUnavailableException) {
+            keepReportAfterFailedSearchForMore(session, SMART_SEARCH_UNAVAILABLE_MESSAGE)
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
+    }
+
+    /**
+     * End a search for more evidence that found nothing, keeping the report it had.
+     *
+     * The report stands on the evidence it was written from; the user is told why
+     * nothing was added.
+     *
+     * @param session The session
+     * @param message What went wrong and what to do about it
+     */
+    private suspend fun keepReportAfterFailedSearchForMore(session: SessionEntity, message: String) {
+        _searchFailureMessage.value = message
+        sessionRepository.updateWorkflowStep(session.id, WorkflowStep.COMPLETED)
+        val report = reportRepository.getReportBySession(session.id)
+        _state.value = report?.let { WorkflowState.Completed(reportId = it.id) } ?: WorkflowState.Idle
+        updateProgress("Complete", WorkflowProgress.PROGRESS_COMPLETE)
+    }
+
+    /**
+     * Check that a session's record of what its searches missed can be read.
+     *
+     * @param session The session
+     * @return False when the record is damaged, which is logged and shown as a
+     *   persistent warning
+     */
+    private fun shortfallRecordReadable(session: SessionEntity): Boolean = try {
+        session.retrievalShortfalls()
+        true
+    } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Session ${session.id} holds a damaged record of its search's shortfalls: ${e.message}")
+        _searchRecordDamaged.value = true
+        false
     }
 
     /**
@@ -571,6 +631,7 @@ class FactCheckWorkflow @Inject constructor(
         _currentSessionId.value = null
         _searchShortfalls.value = emptyList()
         _searchFailureMessage.value = null
+        _searchRecordDamaged.value = false
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
     }
@@ -595,6 +656,10 @@ class FactCheckWorkflow @Inject constructor(
      * @param session The fact-check session to restore for viewing.
      */
     fun restoreForViewing(session: SessionEntity) {
+        // The structured query lives in memory only: another claim's must not page this session
+        if (currentSession?.id != session.id) {
+            structuredQuery = null
+        }
         currentSession = session
         currentConfig = WorkflowConfig(
             searchProvider = session.searchProvider,
@@ -605,14 +670,8 @@ class FactCheckWorkflow @Inject constructor(
         // Emit session ID so UI can observe documents
         _currentSessionId.value = session.id
         _searchFailureMessage.value = null
-        _searchShortfalls.value = try {
-            session.retrievalShortfalls()
-        } catch (e: IllegalArgumentException) {
-            // The report's own text still carries its notice; the warning cannot be rebuilt
-            Log.e(TAG, "Session ${session.id} holds a damaged record of its search's shortfalls: ${e.message}")
-            _searchFailureMessage.value = DAMAGED_SHORTFALLS_MESSAGE
-            emptyList()
-        }
+        _searchRecordDamaged.value = false
+        _searchShortfalls.value = if (shortfallRecordReadable(session)) session.retrievalShortfalls() else emptyList()
 
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
@@ -690,6 +749,9 @@ class FactCheckWorkflow @Inject constructor(
                 !updatedSession.smartSearchEnabled) {
                 val smartSearch = executeSmartSearch(updatedSession, config)
                 recordShortfalls(session.id, smartSearch.shortfalls)
+                if (smartSearch.generationFailed) {
+                    _searchFailureMessage.value = SMART_SEARCH_UNAVAILABLE_MESSAGE
+                }
                 // Re-check after smart search
                 val relevantAfterSmart = documentRepository.getRelevantCount(session.id, config.relevanceThreshold)
                 if (relevantAfterSmart >= config.targetRelevantDocuments) {
@@ -858,12 +920,15 @@ class FactCheckWorkflow @Inject constructor(
             )
         )
 
+        // What is missing, then the documents, then the paging: a failure before the
+        // paging moves leaves the page to be asked for again, never skipped unrecorded
+        recordShortfalls(session.id, outcome.shortfalls)
+        saveSearchedDocuments(outcome.documents)
         outcome.pubMedPaging?.let { sessionRepository.updatePubMedPagination(session.id, it.offset, it.totalResults) }
         outcome.europePMCPaging?.let {
             sessionRepository.updateEpmcPagination(session.id, it.cursor, it.totalResults, it.resultsReceived)
         }
-        recordShortfalls(session.id, outcome.shortfalls)
-        saveSearchedDocuments(outcome.documents, session.claimText)
+        scoreByEmbedding(outcome.documents, session.claimText)
         return outcome.documents
     }
 
@@ -873,28 +938,38 @@ class FactCheckWorkflow @Inject constructor(
      * @param sessionId The session
      * @param shortfalls What the search failed to retrieve
      * @throws IllegalArgumentException if the session's stored record is damaged
+     * @throws IllegalStateException if the session no longer exists: the loss would go unrecorded
      */
     private suspend fun recordShortfalls(sessionId: String, shortfalls: List<RetrievalShortfall>) {
         if (shortfalls.isEmpty()) return
         Log.w(TAG, "Search incomplete: ${SearchFailureReporting.describeSearchShortfalls(shortfalls)}")
-        val session = sessionRepository.getSession(sessionId) ?: return
+        val session = checkNotNull(sessionRepository.getSession(sessionId)) {
+            "Session $sessionId is gone, so what its search could not retrieve cannot be recorded"
+        }
         val recorded = SearchFailureReporting.combinedShortfalls(session.retrievalShortfalls() + shortfalls)
         sessionRepository.updateRetrievalShortfalls(sessionId, recorded)
         _searchShortfalls.value = recorded
     }
 
     /**
-     * Save a search's new documents, and score them by embedding when enabled.
+     * Save a search's new documents.
+     *
+     * @param documents The documents a search found
+     */
+    private suspend fun saveSearchedDocuments(documents: List<DocumentEntity>) {
+        if (documents.isNotEmpty()) {
+            documentRepository.saveDocuments(documents)
+        }
+    }
+
+    /**
+     * Score a search's saved documents by embedding, when enabled.
      *
      * @param documents The documents a search found
      * @param claim The claim being fact-checked
      */
-    private suspend fun saveSearchedDocuments(documents: List<DocumentEntity>, claim: String) {
-        if (documents.isEmpty()) return
-        documentRepository.saveDocuments(documents)
-
-        // Compute embedding scores if enabled
-        if (settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
+    private suspend fun scoreByEmbedding(documents: List<DocumentEntity>, claim: String) {
+        if (documents.isNotEmpty() && settingsRepository.isEmbeddingEnabled() && embeddingService.isAvailable) {
             computeEmbeddingScores(documents, claim)
         }
     }
@@ -1232,8 +1307,14 @@ class FactCheckWorkflow @Inject constructor(
     private data class SmartSearchOutcome(
         /** How many new documents the alternative queries found. */
         val newDocuments: Int,
-        /** What they failed to retrieve, each marked as an alternative search's. */
-        val shortfalls: List<RetrievalShortfall>
+        /**
+         * What the alternative queries that found nothing new failed to retrieve,
+         * each marked as an alternative search's. A query that found documents
+         * records its own losses as it saves them.
+         */
+        val shortfalls: List<RetrievalShortfall>,
+        /** True when no alternative query could be generated, so none was run. */
+        val generationFailed: Boolean = false
     )
 
     /**
@@ -1245,7 +1326,8 @@ class FactCheckWorkflow @Inject constructor(
      *
      * An alternative query that fails does not end smart search: the next one is
      * still tried, and what the failed one could not retrieve is returned for the
-     * caller to record or report (#252).
+     * caller to record or report (#252). A failure to generate the queries is
+     * returned too, and smart search is then not marked as tried.
      *
      * @param session The current session
      * @param config Workflow configuration
@@ -1280,8 +1362,12 @@ class FactCheckWorkflow @Inject constructor(
             outputTokens = Constants.LLM_QUERY_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
         )
 
-        val alternatives = result.getOrNull()
-        if (alternatives.isNullOrEmpty()) {
+        val alternatives = result.getOrElse { error ->
+            // Not marked as tried, so smart search can be tried again
+            Log.e(TAG, "Smart search could not generate alternative queries (${error.javaClass.simpleName})")
+            return SmartSearchOutcome(newDocuments = 0, shortfalls = emptyList(), generationFailed = true)
+        }
+        if (alternatives.isEmpty()) {
             // No alternatives generated — mark smart search as tried so we don't retry
             sessionRepository.updateSmartSearchState(
                 sessionId = session.id,
@@ -1342,7 +1428,6 @@ class FactCheckWorkflow @Inject constructor(
                 shortfalls += e.shortfalls
                 continue
             }
-            shortfalls += outcome.shortfalls
             val newDocs = outcome.documents
 
             if (newDocs.isNotEmpty()) {
@@ -1382,7 +1467,8 @@ class FactCheckWorkflow @Inject constructor(
      * @param session Current session
      * @param config Workflow configuration
      * @param fetchedPmids Set of PMIDs already fetched (for deduplication)
-     * @return The new documents, saved, and what the search failed to retrieve beside them
+     * @return The new documents, saved, and what the search failed to retrieve
+     *   beside them, already recorded on the session
      * @throws SearchFailedException if failures left the search with no new document
      */
     private suspend fun executeAlternativeSearch(
@@ -1408,7 +1494,10 @@ class FactCheckWorkflow @Inject constructor(
                 excludedPmids = fetchedPmids
             )
         )
-        saveSearchedDocuments(outcome.documents, session.claimText)
+        // Recorded with the documents it lost them beside, before anything later can fail
+        recordShortfalls(session.id, outcome.shortfalls)
+        saveSearchedDocuments(outcome.documents)
+        scoreByEmbedding(outcome.documents, session.claimText)
         return outcome
     }
 

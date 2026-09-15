@@ -40,8 +40,11 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -69,6 +72,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.ui.report.components.DocumentDetailSheet
 import com.bmlibrarian.factchecker.ui.report.components.MarkdownReport
 import com.bmlibrarian.factchecker.ui.report.components.ReportDisclaimer
@@ -152,6 +156,10 @@ fun ReportScreen(
         }
 
         val report = uiState.report!!
+        // An incomplete search's notice is shown before the verdict, not after it (#252)
+        val (searchNotice, reportBody) = remember(report.fullReportMarkdown) {
+            SearchFailureReporting.splitSearchShortfallNotice(report.fullReportMarkdown)
+        }
 
         Column(
             modifier = Modifier
@@ -159,6 +167,11 @@ fun ReportScreen(
                 .padding(paddingValues)
                 .padding(Constants.UI_SCREEN_PADDING.dp)
         ) {
+            searchNotice?.let { notice ->
+                IncompleteSearchNotice(notice = SearchFailureReporting.plainNotice(notice))
+                Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+            }
+
             // Verdict header
             VerdictHeader(
                 verdict = report.verdict,
@@ -175,7 +188,7 @@ fun ReportScreen(
             ) {
                 // Markdown report with clickable references
                 MarkdownReport(
-                    markdown = report.fullReportMarkdown,
+                    markdown = reportBody,
                     onReferenceClick = viewModel::onReferenceClick
                 )
 
@@ -349,6 +362,41 @@ private suspend fun handleEvent(
 
         is ReportUiEvent.NavigateToFullText -> {
             onNavigateToFullText?.invoke(event.documentId)
+        }
+    }
+}
+
+/**
+ * Notice that the report's search could not retrieve everything (#252).
+ *
+ * Drawn above the verdict: the verdict, the summary and the report all rest
+ * only on the records that were retrieved.
+ *
+ * @param notice The notice, as plain text
+ */
+@Composable
+private fun IncompleteSearchNotice(notice: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(modifier = Modifier.width(Constants.UI_ICON_TEXT_SPACING.dp))
+            Text(
+                text = notice,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
         }
     }
 }

@@ -90,9 +90,11 @@ data class SessionEntity(
     /**
      * How many records the session's Europe PMC pages held so far, readable or
      * not; with the total, it says how many the next page should hold (#252).
+     * Null for a session saved before the count was kept: its cursor may outlive
+     * its last hit, so a count of 0 would expect records that were already sent.
      */
     @ColumnInfo(name = "epmc_results_received")
-    val epmcResultsReceived: Int = 0,
+    val epmcResultsReceived: Int? = 0,
 
     // ==================== Batch Tracking ====================
 

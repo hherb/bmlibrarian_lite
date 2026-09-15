@@ -18,6 +18,10 @@
 
 package com.bmlibrarian.factchecker.ui.factcheck
 
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.util.Constants
@@ -271,5 +275,41 @@ class FactCheckUiStateTest {
         val state2 = FactCheckUiState(claimText = "test2")
 
         assertFalse(state1 == state2)
+    }
+
+    // ==================== Incomplete Search Tests (#252) ====================
+
+    @Test
+    fun `a complete search shows no warning and no failure`() {
+        val state = FactCheckUiState()
+
+        assertNull(state.incompleteSearchWarning)
+        assertNull(state.searchFailureMessage)
+    }
+
+    @Test
+    fun `a damaged record of what the search missed is a warning of its own`() {
+        val state = FactCheckUiState(searchRecordDamaged = true)
+
+        assertTrue(
+            "got ${state.incompleteSearchWarning}",
+            state.incompleteSearchWarning.orEmpty().startsWith("This session's record of what its search could not retrieve is damaged")
+        )
+    }
+
+    @Test
+    fun `an incomplete search shows what it could not retrieve`() {
+        val state = FactCheckUiState(
+            searchShortfalls = listOf(
+                RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 429)),
+                RetrievalShortfall(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.TIMEOUT), 20)
+            )
+        )
+
+        assertEquals(
+            "Incomplete search: PubMed could not be searched (HTTP 429 Too Many Requests); " +
+                "20 Europe PMC records could not be retrieved (the request timed out).",
+            state.incompleteSearchWarning
+        )
     }
 }

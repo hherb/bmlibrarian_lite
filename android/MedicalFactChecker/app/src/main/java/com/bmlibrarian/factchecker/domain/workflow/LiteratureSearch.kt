@@ -44,9 +44,10 @@ data class PubMedPaging(val offset: Int, val totalResults: Int)
  *
  * @property cursor The cursor of the next page, or null when there is none
  * @property totalResults The search's hit count, as Europe PMC last counted it
- * @property resultsReceived How many records the search's pages held so far, readable or not
+ * @property resultsReceived How many records the search's pages held so far, readable or
+ *   not; null for a session saved before the count was kept, which stays unknown
  */
-data class EuropePMCPaging(val cursor: String?, val totalResults: Int, val resultsReceived: Int)
+data class EuropePMCPaging(val cursor: String?, val totalResults: Int, val resultsReceived: Int?)
 
 /**
  * One page of a fact-check's literature search.
@@ -238,8 +239,9 @@ class LiteratureSearch @Inject constructor(
             if (!request.isNextBatch) {
                 return ProviderPage(emptyList(), listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, failure)))
             }
-            // The cursor promised more, so at least one record is missing
-            val missing = maxOf(1, minOf(batchSize, paging.totalResults - received))
+            // The cursor promised more, so at least one record is missing; not knowing
+            // how many came before claims the most the page could have held
+            val missing = maxOf(1, minOf(batchSize, paging.totalResults - (received ?: 0)))
             return ProviderPage(
                 emptyList(),
                 listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, failure, missing)),
@@ -256,7 +258,7 @@ class LiteratureSearch @Inject constructor(
         return ProviderPage(
             documents,
             page.shortfalls,
-            europePMCPaging = EuropePMCPaging(page.nextCursor, page.totalResults, received + page.resultsReceived)
+            europePMCPaging = EuropePMCPaging(page.nextCursor, page.totalResults, received?.plus(page.resultsReceived))
         )
     }
 

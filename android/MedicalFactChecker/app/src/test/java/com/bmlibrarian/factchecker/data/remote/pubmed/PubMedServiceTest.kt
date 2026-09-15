@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
@@ -935,15 +936,15 @@ class PubMedServiceTest {
     }
 
     @Test
-    fun `unreadable saved credentials fail the search instead of throwing`() = runTest {
+    fun `unreadable saved credentials stop the search as a settings problem, not a PubMed failure`() = runTest {
         // Arrange: encrypted preferences throw on a broken keystore
         val failing = PubMedService(api) { throw java.security.GeneralSecurityException("keystore unavailable") }
 
         // Act
-        val result = failing.search(query = "test")
+        val thrown = runCatching { failing.search(query = "test") }.exceptionOrNull()
 
         // Assert
-        assertEquals(RequestFailure(RequestFailureKind.REQUEST_FAILED), failureOf(result))
+        assertTrue("got $thrown", thrown is NcbiCredentialsUnavailableException)
         coVerify(exactly = 0) {
             api.search(any(), any(), any(), any(), any(), any(), any(), any())
         }

@@ -44,6 +44,7 @@ import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
@@ -144,8 +145,12 @@ class FactCheckWorkflowSearchFailureTest {
         workflow.resumeSession(SESSION_ID, config(SearchProvider.BOTH))
 
         val shortfall = RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 503))
-        coVerify { sessionRepository.updateRetrievalShortfalls(SESSION_ID, listOf(shortfall)) }
-        coVerify { documentRepository.saveDocuments(match { docs -> docs.map { it.pmid } == listOf("1", "2") }) }
+        // What is missing and the documents are kept before the paging moves past them
+        coVerifyOrder {
+            sessionRepository.updateRetrievalShortfalls(SESSION_ID, listOf(shortfall))
+            documentRepository.saveDocuments(match { docs -> docs.map { it.pmid } == listOf("1", "2") })
+            sessionRepository.updateEpmcPagination(SESSION_ID, any(), any(), any())
+        }
         assertEquals(listOf(shortfall), workflow.searchShortfalls.value)
         assertTrue(
             "the report does not open with the notice: ${report.captured}",
@@ -251,6 +256,53 @@ class FactCheckWorkflowSearchFailureTest {
         coVerify { sessionRepository.updateSmartSearchState(SESSION_ID, false, null, null) }
         coVerify(exactly = 0) { reportRepository.createReport(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { sessionRepository.updateRetrievalShortfalls(any(), any()) }
+        coVerify(exactly = 0) { sessionRepository.setError(any(), any()) }
+    }
+
+    @Test
+    fun `more evidence whose alternative queries could not be generated keeps the report and says so`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        stored = stored.copy(workflowStep = WorkflowStep.COMPLETED)
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any()) } returns
+            Result.failure(IllegalStateException("the model is unreachable"))
+        coEvery { reportRepository.getReportBySession(SESSION_ID) } returns mockk(relaxed = true) {
+            coEvery { id } returns "report-252"
+        }
+        workflow.restoreForViewing(stored)
+
+        workflow.fetchMoreEvidence()
+
+        assertEquals(WorkflowState.Completed(reportId = "report-252"), workflow.state.value)
+        assertTrue(
+            "got ${workflow.searchFailureMessage.value}",
+            workflow.searchFailureMessage.value.orEmpty().startsWith("Alternative searches could not be run")
+        )
+        // Smart search is not marked as tried, so the user can try again
+        coVerify(exactly = 0) { sessionRepository.updateSmartSearchState(any(), true, any(), any()) }
+        coVerify(exactly = 0) { reportRepository.createReport(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a damaged record of shortfalls is a persistent warning, and more evidence is refused before searching`() = runTest {
+        holdSession(SearchProvider.PUBMED, pubmedOffset = 20, pubmedTotalResults = 57)
+        stored = stored.copy(workflowStep = WorkflowStep.COMPLETED, retrievalShortfallsJson = "null")
+        coEvery { reportRepository.getReportBySession(SESSION_ID) } returns mockk(relaxed = true) {
+            coEvery { id } returns "report-252"
+        }
+
+        workflow.restoreForViewing(stored)
+
+        assertTrue(workflow.searchRecordDamaged.value)
+        assertEquals(null, workflow.searchFailureMessage.value)
+
+        workflow.fetchMoreEvidence()
+
+        assertEquals(WorkflowState.Completed(reportId = "report-252"), workflow.state.value)
+        assertTrue(
+            "got ${workflow.searchFailureMessage.value}",
+            workflow.searchFailureMessage.value.orEmpty().startsWith("More evidence cannot be added")
+        )
+        coVerify(exactly = 0) { pubMedApi.search(any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { sessionRepository.setError(any(), any()) }
     }
 

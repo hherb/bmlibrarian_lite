@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.europepmc
 
+import android.util.Log
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -59,6 +60,9 @@ data class EuropePMCResultList(
     val result: List<EuropePMCArticle?>? = null
 )
 
+/** Log tag for records a Europe PMC page held that did not decode. */
+private const val LOSSY_DECODE_TAG = "EuropePMCModels"
+
 /**
  * Decodes a result list record by record, keeping a null for each record that fails.
  *
@@ -83,15 +87,24 @@ object LossyArticleListSerializer : KSerializer<List<EuropePMCArticle?>> {
         val input = decoder as? JsonDecoder ?: throw SerializationException("Europe PMC results decode from JSON only")
         val records = input.decodeJsonElement() as? JsonArray
             ?: throw SerializationException("resultList.result is not a list")
-        return records.map { record ->
+        val failures = mutableListOf<String>()
+        val decoded = records.map { record ->
             try {
                 input.json.decodeFromJsonElement(EuropePMCArticle.serializer(), record)
-            } catch (_: SerializationException) {
+            } catch (e: SerializationException) {
+                failures += e.javaClass.simpleName
                 null
-            } catch (_: IllegalArgumentException) {
+            } catch (e: IllegalArgumentException) {
+                failures += e.javaClass.simpleName
                 null
             }
         }
+        if (failures.isNotEmpty()) {
+            // The classes only: a decoding error's message quotes the record
+            val byClass = failures.groupingBy { it }.eachCount().entries.joinToString { "${it.key} x${it.value}" }
+            Log.w(LOSSY_DECODE_TAG, "${failures.size} of ${records.size} Europe PMC records did not decode ($byClass)")
+        }
+        return decoded
     }
 
     /**

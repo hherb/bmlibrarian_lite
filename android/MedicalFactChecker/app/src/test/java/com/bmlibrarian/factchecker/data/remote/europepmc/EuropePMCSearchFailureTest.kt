@@ -225,6 +225,27 @@ class EuropePMCSearchFailureTest {
     }
 
     @Test
+    fun `when how many records came before is unknown, an empty later page ends the cursor as it always did`() = runTest {
+        // A session saved before #252 kept a cursor but no count of what it received
+        answer(EuropePMCSearchResponse(hitCount = 57, nextCursorMark = "AoK", resultList = EuropePMCResultList(result = emptyList())))
+
+        val searched = service.search(query = "aspirin", cursor = "AoJ", batchSize = 20, resultsReceived = null).getOrThrow()
+
+        assertTrue(searched.shortfalls.isEmpty())
+        assertFalse(searched.hasMore)
+    }
+
+    @Test
+    fun `when how many records came before is unknown, a short last page loses nothing`() = runTest {
+        answer(EuropePMCSearchResponse(hitCount = 57, nextCursorMark = null, resultList = results(5)))
+
+        val searched = service.search(query = "aspirin", cursor = "AoJ", batchSize = 20, resultsReceived = null).getOrThrow()
+
+        assertTrue(searched.shortfalls.isEmpty())
+        assertEquals(5, searched.resultsReceived)
+    }
+
+    @Test
     fun `records that could not be read or have no title are counted, not dropped silently`() = runTest {
         val page = listOf(article("1", "Kept"), null, article("3", " "), article("4", null), article("5", "Also kept"))
         answer(EuropePMCSearchResponse(hitCount = 5, nextCursorMark = "AoK", resultList = EuropePMCResultList(result = page)))

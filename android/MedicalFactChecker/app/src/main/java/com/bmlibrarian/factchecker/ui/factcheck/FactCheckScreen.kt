@@ -176,6 +176,23 @@ fun FactCheckScreen(
                 }
             }
 
+            // What the session's searches failed to retrieve (#252): persistent while it goes on
+            uiState.incompleteSearchWarning?.let { warning ->
+                item(key = "incomplete_search") {
+                    IncompleteSearchWarning(warning = warning)
+                }
+            }
+
+            // Why a search for more documents failed, while the session carries on
+            uiState.searchFailureMessage?.let { message ->
+                item(key = "search_failure") {
+                    SearchFailureMessage(
+                        message = message,
+                        onDismiss = viewModel::dismissSearchFailure
+                    )
+                }
+            }
+
             // Progress/State section
             item(key = "state") {
                 when (val state = uiState.workflowState) {
@@ -497,6 +514,82 @@ private fun ErrorMessage(
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             Text(
                 text = error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(Constants.UI_ICON_TEXT_SPACING.dp))
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
+/**
+ * Persistent warning that the session's searches could not retrieve everything (#252).
+ *
+ * Stays while the session goes on: the documents and the report below rest only
+ * on what was retrieved.
+ *
+ * @param warning The warning, naming what failed
+ */
+@Composable
+private fun IncompleteSearchWarning(warning: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(modifier = Modifier.width(Constants.UI_ICON_TEXT_SPACING.dp))
+            Text(
+                text = warning,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+/**
+ * Why a search for more documents failed, and what to do about it (#252).
+ *
+ * The session keeps what it had, so the message can be dismissed.
+ *
+ * @param message What failed, a blank line, and the advice
+ * @param onDismiss Called when the user dismisses the message
+ */
+@Composable
+private fun SearchFailureMessage(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
+        ) {
+            Text(
+                text = "Search failed",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+            Text(
+                text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )

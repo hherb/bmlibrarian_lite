@@ -235,6 +235,41 @@ class LiteratureSearchTest {
         coVerify(exactly = 0) { europePMCApi.search(any(), any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `a session that never counted its Europe PMC records pages on without claiming any missing`() = runTest {
+        pubMedAnswers(count = 0, pmids = emptyList())
+        coEvery { europePMCApi.search(any(), any(), any(), any(), any()) } returns Response.success(
+            EuropePMCSearchResponse(hitCount = 40, nextCursorMark = "AoK", resultList = EuropePMCResultList(result = emptyList()))
+        )
+
+        val page = search.searchPage(
+            request(
+                SearchProvider.EUROPE_PMC, batchSize = 20, isNextBatch = true,
+                europePMC = EuropePMCPaging(cursor = "AoJ", totalResults = 40, resultsReceived = null)
+            )
+        )
+
+        assertTrue(page.shortfalls.isEmpty())
+        assertEquals(EuropePMCPaging(cursor = null, totalResults = 40, resultsReceived = null), page.europePMCPaging)
+    }
+
+    @Test
+    fun `a later Europe PMC page of such a session that failed claims the most it could have held`() = runTest {
+        pubMedAnswers(count = 57, pmids = (21..30).map { "$it" })
+        europePMCFailsWith(503)
+
+        val page = search.searchPage(
+            request(
+                SearchProvider.BOTH, batchSize = 20, isNextBatch = true,
+                pubMed = PubMedPaging(offset = 20, totalResults = 57),
+                europePMC = EuropePMCPaging(cursor = "AoJ", totalResults = 40, resultsReceived = null)
+            )
+        )
+
+        assertEquals(listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, http(503), 10)), page.shortfalls)
+        assertEquals(EuropePMCPaging(cursor = null, totalResults = 40, resultsReceived = null), page.europePMCPaging)
+    }
+
     // ==================== An alternative query ====================
 
     @Test

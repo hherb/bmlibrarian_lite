@@ -33,6 +33,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -110,6 +111,12 @@ class EuropePMCFailedAnswerWireTest {
             listOf(RetrievalShortfall(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), 1)),
             searched.shortfalls
         )
+        // The log names why, by exception class, never by the record's text
+        assertTrue(
+            "no decode diagnostic in ${Log.lines}",
+            Log.lines.any { it.contains("1 of 3 Europe PMC records did not decode") }
+        )
+        assertFalse(Log.lines.any { it.contains("not a number") })
     }
 
     @Test

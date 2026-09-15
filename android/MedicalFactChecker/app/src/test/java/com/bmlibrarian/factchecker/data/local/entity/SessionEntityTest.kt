@@ -44,6 +44,12 @@ class SessionEntityTest {
     }
 
     @Test
+    fun `a new session has counted no Europe PMC records yet`() {
+        // Null is reserved for sessions saved before the count was kept (MIGRATION_5_6)
+        assertEquals(0, session().epmcResultsReceived)
+    }
+
+    @Test
     fun `a session reads back the shortfalls it stored`() {
         val shortfalls = listOf(
             RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 429)),

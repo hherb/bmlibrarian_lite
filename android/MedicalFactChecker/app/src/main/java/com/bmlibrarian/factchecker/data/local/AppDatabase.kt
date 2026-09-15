@@ -235,11 +235,13 @@ abstract class AppDatabase : RoomDatabase() {
          * Adds what a session's searches failed to retrieve (#252), and how many
          * Europe PMC records its pages held, which says how many a later page
          * should hold. A session saved before has no shortfalls recorded, which
-         * reads as a complete search: nothing recorded one.
+         * reads as a complete search: nothing recorded one. Its record count is
+         * left null, unknown: its cursor can outlive its last hit, so a count of
+         * 0 would expect records it already received and report them missing.
          */
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE sessions ADD COLUMN epmc_results_received INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE sessions ADD COLUMN epmc_results_received INTEGER")
                 database.execSQL("ALTER TABLE sessions ADD COLUMN retrieval_shortfalls_json TEXT")
             }
         }

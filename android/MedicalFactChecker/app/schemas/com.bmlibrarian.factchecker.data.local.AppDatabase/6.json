@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "b6f23b0af8bb97f42e410704db2b2f73",
+    "identityHash": "2115c785a45e9aa453762e1036bd8753",
     "entities": [
       {
         "tableName": "sessions",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `claim_text` TEXT NOT NULL, `pubmed_query` TEXT, `alternative_query` TEXT, `workflow_step` TEXT NOT NULL, `search_provider` TEXT NOT NULL, `include_preprints` INTEGER NOT NULL, `pubmed_offset` INTEGER NOT NULL, `pubmed_total_results` INTEGER NOT NULL, `epmc_cursor` TEXT, `epmc_total_results` INTEGER NOT NULL, `epmc_results_received` INTEGER NOT NULL, `current_batch` INTEGER NOT NULL, `documents_in_batch` INTEGER NOT NULL, `smart_search_enabled` INTEGER NOT NULL, `alternative_queries_json` TEXT, `fetched_pmids` TEXT, `hyde_abstract` TEXT, `hyde_generated_at` INTEGER, `total_input_tokens` INTEGER NOT NULL, `total_output_tokens` INTEGER NOT NULL, `estimated_cost_usd` REAL NOT NULL, `error_message` TEXT, `retrieval_shortfalls_json` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `claim_text` TEXT NOT NULL, `pubmed_query` TEXT, `alternative_query` TEXT, `workflow_step` TEXT NOT NULL, `search_provider` TEXT NOT NULL, `include_preprints` INTEGER NOT NULL, `pubmed_offset` INTEGER NOT NULL, `pubmed_total_results` INTEGER NOT NULL, `epmc_cursor` TEXT, `epmc_total_results` INTEGER NOT NULL, `epmc_results_received` INTEGER, `current_batch` INTEGER NOT NULL, `documents_in_batch` INTEGER NOT NULL, `smart_search_enabled` INTEGER NOT NULL, `alternative_queries_json` TEXT, `fetched_pmids` TEXT, `hyde_abstract` TEXT, `hyde_generated_at` INTEGER, `total_input_tokens` INTEGER NOT NULL, `total_output_tokens` INTEGER NOT NULL, `estimated_cost_usd` REAL NOT NULL, `error_message` TEXT, `retrieval_shortfalls_json` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -78,7 +78,7 @@
             "fieldPath": "epmcResultsReceived",
             "columnName": "epmc_results_received",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": false
           },
           {
             "fieldPath": "currentBatch",
@@ -860,7 +860,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b6f23b0af8bb97f42e410704db2b2f73')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2115c785a45e9aa453762e1036bd8753')"
     ]
   }
 }

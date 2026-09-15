@@ -22,6 +22,7 @@ import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialSource
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
@@ -37,6 +38,7 @@ import org.xml.sax.SAXException
 import org.xml.sax.SAXParseException
 import org.xml.sax.helpers.DefaultHandler
 import retrofit2.Response
+import java.io.IOException
 import java.io.StringReader
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -146,6 +148,8 @@ class PubMedService @Inject constructor(
      * @return The page, or a [SourceRequestException] carrying why the search failed
      * @throws IllegalArgumentException if [offset] is past what PubMed can list;
      *   a caller never asks for a page past the end
+     * @throws NcbiCredentialsUnavailableException if the saved NCBI API key or
+     *   email cannot be read: nothing is sent, and the user must fix Settings
      */
     suspend fun search(
         query: String,
@@ -158,12 +162,12 @@ class PubMedService @Inject constructor(
         }
 
         // The saved key lives in encrypted preferences, which throw on a broken
-        // keystore; that is a failed search, not a crash
+        // keystore: not PubMed's failure, and not a crash, but a settings problem
         val credentials = try {
             credentialSource.ncbiCredentials()
         } catch (e: Exception) {
-            Log.w(TAG, "Could not read the saved NCBI API key or email (${e.javaClass.simpleName})")
-            return failure(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+            Log.e(TAG, "Could not read the saved NCBI API key or email (${e.javaClass.simpleName})")
+            throw NcbiCredentialsUnavailableException()
         }
 
         val listing = try {
@@ -555,7 +559,7 @@ class PubMedService @Inject constructor(
     private fun parseArticleSet(xml: String): ParsedArticleSet {
         val handler = PubMedXmlHandler()
         var wellFormed = true
-        try {
+        val parser = try {
             // Built per call rather than cached in a field: SAXParserFactory is not
             // thread-safe, and this service is a @Singleton whose parse can be
             // entered concurrently. Do not "optimise" this into a shared instance.
@@ -575,19 +579,32 @@ class PubMedService @Inject constructor(
                 try {
                     factory.setFeature(feature, enabled)
                 } catch (_: Exception) {
-                    // Feature unsupported by this parser; resolveEntity still blocks fetches.
+                    // resolveEntity still blocks external fetches; the feature name is a constant
+                    Log.w(TAG, "This XML parser does not support $feature")
                 }
             }
-            factory.newSAXParser().parse(InputSource(StringReader(xml)), handler)
+            factory.newSAXParser()
+        } catch (e: Exception) {
+            // Not the answer's fault, and not to be reported as NCBI's: the parser cannot be built here
+            Log.e(TAG, "The efetch XML parser could not be built (${e.javaClass.simpleName})")
+            throw IllegalStateException("The PubMed article parser could not be built on this device")
+        }
+
+        try {
+            parser.parse(InputSource(StringReader(xml)), handler)
         } catch (_: UnexpectedRootException) {
             // Stopped at the root on purpose; judged below
         } catch (e: SAXParseException) {
             Log.e(TAG, "efetch answer is not well-formed XML (line ${e.lineNumber}, column ${e.columnNumber})")
             wellFormed = false
-        } catch (e: Exception) {
+        } catch (e: SAXException) {
             Log.e(TAG, "efetch answer could not be parsed (${e.javaClass.simpleName})")
             wellFormed = false
+        } catch (e: IOException) {
+            Log.e(TAG, "efetch answer could not be read (${e.javaClass.simpleName})")
+            wellFormed = false
         }
+        // Any other exception is a defect in the handler, not a damaged answer: it propagates
 
         when (handler.rootElement) {
             EFETCH_ARTICLE_SET_ROOT -> return ParsedArticleSet(handler.articles, handler.unreadable, wellFormed)

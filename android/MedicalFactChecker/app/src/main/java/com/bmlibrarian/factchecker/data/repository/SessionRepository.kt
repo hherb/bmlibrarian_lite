@@ -167,9 +167,9 @@ class SessionRepository @Inject constructor(
      * @param sessionId Session ID
      * @param cursor New cursor value (null if no more pages)
      * @param totalResults Total available results
-     * @param resultsReceived Records the session's Europe PMC pages held so far, readable or not
+     * @param resultsReceived Records the session's Europe PMC pages held so far, readable or not; null when unknown
      */
-    suspend fun updateEpmcPagination(sessionId: String, cursor: String?, totalResults: Int, resultsReceived: Int) {
+    suspend fun updateEpmcPagination(sessionId: String, cursor: String?, totalResults: Int, resultsReceived: Int?) {
         sessionDao.updateEpmcPagination(sessionId, cursor, totalResults, resultsReceived)
     }
 

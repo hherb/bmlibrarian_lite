@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
@@ -179,10 +180,16 @@ class PubMedSearchFailureTest {
     }
 
     @Test
-    fun `unreadable saved credentials fail the search as a failed request, sending nothing`() = runTest {
-        val failing = PubMedService(api) { throw java.security.GeneralSecurityException("keystore unavailable") }
+    fun `unreadable saved credentials stop the search with what to do, sending nothing`() = runTest {
+        // A broken keystore is not a failure of PubMed's: retrying cannot help, fixing Settings can
+        val failing = PubMedService(api) { throw java.security.GeneralSecurityException("KEYSTORE_TEXT") }
 
-        assertEquals(RequestFailure(RequestFailureKind.REQUEST_FAILED), failureOf(failing.search(query = "aspirin")))
+        val thrown = runCatching { failing.search(query = "aspirin") }.exceptionOrNull()
+
+        assertTrue("got $thrown", thrown is NcbiCredentialsUnavailableException)
+        assertTrue(thrown?.message.orEmpty().contains("Settings"))
+        assertNull("the error kept the keystore's exception", thrown?.cause)
+        assertFalse(thrown?.message.orEmpty().contains("KEYSTORE_TEXT"))
         coVerify(exactly = 0) { api.search(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 

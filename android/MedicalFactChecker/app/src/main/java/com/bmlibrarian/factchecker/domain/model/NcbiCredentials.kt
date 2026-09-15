@@ -75,3 +75,15 @@ fun interface NcbiCredentialSource {
      */
     fun ncbiCredentials(): NcbiCredentials
 }
+
+/**
+ * The saved NCBI API key or email could not be read, so no PubMed search can be sent (#252).
+ *
+ * Encrypted preferences throw when the keystore is broken, such as after a
+ * backup restore. That is not a failure of PubMed's, so it is not reported as
+ * one: retrying cannot help, and the user's next step is in Settings. The
+ * keystore's exception is not kept.
+ */
+class NcbiCredentialsUnavailableException : Exception(
+    "The saved NCBI API key or email could not be read. Re-enter them in Settings, or clear them, then try again."
+)

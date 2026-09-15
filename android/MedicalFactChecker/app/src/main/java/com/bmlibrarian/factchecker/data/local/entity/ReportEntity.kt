@@ -23,6 +23,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import java.util.Date
 import java.util.UUID
@@ -107,6 +108,15 @@ data class ReportEntity(
             "${summary.take(maxLength - 3)}..."
         }
     }
+
+    /**
+     * Whether the report opens with the incomplete-search notice (#252).
+     *
+     * For a surface that shows the verdict without the report's text, such as
+     * the history list, and must still say the evidence base was partial.
+     */
+    val searchWasIncomplete: Boolean
+        get() = SearchFailureReporting.splitSearchShortfallNotice(fullReportMarkdown).first != null
 
     /**
      * Get statistics string for display.

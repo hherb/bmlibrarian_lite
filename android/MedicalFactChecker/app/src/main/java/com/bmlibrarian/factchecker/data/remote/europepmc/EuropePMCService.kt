@@ -65,7 +65,9 @@ class EuropePMCService @Inject constructor(
      * @param batchSize Number of results per page
      * @param includePreprints Whether to include preprints in results
      * @param resultsReceived How many records the search's earlier pages held,
-     *   readable or not; with the hit count, it says how many this page should hold
+     *   readable or not; with the hit count, it says how many this page should hold.
+     *   Null when nobody counted (a session saved before #252): then an empty page
+     *   ends the cursor, as it always did, and no count is expected of the page
      * @return The page, or a [SourceRequestException] carrying why the search failed
      */
     suspend fun search(
@@ -73,7 +75,7 @@ class EuropePMCService @Inject constructor(
         cursor: String? = null,
         batchSize: Int = EuropePMCApi.DEFAULT_PAGE_SIZE,
         includePreprints: Boolean = false,
-        resultsReceived: Int = 0
+        resultsReceived: Int? = 0
     ): Result<EuropePMCSearchResult> {
         return try {
             val page = NetworkRetry.withExponentialBackoff(
@@ -190,7 +192,7 @@ class EuropePMCService @Inject constructor(
      * @param page The decoded answer
      * @param cursor The cursor the page was requested with, or null for the first page
      * @param batchSize The page size asked for
-     * @param resultsReceived How many records the search's earlier pages held
+     * @param resultsReceived How many records the search's earlier pages held, or null when unknown
      * @return The page's readable articles, its cursor and its shortfalls
      * @throws SourceRequestException if the hit count or result list is missing
      *   or unusable, or the page is empty although the hit count promised results
@@ -199,13 +201,14 @@ class EuropePMCService @Inject constructor(
         page: EuropePMCSearchResponse,
         cursor: String?,
         batchSize: Int,
-        resultsReceived: Int
+        resultsReceived: Int?
     ): EuropePMCSearchResult {
         val hitCount = page.hitCount?.takeIf { it >= 0 }
             ?: throw unreadableAnswer("answer has no non-negative integer hitCount")
         val records = page.resultList?.result ?: throw unreadableAnswer("answer has no resultList.result list")
 
-        val expected = maxOf(0, minOf(batchSize, hitCount - resultsReceived))
+        // Unknown when nobody counted what came before: then nothing is expected of the page
+        val expected = resultsReceived?.let { maxOf(0, minOf(batchSize, hitCount - it)) } ?: 0
         if (records.isEmpty() && expected > 0) {
             Log.e(TAG, "Europe PMC sent an empty page after $resultsReceived of $hitCount results")
             throw SourceRequestException(SearchProvider.EUROPE_PMC, RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
