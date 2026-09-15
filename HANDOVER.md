@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#252 + #255 (Android half) — a failed source is not an empty one**, branch
-`fix/android-failed-search-is-not-empty-252`, in review. Android conforms to the
+`fix/android-failed-search-is-not-empty-252`, PR #276. Android conforms to the
 #247 contract; its mapping is the contract's **Android** section. Once merged,
 compress this into **Recently landed**. Next: Swift (**#256** + **#255** +
 **#253**), which must adopt the alternative-query clause (see #256).
