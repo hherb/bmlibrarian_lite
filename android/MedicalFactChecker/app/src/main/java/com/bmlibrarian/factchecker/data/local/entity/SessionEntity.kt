@@ -21,6 +21,8 @@ package com.bmlibrarian.factchecker.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import java.util.Date
@@ -85,6 +87,15 @@ data class SessionEntity(
     @ColumnInfo(name = "epmc_total_results")
     val epmcTotalResults: Int = 0,
 
+    /**
+     * How many records the session's Europe PMC pages held so far, readable or
+     * not; with the total, it says how many the next page should hold (#252).
+     * Null for a session saved before the count was kept: its cursor may outlive
+     * its last hit, so a count of 0 would expect records that were already sent.
+     */
+    @ColumnInfo(name = "epmc_results_received")
+    val epmcResultsReceived: Int? = 0,
+
     // ==================== Batch Tracking ====================
 
     /** Current batch number (for "fetch more" operations). */
@@ -139,6 +150,14 @@ data class SessionEntity(
     @ColumnInfo(name = "error_message")
     val errorMessage: String? = null,
 
+    /**
+     * What the session's searches failed to retrieve, in the contract's JSON
+     * form (#252); null when they retrieved everything they asked for. Read it
+     * with [retrievalShortfalls].
+     */
+    @ColumnInfo(name = "retrieval_shortfalls_json")
+    val retrievalShortfallsJson: String? = null,
+
     // ==================== Timestamps ====================
 
     /** When this session was created. */
@@ -156,10 +175,24 @@ data class SessionEntity(
      */
     val hasMoreDocuments: Boolean
         get() = when (searchProvider) {
-            SearchProvider.PUBMED -> pubmedOffset < pubmedTotalResults
+            SearchProvider.PUBMED -> pubMedHasMore
             SearchProvider.EUROPE_PMC -> epmcCursor != null
-            SearchProvider.BOTH -> pubmedOffset < pubmedTotalResults || epmcCursor != null
+            SearchProvider.BOTH -> pubMedHasMore || epmcCursor != null
         }
+
+    /** Whether PubMed has a next page: past the offset, and within the records PubMed lists. */
+    private val pubMedHasMore: Boolean
+        get() = pubmedOffset < minOf(pubmedTotalResults, SearchFailureReporting.PUBMED_LISTABLE_RECORDS)
+
+    /**
+     * Read what the session's searches failed to retrieve.
+     *
+     * @return The shortfalls; empty when the searches were complete
+     * @throws IllegalArgumentException if the stored value is damaged: a dropped
+     *   record would let a report claim a complete search
+     */
+    fun retrievalShortfalls(): List<RetrievalShortfall> =
+        SearchFailureReporting.retrievalShortfallsFromJson(retrievalShortfallsJson)
 
     /**
      * Check if more evidence can be gathered (either more results or smart search available).

@@ -19,6 +19,9 @@
 package com.bmlibrarian.factchecker.data.remote.europepmc
 
 import com.bmlibrarian.factchecker.domain.model.EuropePMCError
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -326,19 +329,20 @@ class EuropePMCServiceTest {
 
     @Test
     fun `search sets hasMore false when result list is empty`() = runTest {
-        // Arrange
+        // Arrange: an empty page is the end only when no hits remain; an empty
+        // page the hit count promised results for is a failed request (#252)
         coEvery {
             api.search(any(), any(), any(), any(), any())
         } returns Response.success(
             EuropePMCSearchResponse(
-                hitCount = 100,
+                hitCount = 20,
                 nextCursorMark = "nextCursor",
                 resultList = EuropePMCResultList(result = emptyList())
             )
         )
 
         // Act
-        val result = service.search(query = "test")
+        val result = service.search(query = "test", cursor = "AoJ", batchSize = 20, resultsReceived = 20)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -358,9 +362,7 @@ class EuropePMCServiceTest {
         val result = service.search(query = "test")
 
         // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is EuropePMCError.ServerError)
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 500), (result.exceptionOrNull() as SourceRequestException).failure)
     }
 
     @Test
@@ -374,9 +376,7 @@ class EuropePMCServiceTest {
         val result = service.search(query = "invalid query")
 
         // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is EuropePMCError.SearchError)
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 400), (result.exceptionOrNull() as SourceRequestException).failure)
     }
 
     @Test
@@ -390,9 +390,10 @@ class EuropePMCServiceTest {
         val result = service.search(query = "test")
 
         // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is EuropePMCError.SearchError)
+        assertEquals(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+            (result.exceptionOrNull() as SourceRequestException).failure
+        )
     }
 
     // ==================== Retry Logic Tests ====================

@@ -175,12 +175,14 @@ interface SessionDao {
      * @param id Session ID
      * @param cursor New cursor value (null if no more pages)
      * @param totalResults Total available results
+     * @param resultsReceived Records the session's Europe PMC pages held so far, readable or not; null when unknown
      * @param updatedAt Timestamp for the update
      */
     @Query("""
         UPDATE sessions SET
             epmc_cursor = :cursor,
             epmc_total_results = :totalResults,
+            epmc_results_received = :resultsReceived,
             updated_at = :updatedAt
         WHERE id = :id
     """)
@@ -188,6 +190,26 @@ interface SessionDao {
         id: String,
         cursor: String?,
         totalResults: Int,
+        resultsReceived: Int?,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    /**
+     * Record what the session's searches failed to retrieve (#252).
+     *
+     * @param id Session ID
+     * @param shortfallsJson The shortfalls in the contract's JSON form, or null when there are none
+     * @param updatedAt Timestamp for the update
+     */
+    @Query("""
+        UPDATE sessions SET
+            retrieval_shortfalls_json = :shortfallsJson,
+            updated_at = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateRetrievalShortfalls(
+        id: String,
+        shortfallsJson: String?,
         updatedAt: Long = System.currentTimeMillis()
     )
 

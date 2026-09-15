@@ -101,9 +101,6 @@ interface PubMedApi {
         /** Default number of results per batch. */
         const val DEFAULT_BATCH_SIZE = 20
 
-        /** Maximum allowed offset (PubMed limitation). */
-        const val MAX_OFFSET = 9999
-
         /** Rate limit delay without API key (milliseconds). */
         const val RATE_LIMIT_DELAY_MS = 334L
 

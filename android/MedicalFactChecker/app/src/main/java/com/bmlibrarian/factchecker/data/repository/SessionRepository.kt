@@ -21,6 +21,8 @@ package com.bmlibrarian.factchecker.data.repository
 import com.bmlibrarian.factchecker.data.local.dao.SessionDao
 import com.bmlibrarian.factchecker.data.local.dao.SessionWithReportResult
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import kotlinx.coroutines.flow.Flow
@@ -165,9 +167,23 @@ class SessionRepository @Inject constructor(
      * @param sessionId Session ID
      * @param cursor New cursor value (null if no more pages)
      * @param totalResults Total available results
+     * @param resultsReceived Records the session's Europe PMC pages held so far, readable or not; null when unknown
      */
-    suspend fun updateEpmcPagination(sessionId: String, cursor: String?, totalResults: Int) {
-        sessionDao.updateEpmcPagination(sessionId, cursor, totalResults)
+    suspend fun updateEpmcPagination(sessionId: String, cursor: String?, totalResults: Int, resultsReceived: Int?) {
+        sessionDao.updateEpmcPagination(sessionId, cursor, totalResults, resultsReceived)
+    }
+
+    /**
+     * Record what the session's searches failed to retrieve (#252).
+     *
+     * Replaces what was recorded: pass the session's shortfalls combined with the
+     * new ones. None stores nothing, as for a complete search.
+     *
+     * @param sessionId Session ID
+     * @param shortfalls Everything the session's searches failed to retrieve
+     */
+    suspend fun updateRetrievalShortfalls(sessionId: String, shortfalls: List<RetrievalShortfall>) {
+        sessionDao.updateRetrievalShortfalls(sessionId, SearchFailureReporting.retrievalShortfallsToJson(shortfalls))
     }
 
     /**

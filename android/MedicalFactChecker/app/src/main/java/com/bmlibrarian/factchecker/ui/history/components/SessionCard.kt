@@ -148,6 +148,16 @@ fun SessionCard(
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 
+                // The verdict above rests on a partial evidence base (#252)
+                if (it.searchWasIncomplete) {
+                    Text(
+                        text = "Incomplete search: the report rests only on the records that were retrieved.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                }
+
                 Text(
                     text = it.summary,
                     style = MaterialTheme.typography.bodySmall,

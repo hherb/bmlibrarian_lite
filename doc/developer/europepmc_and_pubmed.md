@@ -75,7 +75,8 @@ interceptor runs. The tag holds the call's arguments, the key among them, and
 OkHttp's `Request.toString()` prints it. On Android the key is read by
 `PubMedService` itself, from `NcbiCredentialSource`, never passed by callers:
 every workflow call site used to omit it, so the saved key never reached NCBI. A
-400 on a request that carried a key is reported as `InvalidApiKeyError`.
+400 is a failed search of kind `http_status` 400, whose advice tells the user to
+check a saved key (#252).
 
 The ports differ in a few places. Python is the reference, so align a port with
 it, or record the difference here:
@@ -83,11 +84,12 @@ it, or record the difference here:
 | Case | Python | Swift | Android |
 |------|--------|-------|---------|
 | Which 3xx is refused | 301, 302, 303, 307, 308 with a `Location` header (`is_redirect`) | every 3xx | every 3xx |
-| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`PubMedError.redirectRefused`) | no (`RedirectRefusedError`) |
-| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | `PubMedError.rateLimited` | `RateLimitError` |
+| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`PubMedError.redirectRefused`) | no (`SourceRequestException`, `redirect_refused`) |
+| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | `PubMedError.rateLimited` | `SourceRequestException` (`http_status`, 429) |
 | What counts as "no key" | an empty string | an empty string | a blank string, whitespace included |
-| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | total is the articles seen so far, with a warning (#255) | total 0 (#255) |
-| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | dropped with a `print` (#256) | dropped silently (#252) |
+| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | total is the articles seen so far, with a warning (#255) | as Python |
+| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | dropped with a `print` (#256) | as Python |
+| Retries | `_make_request` per request | the whole `send` | esearch and efetch each on their own |
 
 **A failed source is not an empty one.** What counts as a failed request, what
 a search does with one, and how the reader is told are specified in
@@ -183,8 +185,10 @@ against 10,000 reads its honest last page as incomplete.
 article count re-requests PMIDs already fetched, and a last batch that parsed to
 nothing is requested again on every "fetch more". BioMedLit's `SearchResult`
 reports `nextOffset` as the position after the PMIDs consumed, and `nil` when
-there is no next page (the last match, the offset cap, or no usable count);
-Android's `PubMedSearchResult` advances by `pmids.size`.
+there is no next page (the last match, the offset cap, or no usable count).
+Android's `PubMedSearchResult.nextOffset` is the position after the PMIDs the
+page should have listed, `min(batch, count − offset, 9999 − offset)`, so PMIDs a
+page left unlisted are recorded as missing rather than asked for again.
 
 ---
 

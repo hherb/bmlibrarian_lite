@@ -50,8 +50,9 @@ private val dropInvocationTag = Interceptor { chain ->
  * 307 or 308 would re-send the body, API key included, to whatever host the
  * redirect names, and a 301, 302 or 303 would re-send the request as a GET
  * without its parameters, which NCBI answers as a search for nothing. Unfollowed,
- * the 3xx arrives as the response itself, which [PubMedService] reports as
- * [com.bmlibrarian.factchecker.domain.model.PubMedError.RedirectRefusedError].
+ * the 3xx arrives as the response itself, which [PubMedService] reports as a
+ * failed search of kind
+ * [com.bmlibrarian.factchecker.domain.model.RequestFailureKind.REDIRECT_REFUSED].
  * Not even a redirect to an NCBI host is followed: these endpoints never
  * legitimately redirect, and a same-host redirect can still downgrade to
  * `http://` and carry the key in cleartext.

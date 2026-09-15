@@ -19,7 +19,12 @@
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
-import com.bmlibrarian.factchecker.domain.model.PubMedError
+import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -156,25 +161,10 @@ class PubMedServiceTest {
     // ==================== Offset Validation Tests ====================
 
     @Test
-    fun `search fails when offset exceeds maximum`() = runTest {
-        // Act
-        val result = service.search(
-            query = "test",
-            offset = PubMedApi.MAX_OFFSET + 1
-        )
-
-        // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is PubMedError.InvalidOffsetError)
-        assertEquals(PubMedApi.MAX_OFFSET + 1, (error as PubMedError.InvalidOffsetError).offset)
-    }
-
-    @Test
     fun `search accepts maximum valid offset`() = runTest {
-        // Arrange
+        // Arrange: retstart can be at most 9998 (checked live 2026-09-15)
         coEvery {
-            api.search(any(), any(), any(), any(), retStart = PubMedApi.MAX_OFFSET, any(), any(), any())
+            api.search(any(), any(), any(), any(), retStart = LAST_LISTABLE_OFFSET, any(), any(), any())
         } returns Response.success(
             ESearchResponse(
                 esearchResult = ESearchResult(
@@ -191,7 +181,7 @@ class PubMedServiceTest {
         // Act
         val result = service.search(
             query = "test",
-            offset = PubMedApi.MAX_OFFSET
+            offset = LAST_LISTABLE_OFFSET
         )
 
         // Assert
@@ -211,20 +201,18 @@ class PubMedServiceTest {
         val result = service.search(query = "test")
 
         // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is PubMedError.ServerError)
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 500), failureOf(result))
     }
 
     @Test
-    fun `search returns error on fetch HTTP failure`() = runTest {
+    fun `search records the PMIDs of a fetch that failed`() = runTest {
         // Arrange
         coEvery {
             api.search(any(), any(), any(), any(), any(), any(), any(), any())
         } returns Response.success(
             ESearchResponse(
                 esearchResult = ESearchResult(
-                    count = "10",
+                    count = "1",
                     idList = listOf("12345")
                 )
             )
@@ -237,10 +225,13 @@ class PubMedServiceTest {
         // Act
         val result = service.search(query = "test")
 
-        // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is PubMedError.ServerError)
+        // Assert: the search stands; its fetched articles do not
+        val searched = result.getOrThrow()
+        assertTrue(searched.articles.isEmpty())
+        assertEquals(
+            listOf(RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 500), 1)),
+            searched.shortfalls
+        )
     }
 
     @Test
@@ -254,52 +245,7 @@ class PubMedServiceTest {
         val result = service.search(query = "test")
 
         // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is PubMedError.RateLimitError)
-    }
-
-    @Test
-    fun `search returns error when esearchResult is null`() = runTest {
-        // Arrange
-        coEvery {
-            api.search(any(), any(), any(), any(), any(), any(), any(), any())
-        } returns Response.success(ESearchResponse(esearchResult = null))
-
-        // Act
-        val result = service.search(query = "test")
-
-        // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is PubMedError.SearchError)
-    }
-
-    @Test
-    fun `search returns error when fetch response is empty`() = runTest {
-        // Arrange
-        coEvery {
-            api.search(any(), any(), any(), any(), any(), any(), any(), any())
-        } returns Response.success(
-            ESearchResponse(
-                esearchResult = ESearchResult(
-                    count = "10",
-                    idList = listOf("12345")
-                )
-            )
-        )
-
-        coEvery {
-            api.fetch(any(), any(), any(), any(), any(), any())
-        } returns Response.success(null)
-
-        // Act
-        val result = service.search(query = "test")
-
-        // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is PubMedError.FetchError)
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 429), failureOf(result))
     }
 
     // ==================== Retry Logic Tests ====================
@@ -990,25 +936,24 @@ class PubMedServiceTest {
     }
 
     @Test
-    fun `unreadable saved credentials fail the search instead of throwing`() = runTest {
+    fun `unreadable saved credentials stop the search as a settings problem, not a PubMed failure`() = runTest {
         // Arrange: encrypted preferences throw on a broken keystore
         val failing = PubMedService(api) { throw java.security.GeneralSecurityException("keystore unavailable") }
 
         // Act
-        val result = failing.search(query = "test")
+        val thrown = runCatching { failing.search(query = "test") }.exceptionOrNull()
 
         // Assert
-        val error = result.exceptionOrNull()
-        assertTrue("expected UnknownError, got $error", error is PubMedError.UnknownError)
-        assertTrue(error?.message.orEmpty().contains("NCBI API key"))
+        assertTrue("got $thrown", thrown is NcbiCredentialsUnavailableException)
         coVerify(exactly = 0) {
             api.search(any(), any(), any(), any(), any(), any(), any(), any())
         }
     }
 
     @Test
-    fun `a 400 while a key is saved reports the key as rejected, without its body`() = runTest {
-        // Arrange: NCBI's 400 for a bad key repeats the key in its body
+    fun `a 400 while a key is saved fails the search without its body, and is not retried`() = runTest {
+        // Arrange: NCBI's 400 for a bad key repeats the key in its body. The
+        // advice for a PubMed 400 tells the user to check the saved key.
         val apiKey = "rejected-key-0123456789"
         savedCredentials = NcbiCredentials.of(apiKey = apiKey, email = null)
         coEvery {
@@ -1019,27 +964,11 @@ class PubMedServiceTest {
         val result = service.search(query = "test")
 
         // Assert
-        val error = result.exceptionOrNull()
-        assertTrue("expected InvalidApiKeyError, got $error", error is PubMedError.InvalidApiKeyError)
-        assertFalse("the error carried the key", error?.message.orEmpty().contains(apiKey))
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, 400), failureOf(result))
+        assertFalse("the error carried the key", result.exceptionOrNull()?.message.orEmpty().contains(apiKey))
         coVerify(exactly = 1) {
             api.search(any(), any(), any(), any(), any(), any(), any(), any())
         }
-    }
-
-    @Test
-    fun `a 400 without a saved key is a rejected search`() = runTest {
-        // Arrange
-        coEvery {
-            api.search(any(), any(), any(), any(), any(), any(), any(), any())
-        } returns Response.error(400, "".toResponseBody(null))
-
-        // Act
-        val result = service.search(query = "test")
-
-        // Assert
-        val error = result.exceptionOrNull()
-        assertTrue("expected SearchError, got $error", error is PubMedError.SearchError)
     }
 
     @Test
@@ -1080,9 +1009,7 @@ class PubMedServiceTest {
         val result = service.search(query = "test")
 
         // Assert
-        val error = result.exceptionOrNull()
-        assertTrue("expected RedirectRefusedError, got $error", error is PubMedError.RedirectRefusedError)
-        assertEquals(307, (error as PubMedError.RedirectRefusedError).statusCode)
+        assertEquals(RequestFailure(RequestFailureKind.REDIRECT_REFUSED, 307), failureOf(result))
         coVerify(exactly = 1) {
             api.search(any(), any(), any(), any(), any(), any(), any(), any())
         }
@@ -1165,7 +1092,7 @@ class PubMedServiceTest {
         } returns Response.success(createSampleXml(listOf("1")))
 
         // Act
-        val result = service.search(query = "test", offset = PubMedApi.MAX_OFFSET)
+        val result = service.search(query = "test", offset = LAST_LISTABLE_OFFSET)
 
         // Assert
         assertTrue(result.isSuccess)
@@ -1173,6 +1100,14 @@ class PubMedServiceTest {
     }
 
     // ==================== Helper Methods ====================
+
+    /** The failure a result carries, asserting it is a PubMed source failure. */
+    private fun failureOf(result: Result<PubMedSearchResult>): RequestFailure {
+        val error = result.exceptionOrNull()
+        assertTrue("expected a SourceRequestException, got $error", error is SourceRequestException)
+        assertEquals(SearchProvider.PUBMED, (error as SourceRequestException).provider)
+        return error.failure
+    }
 
     /**
      * Creates a sample PubMed XML response for testing.
@@ -1202,5 +1137,10 @@ class PubMedServiceTest {
             "<PubmedArticleSet>\n" +
             "$articles\n" +
             "</PubmedArticleSet>"
+    }
+
+    private companion object {
+        /** The highest `retstart` E-utilities accepts (checked live 2026-09-15). */
+        const val LAST_LISTABLE_OFFSET = 9_998
     }
 }
