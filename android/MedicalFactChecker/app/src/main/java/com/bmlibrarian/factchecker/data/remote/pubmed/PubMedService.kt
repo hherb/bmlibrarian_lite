@@ -22,12 +22,19 @@ import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialSource
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
-import com.bmlibrarian.factchecker.domain.model.PubMedError
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import kotlinx.coroutines.delay
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
+import org.xml.sax.SAXException
+import org.xml.sax.SAXParseException
 import org.xml.sax.helpers.DefaultHandler
 import retrofit2.Response
 import java.io.StringReader
@@ -77,6 +84,15 @@ private val TEXT_ELEMENTS: Set<String> = setOf(
     "ELocationID", "ArticleId",
 )
 
+/** The root element of an efetch answer that holds articles. */
+private const val EFETCH_ARTICLE_SET_ROOT = "PubmedArticleSet"
+
+/** The root element of efetch's error document, which E-utilities can send with HTTP 200 (#255). */
+private const val EFETCH_ERROR_ROOT = "eFetchResult"
+
+/** Stops a parse at a root element that is not an article set, before any of its text is read. */
+private class UnexpectedRootException : SAXException("unexpected root element")
+
 /**
  * Service for PubMed/NCBI E-utilities API interactions.
  *
@@ -104,34 +120,41 @@ class PubMedService @Inject constructor(
 ) {
 
     /**
-     * Search PubMed and fetch article details.
+     * Search PubMed for one page of articles.
      *
      * Performs a two-step process:
-     * 1. ESearch to get PMIDs matching the query
+     * 1. ESearch to list the page's PMIDs
      * 2. EFetch to get article details for those PMIDs
      *
      * The NCBI API key and email are read from the credential source once per
-     * search and sent with both of its requests. Every failure is logged and
-     * returned; cancellation is rethrown, so a cancelled search stays cancelled.
+     * search and sent with both of its requests. Each request is retried on its
+     * own, so a failed fetch does not search again.
+     *
+     * A failed source is not an empty one (#252): a search that could not list
+     * its PMIDs, whether its request failed or its answer reported an error, could
+     * not be read or listed none of what it counted, fails with a
+     * [SourceRequestException]. A page that answered but retrieved less than it
+     * listed (PMIDs left unlisted, a fetch that failed, articles that could not
+     * be read) succeeds, and says what is missing in
+     * [PubMedSearchResult.shortfalls]. Cancellation is rethrown, so a cancelled
+     * search stays cancelled.
      *
      * @param query PubMed search query
-     * @param offset Starting position for pagination
+     * @param offset Starting position for pagination, from 0 to 9998: PubMed lists
+     *   no more of a search
      * @param batchSize Number of results to fetch
-     * @return Result containing search results or error
+     * @return The page, or a [SourceRequestException] carrying why the search failed
+     * @throws IllegalArgumentException if [offset] is past what PubMed can list;
+     *   a caller never asks for a page past the end
      */
     suspend fun search(
         query: String,
         offset: Int = 0,
         batchSize: Int = PubMedApi.DEFAULT_BATCH_SIZE
     ): Result<PubMedSearchResult> {
-        // Validate offset
-        if (offset > PubMedApi.MAX_OFFSET) {
-            return failure(
-                PubMedError.InvalidOffsetError(
-                    message = "Offset cannot exceed ${PubMedApi.MAX_OFFSET}",
-                    offset = offset
-                )
-            )
+        require(offset in 0 until SearchFailureReporting.PUBMED_LISTABLE_RECORDS) {
+            "PubMed lists a search's records from offset 0 to " +
+                "${SearchFailureReporting.PUBMED_LISTABLE_RECORDS - 1}, not $offset"
         }
 
         // The saved key lives in encrypted preferences, which throw on a broken
@@ -139,49 +162,51 @@ class PubMedService @Inject constructor(
         val credentials = try {
             credentialSource.ncbiCredentials()
         } catch (e: Exception) {
-            return failure(
-                PubMedError.UnknownError(
-                    message = "Could not read the saved NCBI API key or email",
-                    cause = e
-                )
-            )
+            Log.w(TAG, "Could not read the saved NCBI API key or email (${e.javaClass.simpleName})")
+            return failure(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
 
-        return try {
-            NetworkRetry.withExponentialBackoff(
-                maxRetries = Constants.NETWORK_MAX_RETRIES,
-                shouldRetry = { e -> shouldRetryError(e) }
-            ) {
-                performSearch(query, offset, batchSize, credentials)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: PubMedError) {
-            failure(e)
-        } catch (e: Exception) {
-            failure(
-                PubMedError.NetworkError(
-                    message = "Network error: ${e.message}",
-                    cause = e
-                )
-            )
+        val listing = try {
+            withRetries { listPmids(query, offset, batchSize, credentials) }
+        } catch (e: SourceRequestException) {
+            return failure(e.failure)
         }
+
+        val fetched = if (listing.pmids.isEmpty()) {
+            FetchedArticles(emptyList(), emptyList())
+        } else {
+            fetchArticles(listing.pmids, credentials)
+        }
+        // The unlisted PMIDs are recorded as missing, so the next page starts after them
+        val nextOffset = offset + maxOf(listing.expected, listing.pmids.size)
+
+        return Result.success(
+            PubMedSearchResult(
+                articles = fetched.articles,
+                totalResults = listing.totalCount,
+                nextOffset = nextOffset,
+                hasMore = nextOffset < minOf(listing.totalCount, SearchFailureReporting.PUBMED_LISTABLE_RECORDS),
+                shortfalls = SearchFailureReporting.shortfallsForMissingRecords(
+                    SearchProvider.PUBMED,
+                    RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE),
+                    listing.unlisted
+                ) + fetched.shortfalls
+            )
+        )
     }
 
     /**
      * Log a failed search and return it as a failed result.
      *
-     * Logs the error's message and its cause's class. No message here carries a
-     * response body or the key: an HTTP failure's is built from the status and
-     * reason phrase, and a network failure's quotes the transport, whose request
-     * URLs hold no credential. A cause's own message is not logged separately.
+     * The message names the source and the failure's reason only: no body, no
+     * request, and so no key.
      *
-     * @param error Why the search failed
+     * @param failure Why the search failed
      * @return The failed result
      */
-    private fun failure(error: PubMedError): Result<PubMedSearchResult> {
-        val cause = error.cause?.let { " (cause: ${it.javaClass.simpleName})" }.orEmpty()
-        Log.w(TAG, "PubMed search failed, ${error.javaClass.simpleName}: ${error.message}$cause")
+    private fun failure(failure: RequestFailure): Result<PubMedSearchResult> {
+        val error = SourceRequestException(SearchProvider.PUBMED, failure)
+        Log.w(TAG, "PubMed search failed: ${error.message}")
         return Result.failure(error)
     }
 
@@ -314,54 +339,161 @@ class PubMedService @Inject constructor(
 
     // ==================== Private Implementation ====================
 
+    /** The PMIDs one esearch page listed, and what it should have listed. */
+    private data class PmidListing(
+        /** The search's total, from `count`. */
+        val totalCount: Int,
+        /** The PMIDs the page listed, in PubMed's order. */
+        val pmids: List<String>,
+        /** How many PMIDs the page should have listed. */
+        val expected: Int,
+        /** How many of [expected] it left out. */
+        val unlisted: Int
+    )
+
+    /** The articles fetched for a page's PMIDs, and what the fetch failed to retrieve. */
+    private data class FetchedArticles(
+        val articles: List<ParsedArticle>,
+        val shortfalls: List<RetrievalShortfall>
+    )
+
+    /** An efetch article set as parsed. */
+    private data class ParsedArticleSet(
+        /** The articles that carried a PMID and a title. */
+        val articles: List<ParsedArticle>,
+        /** `PubmedArticle` records that closed without a PMID or a title. */
+        val unreadable: Int,
+        /** False when the XML broke off, so records after the break were never seen. */
+        val wellFormed: Boolean
+    )
+
     /**
-     * Perform the actual search operation.
+     * Run one E-utilities request, retrying it while its failure is transient.
+     *
+     * @param block The request, failing with a [SourceRequestException]
+     * @return What the request returned
+     * @throws SourceRequestException when it failed and retrying would not help, or the retries ran out
+     */
+    private suspend fun <T> withRetries(block: suspend () -> T): T =
+        NetworkRetry.withExponentialBackoff(
+            maxRetries = Constants.NETWORK_MAX_RETRIES,
+            shouldRetry = { e -> e is SourceRequestException && e.failure.isRetryable }
+        ) { block() }
+
+    /**
+     * Send one E-utilities request and refuse an unsuccessful answer.
+     *
+     * An error the transport raised is reduced to its [RequestFailure] and not
+     * kept. An unsuccessful status is read from the status line only: the body
+     * is never read, because NCBI's 400 for a bad key repeats the key in it. The
+     * PubMed client follows no redirect ([pubMedHttpClient]), so a 3xx arrives
+     * here too, as a refused redirect.
+     *
+     * @param request The Retrofit call
+     * @return The successful response
+     * @throws SourceRequestException if the request failed or the status is not 2xx
+     */
+    private suspend fun <T> send(request: suspend () -> Response<T>): Response<T> {
+        val response = try {
+            request()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val failure = RequestFailure.fromException(e)
+            // The class only: a converter's message quotes the body
+            Log.w(TAG, "E-utilities request failed: ${failure.describe()} (${e.javaClass.simpleName})")
+            throw SourceRequestException(SearchProvider.PUBMED, failure)
+        }
+        if (!response.isSuccessful) {
+            throw SourceRequestException(SearchProvider.PUBMED, RequestFailure.forHttpStatus(response.code()))
+        }
+        return response
+    }
+
+    /**
+     * Build the error for an E-utilities answer that cannot be read, and log why.
+     *
+     * @param reason What was wrong, naming fields only, never their values
+     * @return The error to throw
+     */
+    private fun unreadableAnswer(reason: String): SourceRequestException {
+        Log.e(TAG, "Unreadable E-utilities answer: $reason")
+        return SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
+    }
+
+    /**
+     * List one page of a search's PMIDs with esearch.
+     *
+     * E-utilities reports some failures inside an HTTP 200, as an `ERROR` field
+     * and no `count` (#255): that answer is a failed search, not a search that
+     * matched nothing, and its text is neither logged nor shown. A `count` that is
+     * missing or no whole number is an answer that cannot be read, not a total of
+     * nothing.
      *
      * @param query PubMed search query
-     * @param offset Starting position for pagination
-     * @param batchSize Number of results to fetch
-     * @param credentials The API key and email to send with both requests
-     * @return Result containing search results
-     * @throws PubMedError for an unsuccessful status, a redirect included
+     * @param offset The page's offset
+     * @param batchSize The page size asked for
+     * @param credentials The API key and email to send
+     * @return The listing
+     * @throws SourceRequestException if the request failed, the answer reports an
+     *   error or cannot be read, or it lists none of the PMIDs it counts
      */
-    private suspend fun performSearch(
+    private suspend fun listPmids(
         query: String,
         offset: Int,
         batchSize: Int,
         credentials: NcbiCredentials
-    ): Result<PubMedSearchResult> {
-        // Step 1: Search for PMIDs
-        val searchResponse = api.search(
-            term = query,
-            retMax = batchSize,
-            retStart = offset,
-            apiKey = credentials.apiKey,
-            email = credentials.email
-        )
-
-        throwIfUnsuccessful(searchResponse, credentials)
-
-        val searchResult = searchResponse.body()?.esearchResult
-            ?: throw PubMedError.SearchError(
-                message = "Empty search response",
-                query = query
-            )
-
-        val pmids = searchResult.idList ?: emptyList()
-        val totalResults = searchResult.count?.toIntOrNull() ?: 0
-
-        if (pmids.isEmpty()) {
-            return Result.success(
-                PubMedSearchResult(
-                    articles = emptyList(),
-                    totalResults = totalResults,
-                    nextOffset = offset,
-                    hasMore = false
-                )
+    ): PmidListing {
+        val response = send {
+            api.search(
+                term = query,
+                retMax = batchSize,
+                retStart = offset,
+                apiKey = credentials.apiKey,
+                email = credentials.email
             )
         }
 
-        // Rate limit delay before fetch
+        val result = response.body()?.esearchResult
+            ?: throw unreadableAnswer("esearch answer has no esearchresult object")
+        if (result.error != null) {
+            Log.e(
+                TAG,
+                "E-utilities esearch answered with an ERROR instead of a result " +
+                    "(its text is not logged: it can repeat the request)"
+            )
+            throw SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.SERVICE_ERROR))
+        }
+        val totalCount = result.count
+            ?.takeIf { count -> count.isNotEmpty() && count.all { it in '0'..'9' } }
+            ?.toIntOrNull()
+            ?: throw unreadableAnswer("esearch result has no numeric count")
+        val pmids = result.idList ?: throw unreadableAnswer("esearch result has no idlist")
+
+        val expected = SearchFailureReporting.expectedEsearchListing(totalCount, offset, batchSize)
+        if (expected > 0 && pmids.isEmpty()) {
+            Log.e(TAG, "Incomplete E-utilities answer: esearch listed 0 of $expected PMIDs")
+            throw SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
+        }
+        val unlisted = maxOf(0, expected - pmids.size)
+        if (unlisted > 0) {
+            Log.w(TAG, "esearch listed ${pmids.size} of $expected PMIDs")
+        }
+        return PmidListing(totalCount, pmids, expected, unlisted)
+    }
+
+    /**
+     * Fetch the articles for a page's PMIDs with efetch.
+     *
+     * A fetch that fails after its retries costs its PMIDs, not the search: they
+     * are recorded as missing, as are the records of an answer that broke off
+     * and the articles that could not be read (#252, #255).
+     *
+     * @param pmids The PMIDs to fetch
+     * @param credentials The API key and email to send
+     * @return The articles, and what the fetch failed to retrieve
+     */
+    private suspend fun fetchArticles(pmids: List<String>, credentials: NcbiCredentials): FetchedArticles {
         val delayMs = if (credentials.apiKey != null) {
             PubMedApi.RATE_LIMIT_DELAY_WITH_KEY_MS
         } else {
@@ -369,59 +501,37 @@ class PubMedService @Inject constructor(
         }
         delay(delayMs)
 
-        // Step 2: Fetch article details
-        val fetchResponse = api.fetch(
-            ids = pmids.joinToString(","),
-            apiKey = credentials.apiKey,
-            email = credentials.email
-        )
-
-        throwIfUnsuccessful(fetchResponse, credentials)
-
-        val xml = fetchResponse.body()
-            ?: throw PubMedError.FetchError(
-                message = "Empty fetch response",
-                pmids = pmids
-            )
-
-        // Step 3: Parse XML to articles
-        val articles = parseArticleXml(xml)
-
-        return Result.success(
-            PubMedSearchResult(
-                articles = articles,
-                totalResults = totalResults,
-                nextOffset = offset + pmids.size,
-                hasMore = (offset + pmids.size) < totalResults && (offset + pmids.size) <= PubMedApi.MAX_OFFSET
-            )
-        )
-    }
-
-    /**
-     * Throw the [PubMedError] for an E-utilities response that did not succeed.
-     *
-     * Uses the status and reason phrase only. The body is never read, because
-     * NCBI's 400 for a bad key repeats the key in it. The PubMed client follows
-     * no redirect ([pubMedHttpClient]), so a 3xx arrives here too and becomes
-     * [PubMedError.RedirectRefusedError].
-     *
-     * @param response The Retrofit response to check
-     * @param credentials The credentials the request carried; a 400 on a request
-     *   with a key is reported as a rejected key
-     * @throws PubMedError when the status is not 2xx
-     */
-    private fun throwIfUnsuccessful(response: Response<*>, credentials: NcbiCredentials) {
-        if (!response.isSuccessful) {
-            throw PubMedError.fromHttpError(
-                statusCode = response.code(),
-                reasonPhrase = response.message(),
-                apiKeySent = credentials.apiKey != null
+        val parsed = try {
+            withRetries {
+                val response = send {
+                    api.fetch(ids = pmids.joinToString(","), apiKey = credentials.apiKey, email = credentials.email)
+                }
+                parseArticleSet(response.body() ?: throw unreadableAnswer("efetch answer has no body"))
+            }
+        } catch (e: SourceRequestException) {
+            Log.w(TAG, "PubMed articles for ${pmids.size} PMIDs could not be fetched: ${e.failure.describe()}")
+            return FetchedArticles(
+                emptyList(),
+                SearchFailureReporting.shortfallsForMissingRecords(SearchProvider.PUBMED, e.failure, pmids.size)
             )
         }
+
+        val unreadable = if (parsed.wellFormed) parsed.unreadable else pmids.size - parsed.articles.size
+        if (unreadable > 0) {
+            Log.w(TAG, "efetch delivered ${parsed.articles.size} readable articles for ${pmids.size} PMIDs")
+        }
+        return FetchedArticles(
+            parsed.articles,
+            SearchFailureReporting.shortfallsForMissingRecords(
+                SearchProvider.PUBMED,
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+                unreadable
+            )
+        )
     }
 
     /**
-     * Parse a PubMed EFetch XML response into [ParsedArticle] objects.
+     * Parse an EFetch answer into [ParsedArticle] objects.
      *
      * Uses a JAXP SAX parser ([javax.xml.parsers.SAXParserFactory]) rather than
      * the Android-framework `XmlPullParser`, so the parsing logic is portable
@@ -430,14 +540,21 @@ class PubMedService @Inject constructor(
      * SAX feature flags), so the parser never fetches the NLM PubMed DTD over
      * the network and is not vulnerable to XXE.
      *
-     * Parsing is resilient: any articles decoded before a malformed-input error
-     * are still returned, matching the behaviour callers rely on.
+     * An article set that breaks off keeps the articles that closed before the
+     * break; the caller counts the rest as missing. Only a parse error's
+     * position is logged: its message can quote the body, such as the name of an
+     * undefined entity.
      *
-     * @param xml The raw EFetch XML payload.
-     * @return The list of articles that carried at least a PMID and a title.
+     * @param xml The raw EFetch XML payload
+     * @return The article set
+     * @throws SourceRequestException if the answer is efetch's `eFetchResult` error
+     *   document, which E-utilities can send with HTTP 200 (#255), or has any other
+     *   root than `PubmedArticleSet`, or no root at all. Neither the error's text
+     *   nor the root's name is logged.
      */
-    private fun parseArticleXml(xml: String): List<ParsedArticle> {
+    private fun parseArticleSet(xml: String): ParsedArticleSet {
         val handler = PubMedXmlHandler()
+        var wellFormed = true
         try {
             // Built per call rather than cached in a field: SAXParserFactory is not
             // thread-safe, and this service is a @Singleton whose parse can be
@@ -447,10 +564,11 @@ class PubMedService @Inject constructor(
             // Deliberately NOT calling setXIncludeAware: JAXP's base implementation
             // throws UnsupportedOperationException unless an implementation
             // overrides it, and Android's Expat-backed factory is not guaranteed
-            // to. That would be swallowed by the catch below and silently empty
-            // every on-device parse while JVM unit tests stayed green - precisely
-            // the #119 failure mode. XInclude is off by default and requires
-            // namespace awareness (disabled above), so there is nothing to disable.
+            // to. That would fail every on-device parse while JVM unit tests
+            // stayed green - the #119 failure mode, silent before #252 and now
+            // every fetch reported as unreadable. XInclude is off by default and
+            // requires namespace awareness (disabled above), so there is nothing
+            // to disable.
             // Harden against XXE and external-DTD network fetches. Not every SAX
             // implementation recognises every feature, so apply each defensively.
             for ((feature, enabled) in SAFE_SAX_FEATURES) {
@@ -461,11 +579,29 @@ class PubMedService @Inject constructor(
                 }
             }
             factory.newSAXParser().parse(InputSource(StringReader(xml)), handler)
+        } catch (_: UnexpectedRootException) {
+            // Stopped at the root on purpose; judged below
+        } catch (e: SAXParseException) {
+            Log.e(TAG, "efetch answer is not well-formed XML (line ${e.lineNumber}, column ${e.columnNumber})")
+            wellFormed = false
         } catch (e: Exception) {
-            // Resilient: keep any articles parsed before the failure.
-            e.printStackTrace()
+            Log.e(TAG, "efetch answer could not be parsed (${e.javaClass.simpleName})")
+            wellFormed = false
         }
-        return handler.articles
+
+        when (handler.rootElement) {
+            EFETCH_ARTICLE_SET_ROOT -> return ParsedArticleSet(handler.articles, handler.unreadable, wellFormed)
+            EFETCH_ERROR_ROOT -> {
+                Log.e(
+                    TAG,
+                    "E-utilities efetch answered with an error document instead of articles " +
+                        "(its text is not logged: it can repeat the request)"
+                )
+                throw SourceRequestException(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.SERVICE_ERROR))
+            }
+            null -> throw unreadableAnswer("efetch answer has no XML root element")
+            else -> throw unreadableAnswer("efetch answer has an unexpected root element")
+        }
     }
 
     /**
@@ -481,6 +617,14 @@ class PubMedService @Inject constructor(
 
         /** Articles decoded so far; the parse result. */
         val articles = mutableListOf<ParsedArticle>()
+
+        /** `PubmedArticle` records that closed without a PMID or a title. */
+        var unreadable = 0
+            private set
+
+        /** The document's root element, once it has opened. */
+        var rootElement: String? = null
+            private set
 
         private val elementStack = ArrayDeque<String>()
         private val textBuffer = StringBuilder()
@@ -508,6 +652,11 @@ class PubMedService @Inject constructor(
             qName: String,
             attributes: Attributes
         ) {
+            if (rootElement == null) {
+                rootElement = qName
+                // Nothing but an article set is read, and an error document's text least of all
+                if (qName != EFETCH_ARTICLE_SET_ROOT) throw UnexpectedRootException()
+            }
             when (qName) {
                 "PubmedArticle" -> currentArticle = ArticleBuilder()
                 "Author" -> {
@@ -641,7 +790,8 @@ class PubMedService @Inject constructor(
                 "ELocationID" -> eLocationIdType = null
                 "ArticleId" -> articleIdType = null
                 "PubmedArticle" -> {
-                    currentArticle?.build()?.let { articles.add(it) }
+                    val built = currentArticle?.build()
+                    if (built != null) articles.add(built) else unreadable++
                     currentArticle = null
                 }
             }
@@ -657,16 +807,6 @@ class PubMedService @Inject constructor(
      */
     private fun cleanXmlText(text: String): String {
         return text.replace(Regex("\\s+"), " ").trim()
-    }
-
-    /**
-     * Determine if an error should trigger a retry.
-     */
-    private fun shouldRetryError(e: Exception): Boolean {
-        return when (e) {
-            is PubMedError -> PubMedError.isRetryable(e)
-            else -> NetworkRetry.isRetryableException(e)
-        }
     }
 
     /**

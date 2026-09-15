@@ -18,8 +18,10 @@
 
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * ESearch response from NCBI E-utilities.
@@ -59,7 +61,16 @@ data class ESearchResult(
     val queryTranslation: String? = null,
     /** Error list if search failed. */
     @SerialName("errorlist")
-    val errorList: ESearchErrorList? = null
+    val errorList: ESearchErrorList? = null,
+    /**
+     * The error E-utilities reports inside an HTTP 200 instead of a result (#255).
+     *
+     * Any value marks a failed search, so it is read as whatever JSON it holds.
+     * Its text is never logged or shown: what NCBI writes into a failed answer
+     * can repeat the request.
+     */
+    @SerialName("ERROR")
+    val error: JsonElement? = null
 )
 
 /**
@@ -119,7 +130,11 @@ data class AbstractSection(
 )
 
 /**
- * Search result from PubMed service.
+ * One page of a PubMed search that answered.
+ *
+ * A search that failed is never one of these: [PubMedService.search] returns a
+ * [com.bmlibrarian.factchecker.domain.model.SourceRequestException] instead.
+ * What a search that answered still failed to retrieve is in [shortfalls].
  */
 data class PubMedSearchResult(
     /** List of parsed articles. */
@@ -129,15 +144,7 @@ data class PubMedSearchResult(
     /** Offset for next page of results. */
     val nextOffset: Int,
     /** Whether there are more results available. */
-    val hasMore: Boolean
-) {
-    companion object {
-        /** Empty search result. */
-        val EMPTY = PubMedSearchResult(
-            articles = emptyList(),
-            totalResults = 0,
-            nextOffset = 0,
-            hasMore = false
-        )
-    }
-}
+    val hasMore: Boolean,
+    /** What this page failed to retrieve: PMIDs left unlisted or unfetched, and unreadable articles. */
+    val shortfalls: List<RetrievalShortfall> = emptyList()
+)
