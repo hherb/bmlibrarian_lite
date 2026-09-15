@@ -88,6 +88,7 @@ bmlibrarian_lite/
 │   ├── europepmc.py         # Europe PMC client (cursor pagination)
 │   ├── search_merger.py     # Deduplication (PMID/DOI/PMC/title)
 │   ├── search_service.py    # Unified search across providers
+│   ├── search_failures.py   # Failed requests → shortfalls → reader-facing notice
 │   ├── query_translator.py  # Natural language → structured query
 │   ├── fulltext_discovery.py # Europe PMC XML → Unpaywall → DOI
 │   ├── pdf_discovery.py     # PDF source discovery
@@ -262,18 +263,34 @@ Available agents:
 
 #### Search Service (`search_service.py`)
 
-Unified search across PubMed and Europe PMC:
+Unified search across PubMed and Europe PMC, with automatic deduplication via
+`search_merger.py` (matching by PMID, DOI, PMC ID, or title similarity):
 
 ```python
+from bmlibrarian_lite.exceptions import SearchFailedError
+from bmlibrarian_lite.search_failures import describe_search_shortfalls
 from bmlibrarian_lite.search_service import SearchService
 
 service = SearchService(config)
-results = service.search("cardiovascular risk factors", max_results=50)
+try:
+    result = service.search("cardiovascular risk factors", max_results=50)
+except SearchFailedError as e:
+    # Failures left nothing retrieved: report e, never "no documents found"
+    raise
 
-# Results are automatically deduplicated across providers
-for result in results:
-    print(f"{result.title} (source: {result.provider})")
+for document in result.documents:
+    print(document.title)
+if result.shortfalls:
+    # The search proceeded without part of its sources: the user must be told
+    print("Incomplete search:", describe_search_shortfalls(result.shortfalls))
 ```
+
+**A failed source is not an empty one** (#247). The clients raise
+`SourceRequestError` for a failed search, including an E-utilities `ERROR`
+inside an HTTP 200; the service proceeds on what was retrieved and records a
+`RetrievalShortfall`, or raises `SearchFailedError` when nothing is left. The
+contract the Swift and Android ports follow is
+`doc/cross_platform/search_failure_reporting.md`.
 
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
@@ -313,10 +330,6 @@ Automatic full-text retrieval with fallback chain:
 2. Europe PMC PDF
 3. Unpaywall PDF (open access)
 4. DOI resolution (publisher website)
-
-#### Search Service (`search_service.py`)
-
-Unified search across PubMed and Europe PMC with automatic deduplication via `search_merger.py` (matching by PMID, DOI, PMC ID, or title similarity).
 
 ### GUI Architecture
 

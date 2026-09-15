@@ -48,6 +48,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
+from bmlibrarian_lite.data_models import RequestFailureKind
+from bmlibrarian_lite.exceptions import SourceRequestError
 from bmlibrarian_lite.pubmed import search_client
 from bmlibrarian_lite.pubmed.constants import ENV_NCBI_API_KEY
 from bmlibrarian_lite.pubmed.data_types import PubMedQuery
@@ -167,9 +169,8 @@ def _search_client_reported_failure(caplog: pytest.LogCaptureFixture) -> bool:
 def _search_client_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     """The search client's own messages at WARNING and above.
 
-    Its HTTP-error messages name the status and no URL, so on that path a
-    status code found here cannot be part of a port number. (Its catch-all
-    ``RequestException`` warning does print the exception, URL included.)
+    Its request-failure messages name the failure's kind and status and no
+    URL (#247), so a status code found here cannot be part of a port number.
     """
     return [
         record.getMessage()
@@ -395,19 +396,20 @@ class TestPubMedSearchClient:
     """The search client, which before #196 sent most requests as GET."""
 
     @pytest.mark.parametrize(
-        "make_request",
+        "make_request, raises",
         [
-            methodcaller("get_count", ASPIRIN),
-            methodcaller("search", ASPIRIN),
-            methodcaller("search_with_offset", "aspirin"),
-            methodcaller("fetch_articles", [TEST_PMID]),
-            methodcaller("test_connection"),
+            (methodcaller("get_count", ASPIRIN), True),
+            (methodcaller("search", ASPIRIN), True),
+            (methodcaller("search_with_offset", "aspirin"), True),
+            (methodcaller("fetch_articles", [TEST_PMID]), False),
+            (methodcaller("test_connection"), False),
         ],
         ids=["get_count", "search", "search_with_offset", "fetch_articles", "test_connection"],
     )
     def test_the_debug_log_does_not_carry_the_key(
         self,
         make_request: Callable[[PubMedSearchClient], object],
+        raises: bool,
         rate_limiting_server: RecordingServer,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
@@ -422,7 +424,14 @@ class TestPubMedSearchClient:
         caplog.set_level(logging.DEBUG)
         client = PubMedSearchClient(email=TEST_EMAIL, api_key=FAKE_API_KEY, max_retries=1)
 
-        make_request(client)
+        # get_count, search and search_with_offset raise (#247); fetch_articles
+        # records the failure and test_connection returns False.
+        if raises:
+            with pytest.raises(SourceRequestError) as raised:
+                make_request(client)
+            assert FAKE_API_KEY not in str(raised.value)
+        else:
+            make_request(client)
 
         assert _search_client_reported_failure(caplog)
         assert "urllib3" in {record.name.split(".")[0] for record in caplog.records}
@@ -449,8 +458,10 @@ class TestPubMedSearchClient:
         caplog.set_level(logging.WARNING)
         client = PubMedSearchClient(email=TEST_EMAIL, api_key=FAKE_API_KEY, max_retries=1)
 
-        client.get_count(ASPIRIN)
+        with pytest.raises(SourceRequestError) as raised:
+            client.get_count(ASPIRIN)
 
+        assert raised.value.failure.kind is RequestFailureKind.REDIRECT_REFUSED
         assert elsewhere.recorded == []
         assert any(str(status.value) in message for message in _search_client_warnings(caplog))
         assert_key_arrived_outside_the_url(redirecting)

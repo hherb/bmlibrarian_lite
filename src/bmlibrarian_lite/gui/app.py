@@ -26,7 +26,7 @@ A lightweight version of BMLibrarian with three tabs:
 import logging
 import os
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 # Suppress tokenizers parallelism warning when forking for Qt threads
 # This must be set before importing any HuggingFace/FastEmbed modules
@@ -59,6 +59,9 @@ from .settings_dialog import SettingsDialog
 from .benchmark_results_dialog import BenchmarkResultsTab
 from .quality_benchmark_results_dialog import QualityBenchmarkResultsTab
 from ..benchmarking import BenchmarkRunner
+
+if TYPE_CHECKING:
+    from bmlibrarian_lite.data_models import RetrievalShortfall
 
 logger = logging.getLogger(__name__)
 
@@ -488,6 +491,7 @@ class LiteMainWindow(QMainWindow):
         question: str,
         pubmed_query: str,
         documents: list,
+        search_shortfalls: list["RetrievalShortfall"],
     ) -> None:
         """
         Handle new documents found from Research Questions tab.
@@ -500,12 +504,16 @@ class LiteMainWindow(QMainWindow):
             question: The research question text
             pubmed_query: The PubMed query string
             documents: List of new LiteDocument objects found
+            search_shortfalls: RetrievalShortfall list for what the search is
+                missing; the review's report must say so (#247)
         """
         # Pre-fill the question in Systematic Review tab
         self.systematic_review_tab.question_input.setPlainText(question)
 
         # Preload documents to skip search step
-        self.systematic_review_tab.set_preloaded_documents(documents, pubmed_query)
+        self.systematic_review_tab.set_preloaded_documents(
+            documents, pubmed_query, search_shortfalls
+        )
 
         # Load existing benchmark results for this question if available
         self._load_benchmark_results_for_question(question)

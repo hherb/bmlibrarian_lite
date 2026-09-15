@@ -42,11 +42,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QGroupBox,
+    QMessageBox,
     QSpinBox,
 )
 from PySide6.QtCore import Signal, QThread, QTimer
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
+from bmlibrarian_lite.resources.styles.stylesheet_generator import get_stylesheet_generator
+from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 
 from ..config import LiteConfig
 from ..storage import LiteStorage
@@ -55,6 +58,7 @@ from ..data_models import (
     ScoredDocument,
     Citation,
     ReportMetadata,
+    RetrievalShortfall,
     SearchProvider,
 )
 from ..agents import (
@@ -62,6 +66,13 @@ from ..agents import (
     LiteScoringAgent,
     LiteCitationAgent,
     LiteReportingAgent,
+)
+from ..exceptions import SearchFailedError
+from ..search_failures import (
+    describe_search_shortfalls,
+    format_search_failure_message,
+    retrieval_shortfalls_from_metadata,
+    with_search_shortfall_notice,
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
 from ..transparency import TransparencyManager, TransparencyResult
@@ -96,12 +107,15 @@ class WorkflowWorker(QThread):
         step_complete: Emitted when a step completes (step name, result)
         error: Emitted on error (step, error message)
         finished: Emitted when workflow completes (final report)
+        search_incomplete: Emitted when the search proceeded without part of
+            its sources (every shortfall's clause, joined with "; ")
     """
 
     progress = Signal(str, int, int)  # step, current, total
     step_complete = Signal(str, object)  # step name, result
     error = Signal(str, str)  # step, error message
     finished = Signal(str, object)  # final report, ReportMetadata
+    search_incomplete = Signal(str)  # what the search is missing (#247)
 
     # Granular signals for audit trail
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
@@ -120,6 +134,7 @@ class WorkflowWorker(QThread):
         quality_manager: Optional[QualityManager] = None,
         preloaded_documents: Optional[List[LiteDocument]] = None,
         pubmed_query: Optional[str] = None,
+        preloaded_search_shortfalls: list[RetrievalShortfall] | None = None,
     ) -> None:
         """
         Initialize the workflow worker.
@@ -134,6 +149,9 @@ class WorkflowWorker(QThread):
             quality_manager: Optional quality manager for filtering
             preloaded_documents: Optional documents to score (skip search if provided)
             pubmed_query: Optional PubMed query (used when preloaded_documents provided)
+            preloaded_search_shortfalls: What the search that found the
+                preloaded documents is missing (#247), so their review is
+                reported as resting on an incomplete search
         """
         super().__init__()
         self.question = question
@@ -145,6 +163,7 @@ class WorkflowWorker(QThread):
         self.quality_manager = quality_manager
         self.preloaded_documents = preloaded_documents
         self.pubmed_query = pubmed_query
+        self.preloaded_search_shortfalls = list(preloaded_search_shortfalls or [])
         self._cancelled = False
         self._cancel_event = threading.Event()
         self._checkpoint_id: Optional[str] = None
@@ -186,6 +205,8 @@ class WorkflowWorker(QThread):
                 if self.pubmed_query:
                     metadata.pubmed_query = self.pubmed_query
                     self.query_generated.emit(self.pubmed_query, self.question)
+                metadata.search_shortfalls = list(self.preloaded_search_shortfalls)
+                self._report_incomplete_search(metadata)
                 self.step_complete.emit("search", documents)
             else:
                 # Run PubMed search
@@ -194,10 +215,22 @@ class WorkflowWorker(QThread):
                     config=self.config,
                     storage=self.storage,
                 )
-                session, documents = search_agent.search(
-                    self.question,
-                    max_results=self.max_results,
+                try:
+                    session, documents = search_agent.search(
+                        self.question,
+                        max_results=self.max_results,
+                    )
+                except SearchFailedError as e:
+                    # A failed search is not an empty one (#247): it ends the
+                    # review as an error, never as "No documents found".
+                    logger.warning(f"Search failed: {e}")
+                    self.error.emit("search", format_search_failure_message(e))
+                    return
+
+                metadata.search_shortfalls = retrieval_shortfalls_from_metadata(
+                    session.metadata
                 )
+                self._report_incomplete_search(metadata)
 
                 # Update metadata with search info
                 if session:
@@ -230,7 +263,7 @@ class WorkflowWorker(QThread):
                 return
 
             if not documents:
-                self.finished.emit("No documents found for this query.", metadata)
+                self._finish_without_report("No documents found for this query.", metadata)
                 return
 
             # Track original document count before quality filtering
@@ -277,7 +310,7 @@ class WorkflowWorker(QThread):
                         return
 
                     if not filtered:
-                        self.finished.emit(
+                        self._finish_without_report(
                             f"No documents passed quality filter. "
                             f"{len(documents)} documents were assessed but none met "
                             f"the minimum quality requirements.",
@@ -380,7 +413,7 @@ class WorkflowWorker(QThread):
                 return
 
             if not scored_docs:
-                self.finished.emit(
+                self._finish_without_report(
                     f"No documents scored {self.min_score} or higher. "
                     "Try lowering the minimum score threshold.",
                     metadata,
@@ -472,6 +505,31 @@ class WorkflowWorker(QThread):
         except Exception as e:
             logger.exception("Workflow error")
             self.error.emit("workflow", str(e))
+
+    def _report_incomplete_search(self, metadata: ReportMetadata) -> None:
+        """Tell the tab the review rests on an incomplete search, if it does.
+
+        Args:
+            metadata: The workflow's metadata, its search shortfalls set.
+        """
+        if metadata.search_shortfalls:
+            self.search_incomplete.emit(describe_search_shortfalls(metadata.search_shortfalls))
+
+    def _finish_without_report(self, message: str, metadata: ReportMetadata) -> None:
+        """End the workflow with a message standing in for the report.
+
+        The message is shown where the report would be, so when the search
+        was incomplete it opens with the same notice a report would (#247):
+        "none scored 3 or higher" means less when a provider never answered.
+
+        Args:
+            message: Why there is no report.
+            metadata: The workflow's metadata so far.
+        """
+        self.finished.emit(
+            with_search_shortfall_notice(message, metadata.search_shortfalls),
+            metadata,
+        )
 
     def cancel(self) -> None:
         """Cancel the workflow."""
@@ -568,6 +626,7 @@ class SystematicReviewTab(QWidget):
         # Pre-loaded documents from Research Questions tab (skip search if set)
         self._preloaded_documents: Optional[List[LiteDocument]] = None
         self._preloaded_pubmed_query: Optional[str] = None
+        self._preloaded_search_shortfalls: list[RetrievalShortfall] = []
 
         self._setup_ui()
 
@@ -660,6 +719,18 @@ class SystematicReviewTab(QWidget):
         progress_group = QGroupBox("Progress")
         progress_layout = QVBoxLayout(progress_group)
 
+        # Shown when the search proceeded without part of its sources (#247).
+        # Unlike the progress label, it stays until the next run.
+        self.search_notice_label = QLabel()
+        self.search_notice_label.setWordWrap(True)
+        self.search_notice_label.setStyleSheet(
+            get_stylesheet_generator().label_stylesheet(
+                color=ThemeColors.WARNING_TEXT, bold=True
+            )
+        )
+        self.search_notice_label.setVisible(False)
+        progress_layout.addWidget(self.search_notice_label)
+
         self.progress_label = QLabel("Ready")
         progress_layout.addWidget(self.progress_label)
 
@@ -689,6 +760,8 @@ class SystematicReviewTab(QWidget):
         self._all_citations = []
         self._quality_assessments = {}
         self.quality_summary.setVisible(False)
+        self.search_notice_label.clear()
+        self.search_notice_label.setVisible(False)
 
         # Update UI state
         self.run_btn.setEnabled(False)
@@ -712,11 +785,13 @@ class SystematicReviewTab(QWidget):
             quality_manager=self.quality_manager,
             preloaded_documents=self._preloaded_documents,
             pubmed_query=self._preloaded_pubmed_query,
+            preloaded_search_shortfalls=self._preloaded_search_shortfalls,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.step_complete.connect(self._on_step_complete)
         self._worker.error.connect(self._on_error)
         self._worker.finished.connect(self._on_finished)
+        self._worker.search_incomplete.connect(self._on_search_incomplete)
 
         # Connect worker audit trail signals to tab signals
         self._worker.query_generated.connect(self.query_generated)
@@ -725,8 +800,7 @@ class SystematicReviewTab(QWidget):
         self._worker.quality_assessed.connect(self.quality_assessed)
 
         # Clear preloaded documents after starting (only used once)
-        self._preloaded_documents = None
-        self._preloaded_pubmed_query = None
+        self.clear_preloaded_documents()
 
         self._worker.start()
 
@@ -814,10 +888,37 @@ class SystematicReviewTab(QWidget):
             self._all_citations = citations
             self.progress_label.setText(f"Extracted {len(citations)} citations")
 
+    def _on_search_incomplete(self, missing: str) -> None:
+        """Tell the user the review is proceeding on an incomplete search.
+
+        Args:
+            missing: What the search is missing: every shortfall's clause,
+                joined with "; ".
+        """
+        self.search_notice_label.setText(
+            f"Incomplete search: {missing}. The review continues on the records "
+            "that were retrieved."
+        )
+        self.search_notice_label.setVisible(True)
+
     def _on_error(self, step: str, message: str) -> None:
-        """Handle workflow errors."""
-        self.progress_label.setText(f"Error in {step}: {message}")
+        """Handle workflow errors.
+
+        A failed search also gets a dialog: its message says what failed and
+        what to do next, which a progress label is too small to hold, so the
+        label shows only its first line. Any other error shows in full.
+
+        Args:
+            step: The workflow step that failed.
+            message: What went wrong; may be empty or span several lines.
+        """
         self._reset_ui()
+        if step == "search":
+            first_line = message.partition("\n")[0]
+            self.progress_label.setText(f"Error in {step}: {first_line}")
+            QMessageBox.warning(self, "Search Failed", message)
+        else:
+            self.progress_label.setText(f"Error in {step}: {message}")
 
     def _on_finished(self, report: str, metadata: Optional[ReportMetadata] = None) -> None:
         """
@@ -926,6 +1027,7 @@ class SystematicReviewTab(QWidget):
         self,
         documents: List[LiteDocument],
         pubmed_query: Optional[str] = None,
+        search_shortfalls: list[RetrievalShortfall] | None = None,
     ) -> None:
         """
         Set preloaded documents to use instead of running a PubMed search.
@@ -936,18 +1038,28 @@ class SystematicReviewTab(QWidget):
         Args:
             documents: Documents to score (already retrieved)
             pubmed_query: Optional PubMed query string for metadata
+            search_shortfalls: What the search that found them is missing
+                (#247); carried into the review's report
         """
         self._preloaded_documents = documents
         self._preloaded_pubmed_query = pubmed_query
+        self._preloaded_search_shortfalls = list(search_shortfalls or [])
         doc_count = len(documents)
         self.progress_label.setText(
             f"{doc_count} documents ready to score. Click 'Run Review' to continue."
         )
+        if self._preloaded_search_shortfalls:
+            self._on_search_incomplete(describe_search_shortfalls(self._preloaded_search_shortfalls))
+        else:
+            # A warning left by an earlier review is not about these documents.
+            self.search_notice_label.clear()
+            self.search_notice_label.setVisible(False)
 
     def clear_preloaded_documents(self) -> None:
         """Clear any preloaded documents."""
         self._preloaded_documents = None
         self._preloaded_pubmed_query = None
+        self._preloaded_search_shortfalls = []
 
     def _run_benchmark(self) -> None:
         """Open benchmark confirmation dialog and run benchmark if confirmed."""

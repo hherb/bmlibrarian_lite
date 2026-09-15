@@ -41,9 +41,10 @@ transparency/         # TransparencyManager, transparency_models, transparency_s
 study_transparency_analyzer/  # Full LLM-based transparency analysis (funding, COI, data availability, trial registration)
 config.py             # LiteConfig (~/.bmlibrarian_lite/)
 storage.py            # LiteStorage (SQLite + sqlite-vec)
-data_models.py        # LiteDocument, ScoredDocument, Citation, SearchProvider, pagination models
+data_models.py        # LiteDocument, ScoredDocument, Citation, SearchProvider, RequestFailure, RetrievalShortfall, pagination models
 europepmc.py          # EuropePMCClient (cursor pagination)
 search_service.py     # Unified search across PubMed + Europe PMC
+search_failures.py    # RequestFailure from requests errors; shortfall clauses, notice, advice, session metadata
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query
 fulltext_discovery.py # Europe PMC XML → Unpaywall PDF → DOI fallback

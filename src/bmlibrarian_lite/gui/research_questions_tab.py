@@ -51,7 +51,8 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
-from ..data_models import LiteDocument, ResearchQuestionSummary
+from ..data_models import LiteDocument, ResearchQuestionSummary, RetrievalShortfall
+from ..search_failures import describe_search_shortfalls
 from ..storage import LiteStorage
 from .workers import IncrementalSearchWorker, ReclassifyWorker, RescoreWorker
 from .benchmark_dialog import BenchmarkWorker
@@ -74,13 +75,14 @@ class ResearchQuestionsTab(QWidget):
         question_selected: Emitted when user selects a question for re-run
             Args: (question, pubmed_query)
         new_documents_found: Emitted when incremental search finds new docs
-            Args: (question, pubmed_query, documents)
+            Args: (question, pubmed_query, documents, search_shortfalls)
         benchmark_completed: Emitted when benchmark run completes
             Args: (BenchmarkResult)
     """
 
     question_selected = Signal(str, str)  # (question, pubmed_query)
-    new_documents_found = Signal(str, str, list)  # (question, pubmed_query, List[LiteDocument])
+    # (question, pubmed_query, List[LiteDocument], List[RetrievalShortfall])
+    new_documents_found = Signal(str, str, list, list)
     benchmark_completed = Signal(object)  # BenchmarkResult
 
     def __init__(
@@ -475,8 +477,21 @@ class ResearchQuestionsTab(QWidget):
             self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-    def _on_search_finished(self, new_docs: list[LiteDocument]) -> None:
-        """Handle search completion."""
+    def _on_search_finished(
+        self, new_docs: list[LiteDocument], shortfalls: list[RetrievalShortfall]
+    ) -> None:
+        """Handle search completion.
+
+        Args:
+            new_docs: The new documents found.
+            shortfalls: What the search is missing. A search that stopped on
+                a failure is never reported as one that ran out of documents,
+                and the shortfalls travel with the documents to the review
+                and its report (#247).
+        """
+        warning = (
+            f"Incomplete search: {describe_search_shortfalls(shortfalls)}." if shortfalls else ""
+        )
         question_summary = self._get_selected_question()
         question_text = question_summary.question if question_summary else ""
         pubmed_query = question_summary.pubmed_query if question_summary else ""
@@ -488,17 +503,34 @@ class ResearchQuestionsTab(QWidget):
             self.progress_label.setText(
                 f"Found {len(new_docs)} new documents. "
                 "Switch to Systematic Review tab to score them."
+                + (f" {warning}" if warning else "")
             )
             # Emit signal for main window to handle
-            self.new_documents_found.emit(question_text, pubmed_query, new_docs)
+            self.new_documents_found.emit(question_text, pubmed_query, new_docs, shortfalls)
 
-            # Show info dialog
-            QMessageBox.information(
+            if warning:
+                QMessageBox.warning(
+                    self,
+                    "Search Incomplete",
+                    f"Found {len(new_docs)} new documents for this question, "
+                    f"but the search is incomplete.\n\n{warning}\n\n"
+                    "You can switch to the Systematic Review tab to score "
+                    "the documents found, or run the search again later.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Search Complete",
+                    f"Found {len(new_docs)} new documents for this question.\n\n"
+                    "You can now switch to the Systematic Review tab to "
+                    "score and process these documents.",
+                )
+        elif warning:
+            self.progress_label.setText(f"No new documents were retrieved. {warning}")
+            QMessageBox.warning(
                 self,
-                "Search Complete",
-                f"Found {len(new_docs)} new documents for this question.\n\n"
-                "You can now switch to the Systematic Review tab to "
-                "score and process these documents.",
+                "Search Incomplete",
+                f"No new documents were retrieved.\n\n{warning}",
             )
         else:
             self.progress_label.setText(

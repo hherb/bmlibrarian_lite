@@ -28,7 +28,7 @@ Supports multiple search providers:
 """
 
 import logging
-from typing import Optional, Callable
+from typing import Any, Optional, Callable
 
 from bmlibrarian_lite.pubmed import (
     PubMedSearchClient,
@@ -41,10 +41,35 @@ from ..data_models import LiteDocument, DocumentSource, SearchSession, SearchPro
 from ..embeddings import LiteEmbedder
 from ..query_converter import LiteQueryConverter
 from ..search_service import SearchService, UnifiedSearchResult
+from ..search_failures import describe_search_shortfalls, retrieval_shortfalls_to_metadata
 from ..query_translator import QueryTranslator
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
+
+
+def search_session_metadata(
+    provider: SearchProvider,
+    search_result: UnifiedSearchResult,
+) -> dict[str, Any]:
+    """Build the metadata a search session is saved with.
+
+    Args:
+        provider: The provider(s) searched.
+        search_result: The search's result.
+
+    Returns:
+        Provider, counts and, when the search was incomplete, what it is
+        missing (#247), for the GUI, MCP and the report to read back.
+    """
+    return {
+        "provider": provider.value,
+        "total_available": search_result.total_count,
+        "pubmed_count": search_result.pubmed_count,
+        "europepmc_count": search_result.europepmc_count,
+        "duplicates_removed": search_result.duplicates_removed,
+        **retrieval_shortfalls_to_metadata(search_result.shortfalls),
+    }
 
 
 class LiteSearchAgent(LiteBaseAgent):
@@ -156,7 +181,13 @@ class LiteSearchAgent(LiteBaseAgent):
             progress_callback: Optional callback for progress updates
 
         Returns:
-            Tuple of (search session, list of documents)
+            Tuple of (search session, list of documents). The session's
+            metadata records what the search is missing, if anything.
+
+        Raises:
+            SearchFailedError: If failures left the search with nothing. No
+                session is saved: a failed search is not one that found
+                nothing (#247).
         """
         max_results = max_results or self.config.search.max_results
         provider = provider or self.config.search.search_provider
@@ -187,28 +218,18 @@ class LiteSearchAgent(LiteBaseAgent):
         )
         if search_result.duplicates_removed > 0:
             logger.info(f"Removed {search_result.duplicates_removed} duplicates")
-
-        if not search_result.documents:
-            # No results found
-            session = self.storage.create_search_session(
-                query=pubmed_query.query_string,
-                natural_language_query=question,
-                document_count=0,
-                metadata={
-                    "provider": provider.value,
-                    "total_available": search_result.total_count,
-                },
+        if search_result.shortfalls:
+            logger.warning(
+                "Search incomplete: " + describe_search_shortfalls(search_result.shortfalls)
             )
-            return session, []
 
         # Use documents directly from search result
         documents = search_result.documents
 
-        if progress_callback:
-            progress_callback(f"Caching {len(documents)} documents...")
-
         # Store documents with embeddings
         if documents:
+            if progress_callback:
+                progress_callback(f"Caching {len(documents)} documents...")
             self.storage.add_documents(documents, embedding_function=self.embedder)
 
         # Create search session with provider metadata
@@ -216,13 +237,7 @@ class LiteSearchAgent(LiteBaseAgent):
             query=pubmed_query.query_string,
             natural_language_query=question,
             document_count=len(documents),
-            metadata={
-                "provider": provider.value,
-                "total_available": search_result.total_count,
-                "pubmed_count": search_result.pubmed_count,
-                "europepmc_count": search_result.europepmc_count,
-                "duplicates_removed": search_result.duplicates_removed,
-            },
+            metadata=search_session_metadata(provider, search_result),
         )
 
         # Record document-question associations for later retrieval
@@ -262,7 +277,12 @@ class LiteSearchAgent(LiteBaseAgent):
             progress_callback: Optional callback for progress updates
 
         Returns:
-            Tuple of (search session, list of documents)
+            Tuple of (search session, list of documents). The session's
+            metadata records what the search is missing, if anything.
+
+        Raises:
+            SearchFailedError: If failures left the search with nothing; no
+                session is saved (#247).
         """
         max_results = max_results or self.config.search.max_results
         provider = provider or self.config.search.search_provider
@@ -281,15 +301,10 @@ class LiteSearchAgent(LiteBaseAgent):
         )
 
         logger.info(f"Found {search_result.total_count} results")
-
-        if not search_result.documents:
-            session = self.storage.create_search_session(
-                query=query_string,
-                natural_language_query=natural_language_query or query_string,
-                document_count=0,
-                metadata={"provider": provider.value},
+        if search_result.shortfalls:
+            logger.warning(
+                "Search incomplete: " + describe_search_shortfalls(search_result.shortfalls)
             )
-            return session, []
 
         documents = search_result.documents
 
@@ -302,13 +317,7 @@ class LiteSearchAgent(LiteBaseAgent):
             query=query_string,
             natural_language_query=natural_language_query or query_string,
             document_count=len(documents),
-            metadata={
-                "provider": provider.value,
-                "total_available": search_result.total_count,
-                "pubmed_count": search_result.pubmed_count,
-                "europepmc_count": search_result.europepmc_count,
-                "duplicates_removed": search_result.duplicates_removed,
-            },
+            metadata=search_session_metadata(provider, search_result),
         )
 
         # Record document-question associations for later retrieval

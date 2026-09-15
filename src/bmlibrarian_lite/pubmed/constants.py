@@ -39,7 +39,10 @@ REQUEST_DELAY_WITHOUT_KEY = 0.34  # seconds between requests without key
 
 # Default search parameters
 DEFAULT_MAX_RESULTS = 200
-MAX_RESULTS_LIMIT = 10000
+# The most PMIDs esearch lists for one PubMed search: "'retstart' cannot be
+# larger than 9998. For PubMed, ESearch can only retrieve the first 9,999
+# records matching the query." (checked live 2026-09-15)
+MAX_RESULTS_LIMIT = 9999
 DEFAULT_BATCH_SIZE = 200  # PMIDs per efetch request
 HISTORY_SERVER_THRESHOLD = 1000  # Use history server above this count
 

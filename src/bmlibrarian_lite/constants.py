@@ -743,6 +743,19 @@ DEFAULT_TARGET_NEW_DOCUMENTS = 50
 MAX_PUBMED_SEARCH_OFFSET = 9999
 
 # =============================================================================
+# Search Failure Reporting (#247)
+# =============================================================================
+
+# Search-session metadata key under which the parts of a search that failed
+# are recorded (a list of RetrievalShortfall.to_dict() values)
+RETRIEVAL_SHORTFALLS_METADATA_KEY = "retrieval_shortfalls"
+
+# The range of a readable HTTP status code, as http.client accepts one: a
+# stored status outside it is read back as unknown
+HTTP_STATUS_CODE_MIN = 100
+HTTP_STATUS_CODE_MAX = 999
+
+# =============================================================================
 # Model Pricing (per 1M tokens, USD)
 # =============================================================================
 

@@ -41,6 +41,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from html import unescape
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -60,9 +61,62 @@ from .constants import (
     EUROPEPMC_SOURCE_PREPRINT,
     EUROPEPMC_USER_AGENT,
 )
-from .data_models import CursorPaginationState
+from .data_models import (
+    CursorPaginationState,
+    RequestFailure,
+    RequestFailureKind,
+    SearchProvider,
+)
+from .exceptions import SourceRequestError
+from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
+
+
+def _malformed_search_answer(reason: str) -> SourceRequestError:
+    """Build the error for a search answer that cannot be read, and log why.
+
+    Args:
+        reason: What was wrong, naming fields only.
+
+    Returns:
+        The error to raise.
+    """
+    logger.error(f"Unreadable Europe PMC search answer: {reason}")
+    return SourceRequestError(
+        SearchProvider.EUROPEPMC, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+    )
+
+
+def _validated_search_page(data: object) -> dict[str, Any]:
+    """Check that a search answer has the fields a result depends on.
+
+    Europe PMC answers some failures with HTTP 200: an unknown cursor gets an
+    answer holding only a ``version`` field (6.9 when checked live on
+    2026-09-14). Read as ``hitCount`` 0, that was a search that matched
+    nothing (#247).
+
+    Args:
+        data: The decoded JSON answer, untrusted.
+
+    Returns:
+        The answer, with a non-negative integer ``hitCount`` and a
+        ``resultList.result`` list.
+
+    Raises:
+        SourceRequestError: If either is missing or of the wrong type, or
+            ``hitCount`` is negative.
+    """
+    if not isinstance(data, dict):
+        raise _malformed_search_answer("answer is not a JSON object")
+    hit_count = data.get("hitCount")
+    # bool is an int subclass; ``true`` is not a count.
+    if not isinstance(hit_count, int) or isinstance(hit_count, bool) or hit_count < 0:
+        raise _malformed_search_answer("answer has no non-negative integer hitCount")
+    result_list = data.get("resultList")
+    if not isinstance(result_list, dict) or not isinstance(result_list.get("result"), list):
+        raise _malformed_search_answer("answer has no resultList.result list")
+    return data
 
 
 def _extract_free_pdf_url(result: dict) -> str | None:
@@ -145,11 +199,15 @@ class EuropePMCClient:
             "Accept": "application/json",
         })
 
+        # raise_on_status=False: once the retries are spent, hand back the last
+        # response, so raise_for_status() names its status. Otherwise urllib3
+        # raises a RetryError that carries no status code to report (#247).
         retry_strategy = Retry(
             total=EUROPEPMC_MAX_RETRIES,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET"],
+            raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         session.mount("http://", adapter)
@@ -244,6 +302,40 @@ class EuropePMCClient:
             logger.warning(f"Europe PMC API error: {e}")
             return None
 
+    def _get_search_page(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Request one page of search results.
+
+        Args:
+            params: Query parameters for the search endpoint.
+
+        Returns:
+            The validated answer.
+
+        Raises:
+            SourceRequestError: If the request failed after the session's
+                retries, or the answer cannot be read.
+        """
+        failure: RequestFailure | None = None
+        data: object = None
+        try:
+            response = self._session.get(
+                EUROPEPMC_SEARCH_URL,
+                params=params,
+                timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.exceptions.RequestException as e:
+            failure = request_failure_from_exception(e)
+        # Raised here, outside the except block, so the requests exception --
+        # holding the request, the response and, for a body that is not
+        # JSON, that raw body as JSONDecodeError.doc -- is not kept as the
+        # error's __context__.
+        if failure is not None:
+            logger.warning(f"Europe PMC search request failed: {failure.describe()}")
+            raise SourceRequestError(SearchProvider.EUROPEPMC, failure)
+        return _validated_search_page(data)
+
     def search(
         self,
         query: str,
@@ -257,6 +349,12 @@ class EuropePMCClient:
         Performs a search using the Europe PMC REST API with cursor-based
         pagination for efficient retrieval of large result sets.
 
+        A cursor cannot skip a page, so a later page that fails, or comes
+        back empty, ends the search there: the articles already retrieved are
+        returned, and the pagination state records how many more were wanted
+        and why they are missing (#247). So does a cursor that ends before
+        ``min(max_results, hitCount)`` results arrived.
+
         Args:
             query: Search query in Europe PMC syntax
             max_results: Maximum number of results to return
@@ -266,6 +364,11 @@ class EuropePMCClient:
 
         Returns:
             Tuple of (list of ArticleInfo, pagination state)
+
+        Raises:
+            SourceRequestError: If the first page failed, could not be read,
+                or held no results although ``hitCount`` said it would. A
+                failed search is never returned as one with no hits.
 
         Example:
             client = EuropePMCClient()
@@ -281,8 +384,12 @@ class EuropePMCClient:
         full_query = self._build_search_query(query, include_preprints)
 
         all_articles: list[ArticleInfo] = []
+        unreadable_count = 0
         current_cursor = cursor
+        next_cursor_value: str | None = None
         total_count = 0
+        failure: RequestFailure | None = None
+        first_page = True
 
         while len(all_articles) < max_results:
             # Calculate how many results we still need
@@ -290,64 +397,83 @@ class EuropePMCClient:
             request_size = min(page_size, remaining)
 
             try:
-                response = self._session.get(
-                    EUROPEPMC_SEARCH_URL,
-                    params={
+                data = self._get_search_page(
+                    {
                         "query": full_query,
                         "format": "json",
                         "resultType": EUROPEPMC_RESULT_TYPE,
                         "pageSize": request_size,
                         "cursorMark": current_cursor,
                         "sort": EUROPEPMC_SORT_ORDER,
-                    },
-                    timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+                    }
                 )
-                response.raise_for_status()
-                data = response.json()
-
-                # Get total count from first response
-                if total_count == 0:
-                    total_count = data.get("hitCount", 0)
-                    logger.info(f"Europe PMC search found {total_count} total results")
-
-                # Parse results
-                results = data.get("resultList", {}).get("result", [])
-                if not results:
-                    break
-
-                for result in results:
-                    article = self._parse_search_result(result)
-                    if article:
-                        all_articles.append(article)
-
-                # Get next cursor
-                next_cursor = data.get("nextCursorMark")
-
-                # Check if we've reached the end
-                if not next_cursor or next_cursor == current_cursor:
-                    break
-
-                current_cursor = next_cursor
-
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Europe PMC search error: {e}")
+            except SourceRequestError as e:
+                if first_page:
+                    raise
+                failure = e.failure
+                logger.warning(
+                    f"Europe PMC search stopped after {len(all_articles)} results: "
+                    f"a later page could not be retrieved ({failure.describe()})"
+                )
                 break
 
-        # Build pagination state
-        # Note: next_cursor might not be set if the loop didn't execute
-        # or if an error occurred before the last response was parsed
-        next_cursor_value = None
-        try:
-            next_cursor_value = data.get("nextCursorMark")  # noqa: F821
-        except NameError:
-            # 'data' was never assigned (loop didn't execute or failed early)
-            pass
+            if first_page:
+                total_count = data["hitCount"]
+                logger.info(f"Europe PMC search found {total_count} total results")
+            wanted = min(max_results, total_count)
+
+            next_mark = data.get("nextCursorMark")
+            next_cursor_value = next_mark if isinstance(next_mark, str) else None
+
+            results = data["resultList"]["result"]
+            if not results:
+                received = len(all_articles) + unreadable_count
+                if received < wanted:
+                    logger.error(
+                        f"Europe PMC sent an empty page after {received} of {wanted} results"
+                    )
+                    incomplete = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+                    if first_page:
+                        raise SourceRequestError(SearchProvider.EUROPEPMC, incomplete)
+                    failure = incomplete
+                break
+
+            for result in results:
+                article = self._parse_search_result(result)
+                if article:
+                    all_articles.append(article)
+                else:
+                    unreadable_count += 1
+
+            if not next_cursor_value or next_cursor_value == current_cursor:
+                # The cursor ends only once every hit was sent (checked live
+                # 2026-09-15): ending before that is an answer that held less
+                # than it counted, not the end of the results.
+                received = len(all_articles) + unreadable_count
+                if received < wanted:
+                    logger.error(
+                        f"Europe PMC's cursor ended after {received} of {wanted} results"
+                    )
+                    failure = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+                break
+
+            current_cursor = next_cursor_value
+            first_page = False
+
+        unretrieved_count = 0
+        if failure is not None:
+            unretrieved_count = max(
+                0, min(max_results, total_count) - len(all_articles) - unreadable_count
+            )
 
         pagination = CursorPaginationState(
             total_count=total_count,
             fetched_count=len(all_articles),
             current_cursor=current_cursor,
             next_cursor=next_cursor_value,
+            unretrieved_count=unretrieved_count,
+            failure=failure,
+            unreadable_count=unreadable_count,
         )
 
         logger.info(f"Europe PMC search returned {len(all_articles)} articles")
@@ -370,6 +496,9 @@ class EuropePMCClient:
 
         Returns:
             List of ArticleInfo objects
+
+        Raises:
+            SourceRequestError: If the first page could not be retrieved.
         """
         articles, _ = self.search(
             query=query,
@@ -393,27 +522,21 @@ class EuropePMCClient:
 
         Returns:
             Total number of matching articles
+
+        Raises:
+            SourceRequestError: If the count could not be obtained; 0 is only
+                ever Europe PMC's own answer.
         """
         full_query = self._build_search_query(query, include_preprints)
-
-        try:
-            response = self._session.get(
-                EUROPEPMC_SEARCH_URL,
-                params={
-                    "query": full_query,
-                    "format": "json",
-                    "resultType": "lite",  # Faster, less data
-                    "pageSize": EUROPEPMC_COUNT_PAGE_SIZE,
-                },
-                timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("hitCount", 0)
-
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Europe PMC count error: {e}")
-            return 0
+        data = self._get_search_page(
+            {
+                "query": full_query,
+                "format": "json",
+                "resultType": "lite",  # Faster, less data
+                "pageSize": EUROPEPMC_COUNT_PAGE_SIZE,
+            }
+        )
+        return data["hitCount"]
 
     def _build_search_query(
         self,

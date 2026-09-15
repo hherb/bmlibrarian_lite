@@ -51,6 +51,7 @@ from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
 from ..quality import QualityAssessment
+from ..search_failures import without_search_shortfall_notice
 
 # Directory for auto-saved reports
 REPORTS_DIR = Path.home() / "bmlibrarian_reports" / "LITE"
@@ -222,8 +223,11 @@ class ReportTab(QWidget):
         self.export_btn.setEnabled(bool(report))
         self.audit_btn.setEnabled(bool(scored_documents))
 
-        # Auto-save the report
-        if report and not report.startswith(("No documents", "Workflow cancelled")):
+        # Auto-save the report, but not a message standing in for one. An
+        # incomplete search puts its notice in front of that message (#247),
+        # so the check reads the text behind the notice.
+        body = without_search_shortfall_notice(report)
+        if body and not body.startswith(("No documents", "Workflow cancelled")):
             self._auto_save_report()
 
     def _make_citations_clickable(self, markdown_report: str) -> str:

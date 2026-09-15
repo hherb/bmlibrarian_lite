@@ -22,6 +22,14 @@ literature databases (PubMed and Europe PMC). It handles:
 - Query translation between provider syntaxes
 - Result merging and deduplication for combined searches
 - Progress reporting during searches
+- Reporting what a failed source left out (#247)
+
+A source that fails is not a source with no evidence. When part of a search
+fails -- one provider of two, an efetch batch, a later Europe PMC page -- the
+search proceeds on what was retrieved and records a ``RetrievalShortfall`` for
+the user to be told. When failures leave nothing retrieved, the search raises
+``SearchFailedError`` rather than returning an empty result, which every
+caller would report as "No documents found".
 
 Usage:
     from bmlibrarian_lite.search_service import SearchService
@@ -51,14 +59,94 @@ from .data_models import (
     CursorPaginationState,
     LiteDocument,
     OffsetPaginationState,
+    RequestFailure,
+    RequestFailureKind,
+    RetrievalShortfall,
     SearchProvider,
 )
 from .europepmc import ArticleInfo, EuropePMCClient
-from .pubmed import ArticleMetadata, PubMedQuery, PubMedSearchClient
+from .exceptions import SearchFailedError, SourceRequestError
+from .pubmed import (
+    ArticleFetchResult,
+    ArticleMetadata,
+    PubMedQuery,
+    PubMedSearchClient,
+    SearchResult,
+)
 from .query_translator import QueryTranslator
+from .search_failures import shortfalls_for_missing_records
 from .search_merger import MergedArticle, SearchResultMerger
 
 logger = logging.getLogger(__name__)
+
+# The failure recorded for records a source sent but the parser could not read.
+_UNREADABLE = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+
+
+def pubmed_shortfalls(
+    search_result: SearchResult,
+    fetched: ArticleFetchResult,
+) -> list[RetrievalShortfall]:
+    """List what a PubMed search that answered still failed to retrieve.
+
+    Args:
+        search_result: The search, which may have failed to list some PMIDs.
+        fetched: The fetch of the listed PMIDs, which may have failed batches.
+
+    Returns:
+        A shortfall each for the unlisted PMIDs, the unfetched PMIDs and the
+        articles that could not be read, each only when there are any.
+    """
+    return [
+        *shortfalls_for_missing_records(
+            SearchProvider.PUBMED, search_result.listing_failure, search_result.unlisted_count
+        ),
+        *shortfalls_for_missing_records(
+            SearchProvider.PUBMED, fetched.failure, len(fetched.pmids_not_fetched)
+        ),
+        *shortfalls_for_missing_records(
+            SearchProvider.PUBMED, _UNREADABLE, fetched.records_unreadable
+        ),
+    ]
+
+
+def europepmc_shortfalls(pagination: CursorPaginationState) -> list[RetrievalShortfall]:
+    """List what a Europe PMC search that answered still failed to retrieve.
+
+    Args:
+        pagination: The search's pagination state.
+
+    Returns:
+        A shortfall for the results a later page or an early end of the
+        cursor left out, and one for the results that could not be read,
+        each only when there are any.
+    """
+    return [
+        *shortfalls_for_missing_records(
+            SearchProvider.EUROPEPMC, pagination.failure, pagination.unretrieved_count
+        ),
+        *shortfalls_for_missing_records(
+            SearchProvider.EUROPEPMC, _UNREADABLE, pagination.unreadable_count
+        ),
+    ]
+
+
+def raise_if_failures_left_nothing(
+    merged: list[MergedArticle],
+    shortfalls: list[RetrievalShortfall],
+) -> None:
+    """Refuse to return an empty result that a failure produced.
+
+    Args:
+        merged: The articles the search will return.
+        shortfalls: What failed along the way.
+
+    Raises:
+        SearchFailedError: If nothing is left and something failed. Only a
+            search with no failures may report that it found nothing.
+    """
+    if not merged and shortfalls:
+        raise SearchFailedError(shortfalls)
 
 
 @dataclass
@@ -78,6 +166,10 @@ class UnifiedSearchResult:
         europepmc_count: Number of results from Europe PMC (if applicable)
         duplicates_removed: Number of duplicates removed in merge
         pagination: Pagination state for continuation
+        shortfalls: What failures left out of this result; empty when the
+            search retrieved everything it asked for. Never set on a result
+            without articles: failures that leave nothing raise
+            ``SearchFailedError`` instead.
     """
 
     articles: list[MergedArticle] = field(default_factory=list)
@@ -89,6 +181,7 @@ class UnifiedSearchResult:
     europepmc_count: int = 0
     duplicates_removed: int = 0
     pagination: CursorPaginationState | OffsetPaginationState | None = None
+    shortfalls: list[RetrievalShortfall] = field(default_factory=list)
 
 
 class SearchService:
@@ -130,6 +223,67 @@ class SearchService:
             self._europepmc_client = EuropePMCClient()
         return self._europepmc_client
 
+    def _search_pubmed_source(
+        self, query: PubMedQuery, max_results: int
+    ) -> SearchResult | RetrievalShortfall:
+        """Run the PubMed search, answering a failure with its shortfall.
+
+        Args:
+            query: The PubMed query.
+            max_results: Maximum PMIDs to list.
+
+        Returns:
+            The search result, or the shortfall a failed search leaves. The
+            client's error is not kept: its traceback's frames hold the
+            request parameters, the NCBI API key among them.
+        """
+        try:
+            return self.pubmed_client.search(query, max_results=max_results)
+        except SourceRequestError as e:
+            logger.warning(f"PubMed search failed: {e}")
+            return RetrievalShortfall(e.provider, e.failure)
+
+    def _fetch_pubmed_articles(
+        self, search_result: SearchResult
+    ) -> tuple[list[ArticleMetadata], list[RetrievalShortfall]]:
+        """Fetch the articles a PubMed search listed.
+
+        Args:
+            search_result: The search, which may have failed to list some PMIDs.
+
+        Returns:
+            The articles fetched, and what the listing and the fetch left out.
+        """
+        fetched = ArticleFetchResult()
+        if search_result.pmids:
+            fetched = self.pubmed_client.fetch_articles(search_result.pmids)
+        return fetched.articles, pubmed_shortfalls(search_result, fetched)
+
+    def _search_europepmc_source(
+        self, query: str, max_results: int, include_preprints: bool
+    ) -> tuple[list[ArticleInfo], CursorPaginationState] | RetrievalShortfall:
+        """Run the Europe PMC search, answering a failure with its shortfall.
+
+        Args:
+            query: The query in Europe PMC syntax.
+            max_results: Maximum results to retrieve.
+            include_preprints: Whether to include preprints.
+
+        Returns:
+            The articles and pagination state, or the shortfall a failed
+            search leaves.
+        """
+        try:
+            return self.europepmc_client.search(
+                query=query,
+                max_results=max_results,
+                include_preprints=include_preprints,
+                page_size=self.config.europepmc.page_size,
+            )
+        except SourceRequestError as e:
+            logger.warning(f"Europe PMC search failed: {e}")
+            return RetrievalShortfall(e.provider, e.failure)
+
     def search(
         self,
         query: str,
@@ -151,7 +305,11 @@ class SearchService:
             progress_callback: Optional callback for progress updates
 
         Returns:
-            UnifiedSearchResult with articles and metadata
+            UnifiedSearchResult with articles and metadata. Its ``shortfalls``
+            list what failed sources, batches or pages left out.
+
+        Raises:
+            SearchFailedError: If failures left nothing retrieved.
         """
         max_results = max_results or self.config.search.max_results
         provider = provider or self.config.search.search_provider
@@ -198,15 +356,14 @@ class SearchService:
         )
 
         # Execute search
-        search_result = self.pubmed_client.search(query_obj, max_results=max_results)
+        search_result = self._search_pubmed_source(query_obj, max_results)
+        if isinstance(search_result, RetrievalShortfall):
+            raise SearchFailedError([search_result])
 
         if progress_callback:
             progress_callback(f"Found {search_result.total_count} results, fetching details...")
 
-        # Fetch article details
-        articles: list[ArticleMetadata] = []
-        if search_result.pmids:
-            articles = self.pubmed_client.fetch_articles(search_result.pmids)
+        articles, shortfalls = self._fetch_pubmed_articles(search_result)
 
         # Convert to merged articles
         merged = [
@@ -214,6 +371,7 @@ class SearchService:
             for article in articles
             if article.abstract  # Skip articles without abstracts
         ]
+        raise_if_failures_left_nothing(merged, shortfalls)
 
         # Create pagination state
         pagination = OffsetPaginationState(
@@ -232,6 +390,7 @@ class SearchService:
             europepmc_count=0,
             duplicates_removed=0,
             pagination=pagination,
+            shortfalls=shortfalls,
         )
 
     def _search_europepmc(
@@ -253,12 +412,10 @@ class SearchService:
             epmc_query = query
 
         # Execute search
-        articles, pagination = self.europepmc_client.search(
-            query=epmc_query,
-            max_results=max_results,
-            include_preprints=include_preprints,
-            page_size=self.config.europepmc.page_size,
-        )
+        answer = self._search_europepmc_source(epmc_query, max_results, include_preprints)
+        if isinstance(answer, RetrievalShortfall):
+            raise SearchFailedError([answer])
+        articles, pagination = answer
 
         if progress_callback:
             progress_callback(f"Found {pagination.total_count} results")
@@ -268,6 +425,8 @@ class SearchService:
 
         # Convert to merged articles
         merged = [self._europepmc_to_merged(article) for article in articles_with_abstract]
+        shortfalls = europepmc_shortfalls(pagination)
+        raise_if_failures_left_nothing(merged, shortfalls)
 
         return UnifiedSearchResult(
             articles=merged,
@@ -279,6 +438,7 @@ class SearchService:
             europepmc_count=len(merged),
             duplicates_removed=0,
             pagination=pagination,
+            shortfalls=shortfalls,
         )
 
     def _search_both(
@@ -288,7 +448,12 @@ class SearchService:
         include_preprints: bool = False,
         progress_callback: Callable[[str], None] | None = None,
     ) -> UnifiedSearchResult:
-        """Search both PubMed and Europe PMC, merging results."""
+        """Search both PubMed and Europe PMC, merging results.
+
+        A provider that fails is recorded as a shortfall and the search
+        proceeds on the other, so the result can rest on one provider alone
+        -- and says so.
+        """
         # Prepare queries for both providers
         if QueryTranslator.is_pubmed_syntax(query):
             pubmed_query = query
@@ -313,21 +478,35 @@ class SearchService:
         # Get more results from each provider to account for duplicates
         per_provider_max = max_results  # Request full amount from each
 
-        pubmed_result = self.pubmed_client.search(pubmed_query_obj, max_results=per_provider_max)
+        shortfalls: list[RetrievalShortfall] = []
+
         pubmed_articles: list[ArticleMetadata] = []
-        if pubmed_result.pmids:
-            pubmed_articles = self.pubmed_client.fetch_articles(pubmed_result.pmids)
+        pubmed_total = 0
+        pubmed_result = self._search_pubmed_source(pubmed_query_obj, per_provider_max)
+        if isinstance(pubmed_result, RetrievalShortfall):
+            logger.warning("Proceeding without PubMed")
+            shortfalls.append(pubmed_result)
+        else:
+            pubmed_total = pubmed_result.total_count
+            pubmed_articles, pubmed_missing = self._fetch_pubmed_articles(pubmed_result)
+            shortfalls.extend(pubmed_missing)
 
         # Search Europe PMC
         if progress_callback:
             progress_callback("Searching Europe PMC...")
 
-        epmc_articles, epmc_pagination = self.europepmc_client.search(
-            query=epmc_query,
-            max_results=per_provider_max,
-            include_preprints=include_preprints,
-            page_size=self.config.europepmc.page_size,
+        epmc_articles: list[ArticleInfo] = []
+        epmc_total = 0
+        epmc_answer = self._search_europepmc_source(
+            epmc_query, per_provider_max, include_preprints
         )
+        if isinstance(epmc_answer, RetrievalShortfall):
+            logger.warning("Proceeding without Europe PMC")
+            shortfalls.append(epmc_answer)
+        else:
+            epmc_articles, epmc_pagination = epmc_answer
+            epmc_total = epmc_pagination.total_count
+            shortfalls.extend(europepmc_shortfalls(epmc_pagination))
 
         if progress_callback:
             progress_callback("Merging results...")
@@ -350,6 +529,7 @@ class SearchService:
         # documents would otherwise be stored and scored on empty text in
         # "Both" mode only.
         merged = [m for m in merged if m.abstract]
+        raise_if_failures_left_nothing(merged, shortfalls)
 
         # Limit to max_results
         if len(merged) > max_results:
@@ -359,10 +539,9 @@ class SearchService:
         # same records, so summing their hit counts would roughly double-count
         # the overlap. The true size of the union is unknowable without
         # fetching every result, so report a conservative lower bound: the
-        # union is at least as large as the bigger of the two result sets.
-        total_available = max(
-            pubmed_result.total_count, epmc_pagination.total_count
-        )
+        # union is at least as large as the bigger of the two result sets. A
+        # provider that failed contributes nothing, so the other's total stands.
+        total_available = max(pubmed_total, epmc_total)
 
         return UnifiedSearchResult(
             articles=merged,
@@ -374,6 +553,7 @@ class SearchService:
             europepmc_count=len(epmc_articles),
             duplicates_removed=duplicates_removed,
             pagination=None,  # Combined search doesn't support continuation
+            shortfalls=shortfalls,
         )
 
     def get_total_count(
@@ -393,6 +573,9 @@ class SearchService:
 
         Returns:
             Total number of matching articles
+
+        Raises:
+            SourceRequestError: If a provider's count could not be obtained.
         """
         provider = provider or self.config.search.search_provider
 

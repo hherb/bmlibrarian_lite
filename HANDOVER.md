@@ -8,10 +8,11 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#243 — the NCBI API key reaches NCBI and nothing else, on Swift and Android**
-(#196's parity half), with #251 and #239 on the same branch. PR #254 is open;
-the rules are under **Recently landed**. Once it merges, delete this section and
-pick a slice from **Potential follow-ups**.
+**#247 + #248 + #255 (Python half) — a failed source is not an empty one**, on
+branch `fix/failed-search-is-not-empty-247`, PR #260. The rules are under
+**Recently landed**. Once it merges, delete this section. The natural next slice
+ports the contract (`doc/cross_platform/search_failure_reporting.md`): **#252**
+(Android) and **#256** + **#255** (Swift), both of which said "mirror #247".
 
 ## Recently landed (context)
 
@@ -19,21 +20,52 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **A failed source is not an empty one** (#247, #248, Python #255; PR #260).
+  Contract: `doc/cross_platform/search_failure_reporting.md`. **User's
+  decisions (2026-09-14): a provider failing in a both-provider search, and a
+  batch or page failing after retries, proceed on what was retrieved and tell
+  the user; failures that leave nothing are `SearchFailedError`**, never "No
+  documents found" (so no session is saved). Clients raise `SourceRequestError`
+  carrying only `RequestFailure` (kind + status): **the `requests` exception is
+  never kept**, since its body holds the key. **An HTTP 200 that is not a result
+  is a failure**: esearch `ERROR` and efetch `<eFetchResult>` are
+  `service_error`; Europe PMC's bare `{"version":…}` for an unknown cursor is
+  `malformed_response` (esearch and Europe PMC checked live); a missing
+  `count`/`hitCount` is malformed, not 0, and **a listing shorter than its count
+  is `incomplete_response`**; records the parser drops are a shortfall too.
+  **PubMed lists only 9,999 records** (`retstart` ≤ 9998, checked live): counting
+  against 10,000 read an honest last page as incomplete. **A spent urllib3
+  read-timeout retry reaches `requests` as a `ConnectionError`**, so the
+  classifier unwraps it. **The search for more never asks for a page past the
+  end** (a failure there read "0 records could not be retrieved"), and failures
+  that leave it nothing new are an error. The review round also pinned the
+  stored provider strings, the reason phrases and `null` handling in the
+  contract, and lodged #261–#266 (LLM-side failures read as absence, book
+  records, test timeouts).
+  **efetch batches and history pages continue past a failure; a Europe PMC
+  cursor cannot, so it stops.** Shortfalls ride session metadata
+  (`retrieval_shortfalls`) to the report (opening notice + Methodology line,
+  added by code, never the LLM), GUI, MCP (**an error is an `isError` result**,
+  with shortfalls and advice) and **from Research Questions with the documents
+  into the review** — a dialog alone left the report claiming a complete
+  search. **A stored shortfall degrades but is never dropped.** **`raise … from
+  None` inside `except` still keeps `__context__`**, and `JSONDecodeError.doc` is
+  the body: classify in the handler, raise after it; tests assert the chain is
+  empty. Test trap: `SearchResultMerger` merges "Record 7" and "Record 8" despite
+  distinct PMIDs (**#258**). `raise_on_status=False` on Europe PMC's `Retry`, or
+  a spent 503 surfaces as a status-less `RetryError`.
+
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
   #246, merged 2026-09-13). Both Python NCBI clients (`PubMedClient`,
   `PubMedSearchClient`) POST every E-utilities request with the parameters in
-  the body. **A URL is what error text and HTTP logging print** — `HTTPError`,
-  `ConnectionError`, urllib3 at DEBUG — and the `HTTPError` text is what a
-  routine 429 wrote into a batch JSON export. **Redacting would chase each
-  printer; taking the key out of the URL covers all of them.** NCBI reads
-  `api_key` from a body (an invalid key is rejected identically over POST and
-  GET). **A body opens one route a query string lacked**: a 307/308 re-sends
-  it wherever it points, so a redirect is a failed request (`raise_for_status`
-  passes a 3xx). **Each test that reaches the local server also asserts the
-  key arrived.** Credential files go through `write_owner_only_file` (`mkstemp`
-  then `os.replace`, never `open` then `chmod`).
-  **Swift and Android** (#243 in PR #254): enforcement points, tests and the
-  ports' differences from Python are tabled in `doc/developer/europepmc_and_pubmed.md`.
+  the body. **A URL is what error text and HTTP logging print** (a routine 429
+  wrote it into a batch JSON export); **redacting would chase each printer.**
+  **A body opens one route a query string lacked**: a 307/308 re-sends it, so a
+  redirect is a failed request (`raise_for_status` passes a 3xx). **Each test
+  that reaches the local server also asserts the key arrived.** Credential files
+  go through `write_owner_only_file` (`mkstemp` then `os.replace`).
+  **Swift and Android** (#243, PR #254, merged 2026-09-14): enforcement points,
+  tests and port differences are tabled in `doc/developer/europepmc_and_pubmed.md`.
   **Swift refuses per task** (`RedirectRefusingTaskDelegate`); **Android on a
   client derived for PubMed only** — Unpaywall and PDF links need redirects, and
   the shared `scalarsAndJson` Retrofit builder is a mutable singleton. **A
@@ -50,56 +82,28 @@ the rest.
   for a bad key echoes the key in its body** (checked live): never log or
   persist an E-utilities error body.
 
-- **The screen and the export read references by one parser** (#233 in PR #242,
-  2026-09-13). **Recognition lives in `ReportInlineText`; renderers only style
-  segments** — the export flattens, `ReportRichText` (iOS + macOS) links;
-  logging is `ReportFormatter.logUnparseableReferences(in:)` from `.task(id:)`,
-  never `body`. **One block splitter, `ReportMarkdownBlock`, for both screens
-  and the PDF**: three private copies drifted until the PDF lost words the
-  screen showed. **Measure through the real renderer** (`Text(String)` printed
-  every citation's UUID). **A removal takes machine syntax, never the report's
-  words** (golden rule 6, user's decision): a whole parenthetical only when all
-  of it is identity-shaped, else just `(doc:<identity>` — the first wide version
-  deleted `in 400 children, contrary to earlier claims`. **Narrowing one pattern
-  moves work to the next**; review each change against the other two. **Space
-  around the scheme is any Unicode space and one line break**, identically in
-  all three patterns, runs possessive (`*+`). **The reader is told**
-  (`RemovedCitationNotice`, user's decision). **A citation without an identity
-  opens a document only if exactly one fits** (`ReportCitation`). **`ReportReferenceLink`
-  owns `docref://` both ways**; ordinary links follow only `http`/`https`.
-
-- **A reference the flattener cannot parse may not print its target** (#230 in
-  PR #235). **Widening a pattern narrows the gap; it does not close it**: what
-  the link pattern misses is *swept* (removed and logged), since
-  `doc:pmid-889149` reads as a PubMed ID. **Whitespace tolerance only in the
-  `doc:` scheme**, or `(95% CI 4-19)` is lost. **A sweep that leaves the
-  identity is worse than none**; the postcondition is checked, not asserted.
-  **Flattening belongs to every block carrying prose.**
-
-- **A document's identity may not claim what the article is** (#208 in PR #226,
-  2026-09-11). **An identity is opaque and unique by construction** —
-  `Document.id` is a UUID; `"pmid-<slot>"` asserted a namespace the slot cannot
-  vouch for. No migration: stored rows keep the identity they were given, and
-  nothing may reconstruct one from an article's fields. **A renderer that cannot
-  see the documents may not name an identifier.** **Before deduplicating, diff
-  the copies — including your own claim that they match.** **Find the surface a
-  reader actually reaches before enumerating the ones that look alike**: both
-  `PrintableReportView`s are instantiated nowhere (#221), macOS PDF export is a
-  stub, and `EvidenceReport.plainTextReport` feeds clipboard, share sheet and
-  *Export as Text*. **A shared gate is only shared if every caller reads it** —
-  a claim in a docstring is not a call site.
-
-- **A PubMed URL may only be built from a stated PubMed ID** (#212 + #213 in PR
-  #218, 2026-09-11). Contract: `doc/cross_platform/fulltext_retrieval.md`.
-  **The shape of a number never states a PubMed ID** — Europe PMC's `ETH`, `CBA`
-  and `HIR` records carry bare decimals, and thesis `889149` is also a real 1977
-  mouse-courtship paper; a live link to the wrong paper is worse than a dead one.
-  Knowledge ranks stated token, then a prefix that settles the shape, then the
-  provider, and **`.both` vouches for nothing**. **One predicate authorises every
-  PubMed URL and `PMID:` line**, `ArticleIdentifierKind.pubmedID(in:declared:)`.
-  **A citation names the namespace it can prove** (`CitationIdentifier`).
-
 - **Older rounds, compressed further**; each rule below cost a defect.
+  - **The screen and the export read references by one parser** (#233, PR #242):
+    recognition lives in `ReportInlineText`, renderers only style segments; one
+    block splitter, `ReportMarkdownBlock`, for both screens and the PDF (three
+    copies drifted). **Measure through the real renderer.** **A removal takes
+    machine syntax, never the report's words** (golden rule 6): a whole
+    parenthetical only when all of it is identity-shaped. **Narrowing one pattern
+    moves work to the next.** The reader is told (`RemovedCitationNotice`).
+    **#230** (PR #235): what the link pattern misses is *swept*, whitespace
+    tolerance only in the `doc:` scheme, and a sweep that leaves the identity is
+    worse than none.
+  - **A document's identity may not claim what the article is** (#208, PR #226):
+    `Document.id` is an opaque UUID; stored `pmid-` rows are kept, never
+    reconstructed. **Find the surface a reader actually reaches** (both
+    `PrintableReportView`s are instantiated nowhere, #221). **A shared gate is
+    only shared if every caller reads it.**
+  - **A PubMed URL may only be built from a stated PubMed ID** (#212 + #213, PR
+    #218; contract `doc/cross_platform/fulltext_retrieval.md`). **The shape of a
+    number never states a PubMed ID** (thesis `889149` is also a 1977 mouse
+    paper); **`.both` vouches for nothing**; one predicate,
+    `ArticleIdentifierKind.pubmedID(in:declared:)`, authorises every PubMed URL
+    and `PMID:` line; a citation names the namespace it can prove.
   - **Europe PMC's own word for what an identifier is** (#209, PR #211): the kind
     is *stated* from the record's `source`, stored, and passed back into
     `fetchFullText`; a stored `nil` means "nobody stated one". The cache tag
@@ -338,16 +342,19 @@ Swift and Kotlin rather than a Swift-side patch.
   call `logging.basicConfig(INFO)` at import, and the GUI configures no logging
   at all, so the fix needs a GUI setup too. **#245** — those two standalone
   CLIs take the NCBI key only as `--api-key` (shell history, `ps`).
-- **#247–#250 — failures that read as findings** (the #246 review). A failed
-  PubMed search returns zero results, so the GUI and MCP say "No documents
-  found" (**#247**; carry only the status, as `e.request.body` holds the key);
-  a failed batch silently shortens the set (**#248**); nothing connects
-  `analysis_failed` (**#249**); an efetch with no article yields "No conflict of
-  interest statement found" (**#250**, #203's shape). **#252** — Android drops
-  every failed search (a rejected key, a broken keystore) with no `else`; **#256**
-  — iOS `searchBoth` with a `print`. **#255** — an `ERROR` in an HTTP 200 reads
-  as no results everywhere. **#253** — both-provider paging judges PubMed's next
-  page by the combined total; PubMed-only paging stops at the cap since #254.
+- **Failures that read as findings, still open** (the #246 review). Nothing
+  connects `analysis_failed` (**#249**); an efetch with no article yields "No
+  conflict of interest statement found" (**#250**, #203's shape). Ports of the
+  #247 contract: **#252** — Android drops every failed search (a rejected key, a
+  broken keystore) with no `else`; **#256** — iOS `searchBoth` with a `print`;
+  **#255** — Swift and Android read an `ERROR` in HTTP 200 as no results.
+  **#253** — both-provider paging judges PubMed's next page by the combined
+  total; PubMed-only paging stops at the cap since #254. **#258** — the search
+  merge drops a distinct article whose title differs by a number (Python and
+  Swift), silently, as "duplicates removed". **#259** — Python full-text
+  discovery reports an unreachable Europe PMC as "Article not found" (the #247
+  contract, for lookups). Not done, a decision: esearch `SERVICE_ERROR` is not
+  retried (the `((` answer fails every time).
 - **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
   **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
   cheaper, and the exact defect that occurred — a guard failing when a `.swift`

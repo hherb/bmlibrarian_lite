@@ -84,9 +84,14 @@ it, or record the difference here:
 |------|--------|-------|---------|
 | Which 3xx is refused | 301, 302, 303, 307, 308 with a `Location` header (`is_redirect`) | every 3xx | every 3xx |
 | Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`PubMedError.redirectRefused`) | no (`RedirectRefusedError`) |
-| A 429 that outlasts the retries | logged, request returns `None` | `PubMedError.rateLimited` | `RateLimitError` |
+| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | `PubMedError.rateLimited` | `RateLimitError` |
 | What counts as "no key" | an empty string | an empty string | a blank string, whitespace included |
-| esearch answer without a usable `count` | total 0 | total is the articles seen so far, with a warning | total 0 |
+| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | total is the articles seen so far, with a warning (#255) | total 0 (#255) |
+| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | dropped with a `print` (#256) | dropped silently (#252) |
+
+**A failed source is not an empty one.** What counts as a failed request, what
+a search does with one, and how the reader is told are specified in
+`doc/cross_platform/search_failure_reporting.md`.
 
 ---
 
@@ -167,7 +172,10 @@ POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=0
 POST esearch.fcgi   body: db=pubmed&term=...&retmax=100&retstart=100
 ```
 
-**Limitation:** Maximum offset is 9999.
+**Limitation:** PubMed lists only the first 9,999 records of a search, so
+`retstart` can be at most 9998 (checked live 2026-09-15: `retstart=9900&retmax=100`
+lists 99 PMIDs, and `retstart=9999` answers with an `ERROR`). A page counted
+against 10,000 reads its honest last page as incomplete.
 
 **Advance by the PMIDs consumed, not the articles parsed.** efetch returns only
 `PubmedArticle` records as articles, so a batch holding a `PubmedBookArticle`

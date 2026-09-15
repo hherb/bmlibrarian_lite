@@ -36,12 +36,14 @@ Example usage:
     print(f"Found {result.total_count} articles, retrieved {result.retrieved_count}")
 """
 
+import json
 import logging
 import os
 import re
 import time
 import xml.etree.ElementTree as ET
-from typing import Optional, List, Dict, Any, Callable, Generator
+from collections.abc import Callable
+from typing import Optional, List, Dict, Any
 import requests
 
 from .constants import (
@@ -62,12 +64,177 @@ from .constants import (
     EMAIL_VALIDATION_PATTERN,
 )
 from .data_types import (
+    ArticleFetchResult,
     PubMedQuery,
     SearchResult,
     ArticleMetadata,
 )
+from ..data_models import RequestFailure, RequestFailureKind, SearchProvider
+from ..exceptions import SourceRequestError
+from ..search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
+
+# Root elements of an efetch answer: the articles, or the document E-utilities
+# sends instead when the fetch failed (with HTTP 400, or with HTTP 200 (#255)).
+EFETCH_ARTICLE_SET_ROOT_TAG = "PubmedArticleSet"
+EFETCH_ERROR_ROOT_TAG = "eFetchResult"
+
+# Marks an answer body that did not decode as JSON (JSON null is a value).
+_NOT_JSON = object()
+
+
+def _malformed_answer(reason: str) -> SourceRequestError:
+    """Build the error for an E-utilities answer that cannot be read, and log why.
+
+    Args:
+        reason: What was wrong, naming fields only, never their values.
+
+    Returns:
+        The error to raise.
+    """
+    logger.error(f"Unreadable E-utilities answer: {reason}")
+    return SourceRequestError(
+        SearchProvider.PUBMED, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+    )
+
+
+def _incomplete_answer(reason: str) -> SourceRequestError:
+    """Build the error for an E-utilities answer that holds less than it says.
+
+    Args:
+        reason: What was missing, as counts only.
+
+    Returns:
+        The error to raise.
+    """
+    logger.error(f"Incomplete E-utilities answer: {reason}")
+    return SourceRequestError(
+        SearchProvider.PUBMED, RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+    )
+
+
+def expected_esearch_listing(total_count: int, retstart: int, retmax: int) -> int:
+    """How many PMIDs an esearch page should list.
+
+    Args:
+        total_count: The search's ``count``.
+        retstart: The page's offset.
+        retmax: The page size asked for.
+
+    Returns:
+        The PMIDs PubMed holds from ``retstart`` on, up to ``retmax`` and to
+        the first 9,999 records, the most E-utilities lists for one search
+        (``MAX_RESULTS_LIMIT``). 0 past the end of what can be listed.
+    """
+    return max(0, min(retmax, total_count - retstart, MAX_RESULTS_LIMIT - retstart))
+
+
+def _decoded_json(response: requests.Response) -> Any:
+    """Decode a JSON answer without keeping the decoder's exception.
+
+    ``JSONDecodeError`` holds the whole body as ``doc``. Raised inside an
+    ``except`` block, any error would keep it reachable as ``__context__``
+    even with ``from None``, so it is dropped here.
+
+    Control characters inside strings are accepted: E-utilities writes a raw
+    newline into some ``ERROR`` texts (checked live 2026-09-15, past the
+    9,999-record cap), and that answer is a service error, not an unreadable
+    one.
+
+    Args:
+        response: The answer.
+
+    Returns:
+        The decoded value, or ``_NOT_JSON`` when the body is not JSON.
+    """
+    try:
+        return json.loads(response.content, strict=False)
+    except ValueError:
+        return _NOT_JSON
+
+
+def _unlisted_or_raise(expected: int, pmids: list[str]) -> int:
+    """Compare a page's PMIDs with what its count says it should list.
+
+    Args:
+        expected: The PMIDs the page should list.
+        pmids: The PMIDs it listed.
+
+    Returns:
+        How many it left out.
+
+    Raises:
+        SourceRequestError: If it should have listed some and listed none: a
+            failed page, not the end of the results.
+    """
+    if expected and not pmids:
+        raise _incomplete_answer(f"esearch listed 0 of {expected} PMIDs")
+    unlisted = max(0, expected - len(pmids))
+    if unlisted:
+        logger.warning(f"esearch listed {len(pmids)} of {expected} PMIDs")
+    return unlisted
+
+
+def _parsed_xml(xml_content: bytes) -> ET.Element | None:
+    """Parse XML without keeping the parser's exception.
+
+    Args:
+        xml_content: The answer body.
+
+    Returns:
+        The root element, or None when the body is not well-formed XML. Only
+        the parse error's code and position are logged: its message can
+        quote the body, such as the name of an undefined entity.
+    """
+    try:
+        return ET.fromstring(xml_content)
+    except ET.ParseError as e:
+        line, column = e.position
+        logger.error(
+            f"efetch answer is not well-formed XML (expat error {e.code} "
+            f"at line {line}, column {column})"
+        )
+        return None
+
+
+def _esearch_count(result: dict[str, Any]) -> int:
+    """Read the total from an esearch result.
+
+    A missing or non-numeric ``count`` is an answer that cannot be read, not a
+    total of nothing (#255).
+
+    Args:
+        result: An ``esearchresult`` object.
+
+    Returns:
+        The number of matching articles.
+
+    Raises:
+        SourceRequestError: If ``count`` is missing or not a whole number.
+    """
+    count = result.get("count")
+    if isinstance(count, str) and count.isdecimal():
+        return int(count)
+    raise _malformed_answer("esearch result has no numeric count")
+
+
+def _esearch_pmids(result: dict[str, Any]) -> list[str]:
+    """Read the PMIDs from an esearch result.
+
+    Args:
+        result: An ``esearchresult`` object.
+
+    Returns:
+        The PMIDs, in the order PubMed listed them.
+
+    Raises:
+        SourceRequestError: If ``idlist`` is missing or not a list of strings.
+    """
+    pmids = result.get("idlist")
+    if isinstance(pmids, list) and all(isinstance(pmid, str) for pmid in pmids):
+        return pmids
+    raise _malformed_answer("esearch result has no idlist of strings")
 
 # Compiled regex pattern for email validation
 _EMAIL_PATTERN = re.compile(EMAIL_VALIDATION_PATTERN)
@@ -104,7 +271,7 @@ class PubMedSearchClient:
         self,
         email: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: int = REQUEST_TIMEOUT_SECONDS,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
         max_retries: int = MAX_RETRIES,
     ) -> None:
         """
@@ -138,7 +305,7 @@ class PubMedSearchClient:
         self,
         url: str,
         params: Dict[str, Any],
-    ) -> Optional[requests.Response]:
+    ) -> requests.Response:
         """
         Make an HTTP request with retry logic and rate limiting.
 
@@ -160,8 +327,13 @@ class PubMedSearchClient:
                 ``email`` and ``api_key`` are added to this dict in place.
 
         Returns:
-            Response object, or None if all retries failed. Every HTTP error
+            The response to the first attempt that succeeded. Every HTTP error
             is retried, a refused redirect and a non-retryable 4xx included.
+
+        Raises:
+            SourceRequestError: When every attempt failed. It carries only the
+                failure's kind and status, never the ``requests`` exception,
+                whose request body holds the key (#247).
         """
         # Add authentication
         if self.email:
@@ -170,6 +342,7 @@ class PubMedSearchClient:
             params["api_key"] = self.api_key
 
         delay = INITIAL_RETRY_DELAY_SECONDS
+        failure = RequestFailure(RequestFailureKind.REQUEST_FAILED)
 
         for attempt in range(self.max_retries):
             try:
@@ -187,57 +360,56 @@ class PubMedSearchClient:
                 response.raise_for_status()
                 return response
 
-            except requests.exceptions.Timeout:
-                logger.warning(
-                    f"PubMed API timeout (attempt {attempt + 1}/{self.max_retries})"
-                )
-                if attempt < self.max_retries - 1:
-                    time.sleep(delay)
-                    delay *= RETRY_BACKOFF_MULTIPLIER
-                else:
-                    logger.error(f"PubMed API request timed out after {self.max_retries} attempts")
-                    return None
-
-            except requests.exceptions.ConnectionError:
-                logger.warning(
-                    f"PubMed API connection error (attempt {attempt + 1}/{self.max_retries})"
-                )
-                if attempt < self.max_retries - 1:
-                    time.sleep(delay)
-                    delay *= RETRY_BACKOFF_MULTIPLIER
-                else:
-                    logger.error(f"PubMed API connection failed after {self.max_retries} attempts")
-                    return None
-
-            except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 429:
-                    logger.warning(
-                        f"Rate limited by PubMed (attempt {attempt + 1}/{self.max_retries})"
-                    )
-                else:
-                    status_code = e.response.status_code if e.response is not None else "unknown"
-                    logger.warning(
-                        f"PubMed API HTTP error {status_code} (attempt {attempt + 1}/{self.max_retries})"
-                    )
-                if attempt < self.max_retries - 1:
-                    time.sleep(delay)
-                    delay *= RETRY_BACKOFF_MULTIPLIER
-                else:
-                    logger.error(f"PubMed API HTTP error after {self.max_retries} attempts")
-                    return None
-
             except requests.exceptions.RequestException as e:
+                failure = request_failure_from_exception(e)
                 logger.warning(
-                    f"PubMed API request failed (attempt {attempt + 1}/{self.max_retries}): {e}"
+                    f"PubMed API request failed (attempt {attempt + 1}/{self.max_retries}): "
+                    f"{failure.describe()}"
                 )
                 if attempt < self.max_retries - 1:
                     time.sleep(delay)
                     delay *= RETRY_BACKOFF_MULTIPLIER
-                else:
-                    logger.error(f"PubMed API request failed after {self.max_retries} attempts")
-                    return None
 
-        return None
+        logger.error(
+            f"PubMed API request failed after {self.max_retries} attempts: {failure.describe()}"
+        )
+        raise SourceRequestError(SearchProvider.PUBMED, failure)
+
+    def _esearch(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Run an esearch request and return its ``esearchresult`` object.
+
+        E-utilities reports some failures inside an HTTP 200, as an ``ERROR``
+        field and no ``count`` (#255). That answer is a failed search, not a
+        search that matched nothing. Its text is neither logged nor shown:
+        what NCBI writes into a failed answer can repeat the request.
+
+        Args:
+            params: esearch parameters, sent as a form-encoded body.
+
+        Returns:
+            The ``esearchresult`` object of a successful answer.
+
+        Raises:
+            SourceRequestError: If the request failed, the answer reports an
+                error, or the answer is not esearch's JSON.
+        """
+        response = self._make_request(ESEARCH_URL, params)
+        data = _decoded_json(response)
+        if data is _NOT_JSON:
+            raise _malformed_answer("esearch answer is not JSON")
+
+        result = data.get("esearchresult") if isinstance(data, dict) else None
+        if not isinstance(result, dict):
+            raise _malformed_answer("esearch answer has no esearchresult object")
+        if "ERROR" in result:
+            logger.error(
+                "E-utilities esearch answered with an ERROR instead of a result "
+                "(its text is not logged: it can repeat the request)"
+            )
+            raise SourceRequestError(
+                SearchProvider.PUBMED, RequestFailure(RequestFailureKind.SERVICE_ERROR)
+            )
+        return result
 
     def search(
         self,
@@ -258,7 +430,14 @@ class PubMedSearchClient:
             progress_callback: Optional callback(step, message) for progress updates
 
         Returns:
-            SearchResult with PMIDs and metadata
+            SearchResult with PMIDs and metadata. PMIDs PubMed counted but did
+            not list -- on a history-server page that failed, or on any page
+            that listed fewer than its count said -- are counted in
+            ``unlisted_count``, and later history pages are still listed.
+
+        Raises:
+            SourceRequestError: If the search itself failed. A failed search
+                is never returned as zero results (#247).
         """
         def report_progress(step: str, message: str) -> None:
             logger.info(f"[{step}] {message}")
@@ -278,64 +457,54 @@ class PubMedSearchClient:
         params["sort"] = sort
 
         # Use history server for large result sets
-        if use_history and max_results > HISTORY_SERVER_THRESHOLD:
+        history_requested = use_history and max_results > HISTORY_SERVER_THRESHOLD
+        if history_requested:
             params["usehistory"] = "y"
             params["retmax"] = 0  # Just get count and WebEnv
 
-        response = self._make_request(ESEARCH_URL, params)
+        result = self._esearch(params)
+        total_count = _esearch_count(result)
+        pmids = _esearch_pmids(result)
 
-        if not response:
-            return SearchResult(
-                query=query,
-                total_count=0,
-                retrieved_count=0,
-                search_time_seconds=time.time() - start_time,
-            )
+        # Get history server info
+        web_env = result.get("webenv")
+        query_key = result.get("querykey")
 
-        try:
-            data = response.json()
-            result = data.get("esearchresult", {})
+        report_progress("results", f"Found {total_count} total results")
 
-            total_count = int(result.get("count", 0))
-            pmids = result.get("idlist", [])
-
-            # Get history server info
-            web_env = result.get("webenv")
-            query_key = result.get("querykey")
-
-            report_progress("results", f"Found {total_count} total results")
-
-            # If using history server and we need more results
-            if use_history and web_env and query_key and max_results > len(pmids):
-                report_progress("fetch", "Fetching additional PMIDs from history server...")
-                pmids = self._fetch_pmids_from_history(
-                    web_env=web_env,
-                    query_key=query_key,
-                    total_count=min(total_count, max_results),
-                    progress_callback=progress_callback,
-                )
-
-            search_time = time.time() - start_time
-            report_progress("complete", f"Retrieved {len(pmids)} PMIDs in {search_time:.2f}s")
-
-            return SearchResult(
-                query=query,
-                total_count=total_count,
-                retrieved_count=len(pmids),
-                pmids=pmids,
-                search_time_seconds=search_time,
+        unlisted_count = 0
+        listing_failure: RequestFailure | None = None
+        if not history_requested:
+            expected = expected_esearch_listing(total_count, 0, max_results)
+            unlisted_count = _unlisted_or_raise(expected, pmids)
+            if unlisted_count:
+                listing_failure = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+        elif total_count > len(pmids):
+            if not isinstance(web_env, str) or not isinstance(query_key, str):
+                raise _malformed_answer("esearch answer lacks the history-server WebEnv")
+            report_progress("fetch", "Fetching additional PMIDs from history server...")
+            listing = self._fetch_pmids_from_history(
                 web_env=web_env,
                 query_key=query_key,
+                total_count=min(total_count, max_results),
+                progress_callback=progress_callback,
             )
+            pmids, unlisted_count, listing_failure = listing
 
-        except Exception as e:
-            logger.error(f"Error parsing search results: {e}")
-            return SearchResult(
-                query=query,
-                total_count=0,
-                retrieved_count=0,
-                search_time_seconds=time.time() - start_time,
-            )
+        search_time = time.time() - start_time
+        report_progress("complete", f"Retrieved {len(pmids)} PMIDs in {search_time:.2f}s")
+
+        return SearchResult(
+            query=query,
+            total_count=total_count,
+            retrieved_count=len(pmids),
+            pmids=pmids,
+            search_time_seconds=search_time,
+            web_env=web_env,
+            query_key=query_key,
+            unlisted_count=unlisted_count,
+            listing_failure=listing_failure,
+        )
 
     def _fetch_pmids_from_history(
         self,
@@ -343,9 +512,13 @@ class PubMedSearchClient:
         query_key: str,
         total_count: int,
         progress_callback: Optional[Callable[[str, str], None]] = None,
-    ) -> List[str]:
+    ) -> tuple[list[str], int, RequestFailure | None]:
         """
         Fetch PMIDs from history server in batches.
+
+        A page that fails is counted and the pages after it are still asked
+        for: ending the list there would drop every later page without a word
+        (#248).
 
         Args:
             web_env: WebEnv from initial search
@@ -354,39 +527,53 @@ class PubMedSearchClient:
             progress_callback: Optional progress callback
 
         Returns:
-            List of PMIDs
+            The PMIDs listed; how many PMIDs the pages left out, whether a
+            page failed or listed fewer than its size; and why the first
+            such page fell short, or None.
         """
-        all_pmids = []
+        all_pmids: list[str] = []
+        unlisted_count = 0
+        first_failure: RequestFailure | None = None
         batch_size = DEFAULT_BATCH_SIZE
 
         for start in range(0, total_count, batch_size):
+            page_size = min(batch_size, total_count - start)
             params = {
                 "db": "pubmed",
                 "WebEnv": web_env,
                 "query_key": query_key,
                 "retstart": start,
-                "retmax": min(batch_size, total_count - start),
+                "retmax": page_size,
                 "retmode": "json",
             }
 
-            response = self._make_request(ESEARCH_URL, params)
-            if not response:
-                logger.warning(f"Failed to fetch PMIDs batch at offset {start}")
-                break
-
             try:
-                data = response.json()
-                batch_pmids = data.get("esearchresult", {}).get("idlist", [])
-                all_pmids.extend(batch_pmids)
+                batch_pmids = _esearch_pmids(self._esearch(params))
+            except SourceRequestError as e:
+                logger.warning(
+                    f"PubMed history page at offset {start} ({page_size} PMIDs) "
+                    f"could not be listed: {e.failure.describe()}"
+                )
+                unlisted_count += page_size
+                if first_failure is None:
+                    first_failure = e.failure
+                continue
 
-                if progress_callback:
-                    progress_callback("fetch", f"Retrieved {len(all_pmids)}/{total_count} PMIDs")
+            short_by = max(0, page_size - len(batch_pmids))
+            if short_by:
+                logger.warning(
+                    f"PubMed history page at offset {start} listed "
+                    f"{len(batch_pmids)} of {page_size} PMIDs"
+                )
+                unlisted_count += short_by
+                if first_failure is None:
+                    first_failure = RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
 
-            except Exception as e:
-                logger.error(f"Error parsing PMID batch: {e}")
-                break
+            all_pmids.extend(batch_pmids)
+            if progress_callback:
+                progress_callback("fetch", f"Retrieved {len(all_pmids)}/{total_count} PMIDs")
 
-        return all_pmids
+        return all_pmids, unlisted_count, first_failure
 
     def search_simple(
         self,
@@ -402,6 +589,9 @@ class PubMedSearchClient:
 
         Returns:
             SearchResult with PMIDs
+
+        Raises:
+            SourceRequestError: If the search failed.
         """
         query = PubMedQuery(
             original_question=query_string,
@@ -430,6 +620,11 @@ class PubMedSearchClient:
 
         Returns:
             SearchResult with PMIDs starting from offset
+
+        Raises:
+            SourceRequestError: If the search failed. A failed page is never
+                returned as an empty one, which a caller would read as the
+                end of the results (#247).
         """
         query = PubMedQuery(
             original_question=query_string,
@@ -449,50 +644,36 @@ class PubMedSearchClient:
         start_time = time.time()
 
         # Build search parameters with offset
+        retmax = min(max_results, MAX_RESULTS_LIMIT)
         params = query.to_url_params()
-        params["retmax"] = min(max_results, MAX_RESULTS_LIMIT)
+        params["retmax"] = retmax
         params["retstart"] = start_offset
         params["sort"] = "relevance"
 
-        response = self._make_request(ESEARCH_URL, params)
+        result = self._esearch(params)
+        total_count = _esearch_count(result)
+        pmids = _esearch_pmids(result)
+        unlisted_count = _unlisted_or_raise(
+            expected_esearch_listing(total_count, start_offset, retmax), pmids
+        )
 
-        if not response:
-            return SearchResult(
-                query=query,
-                total_count=0,
-                retrieved_count=0,
-                search_time_seconds=time.time() - start_time,
-            )
+        search_time = time.time() - start_time
+        report_progress(
+            "complete",
+            f"Retrieved {len(pmids)} PMIDs (offset {start_offset}) in {search_time:.2f}s"
+        )
 
-        try:
-            data = response.json()
-            result = data.get("esearchresult", {})
-
-            total_count = int(result.get("count", 0))
-            pmids = result.get("idlist", [])
-
-            search_time = time.time() - start_time
-            report_progress(
-                "complete",
-                f"Retrieved {len(pmids)} PMIDs (offset {start_offset}) in {search_time:.2f}s"
-            )
-
-            return SearchResult(
-                query=query,
-                total_count=total_count,
-                retrieved_count=len(pmids),
-                pmids=pmids,
-                search_time_seconds=search_time,
-            )
-
-        except Exception as e:
-            logger.error(f"Error parsing search results: {e}")
-            return SearchResult(
-                query=query,
-                total_count=0,
-                retrieved_count=0,
-                search_time_seconds=time.time() - start_time,
-            )
+        return SearchResult(
+            query=query,
+            total_count=total_count,
+            retrieved_count=len(pmids),
+            pmids=pmids,
+            search_time_seconds=search_time,
+            unlisted_count=unlisted_count,
+            listing_failure=(
+                RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE) if unlisted_count else None
+            ),
+        )
 
     def get_count(self, query: PubMedQuery) -> int:
         """
@@ -503,30 +684,29 @@ class PubMedSearchClient:
 
         Returns:
             Number of matching articles
+
+        Raises:
+            SourceRequestError: If the count could not be obtained; 0 is only
+                ever PubMed's own answer.
         """
         params = query.to_url_params()
         params["retmax"] = 0
         params["rettype"] = "count"
 
-        response = self._make_request(ESEARCH_URL, params)
-        if not response:
-            return 0
-
-        try:
-            data = response.json()
-            return int(data.get("esearchresult", {}).get("count", 0))
-        except Exception as e:
-            logger.error(f"Error getting count: {e}")
-            return 0
+        return _esearch_count(self._esearch(params))
 
     def fetch_articles(
         self,
         pmids: List[str],
         batch_size: int = DEFAULT_BATCH_SIZE,
         progress_callback: Optional[Callable[[str, str], None]] = None,
-    ) -> List[ArticleMetadata]:
+    ) -> ArticleFetchResult:
         """
         Fetch article metadata for a list of PMIDs.
+
+        A batch that fails after its retries is recorded and the batches after
+        it are still fetched, so a transient failure costs one batch, not the
+        rest of the list (#248).
 
         Args:
             pmids: List of PubMed IDs
@@ -534,17 +714,18 @@ class PubMedSearchClient:
             progress_callback: Optional progress callback
 
         Returns:
-            List of ArticleMetadata objects
+            The articles fetched, the PMIDs whose batch failed, why the first
+            failed batch failed, and how many articles could not be read.
         """
+        result = ArticleFetchResult()
         if not pmids:
-            return []
+            return result
 
         def report_progress(step: str, message: str) -> None:
             logger.info(f"[{step}] {message}")
             if progress_callback:
                 progress_callback(step, message)
 
-        all_articles = []
         total_batches = (len(pmids) + batch_size - 1) // batch_size
 
         for batch_num, i in enumerate(range(0, len(pmids), batch_size), 1):
@@ -557,82 +738,75 @@ class PubMedSearchClient:
                 "retmode": "xml",
             }
 
-            response = self._make_request(EFETCH_URL, params)
-            if not response:
-                logger.warning(f"Failed to fetch batch {batch_num}")
-                continue
-
             try:
-                articles = self._parse_articles_xml(response.content)
-                all_articles.extend(articles)
-                report_progress(
-                    "progress",
-                    f"Fetched {len(all_articles)}/{len(pmids)} articles"
+                response = self._make_request(EFETCH_URL, params)
+                articles, unreadable = self._parse_articles_xml(response.content)
+            except SourceRequestError as e:
+                logger.warning(
+                    f"PubMed batch {batch_num}/{total_batches} ({len(batch)} PMIDs) "
+                    f"could not be fetched: {e.failure.describe()}"
                 )
-            except Exception as e:
-                logger.error(f"Error parsing batch {batch_num}: {e}")
-
-        return all_articles
-
-    def fetch_articles_generator(
-        self,
-        pmids: List[str],
-        batch_size: int = DEFAULT_BATCH_SIZE,
-    ) -> Generator[ArticleMetadata, None, None]:
-        """
-        Fetch articles as a generator for memory efficiency.
-
-        Args:
-            pmids: List of PubMed IDs
-            batch_size: Number of articles per request
-
-        Yields:
-            ArticleMetadata objects one at a time
-        """
-        for i in range(0, len(pmids), batch_size):
-            batch = pmids[i:i + batch_size]
-
-            params = {
-                "db": "pubmed",
-                "id": ",".join(batch),
-                "retmode": "xml",
-            }
-
-            response = self._make_request(EFETCH_URL, params)
-            if not response:
+                result.pmids_not_fetched.extend(batch)
+                if result.failure is None:
+                    result.failure = e.failure
                 continue
 
-            try:
-                articles = self._parse_articles_xml(response.content)
-                for article in articles:
-                    yield article
-            except Exception as e:
-                logger.error(f"Error parsing batch: {e}")
+            result.articles.extend(articles)
+            result.records_unreadable += unreadable
+            report_progress(
+                "progress",
+                f"Fetched {len(result.articles)}/{len(pmids)} articles"
+            )
 
-    def _parse_articles_xml(self, xml_content: bytes) -> List[ArticleMetadata]:
+        return result
+
+    def _parse_articles_xml(self, xml_content: bytes) -> tuple[list[ArticleMetadata], int]:
         """
-        Parse PubMed XML response to ArticleMetadata objects.
+        Parse an efetch answer to ArticleMetadata objects.
 
         Args:
             xml_content: Raw XML response content
 
         Returns:
-            List of ArticleMetadata objects
+            The articles, and how many ``PubmedArticle`` records could not be
+            read. No articles and none unreadable when the
+            ``PubmedArticleSet`` holds no ``PubmedArticle``: PubMed's answer
+            for PMIDs it does not hold, or for book records
+            (``PubmedBookArticle``), which are not read.
+
+        Raises:
+            SourceRequestError: If the answer is not XML, is efetch's
+                ``eFetchResult`` error document (which E-utilities can send
+                with HTTP 200, #255), or has any other root than
+                ``PubmedArticleSet``. Neither the error's text nor the root's
+                tag is logged: a namespaced tag holds text the server chose.
         """
-        try:
-            root = ET.fromstring(xml_content)
-            articles = []
+        root = _parsed_xml(xml_content)
+        if root is None:
+            raise SourceRequestError(
+                SearchProvider.PUBMED, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+            )
+        if root.tag == EFETCH_ERROR_ROOT_TAG:
+            logger.error(
+                "E-utilities efetch answered with an error document instead of articles "
+                "(its text is not logged: it can repeat the request)"
+            )
+            raise SourceRequestError(
+                SearchProvider.PUBMED, RequestFailure(RequestFailureKind.SERVICE_ERROR)
+            )
+        if root.tag != EFETCH_ARTICLE_SET_ROOT_TAG:
+            raise _malformed_answer("efetch answer has an unexpected root element")
 
-            for article_elem in root.findall(".//PubmedArticle"):
-                metadata = self._parse_single_article(article_elem)
-                if metadata:
-                    articles.append(metadata)
+        articles = []
+        unreadable = 0
+        for article_elem in root.findall(".//PubmedArticle"):
+            metadata = self._parse_single_article(article_elem)
+            if metadata:
+                articles.append(metadata)
+            else:
+                unreadable += 1
 
-            return articles
-
-        except ET.ParseError as e:
-            logger.error(f"XML parse error: {e}")
-            return []
+        return articles, unreadable
 
     def _parse_single_article(
         self,
@@ -856,16 +1030,17 @@ class PubMedSearchClient:
         Test connection to PubMed API.
 
         Returns:
-            True if connection is successful
+            True if PubMed answered; False if the request failed, which has
+            already been logged with its reason.
         """
+        params = {
+            "db": "pubmed",
+            "term": "test",
+            "retmax": 1,
+            "retmode": "json",
+        }
         try:
-            params = {
-                "db": "pubmed",
-                "term": "test",
-                "retmax": 1,
-                "retmode": "json",
-            }
-            response = self._make_request(ESEARCH_URL, params)
-            return response is not None and response.status_code == 200
-        except Exception:
+            self._make_request(ESEARCH_URL, params)
+        except SourceRequestError:
             return False
+        return True
