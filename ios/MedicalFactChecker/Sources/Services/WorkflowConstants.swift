@@ -31,6 +31,15 @@ enum WorkflowConstants {
     /// alternative search queries to find more evidence.
     static let smartSearchThreshold = 3
 
+    /// How many more times the model is asked for alternative queries when its
+    /// answer holds none that can be used.
+    ///
+    /// An answer that does not parse as a list of queries, or that has no
+    /// content, is asked for again — each time a paid call (user's decision,
+    /// 2026-09-16). When no answer is usable, smart search is marked as tried,
+    /// so no later batch asks and pays again.
+    static let maxQueryRetries = 2
+
     /// Most failed document titles to name in a user-facing notice before counting.
     ///
     /// Above this the notice reports a count instead. Naming is more useful —

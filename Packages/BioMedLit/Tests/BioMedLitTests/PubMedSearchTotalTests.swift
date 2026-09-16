@@ -61,21 +61,33 @@ final class PubMedSearchTotalTests: EutilsStubTestCase {
         XCTAssertEqual(EutilsRecordingURLProtocol.recorded.count, 1, "an empty batch needs no efetch")
     }
 
-    /// Without a usable count, the total is what was seen, and a warning says so.
-    func testAMissingCountEndsPaginationAndWarns() async throws {
+    /// Without a usable count, the answer cannot be read: it is not a total of nothing.
+    ///
+    /// It used to end pagination at the articles seen so far, which reported a
+    /// search of 25,000 matches as one batch's worth and told nobody (#255).
+    func testAMissingCountIsAnAnswerThatCannotBeRead() async throws {
         for answer in [
             #"{"esearchresult":{"idlist":["12345"]}}"#,
-            #"{"esearchresult":{"count":"many","idlist":["12345"]}}"#
+            #"{"esearchresult":{"count":"many","idlist":["12345"]}}"#,
+            #"{"esearchresult":{"count":"1 000","idlist":["12345"]}}"#,
+            #"{"esearchresult":{"count":25,"idlist":["12345"]}}"#
         ] {
             EutilsRecordingURLProtocol.reset()
             logger.reset()
             serve(searchAnswer: answer)
 
-            let result = try await service().search(query: "aspirin", maxResults: 1, offset: 40)
-
-            XCTAssertEqual(result.totalCount, 41, answer)
-            XCTAssertNil(result.nextOffset, answer)
-            XCTAssertEqual(logger.problems.count, 1, "\(answer): \(logger.recorded)")
+            do {
+                _ = try await service().search(query: "aspirin", maxResults: 1, offset: 40)
+                XCTFail("\(answer): a search without a usable count should fail")
+            } catch let failed as SourceRequestError {
+                XCTAssertEqual(failed.failure, .malformedResponse, answer)
+                XCTAssertEqual(failed.source, .pubmed, answer)
+            }
+            XCTAssertEqual(
+                EutilsRecordingURLProtocol.recorded.count, 1,
+                "\(answer): an unreadable listing is not fetched from"
+            )
+            XCTAssertEqual(logger.errors.count, 1, "\(answer): \(logger.recorded)")
         }
     }
 }

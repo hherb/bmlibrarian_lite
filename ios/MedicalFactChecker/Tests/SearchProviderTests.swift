@@ -69,8 +69,8 @@ struct SearchOptionsTests {
         #expect(options.provider == .pubmed)
         #expect(options.includePreprints == false)
         #expect(options.maxResults == SearchProviderConstants.defaultMaxResults)
-        #expect(options.offset == 0)
-        #expect(options.cursorMark == nil)
+        #expect(options.continuation == nil)
+        #expect(options.batchNumber == 1)
     }
 
     @Test func customValues() {
@@ -78,12 +78,50 @@ struct SearchOptionsTests {
         options.provider = .europePMC
         options.includePreprints = true
         options.maxResults = 50
-        options.offset = 100
+        options.batchNumber = 3
 
         #expect(options.provider == .europePMC)
         #expect(options.includePreprints == true)
         #expect(options.maxResults == 50)
-        #expect(options.offset == 100)
+        #expect(options.batchNumber == 3)
+    }
+
+    /// A search's first page continues nothing, so each provider it names starts
+    /// at its own first page.
+    @Test func aFirstPageAsksEveryProviderItNames() {
+        var options = SearchOptions()
+        options.provider = .both
+
+        #expect(options.pubMedContinuation == .firstPage)
+        #expect(options.europePMCContinuation == .firstPage)
+        #expect(options.pubMedBasePosition == 0)
+        #expect(options.europePMCBasePosition == 0)
+    }
+
+    /// A provider the options do not name is not asked, whatever the paging says.
+    @Test func aProviderTheOptionsDoNotNameIsNotAsked() {
+        var pubMedOnly = SearchOptions()
+        pubMedOnly.provider = .pubmed
+        pubMedOnly.continuation = SearchContinuation(
+            pubMed: PubMedContinuation(offset: 40, totalResults: 900),
+            europePMC: EuropePMCContinuation(cursor: "abc", totalResults: 50, recordsReceived: 25)
+        )
+
+        #expect(pubMedOnly.pubMedContinuation?.offset == 40)
+        #expect(pubMedOnly.europePMCContinuation == nil)
+    }
+
+    /// A provider with no next page is not asked for one (#253).
+    @Test func aProviderWithNoNextPageIsNotAsked() {
+        var options = SearchOptions()
+        options.provider = .both
+        options.continuation = SearchContinuation(
+            pubMed: nil,
+            europePMC: EuropePMCContinuation(cursor: "abc", totalResults: 50, recordsReceived: 25)
+        )
+
+        #expect(options.pubMedContinuation == nil)
+        #expect(options.europePMCBasePosition == 25)
     }
 }
 
@@ -270,22 +308,10 @@ struct SearchResultMergerTests {
             makeArticle(pmid: "11111111", title: "Study Gamma", source: .europePMC, position: 1),
         ]
 
-        let pubmedResult = UnifiedSearchResult(
-            articles: pubmedArticles,
-            totalCount: 2,
-            pagination: OffsetPaginationState(totalCount: 2, offset: 0, batchSize: 2),
-            provider: .pubmed
-        )
-        let europePMCResult = UnifiedSearchResult(
-            articles: europePMCArticles,
-            totalCount: 2,
-            pagination: OffsetPaginationState(totalCount: 2, offset: 0, batchSize: 2),
-            provider: .europePMC
-        )
-
         let merged = SearchResultMerger.merge(
-            pubmedResult: pubmedResult,
-            europePMCResult: europePMCResult
+            pubMedPage: page(pubmedArticles, totalCount: 2),
+            europePMCPage: page(europePMCArticles, totalCount: 2),
+            shortfalls: []
         )
 
         // Should have 3 unique articles: A, B, C (one duplicate removed)
@@ -296,34 +322,40 @@ struct SearchResultMergerTests {
         #expect(articleA?.source == .pubmed)
     }
 
-    @Test func mergeEmptyResults() {
-        let emptyPubmed = UnifiedSearchResult.empty(provider: .pubmed)
-        let emptyEuropePMC = UnifiedSearchResult.empty(provider: .europePMC)
+    /// One provider's page, holding these articles.
+    private func page(
+        _ articles: [UnifiedArticleMetadata],
+        totalCount: Int
+    ) -> SearchServiceFactory.ProviderPage {
+        SearchServiceFactory.ProviderPage(
+            articles: articles,
+            shortfalls: [],
+            pubMedPagination: nil,
+            europePMCPagination: nil,
+            totalCount: totalCount
+        )
+    }
 
+    @Test func mergeEmptyResults() {
         let merged = SearchResultMerger.merge(
-            pubmedResult: emptyPubmed,
-            europePMCResult: emptyEuropePMC
+            pubMedPage: .notSearched,
+            europePMCPage: .notSearched,
+            shortfalls: []
         )
 
         #expect(merged.articles.isEmpty)
         #expect(merged.totalCount == 0)
+        #expect(merged.shortfalls.isEmpty)
     }
 
     @Test func mergePubmedOnlyWhenEuropePMCEmpty() {
         let pubmedArticles = [
             makeArticle(pmid: "12345678", title: "Study A", source: .pubmed, position: 0),
         ]
-        let pubmedResult = UnifiedSearchResult(
-            articles: pubmedArticles,
-            totalCount: 1,
-            pagination: OffsetPaginationState(totalCount: 1, offset: 0, batchSize: 1),
-            provider: .pubmed
-        )
-        let emptyEuropePMC = UnifiedSearchResult.empty(provider: .europePMC)
-
         let merged = SearchResultMerger.merge(
-            pubmedResult: pubmedResult,
-            europePMCResult: emptyEuropePMC
+            pubMedPage: page(pubmedArticles, totalCount: 1),
+            europePMCPage: .notSearched,
+            shortfalls: []
         )
 
         #expect(merged.articles.count == 1)

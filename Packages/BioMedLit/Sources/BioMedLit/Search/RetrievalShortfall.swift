@@ -110,7 +110,19 @@ public struct RequestFailure: Sendable, Equatable, Hashable {
 
     // MARK: Kinds that carry a status
 
-    /// The failure for an answer with an unsuccessful status.
+    /// The failure for an unsuccessful status from a source whose redirects are followed.
+    ///
+    /// Europe PMC's requests carry no credential, so its redirects are followed
+    /// and a 3xx reaching this point is an answer like any other.
+    ///
+    /// - Parameter statusCode: The status the source answered with.
+    /// - Returns: An HTTP error naming the status, or naming none when it is not
+    ///   a status an HTTP answer can carry.
+    public static func httpStatus(_ statusCode: Int) -> RequestFailure {
+        RequestFailure(kind: .httpStatus, statusCode: checkedStatusCode(statusCode))
+    }
+
+    /// The failure for an answer with an unsuccessful status, redirects refused.
     ///
     /// - Parameter statusCode: The status the source answered with.
     /// - Returns: A refused redirect for a 3xx, which the PubMed client never
@@ -163,6 +175,19 @@ public struct RequestFailure: Sendable, Equatable, Hashable {
     /// - Returns: `true` for 100 to 999.
     static func isHTTPStatusCode(_ value: Int64) -> Bool {
         value >= Int64(statusCodeRange.lowerBound) && value <= Int64(statusCodeRange.upperBound)
+    }
+
+    // MARK: Whether to try again
+
+    /// Whether another attempt may succeed.
+    ///
+    /// A timeout and a broken connection may pass; so may a status the retry
+    /// policy counts as transient, such as 429 or 503. A refused redirect is
+    /// not among them: re-sending would re-send the API key with it.
+    public var isRetryable: Bool {
+        if kind == .timeout || kind == .connection { return true }
+        guard kind == .httpStatus, let statusCode else { return false }
+        return BioMedLitConstants.retryableStatusCodes.contains(statusCode)
     }
 
     // MARK: Telling the user
@@ -418,7 +443,7 @@ public struct RetrievalShortfall: Sendable, Equatable {
 /// message cannot carry a request or an answer body. The message is for logs;
 /// text shown to the user comes from ``RetrievalShortfall/describe()``, which
 /// also covers a failed page rather than a whole search.
-public struct SourceRequestError: LocalizedError, Sendable, Equatable {
+public struct SourceRequestError: LocalizedError, RetryableError, Sendable, Equatable {
     /// The source that failed.
     public let source: SearchSource
 
@@ -439,6 +464,12 @@ public struct SourceRequestError: LocalizedError, Sendable, Equatable {
     public var shortfall: RetrievalShortfall {
         RetrievalShortfall(source: source, failure: failure)
     }
+
+    /// Whether another attempt may succeed, which is ``RequestFailure/isRetryable``.
+    ///
+    /// ``RetryHelper`` asks this, so a 429 or a 503 is retried with backoff
+    /// before the search gives up on the source (golden rule 7).
+    public var isRetryable: Bool { failure.isRetryable }
 
     public var errorDescription: String? {
         "\(source.displayName) could not be searched (\(failure.describe()))"

@@ -163,13 +163,31 @@ public struct SearchResult: Sendable {
     /// The provider that returned these results.
     public let provider: SearchProvider
 
+    /// What this page failed to retrieve, in the order it was recorded (#256).
+    ///
+    /// Empty for a page that lost nothing. A page that a failure left with no
+    /// article at all is not returned at all: the client throws
+    /// ``SourceRequestError`` instead, so a failed source never reads as one
+    /// with no evidence.
+    public let shortfalls: [RetrievalShortfall]
+
+    /// How many records the page held, readable or not.
+    ///
+    /// Europe PMC's cursor is judged against this rather than against
+    /// ``articles``: a record that could not be read still came off the cursor,
+    /// and counting only the readable ones would expect the hits it lost to
+    /// arrive on a later page that no longer exists.
+    public let recordsReceived: Int
+
     public init(
         articles: [SearchArticle],
         totalCount: Int,
         nextCursor: String? = nil,
         nextOffset: Int? = nil,
         query: String,
-        provider: SearchProvider
+        provider: SearchProvider,
+        shortfalls: [RetrievalShortfall] = [],
+        recordsReceived: Int? = nil
     ) {
         self.articles = articles
         self.totalCount = totalCount
@@ -177,6 +195,8 @@ public struct SearchResult: Sendable {
         self.nextOffset = nextOffset
         self.query = query
         self.provider = provider
+        self.shortfalls = shortfalls
+        self.recordsReceived = recordsReceived ?? articles.count
     }
 
     /// Whether there are more results available.

@@ -62,7 +62,12 @@ public enum BioMedLitLib {
     }
 
     /// Get the configured logger, or nil if not configured.
-    internal static var logger: BioMedLitLogger? {
+    ///
+    /// Public so that an app built on this library reports through the same
+    /// pipe the library does, rather than through a second one that has to be
+    /// configured — and, on a multiplatform app, declared twice — before a
+    /// diagnostic reaches anybody (golden rule 8).
+    public static var logger: BioMedLitLogger? {
         configuration?.logger
     }
 }

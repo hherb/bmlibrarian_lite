@@ -935,9 +935,9 @@ public actor FullTextService {
     /// - Throws: `CancellationError` if the caller cancelled.
     private func searchForPMCIdAndPDFUrl(query: String) async throws -> PMCResolution {
         do {
-            // `includePreprints: true` is required, not cosmetic. `search`
-            // appends ` NOT SRC:PPR` to any query that does not already contain
-            // that literal, so with the default this ladder asked
+            // `lookup` sends the query as it is, which is required, not
+            // cosmetic. `search` appends ` NOT SRC:PPR` to any query that does
+            // not already contain that literal, so this ladder once asked
             // `DOI:"…" NOT SRC:PPR` — a filter that cannot match a preprint by
             // construction, which is the one record class the DOI rung is the
             // recovery path for. Verified against the live API: the DOI of a
@@ -949,16 +949,10 @@ public actor FullTextService {
             // what the literature holds. This is a lookup of one known article
             // by its own identifier, and the answer is not ours to filter.
             //
-            // Both flags also make the emitted query identical to `query`, which
-            // is what lets the `noMatch` line below name the string that was
-            // actually sent.
-            let result = try await europePMCService.search(
-                query: query,
-                pageSize: 1,
-                includePreprints: true,
-                requireAbstract: false
-            )
-            if let firstArticle = result.articles.first {
+            // Sending the query unchanged is also what lets the `noMatch` line
+            // below name the string that was actually sent.
+            let records = try await europePMCService.lookup(query: query, pageSize: 1)
+            if let firstArticle = records.first {
                 let pmcId = firstArticle.pmcId?.isEmpty == false ? firstArticle.pmcId : nil
                 // `matchedARecord` regardless of whether it named a PMC ID: the
                 // record is Europe PMC's answer about this article either way.

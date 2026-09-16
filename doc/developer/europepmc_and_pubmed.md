@@ -84,12 +84,13 @@ it, or record the difference here:
 | Case | Python | Swift | Android |
 |------|--------|-------|---------|
 | Which 3xx is refused | 301, 302, 303, 307, 308 with a `Location` header (`is_redirect`) | every 3xx | every 3xx |
-| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`PubMedError.redirectRefused`) | no (`SourceRequestException`, `redirect_refused`) |
-| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | `PubMedError.rateLimited` | `SourceRequestException` (`http_status`, 429) |
+| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`redirect_refused` is not retryable) | no (`SourceRequestException`, `redirect_refused`) |
+| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | as Python (`SourceRequestError`) | `SourceRequestException` (`http_status`, 429) |
 | What counts as "no key" | an empty string | an empty string | a blank string, whitespace included |
-| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | total is the articles seen so far, with a warning (#255) | as Python |
-| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | dropped with a `print` (#256) | as Python |
-| Retries | each HTTP request (`_make_request`) | each HTTP request (`send`) | each request with the reading of its answer: esearch and efetch on their own, so a failed fetch does not search again |
+| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | as Python | as Python |
+| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | as Python | as Python |
+| Retries | each HTTP request (`_make_request`) | each HTTP request (`send`, `requestPage`) | each request with the reading of its answer: esearch and efetch on their own, so a failed fetch does not search again |
+| A cancelled request | not applicable (synchronous) | `CancellationError`, never a shortfall: the user's doing, not the source's | the coroutine's cancellation |
 
 **A failed source is not an empty one.** What counts as a failed request, what
 a search does with one, and how the reader is told are specified in

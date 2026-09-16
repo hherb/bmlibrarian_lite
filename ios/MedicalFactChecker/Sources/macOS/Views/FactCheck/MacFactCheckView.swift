@@ -250,8 +250,7 @@ struct MacFactCheckView: View {
         SearchOptions(
             provider: selectedSearchProvider,
             includePreprints: includePreprints,
-            maxResults: settings.batchSize,
-            offset: 0
+            maxResults: settings.batchSize
         )
     }
 
@@ -493,6 +492,12 @@ struct MacProgressSection: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(width: MacLayout.percentageWidth, alignment: .trailing)
+            }
+
+            // What the searches so far have failed to retrieve, while the
+            // session proceeds: the reader is not told only at the end (#256)
+            if let warning = workflow.incompleteSearchWarning {
+                MacIncompleteSearchNotice(text: warning)
             }
 
             // Status message

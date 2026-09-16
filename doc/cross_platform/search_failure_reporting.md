@@ -386,3 +386,43 @@ complete search's report is unchanged. The report screen, the PDF and the
 shared text draw the notice **before the verdict**, since all three show the
 verdict and summary ahead of the report's text, and the history list marks a
 report whose search was incomplete.
+
+## iOS and macOS
+
+The Swift apps ask each provider for **one page per call** too, so the stage
+table in [Android](#android) is their mapping as well, with these differences.
+
+- **The batch is not halved.** Each provider is asked for the whole batch size,
+  so a search of both returns up to twice as many records as one of either.
+- **The client raises, the app decides.** `PubMedService.search` and
+  `EuropePMCService.search` (BioMedLit) throw `SourceRequestError` for a page
+  they could not list at all, and return what a page *partly* lost as
+  `SearchResult.shortfalls`. `SearchServiceFactory` turns a raised failure into
+  the shortfall it leaves — the source could not be searched on a first page;
+  the page's records are missing and its paging moves past it on a later one —
+  and `FactCheckWorkflow` decides, once it knows which articles are new,
+  whether the page is one to proceed on.
+- **Paging travels as a `SearchContinuation`**, not as a loose offset and
+  cursor: a provider whose side is `nil` has no next page and is not asked for
+  one, which is how "PubMed has no next page" reaches the request (#253).
+- **A lookup is not a page.** `EuropePMCService.lookup` asks Europe PMC what it
+  holds about one known article, by its own identifier. It expects nothing of
+  the answer, records no shortfall, and keeps a record that carries no title —
+  which a search reports as missing, since it cannot be shown.
+- **A cancelled request is not a failure.** Both clients raise
+  `CancellationError` rather than classifying `URLError.cancelled` as a broken
+  connection, so cancelling records nothing as missing.
+- **The session keeps** its shortfalls in `FactCheckSession`'s private
+  `retrievalShortfallsJSON` (read through `retrievalShortfalls()`, which refuses
+  a damaged record), and `europePMCRecordsReceived` counts the Europe PMC
+  records received, `nil` for a session saved before the count was kept.
+- **The report** is assembled by `ReportFormatter.fullReport`: the notice, the
+  model's analysis, a `## Methodology` section holding only the Search
+  Completeness line, then `## References`. The report screen, the printable
+  view, the exported PDF and the shared text draw the notice **before the
+  verdict** and take it off the body; the history list marks a report whose
+  search was incomplete, and the fact-check screen shows the warning while the
+  session proceeds.
+- **Smart search** follows [Alternative queries](#alternative-queries-smart-search).
+  `WorkflowConstants.maxQueryRetries` is the contract's `MAX_QUERY_RETRIES`, and
+  `SmartSearchError` carries the two outcomes that are not a source's failure.

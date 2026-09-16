@@ -384,6 +384,12 @@ struct ProgressSection: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
+            // What the searches so far have failed to retrieve, while the
+            // session proceeds: the reader is not told only at the end (#256)
+            if let warning = workflow.incompleteSearchWarning {
+                IncompleteSearchNotice(text: warning)
+            }
+
             // Generated query (show once generated, collapsed by default)
             if let query = workflow.session?.pubmedQuery, !query.isEmpty {
                 DisclosureGroup(queryLabel, isExpanded: $isQueryExpanded) {

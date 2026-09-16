@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import BioMedLit
 import Foundation
 import SwiftData
 
@@ -97,6 +98,25 @@ final class FactCheckSession {
 
     /// Whether more results are available from Europe PMC.
     var europePMCHasMore: Bool = true
+
+    /// How many Europe PMC records the search's pages have held, readable or not.
+    ///
+    /// Not the same as the documents kept: a record that could not be read still
+    /// came off the cursor, and what the cursor owes is judged against this.
+    /// `nil` for a session saved before the count was kept, whose cursor can
+    /// outlive its last hit — then a later page is expected to hold nothing in
+    /// particular (#256).
+    var europePMCRecordsReceived: Int?
+
+    // MARK: - Search Shortfalls
+
+    /// What this session's searches failed to retrieve, in the contract's JSON.
+    ///
+    /// `nil` for a complete search, and for a session saved before this shipped.
+    /// Private because it is only ever read through ``retrievalShortfalls()``,
+    /// which refuses a damaged record rather than letting a report claim a
+    /// complete search (#256).
+    private var retrievalShortfallsJSON: String?
 
     // MARK: - Smart Search State
 
@@ -294,6 +314,33 @@ final class FactCheckSession {
         case .failed, .budgetExceeded:
             return 0
         }
+    }
+
+    // MARK: - Search Shortfall Methods
+
+    /// What this session's searches failed to retrieve.
+    ///
+    /// - Returns: The shortfalls, empty when every search was complete.
+    /// - Throws: ``BioMedLit/DamagedShortfallRecordError`` when the stored record
+    ///   cannot be read. Refused rather than skipped: a session that cannot say
+    ///   whether its search was complete must not write a report claiming it was.
+    func retrievalShortfalls() throws -> [RetrievalShortfall] {
+        try SearchFailureReporting.shortfalls(fromJSON: retrievalShortfallsJSON)
+    }
+
+    /// Add what a page failed to retrieve to what earlier pages failed to retrieve.
+    ///
+    /// The same failure of the same source and query is reported once, its
+    /// counts added, so a session that meets one failure page after page reads
+    /// as one clause.
+    ///
+    /// - Parameter shortfalls: What the page lost; nothing is written for none.
+    /// - Throws: ``BioMedLit/DamagedShortfallRecordError`` when the record
+    ///   already stored cannot be read, so nothing is written over it.
+    func recordRetrievalShortfalls(_ shortfalls: [RetrievalShortfall]) throws {
+        guard !shortfalls.isEmpty else { return }
+        let combined = SearchFailureReporting.combined(try retrievalShortfalls() + shortfalls)
+        retrievalShortfallsJSON = SearchFailureReporting.json(from: combined)
     }
 
     // MARK: - Methods

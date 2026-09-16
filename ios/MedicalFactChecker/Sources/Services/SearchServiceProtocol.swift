@@ -1,5 +1,5 @@
 // BMLibrarian Lite - Biomedical Literature Research Tool
-// Copyright (C) 2024-2026 Dr Horst Herb
+// Copyright (C) 2024-2025 Dr Horst Herb
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -13,6 +13,7 @@
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 
 import Foundation
 import BioMedLit
@@ -56,11 +57,20 @@ struct OffsetPaginationState: PaginationState, Sendable, Equatable {
     /// Number of results in the current batch.
     let batchSize: Int
 
+    /// Whether the source said there is no page after this one (#253).
+    ///
+    /// BioMedLit answers `nextOffset == nil` when the batch reached the last
+    /// match or the next page would pass the last record PubMed lists. Judging
+    /// only by counts missed the cap, and in a search of both providers it
+    /// judged PubMed's next page against the two providers' combined total, so
+    /// a user who paged to 9,999 was offered a page NCBI refuses.
+    let isExhausted: Bool
+
     /// Number of results fetched so far.
     var fetchedCount: Int { offset + batchSize }
 
     /// Whether more results are available.
-    var hasMore: Bool { fetchedCount < totalCount }
+    var hasMore: Bool { !isExhausted && fetchedCount < totalCount }
 
     /// Logical offset for display purposes.
     var logicalOffset: Int { offset }
@@ -74,10 +84,12 @@ struct OffsetPaginationState: PaginationState, Sendable, Equatable {
     ///   - totalCount: Total results available.
     ///   - offset: Current offset position.
     ///   - batchSize: Size of current batch.
-    init(totalCount: Int, offset: Int, batchSize: Int) {
+    ///   - isExhausted: Whether the source said there is no next page.
+    init(totalCount: Int, offset: Int, batchSize: Int, isExhausted: Bool = false) {
         self.totalCount = totalCount
         self.offset = offset
         self.batchSize = batchSize
+        self.isExhausted = isExhausted
     }
 }
 
@@ -98,6 +110,14 @@ struct CursorPaginationState: PaginationState, Sendable, Equatable {
     /// Number of results fetched so far.
     let fetchedCount: Int
 
+    /// How many records the search's pages have held, readable or not.
+    ///
+    /// Not the same as ``fetchedCount``, which counts the articles that could be
+    /// shown: a record that could not be read still came off the cursor, and
+    /// what the cursor owes is judged against this. `nil` for a session saved
+    /// before the count was kept, whose cursor can outlive its last hit.
+    let recordsReceived: Int?
+
     /// Current cursor token (nil for first request).
     let currentCursor: String?
 
@@ -117,16 +137,19 @@ struct CursorPaginationState: PaginationState, Sendable, Equatable {
     /// - Parameters:
     ///   - totalCount: Total results available.
     ///   - fetchedCount: Number of results fetched so far.
+    ///   - recordsReceived: Records the search's pages held, readable or not.
     ///   - currentCursor: Current cursor token.
     ///   - nextCursor: Next cursor token from API response.
     init(
         totalCount: Int,
         fetchedCount: Int,
+        recordsReceived: Int? = nil,
         currentCursor: String?,
         nextCursor: String?
     ) {
         self.totalCount = totalCount
         self.fetchedCount = fetchedCount
+        self.recordsReceived = recordsReceived
         self.currentCursor = currentCursor
         self.nextCursor = nextCursor
     }
@@ -138,78 +161,65 @@ struct CursorPaginationState: PaginationState, Sendable, Equatable {
         CursorPaginationState(
             totalCount: 0,
             fetchedCount: 0,
+            recordsReceived: 0,
             currentCursor: nil,
             nextCursor: nil
         )
     }
 }
 
-// MARK: - Combined Pagination State
+// MARK: - Where a session's paging stands
 
-/// Pagination state for merged results from multiple providers.
+/// Where a session's PubMed paging stands, for a page that continues it.
+struct PubMedContinuation: Sendable, Equatable {
+    /// The offset of the next page to list.
+    let offset: Int
+
+    /// The search's total, as PubMed last counted it; `nil` before a first page
+    /// has counted it, when nothing is expected of the page.
+    let totalResults: Int?
+
+    /// Where a search's first PubMed page starts.
+    static let firstPage = PubMedContinuation(offset: 0, totalResults: nil)
+}
+
+/// Where a session's Europe PMC paging stands, for a page that continues it.
+struct EuropePMCContinuation: Sendable, Equatable {
+    /// The cursor of the next page; `nil` for a search's first page.
+    let cursor: String?
+
+    /// The search's hit count, as Europe PMC last counted it; `nil` before a
+    /// first page has counted it.
+    let totalResults: Int?
+
+    /// How many records the search's pages have held, readable or not; `nil` for
+    /// a session saved before the count was kept, which stays unknown.
+    let recordsReceived: Int?
+
+    /// Where a search's first Europe PMC page starts.
+    static let firstPage = EuropePMCContinuation(cursor: nil, totalResults: nil, recordsReceived: 0)
+}
+
+/// Where a session's paging stands with both providers.
 ///
-/// Tracks both PubMed offset-based and Europe PMC cursor-based pagination
-/// to enable proper "fetch more" functionality in combined search mode.
-struct CombinedPaginationState: PaginationState, Sendable {
-    /// PubMed pagination state.
-    let pubmedPagination: any PaginationState
+/// A provider whose side is `nil` has no next page and is not asked for one:
+/// its last search failed, or it ran out of results.
+struct SearchContinuation: Sendable, Equatable {
+    /// Where its PubMed paging stands, or `nil` when PubMed has no next page.
+    let pubMed: PubMedContinuation?
 
-    /// Europe PMC pagination state.
-    let europePMCPagination: any PaginationState
-
-    /// Combined total count from both providers.
-    var totalCount: Int {
-        pubmedPagination.totalCount + europePMCPagination.totalCount
-    }
-
-    /// Combined fetched count from both providers.
-    var fetchedCount: Int {
-        pubmedPagination.fetchedCount + europePMCPagination.fetchedCount
-    }
-
-    /// Whether more results are available from either provider.
-    var hasMore: Bool {
-        pubmedPagination.hasMore || europePMCPagination.hasMore
-    }
-
-    /// Logical offset for display purposes (uses PubMed offset as primary).
-    var logicalOffset: Int {
-        pubmedPagination.logicalOffset
-    }
-
-    /// Get the next PubMed offset for pagination.
-    var nextPubMedOffset: Int {
-        if let offsetPagination = pubmedPagination as? OffsetPaginationState {
-            return offsetPagination.nextOffset
-        }
-        return pubmedPagination.logicalOffset
-    }
-
-    /// Get the next Europe PMC cursor for pagination.
-    var nextEuropePMCCursor: String? {
-        if let cursorPagination = europePMCPagination as? CursorPaginationState {
-            return cursorPagination.nextCursor
-        }
-        return nil
-    }
-
-    /// Initialize with pagination states from both providers.
-    ///
-    /// - Parameters:
-    ///   - pubmedPagination: Pagination state from PubMed.
-    ///   - europePMCPagination: Pagination state from Europe PMC.
-    init(pubmedPagination: any PaginationState, europePMCPagination: any PaginationState) {
-        self.pubmedPagination = pubmedPagination
-        self.europePMCPagination = europePMCPagination
-    }
+    /// Where its Europe PMC paging stands, or `nil` when the cursor has ended.
+    let europePMC: EuropePMCContinuation?
 }
 
 // MARK: - Unified Search Result
 
-/// Unified search result that works with any provider.
+/// One page of a search, whatever the providers behind it.
 ///
-/// Encapsulates search results along with pagination state and metadata
-/// about the search provider used.
+/// Carries what the page retrieved, what it failed to retrieve (#256), and
+/// where each provider's paging goes next. A provider's paging is `nil` when
+/// this page must leave it as it was: it was not searched, or its first page
+/// failed, so asking again asks for the same page.
 struct UnifiedSearchResult: Sendable {
     /// Articles returned by the search.
     let articles: [UnifiedArticleMetadata]
@@ -217,99 +227,101 @@ struct UnifiedSearchResult: Sendable {
     /// Total number of results available (may exceed articles.count).
     let totalCount: Int
 
-    /// Pagination state for fetching more results.
-    let pagination: any PaginationState
-
     /// Provider that returned these results.
     let provider: SearchProvider
 
-    /// Whether more results are available.
-    var hasMore: Bool { pagination.hasMore }
+    /// What this page failed to retrieve, the same failure of one source once.
+    let shortfalls: [RetrievalShortfall]
 
-    /// Logical offset for the next fetch.
-    ///
-    /// For offset-based pagination (PubMed), returns `offset + batchSize`.
-    /// For cursor-based pagination (Europe PMC), returns `fetchedCount`.
-    /// For combined pagination, returns the PubMed offset.
-    var nextOffset: Int {
-        if let offsetPagination = pagination as? OffsetPaginationState {
-            return offsetPagination.nextOffset
-        }
-        if let combinedPagination = pagination as? CombinedPaginationState {
-            return combinedPagination.nextPubMedOffset
-        }
-        return pagination.logicalOffset
+    /// Where PubMed's paging goes next, or `nil` to leave it as it was.
+    let pubMedPagination: OffsetPaginationState?
+
+    /// Where Europe PMC's paging goes next, or `nil` to leave it as it was.
+    let europePMCPagination: CursorPaginationState?
+
+    /// Whether more results are available from any provider this page searched.
+    var hasMore: Bool {
+        (pubMedPagination?.hasMore ?? false) || (europePMCPagination?.hasMore ?? false)
     }
 
-    /// Next cursor mark for Europe PMC pagination (convenience accessor).
+    /// Whether PubMed has a page after this one.
     ///
-    /// Returns the next cursor if using cursor-based pagination, nil otherwise.
-    var nextCursorMark: String? {
-        if let cursorPagination = pagination as? CursorPaginationState {
-            return cursorPagination.nextCursor
-        }
-        return nil
+    /// `false` when PubMed was not searched, which is what a session whose
+    /// PubMed search failed reads: nothing was learned about its next page.
+    var pubMedHasMore: Bool { pubMedPagination?.hasMore ?? false }
+
+    /// Whether Europe PMC has a page after this one.
+    var europePMCHasMore: Bool { europePMCPagination?.hasMore ?? false }
+
+    /// How far through the result sets this page has reached.
+    ///
+    /// Across both providers for a search of both, which is what tells a
+    /// refresh of a resumed session's paging when it has covered the documents
+    /// the session already holds.
+    var fetchedCount: Int {
+        (pubMedPagination?.fetchedCount ?? 0) + (europePMCPagination?.fetchedCount ?? 0)
     }
 
-    /// Initialize a unified search result.
+    /// The offset PubMed's next page starts at.
+    var nextOffset: Int? { pubMedPagination?.nextOffset }
+
+    /// Next cursor mark for Europe PMC pagination.
+    var nextCursorMark: String? { europePMCPagination?.nextCursor }
+
+    /// Initialize a page of a search.
     ///
     /// - Parameters:
     ///   - articles: Articles returned.
     ///   - totalCount: Total available results.
-    ///   - pagination: Pagination state.
-    ///   - provider: Source provider.
+    ///   - provider: The provider, or providers, the page was searched from.
+    ///   - shortfalls: What the page failed to retrieve.
+    ///   - pubMedPagination: Where PubMed's paging goes next.
+    ///   - europePMCPagination: Where Europe PMC's paging goes next.
     init(
         articles: [UnifiedArticleMetadata],
         totalCount: Int,
-        pagination: any PaginationState,
-        provider: SearchProvider
+        provider: SearchProvider,
+        shortfalls: [RetrievalShortfall] = [],
+        pubMedPagination: OffsetPaginationState? = nil,
+        europePMCPagination: CursorPaginationState? = nil
     ) {
         self.articles = articles
         self.totalCount = totalCount
-        self.pagination = pagination
         self.provider = provider
+        self.shortfalls = shortfalls
+        self.pubMedPagination = pubMedPagination
+        self.europePMCPagination = europePMCPagination
     }
 
-    /// Create an empty result for error cases.
+    /// Create an empty result, for a provider that was not searched.
     ///
     /// - Parameter provider: The provider that returned no results.
     /// - Returns: Empty search result.
     static func empty(provider: SearchProvider) -> UnifiedSearchResult {
-        UnifiedSearchResult(
-            articles: [],
-            totalCount: 0,
-            pagination: OffsetPaginationState(totalCount: 0, offset: 0, batchSize: 0),
-            provider: provider
-        )
+        UnifiedSearchResult(articles: [], totalCount: 0, provider: provider)
     }
 }
 
 // MARK: - Search Errors
 
 /// Errors that can occur during search operations.
+///
+/// A source that failed is **not** one of these: it is a
+/// ``BioMedLit/RetrievalShortfall`` the page carries, or — when failures left
+/// the page with nothing — a ``BioMedLit/SearchFailedError``.
 enum SearchError: LocalizedError, Equatable {
-    /// One or both providers returned partial results.
-    case partialFailure(successfulProvider: SearchProvider)
-
     /// No results from any provider.
     case noResults
 
     /// Invalid search configuration.
     case invalidConfiguration(String)
 
-    /// Network error during search.
-    case networkError(String)
-
     var errorDescription: String? {
         switch self {
-        case .partialFailure(let provider):
-            return "Partial results available from \(provider.displayName) only"
         case .noResults:
             return "No results found from any search provider"
         case .invalidConfiguration(let reason):
             return "Invalid search configuration: \(reason)"
-        case .networkError(let message):
-            return "Network error: \(message)"
         }
     }
 }
@@ -324,79 +336,68 @@ enum SearchError: LocalizedError, Equatable {
 /// - Query translation between syntaxes
 /// - Result merging and deduplication for "both" provider mode
 /// - Pagination state management
+/// - Reporting what a failed source cost the page (#256)
 enum SearchServiceFactory {
     // MARK: - Main Search Interface
 
-    /// Execute a search using the specified options.
+    /// Search one page from the providers the options name.
     ///
-    /// Routes the search to the appropriate provider(s) based on configuration.
-    /// For "both" provider mode, searches are executed concurrently and results
-    /// are merged with deduplication.
+    /// A source that fails is recorded as a ``BioMedLit/RetrievalShortfall`` and
+    /// the other source's articles still count: a failed source is not an empty
+    /// one. A provider's paging moves only where this page learned something
+    /// about it — a first page that failed leaves it where it was, so asking
+    /// again asks for the same page.
     ///
     /// - Parameters:
     ///   - query: The search query string (in PubMed or plain text syntax).
-    ///   - options: Search configuration options.
+    ///   - options: Search configuration options, including where paging stands.
     ///   - settings: App settings for service configuration.
-    ///   - cursor: Optional cursor for Europe PMC pagination. Pass nil for initial search.
-    /// - Returns: Unified search result with articles and pagination.
-    /// - Throws: Provider-specific errors if search fails.
+    /// Whether the page is one to proceed on is the caller's to decide, after
+    /// it knows which of the articles are new: a page that failures leave with
+    /// no new document changes nothing, and is a ``BioMedLit/SearchFailedError``.
+    ///
+    /// - Returns: The page's articles, what it failed to retrieve, and where
+    ///   each provider's paging goes next.
+    /// - Throws: `CancellationError` when the caller cancelled.
     static func search(
         query: String,
         options: SearchOptions,
-        settings: AppSettings,
-        cursor: String? = nil
+        settings: AppSettings
     ) async throws -> UnifiedSearchResult {
         switch options.provider {
         case .pubmed:
-            return try await searchPubMed(query: query, options: options, settings: settings)
+            return await searchPubMed(query: query, options: options, settings: settings)
 
         case .europePMC:
-            return try await searchEuropePMC(query: query, options: options, cursor: cursor)
+            return await searchEuropePMC(query: query, options: options)
 
         case .both:
-            return try await searchBoth(query: query, options: options, settings: settings, cursor: cursor)
+            return try await searchBoth(query: query, options: options, settings: settings)
         }
     }
 
     // MARK: - PubMed Search
 
-    /// Search PubMed with the given query and options.
+    /// Search one PubMed page.
     ///
     /// - Parameters:
     ///   - query: PubMed query string.
     ///   - options: Search options.
     ///   - settings: App settings for NCBI credentials.
-    /// - Returns: Unified search result.
+    /// - Returns: The page, or a page holding only the shortfall its failure left.
     private static func searchPubMed(
         query: String,
         options: SearchOptions,
         settings: AppSettings
-    ) async throws -> UnifiedSearchResult {
-        // Use BioMedLit PubMedService
-        let service = BMLPubMedService.create(from: settings)
-
-        // Execute search
-        let searchResult = try await service.search(
-            query: query,
-            maxResults: options.maxResults,
-            offset: options.offset
+    ) async -> UnifiedSearchResult {
+        singleProviderResult(
+            await pubMedPage(query: query, options: options, settings: settings), provider: .pubmed
         )
-
-        // Convert BioMedLit articles to unified format using adapter
-        let batchNumber = calculateBatchNumber(offset: options.offset, batchSize: options.maxResults)
-        let unifiedResult = BioMedLitAdapters.toUnifiedSearchResult(
-            searchResult,
-            appProvider: .pubmed,
-            batchNumber: batchNumber,
-            basePosition: options.offset
-        )
-
-        return unifiedResult
     }
 
     // MARK: - Europe PMC Search
 
-    /// Search Europe PMC with the given query and options.
+    /// Search one Europe PMC page.
     ///
     /// The query should ideally be in native Europe PMC syntax (built by
     /// `EuropePMCQueryBuilder`). For backwards compatibility with resumed
@@ -405,179 +406,330 @@ enum SearchServiceFactory {
     /// - Parameters:
     ///   - query: Query string (ideally Europe PMC syntax, PubMed syntax auto-translated).
     ///   - options: Search options.
-    ///   - cursor: Optional cursor for pagination. Pass nil or "*" for initial search.
-    /// - Returns: Unified search result.
+    /// - Returns: The page, or a page holding only the shortfall its failure left.
     private static func searchEuropePMC(
         query: String,
-        options: SearchOptions,
-        cursor: String? = nil
-    ) async throws -> UnifiedSearchResult {
-        // Use BioMedLit EuropePMCService
-        let service = BMLEuropePMCService.create()
-
-        // Check if query is already in Europe PMC syntax
-        let translatedQuery: String
-        if QueryTranslator.isEuropePMCSyntax(query) {
-            // Already in Europe PMC format (from EuropePMCQueryBuilder)
-            translatedQuery = query
-            print("[Search] Using native Europe PMC query")
-        } else if QueryTranslator.isPubMedSyntax(query) {
-            // Legacy: translate from PubMed syntax (for resumed sessions)
-            translatedQuery = QueryTranslator.pubmedToEuropePMC(query)
-            print("[Search] Translated PubMed query to Europe PMC syntax")
-
-            // Log translation warnings
-            let validation = QueryValidator.validateEuropePMCQuery(translatedQuery)
-            if !validation.warnings.isEmpty {
-                print("[Search] Query translation warnings: \(validation.warnings.joined(separator: ", "))")
-            }
-        } else {
-            // Plain text query - use as-is
-            translatedQuery = query
-        }
-
-        // Use provided cursor or "*" for initial request
-        let searchCursor = cursor ?? CursorPaginationState.initialCursor
-        let cursorDescription = searchCursor == CursorPaginationState.initialCursor ? "initial" : String(searchCursor.prefix(20))
-        print("[Search] Europe PMC search with cursor: \(cursorDescription)")
-
-        let result = try await service.search(
-            query: translatedQuery,
-            pageSize: options.maxResults,
-            cursor: searchCursor,
-            includePreprints: options.includePreprints
-        )
-
-        // Convert BioMedLit articles to unified format using adapter
-        let batchNumber = calculateBatchNumber(offset: options.offset, batchSize: options.maxResults)
-        let unifiedResult = BioMedLitAdapters.toUnifiedSearchResult(
-            result,
-            appProvider: .europePMC,
-            batchNumber: batchNumber,
-            basePosition: options.offset,
-            currentCursor: searchCursor,
-            nextCursor: result.nextCursor
-        )
-
-        return unifiedResult
+        options: SearchOptions
+    ) async -> UnifiedSearchResult {
+        singleProviderResult(await europePMCPage(query: query, options: options), provider: .europePMC)
     }
 
     // MARK: - Combined Search
 
-    /// Search both PubMed and Europe PMC concurrently and merge results.
+    /// Search both PubMed and Europe PMC concurrently and merge the two pages.
     ///
-    /// Uses TaskGroup for efficient concurrent execution. Results are merged
-    /// and deduplicated, with PubMed given priority for metadata quality.
+    /// Uses a task group for concurrent execution. Results are merged and
+    /// deduplicated, with PubMed given priority for metadata quality.
     ///
-    /// If one provider fails, returns results from the successful provider only.
-    /// If both fail, throws the first error encountered.
+    /// A provider that failed contributes its shortfall and no articles, and the
+    /// other provider's page still counts (#256). Before this, a failed provider
+    /// was reported with a `print` that goes nowhere in a release build, and the
+    /// run looked like a complete search of both.
     ///
     /// - Parameters:
     ///   - query: Query string.
     ///   - options: Search options.
     ///   - settings: App settings.
-    ///   - cursor: Optional cursor for Europe PMC pagination.
-    /// - Returns: Merged, deduplicated search result.
-    /// - Throws: SearchError if both providers fail.
+    /// - Returns: Merged, deduplicated page.
+    /// - Throws: `CancellationError` when the caller cancelled.
     private static func searchBoth(
         query: String,
         options: SearchOptions,
-        settings: AppSettings,
-        cursor: String? = nil
+        settings: AppSettings
     ) async throws -> UnifiedSearchResult {
-        // Create options for each provider
-        let pubmedOptions = SearchOptions(
-            provider: .pubmed,
-            includePreprints: false,  // PubMed doesn't support preprints
-            maxResults: options.maxResults,
-            offset: options.offset
+        async let pubMed = pubMedPage(query: query, options: options, settings: settings)
+        async let europePMC = europePMCPage(query: query, options: options)
+
+        let pages = await (pubMed: pubMed, europePMC: europePMC)
+        try Task.checkCancellation()
+
+        return SearchResultMerger.merge(
+            pubMedPage: pages.pubMed,
+            europePMCPage: pages.europePMC,
+            shortfalls: SearchFailureReporting.combined(pages.pubMed.shortfalls + pages.europePMC.shortfalls)
         )
+    }
 
-        let europePMCOptions = SearchOptions(
-            provider: .europePMC,
-            includePreprints: options.includePreprints,
-            maxResults: options.maxResults,
-            offset: options.offset
+    // MARK: - One provider's page
+
+    /// What one provider contributed to a page.
+    struct ProviderPage: Sendable {
+        /// The articles it delivered.
+        let articles: [UnifiedArticleMetadata]
+
+        /// What it failed to retrieve.
+        let shortfalls: [RetrievalShortfall]
+
+        /// Where its paging goes next, or `nil` to leave it as it was.
+        let pubMedPagination: OffsetPaginationState?
+
+        /// Where its paging goes next, or `nil` to leave it as it was.
+        let europePMCPagination: CursorPaginationState?
+
+        /// The search's total, as this provider last counted it.
+        let totalCount: Int
+
+        /// A provider this page did not ask.
+        static let notSearched = ProviderPage(
+            articles: [],
+            shortfalls: [],
+            pubMedPagination: nil,
+            europePMCPagination: nil,
+            totalCount: 0
         )
+    }
 
-        // Use throwing TaskGroup with Result to handle partial failures gracefully
-        return try await withThrowingTaskGroup(of: Result<UnifiedSearchResult, Error>.self) { group in
-            group.addTask {
-                do {
-                    let result = try await searchPubMed(query: query, options: pubmedOptions, settings: settings)
-                    return .success(result)
-                } catch {
-                    print("[Search] PubMed search failed: \(error.localizedDescription)")
-                    return .failure(error)
-                }
-            }
-            group.addTask {
-                do {
-                    let result = try await searchEuropePMC(query: query, options: europePMCOptions, cursor: cursor)
-                    return .success(result)
-                } catch {
-                    print("[Search] Europe PMC search failed: \(error.localizedDescription)")
-                    return .failure(error)
-                }
-            }
-
-            var pubmedResult: UnifiedSearchResult?
-            var europePMCResult: UnifiedSearchResult?
-            var firstError: Error?
-
-            // Collect results from both providers
-            for try await result in group {
-                switch result {
-                case .success(let searchResult):
-                    switch searchResult.provider {
-                    case .pubmed:
-                        pubmedResult = searchResult
-                    case .europePMC:
-                        europePMCResult = searchResult
-                    case .both:
-                        // Shouldn't happen, but handle gracefully
-                        break
-                    }
-                case .failure(let error):
-                    // Store first error in case both fail
-                    if firstError == nil {
-                        firstError = error
-                    }
-                }
-            }
-
-            // Handle partial failures gracefully
-            if let pubmed = pubmedResult, let europePMC = europePMCResult {
-                // Both succeeded - merge and deduplicate
-                return SearchResultMerger.merge(
-                    pubmedResult: pubmed,
-                    europePMCResult: europePMC
-                )
-            } else if let pubmed = pubmedResult {
-                // Only PubMed succeeded
-                print("[Search] Returning PubMed results only (Europe PMC failed)")
-                return pubmed
-            } else if let europePMC = europePMCResult {
-                // Only Europe PMC succeeded
-                print("[Search] Returning Europe PMC results only (PubMed failed)")
-                return europePMC
-            } else {
-                // Both failed - throw the first error
-                throw firstError ?? SearchError.noResults
-            }
+    /// Search PubMed's page of the request, reporting a failure rather than raising it.
+    ///
+    /// - Parameters:
+    ///   - query: The query string.
+    ///   - options: Search options, including where paging stands.
+    ///   - settings: App settings for NCBI credentials.
+    /// - Returns: PubMed's articles, shortfalls and paging.
+    /// - Throws: `CancellationError` when the caller cancelled.
+    private static func pubMedPage(
+        query: String,
+        options: SearchOptions,
+        settings: AppSettings
+    ) async -> ProviderPage {
+        let pageSize = options.maxResults
+        // A provider with no next page is not asked for one
+        guard let continuation = options.pubMedContinuation else { return .notSearched }
+        let offset = continuation.offset
+        // How many PMIDs a continuing page should list; unknown before a first page counts them
+        let expected = continuation.totalResults.map {
+            SearchPaging.expectedEsearchListing(totalCount: $0, offset: offset, pageSize: pageSize)
         }
+        if expected == 0 { return .notSearched }
+
+        do {
+            let result = try await BMLPubMedService.create(from: settings).search(
+                query: query, maxResults: pageSize, offset: offset
+            )
+            let articles = BioMedLitAdapters.toUnifiedArticleMetadataArray(
+                result,
+                appProvider: .pubmed,
+                batchNumber: options.batchNumber,
+                basePosition: options.pubMedBasePosition
+            )
+            return ProviderPage(
+                articles: articles,
+                shortfalls: result.shortfalls,
+                pubMedPagination: BioMedLitAdapters.pubMedPagination(
+                    for: result, basePosition: offset, articleCount: articles.count
+                ),
+                europePMCPagination: nil,
+                totalCount: result.totalCount
+            )
+        } catch let error as SourceRequestError {
+            return failedPubMedPage(error, continuation: continuation, offset: offset, expected: expected)
+        } catch {
+            return failedPubMedPage(
+                SourceRequestError(source: .pubmed, failure: .requestFailed),
+                continuation: continuation,
+                offset: offset,
+                expected: expected
+            )
+        }
+    }
+
+    /// Build the page a failed PubMed request leaves.
+    ///
+    /// A first page that failed leaves the paging where it was, so the source is
+    /// not paged past records nobody has seen. A later page that failed is
+    /// recorded as missing and paged past, so asking again asks for the page
+    /// after it (the contract's **Android** section, which is this app's shape too).
+    ///
+    /// - Parameters:
+    ///   - error: Why the request failed.
+    ///   - continuation: Where paging stood, or `nil` for a first page.
+    ///   - offset: The offset the page was asked for at.
+    ///   - expected: How many PMIDs the page should have listed, or `nil` for a first page.
+    /// - Returns: The page, holding the shortfall and no article.
+    private static func failedPubMedPage(
+        _ error: SourceRequestError,
+        continuation: PubMedContinuation,
+        offset: Int,
+        expected: Int?
+    ) -> ProviderPage {
+        guard let totalResults = continuation.totalResults, let expected, expected > 0,
+              let missed = RetrievalShortfall.missingRecords(expected, from: .pubmed, failure: error.failure) else {
+            return ProviderPage(
+                articles: [],
+                shortfalls: [error.shortfall],
+                pubMedPagination: nil,
+                europePMCPagination: nil,
+                totalCount: 0
+            )
+        }
+        return ProviderPage(
+            articles: [],
+            shortfalls: [missed],
+            pubMedPagination: OffsetPaginationState(
+                totalCount: totalResults,
+                offset: offset,
+                batchSize: expected,
+                isExhausted: !SearchPaging.pubMedHasNextPage(
+                    offset: offset + expected, totalCount: totalResults
+                )
+            ),
+            europePMCPagination: nil,
+            totalCount: totalResults
+        )
+    }
+
+    /// Search Europe PMC's page of the request, reporting a failure rather than raising it.
+    ///
+    /// - Parameters:
+    ///   - query: The query string, translated where a resumed session stored
+    ///     PubMed syntax.
+    ///   - options: Search options, including where paging stands.
+    /// - Returns: Europe PMC's articles, shortfalls and paging.
+    private static func europePMCPage(query: String, options: SearchOptions) async -> ProviderPage {
+        let pageSize = options.maxResults
+        // A cursor that has ended is not asked for another page
+        guard let continuation = options.europePMCContinuation else { return .notSearched }
+        let cursor = continuation.cursor ?? CursorPaginationState.initialCursor
+        let recordsReceived = continuation.recordsReceived
+
+        do {
+            let result = try await BMLEuropePMCService.create().search(
+                query: europePMCQuery(from: query),
+                pageSize: pageSize,
+                cursor: cursor,
+                includePreprints: options.includePreprints,
+                recordsReceived: recordsReceived
+            )
+            let articles = BioMedLitAdapters.toUnifiedArticleMetadataArray(
+                result,
+                appProvider: .europePMC,
+                batchNumber: options.batchNumber,
+                basePosition: options.europePMCBasePosition
+            )
+            return ProviderPage(
+                articles: articles,
+                shortfalls: result.shortfalls,
+                pubMedPagination: nil,
+                europePMCPagination: BioMedLitAdapters.europePMCPagination(
+                    for: result,
+                    basePosition: options.europePMCBasePosition,
+                    articleCount: articles.count,
+                    currentCursor: cursor,
+                    recordsReceived: recordsReceived
+                ),
+                totalCount: result.totalCount
+            )
+        } catch let error as SourceRequestError {
+            return failedEuropePMCPage(
+                error, continuation: continuation, cursor: cursor,
+                recordsReceived: recordsReceived, pageSize: pageSize
+            )
+        } catch {
+            return failedEuropePMCPage(
+                SourceRequestError(source: .europePMC, failure: .requestFailed),
+                continuation: continuation, cursor: cursor,
+                recordsReceived: recordsReceived, pageSize: pageSize
+            )
+        }
+    }
+
+    /// Build the page a failed Europe PMC request leaves.
+    ///
+    /// A first page that failed leaves the paging where it was. A later page
+    /// that failed ends the cursor, since a cursor cannot skip a page, and what
+    /// the page would have held is recorded as missing.
+    ///
+    /// - Parameters:
+    ///   - error: Why the request failed.
+    ///   - continuation: Where paging stood, or `nil` for a first page.
+    ///   - cursor: The cursor the page was asked for with.
+    ///   - recordsReceived: Records the search's earlier pages held, or `nil` when unknown.
+    ///   - pageSize: The page size asked for.
+    /// - Returns: The page, holding the shortfall and no article.
+    private static func failedEuropePMCPage(
+        _ error: SourceRequestError,
+        continuation: EuropePMCContinuation,
+        cursor: String,
+        recordsReceived: Int?,
+        pageSize: Int
+    ) -> ProviderPage {
+        guard let totalResults = continuation.totalResults, continuation.cursor != nil else {
+            return ProviderPage(
+                articles: [],
+                shortfalls: [error.shortfall],
+                pubMedPagination: nil,
+                europePMCPagination: nil,
+                totalCount: 0
+            )
+        }
+        // The cursor promised more, so at least one record is missing; not knowing
+        // how many came before claims the most the page could have held
+        let missing = max(1, SearchPaging.expectedEuropePMCPage(
+            hitCount: totalResults,
+            recordsReceived: recordsReceived ?? 0,
+            pageSize: pageSize
+        ))
+        return ProviderPage(
+            articles: [],
+            shortfalls: [RetrievalShortfall.missingRecords(
+                missing, from: .europePMC, failure: error.failure
+            )].compactMap { $0 },
+            pubMedPagination: nil,
+            europePMCPagination: CursorPaginationState(
+                totalCount: totalResults,
+                fetchedCount: recordsReceived ?? 0,
+                recordsReceived: recordsReceived,
+                currentCursor: cursor,
+                nextCursor: nil
+            ),
+            totalCount: totalResults
+        )
     }
 
     // MARK: - Helpers
 
-    /// Calculate batch number from offset and batch size.
+    /// Build the result of a search of one provider.
     ///
     /// - Parameters:
-    ///   - offset: Current offset in results.
-    ///   - batchSize: Size of each batch.
-    /// - Returns: 1-indexed batch number.
-    private static func calculateBatchNumber(offset: Int, batchSize: Int) -> Int {
-        guard batchSize > 0 else { return 1 }
-        return (offset / batchSize) + 1
+    ///   - page: What the provider contributed.
+    ///   - provider: Which provider it was.
+    /// - Returns: The page as a result.
+    private static func singleProviderResult(
+        _ page: ProviderPage,
+        provider: SearchProvider
+    ) -> UnifiedSearchResult {
+        UnifiedSearchResult(
+            articles: page.articles,
+            totalCount: page.totalCount,
+            provider: provider,
+            shortfalls: page.shortfalls,
+            pubMedPagination: page.pubMedPagination,
+            europePMCPagination: page.europePMCPagination
+        )
+    }
+
+    /// The query as Europe PMC is asked it.
+    ///
+    /// - Parameter query: The stored query, which a resumed session may hold in
+    ///   PubMed syntax.
+    /// - Returns: The query in Europe PMC syntax.
+    private static func europePMCQuery(from query: String) -> String {
+        if QueryTranslator.isEuropePMCSyntax(query) {
+            return query
+        }
+        guard QueryTranslator.isPubMedSyntax(query) else {
+            // Plain text: Europe PMC takes it as it is
+            return query
+        }
+        let translated = QueryTranslator.pubmedToEuropePMC(query)
+        let validation = QueryValidator.validateEuropePMCQuery(translated)
+        if !validation.warnings.isEmpty {
+            BioMedLitLib.logger?.warning(
+                "Translated a stored PubMed query for Europe PMC with "
+                    + "\(validation.warnings.count) warning(s)",
+                category: .search
+            )
+        }
+        return translated
     }
 }

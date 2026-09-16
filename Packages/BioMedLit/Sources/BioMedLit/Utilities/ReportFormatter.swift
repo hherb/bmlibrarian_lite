@@ -314,6 +314,56 @@ public enum ReportFormatter {
         }
     }
 
+    // MARK: - Assembling the stored report
+
+    /// Separates the report's blocks.
+    private static let reportBlockSeparator = "\n\n"
+
+    /// Heads the references the workflow lists after the analysis.
+    private static let referencesHeading = "## References"
+
+    /// Build a report's full text.
+    ///
+    /// What the search failed to retrieve is added here, by code, never left to
+    /// the model (#256): an incomplete search's report opens with the
+    /// incomplete-search notice and records the gap in a Methodology section
+    /// before its references. A complete search's report is unchanged.
+    ///
+    /// - Parameters:
+    ///   - analysis: The report the model wrote.
+    ///   - references: The reference list, one entry per relevant document.
+    ///   - shortfalls: What the session's searches failed to retrieve.
+    /// - Returns: The notice (if any), the analysis, the Methodology section (if
+    ///   any) and the references.
+    public static func fullReport(
+        analysis: String,
+        references: String,
+        shortfalls: [RetrievalShortfall]
+    ) -> String {
+        let blocks = [
+            analysis,
+            SearchFailureReporting.searchCompletenessMethodology(shortfalls),
+            referencesHeading + reportBlockSeparator + references,
+        ].filter { !$0.isEmpty }
+        return SearchFailureReporting.withNotice(
+            blocks.joined(separator: reportBlockSeparator), shortfalls: shortfalls
+        )
+    }
+
+    /// Build the text of a message saved in place of a report.
+    ///
+    /// Such as "no relevant evidence": a message standing in for a report opens
+    /// with the same notice, since a check of what the text says rests on the
+    /// same partial evidence base.
+    ///
+    /// - Parameters:
+    ///   - text: The message.
+    ///   - shortfalls: What the session's searches failed to retrieve.
+    /// - Returns: The message, opening with the notice when the search was incomplete.
+    public static func standInReport(_ text: String, shortfalls: [RetrievalShortfall]) -> String {
+        SearchFailureReporting.withNotice(text, shortfalls: shortfalls)
+    }
+
     // MARK: - No Evidence Content
 
     /// Result of generating no-evidence content.

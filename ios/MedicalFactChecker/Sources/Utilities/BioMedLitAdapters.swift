@@ -369,70 +369,53 @@ enum BioMedLitAdapters {
         return nextOffset - basePosition
     }
 
-    /// Convert BioMedLit SearchResult to UnifiedSearchResult with pagination state.
-    ///
-    /// Creates appropriate pagination state based on the provider:
-    /// - PubMed: Uses offset-based pagination
-    /// - Europe PMC: Uses cursor-based pagination
+    /// Where PubMed's paging goes after a page.
     ///
     /// - Parameters:
-    ///   - result: The BioMedLit SearchResult.
-    ///   - appProvider: The app's search provider enum.
-    ///   - batchNumber: Which batch this result represents.
-    ///   - basePosition: Starting position for result numbering.
-    ///   - currentCursor: Current cursor for Europe PMC (optional).
-    ///   - nextCursor: Next cursor from Europe PMC response (optional).
-    /// - Returns: UnifiedSearchResult with proper pagination state.
-    static func toUnifiedSearchResult(
-        _ result: BMLSearchResult,
-        appProvider: SearchProvider,
-        batchNumber: Int,
+    ///   - result: The BioMedLit PubMed result.
+    ///   - basePosition: The offset the page was requested at.
+    ///   - articleCount: How many articles the page produced.
+    /// - Returns: The state the session's PubMed paging moves to, which says
+    ///   there is no next page where BioMedLit said so.
+    static func pubMedPagination(
+        for result: BMLSearchResult,
         basePosition: Int,
-        currentCursor: String? = nil,
-        nextCursor: String? = nil
-    ) -> UnifiedSearchResult {
-        // Convert articles
-        let articles = toUnifiedArticleMetadataArray(
-            result,
-            appProvider: appProvider,
-            batchNumber: batchNumber,
-            basePosition: basePosition
-        )
-
-        // Create appropriate pagination state based on provider
-        let pagination: any PaginationState
-        switch appProvider {
-        case .pubmed:
-            pagination = OffsetPaginationState(
-                totalCount: result.totalCount,
-                offset: basePosition,
-                batchSize: pubMedPositionsAdvanced(
-                    by: result, basePosition: basePosition, articleCount: articles.count
-                )
-            )
-        case .europePMC:
-            // For Europe PMC, use cursor-based pagination
-            let hasMore = nextCursor != nil && !articles.isEmpty
-            pagination = CursorPaginationState(
-                totalCount: result.totalCount,
-                fetchedCount: basePosition + articles.count,
-                currentCursor: currentCursor,
-                nextCursor: hasMore ? nextCursor : nil
-            )
-        case .both:
-            // For merged results, use offset-based pagination as default
-            pagination = OffsetPaginationState(
-                totalCount: result.totalCount,
-                offset: basePosition,
-                batchSize: articles.count
-            )
-        }
-
-        return UnifiedSearchResult(
-            articles: articles,
+        articleCount: Int
+    ) -> OffsetPaginationState {
+        OffsetPaginationState(
             totalCount: result.totalCount,
-            pagination: pagination,
-            provider: appProvider
+            offset: basePosition,
+            batchSize: pubMedPositionsAdvanced(
+                by: result, basePosition: basePosition, articleCount: articleCount
+            ),
+            isExhausted: result.nextOffset == nil
+        )
+    }
+
+    /// Where Europe PMC's paging goes after a page.
+    ///
+    /// - Parameters:
+    ///   - result: The BioMedLit Europe PMC result.
+    ///   - basePosition: The position the page numbered its articles from.
+    ///   - articleCount: How many articles the page produced.
+    ///   - currentCursor: The cursor the page was requested with.
+    ///   - recordsReceived: How many records the search's earlier pages held,
+    ///     readable or not, or `nil` when nobody counted them.
+    /// - Returns: The state the session's Europe PMC paging moves to.
+    static func europePMCPagination(
+        for result: BMLSearchResult,
+        basePosition: Int,
+        articleCount: Int,
+        currentCursor: String,
+        recordsReceived: Int?
+    ) -> CursorPaginationState {
+        CursorPaginationState(
+            totalCount: result.totalCount,
+            fetchedCount: basePosition + articleCount,
+            // A record that could not be read still came off the cursor
+            recordsReceived: recordsReceived.map { $0 + result.recordsReceived },
+            currentCursor: currentCursor,
+            nextCursor: result.nextCursor
         )
     }
 

@@ -232,7 +232,7 @@ final class PubMedIdentityTests: XCTestCase {
         </PubmedArticleSet>
         """
 
-        let articles = PubMedXMLParser(data: Data(xml.utf8)).parse()
+        let articles = PubMedXMLParser(data: Data(xml.utf8)).parseArticleSet().articles
 
         XCTAssertEqual(articles.count, 1)
         XCTAssertEqual(articles.first?.identifierKind, .pubmed)

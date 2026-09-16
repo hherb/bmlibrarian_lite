@@ -21,6 +21,12 @@ import Foundation
 /// PubMed is the US National Library of Medicine's database of biomedical
 /// literature citations and abstracts.
 ///
+/// A search asks for **one page**: a failed request is never an empty page
+/// (#255, #256). The source is asked once for the page's PMIDs and once for
+/// their articles; whatever of the page the answers lose is reported with the
+/// articles that arrived, as ``SearchResult/shortfalls``, and a page that
+/// failures leave with nothing throws ``SourceRequestError``.
+///
 /// Usage:
 /// ```swift
 /// let service = PubMedService(email: "your@email.com")
@@ -71,53 +77,95 @@ public actor PubMedService {
 
     // MARK: - Search
 
-    /// Search PubMed for articles matching the query.
+    /// Search PubMed for one page of articles matching the query.
     ///
     /// - Parameters:
     ///   - query: PubMed search query.
     ///   - maxResults: Maximum number of results to return.
     ///   - offset: Starting offset for pagination.
-    /// - Returns: Search results with articles and pagination info. Only
-    ///   `PubmedArticle` records become articles, so a batch can hold fewer
-    ///   articles than the PMIDs it consumed: a `PubmedBookArticle` yields none.
+    /// - Returns: The page's articles, how many articles match in all, what the
+    ///   page failed to retrieve, and where the next page starts. Only
+    ///   `PubmedArticle` records become articles, so a page can hold fewer
+    ///   articles than the PMIDs it consumed: a `PubmedBookArticle` yields none,
+    ///   and a record that could not be read is reported as missing.
     ///   `nextOffset` is therefore the position after the PMIDs consumed, not
-    ///   after the articles. It is `nil` when there is no next page: the batch
-    ///   reached the last match, the next page would pass PubMed's offset cap
-    ///   (``BioMedLitConstants/pubmedMaxOffset``), or esearch gave no usable count.
-    /// - Throws: `PubMedError` if the search fails.
+    ///   after the articles. It is `nil` when there is no next page: the page
+    ///   reached the last match, or the next page would pass the last record
+    ///   PubMed lists (``SearchPaging/pubMedListableRecords``).
+    /// - Throws: ``SourceRequestError`` if the page could not be listed at all:
+    ///   the request failed after its retries, the answer reports an error or
+    ///   cannot be read, or it lists none of the PMIDs it counts. A failed
+    ///   search is never returned as an empty page.
     public func search(
         query: String,
         maxResults: Int = BioMedLitConstants.pubmedDefaultBatchSize,
         offset: Int = 0
     ) async throws -> SearchResult {
-        // Step 1: Search to get this batch's PMIDs and how many articles match
-        let (pmids, totalCount) = try await searchForPMIDs(query: query, maxResults: maxResults, offset: offset)
-
-        guard !pmids.isEmpty else {
-            return SearchResult(
-                articles: [],
-                totalCount: totalCount,
-                nextOffset: nil,
-                query: query,
-                provider: .pubmed
+        guard offset >= 0, offset < SearchPaging.pubMedListableRecords else {
+            // A page past the cap is one NCBI refuses, and asking for it would
+            // report NCBI's refusal as the source's failure. The caller has a
+            // nil `nextOffset` for exactly this, so reaching here is a defect.
+            BioMedLitLib.logger?.error(
+                "PubMed lists a search's records from offset 0 to "
+                    + "\(SearchPaging.pubMedListableRecords - 1), so offset \(offset) was not requested",
+                category: .search
             )
+            throw SourceRequestError(source: .pubmed, failure: .requestFailed)
         }
 
-        // Step 2: Fetch article details
-        let articles = try await fetchArticleDetails(pmids: pmids)
+        // Step 1: List this page's PMIDs and how many articles match
+        let listing = try await listPMIDs(query: query, maxResults: maxResults, offset: offset)
 
-        // Calculate next offset
-        let nextOffset = offset + pmids.count < totalCount && offset + pmids.count < BioMedLitConstants.pubmedMaxOffset
-            ? offset + pmids.count
+        // Step 2: Fetch the articles for the PMIDs the page listed
+        let fetched = listing.pmids.isEmpty
+            ? FetchedArticles(articles: [], shortfalls: [])
+            : await fetchArticles(for: listing.pmids)
+
+        // The unlisted PMIDs are recorded as missing, so the next page starts after them
+        let consumed = max(listing.expected, listing.pmids.count)
+        let nextPosition = offset + consumed
+        let nextOffset = SearchPaging.pubMedHasNextPage(offset: nextPosition, totalCount: listing.totalCount)
+            ? nextPosition
             : nil
+        let unlisted = RetrievalShortfall.missingRecords(
+            listing.unlisted, from: .pubmed, failure: .incompleteResponse
+        )
 
         return SearchResult(
-            articles: articles,
-            totalCount: totalCount,
+            articles: fetched.articles,
+            totalCount: listing.totalCount,
             nextOffset: nextOffset,
             query: query,
-            provider: .pubmed
+            provider: .pubmed,
+            shortfalls: [unlisted].compactMap { $0 } + fetched.shortfalls,
+            recordsReceived: consumed
         )
+    }
+
+    // MARK: - Private Types
+
+    /// The PMIDs one esearch page listed, and what it should have listed.
+    private struct PMIDListing {
+        /// The search's total, from `count`.
+        let totalCount: Int
+
+        /// The PMIDs the page listed, in PubMed's order.
+        let pmids: [String]
+
+        /// How many PMIDs the page should have listed.
+        let expected: Int
+
+        /// How many of ``expected`` it left out.
+        let unlisted: Int
+    }
+
+    /// The articles fetched for a page's PMIDs, and what the fetch failed to retrieve.
+    private struct FetchedArticles {
+        /// The articles that could be read.
+        let articles: [SearchArticle]
+
+        /// What the fetch lost, empty when it lost nothing.
+        let shortfalls: [RetrievalShortfall]
     }
 
     // MARK: - Private Methods
@@ -134,20 +182,28 @@ public actor PubMedService {
         lastRequestTime = Date()
     }
 
-    /// Search PubMed for one batch of PMIDs and the number of matches in all.
+    /// List one page of a search's PMIDs with esearch.
+    ///
+    /// E-utilities reports some failures inside an HTTP 200, as an `ERROR`
+    /// field and no `count` (#255): that answer is a failed search, not a
+    /// search that matched nothing, and its text is neither logged nor shown. A
+    /// `count` that is missing or is no whole number is an answer that cannot
+    /// be read, not a total of nothing.
     ///
     /// - Parameters:
     ///   - query: PubMed search query.
-    ///   - maxResults: Maximum number of PMIDs in the batch.
-    ///   - offset: Position of the batch's first PMID among all matches.
-    /// - Returns: The batch's PMIDs, and esearch's `count` of every matching
-    ///   article (#251). Without a usable `count`, the total is the articles seen
-    ///   so far, which ends pagination here, and a warning says so.
-    private func searchForPMIDs(
+    ///   - maxResults: Maximum number of PMIDs in the page.
+    ///   - offset: Position of the page's first PMID among all matches.
+    /// - Returns: The page's PMIDs, esearch's `count` of every matching article
+    ///   (#251), and how many PMIDs the page should have listed.
+    /// - Throws: ``SourceRequestError`` if the request failed, the answer
+    ///   reports an error or cannot be read, or it lists none of the PMIDs it
+    ///   counts.
+    private func listPMIDs(
         query: String,
         maxResults: Int,
         offset: Int
-    ) async throws -> (pmids: [String], totalCount: Int) {
+    ) async throws -> PMIDListing {
         let parameters = [
             (name: "db", value: "pubmed"),
             (name: "term", value: query),
@@ -163,18 +219,41 @@ public actor PubMedService {
 
         let data = try await send(to: BioMedLitConstants.pubmedSearchURL, parameters: parameters)
 
-        // Parse response
-        let response = try JSONDecoder().decode(PubMedSearchResponse.self, from: data)
-        let pmids = response.esearchresult?.idlist ?? []
-        let articlesSeen = offset + pmids.count
+        guard let answer = LenientJSON.value(from: data) as? [String: Any] else {
+            throw unreadableAnswer("esearch answer is not a JSON object")
+        }
+        guard let result = answer["esearchresult"] as? [String: Any] else {
+            throw unreadableAnswer("esearch answer has no esearchresult object")
+        }
+        if result["ERROR"] != nil {
+            BioMedLitLib.logger?.error(
+                "E-utilities esearch answered with an ERROR instead of a result "
+                    + "(its text is not logged: it can repeat the request)",
+                category: .search
+            )
+            throw SourceRequestError(source: .pubmed, failure: .serviceError)
+        }
+        guard let count = result["count"] as? String, let totalCount = wholeNumber(count) else {
+            throw unreadableAnswer("esearch result has no numeric count")
+        }
+        guard let pmids = result["idlist"] as? [String] else {
+            throw unreadableAnswer("esearch result has no idlist of strings")
+        }
 
-        let totalCount: Int
-        if let statedCount = response.esearchresult?.count.flatMap({ Int($0) }) {
-            totalCount = statedCount
-        } else {
-            totalCount = articlesSeen
+        let expected = SearchPaging.expectedEsearchListing(
+            totalCount: totalCount, offset: offset, pageSize: maxResults
+        )
+        if expected > 0 && pmids.isEmpty {
+            BioMedLitLib.logger?.error(
+                "Incomplete E-utilities answer: esearch listed 0 of \(expected) PMIDs",
+                category: .search
+            )
+            throw SourceRequestError(source: .pubmed, failure: .incompleteResponse)
+        }
+        let unlisted = max(0, expected - pmids.count)
+        if unlisted > 0 {
             BioMedLitLib.logger?.warning(
-                "PubMed search answered without a usable result count; ending pagination at the \(articlesSeen) articles seen",
+                "esearch listed \(pmids.count) of \(expected) PMIDs",
                 category: .search
             )
         }
@@ -184,18 +263,31 @@ public actor PubMedService {
             category: .search
         )
 
-        return (pmids, totalCount)
+        return PMIDListing(totalCount: totalCount, pmids: pmids, expected: expected, unlisted: unlisted)
     }
 
-    /// Fetch article details for given PMIDs.
+    /// Read a count E-utilities wrote as a decimal string.
+    ///
+    /// - Parameter text: The stated count.
+    /// - Returns: The number, or `nil` for anything that is not decimal digits,
+    ///   a sign and a space included.
+    private func wholeNumber(_ text: String) -> Int? {
+        guard !text.isEmpty, text.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(text)
+    }
+
+    /// Fetch the articles for a page's PMIDs with efetch.
+    ///
+    /// A fetch that fails after its retries costs its PMIDs, not the search:
+    /// they are recorded as missing, as are the records of an answer that broke
+    /// off and the articles that could not be read (#255, #256).
     ///
     /// - Parameter pmids: The PMIDs to fetch.
-    /// - Returns: The `PubmedArticle` records the efetch answer holds. Other
-    ///   records, such as a `PubmedBookArticle`, are skipped, so there can be
-    ///   fewer articles than PMIDs.
-    private func fetchArticleDetails(
-        pmids: [String]
-    ) async throws -> [SearchArticle] {
+    /// - Returns: The `PubmedArticle` records the answer holds, and what the
+    ///   fetch failed to retrieve. Records other than `PubmedArticle`, such as a
+    ///   `PubmedBookArticle`, are not articles and are not missing either: NCBI
+    ///   answered for them, with a record this app does not show.
+    private func fetchArticles(for pmids: [String]) async -> FetchedArticles {
         let parameters = [
             (name: "db", value: "pubmed"),
             (name: "id", value: pmids.joined(separator: ",")),
@@ -203,11 +295,88 @@ public actor PubMedService {
             (name: "retmode", value: "xml")
         ]
 
-        let data = try await send(to: BioMedLitConstants.pubmedFetchURL, parameters: parameters)
+        let parsed: PubMedXMLParser.ParsedArticleSet
+        do {
+            let data = try await send(to: BioMedLitConstants.pubmedFetchURL, parameters: parameters)
+            parsed = try articleSet(from: data)
+        } catch let error as SourceRequestError {
+            BioMedLitLib.logger?.warning(
+                "PubMed articles for \(pmids.count) PMIDs could not be fetched: \(error.failure.describe())",
+                category: .search
+            )
+            return FetchedArticles(
+                articles: [],
+                shortfalls: [
+                    RetrievalShortfall.missingRecords(pmids.count, from: .pubmed, failure: error.failure)
+                ].compactMap { $0 }
+            )
+        } catch {
+            // `send` throws nothing else; saying so beats a page that silently holds no article
+            BioMedLitLib.logger?.error(
+                "PubMed articles for \(pmids.count) PMIDs could not be fetched "
+                    + "(an unexpected error, whose text is not logged)",
+                category: .search
+            )
+            return FetchedArticles(
+                articles: [],
+                shortfalls: [
+                    RetrievalShortfall.missingRecords(pmids.count, from: .pubmed, failure: .requestFailed)
+                ].compactMap { $0 }
+            )
+        }
 
-        // Parse XML response
-        let parser = PubMedXMLParser(data: data)
-        return parser.parse()
+        // An answer that broke off was never seen past the break, so every PMID
+        // without an article is missing, not only the records that closed unreadable
+        let unreadable = parsed.wellFormed ? parsed.unreadable : max(0, pmids.count - parsed.articles.count)
+        if unreadable > 0 {
+            BioMedLitLib.logger?.warning(
+                "efetch delivered \(parsed.articles.count) readable articles for \(pmids.count) PMIDs",
+                category: .search
+            )
+        }
+        return FetchedArticles(
+            articles: parsed.articles,
+            shortfalls: [
+                RetrievalShortfall.missingRecords(unreadable, from: .pubmed, failure: .malformedResponse)
+            ].compactMap { $0 }
+        )
+    }
+
+    /// Parse an efetch answer, refusing NCBI's error document.
+    ///
+    /// - Parameter data: The answer's body.
+    /// - Returns: The articles, how many records closed unreadable, and whether
+    ///   the document was well formed.
+    /// - Throws: ``SourceRequestError`` for an `eFetchResult` error document, or
+    ///   for a root element this build does not know.
+    private func articleSet(from data: Data) throws -> PubMedXMLParser.ParsedArticleSet {
+        let parsed = PubMedXMLParser(data: data).parseArticleSet()
+
+        switch parsed.rootElement {
+        case PubMedXMLParser.articleSetRoot:
+            return parsed
+        case PubMedXMLParser.errorDocumentRoot:
+            BioMedLitLib.logger?.error(
+                "E-utilities efetch answered with an error document instead of articles "
+                    + "(its text is not logged: it can repeat the request)",
+                category: .search
+            )
+            throw SourceRequestError(source: .pubmed, failure: .serviceError)
+        case nil:
+            throw unreadableAnswer("efetch answer has no XML root element")
+        default:
+            throw unreadableAnswer("efetch answer has an unexpected root element")
+        }
+    }
+
+    /// Build the error for an E-utilities answer that cannot be read, and log why.
+    ///
+    /// - Parameter reason: What was wrong, naming fields only, never their
+    ///   values: an answer can repeat the request, API key included.
+    /// - Returns: The error to throw.
+    private func unreadableAnswer(_ reason: String) -> SourceRequestError {
+        BioMedLitLib.logger?.error("Unreadable E-utilities answer: \(reason)", category: .search)
+        return SourceRequestError(source: .pubmed, failure: .malformedResponse)
     }
 
     /// Send one E-utilities request and return the body of its answer.
@@ -226,21 +395,19 @@ public actor PubMedService {
     ///     ``BioMedLitConstants/pubmedSearchURL``.
     ///   - parameters: The request's own parameters. Identification is added here.
     /// - Returns: The body of a 200 response.
-    /// - Throws: ``PubMedError/redirectRefused(statusCode:)`` for a 3xx;
-    ///   ``PubMedError/rateLimited`` for a 429 and
-    ///   ``PubMedError/serverError(statusCode:)`` for another retryable status,
-    ///   when still failing after the last attempt;
-    ///   ``PubMedError/httpError(statusCode:)`` for any other status;
-    ///   ``PubMedError/networkError(_:)`` for an endpoint that is not a URL or
-    ///   an answer that is not HTTP; or the transport's own error.
+    /// - Throws: ``SourceRequestError`` naming PubMed and, as its failure, a
+    ///   refused redirect for a 3xx, the HTTP status for another unsuccessful
+    ///   answer, or the kind the transport's own error belongs to — a timeout,
+    ///   a failed connection, or a failed request.
     private func send(
         to endpoint: String,
         parameters: [(name: String, value: String)]
     ) async throws -> Data {
         guard let url = URL(string: endpoint) else {
-            let reason = "E-utilities endpoint '\(endpoint)' is not a URL"
-            BioMedLitLib.logger?.error(reason, category: .search)
-            throw PubMedError.networkError(reason)
+            BioMedLitLib.logger?.error(
+                "E-utilities endpoint '\(endpoint)' is not a URL", category: .search
+            )
+            throw SourceRequestError(source: .pubmed, failure: .requestFailed)
         }
 
         // Outside the retry, so a retry's backoff is not lengthened by a second wait
@@ -254,113 +421,89 @@ public actor PubMedService {
         let request = EutilsRequest.post(to: url, parameters: bodyParameters)
         let session = self.session
 
-        return try await RetryHelper.retry(
-            config: .networkDefault,
-            shouldRetry: RetryHelper.retryOnlyTransient
-        ) {
-            let (data, response) = try await session.data(
-                for: request,
-                delegate: RedirectRefusingTaskDelegate()
-            )
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw PubMedError.networkError("Invalid response")
-            }
-
-            let statusCode = httpResponse.statusCode
-
-            if BioMedLitConstants.httpRedirectStatusCodes.contains(statusCode) {
-                BioMedLitLib.logger?.error(
-                    "PubMed answered \(url.path) with HTTP \(statusCode), a redirect; not followed",
-                    category: .search
+        do {
+            return try await RetryHelper.retry(
+                config: .networkDefault,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                let (data, response) = try await session.data(
+                    for: request,
+                    delegate: RedirectRefusingTaskDelegate()
                 )
-                throw PubMedError.redirectRefused(statusCode: statusCode)
-            }
 
-            if statusCode == BioMedLitConstants.httpStatusRateLimited {
-                throw PubMedError.rateLimited
-            }
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw SourceRequestError(source: .pubmed, failure: .requestFailed)
+                }
 
-            if BioMedLitConstants.retryableStatusCodes.contains(statusCode) {
-                throw PubMedError.serverError(statusCode: statusCode)
-            }
+                let statusCode = httpResponse.statusCode
 
-            // `data` is dropped unread on every failure: it may echo the key
-            guard statusCode == BioMedLitConstants.httpStatusOK else {
-                throw PubMedError.httpError(statusCode: statusCode)
-            }
+                if BioMedLitConstants.httpRedirectStatusCodes.contains(statusCode) {
+                    BioMedLitLib.logger?.error(
+                        "PubMed answered \(url.path) with HTTP \(statusCode), a redirect; not followed",
+                        category: .search
+                    )
+                }
 
-            return data
+                // `data` is dropped unread on every failure: it may echo the key
+                guard statusCode == BioMedLitConstants.httpStatusOK else {
+                    throw SourceRequestError(
+                        source: .pubmed, failure: .forHTTPStatus(statusCode)
+                    )
+                }
+
+                return data
+            }
+        } catch let error as SourceRequestError {
+            throw error
+        } catch where error.isCancellation {
+            // A cancelled request is the user's doing, not the source's: recorded
+            // as a shortfall it would tell them PubMed lost records it never lost
+            throw CancellationError()
+        } catch {
+            throw SourceRequestError(source: .pubmed, failure: SearchTransport.failure(for: error))
         }
     }
-}
-
-// MARK: - PubMed Errors
-
-/// Errors that can occur during PubMed operations.
-public enum PubMedError: LocalizedError, RetryableError, Sendable {
-    case invalidQuery(String)
-    case networkError(String)
-    case httpError(statusCode: Int)
-    case serverError(statusCode: Int)
-    case parseError(String)
-    case rateLimited
-    case noResults
-    /// NCBI answered with a redirect, which is never followed (#243). A 307 or
-    /// 308 would re-send the body, API key included, to whatever host it names;
-    /// a 301, 302 or 303 would re-send the request as a GET without its parameters.
-    case redirectRefused(statusCode: Int)
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidQuery(let query):
-            return "Invalid search query: \(query)"
-        case .networkError(let message):
-            return "Network error: \(message)"
-        case .httpError(let statusCode):
-            return "HTTP error: \(statusCode)"
-        case .serverError(let statusCode):
-            return "PubMed server error (HTTP \(statusCode)). Try again later."
-        case .parseError(let message):
-            return "Failed to parse response: \(message)"
-        case .rateLimited:
-            return "Rate limited. Please wait and try again."
-        case .noResults:
-            return "No results found for the search query"
-        case .redirectRefused(let statusCode):
-            return "PubMed answered with a redirect (HTTP \(statusCode)), which was not followed"
-        }
-    }
-
-    public var isRetryable: Bool {
-        switch self {
-        case .serverError, .networkError, .rateLimited:
-            return true
-        case .invalidQuery, .httpError, .parseError, .noResults, .redirectRefused:
-            return false
-        }
-    }
-}
-
-// MARK: - Response Types
-
-/// PubMed esearch response.
-struct PubMedSearchResponse: Codable {
-    let esearchresult: PubMedSearchResult?
-}
-
-/// PubMed search result.
-struct PubMedSearchResult: Codable {
-    let count: String?
-    let idlist: [String]?
 }
 
 // MARK: - PubMed XML Parser
 
 /// Simple XML parser for PubMed efetch responses.
+///
+/// Reports what it could not read rather than returning fewer articles in
+/// silence (#255): a record that closes without a PMID or a title is counted,
+/// a document that breaks off is reported as not well formed, and the root
+/// element is kept so an `eFetchResult` error document is told apart from an
+/// empty article set.
 final class PubMedXMLParser: NSObject, XMLParserDelegate {
+    /// The root element of an answer that holds articles.
+    static let articleSetRoot = "PubmedArticleSet"
+
+    /// The root element of NCBI's error document (#255).
+    static let errorDocumentRoot = "eFetchResult"
+
+    /// An efetch answer as parsed.
+    struct ParsedArticleSet {
+        /// The articles that carried a PMID and a title.
+        let articles: [SearchArticle]
+
+        /// `PubmedArticle` records that closed without a PMID or a title.
+        let unreadable: Int
+
+        /// `false` when the XML broke off, so records after the break were never seen.
+        let wellFormed: Bool
+
+        /// The document's root element, or `nil` when it opened none.
+        let rootElement: String?
+    }
+
     private let parser: XMLParser
     private var articles: [SearchArticle] = []
+
+    /// `PubmedArticle` records that closed without a PMID or a title.
+    private var unreadable = 0
+
+    /// The document's root element, once it has opened.
+    private var rootElement: String?
 
     // Current article state
     private var currentPMID = ""
@@ -386,9 +529,26 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
         parser.delegate = self
     }
 
-    func parse() -> [SearchArticle] {
-        parser.parse()
-        return articles
+    /// Parse the answer.
+    ///
+    /// - Returns: The articles, the records that could not be read, whether the
+    ///   document was well formed, and its root element.
+    func parseArticleSet() -> ParsedArticleSet {
+        let wellFormed = parser.parse()
+        if !wellFormed, let error = parser.parserError as NSError? {
+            // The message can name an entity from the body, so only where and which code
+            BioMedLitLib.logger?.error(
+                "efetch answer is not well-formed XML (code \(error.code), "
+                    + "line \(parser.lineNumber), column \(parser.columnNumber))",
+                category: .search
+            )
+        }
+        return ParsedArticleSet(
+            articles: articles,
+            unreadable: unreadable,
+            wellFormed: wellFormed,
+            rootElement: rootElement
+        )
     }
 
     func parser(
@@ -398,6 +558,9 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
         qualifiedName qName: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
+        if rootElement == nil {
+            rootElement = elementName
+        }
         currentElement = elementName
         textBuffer = ""
 
@@ -464,8 +627,26 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
                 currentYear = text
             }
         case "PubmedArticle":
-            // Save the article
-            let article = SearchArticle(
+            saveCurrentArticle()
+            inArticle = false
+        default:
+            break
+        }
+
+        textBuffer = ""
+    }
+
+    /// Keep the article that just closed, or count it as one that could not be read.
+    ///
+    /// A record with no PMID or no title names nothing a reader could look up
+    /// and shows nothing in a list, so it is missing rather than empty (#255).
+    private func saveCurrentArticle() {
+        guard !currentPMID.isEmpty, !currentTitle.isEmpty else {
+            unreadable += 1
+            return
+        }
+        articles.append(
+            SearchArticle(
                 pmid: currentPMID,
                 pmcId: currentPMCID,
                 doi: currentDOI,
@@ -484,13 +665,7 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
                 // case-report accessions (#212).
                 identifierKind: .pubmed
             )
-            articles.append(article)
-            inArticle = false
-        default:
-            break
-        }
-
-        textBuffer = ""
+        )
     }
 
     private func resetCurrentArticle() {

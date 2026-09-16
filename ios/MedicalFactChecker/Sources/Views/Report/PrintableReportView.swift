@@ -39,6 +39,14 @@ struct PrintableReportView: View {
 
             Divider()
 
+            // Incomplete search, before the verdict it qualifies
+            if let notice = report.incompleteSearchNotice {
+                Text(notice)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             // Verdict Badge (centered)
             HStack {
                 Spacer()
@@ -183,7 +191,7 @@ struct PrintableReportView: View {
                 .font(.headline)
 
             // Render markdown as plain text, converting references
-            PrintableMarkdownView(content: report.fullReport)
+            PrintableMarkdownView(content: report.reportBodyAfterNotice)
         }
     }
 

@@ -46,6 +46,8 @@ final class EutilsRecordingURLProtocol: URLProtocol {
         case status(Int, body: Data = Data())
         /// A redirect with this status to this location.
         case redirect(Int, to: URL)
+        /// No answer at all: the transport fails with this error.
+        case transportError(URLError.Code)
     }
 
     /// Size of each read from a request's body stream.
@@ -93,6 +95,8 @@ final class EutilsRecordingURLProtocol: URLProtocol {
             finish(url: url, statusCode: BioMedLitConstants.httpStatusOK, body: data)
         case .status(let statusCode, let body):
             finish(url: url, statusCode: statusCode, body: body)
+        case .transportError(let code):
+            client?.urlProtocol(self, didFailWithError: URLError(code))
         case .redirect(let statusCode, let location):
             let response = HTTPURLResponse(
                 url: url, statusCode: statusCode, httpVersion: "HTTP/1.1",

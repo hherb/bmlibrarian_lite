@@ -432,6 +432,12 @@ struct PDFExporter {
                         font: .systemFont(ofSize: PDFLayout.captionFontSize), color: .gray)
             addSpacing(PDFLayout.sectionSpacing)
 
+            // Incomplete search, before the verdict it qualifies (#256)
+            if let notice = report.incompleteSearchNotice {
+                _ = drawText(notice, font: .systemFont(ofSize: PDFLayout.bodyFontSize), color: .systemOrange)
+                addSpacing(PDFLayout.blockSpacing)
+            }
+
             // Verdict Badge
             let verdictColor: UIColor = switch report.verdict {
             case .supported: .systemGreen
@@ -474,7 +480,7 @@ struct PDFExporter {
             // Detailed Report - now with proper markdown rendering
             _ = drawText("Detailed Analysis", font: .boldSystemFont(ofSize: PDFLayout.sectionHeadingFontSize))
             addSpacing(PDFLayout.itemSpacing)
-            drawMarkdown(report.fullReport)
+            drawMarkdown(report.reportBodyAfterNotice)
             addSpacing(PDFLayout.sectionSpacing)
 
             drawDivider()
