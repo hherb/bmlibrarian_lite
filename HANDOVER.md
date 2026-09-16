@@ -482,6 +482,12 @@ Swift and Kotlin rather than a Swift-side patch.
   feature missing. **Key the harness on `swift test`'s exit code**, not its last
   summary line. **A survivor is a claim about the test, and sometimes about the
   code** (#186): check what the asserted value's provenance is on that path.
+- **Touching a SwiftData model, or `SchemaVersions.swift`?** A probe that opens
+  a store whose checksum *matches* a listed version proves nothing — two of them
+  passed while the change would have crashed every upgrading app at launch. Write
+  the store in an **earlier build's** model shape first (`StoreMigrationTests`
+  shows how, with a snapshot `@Model` in the test); that is the only path that
+  reaches the duplicate-checksum exception and an unclassified migration error.
 - **A silent SwiftPM hang with no second build running** is its manifest binary
   stuck at `_dyld_start` behind `syspolicyd`; each invocation can stall 7–11
   minutes, and `--disable-sandbox` did not prevent it (2026-09-13). Check with `swiftc -typecheck`
