@@ -8,66 +8,37 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#256 + #255 + #253 (Swift half) — a failed source is not an empty one**, branch
-`fix/swift-failed-search-is-not-empty-256`, PR #282. iOS and macOS conform
-to the #247 contract; their mapping is the contract's **iOS and macOS** section.
-Once merged, compress this into **Recently landed**. Python and Android are
-already conformant, so this closes the port.
+**#285 + #284 — a store that cannot be opened, and a report that says what its
+search lost**, branch `fix/swift-store-schema-and-report-shortfalls-285`.
+iOS/macOS only. Compress into **Recently landed** once merged.
 
-- **User's decisions (2026-09-16).** Android merged first (PR #276) and Swift
-  branched off master. The doubled "could not be completed" — a failed
-  alternative query's clause inside a failed search's sentence — **ships as the
-  contract states it**, so all three platforms read alike.
-- **The clients raise, the app decides.** `PubMedService.search` and
-  `EuropePMCService.search` throw `SourceRequestError` for a page they could not
-  list at all, and return what a page *partly* lost as `SearchResult.shortfalls`.
-  `SearchServiceFactory` turns a raised failure into the shortfall it leaves — a
-  first page: the source could not be searched and its paging stays put; a later
-  page: the records are missing and paging moves past it — and
-  `FactCheckWorkflow` decides, once it knows which articles are new, whether the
-  page is one to proceed on. **A page that failures leave with no new document
-  changes nothing.**
-- **Paging travels as a `SearchContinuation`**, not a loose offset and cursor, so
-  "PubMed has no next page" reaches the request (#253). `OffsetPaginationState`
-  carries `isExhausted`; per-provider totals are no longer conflated.
-- **Traps, each of which cost a round.** `swift test` and the macOS `xcodebuild`
-  compile **none** of the five iOS-guarded files this touched — only an iOS
-  Simulator build does (#190), so run one. `Sources/macOS` is likewise excluded
-  from the SwiftPM target, so a macOS-only view compiles in **neither** suite:
-  the macOS history list was missed for exactly that reason. **`SourceRequestError`
-  must conform to `RetryableError`**, or a 429 silently stops being retried. **A
-  lookup is not a page**: `EuropePMCService.search` also served the full-text
-  chain's identifier lookups, where a title filter and a hit-count requirement
-  (right for a search page) broke six full-text tests — hence
-  `EuropePMCService.lookup`. A cancelled request must raise `CancellationError`
-  **on every leg**, efetch included, or it is recorded as a lost record the user
-  caused. `os.Logger` takes an `OSLogMessage` literal, so a concatenated string
-  will not compile.
-- **What a re-walk is not.** `refreshPaginationState` replays the pages a resumed
-  session already holds documents from, to move paging past them. It is **not** a
-  page asked for more documents: it records no shortfall (the search that first
-  read those pages recorded what they lost, so recording again inflates the count
-  on every resume) and finding no new document is its ordinary outcome, not a
-  failed search. Treating it as one locked "Get more evidence" out of a resumed
-  session permanently, since the same replay fails the same way every time.
-- **Smart search never ends the run** where the step itself chose to run it. Its
-  two outcomes are the model's failure, not a source's: the documents already
-  scored still make a report, and `FactCheckWorkflow.smartSearchNotice` says why
-  no alternative search happened. Only where the user *asked* for smart search is
-  its failure the outcome of what they asked for.
-- **Not covered by tests:** the workflow's own decisions (throwing when a page
-  leaves nothing new, the alternative-query hold-back, the paging writes) have no
-  end-to-end test, since `FactCheckWorkflow` takes no injectable search service —
-  the Swift shape of #216. Lodged as **#281**; **#288** records that six of the
-  ten uncovered decisions are pure functions that are `private` by accident and
-  are testable today without any injection.
-- **Review of the PR, addressed 2026-09-16.** Five review agents; four critical
-  findings fixed here (the re-walk lockout and its double-counted shortfalls, the
-  smart-search abort, a cancelled efetch recorded as lost PubMed records, and the
-  macOS history list never marking an incomplete search), plus the vanishing
-  progress-time warning, the contract's stale status row, and restored-session
-  errors going to `print`. Lodged rather than addressed here: **#283** through
-  **#288**.
+- **Nothing is deleted any more.** `StoreRecovery.setAsideStore` renames
+  `default.store{,-shm,-wal}` to `…unreadable-<yyyyMMdd-HHmmss>` (user's
+  decision, 2026-09-17), logs it, and leaves the sentence the user is owed in
+  `UserDefaults` for `.storeRecoveryNotice()` on both root views — the store is
+  opened before any window exists. A file that could not be moved is named too.
+- **A version bump would crash the app, so there is none.** Every
+  `VersionedSchema` is built from the *live* model classes, so a `SchemaV3`
+  listing V2's models is byte-identical to it, and a store matching no version
+  then raises `NSInvalidArgumentException`, "Duplicate version checksums
+  detected" — an ObjC exception no Swift `catch` takes, on a `fatalError` path.
+  **#289**; the measurement is in `SchemaVersions.swift`. Two probes called it
+  safe; only a test against a store written by an *earlier build* caught it.
+- **A live defect that test also found:** such a store is refused with
+  `SwiftDataError.unknownDataStoreSchema` (SwiftData drops the 134504 Cocoa
+  error behind it), `isMigrationError` did not know the name, so the factory
+  rethrew into `fatalError` — a launch crash for everyone upgrading past a model
+  change. `StoreMigrationTests` pins the ladder now.
+- **The report records what its search lost** (`EvidenceReport`'s private
+  `searchShortfallsJSON`, `"[]"` when complete) instead of matching its own
+  prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before the
+  record and is read off its text; a damaged record reports as incomplete and
+  says it cannot tell the reader what is missing. The contract's **iOS and
+  macOS** section records that divergence from Python's "no key reads as `[]`".
+- **Also lodged: #290** — `AppLogger` exists twice, iOS- and macOS-only, so
+  shared code can use neither.
+- **Verified:** `swift test` 370 (app) + 1200 (BioMedLit), macOS `xcodebuild`,
+  iOS Simulator build. Python and Android untouched.
 
 ## Recently landed (context)
 
@@ -75,37 +46,43 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A failed source is not an empty one, on Android** (#252 + #255; PR #276,
-  merged 2026-09-16). Its mapping is the contract's **Android** section, which is
-  every one-page-per-call app's: a failed later PubMed page is recorded and paged
-  past, a failed later Europe PMC page ends the cursor, **an ended cursor misses
-  every hit not received**, and a page that failures leave with nothing changes
-  nothing. **A failed alternative (smart-search) query has its own clause**,
-  persisted as `"query": "alternative"`, and counts combine only within one
-  query. An answer holding no usable query is asked for again up to
-  `MAX_QUERY_RETRIES` (2) and then marks smart search as tried; a failed request
-  to the model is not asked again and leaves it available. A damaged shortfall
-  record is a persistent warning that stops a session before it spends anything.
-  Lodged: #267–#275, #277–#280.
-
-- **A failed source is not an empty one** (#247, #248, Python #255; PR #260,
-  merged 2026-09-15). Contract: `doc/cross_platform/search_failure_reporting.md`.
-  **A failure proceeds on what was retrieved and tells the user; failures that
-  leave nothing are an error**, never "No documents found" (user, 2026-09-14). A
-  failure travels as kind + HTTP status only: **no exception, body or parser
-  message is kept** (`raise … from None` inside `except` still keeps
-  `__context__`; `JSONDecodeError.doc` is the body). **An HTTP 200 can be a
-  failure** (esearch `ERROR`, efetch `<eFetchResult>`, Europe PMC's bare
-  `{"version":…}`), a missing count is malformed rather than 0, and a listing
-  shorter than its count is incomplete. **PubMed lists only 9,999 records**
-  (`retstart` ≤ 9998, checked live), and **a search never asks for a page past
-  the end**. The notice and Methodology line are added by code, never the LLM,
-  and **shortfalls ride with the documents into the review**: a dialog alone
-  left the report claiming a complete search. A stored shortfall degrades but
-  is never dropped. Traps: urllib3's spent read timeout arrives as a
-  `ConnectionError`; `raise_on_status=False` on Europe PMC's `Retry`;
-  `SearchResultMerger` merges "Record 7" and "Record 8" (**#258**). Lodged
-  #261–#266.
+- **A failed source is not an empty one** — all three platforms conform: Python
+  (#247, #248; PR #260), Android (#252; PR #276), iOS/macOS (#256, #253; PR
+  #282), merged 2026-09-15/16. Contract:
+  `doc/cross_platform/search_failure_reporting.md`, one section per platform.
+  #255 (E-utilities failing with HTTP 200) was verified on all three and closed
+  on 2026-09-17.
+  - **The rule.** A failure proceeds on what was retrieved and tells the user;
+    **failures that leave nothing are an error**, never "No documents found"
+    (user, 2026-09-14). A failure travels as kind + HTTP status only: **no
+    exception, body or parser message is kept** (`raise … from None` keeps
+    `__context__`; `JSONDecodeError.doc` is the body; NCBI's 400 echoes the
+    key). **An HTTP 200 can be a failure** (esearch `ERROR`, efetch
+    `<eFetchResult>`, Europe PMC's bare `{"version":…}`), a missing count is
+    malformed rather than 0, a listing shorter than its count is incomplete,
+    **PubMed lists only 9,999 records**, and a search never asks past the end.
+    Notice and Methodology line are added by code, never the LLM, and
+    **shortfalls ride with the documents into the review** — a dialog alone left
+    the report claiming a complete search. A stored shortfall degrades but is
+    never dropped; a damaged record stops a session before it spends anything.
+  - **Per page.** A failed later PubMed page is recorded and paged past; a failed
+    later Europe PMC page ends the cursor, and **an ended cursor misses every hit
+    not received**. **A page that failures leave with no new document changes
+    nothing.** A failed alternative (smart-search) query has **its own clause**,
+    persisted as `"query": "alternative"`; counts combine only within one query.
+    The doubled "could not be completed" is the contract's wording on all three
+    (user, 2026-09-16).
+  - **Swift shape.** The clients raise (`SourceRequestError`), the app decides;
+    paging travels as a `SearchContinuation`. **`SourceRequestError` must conform
+    to `RetryableError`**, or a 429 stops being retried. **A lookup is not a
+    page** (`EuropePMCService.lookup`). A cancelled request raises
+    `CancellationError` **on every leg**, efetch included.
+    `refreshPaginationState` replays pages already held: **no** shortfall, and
+    finding nothing new is ordinary — treating it as failure locked "Get more
+    evidence" out of every resumed session. **Smart search never ends the run**
+    where the step itself chose it. `os.Logger` takes a literal.
+  - Lodged across the three rounds: #258, #259, #261–#266 (Python), #267–#275,
+    #277–#280 (Android), #281, #283–#290 (Swift).
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
   #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs E-utilities
@@ -126,33 +103,30 @@ the rest.
 
 - **Older rounds, compressed further**; each rule below cost a defect.
   - **The screen and the export read references by one parser** (#233, PR #242):
-    recognition lives in `ReportInlineText`, renderers only style segments; one
-    block splitter, `ReportMarkdownBlock`, for both screens and the PDF (three
-    copies drifted). **Measure through the real renderer.** **A removal takes
-    machine syntax, never the report's words** (golden rule 6): a whole
-    parenthetical only when all of it is identity-shaped. **Narrowing one pattern
-    moves work to the next.** The reader is told (`RemovedCitationNotice`).
-    **#230** (PR #235): what the link pattern misses is *swept*, whitespace
-    tolerance only in the `doc:` scheme, and a sweep that leaves the identity is
-    worse than none.
+    recognition in `ReportInlineText`, renderers only style segments; one block
+    splitter, `ReportMarkdownBlock`, for screens and PDF (three copies drifted).
+    **Measure through the real renderer.** **A removal takes machine syntax,
+    never the report's words** (golden rule 6). **Narrowing one pattern moves
+    work to the next.** The reader is told (`RemovedCitationNotice`). **#230**
+    (PR #235): what the link pattern misses is *swept*, whitespace tolerance only
+    in the `doc:` scheme, and a sweep leaving the identity is worse than none.
   - **A document's identity may not claim what the article is** (#208, PR #226):
     `Document.id` is an opaque UUID; stored `pmid-` rows are kept, never
-    reconstructed. **Find the surface a reader actually reaches** (both
-    `PrintableReportView`s are instantiated nowhere, #221). **A shared gate is
-    only shared if every caller reads it.**
+    reconstructed. **Find the surface a reader actually reaches** (#221). **A
+    shared gate is only shared if every caller reads it.**
   - **A PubMed URL may only be built from a stated PubMed ID** (#212 + #213, PR
     #218; contract `doc/cross_platform/fulltext_retrieval.md`). **The shape of a
     number never states a PubMed ID** (thesis `889149` is also a 1977 mouse
     paper); **`.both` vouches for nothing**; one predicate,
     `ArticleIdentifierKind.pubmedID(in:declared:)`, authorises every PubMed URL
-    and `PMID:` line; a citation names the namespace it can prove.
+    and `PMID:` line.
   - **Europe PMC's own word for what an identifier is** (#209, PR #211): the kind
-    is *stated* from the record's `source`, stored, and passed back into
+    is *stated* from the record's `source`, stored, passed back into
     `fetchFullText`; a stored `nil` means "nobody stated one". The cache tag
     names the kind, not the rung. One writer for document creation
-    (`applySearchMetadata`), untested on its three workflow paths (**#216**). A
-    lookup by identifier must not filter preprints; `isNumber` is not "all
-    digits". Only Swift conforms: #205 (Android), #207 (Python).
+    (`applySearchMetadata`), untested on its three paths (**#216**). A lookup
+    must not filter preprints; `isNumber` is not "all digits". Only Swift
+    conforms: #205 (Android), #207 (Python).
   - **An article without a PMID can reach its PDF** (#202, PR #206): an article
     is named by a *ladder* (primary slot, PMC ID, DOI), no two identifiers may
     share a name, and the key comes from the document, never `resolvedPmcId`.
@@ -243,109 +217,116 @@ the rest.
 
 ## Potential follow-ups
 
+### The #282 review round: iOS/macOS storage, errors and tests
+
+Lodged while reviewing PR #282 (2026-09-16). The four critical findings were
+fixed on that branch; these are what it left.
+
+- **#287 — four error paths that still swallow or misreport.** Pending
+  smart-search shortfalls dropped when the budget throws mid-loop;
+  `TransparencyAnalysisService` swallowing `SourceRequestError` and cancellation;
+  macOS PDF export a silent `nil`-returning stub (so the contract's "the PDF
+  draws the notice" holds on iOS only); a keychain read failure reading as "no
+  NCBI API key", which makes the 429 advice tell the user to set the key they
+  have set.
+- **#286 — three in the failure types themselves**: a non-`Sendable`
+  `NumberFormatter` static (a Swift 6 hard error, reached from two isolation
+  domains); a PubMed search that legitimately matched nothing re-issued on every
+  batch and then misreported as a failed *first* page; dead/confusable public API
+  (`redirectRefused` with no callers, `SearchSource.provider` bridging to the
+  wrong `SearchProvider` spelling, `httpStatus` vs `forHTTPStatus`).
+- **#289 — a SwiftData version bump crashes at launch**, and **#290** —
+  `AppLogger` is declared twice. Both found doing #285; #289 blocks any model
+  change lightweight migration cannot absorb (a rename, a retype, a property
+  becoming non-optional), because there is no way to add a stage until each
+  version snapshots its own model types.
+- **#281 / #288 — the workflow's own decisions are untested**, because
+  `FactCheckWorkflow` takes no injectable search service (the Swift shape of
+  #216). But **#288 measured that six of the ten are pure functions that are
+  `private` by accident** and testable today: the boundary that matters is
+  `failedEuropePMCPage`'s `max(1, …)`, without which **a failed later Europe PMC
+  page reports as a complete one** and nothing catches it.
+
 ### The #226 review round: identity, one layer down
 
-Lodged while reviewing #226, #230 and #233 (2026-09-11 to 09-13). Independent
-of each other.
+Lodged while reviewing #226, #230 and #233 (2026-09-11 to 09-13). Independent of
+each other.
 
-- **#240 / #241 — where block-by-block rendering still differs from the text
-  export**: emphasis spanning a reference prints `**`, and a reference wrapped
-  after a list item or heading splits across blocks. Since #233 both live in one
-  tested place, `ReportMarkdownBlock`, shared by both screens and the PDF.
-
-- **#227 — the workflow and the checkpoints still key documents by the ambiguous
-  primary slot.** `FactCheckWorkflow` builds three `[String: Document]` maps on
-  `doc.pmid`, so of N documents sharing a slot value N-1 are silently never
-  scored; `CheckpointManager` persists the same key, so a resume replays one
-  document's score and rationale onto all of them. The persisted half is a
-  schema question, which is why #226 left it.
-- **#228 — an identity and a citation identifier are the same type**, so
-  swapping them compiles and produces exactly #212's output. Both are filled
-  from the same `doc` thirty lines apart. Wants `CitationIdentifier` moved into
-  `BioMedLit` and a `DocumentIdentity` wrapper — a currency type, not a storage
-  change: the column must stay `String`, since stored rows hold `pmid-12662058`,
-  which is not a valid UUID. Related to #219.
-- **#232 — rows written before #208 keep a derived identity, and nothing detects
-  a collision**: both report-resolution sites pick `.first { $0.id == … }`
-  silently; wants a `filter` plus an error log.
-- **#224 — an unresolvable report reference is a silent no-op**, on both
-  platforms. `findDocumentById` answers `nil` and nothing presents: golden rule
-  8. Since #233 both views resolve through `ReportReferenceLink`, and a
-  citation without an identity through `ReportCitation`, which logs a tap that
-  fits no document or several — but the reader still sees nothing. A display-text
-  fallback for `.documentIdentity` needs a second associated value first.
-  `ReportSummaryText` handles no taps itself: its citations work only beside a
-  report body that listens.
+- **#227 — the workflow and the checkpoints key documents by the ambiguous
+  primary slot.** Three `[String: Document]` maps on `doc.pmid`: of N documents
+  sharing a slot value, N-1 are never scored, and `CheckpointManager` persists
+  the same key, so a resume replays one document's score onto all of them. The
+  persisted half is a schema question, which is why #226 left it.
+- **#228 — an identity and a citation identifier are the same type**, so swapping
+  them compiles and produces #212's output; both filled from the same `doc`
+  thirty lines apart. Wants `CitationIdentifier` in `BioMedLit` and a
+  `DocumentIdentity` wrapper — a currency type, not a storage change: the column
+  stays `String`, since stored rows hold `pmid-12662058`. Related to #219, #222
+  (a "PubMed" badge beside no PubMed link, `searchSourceEnum` guessing where
+  `recordedProvider` refuses).
+- **#232 — rows written before #208 keep a derived identity and nothing detects a
+  collision**: both report-resolution sites pick `.first { $0.id == … }`; wants a
+  `filter` and an error log. **#223** — a malformed Europe PMC source token warns
+  once per SwiftUI redraw; validate once in `applySearchMetadata`.
+- **#224 — an unresolvable report reference is a silent no-op**, both platforms:
+  `findDocumentById` answers `nil` and nothing presents (golden rule 8). Since
+  #233 both views resolve through `ReportReferenceLink`, and `ReportCitation`
+  logs a tap fitting no document or several — the reader still sees nothing. A
+  display-text fallback needs a second associated value first.
+- **#237 — the export deletes citations and tells only the log**, with the export
+  sheet in front of the user. The parts exist since #233: `PDFExporter` parses
+  once through `ReportMarkdownBlock`, `RemovedCitationNotice(parses:)` is the
+  sentence; what remains is showing it on the PDF and in `plainTextReport`
+  (which also leaves literal `\n` unconverted). **#236** — a `doc:` target that
+  lost its opening parenthesis survives the sweep, keyed on `(doc:`; widening it
+  deletes text on a bare scheme in prose, so it wants a decision (golden rule 6).
+  **#238** — `BioMedLit` defaults to discarding diagnostics though it now removes
+  text; both apps configure a real logger, so this is enforcement.
+- **#240 / #241 — block rendering still differs from the text export**: emphasis
+  spanning a reference prints `**`, and a reference wrapped after a list item or
+  heading splits across blocks. Both live in `ReportMarkdownBlock` since #233.
 - **#231 — transparency analysis cannot run from full text alone**, though
-  `analyzeCOI` and `analyzeDataAvailability` need no identifier. 60 of 100
-  sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records carry no DOI, so this is the
-  common case for that population. Needs a "not assessed" state, which is what
-  makes it a contract change rather than a widened guard — see #203.
-- **#234 — Android's PDF export never flattens links**, so every citation prints
-  its whole `[Author, Year](doc:pmid-…)` source. #230 ports directly.
-- **#229 — Android and Python still build and parse `pmid-` references**: no
-  shared contract breaks, but close the divergence deliberately.
-- **#236 — a `doc:` target that lost its opening parenthesis survives the
-  sweep**, which is keyed on `(doc:`. Widening it would delete text on the
-  strength of a bare scheme in prose, which is golden rule 6 territory and wants
-  a decision rather than a patch. Reported meanwhile, and pinned by test.
-- **#237 — the export deletes citations and tells only the log.** Golden rule 8
-  wants the user told, and the export sheet sits right in front of them. Since
-  #233 the parts exist: `PDFExporter` already parses once per report through
-  `ReportMarkdownBlock` and logs once; `RemovedCitationNotice(parses:)` is the
-  sentence. What remains is to surface it on the PDF and in `plainTextReport`
-  (which also leaves literal `\n` unconverted, unlike the screen and PDF). The
-  printable views still call the logging `-> String` flattener from `body`.
-- **#238 — `BioMedLit` defaults to discarding its own diagnostics**, though
-  since #230 it removes text. Both apps configure a real logger: enforcement,
-  not a live defect.
-- **#222 — a card can show a "PubMed" badge next to no PubMed link**: for a row
-  with no `searchSource`, `searchSourceEnum` falls back to `.pubmed` (badge)
-  while `recordedProvider` refuses to guess (link). Decide with #219.
-- **#223 — a malformed Europe PMC source token warns once per SwiftUI redraw**:
-  `Document.identifierKind`'s getter re-validates on every read from view
-  bodies. Validate once in `applySearchMetadata` and record an `ErrorEntry`.
+  `analyzeCOI` and `analyzeDataAvailability` need no identifier; 60 of 100
+  sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records carry no DOI. Needs a "not
+  assessed" state, which makes it a contract change — see #203.
+- **Android's share of this round**: **#234** (the PDF export never flattens
+  links, so every citation prints its `[Author, Year](doc:pmid-…)` source; #230
+  ports directly) and **#229** (Android and Python still build and parse `pmid-`
+  references — no shared contract breaks, but close it deliberately).
 
 ### The #206 round: identifier identity, on the other two platforms
 
-The Swift fix is one platform's half of a contract change. All of these are
-independent of each other.
+The Swift fix is one platform's half of a contract change. All independent.
 
 - **#214 — what the retrieval chain learns never reaches the reader or the error
   queue**, and **#215 — cache read and write failures are misreported as download
-  failures**. Both are in `FullTextService`, and both are honesty-of-reporting
-  work of the shape #183/#186/#187 established.
-- **#216 — nothing tests `FactCheckWorkflow`'s three document-creation paths.**
-  How the third hand-copying site survived the whole of #209.
+  failures.** Both in `FullTextService`; both the honesty-of-reporting shape
+  #183/#186/#187 established.
+- **#216 — nothing tests `FactCheckWorkflow`'s three document-creation paths**,
+  which is how the third hand-copying site survived the whole of #209.
 - **#210 — macOS shows a preprint as plain "Europe PMC".** `MacScoredDocumentsView`
   draws `MacProviderBadge`, which takes no preprint flag, while the macOS badge
-  that does is referenced only by its own preview. Dead until #209 made
-  `isPreprint` real; live now, and the two platforms disagree about what they
-  tell the reader.
+  that does is referenced only by its own preview: the two platforms disagree
+  about what they tell the reader.
 - **#205 — Android asks `src:med` for every identifier** (`FullTextService.kt:308`)
-  and never asks for a PMC ID at all. A verbatim port of the Swift repair, plus
-  the revised "Cache Keys" section **and the stated kind** (#209): route on the
-  record's `source`, persist the token, tag the cache on the kind.
-- **#220 — Android builds a PubMed URL from an unvouched `pmid`**
-  (`Document.kt:167`, `ReportViewModel.kt:347`). Unreachable under today's
-  mapping, which is the shape Swift had before #212; port the rule, not the fix.
-- **#207 — Python has no preprint routing, runs only the first matching rung,
-  and puts the PMC rung first** (`europepmc.py`, `get_article_info`). Less
-  severe than the Swift defect was, because Python keeps the identifiers in
-  separate parameters and so never asks for a PMC accession under `src:med`.
-  Also wants the stated kind (#209); it has no PDF cache, so the tag half of the
-  contract does not apply.
+  and never asks for a PMC ID. A verbatim port of the Swift repair, plus the
+  revised "Cache Keys" section **and the stated kind** (#209). **#220** — Android
+  builds a PubMed URL from an unvouched `pmid` (`Document.kt:167`,
+  `ReportViewModel.kt:347`); unreachable under today's mapping, the shape Swift
+  had before #212 — port the rule, not the fix.
+- **#207 — Python has no preprint routing, runs only the first matching rung, and
+  puts the PMC rung first** (`europepmc.py`, `get_article_info`). Less severe than
+  Swift's was, since Python keeps identifiers in separate parameters and never
+  asks for a PMC accession under `src:med`. Wants the stated kind (#209) too; no
+  PDF cache, so the tag half does not apply.
 - **#204 — unsectioned `<back>` routing sweeps `<ref-list>` apparatus into
-  `bodySections`.** Found from bmlib's side. `case "p"` ends on the ambient
-  `inBack`, so a `<ref-list>`'s own `<p>` and a `<ref>`'s `<note><p>` become
-  article prose — "Faculty Opinions Recommendation", highlight keys, a bare DOI.
-  Measured at 191 paragraphs in 39 of 8,117 served articles (0.47%) and 1,354 in
-  307 of 97,909 (0.25%). Small, but a corruption rather than a blank, where
-  everything else that widening recovers is content that was missing. **bmlib
-  refuses `<ref-list>` and nothing else, decided by an ancestor test on the
-  element stack** — a bare `inRefList` flag is re-admitted by a nested list's
-  close tag. Port it, or record the divergence knowingly; bmlib has it in its
-  own `docs/DECISIONS.md`.
+  `bodySections`.** Found from bmlib's side: `case "p"` ends on the ambient
+  `inBack`, so a `<ref-list>`'s own `<p>` becomes article prose — 191 paragraphs
+  in 39 of 8,117 served articles (0.47%), 1,354 in 307 of 97,909 (0.25%). Small,
+  but a corruption rather than a blank. **bmlib refuses `<ref-list>` and nothing
+  else, decided by an ancestor test on the element stack** — a bare `inRefList`
+  flag is re-admitted by a nested list's close tag. Port it, or record the
+  divergence knowingly.
 
 ### Extracted PDF text misrepresents an article to the transparency analyser
 
@@ -381,9 +362,9 @@ Swift and Kotlin rather than a Swift-side patch.
 ### The rest of the #198 round
 
 - **#244 — `bmll -v` never enables DEBUG**: the analyser and `batch_analyzer.py`
-  call `logging.basicConfig(INFO)` at import, and the GUI configures no logging
-  at all, so the fix needs a GUI setup too. **#245** — those two standalone
-  CLIs take the NCBI key only as `--api-key` (shell history, `ps`).
+  call `logging.basicConfig(INFO)` at import and the GUI configures none, so the
+  fix needs a GUI setup too. **#245** — those two CLIs take the NCBI key only as
+  `--api-key` (shell history, `ps`).
 - **Failures that read as findings, still open** (the #246 review). Nothing
   connects `analysis_failed` (**#249**); an efetch with no article yields "No
   conflict of interest statement found" (**#250**, #203's shape). **#258** — the

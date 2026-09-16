@@ -106,6 +106,34 @@ enum SchemaV2: VersionedSchema {
     }
 }
 
+// MARK: - Why there is no Schema Version 3
+
+// The search-failure contract added three stored properties (#256, #284):
+// `FactCheckSession.europePMCRecordsReceived`, its `retrievalShortfallsJSON`,
+// and `EvidenceReport.searchShortfallsJSON`. No version was added for them, and
+// adding one would break the app rather than help it (#285, measured
+// 2026-09-17):
+//
+// - Every version in this file is built from the *live* model classes, so a new
+//   property moves all their checksums at once. A V3 listing the same models as
+//   V2 is therefore byte-identical to it, and building a container against a
+//   store that matches no version raises `NSInvalidArgumentException`,
+//   "Duplicate version checksums detected" — an Objective-C exception no Swift
+//   `catch` can take, so every user whose store predates the current shape would
+//   meet it at launch. It is the same trap the V0 note below describes.
+// - A store written by an earlier build already matches no version — its
+//   checksum was computed from the model classes as they were — so staged
+//   migration refuses it with "Cannot use staged migration with an unknown model
+//   version" (NSCocoaError 134504), whatever versions this file lists.
+//   `CloudKitConfiguration.makeContainer` then falls to automatic lightweight
+//   migration, which is what actually carries the user's fact checks across an
+//   added property. `StoreMigrationTests` pins that.
+//
+// Making a version bump mean something requires snapshotting each model type
+// inside its own version instead of sharing the live classes, which is #289.
+// Until then a new optional property needs no stage, and a change lightweight
+// migration cannot absorb needs #289 done first.
+
 // MARK: - Migration Plan
 
 /// Migration plan for upgrading the database schema.
@@ -126,7 +154,8 @@ enum MedicalFactCheckerMigrationPlan: SchemaMigrationPlan {
         // SwiftData to compute identical checksums and crash with
         // "Duplicate version checksums across stages detected."
         // Unversioned databases are handled by CloudKitConfiguration's fallback
-        // strategies (automatic lightweight migration or store reset).
+        // strategies (automatic lightweight migration, or setting the store
+        // aside unread).
         [SchemaV1.self, SchemaV2.self]
     }
 

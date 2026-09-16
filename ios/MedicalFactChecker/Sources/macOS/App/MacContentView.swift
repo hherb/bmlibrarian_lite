@@ -100,6 +100,8 @@ struct MacContentView: View {
                         selectedNavItem = .fullText
                     }
                 }
+                // Said here because the store is opened before any window exists
+                .storeRecoveryNotice()
         }
     }
 

@@ -1638,7 +1638,8 @@ struct FootnoteSection: View {
         """,
         citationCount: 5,
         uniqueSourceCount: 3,
-        documentsReviewed: 15
+        documentsReviewed: 15,
+        searchShortfallsRecord: ReportSearchCompleteness.completeSearchRecord
     )
 
     return ReportView(report: report)

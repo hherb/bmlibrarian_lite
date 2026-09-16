@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-import Foundation
-import SwiftData
 import CloudKit
+import Foundation
+import OSLog
+import SwiftData
 
 /// Manages CloudKit sync configuration and state.
 ///
@@ -31,6 +32,17 @@ enum CloudKitConfiguration {
 
     /// CloudKit container identifier (must match entitlements).
     static let containerIdentifier = "iCloud.com.hherb.MedicalFactChecker"
+
+    /// Logger for what becomes of the store.
+    ///
+    /// Built here rather than through `AppLogger`, which exists twice — once
+    /// behind `#if os(iOS)` and once in the macOS-only sources — so a file
+    /// shared by both platforms can use neither (#290). Same subsystem as
+    /// `FactCheckWorkflow`'s.
+    private static let logger = Logger(
+        subsystem: "com.bmlibrarian.factchecker",
+        category: "Persistence"
+    )
 
     // MARK: - UserDefaults Keys
 
@@ -101,14 +113,10 @@ enum CloudKitConfiguration {
     /// - Throws: SwiftData errors if container creation fails.
     ///
     /// Uses the `MedicalFactCheckerMigrationPlan` to handle schema upgrades
-    /// from previous versions, preserving user data during updates.
-    ///
-    /// ## Migration Strategy
-    ///
-    /// 1. First attempts staged migration with the full migration plan
-    /// 2. If that fails with "unknown model version", attempts without migration plan
-    ///    (allows SwiftData to perform automatic lightweight migration)
-    /// 3. If all else fails, deletes the corrupt/incompatible store and creates fresh
+    /// from previous versions, preserving user data during updates. A store that
+    /// survives none of the strategies is set aside rather than deleted, and
+    /// what happened waits in ``StoreRecovery`` for the next launch to tell the
+    /// user (#285).
     static func makeModelContainerWithMigration() throws -> ModelContainer {
         let useCloudKit = isSyncEnabled && isCloudAvailable
 
@@ -130,6 +138,40 @@ enum CloudKitConfiguration {
             )
         }
 
+        return try makeContainer(
+            schema: schema,
+            configuration: configuration,
+            setAsideUnreadableStore: setAsideApplicationSupportStore
+        )
+    }
+
+    /// Open a store, trying every way to keep what it holds.
+    ///
+    /// - Parameters:
+    ///   - schema: The schema of the models to store.
+    ///   - configuration: Where and how the store is kept.
+    ///   - setAsideUnreadableStore: Called once, before the last resort, to move
+    ///     a store no migration could read out of the way. It must not delete
+    ///     it: what the user saved is kept, whether or not this app can read it.
+    /// - Returns: The container, empty only if the store had to be set aside.
+    /// - Throws: Whatever SwiftData raised, for anything that is not a migration
+    ///   failure, and for a fresh store that could not be created either.
+    ///
+    /// ## The three strategies
+    ///
+    /// 1. Staged migration with the full plan. A store written by an earlier
+    ///    build matches no version in the plan — see the note at the top of
+    ///    `SchemaVersions.swift` — so this fails with "unknown model version"
+    ///    for exactly the upgrade it looks like it is for.
+    /// 2. Automatic lightweight migration, which is what actually carries a
+    ///    user's fact checks across a property being added.
+    /// 3. Set the store aside and start empty. The user's data is not lost, but
+    ///    it is out of the app, so it is reported rather than logged alone.
+    static func makeContainer(
+        schema: Schema,
+        configuration: ModelConfiguration,
+        setAsideUnreadableStore: () -> Void
+    ) throws -> ModelContainer {
         // Strategy 1: Try staged migration with full plan
         do {
             return try ModelContainer(
@@ -138,12 +180,10 @@ enum CloudKitConfiguration {
                 configurations: [configuration]
             )
         } catch {
-            if isMigrationError(error) {
-                print("Staged migration failed: \(error), attempting automatic migration...")
-            } else {
-                // Re-throw non-migration errors
-                throw error
-            }
+            guard isMigrationError(error) else { throw error }
+            logger.error(
+                "Staged migration failed, attempting automatic migration: \(String(describing: error), privacy: .public)"
+            )
         }
 
         // Strategy 2: Try without migration plan (automatic lightweight migration)
@@ -153,16 +193,14 @@ enum CloudKitConfiguration {
                 configurations: [configuration]
             )
         } catch {
-            if isMigrationError(error) {
-                print("Automatic migration failed: \(error.localizedDescription)")
-                print("Attempting store reset...")
-            } else {
-                throw error
-            }
+            guard isMigrationError(error) else { throw error }
+            logger.error(
+                "Automatic migration failed, setting the store aside: \(String(describing: error), privacy: .public)"
+            )
         }
 
-        // Strategy 3: Delete corrupt/incompatible store and create fresh
-        deleteExistingStore()
+        // Strategy 3: Keep the store the app cannot read, and start fresh
+        setAsideUnreadableStore()
 
         return try ModelContainer(
             for: schema,
@@ -172,7 +210,29 @@ enum CloudKitConfiguration {
 
     // MARK: - Private Helpers
 
-    /// Check if an error is a migration-related error that warrants store reset.
+    /// Whether an error is one another way of opening the store might survive.
+    ///
+    /// Anything else is the caller's to raise: it is not a store this app can
+    /// decide about.
+    ///
+    /// ## Why this reads the error as text
+    ///
+    /// `SwiftDataError` carries its case in a private enum and drops the Cocoa
+    /// error behind it (`_underlyingCocoaError` is `nil`), so the code
+    /// underneath — 134504 for a store no version in the plan matches — never
+    /// reaches a caller. Its public `unknownDataStoreSchema` exists only from
+    /// macOS 27 and iOS 27, far above this app's minimum, so the case name in
+    /// the error's own description is what there is to match on.
+    ///
+    /// `unknownDataStoreSchema` is the ordinary upgrade: **every** store written
+    /// by an earlier build raises it, because a schema's checksum is computed
+    /// from the live model classes and any added property moves it. Missing it
+    /// made the app raise that error out of container creation, where both entry
+    /// points end in `fatalError` — a crash at launch for exactly the users
+    /// whose data the strategies exist to keep (found by `StoreMigrationTests`).
+    ///
+    /// - Parameter error: What opening the store raised.
+    /// - Returns: `true` when another strategy is worth trying.
     private static func isMigrationError(_ error: Error) -> Bool {
         let errorDescription = String(describing: error)
 
@@ -183,6 +243,7 @@ enum CloudKitConfiguration {
             "134140",   // NSMigrationMissingMappingModelError
             "134504",   // Staged migration unknown version
             "unknown model version",
+            "unknownDataStoreSchema",   // What SwiftData raises for that same 134504
             "migration",
             "loadIssueModelContainer",
         ]
@@ -190,35 +251,33 @@ enum CloudKitConfiguration {
         return migrationIndicators.contains { errorDescription.localizedCaseInsensitiveContains($0) }
     }
 
-    /// Delete the existing SwiftData store files.
+    /// Move the app's own store out of the way, keeping every byte of it.
     ///
-    /// Used as a last resort when migration is not possible.
-    /// This will lose all existing data but allows the app to start fresh.
-    private static func deleteExistingStore() {
-        let fileManager = FileManager.default
-        guard let appSupport = fileManager.urls(
+    /// The last resort when no migration could read it. Nothing is deleted: the
+    /// files are renamed, the move is logged, and the sentence the user is owed
+    /// waits for the first view that can show it (#285, golden rule 8).
+    private static func setAsideApplicationSupportStore() {
+        guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first else {
+            logger.error(
+                "The store could not be read and this device has no Application Support directory to set it aside in"
+            )
+            StoreRecovery.recordPendingMessage(StoreRecovery.unreachableStoreMessage)
             return
         }
 
-        let storeFiles = [
-            "default.store",
-            "default.store-shm",
-            "default.store-wal",
-        ]
-
-        for fileName in storeFiles {
-            let fileURL = appSupport.appendingPathComponent(fileName)
-            do {
-                if fileManager.fileExists(atPath: fileURL.path) {
-                    try fileManager.removeItem(at: fileURL)
-                    print("Deleted store file: \(fileName)")
-                }
-            } catch {
-                print("Failed to delete \(fileName): \(error.localizedDescription)")
-            }
+        let outcome = StoreRecovery.setAsideStore(in: appSupport)
+        logger.error(
+            """
+            An unreadable store was set aside in \(appSupport.path, privacy: .public). \
+            Kept: \(outcome.keptAs.joined(separator: ", "), privacy: .public). \
+            Could not move: \(outcome.couldNotMove.joined(separator: ", "), privacy: .public)
+            """
+        )
+        if let message = StoreRecovery.message(for: outcome) {
+            StoreRecovery.recordPendingMessage(message)
         }
     }
 

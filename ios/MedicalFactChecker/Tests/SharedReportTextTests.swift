@@ -46,7 +46,8 @@ final class SharedReportTextTests: XCTestCase {
             fullReport: fullReport,
             citationCount: 1,
             uniqueSourceCount: 1,
-            documentsReviewed: 1
+            documentsReviewed: 1,
+            searchShortfallsRecord: ReportSearchCompleteness.completeSearchRecord
         )
     }
 

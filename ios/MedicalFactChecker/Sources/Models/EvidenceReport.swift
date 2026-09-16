@@ -62,6 +62,18 @@ final class EvidenceReport {
     /// Number of documents reviewed total.
     var documentsReviewed: Int = 0
 
+    // MARK: - Search Shortfalls
+
+    /// What the search behind this report failed to retrieve, in the contract's JSON.
+    ///
+    /// `"[]"` for a complete search, so a report that recorded nothing can be
+    /// told from one that recorded a complete search. `nil` is therefore only a
+    /// report saved before this shipped, whose own text is asked instead.
+    ///
+    /// Private because it is only ever read through ``completeness``, which
+    /// refuses to let a damaged record read as a complete search (#284).
+    private var searchShortfallsJSON: String?
+
     // MARK: - Relationships
 
     var session: FactCheckSession?
@@ -77,13 +89,19 @@ final class EvidenceReport {
     ///   - citationCount: Number of citations included.
     ///   - uniqueSourceCount: Number of unique sources cited.
     ///   - documentsReviewed: Total documents reviewed.
+    ///   - searchShortfallsRecord: What the search behind the report failed to
+    ///     retrieve, from ``BioMedLit/SearchFailureReporting/reportRecord(for:)``.
+    ///     It has no default: a report that does not say what its search lost is
+    ///     the defect this parameter exists to prevent (#284). Pass `nil` only
+    ///     to stand in for a report saved before the record existed.
     init(
         verdict: Verdict,
         summary: String,
         fullReport: String,
         citationCount: Int,
         uniqueSourceCount: Int,
-        documentsReviewed: Int
+        documentsReviewed: Int,
+        searchShortfallsRecord: String?
     ) {
         self.verdict = verdict
         self.summary = summary
@@ -91,9 +109,19 @@ final class EvidenceReport {
         self.citationCount = citationCount
         self.uniqueSourceCount = uniqueSourceCount
         self.documentsReviewed = documentsReviewed
+        self.searchShortfallsJSON = searchShortfallsRecord
     }
 
     // MARK: - Computed Properties
+
+    /// What this report says about the search behind it.
+    ///
+    /// Read from the record it stored, not from its own text: a report used to
+    /// answer by matching the notice's opening words in `fullReport`, so
+    /// anything that rewrote the text answered for the search (#284).
+    var completeness: ReportSearchCompleteness {
+        ReportSearchCompleteness(record: searchShortfallsJSON, reportText: fullReport)
+    }
 
     /// The incomplete-search notice this report opens with, as plain text.
     ///
@@ -103,22 +131,24 @@ final class EvidenceReport {
     /// notice is drawn before the verdict and removed from the body it opened
     /// (#256). It is moved, never dropped.
     var incompleteSearchNotice: String? {
-        SearchFailureReporting.splitPlainNotice(fullReport).notice
+        completeness.notice
     }
 
     /// The report's text with the incomplete-search notice taken off the front.
     ///
     /// Unchanged for a report whose search was complete.
     var reportBodyAfterNotice: String {
-        SearchFailureReporting.splitPlainNotice(fullReport).body
+        completeness.bodyAfterNotice
     }
 
     /// Whether the search behind this report was incomplete.
     ///
     /// For a surface that shows the verdict without the report's text, such as
     /// the history list, which must still say the evidence base was partial.
+    /// `true` as well for a record that could not be read: a report that cannot
+    /// say what it is missing must not pass as one missing nothing.
     var searchWasIncomplete: Bool {
-        SearchFailureReporting.isIncompleteSearchReport(fullReport)
+        completeness.wasIncomplete
     }
 
     /// A footnote describing how this report was generated.
