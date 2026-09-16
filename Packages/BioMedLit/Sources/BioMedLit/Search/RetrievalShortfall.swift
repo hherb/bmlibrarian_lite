@@ -68,7 +68,7 @@ public enum RequestFailureKind: String, Sendable, Codable, CaseIterable {
 /// The memberwise initializer is private, so a kind that carries no status can
 /// never be given one: each kind is reached through the factory that suits it.
 public struct RequestFailure: Sendable, Equatable, Hashable {
-    /// The lowest three-digit HTTP status code.
+    /// The statuses an HTTP answer can carry: every three-digit code.
     private static let statusCodeRange = 100...999
 
     /// What went wrong.

@@ -336,11 +336,20 @@ final class FactCheckSession {
     ///
     /// - Parameter shortfalls: What the page lost; nothing is written for none.
     /// - Throws: ``BioMedLit/DamagedShortfallRecordError`` when the record
-    ///   already stored cannot be read, so nothing is written over it.
+    ///   already stored cannot be read, so nothing is written over it, or when
+    ///   what should replace it could not be written.
     func recordRetrievalShortfalls(_ shortfalls: [RetrievalShortfall]) throws {
         guard !shortfalls.isEmpty else { return }
         let combined = SearchFailureReporting.combined(try retrievalShortfalls() + shortfalls)
-        retrievalShortfallsJSON = SearchFailureReporting.json(from: combined)
+        guard let written = SearchFailureReporting.json(from: combined) else {
+            // `nil` is also how a complete search is stored, so assigning it
+            // here would erase what earlier pages lost and let a later report
+            // claim a complete search. Keep the record and refuse instead (#256).
+            throw DamagedShortfallRecordError(
+                reason: "What this session's searches failed to retrieve could not be written down."
+            )
+        }
+        retrievalShortfallsJSON = written
     }
 
     // MARK: - Methods

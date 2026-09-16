@@ -82,6 +82,15 @@ final class FactCheckWorkflow {
     /// Set to true when specifically waiting for smart search decision.
     private(set) var awaitingSmartSearchDecision = false
 
+    /// Why no alternative search ran, for the screen to show while the session proceeds.
+    ///
+    /// `nil` when smart search has not failed. Generating alternative queries is
+    /// the model's work, not a literature source's, so failing at it never ends
+    /// the run and records no shortfall: the documents already found and scored
+    /// still make a report. The run this notice belongs to keeps it until the
+    /// next smart search is attempted (#256).
+    private(set) var smartSearchNotice: String?
+
     /// Whether this workflow was restored from history.
     ///
     /// When true, the first call to `fetchMoreEvidence()` will refresh pagination
@@ -253,6 +262,9 @@ final class FactCheckWorkflow {
     ///   - claim: The medical claim to fact-check.
     ///   - searchOptions: Search configuration (provider, preprints, etc.).
     func startFactCheck(claim: String, searchOptions: SearchOptions? = nil) async {
+        // A new claim answers for itself: the last run's notice is not this run's
+        smartSearchNotice = nil
+
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
@@ -393,8 +405,20 @@ final class FactCheckWorkflow {
     /// scoring. The method updates the session's cursor/offset to the correct
     /// position for fetching additional results beyond the original set.
     ///
+    /// **It records no shortfall.** The pages it re-walks are the ones the
+    /// session already holds documents from, so what they lose was already
+    /// recorded by the search that first read them: recording it again would
+    /// add the same records to the count on every resume. A re-walk that fails
+    /// now loses nothing either — those documents are already in the session —
+    /// so it stops where it got to and leaves paging behind it. Finding no new
+    /// document is this method's ordinary outcome, not a failed search; the
+    /// fetch that follows it decides that, against a page asked for more (#256).
+    ///
     /// - Returns: Number of new documents found during the refresh.
-    /// - Throws: SearchError if no query is available, or network errors.
+    /// - Throws: `SearchError` if no query is available, ``BudgetError`` if the
+    ///   budget is spent, `CancellationError`, or a network error. Also
+    ///   ``BioMedLit/DamagedShortfallRecordError`` when what earlier searches
+    ///   lost cannot be read, which stops the session before it searches.
     private func refreshPaginationState() async throws -> Int {
         guard let session = session else { return 0 }
 
@@ -403,7 +427,6 @@ final class FactCheckWorkflow {
 
         let existingCount = session.documents?.count ?? 0
         var newDocumentsFound = 0
-        var shortfalls: [RetrievalShortfall] = []
         var continuation: SearchContinuation?
         var lastPage: UnifiedSearchResult?
         var covered = 0
@@ -432,7 +455,13 @@ final class FactCheckWorkflow {
                 options: options,
                 settings: settings
             )
-            shortfalls += result.shortfalls
+            if !result.shortfalls.isEmpty {
+                // Not recorded: see this method's note. Logged so a re-walk that
+                // keeps failing is visible, since it leaves paging behind it.
+                logger.warning(
+                    "Refreshing the search state lost \(result.shortfalls.count) record(s) of ground already covered; paging stops where the re-walk reached"
+                )
+            }
             lastPage = result
 
             for article in articlesNotYetHeld(result.articles, by: session) {
@@ -460,14 +489,6 @@ final class FactCheckWorkflow {
             }
             continuation = nextContinuation(after: result)
         }
-
-        // Failures that left the refresh with nothing are a failed search, not an empty one
-        if newDocumentsFound == 0, let failed = SearchFailedError(shortfalls: shortfalls) {
-            throw failed
-        }
-
-        // What the pages lost is recorded before their documents are saved
-        try session.recordRetrievalShortfalls(shortfalls)
 
         if let lastPage {
             applyPaging(from: lastPage, to: session)
@@ -1218,7 +1239,17 @@ final class FactCheckWorkflow {
                     // Try smart search first if not already enabled
                     if !session.smartSearchEnabled && relevant < smartSearchThreshold {
                         updateProgress(.searchingPubMed, "Insufficient results, activating smart search...")
-                        try await executeSmartSearch()
+                        do {
+                            try await executeSmartSearch()
+                        } catch let error as SmartSearchError {
+                            // Smart search is this step's own idea, not something
+                            // the user asked for, and generating queries is not a
+                            // source's failure: the documents already scored still
+                            // make a report, so the run proceeds and says why no
+                            // alternative search happened (#256)
+                            logger.warning("Smart search did not run: \(error.localizedDescription)")
+                            smartSearchNotice = error.localizedDescription
+                        }
 
                         // Re-check after smart search
                         let relevantAfterSmart = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
@@ -2346,6 +2377,10 @@ final class FactCheckWorkflow {
     private func executeSmartSearch(askedForMoreEvidence: Bool = false) async throws {
         guard let session = session else { return }
 
+        // A fresh attempt answers for itself: an earlier attempt's notice would
+        // otherwise outlive the reason it was shown
+        smartSearchNotice = nil
+
         // Refuse to spend anything before a damaged record of what earlier
         // searches lost has been read
         _ = try session.retrievalShortfalls()
@@ -2620,7 +2655,9 @@ enum SmartSearchError: LocalizedError, Equatable {
     /// Smart search is marked as tried, so no later batch asks and pays again.
     case noUsableQuery
 
-    /// The request to the model failed, so nothing was asked and nothing paid.
+    /// The request to the model failed, so that request asked nothing and paid
+    /// nothing. An earlier attempt in the same round may already have been
+    /// billed, since each retry is a paid call.
     ///
     /// Smart search stays available to try again.
     case queryGenerationFailed

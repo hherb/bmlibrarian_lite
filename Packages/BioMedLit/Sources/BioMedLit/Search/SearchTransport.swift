@@ -42,8 +42,9 @@ enum SearchTransport {
     /// Classify an error a request raised, keeping nothing of the error itself.
     ///
     /// A cancelled request is not a failure and must be told apart by the
-    /// caller first (`Error.isCancellation`); classified here it would read as
-    /// a broken connection and be recorded as a shortfall the user never caused.
+    /// caller first (`Error.isCancellation`). `URLError.cancelled` is not one of
+    /// the codes below, so classified here it would read as a failed request and
+    /// be recorded as a shortfall the user never caused.
     ///
     /// - Parameter error: What the request raised.
     /// - Returns: The failure, by kind only.

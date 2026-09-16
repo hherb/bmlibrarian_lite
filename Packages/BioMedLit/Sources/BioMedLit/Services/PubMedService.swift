@@ -95,7 +95,10 @@ public actor PubMedService {
     /// - Throws: ``SourceRequestError`` if the page could not be listed at all:
     ///   the request failed after its retries, the answer reports an error or
     ///   cannot be read, or it lists none of the PMIDs it counts. A failed
-    ///   search is never returned as an empty page.
+    ///   search is never returned as an empty page. Also `CancellationError`
+    ///   when the user cancelled, which records nothing as missing; and
+    ///   ``SourceRequestError`` with ``RequestFailureKind/requestFailed`` for an
+    ///   `offset` outside the records PubMed lists, which is a caller defect.
     public func search(
         query: String,
         maxResults: Int = BioMedLitConstants.pubmedDefaultBatchSize,
@@ -119,7 +122,7 @@ public actor PubMedService {
         // Step 2: Fetch the articles for the PMIDs the page listed
         let fetched = listing.pmids.isEmpty
             ? FetchedArticles(articles: [], shortfalls: [])
-            : await fetchArticles(for: listing.pmids)
+            : try await fetchArticles(for: listing.pmids)
 
         // The unlisted PMIDs are recorded as missing, so the next page starts after them
         let consumed = max(listing.expected, listing.pmids.count)
@@ -286,8 +289,12 @@ public actor PubMedService {
     /// - Returns: The `PubmedArticle` records the answer holds, and what the
     ///   fetch failed to retrieve. Records other than `PubmedArticle`, such as a
     ///   `PubmedBookArticle`, are not articles and are not missing either: NCBI
-    ///   answered for them, with a record this app does not show.
-    private func fetchArticles(for pmids: [String]) async -> FetchedArticles {
+    ///   answered for them, with a record this app does not show — so long as
+    ///   the document was well formed; an answer that broke off counts every
+    ///   PMID without an article, as below.
+    /// - Throws: `CancellationError` when the user cancelled the fetch. A fetch
+    ///   nobody waited for lost nothing, so it records no shortfall.
+    private func fetchArticles(for pmids: [String]) async throws -> FetchedArticles {
         let parameters = [
             (name: "db", value: "pubmed"),
             (name: "id", value: pmids.joined(separator: ",")),
@@ -310,8 +317,13 @@ public actor PubMedService {
                     RetrievalShortfall.missingRecords(pmids.count, from: .pubmed, failure: error.failure)
                 ].compactMap { $0 }
             )
+        } catch where error.isCancellation {
+            // A cancelled fetch is the user's doing, not the source's: recorded
+            // as a shortfall it would tell them PubMed lost records it never lost
+            throw CancellationError()
         } catch {
-            // `send` throws nothing else; saying so beats a page that silently holds no article
+            // `send` and `articleSet(from:)` throw nothing else; saying so beats
+            // a page that silently holds no article
             BioMedLitLib.logger?.error(
                 "PubMed articles for \(pmids.count) PMIDs could not be fetched "
                     + "(an unexpected error, whose text is not logged)",

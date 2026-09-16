@@ -31,18 +31,43 @@ already conformant, so this closes the port.
   "PubMed has no next page" reaches the request (#253). `OffsetPaginationState`
   carries `isExhausted`; per-provider totals are no longer conflated.
 - **Traps, each of which cost a round.** `swift test` and the macOS `xcodebuild`
-  compile **neither** of the five iOS-guarded files this touched — only an iOS
-  Simulator build does (#190), so run one. **`SourceRequestError` must conform to
-  `RetryableError`**, or a 429 silently stops being retried. **A lookup is not a
-  page**: `EuropePMCService.search` also served the full-text chain's identifier
-  lookups, where a title filter and a hit-count requirement (right for a search
-  page) broke six full-text tests — hence `EuropePMCService.lookup`. A cancelled
-  request must raise `CancellationError`, or it is recorded as a lost record the
-  user caused.
+  compile **none** of the five iOS-guarded files this touched — only an iOS
+  Simulator build does (#190), so run one. `Sources/macOS` is likewise excluded
+  from the SwiftPM target, so a macOS-only view compiles in **neither** suite:
+  the macOS history list was missed for exactly that reason. **`SourceRequestError`
+  must conform to `RetryableError`**, or a 429 silently stops being retried. **A
+  lookup is not a page**: `EuropePMCService.search` also served the full-text
+  chain's identifier lookups, where a title filter and a hit-count requirement
+  (right for a search page) broke six full-text tests — hence
+  `EuropePMCService.lookup`. A cancelled request must raise `CancellationError`
+  **on every leg**, efetch included, or it is recorded as a lost record the user
+  caused. `os.Logger` takes an `OSLogMessage` literal, so a concatenated string
+  will not compile.
+- **What a re-walk is not.** `refreshPaginationState` replays the pages a resumed
+  session already holds documents from, to move paging past them. It is **not** a
+  page asked for more documents: it records no shortfall (the search that first
+  read those pages recorded what they lost, so recording again inflates the count
+  on every resume) and finding no new document is its ordinary outcome, not a
+  failed search. Treating it as one locked "Get more evidence" out of a resumed
+  session permanently, since the same replay fails the same way every time.
+- **Smart search never ends the run** where the step itself chose to run it. Its
+  two outcomes are the model's failure, not a source's: the documents already
+  scored still make a report, and `FactCheckWorkflow.smartSearchNotice` says why
+  no alternative search happened. Only where the user *asked* for smart search is
+  its failure the outcome of what they asked for.
 - **Not covered by tests:** the workflow's own decisions (throwing when a page
   leaves nothing new, the alternative-query hold-back, the paging writes) have no
   end-to-end test, since `FactCheckWorkflow` takes no injectable search service —
-  the Swift shape of #216. Lodged as **#281**.
+  the Swift shape of #216. Lodged as **#281**; **#288** records that six of the
+  ten uncovered decisions are pure functions that are `private` by accident and
+  are testable today without any injection.
+- **Review of the PR, addressed 2026-09-16.** Five review agents; four critical
+  findings fixed here (the re-walk lockout and its double-counted shortfalls, the
+  smart-search abort, a cancelled efetch recorded as lost PubMed records, and the
+  macOS history list never marking an incomplete search), plus the vanishing
+  progress-time warning, the contract's stale status row, and restored-session
+  errors going to `print`. Lodged rather than addressed here: **#283** through
+  **#288**.
 
 ## Recently landed (context)
 

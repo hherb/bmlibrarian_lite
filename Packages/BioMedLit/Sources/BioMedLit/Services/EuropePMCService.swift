@@ -76,7 +76,8 @@ public actor EuropePMCService {
     ///   cursor ends.
     /// - Throws: ``SourceRequestError`` if the request failed after its retries,
     ///   the answer cannot be read, or it holds no record where the hit count
-    ///   says it should hold some.
+    ///   says it should hold some. Also `CancellationError` when the user
+    ///   cancelled, which records nothing as missing.
     public func search(
         query: String,
         pageSize: Int = BioMedLitConstants.europePMCDefaultPageSize,
@@ -137,6 +138,7 @@ public actor EuropePMCService {
     /// - Throws: ``SourceRequestError`` if the request failed after its retries
     ///   or the answer cannot be read, so "Europe PMC has nothing for this
     ///   article" and "we could not ask Europe PMC" stay opposite answers (#186).
+    ///   Also `CancellationError` when the user cancelled.
     public func lookup(query: String, pageSize: Int = 1) async throws -> [SearchArticle] {
         let data = try await requestPage(query: query, pageSize: pageSize, cursor: Self.initialCursor)
 

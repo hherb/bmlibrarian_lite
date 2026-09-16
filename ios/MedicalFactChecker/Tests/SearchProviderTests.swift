@@ -16,6 +16,10 @@
 
 import Testing
 import Foundation
+// Named one by one: a whole-module import would make `SearchProvider`
+// ambiguous, since BioMedLit has an enum of that name too.
+import struct BioMedLit.RetrievalShortfall
+import enum BioMedLit.SearchFailureReporting
 @testable import MedicalFactChecker
 
 // MARK: - SearchProvider Tests
@@ -359,5 +363,72 @@ struct SearchResultMergerTests {
         )
 
         #expect(merged.articles.count == 1)
+    }
+
+    /// A failed provider's shortfall survives the merge with the other's articles.
+    ///
+    /// This is #256 itself: the bug was a both-provider search that kept one
+    /// source's articles and dropped the other's failure, so a rate-limited
+    /// PubMed halved the evidence base and the run looked complete. Merging must
+    /// carry the shortfall through, or the report claims a search that never
+    /// happened.
+    @Test func mergeKeepsAFailedProvidersShortfallWithTheOthersArticles() {
+        let europePMCArticles = [
+            makeArticle(pmid: "11111111", title: "Study Gamma", source: .europePMC, position: 0),
+        ]
+        let pubMedFailed = RetrievalShortfall(
+            source: .pubmed,
+            failure: .httpStatus(429)
+        )
+
+        let merged = SearchResultMerger.merge(
+            pubMedPage: .notSearched,
+            europePMCPage: page(europePMCArticles, totalCount: 1),
+            shortfalls: [pubMedFailed]
+        )
+
+        #expect(merged.articles.count == 1)
+        #expect(merged.shortfalls == [pubMedFailed])
+        // The reader is told which source failed and why, not merely that one did
+        #expect(
+            SearchFailureReporting.describe(merged.shortfalls)
+                == "PubMed could not be searched (HTTP 429 Too Many Requests)"
+        )
+    }
+
+    /// Each provider's paging comes from its own side of the page (#253).
+    @Test func mergeTakesEachProvidersPagingFromItsOwnSide() {
+        let pubMedPage = SearchServiceFactory.ProviderPage(
+            articles: [makeArticle(pmid: "12345678", title: "Study A", source: .pubmed, position: 0)],
+            shortfalls: [],
+            pubMedPagination: OffsetPaginationState(
+                totalCount: 9_999, offset: 9_900, batchSize: 99, isExhausted: true
+            ),
+            europePMCPagination: nil,
+            totalCount: 9_999
+        )
+        let europePMCPage = SearchServiceFactory.ProviderPage(
+            articles: [makeArticle(pmid: "11111111", title: "Study Gamma", source: .europePMC, position: 0)],
+            shortfalls: [],
+            pubMedPagination: nil,
+            europePMCPagination: CursorPaginationState(
+                totalCount: 500,
+                fetchedCount: 1,
+                recordsReceived: 1,
+                currentCursor: "*",
+                nextCursor: "next"
+            ),
+            totalCount: 500
+        )
+
+        let merged = SearchResultMerger.merge(
+            pubMedPage: pubMedPage,
+            europePMCPage: europePMCPage,
+            shortfalls: []
+        )
+
+        // PubMed is at the cap and answers for itself; Europe PMC still has pages
+        #expect(merged.pubMedPagination?.isExhausted == true)
+        #expect(merged.europePMCPagination?.nextCursor == "next")
     }
 }

@@ -133,6 +133,20 @@ struct MacFactCheckView: View {
                 // Budget display
                 MacBudgetDisplayView()
 
+                // What the searches so far have failed to retrieve, and why no
+                // alternative search ran. Drawn outside the progress section,
+                // which only exists while the workflow runs: a pause for the
+                // user's decision is exactly when they need to know the evidence
+                // base is partial (#256).
+                if let workflow = workflow {
+                    if let warning = workflow.incompleteSearchWarning {
+                        MacIncompleteSearchNotice(text: warning)
+                    }
+                    if let notice = workflow.smartSearchNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
+                }
+
                 // Progress section
                 if let workflow = workflow, workflow.isRunning {
                     MacProgressSection(workflow: workflow)
@@ -492,12 +506,6 @@ struct MacProgressSection: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(width: MacLayout.percentageWidth, alignment: .trailing)
-            }
-
-            // What the searches so far have failed to retrieve, while the
-            // session proceeds: the reader is not told only at the end (#256)
-            if let warning = workflow.incompleteSearchWarning {
-                MacIncompleteSearchNotice(text: warning)
             }
 
             // Status message

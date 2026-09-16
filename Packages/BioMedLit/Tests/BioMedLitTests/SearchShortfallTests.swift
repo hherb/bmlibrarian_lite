@@ -72,7 +72,12 @@ final class SearchShortfallTests: XCTestCase {
         }
         XCTAssertEqual(RequestFailure.forHTTPStatus(503).describe(), "HTTP 503 Service Unavailable")
         XCTAssertEqual(RequestFailure.redirectRefused(statusCode: 307).describe(), "a redirect (HTTP 307) was refused")
-        XCTAssertEqual(Set(reasons.values).count, reasons.count)
+        // No two kinds read as the same reason, asked of the production side:
+        // asserting it of `reasons` above would only check the literal above.
+        let described = RequestFailureKind.allCases.map {
+            RequestFailure.restored(kind: $0, statusCode: nil).describe()
+        }
+        XCTAssertEqual(Set(described).count, RequestFailureKind.allCases.count)
     }
 
     /// The reason phrases are the contract's, not a library's.
@@ -81,12 +86,23 @@ final class SearchShortfallTests: XCTestCase {
     /// three of its own, so a platform's own table would read differently on
     /// each platform.
     func testTheReasonPhrasesAreTheContracts() {
+        // Every row of the contract's table, spelled out rather than looped over
+        // the production table, which would assert only that it equals itself.
         let expected = [
             400: "HTTP 400 Bad Request",
+            401: "HTTP 401 Unauthorized",
+            403: "HTTP 403 Forbidden",
+            404: "HTTP 404 Not Found",
+            408: "HTTP 408 Request Timeout",
             413: "HTTP 413 Content Too Large",
             414: "HTTP 414 URI Too Long",
-            422: "HTTP 422",
             429: "HTTP 429 Too Many Requests",
+            500: "HTTP 500 Internal Server Error",
+            502: "HTTP 502 Bad Gateway",
+            503: "HTTP 503 Service Unavailable",
+            504: "HTTP 504 Gateway Timeout",
+            // Not in the table: the status alone, never a library's phrase
+            422: "HTTP 422",
             599: "HTTP 599",
         ]
         for (status, clause) in expected {

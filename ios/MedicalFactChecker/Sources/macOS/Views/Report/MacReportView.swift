@@ -481,9 +481,6 @@ enum ExportFormat {
 
 // MARK: - Supporting Views
 
-/// Large verdict badge for report headers.
-///
-/// Displays the verdict with appropriate color coding in a pill shape.
 // MARK: - Incomplete Search Notice
 
 /// The incomplete-search notice, drawn before the verdict (#256).
@@ -512,6 +509,9 @@ struct MacIncompleteSearchNotice: View {
     }
 }
 
+/// Large verdict badge for report headers.
+///
+/// Displays the verdict with appropriate color coding in a pill shape.
 struct MacVerdictBadge: View {
     /// The verdict to display.
     let verdict: Verdict

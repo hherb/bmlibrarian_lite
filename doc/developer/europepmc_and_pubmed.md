@@ -165,8 +165,17 @@ GET /search?query=...&pageSize=25&cursorMark=*
 **Key points:**
 - Initial request uses `cursorMark=*`
 - Subsequent requests use `nextCursorMark` from previous response
-- When `nextCursorMark` equals the current cursor or is null, no more results
-- Maximum of ~10,000 results accessible via pagination
+- When `nextCursorMark` equals the current cursor, is null, or is `*`, no more
+  results; a page holding no result ends the cursor too
+- **No offset cap.** The cursor ends only once every hit was sent (checked live
+  2026-09-15), so a search reaching the end before `hitCount` records arrived
+  has lost the rest — it is not a cap being hit. An earlier note here claimed a
+  ~10,000 limit; it did not survive checking, and reading it as one would
+  report every long search as incomplete.
+- An **unknown or expired `cursorMark`** answers HTTP 200 with only a version
+  field, `{"version":"6.9"}` (checked live 2026-09-14): no `hitCount`, no
+  `resultList`. That is an answer that cannot be read, not a search that matched
+  nothing.
 
 ### PubMed: Offset-Based Pagination
 

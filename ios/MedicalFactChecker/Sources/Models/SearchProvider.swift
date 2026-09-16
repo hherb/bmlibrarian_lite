@@ -29,9 +29,6 @@ enum SearchProviderConstants {
 
     /// Default maximum results per search.
     static let defaultMaxResults = 20
-
-    /// Default offset for pagination.
-    static let defaultOffset = 0
 }
 
 // MARK: - Search Provider

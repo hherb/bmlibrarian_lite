@@ -8,7 +8,7 @@ is the reference; the ports mirror it.
 | Platform | Status |
 |----------|--------|
 | Python | Conforms (#247, #248, Python half of #255) |
-| Swift (BioMedLit + app) | Not yet: #256 (both-provider search drops a failure with a `print`), #255 (esearch/efetch `ERROR` in HTTP 200), #253 (paging past PubMed's cap in a both-provider search); also adopt [Alternative queries](#alternative-queries-smart-search) |
+| Swift (BioMedLit + app) | Conforms (#256, Swift half of #255, #253); how its paging maps onto the contract is under [iOS and macOS](#ios-and-macos) |
 | Android | Conforms (#252, Android half of #255); how its paging maps onto the contract is under [Android](#android) |
 
 ## Why
@@ -325,12 +325,19 @@ Generating the queries is not a source's failure, so it records no shortfall
 
 - A request to the model that failed (a broken connection, a refused key)
   shows that alternative searches could not be run and to check the model and
-  its key; smart search stays available, and the request costs nothing.
+  its key; smart search stays available, and that request costs nothing — an
+  earlier retry in the same round may already have been billed.
 - An answer holding no usable query (text that is not a list of queries, or no
   content) is asked for again, up to `MAX_QUERY_RETRIES` (2) more times, each a
   paid call. When no answer is usable, smart search is marked as tried, so no
   later batch asks and pays again, and the user is told the model's answers
   held no usable query.
+
+**Neither ends the run.** Where smart search is the step's own idea — too few
+relevant documents, rather than the user asking for more evidence — its failure
+is shown and the session proceeds to the report on the documents it already
+scored. Only where the user asked for smart search is its failure the outcome
+of what they asked for.
 
 ## Android
 
@@ -399,9 +406,13 @@ table in [Android](#android) is their mapping as well, with these differences.
   they could not list at all, and return what a page *partly* lost as
   `SearchResult.shortfalls`. `SearchServiceFactory` turns a raised failure into
   the shortfall it leaves — the source could not be searched on a first page;
-  the page's records are missing and its paging moves past it on a later one —
-  and `FactCheckWorkflow` decides, once it knows which articles are new,
-  whether the page is one to proceed on.
+  the page's records are missing on a later one, and its paging then moves past
+  it (PubMed) or the cursor ends (Europe PMC, which cannot skip a page) — and
+  `FactCheckWorkflow` decides, once it knows which articles are new, whether the
+  page is one to proceed on. **Refreshing a resumed session's paging is not such
+  a page**: it re-walks ground the session already holds documents from, so it
+  records no shortfall — the search that first read those pages recorded what
+  they lost — and finding no new document there is its ordinary outcome.
 - **Paging travels as a `SearchContinuation`**, not as a loose offset and
   cursor: a provider whose side is `nil` has no next page and is not asked for
   one, which is how "PubMed has no next page" reaches the request (#253).
@@ -410,8 +421,10 @@ table in [Android](#android) is their mapping as well, with these differences.
   the answer, records no shortfall, and keeps a record that carries no title —
   which a search reports as missing, since it cannot be shown.
 - **A cancelled request is not a failure.** Both clients raise
-  `CancellationError` rather than classifying `URLError.cancelled` as a broken
-  connection, so cancelling records nothing as missing.
+  `CancellationError` rather than reducing `URLError.cancelled` to a
+  `RequestFailure` at all, so cancelling records nothing as missing. This holds
+  for every leg of a search, PubMed's efetch included: a leg that catches
+  everything else must still let a cancellation through.
 - **The session keeps** its shortfalls in `FactCheckSession`'s private
   `retrievalShortfallsJSON` (read through `retrievalShortfalls()`, which refuses
   a damaged record), and `europePMCRecordsReceived` counts the Europe PMC

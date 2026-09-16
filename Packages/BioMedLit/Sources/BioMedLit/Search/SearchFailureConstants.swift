@@ -19,7 +19,7 @@ import Foundation
 
 /// The wording a search failure reaches the user in, fixed by the contract.
 ///
-/// Every sentence, phrase and number format an incomplete search shows is here
+/// Every sentence, phrase and number format **the contract fixes** is here
 /// rather than at the site that prints it, because all three platforms must
 /// read alike: the contract
 /// (`doc/cross_platform/search_failure_reporting.md`) fixes these strings, and

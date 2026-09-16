@@ -286,6 +286,9 @@ struct MacSessionRow: View {
                 // Verdict or status badge
                 if let report = session.report {
                     MacSmallVerdictBadge(verdict: report.verdict)
+                    if report.searchWasIncomplete {
+                        MacIncompleteSearchMark()
+                    }
                 } else {
                     MacStatusBadge(step: session.currentStep)
                 }
@@ -343,6 +346,21 @@ struct MacSessionRow: View {
             }
         }
         .padding(.vertical, MacSpacing.medium)
+    }
+}
+
+/// Marks a report whose search was incomplete, beside its verdict (#256).
+///
+/// The history list shows a verdict without the report's text, where the
+/// report's own notice is not drawn and nothing else says the evidence base
+/// was partial. Opening the report says which source failed and why.
+struct MacIncompleteSearchMark: View {
+    var body: some View {
+        Label("Incomplete search", systemImage: "exclamationmark.triangle.fill")
+            .labelStyle(.iconOnly)
+            .foregroundColor(.orange)
+            .font(.caption)
+            .accessibilityLabel("The search behind this report was incomplete")
     }
 }
 
@@ -463,7 +481,12 @@ struct MacSessionDetailView: View {
                         .textCase(.uppercase)
 
                     if let report = session.report {
-                        MacVerdictBadge(verdict: report.verdict)
+                        HStack(spacing: MacSpacing.small) {
+                            MacVerdictBadge(verdict: report.verdict)
+                            if report.searchWasIncomplete {
+                                MacIncompleteSearchMark()
+                            }
+                        }
                     } else {
                         MacStatusBadge(step: session.currentStep)
                     }

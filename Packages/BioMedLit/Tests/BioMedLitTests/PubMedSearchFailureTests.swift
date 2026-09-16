@@ -278,4 +278,46 @@ final class PubMedSearchFailureTests: EutilsStubTestCase {
             XCTFail("expected cancellation, got \(error)")
         }
     }
+
+    /// Cancelling while efetch is in flight loses no record either.
+    ///
+    /// The esearch leg succeeds, so this reaches the fetch's own catch — which
+    /// catches everything in order to report a page that holds no article. A
+    /// cancellation caught there would tell the user PubMed lost the page's
+    /// records, for a request they themselves stopped (#256).
+    func testACancelledFetchIsNotASourceFailure() async {
+        EutilsRecordingURLProtocol.reply = { request, _ in
+            if request.url?.lastPathComponent == "efetch.fcgi" {
+                return .transportError(.cancelled)
+            }
+            return .ok(Data(#"{"esearchresult":{"count":"2","idlist":["12345","67890"]}}"#.utf8))
+        }
+
+        do {
+            _ = try await service().search(query: "aspirin", maxResults: 2)
+            XCTFail("a cancelled fetch should not return a page")
+        } catch is CancellationError {
+            // Expected: nothing is recorded as missing
+        } catch {
+            XCTFail("expected cancellation, got \(error)")
+        }
+    }
+
+    /// An empty article set is NCBI's answer for PMIDs it does not hold.
+    ///
+    /// One of the three answers the contract says must keep reading as empty. It
+    /// costs no record: NCBI answered, it simply holds nothing for them. Counting
+    /// them as missing would put a full page's `malformed_response` clause in the
+    /// report every time a PMID has no article.
+    func testAnEmptyArticleSetLosesNoRecord() async throws {
+        serve(
+            searchAnswer: #"{"esearchresult":{"count":"2","idlist":["12345","67890"]}}"#,
+            fetchAnswer: Data("<PubmedArticleSet></PubmedArticleSet>".utf8)
+        )
+
+        let result = try await service().search(query: "aspirin", maxResults: 2)
+
+        XCTAssertTrue(result.articles.isEmpty)
+        XCTAssertTrue(result.shortfalls.isEmpty, "NCBI answered; it holds no article for those PMIDs")
+    }
 }

@@ -348,13 +348,14 @@ enum SearchServiceFactory {
     /// about it — a first page that failed leaves it where it was, so asking
     /// again asks for the same page.
     ///
+    /// Whether the page is one to proceed on is the caller's to decide, after
+    /// it knows which of the articles are new: a page that failures leave with
+    /// no new document changes nothing, and is a ``BioMedLit/SearchFailedError``.
+    ///
     /// - Parameters:
     ///   - query: The search query string (in PubMed or plain text syntax).
     ///   - options: Search configuration options, including where paging stands.
     ///   - settings: App settings for service configuration.
-    /// Whether the page is one to proceed on is the caller's to decide, after
-    /// it knows which of the articles are new: a page that failures leave with
-    /// no new document changes nothing, and is a ``BioMedLit/SearchFailedError``.
     ///
     /// - Returns: The page's articles, what it failed to retrieve, and where
     ///   each provider's paging goes next.
@@ -460,10 +461,10 @@ enum SearchServiceFactory {
         /// What it failed to retrieve.
         let shortfalls: [RetrievalShortfall]
 
-        /// Where its paging goes next, or `nil` to leave it as it was.
+        /// Where PubMed's paging goes next, or `nil` to leave it as it was.
         let pubMedPagination: OffsetPaginationState?
 
-        /// Where its paging goes next, or `nil` to leave it as it was.
+        /// Where Europe PMC's paging goes next, or `nil` to leave it as it was.
         let europePMCPagination: CursorPaginationState?
 
         /// The search's total, as this provider last counted it.
