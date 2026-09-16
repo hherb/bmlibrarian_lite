@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#256 + #255 + #253 (Swift half) — a failed source is not an empty one**, branch
-`fix/swift-failed-search-is-not-empty-256`, PR #PRNUMBER. iOS and macOS conform
+`fix/swift-failed-search-is-not-empty-256`, PR #282. iOS and macOS conform
 to the #247 contract; their mapping is the contract's **iOS and macOS** section.
 Once merged, compress this into **Recently landed**. Python and Android are
 already conformant, so this closes the port.
