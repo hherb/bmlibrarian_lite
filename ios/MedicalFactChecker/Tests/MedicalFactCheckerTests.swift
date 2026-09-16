@@ -959,288 +959,101 @@ final class CursorPaginationStateTests: XCTestCase {
     }
 }
 
-final class CombinedPaginationStateTests: XCTestCase {
+/// A page of a search, and what it says about each provider's paging (#253, #256).
+final class SearchPageTests: XCTestCase {
+    /// PubMed's paging after a page that has more to come.
+    private let pubMedPaging = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
 
-    func testTotalCountCombinesBoth() {
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 15,
-            currentCursor: "*",
-            nextCursor: "abc"
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
+    /// Europe PMC's paging after a page that has more to come.
+    private let europePMCPaging = CursorPaginationState(
+        totalCount: 50,
+        fetchedCount: 15,
+        recordsReceived: 15,
+        currentCursor: "*",
+        nextCursor: "abc"
+    )
+
+    /// A page of both providers, with the paging given.
+    private func page(
+        pubMed: OffsetPaginationState?,
+        europePMC: CursorPaginationState?
+    ) -> UnifiedSearchResult {
+        UnifiedSearchResult(
+            articles: [],
+            totalCount: (pubMed?.totalCount ?? 0) + (europePMC?.totalCount ?? 0),
+            provider: .both,
+            pubMedPagination: pubMed,
             europePMCPagination: europePMC
         )
-
-        XCTAssertEqual(combined.totalCount, 150)
     }
 
-    func testFetchedCountCombinesBoth() {
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 15,
-            currentCursor: "*",
-            nextCursor: "abc"
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
-        )
-
+    /// A page of both providers reaches as far as the two together have.
+    func testTheFetchedCountCombinesBoth() {
         // PubMed: 20 + 10 = 30, Europe PMC: 15
-        XCTAssertEqual(combined.fetchedCount, 45)
+        XCTAssertEqual(page(pubMed: pubMedPaging, europePMC: europePMCPaging).fetchedCount, 45)
     }
 
-    func testHasMoreWhenBothHaveMore() {
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 15,
-            currentCursor: "*",
-            nextCursor: "abc"
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
+    /// More is available while either provider has more.
+    func testMoreIsAvailableWhileEitherProviderHasMore() {
+        let exhaustedPubMed = OffsetPaginationState(totalCount: 30, offset: 20, batchSize: 10)
+        let endedCursor = CursorPaginationState(
+            totalCount: 50, fetchedCount: 50, recordsReceived: 50, currentCursor: "abc", nextCursor: nil
         )
 
-        XCTAssertTrue(combined.hasMore)
+        XCTAssertTrue(page(pubMed: pubMedPaging, europePMC: europePMCPaging).hasMore)
+        XCTAssertTrue(page(pubMed: pubMedPaging, europePMC: endedCursor).hasMore)
+        XCTAssertTrue(page(pubMed: exhaustedPubMed, europePMC: europePMCPaging).hasMore)
+        XCTAssertFalse(page(pubMed: exhaustedPubMed, europePMC: endedCursor).hasMore)
     }
 
-    func testHasMoreWhenOnlyPubMedHasMore() {
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 50,
-            currentCursor: "abc",
-            nextCursor: nil
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
+    /// Each provider answers for its own next page, never for the other's.
+    ///
+    /// A search of both providers used to judge PubMed's next page against the
+    /// two providers' combined total, which offered a page NCBI refuses (#253).
+    func testEachProviderAnswersForItsOwnNextPage() {
+        let atTheCap = OffsetPaginationState(
+            totalCount: 25_000, offset: 9_980, batchSize: 19, isExhausted: true
         )
 
-        XCTAssertTrue(combined.hasMore)
+        let result = page(pubMed: atTheCap, europePMC: europePMCPaging)
+
+        XCTAssertFalse(result.pubMedHasMore, "PubMed lists no record past its cap")
+        XCTAssertTrue(result.europePMCHasMore)
+        XCTAssertTrue(result.hasMore, "Europe PMC still has pages")
     }
 
-    func testHasMoreWhenOnlyEuropePMCHasMore() {
-        let pubmed = OffsetPaginationState(totalCount: 30, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 15,
-            currentCursor: "*",
-            nextCursor: "abc"
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
-        )
+    /// A provider that was not searched leaves its own paging to the session.
+    func testAProviderThatWasNotSearchedCarriesNoPaging() {
+        let result = page(pubMed: nil, europePMC: europePMCPaging)
 
-        XCTAssertTrue(combined.hasMore)
+        XCTAssertNil(result.nextOffset)
+        XCTAssertFalse(result.pubMedHasMore)
+        XCTAssertEqual(result.nextCursorMark, "abc")
     }
 
-    func testHasMoreWhenBothExhausted() {
-        let pubmed = OffsetPaginationState(totalCount: 30, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 50,
-            currentCursor: "abc",
-            nextCursor: nil
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
-        )
-
-        XCTAssertFalse(combined.hasMore)
+    /// The next page starts after the records this one consumed.
+    func testTheNextPageStartsAfterThisOne() {
+        XCTAssertEqual(page(pubMed: pubMedPaging, europePMC: nil).nextOffset, 30)
+        XCTAssertEqual(page(pubMed: nil, europePMC: europePMCPaging).nextCursorMark, "abc")
     }
 
-    func testNextPubMedOffset() {
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState.initial()
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
-        )
-
-        XCTAssertEqual(combined.nextPubMedOffset, 30)
-    }
-
-    func testNextEuropePMCCursor() {
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 0, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 15,
-            currentCursor: "*",
-            nextCursor: "AoJxyz123"
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
-        )
-
-        XCTAssertEqual(combined.nextEuropePMCCursor, "AoJxyz123")
-    }
-}
-
-// MARK: - UnifiedSearchResult Tests (Phase 4)
-
-final class UnifiedSearchResultTests: XCTestCase {
-
-    func testEmptyResultFactory() {
+    /// An empty page names its provider and offers nothing further.
+    func testAnEmptyPageOffersNothingFurther() {
         let result = UnifiedSearchResult.empty(provider: .pubmed)
 
         XCTAssertTrue(result.articles.isEmpty)
         XCTAssertEqual(result.totalCount, 0)
         XCTAssertEqual(result.provider, .pubmed)
         XCTAssertFalse(result.hasMore)
-    }
-
-    func testEmptyResultForEuropePMC() {
-        let result = UnifiedSearchResult.empty(provider: .europePMC)
-
-        XCTAssertEqual(result.provider, .europePMC)
+        XCTAssertNil(result.nextOffset)
         XCTAssertNil(result.nextCursorMark)
-    }
-
-    func testHasMoreDelegatesToPagination() {
-        let pagination = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let result = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: pagination,
-            provider: .pubmed
-        )
-
-        XCTAssertTrue(result.hasMore)
-    }
-
-    func testNextCursorMarkWithCursorPagination() {
-        let pagination = CursorPaginationState(
-            totalCount: 100,
-            fetchedCount: 20,
-            currentCursor: "*",
-            nextCursor: "AoJxyz123"
-        )
-        let result = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: pagination,
-            provider: .europePMC
-        )
-
-        XCTAssertEqual(result.nextCursorMark, "AoJxyz123")
-    }
-
-    func testNextCursorMarkWithOffsetPagination() {
-        let pagination = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let result = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: pagination,
-            provider: .pubmed
-        )
-
-        XCTAssertNil(result.nextCursorMark)
-    }
-
-    // MARK: - Bug Fix Tests: nextOffset should return next position, not current
-
-    func testNextOffsetWithOffsetPaginationReturnsNextPosition() {
-        // Bug fix test: nextOffset should return offset + batchSize, not just offset
-        let pagination = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let result = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: pagination,
-            provider: .pubmed
-        )
-
-        // nextOffset should be 30 (20 + 10), not 20
-        XCTAssertEqual(result.nextOffset, 30)
-        XCTAssertNotEqual(result.nextOffset, pagination.logicalOffset)
-    }
-
-    func testNextOffsetWithCursorPaginationReturnsFetchedCount() {
-        // For cursor pagination, nextOffset should return fetchedCount
-        let pagination = CursorPaginationState(
-            totalCount: 100,
-            fetchedCount: 40,
-            currentCursor: "*",
-            nextCursor: "abc123"
-        )
-        let result = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: pagination,
-            provider: .europePMC
-        )
-
-        XCTAssertEqual(result.nextOffset, 40)
-    }
-
-    func testNextOffsetWithCombinedPaginationReturnsNextPubMedOffset() {
-        // For combined pagination, nextOffset should return PubMed's next offset
-        let pubmed = OffsetPaginationState(totalCount: 100, offset: 20, batchSize: 10)
-        let europePMC = CursorPaginationState(
-            totalCount: 50,
-            fetchedCount: 15,
-            currentCursor: "*",
-            nextCursor: "abc"
-        )
-        let combined = CombinedPaginationState(
-            pubmedPagination: pubmed,
-            europePMCPagination: europePMC
-        )
-        let result = UnifiedSearchResult(
-            articles: [],
-            totalCount: 150,
-            pagination: combined,
-            provider: .both
-        )
-
-        // Should return PubMed's next offset (30), not logical offset (20)
-        XCTAssertEqual(result.nextOffset, 30)
-    }
-
-    func testNextOffsetIsConsistentWithPagination() {
-        // Verify nextOffset advances correctly for subsequent pages
-        let firstPage = OffsetPaginationState(totalCount: 100, offset: 0, batchSize: 20)
-        let firstResult = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: firstPage,
-            provider: .pubmed
-        )
-
-        // First page nextOffset should be 20
-        XCTAssertEqual(firstResult.nextOffset, 20)
-
-        // Simulate using nextOffset for second page
-        let secondPage = OffsetPaginationState(totalCount: 100, offset: firstResult.nextOffset, batchSize: 20)
-        let secondResult = UnifiedSearchResult(
-            articles: [],
-            totalCount: 100,
-            pagination: secondPage,
-            provider: .pubmed
-        )
-
-        // Second page nextOffset should be 40
-        XCTAssertEqual(secondResult.nextOffset, 40)
+        XCTAssertEqual(result.shortfalls, [])
     }
 }
 
 // MARK: - SearchError Tests (Phase 4)
 
 final class SearchErrorTests: XCTestCase {
-
-    func testPartialFailureDescription() {
-        let error = SearchError.partialFailure(successfulProvider: .pubmed)
-        XCTAssertTrue(error.errorDescription?.contains("PubMed") ?? false)
-    }
 
     func testNoResultsDescription() {
         let error = SearchError.noResults
@@ -1251,11 +1064,6 @@ final class SearchErrorTests: XCTestCase {
     func testInvalidConfigurationDescription() {
         let error = SearchError.invalidConfiguration("Missing API key")
         XCTAssertTrue(error.errorDescription?.contains("Missing API key") ?? false)
-    }
-
-    func testNetworkErrorDescription() {
-        let error = SearchError.networkError("Connection timeout")
-        XCTAssertTrue(error.errorDescription?.contains("Connection timeout") ?? false)
     }
 
     func testEquatable() {

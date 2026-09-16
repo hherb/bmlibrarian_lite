@@ -108,6 +108,11 @@ struct ReportContentView: View {
 
     private var reportContent: some View {
         VStack(alignment: .leading, spacing: 20) {
+            // Incomplete search, before the verdict it qualifies
+            if let notice = report.incompleteSearchNotice {
+                IncompleteSearchNotice(text: notice)
+            }
+
             // Verdict Badge
             HStack {
                 Spacer()
@@ -163,7 +168,7 @@ struct ReportContentView: View {
                     .font(.headline)
 
                 MarkdownReportView(
-                    report.fullReport,
+                    report.reportBodyAfterNotice,
                     documents: report.session?.documents ?? []
                 )
             }
@@ -237,6 +242,34 @@ struct ReportContentView: View {
     }
 }
 
+// MARK: - Incomplete Search Notice
+
+/// The incomplete-search notice, drawn before the verdict (#256).
+///
+/// The report's text carries the notice as a Markdown block quote, and this
+/// screen shows the verdict and the summary ahead of that text — so a notice
+/// left where it was written would reach the reader after the verdict it
+/// qualifies. It is drawn here instead and taken off the body, never dropped.
+struct IncompleteSearchNotice: View {
+    /// The notice, as plain text.
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(10)
+    }
+}
+
 // MARK: - Report View (Sheet)
 
 /// Report view designed for sheet presentation.
@@ -274,6 +307,11 @@ struct ReportView: View {
             ZStack {
                 ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    // Incomplete search, before the verdict it qualifies
+                    if let notice = report.incompleteSearchNotice {
+                        IncompleteSearchNotice(text: notice)
+                    }
+
                     // Verdict Badge
                     HStack {
                         Spacer()
@@ -329,7 +367,7 @@ struct ReportView: View {
                             .font(.headline)
 
                         MarkdownReportView(
-                            report.fullReport,
+                            report.reportBodyAfterNotice,
                             documents: report.session?.documents ?? []
                         )
                     }

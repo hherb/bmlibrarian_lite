@@ -92,6 +92,18 @@ struct FactCheckView: View {
 
                     // Progress Section
                     if let workflow = workflow {
+                        // What the searches so far have failed to retrieve, and
+                        // why no alternative search ran. Drawn outside the
+                        // progress section, which only exists while the workflow
+                        // runs: a pause for the user's decision is exactly when
+                        // they need to know the evidence base is partial (#256).
+                        if let warning = workflow.incompleteSearchWarning {
+                            IncompleteSearchNotice(text: warning)
+                        }
+                        if let notice = workflow.smartSearchNotice {
+                            IncompleteSearchNotice(text: notice)
+                        }
+
                         if workflow.isRunning {
                             ProgressSection(workflow: workflow)
                         }

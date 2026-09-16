@@ -45,26 +45,29 @@ private enum MergerConstants {
 /// 3. PMC ID match
 /// 4. Title similarity > threshold (fallback)
 enum SearchResultMerger {
-    /// Merge results from PubMed and Europe PMC, removing duplicates.
+    /// Merge the two providers' pages, removing duplicates.
     ///
     /// Deduplication priority: PMID > DOI > PMC ID > Title similarity
     ///
-    /// Note: For subsequent pages, callers need to track pagination separately
-    /// since PubMed uses offset and Europe PMC uses cursor marks.
+    /// Each provider's paging travels separately, and a provider whose page
+    /// failed carries none: its paging is left where it was, so asking again
+    /// asks for the same page (#256).
     ///
     /// - Parameters:
-    ///   - pubmedResult: Results from PubMed.
-    ///   - europePMCResult: Results from Europe PMC.
-    /// - Returns: Merged, deduplicated result with combined pagination state.
+    ///   - pubMedPage: What PubMed contributed.
+    ///   - europePMCPage: What Europe PMC contributed.
+    ///   - shortfalls: What the two pages failed to retrieve, already combined.
+    /// - Returns: Merged, deduplicated page with both providers' paging.
     static func merge(
-        pubmedResult: UnifiedSearchResult,
-        europePMCResult: UnifiedSearchResult
+        pubMedPage: SearchServiceFactory.ProviderPage,
+        europePMCPage: SearchServiceFactory.ProviderPage,
+        shortfalls: [RetrievalShortfall]
     ) -> UnifiedSearchResult {
         var seen = Set<String>()
         var merged: [UnifiedArticleMetadata] = []
 
         // Add PubMed results first (primary source, higher priority)
-        for article in pubmedResult.articles {
+        for article in pubMedPage.articles {
             let key = deduplicationKey(for: article)
             if !seen.contains(key) {
                 seen.insert(key)
@@ -75,7 +78,7 @@ enum SearchResultMerger {
         }
 
         // Add unique Europe PMC results
-        for article in europePMCResult.articles {
+        for article in europePMCPage.articles {
             let key = deduplicationKey(for: article)
 
             // Check all possible keys for this article
@@ -93,21 +96,14 @@ enum SearchResultMerger {
         // Sort by relevance (original position is a proxy)
         let sorted = merged.sorted { $0.resultPosition < $1.resultPosition }
 
-        // Estimate total (may have duplicates we removed)
-        let estimatedTotal = pubmedResult.totalCount + europePMCResult.totalCount
-
-        // Create combined pagination state
-        // We track both offset (for PubMed) and cursor (for Europe PMC)
-        let combinedPagination = CombinedPaginationState(
-            pubmedPagination: pubmedResult.pagination,
-            europePMCPagination: europePMCResult.pagination
-        )
-
         return UnifiedSearchResult(
             articles: sorted,
-            totalCount: estimatedTotal,
-            pagination: combinedPagination,
-            provider: .both
+            // An estimate: the duplicates removed here are counted by both sources
+            totalCount: pubMedPage.totalCount + europePMCPage.totalCount,
+            provider: .both,
+            shortfalls: shortfalls,
+            pubMedPagination: pubMedPage.pubMedPagination,
+            europePMCPagination: europePMCPage.europePMCPagination
         )
     }
 

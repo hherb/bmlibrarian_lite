@@ -100,7 +100,7 @@ enum EutilsRequest {
 /// names; a 301, 302 or 303 re-sends the request as a GET without its
 /// parameters, which NCBI answers as a search for nothing. Declining leaves the
 /// task to finish with the 3xx response itself, which the caller reports as
-/// ``PubMedError/redirectRefused(statusCode:)``.
+/// a refused redirect (``RequestFailureKind/redirectRefused``).
 ///
 /// Not even a redirect to an NCBI host is followed. These endpoints never
 /// legitimately redirect, following a 301, 302 or 303 can never yield a correct

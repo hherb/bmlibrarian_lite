@@ -51,6 +51,14 @@ struct ContentView: View {
     /// Currently selected document for full-text viewing.
     @State private var selectedFullTextDocument: Document?
 
+    /// What a restored session's workflow failed at, for the alert to show.
+    ///
+    /// A restored session drives "Get more evidence", whose failure carries the
+    /// contract's sentence and the advice that follows it. Sent nowhere it would
+    /// reach the reader, a rate-limited search would stop the spinner and leave
+    /// the report unchanged with no word of why (#256).
+    @State private var restoredSessionError: String?
+
     var body: some View {
         if !hasAcceptedDisclaimer {
             DisclaimerView(onAccept: acceptDisclaimer)
@@ -65,6 +73,17 @@ struct ContentView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
                     showingOnboardingFromSettings = true
+                }
+                .alert(
+                    "Could not continue",
+                    isPresented: Binding(
+                        get: { restoredSessionError != nil },
+                        set: { if !$0 { restoredSessionError = nil } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) { restoredSessionError = nil }
+                } message: {
+                    Text(restoredSessionError ?? "")
                 }
         }
     }
@@ -191,12 +210,12 @@ struct ContentView: View {
 
         // Called when an error occurs during workflow execution
         restoredWorkflow.onError = { error in
-            print("[ContentView] Workflow error: \(error.localizedDescription)")
+            restoredSessionError = error.localizedDescription
         }
 
         // Called when budget limit is exceeded
         restoredWorkflow.onBudgetExceeded = { message in
-            print("[ContentView] Budget exceeded: \(message)")
+            restoredSessionError = message
         }
 
         // Restore session for viewing (does not run the workflow)

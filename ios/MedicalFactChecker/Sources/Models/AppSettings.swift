@@ -308,8 +308,7 @@ final class AppSettings {
         SearchOptions(
             provider: overrideProvider ?? selectedSearchProvider,
             includePreprints: includePreprints,
-            maxResults: batchSize,
-            offset: 0
+            maxResults: batchSize
         )
     }
 

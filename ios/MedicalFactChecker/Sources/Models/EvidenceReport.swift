@@ -95,6 +95,32 @@ final class EvidenceReport {
 
     // MARK: - Computed Properties
 
+    /// The incomplete-search notice this report opens with, as plain text.
+    ///
+    /// `nil` when the search behind the report was complete. All three surfaces
+    /// that show a report — the screen, the exported PDF and the shared text —
+    /// show the verdict and the summary ahead of the report's own text, so the
+    /// notice is drawn before the verdict and removed from the body it opened
+    /// (#256). It is moved, never dropped.
+    var incompleteSearchNotice: String? {
+        SearchFailureReporting.splitPlainNotice(fullReport).notice
+    }
+
+    /// The report's text with the incomplete-search notice taken off the front.
+    ///
+    /// Unchanged for a report whose search was complete.
+    var reportBodyAfterNotice: String {
+        SearchFailureReporting.splitPlainNotice(fullReport).body
+    }
+
+    /// Whether the search behind this report was incomplete.
+    ///
+    /// For a surface that shows the verdict without the report's text, such as
+    /// the history list, which must still say the evidence base was partial.
+    var searchWasIncomplete: Bool {
+        SearchFailureReporting.isIncompleteSearchReport(fullReport)
+    }
+
     /// A footnote describing how this report was generated.
     var generationFootnote: String {
         var parts: [String] = []
@@ -132,18 +158,19 @@ final class EvidenceReport {
     /// A reader who wants to look a study up is served by the reference list,
     /// which carries a namespace-labelled identifier.
     var plainTextReport: String {
-        """
+        let notice = incompleteSearchNotice.map { "\($0)\n\n" } ?? ""
+        return """
         MEDICAL FACT CHECK REPORT
         Generated: \(generatedAt.formatted(date: .abbreviated, time: .shortened))
 
-        VERDICT: \(verdict.rawValue)
+        \(notice)VERDICT: \(verdict.rawValue)
 
         SUMMARY:
         \(ReportFormatter.plainText(fromReportMarkdown: summary))
 
         ---
 
-        \(ReportFormatter.plainText(fromReportMarkdown: fullReport))
+        \(ReportFormatter.plainText(fromReportMarkdown: reportBodyAfterNotice))
 
         ---
         Based on \(uniqueSourceCount) sources, \(citationCount) citations.

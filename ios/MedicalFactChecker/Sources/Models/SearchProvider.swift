@@ -29,9 +29,6 @@ enum SearchProviderConstants {
 
     /// Default maximum results per search.
     static let defaultMaxResults = 20
-
-    /// Default offset for pagination.
-    static let defaultOffset = 0
 }
 
 // MARK: - Search Provider
@@ -132,15 +129,40 @@ struct SearchOptions: Sendable {
     /// Maximum results per provider.
     var maxResults: Int = SearchProviderConstants.defaultMaxResults
 
-    /// Starting offset for pagination (PubMed style).
-    var offset: Int = SearchProviderConstants.defaultOffset
-
-    /// Cursor mark for Europe PMC pagination (nil for first page).
+    /// Where the session's paging stands, for a page that continues it.
     ///
-    /// Europe PMC uses cursor-based pagination. For the first page, pass nil
-    /// (which will use "*"). For subsequent pages, pass the nextCursorMark
-    /// from the previous response.
-    var cursorMark: String?
+    /// `nil` for a search's first page. A provider whose side of it is `nil`
+    /// has no next page and is not asked for one: its last search failed, or it
+    /// ran out of results. Paging is held here rather than as a loose offset
+    /// and cursor so that "PubMed has no next page" cannot be lost on the way
+    /// to the request (#253).
+    var continuation: SearchContinuation?
+
+    /// The batch number the page's articles are recorded with.
+    var batchNumber: Int = 1
+
+    /// Where PubMed's paging stands, or `nil` when PubMed is not searched.
+    ///
+    /// A search's first page continues nothing, so every provider the options
+    /// name starts at its own first page.
+    var pubMedContinuation: PubMedContinuation? {
+        guard provider == .pubmed || provider == .both else { return nil }
+        guard let continuation else { return .firstPage }
+        return continuation.pubMed
+    }
+
+    /// Where Europe PMC's paging stands, or `nil` when Europe PMC is not searched.
+    var europePMCContinuation: EuropePMCContinuation? {
+        guard provider == .europePMC || provider == .both else { return nil }
+        guard let continuation else { return .firstPage }
+        return continuation.europePMC
+    }
+
+    /// The result position PubMed's page numbers its articles from.
+    var pubMedBasePosition: Int { pubMedContinuation?.offset ?? 0 }
+
+    /// The result position Europe PMC's page numbers its articles from.
+    var europePMCBasePosition: Int { europePMCContinuation?.recordsReceived ?? 0 }
 
     /// Create default options for a provider.
     ///
@@ -150,9 +172,7 @@ struct SearchOptions: Sendable {
         SearchOptions(
             provider: provider,
             includePreprints: false,
-            maxResults: SearchProviderConstants.defaultMaxResults,
-            offset: SearchProviderConstants.defaultOffset,
-            cursorMark: nil
+            maxResults: SearchProviderConstants.defaultMaxResults
         )
     }
 }

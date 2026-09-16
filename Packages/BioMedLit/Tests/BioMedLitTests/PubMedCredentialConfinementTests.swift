@@ -175,8 +175,9 @@ final class PubMedCredentialConfinementTests: EutilsStubTestCase {
         } catch {
             XCTAssertFalse("\(error)".contains(apiKey), "the error carried the key")
             XCTAssertFalse(error.localizedDescription.contains(apiKey), "the error carried the key")
-            guard case PubMedError.httpError(statusCode: 400) = error else {
-                return XCTFail("expected httpError(400), got \(error)")
+            guard let failed = error as? SourceRequestError,
+                  failed.failure == .forHTTPStatus(400) else {
+                return XCTFail("expected an HTTP 400 source failure, got \(error)")
             }
         }
 
@@ -228,6 +229,8 @@ final class PubMedCredentialConfinementTests: EutilsStubTestCase {
     ///
     /// The refusal is passed per request, so a fetch that stopped going through
     /// the shared sender would silently lose it and follow a 307 with the key.
+    /// A refused fetch costs the page's articles rather than the search (#256),
+    /// so what the page lost is what names the refusal here.
     func testARedirectOnTheFetchIsRefusedNotFollowed() async throws {
         for statusCode in [301, 302, 303, 307, 308] {
             EutilsRecordingURLProtocol.reset()
@@ -237,8 +240,14 @@ final class PubMedCredentialConfinementTests: EutilsStubTestCase {
                     : .redirect(statusCode, to: EutilsFixture.elsewhere)
             }
 
-            await assertRedirectRefused(statusCode)
+            let result = try await service(apiKey: apiKey).search(query: "aspirin")
 
+            XCTAssertEqual(result.articles, [], "HTTP \(statusCode): the refused fetch delivered no article")
+            XCTAssertEqual(
+                result.shortfalls.map(\.failure),
+                [.redirectRefused(statusCode: statusCode)],
+                "HTTP \(statusCode) on the fetch"
+            )
             let requests = EutilsRecordingURLProtocol.recorded
             XCTAssertEqual(
                 requests.map(\.url.lastPathComponent), ["esearch.fcgi", "efetch.fcgi"],
@@ -251,17 +260,18 @@ final class PubMedCredentialConfinementTests: EutilsStubTestCase {
         }
     }
 
-    /// Run a search that must fail with ``PubMedError/redirectRefused(statusCode:)``.
+    /// Run a search that must fail with a refused redirect naming the status.
     private func assertRedirectRefused(
         _ statusCode: Int, file: StaticString = #filePath, line: UInt = #line
     ) async {
         do {
             _ = try await service(apiKey: apiKey).search(query: "aspirin")
             XCTFail("HTTP \(statusCode): a redirect should fail the search", file: file, line: line)
-        } catch PubMedError.redirectRefused(let refused) {
-            XCTAssertEqual(refused, statusCode, file: file, line: line)
+        } catch let failed as SourceRequestError {
+            XCTAssertEqual(failed.failure.kind, .redirectRefused, file: file, line: line)
+            XCTAssertEqual(failed.failure.statusCode, statusCode, file: file, line: line)
         } catch {
-            XCTFail("HTTP \(statusCode): expected redirectRefused, got \(error)", file: file, line: line)
+            XCTFail("HTTP \(statusCode): expected a refused redirect, got \(error)", file: file, line: line)
         }
     }
 
@@ -296,19 +306,22 @@ final class PubMedCredentialConfinementTests: EutilsStubTestCase {
         do {
             _ = try await service(apiKey: apiKey).search(query: "aspirin")
             XCTFail("a persistent 429 should fail the search")
-        } catch PubMedError.rateLimited {
+        } catch let failed as SourceRequestError {
+            XCTAssertEqual(failed.failure, .forHTTPStatus(BioMedLitConstants.httpStatusRateLimited))
             XCTAssertEqual(
                 EutilsRecordingURLProtocol.recorded.count, RetryConfiguration.networkDefault.maxAttempts,
                 "a 429 is retried"
             )
         } catch {
-            XCTFail("expected rateLimited, got \(error)")
+            XCTFail("expected an HTTP 429 source failure, got \(error)")
         }
     }
 
     /// A final server error does not promise a retry.
     func testAServerErrorDescriptionPromisesNoRetry() throws {
-        let description = try XCTUnwrap(PubMedError.serverError(statusCode: 503).errorDescription)
+        let failed = SourceRequestError(source: .pubmed, failure: .forHTTPStatus(503))
+
+        let description = try XCTUnwrap(failed.errorDescription)
 
         XCTAssertFalse(description.contains("Retrying"), description)
         XCTAssertTrue(description.contains("503"), description)

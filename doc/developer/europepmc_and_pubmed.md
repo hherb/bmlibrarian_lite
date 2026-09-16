@@ -84,12 +84,13 @@ it, or record the difference here:
 | Case | Python | Swift | Android |
 |------|--------|-------|---------|
 | Which 3xx is refused | 301, 302, 303, 307, 308 with a `Location` header (`is_redirect`) | every 3xx | every 3xx |
-| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`PubMedError.redirectRefused`) | no (`SourceRequestException`, `redirect_refused`) |
-| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | `PubMedError.rateLimited` | `SourceRequestException` (`http_status`, 429) |
+| Refused redirect retried? | yes, like every HTTP error in `_make_request` | no (`redirect_refused` is not retryable) | no (`SourceRequestException`, `redirect_refused`) |
+| A 429 that outlasts the retries | `SourceRequestError` (`http_status`, 429) | as Python (`SourceRequestError`) | `SourceRequestException` (`http_status`, 429) |
 | What counts as "no key" | an empty string | an empty string | a blank string, whitespace included |
-| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | total is the articles seen so far, with a warning (#255) | as Python |
-| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | dropped with a `print` (#256) | as Python |
-| Retries | each HTTP request (`_make_request`) | each HTTP request (`send`) | each request with the reading of its answer: esearch and efetch on their own, so a failed fetch does not search again |
+| esearch answer without a usable `count` | `SourceRequestError` (`malformed_response`); an `ERROR` field is `service_error` | as Python | as Python |
+| A failed search in a search of both providers | proceeds on the other provider and records a shortfall | as Python | as Python |
+| Retries | each HTTP request (`_make_request`) | each HTTP request (`send`, `requestPage`) | each request with the reading of its answer: esearch and efetch on their own, so a failed fetch does not search again |
+| A cancelled request | not applicable (synchronous) | `CancellationError`, never a shortfall: the user's doing, not the source's | the coroutine's cancellation |
 
 **A failed source is not an empty one.** What counts as a failed request, what
 a search does with one, and how the reader is told are specified in
@@ -164,8 +165,17 @@ GET /search?query=...&pageSize=25&cursorMark=*
 **Key points:**
 - Initial request uses `cursorMark=*`
 - Subsequent requests use `nextCursorMark` from previous response
-- When `nextCursorMark` equals the current cursor or is null, no more results
-- Maximum of ~10,000 results accessible via pagination
+- When `nextCursorMark` equals the current cursor, is null, or is `*`, no more
+  results; a page holding no result ends the cursor too
+- **No offset cap.** The cursor ends only once every hit was sent (checked live
+  2026-09-15), so a search reaching the end before `hitCount` records arrived
+  has lost the rest — it is not a cap being hit. An earlier note here claimed a
+  ~10,000 limit; it did not survive checking, and reading it as one would
+  report every long search as incomplete.
+- An **unknown or expired `cursorMark`** answers HTTP 200 with only a version
+  field, `{"version":"6.9"}` (checked live 2026-09-14): no `hitCount`, no
+  `resultList`. That is an answer that cannot be read, not a search that matched
+  nothing.
 
 ### PubMed: Offset-Based Pagination
 

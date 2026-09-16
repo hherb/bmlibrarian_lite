@@ -129,7 +129,10 @@ public enum BioMedLitConstants {
     /// Default batch size for PubMed searches.
     public static let pubmedDefaultBatchSize = 100
 
-    /// Maximum offset for PubMed searches.
+    /// The records PubMed lists for one search.
+    ///
+    /// `retstart` is bounded by this **exclusively**, so 9998 is the last offset
+    /// a search can ask for. See ``SearchPaging/pubMedListableRecords``.
     public static let pubmedMaxOffset = 9999
 
     /// Rate limit for PubMed without API key (requests per second).

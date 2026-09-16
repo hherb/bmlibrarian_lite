@@ -38,10 +38,10 @@ final class PubMedPaginationAdapterTests: XCTestCase {
         identifierKind: .pubmed
     )
 
-    /// Convert a PubMed result requested at `basePosition`.
-    private func unified(_ result: BMLSearchResult, basePosition: Int) -> UnifiedSearchResult {
-        BioMedLitAdapters.toUnifiedSearchResult(
-            result, appProvider: .pubmed, batchNumber: 2, basePosition: basePosition
+    /// Where PubMed's paging goes after a page requested at `basePosition`.
+    private func unified(_ result: BMLSearchResult, basePosition: Int) -> OffsetPaginationState {
+        BioMedLitAdapters.pubMedPagination(
+            for: result, basePosition: basePosition, articleCount: result.articles.count
         )
     }
 
@@ -106,7 +106,7 @@ final class PubMedPaginationAdapterTests: XCTestCase {
         let converted = unified(result(articles: 20, totalCount: 25000, nextOffset: nil), basePosition: 9980)
 
         XCTAssertFalse(converted.hasMore)
-        XCTAssertFalse(converted.nextOffset < converted.totalCount, "the workflow's own hasMore check")
+        XCTAssertTrue(converted.isExhausted, "BioMedLit said there is no page past the cap")
     }
 
     /// An empty batch past the end offers nothing further.

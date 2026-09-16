@@ -68,6 +68,11 @@ struct MacReportView: View {
             // Report content
             ScrollView {
                 VStack(alignment: .leading, spacing: MacSpacing.sectionSpacing) {
+                    // Incomplete search, before the verdict it qualifies
+                    if let notice = report.incompleteSearchNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
+
                     // Verdict badge
                     HStack {
                         Spacer()
@@ -257,7 +262,7 @@ struct MacReportView: View {
                 .fontWeight(.semibold)
 
             MacMarkdownReportView(
-                report.fullReport,
+                report.reportBodyAfterNotice,
                 documents: report.session?.documents ?? []
             )
         }
@@ -475,6 +480,34 @@ enum ExportFormat {
 }
 
 // MARK: - Supporting Views
+
+// MARK: - Incomplete Search Notice
+
+/// The incomplete-search notice, drawn before the verdict (#256).
+///
+/// The report's text carries the notice as a Markdown block quote, and this
+/// window shows the verdict and the summary ahead of that text — so a notice
+/// left where it was written would reach the reader after the verdict it
+/// qualifies. It is drawn here instead and taken off the body, never dropped.
+struct MacIncompleteSearchNotice: View {
+    /// The notice, as plain text.
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: MacSpacing.small) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MacSpacing.standard)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(MacOpacity.light))
+        .cornerRadius(MacCornerRadius.large)
+    }
+}
 
 /// Large verdict badge for report headers.
 ///

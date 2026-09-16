@@ -29,6 +29,9 @@ import Foundation
 public actor EuropePMCService {
     // MARK: - Properties
 
+    /// The cursor that asks for a search's first page.
+    static let initialCursor = "*"
+
     private let session: URLSession
     private let baseURL: String
 
@@ -51,7 +54,12 @@ public actor EuropePMCService {
 
     // MARK: - Search
 
-    /// Search Europe PMC for articles matching the query.
+    /// Search Europe PMC for one page of articles matching the query.
+    ///
+    /// A failed request is never an empty page (#256): whatever of the page the
+    /// answer loses is reported with the articles that arrived, as
+    /// ``SearchResult/shortfalls``, and a page that failures leave with nothing
+    /// throws ``SourceRequestError``.
     ///
     /// - Parameters:
     ///   - query: Search query string (supports Europe PMC query syntax).
@@ -59,14 +67,24 @@ public actor EuropePMCService {
     ///   - cursor: Cursor for pagination (use "*" for first page).
     ///   - includePreprints: Whether to include preprints in results.
     ///   - requireAbstract: Whether to only return articles with abstracts.
-    /// - Returns: Search results with articles and pagination info.
-    /// - Throws: `EuropePMCError` if the search fails.
+    ///   - recordsReceived: How many records the search's earlier pages held,
+    ///     readable or not; 0 for a first page, and `nil` when nobody counted
+    ///     them — a session saved before the count was kept, whose cursor can
+    ///     outlive its last hit, so nothing in particular is expected of the page.
+    /// - Returns: The page's articles, the search's hit count, what the page
+    ///   failed to retrieve, and the cursor of the next page — `nil` once the
+    ///   cursor ends.
+    /// - Throws: ``SourceRequestError`` if the request failed after its retries,
+    ///   the answer cannot be read, or it holds no record where the hit count
+    ///   says it should hold some. Also `CancellationError` when the user
+    ///   cancelled, which records nothing as missing.
     public func search(
         query: String,
         pageSize: Int = BioMedLitConstants.europePMCDefaultPageSize,
         cursor: String = "*",
         includePreprints: Bool = false,
-        requireAbstract: Bool = true
+        requireAbstract: Bool = true,
+        recordsReceived: Int? = 0
     ) async throws -> SearchResult {
         // Build the full query with filters
         var fullQuery = query
@@ -81,12 +99,98 @@ public actor EuropePMCService {
             fullQuery += " AND HAS_ABSTRACT:Y"
         }
 
-        // Build URL
+        let data = try await requestPage(query: fullQuery, pageSize: pageSize, cursor: cursor)
+        let page = try readPage(data, cursor: cursor, pageSize: pageSize, recordsReceived: recordsReceived)
+
+        BioMedLitLib.logger?.info(
+            "Europe PMC search returned \(page.articles.count) of \(page.hitCount) results",
+            category: .search
+        )
+
+        return SearchResult(
+            articles: page.articles,
+            totalCount: page.hitCount,
+            nextCursor: page.nextCursor,
+            query: fullQuery,
+            provider: .europePMC,
+            shortfalls: page.shortfalls,
+            recordsReceived: page.recordsReceived
+        )
+    }
+
+    // MARK: - Lookup
+
+    /// Look one known article up by its own identifier.
+    ///
+    /// A lookup is not a page of a search, and the two ask opposite things of a
+    /// record. Discovery shows a reader what the literature holds, so a record
+    /// with no title is one it cannot show and reports as missing; a lookup asks
+    /// Europe PMC what it holds about *this* article, and a record that names a
+    /// PMC accession answers that question whether or not it carries a title.
+    /// Nothing is expected of the page either: one hit is asked for, and the
+    /// hit count says how many other articles match a query nobody is paging.
+    ///
+    /// - Parameters:
+    ///   - query: The identifier query, sent as it is.
+    ///   - pageSize: How many records to ask for.
+    /// - Returns: The records Europe PMC answered with, in its order; empty when
+    ///   it holds none.
+    /// - Throws: ``SourceRequestError`` if the request failed after its retries
+    ///   or the answer cannot be read, so "Europe PMC has nothing for this
+    ///   article" and "we could not ask Europe PMC" stay opposite answers (#186).
+    ///   Also `CancellationError` when the user cancelled.
+    public func lookup(query: String, pageSize: Int = 1) async throws -> [SearchArticle] {
+        let data = try await requestPage(query: query, pageSize: pageSize, cursor: Self.initialCursor)
+
+        guard let answer = try? JSONDecoder().decode(EuropePMCResponse.self, from: data) else {
+            throw unreadableAnswer("lookup answer is not Europe PMC's JSON")
+        }
+        // No hit count is asked of a lookup: it says how many articles match a
+        // query nobody is paging, and a lookup asks for one known article
+        guard let records = answer.resultList?.result else {
+            throw unreadableAnswer("lookup answer has no resultList.result list")
+        }
+        return records.compactMap { $0.value }.map(EuropePMCService.searchArticle(from:))
+    }
+
+    // MARK: - One Page
+
+    /// One search page as read.
+    private struct SearchPage {
+        /// The articles that could be read.
+        let articles: [SearchArticle]
+
+        /// How many records the answer held, readable or not.
+        let recordsReceived: Int
+
+        /// The search's hit count.
+        let hitCount: Int
+
+        /// The cursor of the next page, or `nil` once the cursor ends.
+        let nextCursor: String?
+
+        /// What the page failed to retrieve.
+        let shortfalls: [RetrievalShortfall]
+    }
+
+    /// Request one search page and refuse an unsuccessful answer.
+    ///
+    /// - Parameters:
+    ///   - query: The query as it is sent, filters included.
+    ///   - pageSize: Number of results per page.
+    ///   - cursor: The cursor to send.
+    /// - Returns: The body of a 200 response.
+    /// - Throws: ``SourceRequestError`` if the endpoint is not a URL, the
+    ///   request failed after its retries, or the status is not 200.
+    private func requestPage(query: String, pageSize: Int, cursor: String) async throws -> Data {
         guard var components = URLComponents(string: BioMedLitConstants.europePMCSearchURL) else {
-            throw EuropePMCError.invalidQuery("Invalid search URL configuration")
+            BioMedLitLib.logger?.error(
+                "The Europe PMC search endpoint is not a URL", category: .search
+            )
+            throw SourceRequestError(source: .europePMC, failure: .requestFailed)
         }
         components.queryItems = [
-            URLQueryItem(name: "query", value: fullQuery),
+            URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "format", value: "json"),
             URLQueryItem(name: "pageSize", value: String(min(pageSize, BioMedLitConstants.europePMCMaxPageSize))),
             URLQueryItem(name: "cursorMark", value: cursor),
@@ -94,56 +198,146 @@ public actor EuropePMCService {
         ]
 
         guard let url = components.url else {
-            throw EuropePMCError.invalidQuery(query)
+            BioMedLitLib.logger?.error(
+                "The Europe PMC search query could not be written into a URL", category: .search
+            )
+            throw SourceRequestError(source: .europePMC, failure: .requestFailed)
         }
 
         BioMedLitLib.logger?.debug("Europe PMC search URL: \(url.absoluteString)", category: .search)
 
-        // Execute request with retry
-        let data = try await RetryHelper.retry(
-            config: .networkDefault,
-            shouldRetry: RetryHelper.retryOnlyTransient
-        ) {
-            let (data, response) = try await self.session.data(from: url)
+        let session = self.session
+        do {
+            return try await RetryHelper.retry(
+                config: .networkDefault,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                let (data, response) = try await session.data(from: url)
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw EuropePMCError.networkError("Invalid response")
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw SourceRequestError(source: .europePMC, failure: .requestFailed)
+                }
+
+                guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
+                    throw SourceRequestError(
+                        source: .europePMC, failure: .httpStatus(httpResponse.statusCode)
+                    )
+                }
+
+                return data
             }
+        } catch let error as SourceRequestError {
+            BioMedLitLib.logger?.warning(
+                "Europe PMC search failed: \(error.failure.describe())", category: .search
+            )
+            throw error
+        } catch where error.isCancellation {
+            // A cancelled request is the user's doing, not the source's
+            throw CancellationError()
+        } catch {
+            throw SourceRequestError(source: .europePMC, failure: SearchTransport.failure(for: error))
+        }
+    }
 
-            if BioMedLitConstants.retryableStatusCodes.contains(httpResponse.statusCode) {
-                throw EuropePMCError.serverError(statusCode: httpResponse.statusCode)
-            }
-
-            guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
-                throw EuropePMCError.httpError(statusCode: httpResponse.statusCode)
-            }
-
-            return data
+    /// Read a search page Europe PMC answered, checking it holds what it counts.
+    ///
+    /// Checked live on 2026-09-14: an unknown `cursorMark` answers HTTP 200 with
+    /// only a `version` field, which has no hit count and is therefore an answer
+    /// that cannot be read rather than a search that matched nothing (#255).
+    ///
+    /// - Parameters:
+    ///   - data: The answer's body.
+    ///   - cursor: The cursor the page was requested with.
+    ///   - pageSize: The page size asked for.
+    ///   - recordsReceived: How many records the search's earlier pages held, or
+    ///     `nil` when nobody counted them.
+    /// - Returns: The page's readable articles, its cursor and its shortfalls.
+    /// - Throws: ``SourceRequestError`` if the answer cannot be read, or holds no
+    ///   record where the hit count says it should hold some.
+    private func readPage(
+        _ data: Data,
+        cursor: String,
+        pageSize: Int,
+        recordsReceived: Int?
+    ) throws -> SearchPage {
+        // The decoder's error quotes the body it could not read, so it is dropped here
+        guard let answer = try? JSONDecoder().decode(EuropePMCResponse.self, from: data) else {
+            throw unreadableAnswer("search answer is not Europe PMC's JSON")
+        }
+        guard let hitCount = answer.hitCount, hitCount >= 0 else {
+            throw unreadableAnswer("search answer has no non-negative integer hitCount")
+        }
+        guard let records = answer.resultList?.result else {
+            throw unreadableAnswer("search answer has no resultList.result list")
         }
 
-        // Parse response
-        let response = try JSONDecoder().decode(EuropePMCResponse.self, from: data)
-
-        let results = response.resultList?.result ?? []
-        var articles: [SearchArticle] = []
-        articles.reserveCapacity(results.count)
-
-        for result in results {
-            articles.append(EuropePMCService.searchArticle(from: result))
+        // Unknown when nobody counted what came before: then nothing is expected of the page
+        let expected = recordsReceived.map {
+            SearchPaging.expectedEuropePMCPage(hitCount: hitCount, recordsReceived: $0, pageSize: pageSize)
+        } ?? 0
+        if records.isEmpty && expected > 0 {
+            BioMedLitLib.logger?.error(
+                "Europe PMC sent an empty page after \(recordsReceived ?? 0) of \(hitCount) results",
+                category: .search
+            )
+            throw SourceRequestError(source: .europePMC, failure: .incompleteResponse)
         }
 
-        BioMedLitLib.logger?.info(
-            "Europe PMC search returned \(articles.count) of \(response.hitCount ?? 0) results",
-            category: .search
-        )
+        // nextCursorMark repeats the cursor sent when there are no more results
+        let nextCursor = answer.nextCursorMark.flatMap { next -> String? in
+            guard next != cursor, next != Self.initialCursor, !records.isEmpty else { return nil }
+            return next
+        }
 
-        return SearchResult(
+        // The cursor ends only once every hit was sent (checked live 2026-09-15).
+        // Nothing past an ended cursor can be asked for, so every hit not received
+        // is missing, including those an earlier page left out while its cursor went on
+        let cutShort: Int
+        if nextCursor == nil, let recordsReceived {
+            cutShort = max(0, hitCount - (recordsReceived + records.count))
+            if cutShort > 0 {
+                BioMedLitLib.logger?.error(
+                    "Europe PMC's cursor ended after \(recordsReceived + records.count) of \(hitCount) results",
+                    category: .search
+                )
+            }
+        } else {
+            cutShort = 0
+        }
+
+        let articles = records.compactMap { record -> SearchArticle? in
+            guard let result = record.value,
+                  let title = result.title,
+                  !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return EuropePMCService.searchArticle(from: result)
+        }
+        let unreadable = records.count - articles.count
+        if unreadable > 0 {
+            BioMedLitLib.logger?.warning(
+                "Europe PMC sent \(unreadable) records that could not be read or have no title",
+                category: .search
+            )
+        }
+
+        return SearchPage(
             articles: articles,
-            totalCount: response.hitCount ?? 0,
-            nextCursor: response.nextCursorMark,
-            query: fullQuery,
-            provider: .europePMC
+            recordsReceived: records.count,
+            hitCount: hitCount,
+            nextCursor: nextCursor,
+            shortfalls: [
+                RetrievalShortfall.missingRecords(cutShort, from: .europePMC, failure: .incompleteResponse),
+                RetrievalShortfall.missingRecords(unreadable, from: .europePMC, failure: .malformedResponse),
+            ].compactMap { $0 }
         )
+    }
+
+    /// Build the error for a search answer that cannot be read, and log why.
+    ///
+    /// - Parameter reason: What was wrong, naming fields only, never their values.
+    /// - Returns: The error to throw.
+    private func unreadableAnswer(_ reason: String) -> SourceRequestError {
+        BioMedLitLib.logger?.error("Unreadable Europe PMC answer: \(reason)", category: .search)
+        return SourceRequestError(source: .europePMC, failure: .malformedResponse)
     }
 
     // MARK: - Result Mapping
@@ -284,41 +478,6 @@ public actor EuropePMCService {
     }
 }
 
-// MARK: - Europe PMC Errors
-
-/// Errors that can occur during Europe PMC operations.
-public enum EuropePMCError: LocalizedError, RetryableError, Sendable {
-    case invalidQuery(String)
-    case networkError(String)
-    case httpError(statusCode: Int)
-    case serverError(statusCode: Int)
-    case parseError(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidQuery(let query):
-            return "Invalid search query: \(query)"
-        case .networkError(let message):
-            return "Network error: \(message)"
-        case .httpError(let statusCode):
-            return "HTTP error: \(statusCode)"
-        case .serverError(let statusCode):
-            return "Server error (HTTP \(statusCode)). Retrying..."
-        case .parseError(let message):
-            return "Failed to parse response: \(message)"
-        }
-    }
-
-    public var isRetryable: Bool {
-        switch self {
-        case .serverError, .networkError:
-            return true
-        case .invalidQuery, .httpError, .parseError:
-            return false
-        }
-    }
-}
-
 // MARK: - Response Types
 
 /// Europe PMC search response.
@@ -329,17 +488,39 @@ struct EuropePMCResponse: Codable {
 }
 
 /// Europe PMC result list wrapper.
+///
+/// A missing `result` list stays missing rather than reading as an empty one: a
+/// page with no list is an answer that cannot be read, and a page with an empty
+/// list is a source saying it sent nothing (#255). The two are opposite
+/// answers, and only one of them is the evidence base's own.
 struct EuropePMCResultList: Codable {
-    let result: [EuropePMCResult]?
+    let result: [DecodedOrNil<EuropePMCResult>]?
+}
+
+/// One element of a list, decoded if it can be.
+///
+/// A record Europe PMC sends that this build cannot decode is one record
+/// missing, not a page that cannot be read: decoding the list strictly would
+/// throw away every other record on the page with it.
+struct DecodedOrNil<Wrapped: Codable>: Codable {
+    /// The decoded element, or `nil` when it could not be decoded.
+    let value: Wrapped?
 
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        // Handle null or missing result array
-        result = try container.decodeIfPresent([EuropePMCResult].self, forKey: .result) ?? []
+        value = try? Wrapped(from: decoder)
     }
 
-    enum CodingKeys: String, CodingKey {
-        case result
+    /// Encode the element, or nothing where there was nothing to decode.
+    ///
+    /// Only ``EuropePMCResultList``'s conformance asks for this; the app never
+    /// sends Europe PMC a result list.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        guard let value else {
+            try container.encodeNil()
+            return
+        }
+        try container.encode(value)
     }
 }
 

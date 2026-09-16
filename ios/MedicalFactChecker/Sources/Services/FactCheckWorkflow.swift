@@ -82,6 +82,15 @@ final class FactCheckWorkflow {
     /// Set to true when specifically waiting for smart search decision.
     private(set) var awaitingSmartSearchDecision = false
 
+    /// Why no alternative search ran, for the screen to show while the session proceeds.
+    ///
+    /// `nil` when smart search has not failed. Generating alternative queries is
+    /// the model's work, not a literature source's, so failing at it never ends
+    /// the run and records no shortfall: the documents already found and scored
+    /// still make a report. The run this notice belongs to keeps it until the
+    /// next smart search is attempted (#256).
+    private(set) var smartSearchNotice: String?
+
     /// Whether this workflow was restored from history.
     ///
     /// When true, the first call to `fetchMoreEvidence()` will refresh pagination
@@ -253,6 +262,9 @@ final class FactCheckWorkflow {
     ///   - claim: The medical claim to fact-check.
     ///   - searchOptions: Search configuration (provider, preprints, etc.).
     func startFactCheck(claim: String, searchOptions: SearchOptions? = nil) async {
+        // A new claim answers for itself: the last run's notice is not this run's
+        smartSearchNotice = nil
+
         // Initialize services
         do {
             llmService = try LLMService.create(from: settings)
@@ -393,67 +405,66 @@ final class FactCheckWorkflow {
     /// scoring. The method updates the session's cursor/offset to the correct
     /// position for fetching additional results beyond the original set.
     ///
+    /// **It records no shortfall.** The pages it re-walks are the ones the
+    /// session already holds documents from, so what they lose was already
+    /// recorded by the search that first read them: recording it again would
+    /// add the same records to the count on every resume. A re-walk that fails
+    /// now loses nothing either — those documents are already in the session —
+    /// so it stops where it got to and leaves paging behind it. Finding no new
+    /// document is this method's ordinary outcome, not a failed search; the
+    /// fetch that follows it decides that, against a page asked for more (#256).
+    ///
     /// - Returns: Number of new documents found during the refresh.
-    /// - Throws: SearchError if no query is available, or network errors.
+    /// - Throws: `SearchError` if no query is available, ``BudgetError`` if the
+    ///   budget is spent, `CancellationError`, or a network error. Also
+    ///   ``BioMedLit/DamagedShortfallRecordError`` when what earlier searches
+    ///   lost cannot be read, which stops the session before it searches.
     private func refreshPaginationState() async throws -> Int {
         guard let session = session else { return 0 }
 
+        // Refuse to search before a damaged record of what earlier searches lost has been read
+        _ = try session.retrievalShortfalls()
+
         let existingCount = session.documents?.count ?? 0
-
-        // Reset pagination to start
-        var currentOffset = 0
-        var currentCursor: String? = "*"
         var newDocumentsFound = 0
-        let provider = currentSearchOptions?.provider ?? .pubmed
-
-        // Build existing identifier sets for deduplication
-        let existingDocuments = session.documents ?? []
-        var existingPmids = Set(existingDocuments.map { $0.pmid })
-        var existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
-        var existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
-
-        // We need to re-fetch until our pagination position covers all existing documents.
-        // The goal is to get our cursor/offset to a position BEYOND what was already fetched,
-        // so subsequent fetches return new documents. We continue until currentOffset >= existingCount.
-        var lastTotalCount = 0
+        var continuation: SearchContinuation?
+        var lastPage: UnifiedSearchResult?
+        var covered = 0
 
         // Get query string - required for refresh
         guard let queryString = session.pubmedQuery else {
             throw SearchError.invalidConfiguration("No query available for pagination refresh")
         }
 
-        while currentOffset < existingCount {
+        // Re-fetch until the paging position covers every document already held,
+        // so the next fetch returns documents this session has not seen
+        while covered < existingCount {
             // Check budget before each batch
             try checkBudget()
 
-            // Build options for this batch
             var options = currentSearchOptions ?? settings.buildSearchOptions()
             options.maxResults = settings.batchSize
-            options.offset = currentOffset
-            options.cursorMark = currentCursor
+            options.batchNumber = session.batchesFetched + 1
+            options.continuation = continuation
 
             updateProgress(.fetchingMoreEvidence,
-                "Refreshing search state (offset \(currentOffset)/\(existingCount))...")
+                "Refreshing search state (offset \(covered)/\(existingCount))...")
 
             let result = try await SearchServiceFactory.search(
                 query: queryString,
                 options: options,
-                settings: settings,
-                cursor: options.cursorMark
+                settings: settings
             )
+            if !result.shortfalls.isEmpty {
+                // Not recorded: see this method's note. Logged so a re-walk that
+                // keeps failing is visible, since it leaves paging behind it.
+                logger.warning(
+                    "Refreshing the search state lost \(result.shortfalls.count) record(s) of ground already covered; paging stops where the re-walk reached"
+                )
+            }
+            lastPage = result
 
-            lastTotalCount = result.totalCount
-
-            // Process articles - add only those not in existing set
-            for article in result.articles {
-                // Skip if already exists (by PMID)
-                if existingPmids.contains(article.pmid) { continue }
-                // Skip if DOI matches
-                if let doi = article.doi?.lowercased(), existingDois.contains(doi) { continue }
-                // Skip if PMC ID matches
-                if let pmcId = article.pmcId?.lowercased(), existingPmcIds.contains(pmcId) { continue }
-
-                // New document - add to session
+            for article in articlesNotYetHeld(result.articles, by: session) {
                 let document = Document(
                     pmid: article.pmid,
                     title: article.title,
@@ -467,51 +478,49 @@ final class FactCheckWorkflow {
 
                 modelContext.insert(document)
                 newDocumentsFound += 1
-
-                // Update dedup sets for subsequent iterations
-                existingPmids.insert(article.pmid)
-                if let doi = article.doi { existingDois.insert(doi.lowercased()) }
-                if let pmcId = article.pmcId { existingPmcIds.insert(pmcId.lowercased()) }
             }
 
-            currentOffset = result.nextOffset
-            currentCursor = result.nextCursorMark
+            covered = max(covered + result.articles.count, result.fetchedCount)
 
-            // Check if search is exhausted
-            if result.articles.isEmpty {
+            // A page that failed stops the refresh with the documents it found,
+            // rather than paging on over records nobody has seen (#256)
+            if !result.shortfalls.isEmpty || result.articles.isEmpty || !result.hasMore {
                 break
             }
-            if provider == .europePMC || provider == .both {
-                if currentCursor == nil {
-                    break
-                }
-            }
-            if provider == .pubmed || provider == .both {
-                if currentOffset >= result.totalCount {
-                    break
-                }
-            }
+            continuation = nextContinuation(after: result)
         }
 
-        // Update session pagination state with fresh values
-        if provider == .pubmed || provider == .both {
-            session.pubmedTotalResults = lastTotalCount
-            session.pubmedOffset = currentOffset
-            session.pubmedHasMore = currentOffset < lastTotalCount
+        if let lastPage {
+            applyPaging(from: lastPage, to: session)
         }
-        if provider == .europePMC || provider == .both {
-            session.europePMCTotalResults = lastTotalCount
-            session.europePMCCursor = currentCursor
-            session.europePMCOffset = currentOffset
-            session.europePMCHasMore = currentCursor != nil
-        }
-
         if newDocumentsFound > 0 {
             session.documentsFound += newDocumentsFound
         }
         try? modelContext.save()
 
         return newDocumentsFound
+    }
+
+    /// Where the next page continues from, after a page.
+    ///
+    /// A provider with no next page is left out, so it is not asked for one.
+    ///
+    /// - Parameter result: The page just searched.
+    /// - Returns: Where each provider's paging goes next.
+    private func nextContinuation(after result: UnifiedSearchResult) -> SearchContinuation {
+        var pubMed: PubMedContinuation?
+        if let state = result.pubMedPagination, state.hasMore {
+            pubMed = PubMedContinuation(offset: state.nextOffset, totalResults: state.totalCount)
+        }
+        var europePMC: EuropePMCContinuation?
+        if let state = result.europePMCPagination, state.hasMore, let cursor = state.nextCursor {
+            europePMC = EuropePMCContinuation(
+                cursor: cursor,
+                totalResults: state.totalCount,
+                recordsReceived: state.recordsReceived
+            )
+        }
+        return SearchContinuation(pubMed: pubMed, europePMC: europePMC)
     }
 
     /// User approved fetching more documents.
@@ -574,7 +583,7 @@ final class FactCheckWorkflow {
             updateProgress(.fetchingMoreEvidence, "Generating alternative search queries...")
 
             // Execute smart search with alternative queries
-            try await executeSmartSearch()
+            try await executeSmartSearch(askedForMoreEvidence: true)
 
             // Check if we found enough documents after smart search
             let relevantCount = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
@@ -614,11 +623,12 @@ final class FactCheckWorkflow {
                 try? modelContext.save()
             }
         } catch {
+            let reported = userFacing(error)
             session.currentStep = .failed
-            session.errorMessage = error.localizedDescription
+            session.errorMessage = reported.localizedDescription
             session.stopReason = .apiError
             try? modelContext.save()
-            onError?(error)
+            onError?(reported)
         }
 
         isRunning = false
@@ -965,11 +975,12 @@ final class FactCheckWorkflow {
             try? modelContext.save()
             onBudgetExceeded?(error.localizedDescription)
         } catch {
+            let reported = userFacing(error)
             session.currentStep = .failed
-            session.errorMessage = error.localizedDescription
+            session.errorMessage = reported.localizedDescription
             session.stopReason = .apiError
             try? modelContext.save()
-            onError?(error)
+            onError?(reported)
         }
 
         isRunning = false
@@ -1091,7 +1102,7 @@ final class FactCheckWorkflow {
                 try Task.checkCancellation()
                 // PubMed exhausted but smart search not tried - try alternative queries
                 updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
-                try await executeSmartSearch()
+                try await executeSmartSearch(askedForMoreEvidence: true)
             } else {
                 // Both exhausted - nothing more we can do
                 session.currentStep = .completed
@@ -1156,11 +1167,13 @@ final class FactCheckWorkflow {
             onBudgetExceeded?(error.localizedDescription)
         } catch {
             // Restore to completed state on error - original report is preserved
-            // since we only delete it after successful regeneration
+            // since we only delete it after successful regeneration, and a failed
+            // search leaves the report exactly as it was (#256)
+            let reported = userFacing(error)
             session.currentStep = .completed
-            session.errorMessage = error.localizedDescription
+            session.errorMessage = reported.localizedDescription
             try? modelContext.save()
-            onError?(error)
+            onError?(reported)
         }
 
         isRunning = false
@@ -1226,7 +1239,17 @@ final class FactCheckWorkflow {
                     // Try smart search first if not already enabled
                     if !session.smartSearchEnabled && relevant < smartSearchThreshold {
                         updateProgress(.searchingPubMed, "Insufficient results, activating smart search...")
-                        try await executeSmartSearch()
+                        do {
+                            try await executeSmartSearch()
+                        } catch let error as SmartSearchError {
+                            // Smart search is this step's own idea, not something
+                            // the user asked for, and generating queries is not a
+                            // source's failure: the documents already scored still
+                            // make a report, so the run proceeds and says why no
+                            // alternative search happened (#256)
+                            logger.warning("Smart search did not run: \(error.localizedDescription)")
+                            smartSearchNotice = error.localizedDescription
+                        }
 
                         // Re-check after smart search
                         let relevantAfterSmart = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
@@ -1323,11 +1346,12 @@ final class FactCheckWorkflow {
             try? modelContext.save()
             onBudgetExceeded?(error.localizedDescription)
         } catch {
+            let reported = userFacing(error)
             session.currentStep = .failed
-            session.errorMessage = error.localizedDescription
+            session.errorMessage = reported.localizedDescription
             session.stopReason = .apiError
             try? modelContext.save()
-            onError?(error)
+            onError?(reported)
         }
 
         isRunning = false
@@ -1481,11 +1505,16 @@ final class FactCheckWorkflow {
 
         updateProgress(.searchingPubMed, "Searching \(providerName) (batch \(batchNumber))...")
 
+        // Refuse to search before a damaged record of what earlier searches lost
+        // has been read: a session that cannot say whether its search was
+        // complete must not spend anything writing a report that claims it was
+        _ = try session.retrievalShortfalls()
+
         // Build search options with current pagination state
         var options = currentSearchOptions ?? settings.buildSearchOptions()
         options.maxResults = settings.batchSize
-        options.offset = session.pubmedOffset
-        options.cursorMark = session.europePMCCursor
+        options.batchNumber = batchNumber
+        options.continuation = searchContinuation(for: session, provider: provider)
 
         // Build query string from stored structured query or fallback to session query
         let queryString: String
@@ -1505,54 +1534,23 @@ final class FactCheckWorkflow {
         let result = try await SearchServiceFactory.search(
             query: queryString,
             options: options,
-            settings: settings,
-            cursor: options.cursorMark
+            settings: settings
         )
 
-        // Update session state based on provider
-        if provider == .pubmed || provider == .both {
-            session.pubmedTotalResults = result.totalCount
-            session.pubmedOffset = result.nextOffset
-            session.pubmedHasMore = result.nextOffset < result.totalCount
-        }
-        if provider == .europePMC || provider == .both {
-            session.europePMCTotalResults = result.totalCount
-            session.europePMCCursor = result.nextCursorMark
-            session.europePMCOffset = result.nextOffset
-            session.europePMCHasMore = result.nextCursorMark != nil
-        }
-        session.batchesFetched = batchNumber
+        let newArticles = articlesNotYetHeld(result.articles, by: session)
 
-        if result.articles.isEmpty {
-            if (session.documents ?? []).isEmpty {
-                throw PubMedError.noResults
-            }
-            return  // No more results, proceed with what we have
+        // A page that failures left with no new document changes nothing: no
+        // paging, no document and no shortfall is kept, so asking again asks
+        // for the same page (#256)
+        if newArticles.isEmpty, let failed = SearchFailedError(shortfalls: result.shortfalls) {
+            throw failed
         }
 
-        updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
+        // What the page lost is recorded before its documents, and both before its paging
+        try session.recordRetrievalShortfalls(result.shortfalls)
 
-        // Build sets of existing identifiers for deduplication
-        let existingDocuments = session.documents ?? []
-        let existingPmids = Set(existingDocuments.map { $0.pmid })
-        let existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
-        let existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
-
-        // Filter out duplicates before adding
-        let newArticles = result.articles.filter { article in
-            // Check PMID (primary identifier)
-            if existingPmids.contains(article.pmid) {
-                return false
-            }
-            // Check DOI
-            if let doi = article.doi?.lowercased(), existingDois.contains(doi) {
-                return false
-            }
-            // Check PMC ID
-            if let pmcId = article.pmcId?.lowercased(), existingPmcIds.contains(pmcId) {
-                return false
-            }
-            return true
+        if !newArticles.isEmpty {
+            updateProgress(.searchingPubMed, "Processing \(result.articles.count) articles...")
         }
 
         // Create Document objects from deduplicated articles
@@ -1572,7 +1570,105 @@ final class FactCheckWorkflow {
         }
 
         session.documentsFound += newArticles.count
+        applyPaging(from: result, to: session)
+        session.batchesFetched = batchNumber
         try? modelContext.save()
+
+        if result.articles.isEmpty, (session.documents ?? []).isEmpty {
+            throw SearchError.noResults
+        }
+    }
+
+    // MARK: - Search Pagination and Shortfalls
+
+    /// Where the session's paging stands, for a page that continues it.
+    ///
+    /// `nil` for a search's first page, which continues nothing. A provider
+    /// whose side is `nil` has no next page and is not asked for one, and a
+    /// provider whose paging was reset — by a change of provider while fetching
+    /// more evidence — starts again at its own first page.
+    ///
+    /// - Parameters:
+    ///   - session: The session whose paging to continue.
+    ///   - provider: The provider(s) the page searches.
+    /// - Returns: Where each provider's paging stands.
+    private func searchContinuation(
+        for session: FactCheckSession,
+        provider: SearchProvider
+    ) -> SearchContinuation? {
+        guard session.batchesFetched > 0 else { return nil }
+
+        var pubMed: PubMedContinuation?
+        if provider == .pubmed || provider == .both {
+            if session.pubmedTotalResults == 0 && session.pubmedOffset == 0 {
+                pubMed = .firstPage
+            } else if session.pubmedHasMore {
+                pubMed = PubMedContinuation(
+                    offset: session.pubmedOffset, totalResults: session.pubmedTotalResults
+                )
+            }
+        }
+
+        var europePMC: EuropePMCContinuation?
+        if provider == .europePMC || provider == .both {
+            if let cursor = session.europePMCCursor, session.europePMCHasMore {
+                europePMC = EuropePMCContinuation(
+                    cursor: cursor,
+                    totalResults: session.europePMCTotalResults,
+                    recordsReceived: session.europePMCRecordsReceived
+                )
+            } else if session.europePMCCursor == nil && session.europePMCHasMore {
+                europePMC = .firstPage
+            }
+        }
+
+        return SearchContinuation(pubMed: pubMed, europePMC: europePMC)
+    }
+
+    /// Move the session's paging to where the page left it.
+    ///
+    /// A provider the page did not search, or whose first page failed, carries
+    /// no paging: its own is left exactly as it was.
+    ///
+    /// - Parameters:
+    ///   - result: The page.
+    ///   - session: The session to move.
+    private func applyPaging(from result: UnifiedSearchResult, to session: FactCheckSession) {
+        if let pubMed = result.pubMedPagination {
+            session.pubmedTotalResults = pubMed.totalCount
+            session.pubmedOffset = pubMed.nextOffset
+            session.pubmedHasMore = pubMed.hasMore
+        }
+        if let europePMC = result.europePMCPagination {
+            session.europePMCTotalResults = europePMC.totalCount
+            session.europePMCCursor = europePMC.nextCursor
+            session.europePMCOffset = europePMC.fetchedCount
+            session.europePMCRecordsReceived = europePMC.recordsReceived
+            session.europePMCHasMore = europePMC.hasMore
+        }
+    }
+
+    /// The articles of a page that the session does not already hold.
+    ///
+    /// - Parameters:
+    ///   - articles: The page's articles.
+    ///   - session: The session whose documents to compare against.
+    /// - Returns: The articles whose PubMed ID, DOI and PMC ID are all new.
+    private func articlesNotYetHeld(
+        _ articles: [UnifiedArticleMetadata],
+        by session: FactCheckSession
+    ) -> [UnifiedArticleMetadata] {
+        let existingDocuments = session.documents ?? []
+        let existingPmids = Set(existingDocuments.map { $0.pmid })
+        let existingDois = Set(existingDocuments.compactMap { $0.doi?.lowercased() })
+        let existingPmcIds = Set(existingDocuments.compactMap { $0.pmcId?.lowercased() })
+
+        return articles.filter { article in
+            if existingPmids.contains(article.pmid) { return false }
+            if let doi = article.doi?.lowercased(), existingDois.contains(doi) { return false }
+            if let pmcId = article.pmcId?.lowercased(), existingPmcIds.contains(pmcId) { return false }
+            return true
+        }
     }
 
     /// Score documents using parallel processing with checkpointing.
@@ -2009,6 +2105,10 @@ final class FactCheckWorkflow {
         let allCitations = (session.documents ?? []).flatMap { $0.citations ?? [] }
         let relevantDocCount = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
 
+        // A report must be able to say whether the search behind it was complete,
+        // so a damaged record fails the session before the model is paid (#256)
+        let shortfalls = try session.retrievalShortfalls()
+
         // Handle no evidence case using ReportFormatter
         guard !allCitations.isEmpty else {
             let noEvidenceContent = ReportFormatter.generateNoEvidenceContent(
@@ -2019,7 +2119,9 @@ final class FactCheckWorkflow {
             let report = EvidenceReport(
                 verdict: .insufficientEvidence,
                 summary: noEvidenceContent.summary,
-                fullReport: noEvidenceContent.fullReport,
+                fullReport: ReportFormatter.standInReport(
+                    noEvidenceContent.fullReport, shortfalls: shortfalls
+                ),
                 citationCount: 0,
                 uniqueSourceCount: 0,
                 documentsReviewed: session.documentsScored
@@ -2083,7 +2185,12 @@ final class FactCheckWorkflow {
             )
         }
         let references = ReportFormatter.formatReferences(referenceData)
-        let completeReport = parsedReport.fullReport + "\n\n## References\n\n" + references
+        // The notice and the Methodology line are added by code, never by the model
+        let completeReport = ReportFormatter.fullReport(
+            analysis: parsedReport.fullReport,
+            references: references,
+            shortfalls: shortfalls
+        )
 
         let report = EvidenceReport(
             verdict: parsedReport.verdict,
@@ -2097,6 +2204,39 @@ final class FactCheckWorkflow {
         modelContext.insert(report)
         session.report = report
         try? modelContext.save()
+    }
+
+    // MARK: - Telling the user
+
+    /// What this session's searches have failed to retrieve, as one sentence.
+    ///
+    /// Shown while the session proceeds, so the reader is not told only at the
+    /// end that the evidence base was partial (#256). `nil` while every search
+    /// has been complete.
+    var incompleteSearchWarning: String? {
+        guard let session = session else { return nil }
+        do {
+            return SearchFailureReporting.incompleteSearchWarning(try session.retrievalShortfalls())
+        } catch {
+            // A record that cannot be read is a warning of its own: this session
+            // cannot say whether its search was complete, and every step that
+            // would search or write a report refuses before spending anything
+            return "What earlier searches failed to retrieve could not be read, "
+                + "so this session cannot say whether its search was complete."
+        }
+    }
+
+
+    /// The error as the user is told about it.
+    ///
+    /// A failed search reaches the user as the contract's sentence and the
+    /// advice that follows it; everything else as it is.
+    ///
+    /// - Parameter error: What the step raised.
+    /// - Returns: The error to show and to store on the session.
+    private func userFacing(_ error: Error) -> Error {
+        guard let failed = error as? SearchFailedError else { return error }
+        return ReportedSearchFailure(failure: failed)
     }
 
     // MARK: - Budget Management
@@ -2164,13 +2304,19 @@ final class FactCheckWorkflow {
         WorkflowConstants.smartSearchThreshold
     }
 
-    /// Generate alternative search queries when initial search yields insufficient results.
+    /// Ask the model for alternative search queries, asking again for an unusable answer.
     ///
-    /// Returns structured queries that can be translated to any provider's syntax.
+    /// An answer that does not parse as a list of queries, or that has no
+    /// content, is asked for again up to ``WorkflowConstants/maxQueryRetries``
+    /// more times, each a paid call (user's decision, 2026-09-16). Generating
+    /// the queries is not a source's failure, so none of this records a
+    /// shortfall.
+    ///
+    /// - Returns: The queries, or an empty list when no answer held one.
+    /// - Throws: ``SmartSearchError/queryGenerationFailed`` when the request to
+    ///   the model failed, which costs nothing and leaves smart search available.
     private func generateAlternativeQueries() async throws -> [StructuredQuery] {
         guard let session = session, let llmService = llmService else { return [] }
-
-        try checkBudget()
 
         // Use centralized prompt template for alternative query generation
         let context = PromptTemplates.AlternativeQueryContext(
@@ -2180,33 +2326,75 @@ final class FactCheckWorkflow {
             relevantCount: session.relevantDocumentsFound
         )
         let prompt = PromptTemplates.alternativeQueries(context: context)
-
         let messages = [LLMService.userMessage(prompt)]
-        let (response, usage) = try await llmService.chat(
-            messages: messages,
-            temperature: 0.3,
-            maxTokens: 1024,
-            jsonMode: true
-        )
 
-        recordUsage(usage, operationType: "smart_search")
+        for attempt in 0...WorkflowConstants.maxQueryRetries {
+            try checkBudget()
+            try Task.checkCancellation()
 
-        // Parse the structured query array
-        let queries = ResponseParser.parseStructuredQueryArray(response)
-        return queries
+            let response: String
+            let usage: LLMUsage
+            do {
+                (response, usage) = try await llmService.chat(
+                    messages: messages,
+                    temperature: 0.3,
+                    maxTokens: 1024,
+                    jsonMode: true
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A request that failed asks nothing and pays nothing
+                throw SmartSearchError.queryGenerationFailed
+            }
+
+            recordUsage(usage, operationType: "smart_search")
+
+            let queries = ResponseParser.parseStructuredQueryArray(response)
+            if !queries.isEmpty {
+                return queries
+            }
+            if attempt < WorkflowConstants.maxQueryRetries {
+                updateProgress(.searchingPubMed, "Asking again for alternative search strategies...")
+            }
+        }
+        return []
     }
 
     /// Execute smart search with alternative queries.
-    private func executeSmartSearch() async throws {
+    ///
+    /// What the queries lose is held back until one of them has found a new
+    /// document, and is then recorded before any later document is saved. When
+    /// failures leave every query with nothing and the user asked for more
+    /// evidence, that is a failed search: nothing is kept, and smart search
+    /// stays available to try again (#256).
+    ///
+    /// - Parameter askedForMoreEvidence: Whether the user asked for more
+    ///   evidence, rather than the workflow running smart search on its own.
+    /// - Throws: ``BioMedLit/SearchFailedError`` when the user asked for more
+    ///   evidence and failures left the queries with no new document;
+    ///   ``SmartSearchError`` when the queries could not be generated.
+    private func executeSmartSearch(askedForMoreEvidence: Bool = false) async throws {
         guard let session = session else { return }
+
+        // A fresh attempt answers for itself: an earlier attempt's notice would
+        // otherwise outlive the reason it was shown
+        smartSearchNotice = nil
+
+        // Refuse to spend anything before a damaged record of what earlier
+        // searches lost has been read
+        _ = try session.retrievalShortfalls()
 
         // Generate alternative structured queries
         updateProgress(.searchingPubMed, "Generating alternative search strategies...")
         let alternatives = try await generateAlternativeQueries()
 
         guard !alternatives.isEmpty else {
-            // No alternatives generated, continue with what we have
-            return
+            // No answer held a usable query: marked as tried, so no later batch
+            // asks and pays again, and the user is told why
+            session.smartSearchEnabled = true
+            try? modelContext.save()
+            throw SmartSearchError.noUsableQuery
         }
 
         // Store alternatives in session (encode as JSON)
@@ -2214,7 +2402,6 @@ final class FactCheckWorkflow {
            let jsonString = String(data: data, encoding: .utf8) {
             session.alternativeQueries = jsonString
         }
-        session.smartSearchEnabled = true
         session.currentAlternativeQueryIndex = 0
 
         // Track already-fetched PMIDs
@@ -2222,6 +2409,11 @@ final class FactCheckWorkflow {
         session.fetchedPmids = existingPmids.joined(separator: ",")
 
         onSmartSearchActivated?("Trying \(alternatives.count) alternative search strategies...")
+
+        // Held back until a query has found a new document: a request for more
+        // evidence that finds nothing keeps nothing
+        var pendingShortfalls: [RetrievalShortfall] = []
+        var foundDocuments = false
 
         // Execute each alternative query
         for (index, structuredQuery) in alternatives.enumerated() {
@@ -2233,7 +2425,10 @@ final class FactCheckWorkflow {
             let queryDescription = structuredQuery.concepts.first?.name ?? "alternative \(index + 1)"
             updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(queryDescription)...")
 
-            try await executeAlternativeQuery(structuredQuery)
+            let found = try await executeAlternativeQuery(
+                structuredQuery, pendingShortfalls: &pendingShortfalls
+            )
+            foundDocuments = foundDocuments || found
 
             // Check if we now have enough relevant documents
             let relevant = (session.documents ?? []).filter { $0.meetsThreshold(settings.minScoreThreshold) }.count
@@ -2243,6 +2438,14 @@ final class FactCheckWorkflow {
             }
         }
 
+        if !foundDocuments, askedForMoreEvidence, let failed = SearchFailedError(shortfalls: pendingShortfalls) {
+            // Nothing is kept, and smart search stays available to try again
+            throw failed
+        }
+
+        // Smart search ran, so no later batch generates its queries again
+        session.smartSearchEnabled = true
+        try session.recordRetrievalShortfalls(pendingShortfalls)
         try? modelContext.save()
     }
 
@@ -2251,9 +2454,17 @@ final class FactCheckWorkflow {
     /// Searches using the current provider (from search options) with the given
     /// structured query, then scores any new documents found.
     ///
-    /// - Parameter query: The structured query to execute.
-    private func executeAlternativeQuery(_ query: StructuredQuery) async throws {
-        guard let session = session else { return }
+    /// - Parameters:
+    ///   - query: The structured query to execute.
+    ///   - pendingShortfalls: What earlier alternative queries lost and has not
+    ///     been recorded yet; this query's losses are added, and everything is
+    ///     recorded once this query has found a new document.
+    /// - Returns: Whether the query found a document the session did not hold.
+    private func executeAlternativeQuery(
+        _ query: StructuredQuery,
+        pendingShortfalls: inout [RetrievalShortfall]
+    ) async throws -> Bool {
+        guard let session = session else { return false }
 
         // Get already-fetched PMIDs
         let fetchedPmidSet = Set((session.fetchedPmids ?? "").split(separator: ",").map(String.init))
@@ -2265,12 +2476,13 @@ final class FactCheckWorkflow {
         // Build query string using type-safe wrapper
         let queryString = BioMedLitAdapters.buildQuery(from: queryWithPrefs, for: appProvider)
 
-        // Build search options
+        // An alternative query starts its own search, so it continues no paging
+        let batchNumber = session.batchesFetched + 1
         let options = SearchOptions(
             provider: appProvider,
             includePreprints: currentSearchOptions?.includePreprints ?? false,
             maxResults: settings.batchSize,
-            offset: 0
+            batchNumber: batchNumber
         )
 
         // Use unified search service
@@ -2280,14 +2492,23 @@ final class FactCheckWorkflow {
             settings: settings
         )
 
+        // An alternative query's loss is never reported as the source never
+        // having been searched: the original query's results are in the report
+        let shortfalls = result.shortfalls.map { $0.belongingTo(.alternative) }
+
         // Filter out already-fetched PMIDs from result
         let newArticles = result.articles.filter { !fetchedPmidSet.contains($0.pmid) }
 
         guard !newArticles.isEmpty else {
-            return  // No new results from this query
+            // Held back: one query failing does not end smart search
+            pendingShortfalls += shortfalls
+            return false
         }
 
-        let batchNumber = session.batchesFetched + 1
+        // What the queries lost is recorded before any document is saved
+        pendingShortfalls += shortfalls
+        try session.recordRetrievalShortfalls(pendingShortfalls)
+        pendingShortfalls = []
 
         // Create Document objects from UnifiedArticleMetadata
         for (index, article) in newArticles.enumerated() {
@@ -2318,6 +2539,7 @@ final class FactCheckWorkflow {
 
         // Score the new documents
         try await scoreNewDocuments(newArticles.map { $0.pmid })
+        return true
     }
 
     /// Score only specific documents (by PMID) using checkpointed parallel processing.
@@ -2417,6 +2639,53 @@ final class FactCheckWorkflow {
     private func updateProgress(_ step: WorkflowStep, _ message: String) {
         progressMessage = message
         onProgress?(step, message)
+    }
+}
+
+// MARK: - Smart Search Errors
+
+/// Why smart search could not run its alternative queries (#256).
+///
+/// Generating the queries is not a literature source's failure, so neither of
+/// these records a retrieval shortfall: the evidence base is whole, and what
+/// went wrong is the model or its configuration.
+enum SmartSearchError: LocalizedError, Equatable {
+    /// The model's answers held no usable query, after every retry.
+    ///
+    /// Smart search is marked as tried, so no later batch asks and pays again.
+    case noUsableQuery
+
+    /// The request to the model failed, so that request asked nothing and paid
+    /// nothing. An earlier attempt in the same round may already have been
+    /// billed, since each retry is a paid call.
+    ///
+    /// Smart search stays available to try again.
+    case queryGenerationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .noUsableQuery:
+            return "The model's answers held no usable alternative search query, "
+                + "so no alternative search was run."
+        case .queryGenerationFailed:
+            return "Alternative searches could not be run: the model could not be asked for them. "
+                + "Check the model and its key in Settings."
+        }
+    }
+}
+
+/// A failed search as the user is told about it (#256).
+///
+/// Carries the contract's sentence and the advice that follows it, so a dialog
+/// that shows an error's description shows both. Kept apart from
+/// ``BioMedLit/SearchFailedError`` itself, whose description is the sentence
+/// alone, which the advice is composed onto here.
+struct ReportedSearchFailure: LocalizedError, Equatable {
+    /// What failed.
+    let failure: SearchFailedError
+
+    var errorDescription: String? {
+        SearchFailureReporting.failureMessage(failure)
     }
 }
 
