@@ -138,10 +138,13 @@ def combined_shortfalls(shortfalls: Sequence[RetrievalShortfall]) -> list[Retrie
     Returns:
         The shortfalls in first-seen order, with the counts of those naming
         the same source and failure added together. A source that could not
-        be searched at all (no count) is never merged into a count.
+        be searched at all (no count) is never merged into a count, and is
+        reported once for each failure however often it failed.
     """
     combined: list[RetrievalShortfall] = []
     for shortfall in shortfalls:
+        if shortfall.records_missing is None and shortfall in combined:
+            continue
         for index, earlier in enumerate(combined):
             if (
                 earlier.provider is shortfall.provider

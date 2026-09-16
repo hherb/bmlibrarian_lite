@@ -8,11 +8,61 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#247 + #248 + #255 (Python half) — a failed source is not an empty one**, on
-branch `fix/failed-search-is-not-empty-247`, PR #260. The rules are under
-**Recently landed**. Once it merges, delete this section. The natural next slice
-ports the contract (`doc/cross_platform/search_failure_reporting.md`): **#252**
-(Android) and **#256** + **#255** (Swift), both of which said "mirror #247".
+**#252 + #255 (Android half) — a failed source is not an empty one**, branch
+`fix/android-failed-search-is-not-empty-252`, PR #276. Android conforms to the
+#247 contract; its mapping is the contract's **Android** section. Once merged,
+compress this into **Recently landed**. Next: Swift (**#256** + **#255** +
+**#253**), which must adopt the alternative-query clause (see #256).
+
+- **User's decisions (2026-09-15).** Android before Swift. Android's report has
+  no Methodology section, so code adds one holding only the Search Completeness
+  line, for an incomplete search. **A failed smart-search (alternative) query
+  has its own clause**, "an alternative search of PubMed could not be completed
+  (…)", persisted as `"query": "alternative"`, since "PubMed could not be
+  searched" overstated beside the original query's PubMed results.
+- **One page per call.** A failed later PubMed page is recorded and skipped; a
+  failed later Europe PMC page is recorded and ends the cursor. **A page that
+  failures leave with nothing persists nothing**, so asking again asks for the
+  same page; losses are recorded before documents, and both before paging.
+  Search lives in `LiteratureSearch`, testable without the workflow. **A
+  migrated session's Europe PMC count is `null`, not 0** (a pre-v6 cursor can
+  outlive its last hit). The notice is drawn **before the verdict** on screen,
+  PDF (tested by reading the rendered PDF back) and share text.
+- **Not shortfalls:** an unreadable keystore (`NcbiCredentialsUnavailableException`,
+  fix in Settings; handled like a failed search, so Get more evidence keeps the
+  report) and query generation. **User's decision (2026-09-16): an answer with
+  no usable query is asked again, up to `MAX_QUERY_RETRIES` (2)**; if none is
+  usable smart search is marked as tried, so no later batch pays again. A
+  request that failed leaves smart search available and records no usage.
+  `LLMService.generateAlternativeQueries` returns an empty list for an unusable
+  answer, a failure only for a failed request. A damaged shortfall record is a
+  persistent warning: Get more evidence keeps the report, and every other step
+  that would search or write a report fails the session before spending
+  anything. Fixed on the way: Fetch more re-requested page 1; the 9,999 cap;
+  `printStackTrace` in efetch (PubMed half of #123); Europe PMC cancellation and
+  429; one bad record failing a page. `PubMedError` is deleted.
+- **Review round (the same PR).** **An ended Europe PMC cursor misses every hit
+  not received** (`hitCount − received`), what earlier short pages left out
+  included. A failed alternative query's losses are held back only until a
+  query finds a document, then recorded before any later save. A source not
+  searched is reported once per failure and query (Python too); counts too large
+  to add stay apart rather than be capped. Paging limits live in
+  `SearchPaging`, the clients' send/retry in `data/remote/SourceRequests.kt`.
+- **Traps.** The test `Log` shadow records lines: assert no body reaches it, and
+  that something was logged. **A Gradle incremental compile once served stale
+  classes**: final check with `--rerun-tasks`. The wire tests' servers fail
+  fast and count requests in `tearDown`, so a new retry fails quickly instead of
+  waiting out timeouts. Compile the instrumented `SessionDaoTest` with
+  `compileDebugAndroidTestKotlin`; no migration test exists (#269).
+- **Lodged:** #267 (Dismiss does nothing), #268 (`current_batch` never written),
+  #269 (Room schemas 2/3, no migration tests), #270 (PMC lookup, #259 parity),
+  #271 (full-text 429), #273 (`errorMessage` never shown), #274 (paging after a
+  restore uses another query), #275 (cancellation read as failure; a failed Get
+  More Evidence hides the report); from the review: #277 (a failed later Europe
+  PMC page counts one page, to decide), #278 (type hardening), #279 (shared
+  parity fixture), #280 (instrumented screen tests). Commented: #265 (listed
+  PMIDs fetched as nothing), #256 (what Swift must adopt; the doubled "could not
+  be completed" wording is still to decide).
 
 ## Recently landed (context)
 
@@ -20,67 +70,41 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A failed source is not an empty one** (#247, #248, Python #255; PR #260).
-  Contract: `doc/cross_platform/search_failure_reporting.md`. **User's
-  decisions (2026-09-14): a provider failing in a both-provider search, and a
-  batch or page failing after retries, proceed on what was retrieved and tell
-  the user; failures that leave nothing are `SearchFailedError`**, never "No
-  documents found" (so no session is saved). Clients raise `SourceRequestError`
-  carrying only `RequestFailure` (kind + status): **the `requests` exception is
-  never kept**, since its body holds the key. **An HTTP 200 that is not a result
-  is a failure**: esearch `ERROR` and efetch `<eFetchResult>` are
-  `service_error`; Europe PMC's bare `{"version":…}` for an unknown cursor is
-  `malformed_response` (esearch and Europe PMC checked live); a missing
-  `count`/`hitCount` is malformed, not 0, and **a listing shorter than its count
-  is `incomplete_response`**; records the parser drops are a shortfall too.
-  **PubMed lists only 9,999 records** (`retstart` ≤ 9998, checked live): counting
-  against 10,000 read an honest last page as incomplete. **A spent urllib3
-  read-timeout retry reaches `requests` as a `ConnectionError`**, so the
-  classifier unwraps it. **The search for more never asks for a page past the
-  end** (a failure there read "0 records could not be retrieved"), and failures
-  that leave it nothing new are an error. The review round also pinned the
-  stored provider strings, the reason phrases and `null` handling in the
-  contract, and lodged #261–#266 (LLM-side failures read as absence, book
-  records, test timeouts).
-  **efetch batches and history pages continue past a failure; a Europe PMC
-  cursor cannot, so it stops.** Shortfalls ride session metadata
-  (`retrieval_shortfalls`) to the report (opening notice + Methodology line,
-  added by code, never the LLM), GUI, MCP (**an error is an `isError` result**,
-  with shortfalls and advice) and **from Research Questions with the documents
-  into the review** — a dialog alone left the report claiming a complete
-  search. **A stored shortfall degrades but is never dropped.** **`raise … from
-  None` inside `except` still keeps `__context__`**, and `JSONDecodeError.doc` is
-  the body: classify in the handler, raise after it; tests assert the chain is
-  empty. Test trap: `SearchResultMerger` merges "Record 7" and "Record 8" despite
-  distinct PMIDs (**#258**). `raise_on_status=False` on Europe PMC's `Retry`, or
-  a spent 503 surfaces as a status-less `RetryError`.
+- **A failed source is not an empty one** (#247, #248, Python #255; PR #260,
+  merged 2026-09-15). Contract: `doc/cross_platform/search_failure_reporting.md`.
+  **A failure proceeds on what was retrieved and tells the user; failures that
+  leave nothing are an error**, never "No documents found" (user, 2026-09-14). A
+  failure travels as kind + HTTP status only: **no exception, body or parser
+  message is kept** (`raise … from None` inside `except` still keeps
+  `__context__`; `JSONDecodeError.doc` is the body). **An HTTP 200 can be a
+  failure** (esearch `ERROR`, efetch `<eFetchResult>`, Europe PMC's bare
+  `{"version":…}`), a missing count is malformed rather than 0, and a listing
+  shorter than its count is incomplete. **PubMed lists only 9,999 records**
+  (`retstart` ≤ 9998, checked live), and **a search never asks for a page past
+  the end**. The notice and Methodology line are added by code, never the LLM,
+  and **shortfalls ride with the documents into the review**: a dialog alone
+  left the report claiming a complete search. A stored shortfall degrades but
+  is never dropped. Traps: urllib3's spent read timeout arrives as a
+  `ConnectionError`; `raise_on_status=False` on Europe PMC's `Retry`;
+  `SearchResultMerger` merges "Record 7" and "Record 8" (**#258**). Lodged
+  #261–#266.
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
-  #246, merged 2026-09-13). Both Python NCBI clients (`PubMedClient`,
-  `PubMedSearchClient`) POST every E-utilities request with the parameters in
-  the body. **A URL is what error text and HTTP logging print** (a routine 429
-  wrote it into a batch JSON export); **redacting would chase each printer.**
-  **A body opens one route a query string lacked**: a 307/308 re-sends it, so a
-  redirect is a failed request (`raise_for_status` passes a 3xx). **Each test
-  that reaches the local server also asserts the key arrived.** Credential files
-  go through `write_owner_only_file` (`mkstemp` then `os.replace`).
-  **Swift and Android** (#243, PR #254, merged 2026-09-14): enforcement points,
-  tests and port differences are tabled in `doc/developer/europepmc_and_pubmed.md`.
-  **Swift refuses per task** (`RedirectRefusingTaskDelegate`); **Android on a
-  client derived for PubMed only** — Unpaywall and PDF links need redirects, and
-  the shared `scalarsAndJson` Retrofit builder is a mutable singleton. **A
-  redirect test needs a control that a followed redirect is observable**; all
-  guards were mutation-tested. **Android reads the key in `PubMedService`**
-  (`NcbiCredentialSource`; all four workflow call sites omitted it), and a 400 on
-  a keyed request is `InvalidApiKeyError`. **Retrofit's `Invocation` tag holds
-  the key and `Request.toString()` prints it**, so `pubMedHttpClient` drops it
-  first. Test traps: a `URLProtocol` gets the body as `httpBodyStream`; use
-  MockWebServer. **#251, same PR**: Swift returned the batch size as `totalCount`.
-  The app advances by the PMIDs consumed (a `PubmedBookArticle` parses to no
-  article), and **a `nil` `nextOffset` means no next page**: advance to the end,
-  or a last batch that parsed to nothing is re-requested forever. **NCBI's 400
-  for a bad key echoes the key in its body** (checked live): never log or
-  persist an E-utilities error body.
+  #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs E-utilities
+  parameters in the body. **A URL is what error text and HTTP logging print**,
+  and redacting would chase each printer. **A 307/308 re-sends a body, so a
+  redirect is a failed request.** Enforcement points, tests and port
+  differences are tabled in `doc/developer/europepmc_and_pubmed.md`. Swift
+  refuses per task; **Android uses a client derived for PubMed only** (Unpaywall
+  and PDF links need redirects, and the shared Retrofit builder is a mutable
+  singleton) and drops Retrofit's `Invocation` tag, which holds the key and which
+  `Request.toString()` prints. **A redirect test needs a control that a followed
+  redirect is observable**; each test that reaches the local server asserts the
+  key arrived. Swift trap: a `URLProtocol` gets the body as `httpBodyStream`.
+  **NCBI's 400 for a bad key echoes the key in its body** (checked live). **A
+  `nil` next offset means no next page**: advance past the PMIDs consumed, or a
+  last batch that parsed to nothing is requested forever (#251). Credential files
+  go through `write_owner_only_file`.
 
 - **Older rounds, compressed further**; each rule below cost a defect.
   - **The screen and the export read references by one parser** (#233, PR #242):
@@ -344,10 +368,9 @@ Swift and Kotlin rather than a Swift-side patch.
   CLIs take the NCBI key only as `--api-key` (shell history, `ps`).
 - **Failures that read as findings, still open** (the #246 review). Nothing
   connects `analysis_failed` (**#249**); an efetch with no article yields "No
-  conflict of interest statement found" (**#250**, #203's shape). Ports of the
-  #247 contract: **#252** — Android drops every failed search (a rejected key, a
-  broken keystore) with no `else`; **#256** — iOS `searchBoth` with a `print`;
-  **#255** — Swift and Android read an `ERROR` in HTTP 200 as no results.
+  conflict of interest statement found" (**#250**, #203's shape). Swift's port of
+  the #247 contract (Android is in flight): **#256** — iOS `searchBoth` with a
+  `print`; **#255** — Swift reads an `ERROR` in HTTP 200 as no results.
   **#253** — both-provider paging judges PubMed's next page by the combined
   total; PubMed-only paging stops at the cap since #254. **#258** — the search
   merge drops a distinct article whose title differs by a number (Python and
@@ -415,11 +438,11 @@ Swift and Kotlin rather than a Swift-side patch.
   transparency results still feed report aggregates and the exported PDF:
   `TransparencySummarySection` and `PrintableReportView` average v1 and v2 scores
   into one unlabelled figure.
-- **#123 — Android's `parseArticleXml` swallows parse errors** with
-  `printStackTrace()`, so a truncated EFetch batch under-reports silently.
-  Blocked on a JVM-portable logging seam (`Log.e` would undo #119's pure-JVM SAX
-  parsing; leave `setXIncludeAware` uncalled, it throws on-device only).
-  Overlaps **#121** (the JATS parser, same fix).
+- **#121 — Android's JATS parser still swallows parse errors** and is
+  unit-untestable (`XmlPullParser`). The PubMed efetch half of #123 is done on the
+  #252 branch. The logging seam it waited for exists: the test sources shadow
+  `android.util.Log`. Leave `setXIncludeAware` uncalled, since it throws only
+  on-device.
 - **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
   indicators, funding/trial (network), JATS statement extraction, Room
   persistence + `DocumentCard` UI. **#109 — LLM-assisted disambiguation of repo +

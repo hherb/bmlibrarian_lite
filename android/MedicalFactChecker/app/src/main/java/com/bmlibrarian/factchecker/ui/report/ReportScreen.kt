@@ -69,6 +69,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.ui.common.IncompleteSearchCard
 import com.bmlibrarian.factchecker.ui.report.components.DocumentDetailSheet
 import com.bmlibrarian.factchecker.ui.report.components.MarkdownReport
 import com.bmlibrarian.factchecker.ui.report.components.ReportDisclaimer
@@ -152,6 +154,10 @@ fun ReportScreen(
         }
 
         val report = uiState.report!!
+        // An incomplete search's notice is shown before the verdict, not after it (#252)
+        val (searchNotice, reportBody) = remember(report.fullReportMarkdown) {
+            SearchFailureReporting.splitPlainSearchShortfallNotice(report.fullReportMarkdown)
+        }
 
         Column(
             modifier = Modifier
@@ -159,6 +165,11 @@ fun ReportScreen(
                 .padding(paddingValues)
                 .padding(Constants.UI_SCREEN_PADDING.dp)
         ) {
+            searchNotice?.let { notice ->
+                IncompleteSearchCard(text = notice)
+                Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+            }
+
             // Verdict header
             VerdictHeader(
                 verdict = report.verdict,
@@ -175,7 +186,7 @@ fun ReportScreen(
             ) {
                 // Markdown report with clickable references
                 MarkdownReport(
-                    markdown = report.fullReportMarkdown,
+                    markdown = reportBody,
                     onReferenceClick = viewModel::onReferenceClick
                 )
 

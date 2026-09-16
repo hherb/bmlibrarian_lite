@@ -44,6 +44,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.ui.history.SessionWithReport
 import com.bmlibrarian.factchecker.ui.report.components.VerdictBadge
@@ -147,6 +148,16 @@ fun SessionCard(
                 Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+
+                // The verdict above rests on a partial evidence base (#252)
+                if (it.searchWasIncomplete) {
+                    Text(
+                        text = SearchFailureReporting.INCOMPLETE_REPORT_MARK,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                }
 
                 Text(
                     text = it.summary,

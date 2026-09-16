@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.util
 import android.content.Context
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.ui.report.PaperSize
 import com.itextpdf.kernel.colors.ColorConstants
 import com.itextpdf.kernel.colors.DeviceRgb
@@ -97,13 +98,17 @@ class PdfExporter @Inject constructor(
             Constants.PDF_PAGE_MARGIN_POINTS
         )
 
+        // An incomplete search's notice precedes the verdict, not only the analysis (#252)
+        val (searchNotice, reportBody) = SearchFailureReporting.splitPlainSearchShortfallNotice(report.fullReportMarkdown)
+
         try {
             // Add content to PDF
             addTitle(document)
             addGeneratedDate(document, report.createdAt)
+            searchNotice?.let { addSearchNotice(document, it) }
             addVerdict(document, report)
             addSummary(document, report)
-            addFullReport(document, report)
+            addFullReport(document, reportBody)
             addStatistics(document, report)
             addReferences(document, documents)
             addFootnotes(document, report)
@@ -149,6 +154,22 @@ class PdfExporter @Inject constructor(
     }
 
     /**
+     * Add the notice that the report's search was incomplete (#252).
+     *
+     * @param document The PDF document
+     * @param notice The notice, as plain text
+     */
+    private fun addSearchNotice(document: Document, notice: String) {
+        val paragraph = Paragraph(notice)
+            .setFontSize(Constants.PDF_BODY_FONT_SIZE)
+            .setMultipliedLeading(Constants.PDF_LINE_SPACING)
+            .setBold()
+            .setMarginBottom(SPACING_MEDIUM)
+
+        document.add(paragraph)
+    }
+
+    /**
      * Add verdict section with colored badge.
      */
     private fun addVerdict(document: Document, report: ReportEntity) {
@@ -187,12 +208,15 @@ class PdfExporter @Inject constructor(
 
     /**
      * Add full report content.
+     *
+     * @param document The PDF document
+     * @param markdown The report's text, without the notice drawn before the verdict
      */
-    private fun addFullReport(document: Document, report: ReportEntity) {
+    private fun addFullReport(document: Document, markdown: String) {
         addSectionHeading(document, "DETAILED ANALYSIS")
 
         // Split markdown into paragraphs and render
-        val paragraphs = report.fullReportMarkdown.split("\n\n")
+        val paragraphs = markdown.split("\n\n")
         for (para in paragraphs) {
             if (para.isBlank()) continue
 
@@ -223,20 +247,22 @@ class PdfExporter @Inject constructor(
                 }
                 trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
                     // Bullet point - add indent
-                    Paragraph("• ${trimmed.substring(2)}")
+                    Paragraph("• ${withoutInlineMarkup(trimmed.substring(2))}")
                         .setFontSize(Constants.PDF_BODY_FONT_SIZE)
                         .setMultipliedLeading(Constants.PDF_LINE_SPACING)
                         .setMarginLeft(BULLET_INDENT)
                 }
+                trimmed.startsWith("> ") -> {
+                    // Block quote - indent, without its marker
+                    Paragraph(withoutInlineMarkup(trimmed.removePrefix("> ")))
+                        .setFontSize(Constants.PDF_BODY_FONT_SIZE)
+                        .setMultipliedLeading(Constants.PDF_LINE_SPACING)
+                        .setMarginLeft(BULLET_INDENT)
+                        .setMarginBottom(SPACING_SMALL)
+                }
                 else -> {
                     // Regular paragraph - strip basic markdown formatting
-                    val cleanText = trimmed
-                        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1") // Bold
-                        .replace(Regex("\\*(.+?)\\*"), "$1") // Italic
-                        .replace(Regex("__(.+?)__"), "$1") // Bold
-                        .replace(Regex("_(.+?)_"), "$1") // Italic
-
-                    Paragraph(cleanText)
+                    Paragraph(withoutInlineMarkup(trimmed))
                         .setFontSize(Constants.PDF_BODY_FONT_SIZE)
                         .setMultipliedLeading(Constants.PDF_LINE_SPACING)
                         .setMarginBottom(SPACING_SMALL)
@@ -249,6 +275,18 @@ class PdfExporter @Inject constructor(
         // Add spacing after report content
         document.add(Paragraph().setMarginBottom(SPACING_MEDIUM))
     }
+
+    /**
+     * Strip basic inline Markdown formatting, keeping the text it marks.
+     *
+     * @param text A paragraph's text
+     * @return The text without bold or italic markers
+     */
+    private fun withoutInlineMarkup(text: String): String = text
+        .replace(BOLD_ASTERISKS, "$1")
+        .replace(ITALIC_ASTERISK, "$1")
+        .replace(BOLD_UNDERSCORES, "$1")
+        .replace(ITALIC_UNDERSCORE, "$1")
 
     /**
      * Add statistics section.
@@ -432,5 +470,17 @@ class PdfExporter @Inject constructor(
 
         /** Extra length for section heading underlines. */
         private const val UNDERLINE_EXTRA_LENGTH = 5
+
+        /** Bold text marked with asterisks, keeping the text. */
+        private val BOLD_ASTERISKS = Regex("\\*\\*(.+?)\\*\\*")
+
+        /** Italic text marked with an asterisk, keeping the text. */
+        private val ITALIC_ASTERISK = Regex("\\*(.+?)\\*")
+
+        /** Bold text marked with underscores, keeping the text. */
+        private val BOLD_UNDERSCORES = Regex("__(.+?)__")
+
+        /** Italic text marked with an underscore, keeping the text. */
+        private val ITALIC_UNDERSCORE = Regex("_(.+?)_")
     }
 }

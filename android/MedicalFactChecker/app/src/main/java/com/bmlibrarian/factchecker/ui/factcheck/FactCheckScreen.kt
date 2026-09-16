@@ -71,6 +71,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
+import com.bmlibrarian.factchecker.ui.common.IncompleteSearchCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
@@ -173,6 +174,23 @@ fun FactCheckScreen(
                     item(key = "query") {
                         GeneratedQueryDisplay(query = query)
                     }
+                }
+            }
+
+            // What the session's searches failed to retrieve (#252): persistent while it goes on
+            uiState.incompleteSearchWarning?.let { warning ->
+                item(key = "incomplete_search") {
+                    IncompleteSearchCard(text = warning)
+                }
+            }
+
+            // Why a search or smart search could not do what was asked, while the session carries on
+            uiState.searchFailureMessage?.let { message ->
+                item(key = "search_failure") {
+                    SearchFailureMessage(
+                        message = message,
+                        onDismiss = viewModel::dismissSearchFailure
+                    )
                 }
             }
 
@@ -497,6 +515,47 @@ private fun ErrorMessage(
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             Text(
                 text = error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(Constants.UI_ICON_TEXT_SPACING.dp))
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
+/**
+ * Why a search or smart search could not do what was asked, and what to do about it (#252).
+ *
+ * The session keeps what it had, so the message can be dismissed.
+ *
+ * @param message What failed, a blank line, and the advice
+ * @param onDismiss Called when the user dismisses the message
+ */
+@Composable
+private fun SearchFailureMessage(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
+        ) {
+            Text(
+                text = "Search failed",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+            Text(
+                text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )

@@ -29,6 +29,8 @@ import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
 import com.bmlibrarian.factchecker.domain.model.DocumentSortOrder
+import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
+import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
@@ -95,8 +97,31 @@ data class FactCheckUiState(
     val canFetchMoreDocuments: Boolean = false,
 
     /** ID of document currently loading full text, or null if none. */
-    val loadingFullTextDocumentId: String? = null
+    val loadingFullTextDocumentId: String? = null,
+
+    /** What the session's searches failed to retrieve (#252); empty when they were complete. */
+    val searchShortfalls: List<RetrievalShortfall> = emptyList(),
+
+    /** Why a search or smart search could not do what was asked while the session goes on, with advice; null when none. */
+    val searchFailureMessage: String? = null,
+
+    /** Whether the session's record of what its searches missed is damaged (#252). */
+    val searchRecordDamaged: Boolean = false
 ) {
+    /**
+     * The persistent warning an incomplete search shows.
+     *
+     * @return That the session's record of what its searches missed is damaged,
+     *   when it is; otherwise "Incomplete search: {clauses}.", or null when the
+     *   searches were complete
+     */
+    val incompleteSearchWarning: String?
+        get() = if (searchRecordDamaged) {
+            DAMAGED_RECORD_WARNING
+        } else {
+            SearchFailureReporting.incompleteSearchWarning(searchShortfalls)
+        }
+
     /**
      * Get only scored documents from the full list.
      *
@@ -122,6 +147,11 @@ data class FactCheckUiState(
     fun getCitationsForDocument(documentId: String): List<CitationEntity> =
         citationsByDocument[documentId] ?: emptyList()
 }
+
+/** The persistent warning for a session whose record of what its search missed is damaged (#252). */
+private const val DAMAGED_RECORD_WARNING =
+    "This session's record of what its search could not retrieve is damaged, so whether its search " +
+        "was complete cannot be shown. The report keeps any notice it was written with."
 
 /**
  * ViewModel for the FactCheck screen.
@@ -159,6 +189,7 @@ class FactCheckViewModel @Inject constructor(
         observeWorkflowState()
         observeWorkflowProgress()
         observeWorkflowSessionId()
+        observeSearchShortfalls()
         observeConfiguration()
         loadBudgetInfo()
     }
@@ -196,6 +227,27 @@ class FactCheckViewModel @Inject constructor(
         viewModelScope.launch {
             workflow.progress.collect { progress ->
                 _uiState.update { it.copy(progress = progress) }
+            }
+        }
+    }
+
+    /**
+     * Observe what the session's searches failed to retrieve, and why a search for more failed (#252).
+     */
+    private fun observeSearchShortfalls() {
+        viewModelScope.launch {
+            workflow.searchShortfalls.collect { shortfalls ->
+                _uiState.update { it.copy(searchShortfalls = shortfalls) }
+            }
+        }
+        viewModelScope.launch {
+            workflow.searchFailureMessage.collect { message ->
+                _uiState.update { it.copy(searchFailureMessage = message) }
+            }
+        }
+        viewModelScope.launch {
+            workflow.searchRecordDamaged.collect { damaged ->
+                _uiState.update { it.copy(searchRecordDamaged = damaged) }
             }
         }
     }
@@ -345,6 +397,13 @@ class FactCheckViewModel @Inject constructor(
      */
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    /**
+     * Stop showing why a search for more documents failed.
+     */
+    fun dismissSearchFailure() {
+        workflow.dismissSearchFailure()
     }
 
     /**

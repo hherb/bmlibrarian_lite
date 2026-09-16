@@ -18,10 +18,13 @@
 
 package com.bmlibrarian.factchecker.data.remote.pubmed
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.debugHttpLoggingInterceptor
 import com.bmlibrarian.factchecker.di.NetworkModule
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
-import com.bmlibrarian.factchecker.domain.model.PubMedError
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -225,18 +228,23 @@ class PubMedCredentialConfinementTest {
     }
 
     @Test
-    fun `a failed answer that echoes the key reports a rejected key and prints no key`() = runBlocking {
+    fun `a failed answer that echoes the key fails as HTTP 400 and prints no key`() = runBlocking {
         // NCBI's 400 for a bad key repeats the key in its body
         ncbi.reply = { Reply.Status(HTTP_BAD_REQUEST, """{"error":"API key invalid","api-key":"$apiKey"}""") }
         val lines = CopyOnWriteArrayList<String>()
         val loggingClient = OkHttpClient.Builder()
             .addInterceptor(debugHttpLoggingInterceptor { lines.add(it) })
             .build()
+        Log.clear()
 
         val result = service(loggingClient).search(query = "aspirin")
 
         val error = result.exceptionOrNull()
-        assertTrue("expected InvalidApiKeyError, got $error", error is PubMedError.InvalidApiKeyError)
+        assertTrue("expected a SourceRequestException, got $error", error is SourceRequestException)
+        assertEquals(RequestFailure(RequestFailureKind.HTTP_STATUS, HTTP_BAD_REQUEST), (error as SourceRequestException).failure)
+        for (line in Log.lines) {
+            assertFalse("logged the key: $line", line.contains(apiKey))
+        }
         var link: Throwable? = error
         while (link != null) {
             assertFalse("the error carried the key: $link", "$link ${link.message}".contains(apiKey))
@@ -295,8 +303,11 @@ class PubMedCredentialConfinementTest {
             val result = service().search(query = "aspirin")
 
             val error = result.exceptionOrNull()
-            assertTrue("HTTP $statusCode: got $error", error is PubMedError.RedirectRefusedError)
-            assertEquals(statusCode, (error as PubMedError.RedirectRefusedError).statusCode)
+            assertTrue("HTTP $statusCode: got $error", error is SourceRequestException)
+            assertEquals(
+                RequestFailure(RequestFailureKind.REDIRECT_REFUSED, statusCode),
+                (error as SourceRequestException).failure
+            )
             assertEquals("HTTP $statusCode was followed", 0, elsewhere.recorded.size)
             assertEquals("HTTP $statusCode was retried", 1, ncbi.recorded.size)
         }
@@ -331,7 +342,10 @@ class PubMedCredentialConfinementTest {
         val result = service.search(query = "aspirin")
 
         val error = result.exceptionOrNull()
-        assertTrue("expected RedirectRefusedError, got $error", error is PubMedError.RedirectRefusedError)
+        assertEquals(
+            RequestFailure(RequestFailureKind.REDIRECT_REFUSED, HTTP_TEMPORARY_REDIRECT),
+            (error as? SourceRequestException)?.failure
+        )
         assertEquals("requests to the local NCBI: one, not retried", 1, ncbi.recorded.size)
         assertEquals("the redirect was followed", 0, elsewhere.recorded.size)
     }

@@ -172,7 +172,9 @@ class LLMService @Inject constructor(
      * @param initialQuery The initial query that was tried
      * @param totalResults Total results from the initial search
      * @param relevantCount Number of relevant documents found
-     * @return Result containing a list of alternative StructuredQuery objects
+     * @return The alternative queries; an empty list when the model answered
+     *   with no query that can be used, or with nothing, which asking again may
+     *   mend; or a failure when the request itself failed
      */
     suspend fun generateAlternativeQueries(
         provider: LLMProvider,
@@ -220,7 +222,7 @@ class LLMService @Inject constructor(
             Generate alternative structured queries for the medical question:
         """.trimIndent()
 
-        return chat(
+        val answer = chat(
             provider = provider,
             apiKey = apiKey,
             model = model,
@@ -228,13 +230,12 @@ class LLMService @Inject constructor(
             userPrompt = userPrompt,
             maxTokens = 1024,
             temperature = 0.3
-        ).mapCatching { result ->
-            val queries = StructuredQuery.parseArray(result.content)
-            if (queries.isEmpty()) {
-                throw IllegalStateException("Failed to parse alternative queries from LLM response")
-            }
-            queries
+        )
+        // An answer with no content reached the model as surely as one that does not parse
+        if (answer.exceptionOrNull() is LLMError.EmptyResponseError) {
+            return Result.success(emptyList())
         }
+        return answer.map { StructuredQuery.parseArray(it.content) }
     }
 
     /**
