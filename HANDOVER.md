@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#285 + #284 — a store that cannot be opened, and a report that says what its
-search lost**, branch `fix/swift-store-schema-and-report-shortfalls-285`.
+search lost**, branch `fix/swift-store-schema-and-report-shortfalls-285`, PR #291.
 iOS/macOS only. Compress into **Recently landed** once merged.
 
 - **Nothing is deleted any more.** `StoreRecovery.setAsideStore` renames
