@@ -366,10 +366,10 @@ enum SearchServiceFactory {
     ) async throws -> UnifiedSearchResult {
         switch options.provider {
         case .pubmed:
-            return await searchPubMed(query: query, options: options, settings: settings)
+            return try await searchPubMed(query: query, options: options, settings: settings)
 
         case .europePMC:
-            return await searchEuropePMC(query: query, options: options)
+            return try await searchEuropePMC(query: query, options: options)
 
         case .both:
             return try await searchBoth(query: query, options: options, settings: settings)
@@ -389,9 +389,9 @@ enum SearchServiceFactory {
         query: String,
         options: SearchOptions,
         settings: AppSettings
-    ) async -> UnifiedSearchResult {
+    ) async throws -> UnifiedSearchResult {
         singleProviderResult(
-            await pubMedPage(query: query, options: options, settings: settings), provider: .pubmed
+            try await pubMedPage(query: query, options: options, settings: settings), provider: .pubmed
         )
     }
 
@@ -410,8 +410,8 @@ enum SearchServiceFactory {
     private static func searchEuropePMC(
         query: String,
         options: SearchOptions
-    ) async -> UnifiedSearchResult {
-        singleProviderResult(await europePMCPage(query: query, options: options), provider: .europePMC)
+    ) async throws -> UnifiedSearchResult {
+        singleProviderResult(try await europePMCPage(query: query, options: options), provider: .europePMC)
     }
 
     // MARK: - Combined Search
@@ -440,7 +440,7 @@ enum SearchServiceFactory {
         async let pubMed = pubMedPage(query: query, options: options, settings: settings)
         async let europePMC = europePMCPage(query: query, options: options)
 
-        let pages = await (pubMed: pubMed, europePMC: europePMC)
+        let pages = try await (pubMed: pubMed, europePMC: europePMC)
         try Task.checkCancellation()
 
         return SearchResultMerger.merge(
@@ -486,12 +486,13 @@ enum SearchServiceFactory {
     ///   - options: Search options, including where paging stands.
     ///   - settings: App settings for NCBI credentials.
     /// - Returns: PubMed's articles, shortfalls and paging.
-    /// - Throws: `CancellationError` when the caller cancelled.
+    /// - Throws: `CancellationError` when the caller cancelled, which is the
+    ///   user's doing rather than the source's and records nothing as missing.
     private static func pubMedPage(
         query: String,
         options: SearchOptions,
         settings: AppSettings
-    ) async -> ProviderPage {
+    ) async throws -> ProviderPage {
         let pageSize = options.maxResults
         // A provider with no next page is not asked for one
         guard let continuation = options.pubMedContinuation else { return .notSearched }
@@ -523,6 +524,8 @@ enum SearchServiceFactory {
             )
         } catch let error as SourceRequestError {
             return failedPubMedPage(error, continuation: continuation, offset: offset, expected: expected)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             return failedPubMedPage(
                 SourceRequestError(source: .pubmed, failure: .requestFailed),
@@ -542,7 +545,8 @@ enum SearchServiceFactory {
     ///
     /// - Parameters:
     ///   - error: Why the request failed.
-    ///   - continuation: Where paging stood, or `nil` for a first page.
+    ///   - continuation: Where paging stood; its total is `nil` for a first page,
+    ///     which has counted nothing yet.
     ///   - offset: The offset the page was asked for at.
     ///   - expected: How many PMIDs the page should have listed, or `nil` for a first page.
     /// - Returns: The page, holding the shortfall and no article.
@@ -585,7 +589,9 @@ enum SearchServiceFactory {
     ///     PubMed syntax.
     ///   - options: Search options, including where paging stands.
     /// - Returns: Europe PMC's articles, shortfalls and paging.
-    private static func europePMCPage(query: String, options: SearchOptions) async -> ProviderPage {
+    /// - Throws: `CancellationError` when the caller cancelled, which is the
+    ///   user's doing rather than the source's and records nothing as missing.
+    private static func europePMCPage(query: String, options: SearchOptions) async throws -> ProviderPage {
         let pageSize = options.maxResults
         // A cursor that has ended is not asked for another page
         guard let continuation = options.europePMCContinuation else { return .notSearched }
@@ -624,6 +630,8 @@ enum SearchServiceFactory {
                 error, continuation: continuation, cursor: cursor,
                 recordsReceived: recordsReceived, pageSize: pageSize
             )
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             return failedEuropePMCPage(
                 SourceRequestError(source: .europePMC, failure: .requestFailed),
@@ -641,7 +649,8 @@ enum SearchServiceFactory {
     ///
     /// - Parameters:
     ///   - error: Why the request failed.
-    ///   - continuation: Where paging stood, or `nil` for a first page.
+    ///   - continuation: Where paging stood; its cursor and total are `nil` for a
+    ///     first page, which has counted nothing yet.
     ///   - cursor: The cursor the page was asked for with.
     ///   - recordsReceived: Records the search's earlier pages held, or `nil` when unknown.
     ///   - pageSize: The page size asked for.

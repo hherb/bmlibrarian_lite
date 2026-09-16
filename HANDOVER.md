@@ -8,67 +8,60 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#252 + #255 (Android half) — a failed source is not an empty one**, branch
-`fix/android-failed-search-is-not-empty-252`, PR #276. Android conforms to the
-#247 contract; its mapping is the contract's **Android** section. Once merged,
-compress this into **Recently landed**. Next: Swift (**#256** + **#255** +
-**#253**), which must adopt the alternative-query clause (see #256).
+**#256 + #255 + #253 (Swift half) — a failed source is not an empty one**, branch
+`fix/swift-failed-search-is-not-empty-256`, PR #PRNUMBER. iOS and macOS conform
+to the #247 contract; their mapping is the contract's **iOS and macOS** section.
+Once merged, compress this into **Recently landed**. Python and Android are
+already conformant, so this closes the port.
 
-- **User's decisions (2026-09-15).** Android before Swift. Android's report has
-  no Methodology section, so code adds one holding only the Search Completeness
-  line, for an incomplete search. **A failed smart-search (alternative) query
-  has its own clause**, "an alternative search of PubMed could not be completed
-  (…)", persisted as `"query": "alternative"`, since "PubMed could not be
-  searched" overstated beside the original query's PubMed results.
-- **One page per call.** A failed later PubMed page is recorded and skipped; a
-  failed later Europe PMC page is recorded and ends the cursor. **A page that
-  failures leave with nothing persists nothing**, so asking again asks for the
-  same page; losses are recorded before documents, and both before paging.
-  Search lives in `LiteratureSearch`, testable without the workflow. **A
-  migrated session's Europe PMC count is `null`, not 0** (a pre-v6 cursor can
-  outlive its last hit). The notice is drawn **before the verdict** on screen,
-  PDF (tested by reading the rendered PDF back) and share text.
-- **Not shortfalls:** an unreadable keystore (`NcbiCredentialsUnavailableException`,
-  fix in Settings; handled like a failed search, so Get more evidence keeps the
-  report) and query generation. **User's decision (2026-09-16): an answer with
-  no usable query is asked again, up to `MAX_QUERY_RETRIES` (2)**; if none is
-  usable smart search is marked as tried, so no later batch pays again. A
-  request that failed leaves smart search available and records no usage.
-  `LLMService.generateAlternativeQueries` returns an empty list for an unusable
-  answer, a failure only for a failed request. A damaged shortfall record is a
-  persistent warning: Get more evidence keeps the report, and every other step
-  that would search or write a report fails the session before spending
-  anything. Fixed on the way: Fetch more re-requested page 1; the 9,999 cap;
-  `printStackTrace` in efetch (PubMed half of #123); Europe PMC cancellation and
-  429; one bad record failing a page. `PubMedError` is deleted.
-- **Review round (the same PR).** **An ended Europe PMC cursor misses every hit
-  not received** (`hitCount − received`), what earlier short pages left out
-  included. A failed alternative query's losses are held back only until a
-  query finds a document, then recorded before any later save. A source not
-  searched is reported once per failure and query (Python too); counts too large
-  to add stay apart rather than be capped. Paging limits live in
-  `SearchPaging`, the clients' send/retry in `data/remote/SourceRequests.kt`.
-- **Traps.** The test `Log` shadow records lines: assert no body reaches it, and
-  that something was logged. **A Gradle incremental compile once served stale
-  classes**: final check with `--rerun-tasks`. The wire tests' servers fail
-  fast and count requests in `tearDown`, so a new retry fails quickly instead of
-  waiting out timeouts. Compile the instrumented `SessionDaoTest` with
-  `compileDebugAndroidTestKotlin`; no migration test exists (#269).
-- **Lodged:** #267 (Dismiss does nothing), #268 (`current_batch` never written),
-  #269 (Room schemas 2/3, no migration tests), #270 (PMC lookup, #259 parity),
-  #271 (full-text 429), #273 (`errorMessage` never shown), #274 (paging after a
-  restore uses another query), #275 (cancellation read as failure; a failed Get
-  More Evidence hides the report); from the review: #277 (a failed later Europe
-  PMC page counts one page, to decide), #278 (type hardening), #279 (shared
-  parity fixture), #280 (instrumented screen tests). Commented: #265 (listed
-  PMIDs fetched as nothing), #256 (what Swift must adopt; the doubled "could not
-  be completed" wording is still to decide).
+- **User's decisions (2026-09-16).** Android merged first (PR #276) and Swift
+  branched off master. The doubled "could not be completed" — a failed
+  alternative query's clause inside a failed search's sentence — **ships as the
+  contract states it**, so all three platforms read alike.
+- **The clients raise, the app decides.** `PubMedService.search` and
+  `EuropePMCService.search` throw `SourceRequestError` for a page they could not
+  list at all, and return what a page *partly* lost as `SearchResult.shortfalls`.
+  `SearchServiceFactory` turns a raised failure into the shortfall it leaves — a
+  first page: the source could not be searched and its paging stays put; a later
+  page: the records are missing and paging moves past it — and
+  `FactCheckWorkflow` decides, once it knows which articles are new, whether the
+  page is one to proceed on. **A page that failures leave with no new document
+  changes nothing.**
+- **Paging travels as a `SearchContinuation`**, not a loose offset and cursor, so
+  "PubMed has no next page" reaches the request (#253). `OffsetPaginationState`
+  carries `isExhausted`; per-provider totals are no longer conflated.
+- **Traps, each of which cost a round.** `swift test` and the macOS `xcodebuild`
+  compile **neither** of the five iOS-guarded files this touched — only an iOS
+  Simulator build does (#190), so run one. **`SourceRequestError` must conform to
+  `RetryableError`**, or a 429 silently stops being retried. **A lookup is not a
+  page**: `EuropePMCService.search` also served the full-text chain's identifier
+  lookups, where a title filter and a hit-count requirement (right for a search
+  page) broke six full-text tests — hence `EuropePMCService.lookup`. A cancelled
+  request must raise `CancellationError`, or it is recorded as a lost record the
+  user caused.
+- **Not covered by tests:** the workflow's own decisions (throwing when a page
+  leaves nothing new, the alternative-query hold-back, the paging writes) have no
+  end-to-end test, since `FactCheckWorkflow` takes no injectable search service —
+  the Swift shape of #216. Lodged as **#281**.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A failed source is not an empty one, on Android** (#252 + #255; PR #276,
+  merged 2026-09-16). Its mapping is the contract's **Android** section, which is
+  every one-page-per-call app's: a failed later PubMed page is recorded and paged
+  past, a failed later Europe PMC page ends the cursor, **an ended cursor misses
+  every hit not received**, and a page that failures leave with nothing changes
+  nothing. **A failed alternative (smart-search) query has its own clause**,
+  persisted as `"query": "alternative"`, and counts combine only within one
+  query. An answer holding no usable query is asked for again up to
+  `MAX_QUERY_RETRIES` (2) and then marks smart search as tried; a failed request
+  to the model is not asked again and leaves it available. A damaged shortfall
+  record is a persistent warning that stops a session before it spends anything.
+  Lodged: #267–#275, #277–#280.
 
 - **A failed source is not an empty one** (#247, #248, Python #255; PR #260,
   merged 2026-09-15). Contract: `doc/cross_platform/search_failure_reporting.md`.
@@ -368,16 +361,13 @@ Swift and Kotlin rather than a Swift-side patch.
   CLIs take the NCBI key only as `--api-key` (shell history, `ps`).
 - **Failures that read as findings, still open** (the #246 review). Nothing
   connects `analysis_failed` (**#249**); an efetch with no article yields "No
-  conflict of interest statement found" (**#250**, #203's shape). Swift's port of
-  the #247 contract (Android is in flight): **#256** — iOS `searchBoth` with a
-  `print`; **#255** — Swift reads an `ERROR` in HTTP 200 as no results.
-  **#253** — both-provider paging judges PubMed's next page by the combined
-  total; PubMed-only paging stops at the cap since #254. **#258** — the search
-  merge drops a distinct article whose title differs by a number (Python and
-  Swift), silently, as "duplicates removed". **#259** — Python full-text
+  conflict of interest statement found" (**#250**, #203's shape). **#258** — the
+  search merge drops a distinct article whose title differs by a number (Python
+  and Swift), silently, as "duplicates removed". **#259** — Python full-text
   discovery reports an unreachable Europe PMC as "Article not found" (the #247
-  contract, for lookups). Not done, a decision: esearch `SERVICE_ERROR` is not
-  retried (the `((` answer fails every time).
+  contract, for lookups; Swift's `EuropePMCService.lookup` now raises rather than
+  answering nothing, so Python is the one left). Not done, a decision: esearch
+  `SERVICE_ERROR` is not retried (the `((` answer fails every time).
 - **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
   **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
   cheaper, and the exact defect that occurred — a guard failing when a `.swift`
