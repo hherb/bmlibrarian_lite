@@ -60,32 +60,38 @@ struct ContentView: View {
     @State private var restoredSessionError: String?
 
     var body: some View {
-        if !hasAcceptedDisclaimer {
-            DisclaimerView(onAccept: acceptDisclaimer)
-        } else if !hasSeenOnboarding {
-            OnboardingView(onComplete: completeOnboarding)
-        } else {
-            mainTabView
-                .sheet(isPresented: $showingOnboardingFromSettings) {
-                    OnboardingView(onComplete: {
-                        showingOnboardingFromSettings = false
-                    })
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
-                    showingOnboardingFromSettings = true
-                }
-                .alert(
-                    "Could not continue",
-                    isPresented: Binding(
-                        get: { restoredSessionError != nil },
-                        set: { if !$0 { restoredSessionError = nil } }
-                    )
-                ) {
-                    Button("OK", role: .cancel) { restoredSessionError = nil }
-                } message: {
-                    Text(restoredSessionError ?? "")
-                }
+        Group {
+            if !hasAcceptedDisclaimer {
+                DisclaimerView(onAccept: acceptDisclaimer)
+            } else if !hasSeenOnboarding {
+                OnboardingView(onComplete: completeOnboarding)
+            } else {
+                mainTabView
+                    .sheet(isPresented: $showingOnboardingFromSettings) {
+                        OnboardingView(onComplete: {
+                            showingOnboardingFromSettings = false
+                        })
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
+                        showingOnboardingFromSettings = true
+                    }
+                    .alert(
+                        "Could not continue",
+                        isPresented: Binding(
+                            get: { restoredSessionError != nil },
+                            set: { if !$0 { restoredSessionError = nil } }
+                        )
+                    ) {
+                        Button("OK", role: .cancel) { restoredSessionError = nil }
+                    } message: {
+                        Text(restoredSessionError ?? "")
+                    }
+            }
         }
+        // Said on the whole view rather than one branch of it: the store is
+        // opened before any window exists, and the user may still be on the
+        // disclaimer or onboarding when it turns out to be unreadable.
+        .storeRecoveryNotice()
     }
 
     private var mainTabView: some View {

@@ -429,6 +429,21 @@ table in [Android](#android) is their mapping as well, with these differences.
   `retrievalShortfallsJSON` (read through `retrievalShortfalls()`, which refuses
   a damaged record), and `europePMCRecordsReceived` counts the Europe PMC
   records received, `nil` for a session saved before the count was kept.
+- **The report keeps its own record.** `EvidenceReport`'s private
+  `searchShortfallsJSON` holds this contract's `search_shortfalls`, written by
+  `SearchFailureReporting.reportRecord(for:)` before the model is paid, as `[]`
+  for a complete search. `ReportSearchCompleteness` reads it, and the history
+  list's marker, the notice and the body a reader sees all come from it.
+  Unlike Python's, **a Swift report with no record is not a complete search**:
+  `nil` here is a report saved before the record existed, and its own text —
+  which this app wrote, notice included — is read instead. Also unlike Python's,
+  **a damaged record is not refused at read time**: where
+  `ReportMetadata.from_dict` raises, a stored Swift report still opens, reporting
+  as incomplete and saying it cannot tell the reader what is missing, with
+  nothing taken off its text (#284). Refusing would leave the reader unable to
+  open a report they can see in their History. The session's read path does match
+  Python — `FactCheckSession.retrievalShortfalls()` still throws — so this
+  divergence is the report's alone.
 - **The report** is assembled by `ReportFormatter.fullReport`: the notice, the
   model's analysis, a `## Methodology` section holding only the Search
   Completeness line, then `## References`. The report screen, the printable

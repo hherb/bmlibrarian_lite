@@ -75,32 +75,38 @@ struct MacContentView: View {
     @State private var errorMessage = ""
 
     var body: some View {
-        if !hasAcceptedDisclaimer {
-            MacDisclaimerView(onAccept: acceptDisclaimer)
-        } else if !hasSeenOnboarding {
-            MacOnboardingView(onComplete: completeOnboarding)
-        } else {
-            mainNavigationView
-                .sheet(isPresented: $showingOnboardingFromSettings) {
-                    MacOnboardingView(onComplete: {
-                        showingOnboardingFromSettings = false
-                    })
-                }
-                .alert("Error", isPresented: $showingError) {
-                    Button("OK", role: .cancel) { }
-                } message: {
-                    Text(errorMessage)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .showMacOnboarding)) { _ in
-                    showingOnboardingFromSettings = true
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .showDocumentFullText)) { notification in
-                    if let document = notification.userInfo?["document"] as? Document {
-                        selectedFullTextDocument = document
-                        selectedNavItem = .fullText
+        Group {
+            if !hasAcceptedDisclaimer {
+                MacDisclaimerView(onAccept: acceptDisclaimer)
+            } else if !hasSeenOnboarding {
+                MacOnboardingView(onComplete: completeOnboarding)
+            } else {
+                mainNavigationView
+                    .sheet(isPresented: $showingOnboardingFromSettings) {
+                        MacOnboardingView(onComplete: {
+                            showingOnboardingFromSettings = false
+                        })
                     }
-                }
+                    .alert("Error", isPresented: $showingError) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text(errorMessage)
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .showMacOnboarding)) { _ in
+                        showingOnboardingFromSettings = true
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .showDocumentFullText)) { notification in
+                        if let document = notification.userInfo?["document"] as? Document {
+                            selectedFullTextDocument = document
+                            selectedNavItem = .fullText
+                        }
+                    }
+            }
         }
+        // Said on the whole view rather than one branch of it: the store is
+        // opened before any window exists, and the user may still be on the
+        // disclaimer or onboarding when it turns out to be unreadable.
+        .storeRecoveryNotice()
     }
 
     private var mainNavigationView: some View {

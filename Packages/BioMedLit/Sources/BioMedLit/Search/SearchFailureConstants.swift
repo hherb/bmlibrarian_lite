@@ -52,6 +52,21 @@ enum SearchFailureConstants {
     /// Opens the message shown when failures left a search with nothing.
     static let searchFailedOpening = "The search could not be completed: "
 
+    // MARK: - What a report records about its search
+
+    /// What a report whose search was complete records, so it can be told from
+    /// a report that recorded nothing at all (``ReportSearchCompleteness``).
+    static let completeSearchRecord = "[]"
+
+    /// Stands in for the notice when a report's own record cannot be read.
+    ///
+    /// The one thing such a report must not say is that its search was
+    /// complete, so it says what it can: that it cannot tell the reader what
+    /// the evidence base is missing.
+    static let unreadableRecordNotice = plainNoticeOpening
+        + "what this report recorded about its search could not be read, "
+        + "so what the evidence base is missing cannot be said."
+
     // MARK: - What to do next
 
     /// What to do about a source that is limiting how often it can be searched.

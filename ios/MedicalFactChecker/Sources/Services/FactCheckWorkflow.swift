@@ -2108,6 +2108,11 @@ final class FactCheckWorkflow {
         // A report must be able to say whether the search behind it was complete,
         // so a damaged record fails the session before the model is paid (#256)
         let shortfalls = try session.retrievalShortfalls()
+        // The report keeps its own copy of that list, written here rather than
+        // after the model has been paid: a record that cannot be written must
+        // stop the report being made, since storing nothing would have the
+        // report claim a complete search (#284).
+        let shortfallsRecord = try SearchFailureReporting.reportRecord(for: shortfalls)
 
         // Handle no evidence case using ReportFormatter
         guard !allCitations.isEmpty else {
@@ -2124,7 +2129,8 @@ final class FactCheckWorkflow {
                 ),
                 citationCount: 0,
                 uniqueSourceCount: 0,
-                documentsReviewed: session.documentsScored
+                documentsReviewed: session.documentsScored,
+                searchShortfallsRecord: shortfallsRecord
             )
             report.session = session
             modelContext.insert(report)
@@ -2198,7 +2204,8 @@ final class FactCheckWorkflow {
             fullReport: completeReport,
             citationCount: allCitations.count,
             uniqueSourceCount: uniqueSources,
-            documentsReviewed: session.documentsScored
+            documentsReviewed: session.documentsScored,
+            searchShortfallsRecord: shortfallsRecord
         )
         report.session = session
         modelContext.insert(report)

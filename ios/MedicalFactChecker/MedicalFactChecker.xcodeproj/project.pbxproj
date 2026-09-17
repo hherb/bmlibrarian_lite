@@ -83,6 +83,8 @@
 		A1000051001 /* FullTextViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051000 /* FullTextViewer.swift */; };
 		A1000074001 /* FullTextTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000074000 /* FullTextTab.swift */; };
 		A1000052001 /* CloudKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000052000 /* CloudKitConfiguration.swift */; };
+		A10000B2001 /* StoreRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000B2000 /* StoreRecovery.swift */; };
+		A10000B3001 /* StoreRecoveryNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000B3000 /* StoreRecoveryNotice.swift */; };
 		A1000054001 /* BioMedLitAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000054000 /* BioMedLitAdapters.swift */; };
 		A1000057001 /* StructuredQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057000 /* StructuredQuery.swift */; };
 		A1000058001 /* QueryConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000058000 /* QueryConstants.swift */; };
@@ -195,6 +197,8 @@
 		A1000051000 /* FullTextViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextViewer.swift; sourceTree = "<group>"; };
 		A1000074000 /* FullTextTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextTab.swift; sourceTree = "<group>"; };
 		A1000052000 /* CloudKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitConfiguration.swift; sourceTree = "<group>"; };
+		A10000B2000 /* StoreRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreRecovery.swift; sourceTree = "<group>"; };
+		A10000B3000 /* StoreRecoveryNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreRecoveryNotice.swift; sourceTree = "<group>"; };
 		A1000053000 /* MedicalFactChecker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MedicalFactChecker.entitlements; sourceTree = "<group>"; };
 		A1000054000 /* BioMedLitAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BioMedLitAdapters.swift; sourceTree = "<group>"; };
 		A1000057000 /* StructuredQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredQuery.swift; sourceTree = "<group>"; };
@@ -363,6 +367,8 @@
 				A10000A1000 /* ReportReferenceLink.swift */,
 				A1000015000 /* ResponseParser.swift */,
 				A1000045000 /* SearchResultMerger.swift */,
+				A10000B2000 /* StoreRecovery.swift */,
+				A10000B3000 /* StoreRecoveryNotice.swift */,
 				A1000030000 /* StringArrayTransformer.swift */,
 			);
 			path = Utilities;
@@ -686,6 +692,8 @@
 				A1000051001 /* FullTextViewer.swift in Sources */,
 				A1000074001 /* FullTextTab.swift in Sources */,
 				A1000052001 /* CloudKitConfiguration.swift in Sources */,
+				A10000B2001 /* StoreRecovery.swift in Sources */,
+				A10000B3001 /* StoreRecoveryNotice.swift in Sources */,
 				E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */,
 				63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */,
 				C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */,

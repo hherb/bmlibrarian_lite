@@ -274,6 +274,31 @@ public enum SearchFailureReporting {
 
     // MARK: - The persisted form
 
+    /// Build the value a report stores for what the search behind it lost.
+    ///
+    /// Unlike a session's, a report's record is written for a complete search
+    /// too, as the contract's `[]`: a report that recorded nothing at all is one
+    /// saved before the record existed, and only its own text can be asked
+    /// (``ReportSearchCompleteness``).
+    ///
+    /// Write it before anything is spent on the report. A record that cannot be
+    /// written must stop the report being made, not be stored as `nil` — which
+    /// is how a complete search is stored, and would have the report claim one.
+    ///
+    /// - Parameter shortfalls: What the search behind the report is missing.
+    /// - Returns: `"[]"` for a complete search, otherwise the contract's JSON array.
+    /// - Throws: ``DamagedShortfallRecordError`` when what is missing could not
+    ///   be written down.
+    public static func reportRecord(for shortfalls: [RetrievalShortfall]) throws -> String {
+        guard !shortfalls.isEmpty else { return SearchFailureConstants.completeSearchRecord }
+        guard let record = json(from: shortfalls) else {
+            throw DamagedShortfallRecordError(
+                reason: "What the search behind this report failed to retrieve could not be written down."
+            )
+        }
+        return record
+    }
+
     /// Build the value a session stores for what its search is missing.
     ///
     /// - Parameter shortfalls: What the search is missing.

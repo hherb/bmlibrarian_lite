@@ -1168,7 +1168,8 @@ private struct MacDocumentDetailAbstractView: View {
         fullReport: "## Analysis\n\nMultiple studies examined this relationship...",
         citationCount: 5,
         uniqueSourceCount: 3,
-        documentsReviewed: 15
+        documentsReviewed: 15,
+        searchShortfallsRecord: ReportSearchCompleteness.completeSearchRecord
     )
     return MacReportView(report: report)
         .frame(width: 900, height: 700)

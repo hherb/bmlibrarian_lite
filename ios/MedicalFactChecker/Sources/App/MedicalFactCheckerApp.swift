@@ -46,15 +46,12 @@ struct MedicalFactCheckerApp: App {
             // when upgrading from previous schema versions
             return try CloudKitConfiguration.makeModelContainerWithMigration()
         } catch {
-            // Print detailed error information
-            print("❌ ModelContainer creation failed:")
-            print("Error: \(error)")
-            print("Localized description: \(error.localizedDescription)")
-            if let nsError = error as NSError? {
-                print("Domain: \(nsError.domain)")
-                print("Code: \(nsError.code)")
-                print("UserInfo: \(nsError.userInfo)")
-            }
+            // A release build prints nowhere, so the one record of why the app
+            // will not start goes to the log before it stops (#285).
+            let nsError = error as NSError
+            AppLogger.persistence.critical(
+                "ModelContainer creation failed (\(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)): \(String(describing: error), privacy: .public)"
+            )
             fatalError("Could not create ModelContainer: \(error)")
         }
     }()
