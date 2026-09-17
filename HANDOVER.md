@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#302 + #303 + #304 — a failure is not a finding, one layer down**, branch
-`fix/failure-is-not-an-answer-302`. Python only. Compress into **Recently
+`fix/failure-is-not-an-answer-302`, PR #305. Python only. Compress into **Recently
 landed** once merged. The three defects PR #301 lodged rather than fixed, all
 the same family as #261–#264 and all pre-existing on master.
 
