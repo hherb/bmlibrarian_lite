@@ -31,7 +31,13 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
-from ..data_models import Citation, ScoredDocument
+from ..data_models import (
+    Citation,
+    CitationOutcome,
+    EvaluationErrorCode,
+    ScoredDocument,
+    distinct_causes,
+)
 from ..exceptions import JSONParseError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception
 from .base import LiteBaseAgent
@@ -98,6 +104,28 @@ class LiteCitationAgent(LiteBaseAgent):
         Returns:
             List of extracted citations. Empty list on failure.
         """
+        citations, _ = self._extract_with_cause(question, scored_doc)
+        return citations
+
+    def _extract_with_cause(
+        self,
+        question: str,
+        scored_doc: ScoredDocument,
+    ) -> tuple[list[Citation], EvaluationErrorCode | None]:
+        """Extract citations from a document, keeping why it failed.
+
+        The cause is what tells a failed extraction apart from a document
+        with nothing to say (#261); :meth:`extract_citations` drops it, and
+        :meth:`extract_all_citations` records it.
+
+        Args:
+            question: Research question
+            scored_doc: Document with relevance score
+
+        Returns:
+            The citations and ``None``; or an empty list and the error code
+            classifying the failure.
+        """
         doc = scored_doc.document
 
         user_prompt = f"""Research Question: {question}
@@ -131,20 +159,20 @@ Extract the most relevant passages that help answer the research question."""
                 )
                 citations.append(citation)
 
-            return citations
+            return citations, None
 
         except RetryExhaustedError as e:
             logger.error(
                 f"Document {doc.id}: Citation extraction failed after all retries: {e}"
             )
-            return []
+            return [], EvaluationErrorCode.RETRY_EXHAUSTED
         except Exception as e:
             error_code = classify_llm_exception(e)
             logger.error(
                 f"Document {doc.id}: Citation extraction failed with "
                 f"{error_code.name}: {e}"
             )
-            return []
+            return [], error_code
 
     @llm_retry(max_retries=3, retry_on_json_error=True)
     def _extract_with_retry(self, messages: list) -> list[dict]:
@@ -184,12 +212,14 @@ Extract the most relevant passages that help answer the research question."""
         progress_callback: Optional[Callable[[int, int], None]] = None,
         max_workers: int = 1,
         cancelled: Optional[threading.Event] = None,
-    ) -> list[Citation]:
+    ) -> CitationOutcome:
         """
         Extract citations from all scored documents, optionally in parallel.
 
-        Documents that fail extraction are skipped and logged.
-        The method continues processing remaining documents.
+        Extraction continues past a document it could not read, and the
+        outcome says how many were lost and why (#261): a report built on no
+        citations must not tell the reader the literature was silent when
+        nobody could read it.
 
         Args:
             question: Research question
@@ -200,9 +230,12 @@ Extract the most relevant passages that help answer the research question."""
             cancelled: Optional threading.Event; when set, stops processing
 
         Returns:
-            List of all extracted citations
+            The outcome: the citations, how many documents were attempted,
+            and how many could not be read, with the causes.
         """
         all_citations: list[Citation] = []
+        causes: list[EvaluationErrorCode] = []
+        attempted = 0
         failed_count = 0
         # Filter out documents with negative scores (error codes) and below threshold
         eligible = [d for d in scored_documents if d.score >= min_score]
@@ -222,10 +255,12 @@ Extract the most relevant passages that help answer the research question."""
                 if progress_callback:
                     progress_callback(i + 1, total)
 
-                citations = self.extract_citations(question, scored_doc)
+                citations, cause = self._extract_with_cause(question, scored_doc)
+                attempted += 1
 
-                if not citations:
+                if cause is not None:
                     failed_count += 1
+                    causes.append(cause)
                     logger.warning(
                         f"Document {scored_doc.document.id}: No citations extracted "
                         f"({i+1}/{total})"
@@ -241,8 +276,10 @@ Extract the most relevant passages that help answer the research question."""
             lock = threading.Lock()
             completed = 0
 
-            def _extract_one(doc: ScoredDocument) -> list[Citation]:
-                return self.extract_citations(question, doc)
+            def _extract_one(
+                doc: ScoredDocument,
+            ) -> tuple[list[Citation], EvaluationErrorCode | None]:
+                return self._extract_with_cause(question, doc)
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
@@ -257,14 +294,16 @@ Extract the most relevant passages that help answer the research question."""
                         break
 
                     idx = futures[future]
-                    citations = future.result()
+                    citations, cause = future.result()
                     doc_id = eligible[idx].document.id
 
                     with lock:
                         completed += 1
                         current = completed
-                        if not citations:
+                        attempted += 1
+                        if cause is not None:
                             failed_count += 1
+                            causes.append(cause)
                             logger.warning(
                                 f"Document {doc_id}: No citations extracted "
                                 f"({current}/{total})"
@@ -281,13 +320,18 @@ Extract the most relevant passages that help answer the research question."""
         if failed_count > 0:
             logger.warning(
                 f"Citation extraction complete: {len(all_citations)} citations from "
-                f"{total - failed_count} documents, {failed_count} failed"
+                f"{attempted - failed_count} documents, {failed_count} failed"
             )
         else:
             logger.info(
-                f"Extracted {len(all_citations)} total citations from {total} documents"
+                f"Extracted {len(all_citations)} total citations from {attempted} documents"
             )
-        return all_citations
+        return CitationOutcome(
+            citations=all_citations,
+            documents_attempted=attempted,
+            documents_failed=failed_count,
+            causes=distinct_causes(causes),
+        )
 
     def _parse_citation_response(self, response: str) -> list[dict]:
         """

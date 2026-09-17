@@ -577,15 +577,19 @@ class TestTheSystematicReviewTab:
         assert tab.run_btn.isEnabled()
         assert tab.progress_label.text() == "Error in workflow: "
 
-    def test_an_error_outside_the_search_shows_in_full(
+    def test_an_error_from_a_step_without_a_dialog_shows_in_full(
         self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        """Without a dialog, the label is the only place the message appears."""
+        """Without a dialog, the label is the only place the message appears.
+
+        The steps that end the review -- search, scoring and report (#261,
+        #262) -- get a dialog instead; see test_gui_analysis_failures.py.
+        """
         tab, message_box = review_tab(monkeypatch, tmp_path)
 
-        tab._on_error("scoring", "The model failed.\nIt answered nothing.")
+        tab._on_error("workflow", "The model failed.\nIt answered nothing.")
 
-        assert tab.progress_label.text() == "Error in scoring: The model failed.\nIt answered nothing."
+        assert tab.progress_label.text() == "Error in workflow: The model failed.\nIt answered nothing."
         message_box.warning.assert_not_called()
 
     def test_a_failed_search_gets_a_dialog_with_the_whole_message(

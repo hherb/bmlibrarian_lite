@@ -24,11 +24,12 @@ the lite module for consistent data handling.
 
 import hashlib
 import json
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, TypeGuard
 
 from .constants import HTTP_STATUS_CODE_MAX, HTTP_STATUS_CODE_MIN, MAX_PUBMED_SEARCH_OFFSET
 
@@ -500,6 +501,199 @@ class EvaluationErrorCode(Enum):
         return descriptions.get(self, "Unknown error")
 
 
+class AnalysisStage(Enum):
+    """A stage of the review that reads documents with a model (#261, #262).
+
+    The raw values are persisted in report metadata: never rename one.
+    """
+
+    SCORING = "scoring"
+    CITATION_EXTRACTION = "citation_extraction"
+
+    @property
+    def loss_clause(self) -> str:
+        """How a loss at this stage is described to the reader.
+
+        Returns:
+            The verb phrase completing "N of M documents ...".
+        """
+        return _STAGE_LOSS_CLAUSES[self]
+
+
+_STAGE_LOSS_CLAUSES = {
+    AnalysisStage.SCORING: "could not be scored",
+    AnalysisStage.CITATION_EXTRACTION: "could not be read for citations",
+}
+
+
+@dataclass(frozen=True)
+class AnalysisShortfall:
+    """Documents a stage of the review could not analyse (#261, #262).
+
+    The companion of :class:`RetrievalShortfall` for the stages after the
+    search. A review proceeds on the documents that were analysed and says
+    what is missing: never silently, and never as documents the model turned
+    down.
+
+    Attributes:
+        stage: Which stage lost them.
+        documents_failed: How many documents it could not analyse, at least
+            one.
+        documents_attempted: How many it tried, at least ``documents_failed``.
+        causes: Why, each cause once, in the order it first occurred; empty
+            when no cause was kept.
+
+    Raises:
+        ValueError: On construction, if nothing failed, or more documents
+            failed than were attempted. A shortfall that lost nothing would
+            tell the user a complete analysis was incomplete.
+    """
+
+    stage: AnalysisStage
+    documents_failed: int
+    documents_attempted: int
+    causes: tuple[EvaluationErrorCode, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Refuse counts that cannot be true, and name each cause once.
+
+        Twenty documents that timed out have one cause between them, so the
+        causes are reduced on the way in rather than at each place they are
+        read.
+        """
+        if self.documents_failed < 1:
+            raise ValueError("An analysis shortfall loses at least one document")
+        if self.documents_attempted < self.documents_failed:
+            raise ValueError(
+                "An analysis shortfall cannot lose more documents than it attempted"
+            )
+        object.__setattr__(self, "causes", distinct_causes(self.causes))
+
+    @property
+    def nothing_survived(self) -> bool:
+        """Whether every document attempted at this stage failed.
+
+        Returns:
+            True when the stage produced nothing, so there is nothing to
+            proceed on.
+        """
+        return self.documents_failed == self.documents_attempted
+
+    def describe(self) -> str:
+        """Describe the shortfall as a clause for a sentence shown to the user.
+
+        Returns:
+            For example ``"3 of 20 documents could not be scored (API request
+            timed out)"``. Without a cause, the count alone: the reason
+            degrades, the loss never does.
+        """
+        noun = "document" if self.documents_attempted == 1 else "documents"
+        clause = (
+            f"{self.documents_failed:,} of {self.documents_attempted:,} "
+            f"{noun} {self.stage.loss_clause}"
+        )
+        if not self.causes:
+            return clause
+        reasons = ", ".join(cause.description for cause in self.causes)
+        return f"{clause} ({reasons})"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-safe dictionary."""
+        return {
+            "stage": self.stage.value,
+            "documents_failed": self.documents_failed,
+            "documents_attempted": self.documents_attempted,
+            "causes": [cause.value for cause in self.causes],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "AnalysisShortfall":
+        """Read a stored shortfall.
+
+        The causes degrade: a code this build does not know is dropped, which
+        loses the reason but never the loss. The stage and the counts cannot
+        degrade -- a shortfall naming neither what failed nor how much tells
+        the reader nothing -- so an entry missing either is refused.
+
+        Args:
+            data: The stored value, untrusted.
+
+        Returns:
+            The shortfall.
+
+        Raises:
+            ValueError: If the value is not a dictionary naming a known stage
+                and counts that can be true.
+        """
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"An analysis shortfall must be a dict, not {type(data).__name__}"
+            )
+        try:
+            stage = AnalysisStage(data.get("stage"))
+        except ValueError:
+            raise ValueError("An analysis shortfall must name a known stage") from None
+        failed = data.get("documents_failed")
+        attempted = data.get("documents_attempted")
+        if _is_document_count(failed) and _is_document_count(attempted):
+            return cls(stage, failed, attempted, _causes_from_values(data.get("causes")))
+        raise ValueError("An analysis shortfall counts the documents it lost")
+
+
+def _is_document_count(value: object) -> TypeGuard[int]:
+    """Whether a value counts documents.
+
+    Args:
+        value: The value, untrusted.
+
+    Returns:
+        True for a whole number of at least one. ``bool`` is an ``int`` in
+        Python and is refused: ``True`` is not a count.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _causes_from_values(values: object) -> tuple[EvaluationErrorCode, ...]:
+    """Read stored error codes, dropping what this build cannot name.
+
+    Args:
+        values: The stored causes, untrusted.
+
+    Returns:
+        The codes it recognised, each once, in order.
+    """
+    if not isinstance(values, list):
+        return ()
+    causes: list[EvaluationErrorCode] = []
+    for value in values:
+        try:
+            causes.append(EvaluationErrorCode(value))
+        except ValueError:
+            continue
+    return distinct_causes(causes)
+
+
+def distinct_causes(
+    causes: Iterable[EvaluationErrorCode],
+) -> tuple[EvaluationErrorCode, ...]:
+    """Reduce repeated causes to one mention each.
+
+    Twenty documents that timed out have one cause between them, not twenty.
+
+    Args:
+        causes: The causes, in the order they occurred.
+
+    Returns:
+        Each cause once, in the order it first occurred, with ``SUCCESS``
+        dropped: it is not a failure.
+    """
+    seen: dict[EvaluationErrorCode, None] = {}
+    for cause in causes:
+        if cause is not EvaluationErrorCode.SUCCESS:
+            seen.setdefault(cause, None)
+    return tuple(seen)
+
+
 class EvaluatorType(Enum):
     """Type of evaluator that produced an evaluation."""
 
@@ -951,6 +1145,73 @@ class ScoredDocument:
         }
 
 
+@dataclass(frozen=True)
+class ScoringOutcome:
+    """What scoring produced, and what it could not do (#262).
+
+    Documents the model could not score used to leave scoring the same way
+    documents it judged irrelevant did -- missing from the result -- so a
+    review whose provider was down ended with "no documents scored 3 or
+    higher". They are counted apart here.
+
+    Attributes:
+        accepted: The documents that met the threshold, highest score first.
+        failed: The documents scoring could not score, each carrying its
+            error code as a negative score.
+        documents_attempted: How many documents scoring tried, which is fewer
+            than were asked for when the run was cancelled.
+    """
+
+    accepted: list["ScoredDocument"]
+    failed: list["ScoredDocument"]
+    documents_attempted: int
+
+    @property
+    def shortfall(self) -> AnalysisShortfall | None:
+        """What scoring lost, or ``None`` when it scored every document.
+
+        Returns:
+            The shortfall, its causes read from the failed documents' error
+            codes.
+        """
+        return analysis_shortfall_for_failed_scores(
+            AnalysisStage.SCORING, self.failed, self.documents_attempted
+        )
+
+
+def analysis_shortfall_for_failed_scores(
+    stage: AnalysisStage,
+    failed: "Sequence[ScoredDocument]",
+    documents_attempted: int,
+) -> AnalysisShortfall | None:
+    """Record what a stage lost, reading each failure's cause from its score.
+
+    Args:
+        stage: The stage that lost them.
+        failed: The documents it could not analyse, each with a negative
+            score holding an :class:`EvaluationErrorCode`.
+        documents_attempted: How many documents the stage tried.
+
+    Returns:
+        The shortfall, or ``None`` when nothing failed: a shortfall that lost
+        nothing would tell the user a complete analysis was incomplete.
+    """
+    if not failed:
+        return None
+    causes: list[EvaluationErrorCode] = []
+    for scored in failed:
+        try:
+            causes.append(EvaluationErrorCode(scored.score))
+        except ValueError:
+            causes.append(EvaluationErrorCode.UNKNOWN_ERROR)
+    return AnalysisShortfall(
+        stage=stage,
+        documents_failed=len(failed),
+        documents_attempted=max(documents_attempted, len(failed)),
+        causes=tuple(causes),
+    )
+
+
 @dataclass
 class Citation:
     """
@@ -1030,6 +1291,45 @@ class Citation:
         if parts:
             return f"**{', '.join(parts)}**"
         return ""
+
+
+@dataclass(frozen=True)
+class CitationOutcome:
+    """What citation extraction produced, and what it could not do (#261).
+
+    A relevant document the model could not read is not a document with
+    nothing to say, but both used to leave extraction as an absent citation.
+    A report built on no citations at all then told the reader that the
+    literature was silent.
+
+    Attributes:
+        citations: The passages that were extracted.
+        documents_attempted: How many documents extraction tried: those at or
+            above the threshold, minus any the run was cancelled before.
+        documents_failed: How many of them it could not read.
+        causes: Why, each cause once, in the order it first occurred.
+    """
+
+    citations: list["Citation"]
+    documents_attempted: int
+    documents_failed: int = 0
+    causes: tuple[EvaluationErrorCode, ...] = ()
+
+    @property
+    def shortfall(self) -> AnalysisShortfall | None:
+        """What extraction lost, or ``None`` when it read every document.
+
+        Returns:
+            The shortfall.
+        """
+        if self.documents_failed < 1:
+            return None
+        return AnalysisShortfall(
+            stage=AnalysisStage.CITATION_EXTRACTION,
+            documents_failed=self.documents_failed,
+            documents_attempted=max(self.documents_attempted, self.documents_failed),
+            causes=self.causes,
+        )
 
 
 @dataclass
@@ -1265,6 +1565,8 @@ class ReportMetadata:
         documents_retrieved: Number of documents actually retrieved
         search_shortfalls: What failed sources, batches or pages left out of
             the search (#247); empty when the search was complete
+        analysis_shortfalls: What scoring and citation extraction could not
+            read (#261, #262); empty when every document was analysed
 
         documents_scored: Total documents that were scored
         documents_accepted: Documents that met the score threshold
@@ -1298,6 +1600,7 @@ class ReportMetadata:
     total_is_lower_bound: bool = False
     documents_retrieved: int = 0
     search_shortfalls: list[RetrievalShortfall] = field(default_factory=list)
+    analysis_shortfalls: list[AnalysisShortfall] = field(default_factory=list)
 
     # Scoring info
     documents_scored: int = 0
@@ -1340,6 +1643,7 @@ class ReportMetadata:
             "total_is_lower_bound": self.total_is_lower_bound,
             "documents_retrieved": self.documents_retrieved,
             "search_shortfalls": [s.to_dict() for s in self.search_shortfalls],
+            "analysis_shortfalls": [s.to_dict() for s in self.analysis_shortfalls],
             "documents_scored": self.documents_scored,
             "documents_accepted": self.documents_accepted,
             "documents_rejected": self.documents_rejected,
@@ -1376,6 +1680,11 @@ class ReportMetadata:
         if not isinstance(stored_shortfalls, list):
             raise ValueError("search_shortfalls must be a list")
 
+        # Metadata saved before #261 has no analysis shortfalls.
+        stored_analysis = data.get("analysis_shortfalls", [])
+        if not isinstance(stored_analysis, list):
+            raise ValueError("analysis_shortfalls must be a list")
+
         return cls(
             version=data.get("version", 1),
             generated_at=generated_at,
@@ -1386,6 +1695,7 @@ class ReportMetadata:
             total_is_lower_bound=data.get("total_is_lower_bound", False),
             documents_retrieved=data.get("documents_retrieved", 0),
             search_shortfalls=[RetrievalShortfall.from_dict(s) for s in stored_shortfalls],
+            analysis_shortfalls=[AnalysisShortfall.from_dict(s) for s in stored_analysis],
             documents_scored=data.get("documents_scored", 0),
             documents_accepted=data.get("documents_accepted", 0),
             documents_rejected=data.get("documents_rejected", 0),

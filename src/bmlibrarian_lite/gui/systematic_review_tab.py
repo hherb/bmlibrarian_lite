@@ -54,12 +54,20 @@ from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import (
+    AnalysisShortfall,
+    AnalysisStage,
     LiteDocument,
     ScoredDocument,
     Citation,
     ReportMetadata,
     RetrievalShortfall,
     SearchProvider,
+    analysis_shortfall_for_failed_scores,
+)
+from ..analysis_failures import (
+    analysis_failure_advice,
+    describe_analysis_shortfalls,
+    with_analysis_shortfall_notice,
 )
 from ..agents import (
     LiteSearchAgent,
@@ -91,6 +99,16 @@ from .quality_benchmark_dialog import (
 logger = logging.getLogger(__name__)
 
 
+# The steps whose failure ends the review, and what the dialog saying so is
+# called. Their messages carry what to do next (#247, #261, #262), which a
+# progress label is too small to hold.
+_ERROR_DIALOG_TITLES = {
+    "search": "Search Failed",
+    "scoring": "Scoring Failed",
+    "report": "Report Generation Failed",
+}
+
+
 class WorkflowWorker(QThread):
     """
     Background worker for systematic review workflow.
@@ -109,6 +127,8 @@ class WorkflowWorker(QThread):
         finished: Emitted when workflow completes (final report)
         search_incomplete: Emitted when the search proceeded without part of
             its sources (every shortfall's clause, joined with "; ")
+        analysis_incomplete: Emitted when scoring or citation extraction
+            could not read part of what the search found (#261, #262)
     """
 
     progress = Signal(str, int, int)  # step, current, total
@@ -116,6 +136,7 @@ class WorkflowWorker(QThread):
     error = Signal(str, str)  # step, error message
     finished = Signal(str, object)  # final report, ReportMetadata
     search_incomplete = Signal(str)  # what the search is missing (#247)
+    analysis_incomplete = Signal(str)  # what the analysis could not read (#261)
 
     # Granular signals for audit trail
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
@@ -398,10 +419,26 @@ class WorkflowWorker(QThread):
 
             self.step_complete.emit("scoring", scored_docs)
 
+            # A document the model could not score is not a document it
+            # scored below the threshold (#262): counted as rejected, it read
+            # as the literature's answer.
+            failed_scores = [d for d in all_scored_docs if d.score < 0]
+            scoring_shortfall = analysis_shortfall_for_failed_scores(
+                AnalysisStage.SCORING, failed_scores, len(all_scored_docs)
+            )
+            if scoring_shortfall is not None:
+                metadata.analysis_shortfalls.append(scoring_shortfall)
+                if scoring_shortfall.nothing_survived:
+                    self._fail_analysis("scoring", scoring_shortfall)
+                    return
+                self.analysis_incomplete.emit(scoring_shortfall.describe())
+
             # Update metadata with scoring stats
             metadata.documents_scored = len(all_scored_docs)
             metadata.documents_accepted = len([d for d in all_scored_docs if d.score >= self.min_score])
-            metadata.documents_rejected = len([d for d in all_scored_docs if d.score < self.min_score])
+            metadata.documents_rejected = len(
+                [d for d in all_scored_docs if 0 <= d.score < self.min_score]
+            )
 
             # Calculate score distribution
             for scored_doc in all_scored_docs:
@@ -433,7 +470,7 @@ class WorkflowWorker(QThread):
                 citation_provider
             )
 
-            citations = citation_agent.extract_all_citations(
+            extraction = citation_agent.extract_all_citations(
                 self.question,
                 scored_docs,
                 min_score=self.min_score,
@@ -441,6 +478,15 @@ class WorkflowWorker(QThread):
                 max_workers=citation_workers,
                 cancelled=self._cancel_event,
             )
+            citations = extraction.citations
+
+            # A relevant document nobody could read is not a document with
+            # nothing to say (#261). Extraction is not ended by losing every
+            # document: the report says the extraction failed, which is more
+            # than a threshold message could.
+            if extraction.shortfall is not None:
+                metadata.analysis_shortfalls.append(extraction.shortfall)
+                self.analysis_incomplete.emit(extraction.shortfall.describe())
 
             # Emit per-citation signals for audit trail and save to database
             for citation in citations:
@@ -485,12 +531,19 @@ class WorkflowWorker(QThread):
             )
 
             reporting_agent = LiteReportingAgent(config=self.config)
-            report = reporting_agent.generate_report(
-                self.question,
-                citations,
-                metadata,
-                transparency_results=transparency_results,
-            )
+            try:
+                report = reporting_agent.generate_report(
+                    self.question,
+                    citations,
+                    metadata,
+                    transparency_results=transparency_results,
+                )
+            except Exception as e:
+                # The error text used to be the report: checkpointed as
+                # complete, auto-saved and listed under Load Report (#263).
+                logger.exception("Report generation failed")
+                self.error.emit("report", str(e))
+                return
             self.step_complete.emit("report", report)
 
             # Save report to checkpoint for later retrieval
@@ -515,19 +568,39 @@ class WorkflowWorker(QThread):
         if metadata.search_shortfalls:
             self.search_incomplete.emit(describe_search_shortfalls(metadata.search_shortfalls))
 
+    def _fail_analysis(self, step: str, shortfall: AnalysisShortfall) -> None:
+        """End the workflow because a stage could read none of its documents.
+
+        "No documents scored 3 or higher. Try lowering the minimum score
+        threshold." is advice that cannot help when the model answered
+        nothing at all (#262), so the step ends in an error instead.
+
+        Args:
+            step: The workflow step that failed.
+            shortfall: What it lost, and why.
+        """
+        logger.error("Analysis failed in %s: %s", step, shortfall.describe())
+        self.error.emit(
+            step,
+            f"{describe_analysis_shortfalls([shortfall])}."
+            f"\n\n{analysis_failure_advice([shortfall])}",
+        )
+
     def _finish_without_report(self, message: str, metadata: ReportMetadata) -> None:
         """End the workflow with a message standing in for the report.
 
-        The message is shown where the report would be, so when the search
-        was incomplete it opens with the same notice a report would (#247):
-        "none scored 3 or higher" means less when a provider never answered.
+        The message is shown where the report would be, so it opens with the
+        same notices a report would (#247, #261): "none scored 3 or higher"
+        means less when a provider never answered, or when part of what was
+        found could not be read.
 
         Args:
             message: Why there is no report.
             metadata: The workflow's metadata so far.
         """
+        qualified = with_analysis_shortfall_notice(message, metadata.analysis_shortfalls)
         self.finished.emit(
-            with_search_shortfall_notice(message, metadata.search_shortfalls),
+            with_search_shortfall_notice(qualified, metadata.search_shortfalls),
             metadata,
         )
 
@@ -596,6 +669,8 @@ class SystematicReviewTab(QWidget):
         self.config = config
         self.storage = storage
         self._worker: Optional[WorkflowWorker] = None
+        # What scoring and citation extraction could not read, this run.
+        self._analysis_notices: list[str] = []
         self._quality_worker: Optional[QualityFilterWorker] = None
         self._benchmark_worker: Optional[BenchmarkWorker] = None
         self._benchmark_progress_dialog: Optional[BenchmarkProgressDialog] = None
@@ -731,6 +806,19 @@ class SystematicReviewTab(QWidget):
         self.search_notice_label.setVisible(False)
         progress_layout.addWidget(self.search_notice_label)
 
+        # Shown when scoring or citation extraction could not read part of
+        # what the search found (#261, #262). Like the search notice, it
+        # stays until the next run.
+        self.analysis_notice_label = QLabel()
+        self.analysis_notice_label.setWordWrap(True)
+        self.analysis_notice_label.setStyleSheet(
+            get_stylesheet_generator().label_stylesheet(
+                color=ThemeColors.WARNING_TEXT, bold=True
+            )
+        )
+        self.analysis_notice_label.setVisible(False)
+        progress_layout.addWidget(self.analysis_notice_label)
+
         self.progress_label = QLabel("Ready")
         progress_layout.addWidget(self.progress_label)
 
@@ -762,6 +850,9 @@ class SystematicReviewTab(QWidget):
         self.quality_summary.setVisible(False)
         self.search_notice_label.clear()
         self.search_notice_label.setVisible(False)
+        self._analysis_notices = []
+        self.analysis_notice_label.clear()
+        self.analysis_notice_label.setVisible(False)
 
         # Update UI state
         self.run_btn.setEnabled(False)
@@ -792,6 +883,7 @@ class SystematicReviewTab(QWidget):
         self._worker.error.connect(self._on_error)
         self._worker.finished.connect(self._on_finished)
         self._worker.search_incomplete.connect(self._on_search_incomplete)
+        self._worker.analysis_incomplete.connect(self._on_analysis_incomplete)
 
         # Connect worker audit trail signals to tab signals
         self._worker.query_generated.connect(self.query_generated)
@@ -901,22 +993,41 @@ class SystematicReviewTab(QWidget):
         )
         self.search_notice_label.setVisible(True)
 
+    def _on_analysis_incomplete(self, missing: str) -> None:
+        """Tell the user the review could not read part of what it found.
+
+        Scoring and citation extraction each report their own loss, so the
+        clauses accumulate: a second notice that replaced the first would
+        hide what the first said (#261, #262).
+
+        Args:
+            missing: What one stage could not read, as its clause.
+        """
+        self._analysis_notices.append(missing)
+        self.analysis_notice_label.setText(
+            f"Incomplete analysis: {'; '.join(self._analysis_notices)}. The review "
+            "continues on the documents that were analysed."
+        )
+        self.analysis_notice_label.setVisible(True)
+
     def _on_error(self, step: str, message: str) -> None:
         """Handle workflow errors.
 
-        A failed search also gets a dialog: its message says what failed and
-        what to do next, which a progress label is too small to hold, so the
-        label shows only its first line. Any other error shows in full.
+        A step that ends the review gets a dialog: its message says what
+        failed and what to do next, which a progress label is too small to
+        hold, so the label shows only its first line. Any other error shows
+        in full.
 
         Args:
             step: The workflow step that failed.
             message: What went wrong; may be empty or span several lines.
         """
         self._reset_ui()
-        if step == "search":
+        title = _ERROR_DIALOG_TITLES.get(step)
+        if title:
             first_line = message.partition("\n")[0]
             self.progress_label.setText(f"Error in {step}: {first_line}")
-            QMessageBox.warning(self, "Search Failed", message)
+            QMessageBox.warning(self, title, message)
         else:
             self.progress_label.setText(f"Error in {step}: {message}")
 

@@ -26,9 +26,11 @@ import pytest
 
 from bmlibrarian_lite.data_models import (
     Citation,
+    CitationOutcome,
     DocumentSource,
     LiteDocument,
     ScoredDocument,
+    ScoringOutcome,
     SearchProvider,
     SearchSession,
 )
@@ -239,7 +241,9 @@ class TestFactCheck:
         session = _make_session()
         doc = _make_document()
         ctx.search_agent.search.return_value = (session, [doc])
-        ctx.scoring_agent.score_documents.return_value = []
+        ctx.scoring_agent.score_documents.return_value = ScoringOutcome(
+            accepted=[], failed=[], documents_attempted=1
+        )
 
         result = _handle_fact_check({"claim": "test", "min_score": 4}, ctx)
 
@@ -255,8 +259,12 @@ class TestFactCheck:
         citation = _make_citation(doc)
 
         ctx.search_agent.search.return_value = (session, [doc])
-        ctx.scoring_agent.score_documents.return_value = [scored]
-        ctx.citation_agent.extract_all_citations.return_value = [citation]
+        ctx.scoring_agent.score_documents.return_value = ScoringOutcome(
+            accepted=[scored], failed=[], documents_attempted=1
+        )
+        ctx.citation_agent.extract_all_citations.return_value = CitationOutcome(
+            citations=[citation], documents_attempted=1
+        )
         ctx.reporting_agent.generate_report.return_value = "# Report\nFindings here."
 
         result = _handle_fact_check({"claim": "test claim"}, ctx)
@@ -517,8 +525,12 @@ class TestFactCheckProgress:
         citation = _make_citation(doc)
 
         ctx.search_agent.search.return_value = (session, [doc])
-        ctx.scoring_agent.score_documents.return_value = [scored]
-        ctx.citation_agent.extract_all_citations.return_value = [citation]
+        ctx.scoring_agent.score_documents.return_value = ScoringOutcome(
+            accepted=[scored], failed=[], documents_attempted=1
+        )
+        ctx.citation_agent.extract_all_citations.return_value = CitationOutcome(
+            citations=[citation], documents_attempted=1
+        )
         ctx.reporting_agent.generate_report.return_value = "# Report"
 
         reporter = _make_progress()

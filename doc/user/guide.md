@@ -100,6 +100,24 @@ A database that cannot be reached is never reported as one with no articles.
 - **Part of the search failed** (one of two providers, or a batch of records): the review continues on what was retrieved. A warning appears under Progress, the report opens with an **Incomplete search** notice, and its Methodology section lists what is missing and why.
 - **Research Questions → search for more documents** keeps going past a batch of records it could not fetch, and stops at a page of results it could not retrieve. It hands the documents it found to the review with what is missing, so that review's report opens with the same notice. If the failures leave it with no new document, it shows an error with what to do next.
 
+#### When the AI Cannot Read What Was Found
+
+A model that could not answer is never reported as a literature with nothing
+relevant in it.
+
+- **No document could be scored** (the model provider is unreachable, refuses
+  the API key, or rate-limits every request): the review stops with an error
+  naming what failed and what to do next. It does not say "No documents scored
+  3 or higher": nobody knows what those documents would have scored.
+- **Some documents could not be scored, or could not be read for citations**:
+  the review continues on the rest. A warning appears under Progress, the
+  report opens with an **Incomplete analysis** notice, and its Methodology
+  section records it under Analysis Completeness. Those documents are not
+  counted as rejected.
+- **A report that could not be generated is not saved.** The review ends with
+  an error in the report step, and nothing is added to the report folder or
+  offered under Load Report.
+
 #### Search Tips
 
 - Be specific in your research question

@@ -292,6 +292,38 @@ inside an HTTP 200; the service proceeds on what was retrieved and records a
 contract the Swift and Android ports follow is
 `doc/cross_platform/search_failure_reporting.md`.
 
+#### Analysis Failures (`analysis_failures.py`)
+
+The companion of `search_failures.py` for the stages after the search:
+
+```python
+from bmlibrarian_lite.exceptions import AnalysisFailedError
+
+try:
+    scoring = scoring_agent.score_documents(question, documents, min_score=3)
+except AnalysisFailedError as e:
+    # No document could be scored: report e.shortfall, never "none scored
+    # above the threshold"
+    raise
+
+extraction = citation_agent.extract_all_citations(question, scoring.accepted)
+report = reporting_agent.generate_report(
+    question,
+    extraction.citations,
+    analysis_shortfalls=[
+        s for s in (scoring.shortfall, extraction.shortfall) if s is not None
+    ],
+)
+```
+
+**A failed analysis is not an empty one** (#261, #262). Scoring and citation
+extraction answer with an outcome carrying an `AnalysisShortfall`; scoring
+raises when it could score nothing at all; report generation raises rather
+than returning its error as the report (#263). A report that rests on part of
+what was found opens with an **Incomplete analysis** notice, and a check that
+decides *what a text is* reads the body behind both notices. The contract is
+`doc/cross_platform/analysis_failure_reporting.md`.
+
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
 The transparency system has two components:
