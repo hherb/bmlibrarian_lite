@@ -8,61 +8,61 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#285 + #284 — a store that cannot be opened, and a report that says what its
-search lost**, branch `fix/swift-store-schema-and-report-shortfalls-285`, PR #291.
-iOS/macOS only. Compress into **Recently landed** once merged.
+**#261 + #262 + #263 + #264 — a failed analysis is not an empty one**, branch
+`fix/failed-analysis-is-not-an-empty-one-261`, PR #301. Python only. Compress into
+**Recently landed** once merged.
 
-- **Nothing is deleted any more, and the store moves whole or not at all.**
-  `StoreRecovery.setAsideStore` moves `default.store{,-shm,-wal}` into one
-  `unreadable-<yyyyMMdd-HHmmss>/` folder (stepping to `-2` when a second failure
-  lands in the same second), and rolls every move back if any one of them fails.
-  A database parted from its write-ahead log has lost what that log still held,
-  so a half-moved store is never left behind — and `makeContainer` refuses to
-  open a fresh database when anything is still lying where SwiftData writes,
-  raising `StoreSetAsideFailure` instead. `SetAsideStore` is a sum type carrying
-  why the move failed; the caller logs it and the user is told it.
-- **Every message says "Nothing was deleted"** — including the case where
-  *nothing* could be moved, which is the one case where the store is provably
-  still whole on disk.
-- **The message is app-scoped and cannot be dropped unread.**
-  `StoreRecoveryMessage` (`@Observable`, like `AppSettings`) is read once per
-  launch, so several macOS windows say it once between them, and the alert's
-  binding setter is deliberately inert: only the OK button forgets it. SwiftUI
-  drives that setter to `false` for reasons that are not the user reading it —
-  a sibling alert on the same view, a view torn down — and a message dropped
-  then was the silence #285 is about. Attached to the whole root view, not just
-  the post-onboarding branch.
-- **A version bump would crash the app, so there is none.** Every
-  `VersionedSchema` is built from the *live* model classes, so a `SchemaV3`
-  listing V2's models computes the same schema checksum, and a store matching no
-  version then raises `NSInvalidArgumentException` — an ObjC exception no Swift
-  `catch` takes, on a `fatalError` path. **#289**; the measurement is in
-  `SchemaVersions.swift`. Two probes called it safe; only a test against a store
-  written by an *earlier build* caught it.
-- **A live defect that test also found:** such a store is refused with
-  `SwiftDataError.unknownDataStoreSchema` (SwiftData drops the 134504 Cocoa
-  error behind it), `isMigrationError` did not know the name, so the factory
-  rethrew into `fatalError` — a launch crash for everyone upgrading past a model
-  change. `StoreMigrationTests` pins the ladder now, and `isMigrationError` is
-  tested in both directions. Its looser indicators are **#292**.
-- **The report records what its search lost** (`EvidenceReport`'s private
-  `searchShortfallsJSON`, `"[]"` when complete) instead of matching its own
-  prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before the
-  record and is read off its text; a damaged record reports as incomplete, says
-  it cannot tell the reader what is missing, and now logs *why*. The contract's
-  **iOS and macOS** section records both divergences from Python — "no key reads
-  as `[]`", and a damaged record degrading where Python refuses.
-- **Lodged while working here:** **#290** (`AppLogger` twice, so shared code can
-  use neither), **#292** (the migration heuristic matches `"migration"` as a bare
-  substring), **#293** (`try? modelContext.save()` discards the failure that
-  decides whether the record lands), **#294** (a set-aside store is unreachable
-  to the user on iOS and accumulates), **#295** (`ReportSearchCompleteness` is
-  four states in `Bool × String? × String`), **#296** (the earlier-build test
-  schema has no relationships or transformables), **#297** (`fatalError` rather
-  than a window that explains), **#298** (a damaged record reported as an API
-  error).
-- **Verified:** `swift test` 385 (app) + 1200 (BioMedLit), macOS `xcodebuild`,
-  iOS Simulator build — all four green. Python and Android untouched.
+- **The contract** is `doc/cross_platform/analysis_failure_reporting.md`, the
+  companion of the search one for the stages after the search. Swift and
+  Android are **unchecked** against it (**#300**).
+- **The vocabulary.** `AnalysisShortfall` (in `data_models.py`, beside
+  `RetrievalShortfall`) records stage + failed + attempted + causes; the pure
+  functions are in `analysis_failures.py`. A shortfall that lost nothing is
+  refused on construction, repeated causes are reduced on the way in, and a
+  cause a build cannot name degrades while the count never does.
+- **Scoring raises** (`AnalysisFailedError`) when every attempted document
+  failed; otherwise it answers with a `ScoringOutcome` whose failures are kept
+  apart from documents scored below the threshold. **Citation extraction never
+  raises** — the documents are known to be relevant, so a report can say the
+  extraction failed, which is more than a threshold message could.
+  **Report generation raises** rather than returning `Error generating report:
+  …` as the report (which the GUI checkpointed as complete and auto-saved).
+- **The notice is idempotent**: the agent qualifies the report, and the MCP
+  result must not qualify it again. A check that decides *what a text is*
+  (the Report tab's auto-save) reads the body behind **both** notices.
+- **A failed document is not a rejected one** — the Methodology section counts
+  them apart and records **Analysis Completeness**, and it is not a *scored*
+  one either: `documents_scored == documents_accepted + documents_rejected`,
+  so the three numbers reconcile.
+- **Classify the failure, not the wrapper.** `llm_retry` retries every provider
+  failure, so an agent sees `RetryExhaustedError`, never the refused key or
+  unreachable host underneath. Recording the wrapper left *every* outage
+  advising "try again later" — the tailored advice was unreachable in
+  production, including #262's own Ollama-is-down case. Both agents now go
+  through `classify_exhausted_retries()` (`utils.py`), which reads
+  `last_error`. **Tests that patch `_score_with_retry`/`_extract_with_retry`
+  patch *inside* the retry decorator and cannot see this**; the ones that
+  matter drive `_chat`.
+- **Cancelling is not failing.** A cancelled run's attempted set is only what
+  it got through, so one timed-out document before a cancel used to end the
+  review with "Scoring Failed". The cancel check now precedes the total-loss
+  verdict in both the worker and `score_documents`.
+- **A later failure does not un-lose what an earlier stage lost.** The MCP
+  shortfalls are a handler local, so a report-generation failure (which #263
+  made raise) dropped them; the exception now carries them to `_error_payload`.
+- **The outcome types enforce their own counts.** `ScoringOutcome` and
+  `CitationOutcome` refuse impossible numbers on construction instead of
+  repairing them with `max()` — a floored `attempted` reads as "every document
+  failed", which is a *terminal* verdict, so a caller's slip became a
+  confident lie to the user.
+- **Verified:** `pytest tests/` — 1197 passed, 3 xfailed;
+  `lint_delta.py --base-ref origin/master` reports 0 new ruff and 0 new mypy
+  findings. Swift and Android untouched.
+- **Lodged, not fixed** (all pre-existing on master, all the same family):
+  audit trail writes unscored documents as rejected with an invented reason
+  (issue 302); a well-formed `{"passages": []}` is treated as a parse failure,
+  costing 4x the LLM calls and a false "Incomplete analysis" (issue 303); the
+  GUI's full-text-to-abstract fallback is silent (issue 304).
 
 ## Recently landed (context)
 
@@ -70,96 +70,103 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **An unreadable store is kept whole, and a report records what its search
+  lost** (#285 + #284; PR #291, merged 2026-09-17). iOS/macOS only.
+  - **Nothing is deleted.** `StoreRecovery.setAsideStore` moves
+    `default.store{,-shm,-wal}` into one `unreadable-<timestamp>/` folder and
+    rolls every move back if any one fails — a database parted from its
+    write-ahead log has lost what that log still held — and `makeContainer`
+    refuses to open a fresh database while anything is left where SwiftData
+    writes. **Every message says "Nothing was deleted"**, the nothing-could-be-
+    moved case included, which is the one case where the store is provably whole.
+  - **A recovery message is app-scoped and cannot be dropped unread.**
+    `StoreRecoveryMessage` (`@Observable`) is read once per launch, so several
+    macOS windows say it once between them, and the alert's binding setter is
+    deliberately inert: only OK forgets it. SwiftUI drives that setter to `false`
+    for reasons that are not the user reading it, and that silence was #285.
+    Attach such an alert to the whole root view, not one branch of it.
+  - **A SwiftData version bump still crashes at launch**, so there is none:
+    every `VersionedSchema` is built from the *live* model classes, so two
+    versions share a checksum and a store matching neither raises
+    `NSInvalidArgumentException`, which no Swift `catch` takes (**#289**;
+    measured in `SchemaVersions.swift`). Only a store written by an **earlier
+    build** reaches it — two probes against a matching checksum called it safe.
+    `isMigrationError` must know `SwiftDataError.unknownDataStoreSchema`
+    (SwiftData hides Cocoa 134504 behind it) or every upgrading app hits
+    `fatalError`; `StoreMigrationTests` pins the ladder.
+  - **The report records what its search lost** in `EvidenceReport`'s private
+    `searchShortfallsJSON` (`"[]"` when complete) instead of matching its own
+    prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before
+    the record and is read off its text; a damaged record reports as incomplete
+    and says it cannot name what is missing. Both divergences from Python are in
+    the contract's iOS/macOS section.
+
 - **A failed source is not an empty one** — all three platforms conform: Python
   (#247, #248; PR #260), Android (#252; PR #276), iOS/macOS (#256, #253; PR
-  #282), merged 2026-09-15/16. Contract:
-  `doc/cross_platform/search_failure_reporting.md`, one section per platform.
-  #255 (E-utilities failing with HTTP 200) was verified on all three and closed
-  on 2026-09-17.
-  - **The rule.** A failure proceeds on what was retrieved and tells the user;
-    **failures that leave nothing are an error**, never "No documents found"
-    (user, 2026-09-14). A failure travels as kind + HTTP status only: **no
-    exception, body or parser message is kept** (`raise … from None` keeps
-    `__context__`; `JSONDecodeError.doc` is the body; NCBI's 400 echoes the
-    key). **An HTTP 200 can be a failure** (esearch `ERROR`, efetch
-    `<eFetchResult>`, Europe PMC's bare `{"version":…}`), a missing count is
-    malformed rather than 0, a listing shorter than its count is incomplete,
-    **PubMed lists only 9,999 records**, and a search never asks past the end.
-    Notice and Methodology line are added by code, never the LLM, and
-    **shortfalls ride with the documents into the review** — a dialog alone left
-    the report claiming a complete search. A stored shortfall degrades but is
-    never dropped; a damaged record stops a session before it spends anything.
-  - **Per page.** A failed later PubMed page is recorded and paged past; a failed
-    later Europe PMC page ends the cursor, and **an ended cursor misses every hit
-    not received**. **A page that failures leave with no new document changes
-    nothing.** A failed alternative (smart-search) query has **its own clause**,
-    persisted as `"query": "alternative"`; counts combine only within one query.
-    The doubled "could not be completed" is the contract's wording on all three
-    (user, 2026-09-16).
+  #282), merged 2026-09-15/16, with #255 (E-utilities failing with HTTP 200)
+  closed on all three on 2026-09-17. The contract, one section per platform, is
+  `doc/cross_platform/search_failure_reporting.md`; read it before touching any
+  of this. What it is easiest to get wrong again:
+  - **Failures that leave nothing are an error**, never "No documents found"
+    (user, 2026-09-14), and a failure travels as kind + HTTP status only: **no
+    exception, body or parser message is kept** (each of those can print the
+    NCBI API key). **An HTTP 200 can be a failure**, a missing count is
+    malformed rather than 0, and **PubMed lists only 9,999 records**.
+  - **Shortfalls ride with the documents into the review** — a dialog alone
+    left the report claiming a complete search. Notice and Methodology line are
+    added by code, never the LLM. A stored shortfall degrades but is never
+    dropped; a damaged record stops a session before it spends anything.
+  - **A page that failures leave with no new document changes nothing**; a
+    failed later Europe PMC page ends the cursor, and **an ended cursor misses
+    every hit not received**. A failed alternative (smart-search) query has
+    **its own clause**; counts combine only within one query.
   - **Swift shape.** The clients raise (`SourceRequestError`), the app decides;
-    paging travels as a `SearchContinuation`. **`SourceRequestError` must conform
-    to `RetryableError`**, or a 429 stops being retried. **A lookup is not a
-    page** (`EuropePMCService.lookup`). A cancelled request raises
-    `CancellationError` **on every leg**, efetch included.
-    `refreshPaginationState` replays pages already held: **no** shortfall, and
-    finding nothing new is ordinary — treating it as failure locked "Get more
-    evidence" out of every resumed session. **Smart search never ends the run**
-    where the step itself chose it. `os.Logger` takes a literal.
+    paging travels as a `SearchContinuation`, and **`SourceRequestError` must
+    conform to `RetryableError`** or a 429 stops being retried. **A lookup is
+    not a page.** `refreshPaginationState` replays pages already held: **no**
+    shortfall, and finding nothing new is ordinary — treating it as failure
+    locked "Get more evidence" out of every resumed session.
   - Lodged across the three rounds: #258, #259, #261–#266 (Python), #267–#275,
     #277–#280 (Android), #281, #283–#290 (Swift).
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
-  #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs E-utilities
-  parameters in the body. **A URL is what error text and HTTP logging print**,
-  and redacting would chase each printer. **A 307/308 re-sends a body, so a
-  redirect is a failed request.** Enforcement points, tests and port
-  differences are tabled in `doc/developer/europepmc_and_pubmed.md`. Swift
-  refuses per task; **Android uses a client derived for PubMed only** (Unpaywall
-  and PDF links need redirects, and the shared Retrofit builder is a mutable
-  singleton) and drops Retrofit's `Invocation` tag, which holds the key and which
-  `Request.toString()` prints. **A redirect test needs a control that a followed
-  redirect is observable**; each test that reaches the local server asserts the
-  key arrived. Swift trap: a `URLProtocol` gets the body as `httpBodyStream`.
-  **NCBI's 400 for a bad key echoes the key in its body** (checked live). **A
-  `nil` next offset means no next page**: advance past the PMIDs consumed, or a
-  last batch that parsed to nothing is requested forever (#251). Credential files
-  go through `write_owner_only_file`.
+  #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs
+  E-utilities parameters in the body; **a URL is what error text and HTTP
+  logging print**, and redacting would chase each printer. **A 307/308 re-sends
+  a body, so a redirect is a failed request.** Enforcement points, tests and
+  port differences are tabled in `doc/developer/europepmc_and_pubmed.md`.
+  Traps: **Android uses a client derived for PubMed only** (Unpaywall and PDF
+  links need redirects) and drops Retrofit's `Invocation` tag, which holds the
+  key; a Swift `URLProtocol` gets the body as `httpBodyStream`; **a redirect
+  test needs a control that a followed redirect is observable**; **NCBI's 400
+  for a bad key echoes the key in its body** (checked live); **a `nil` next
+  offset means no next page** (#251). Credential files go through
+  `write_owner_only_file`.
 
 - **Older rounds, compressed further**; each rule below cost a defect.
-  - **The screen and the export read references by one parser** (#233, PR #242):
-    recognition in `ReportInlineText`, renderers only style segments; one block
-    splitter, `ReportMarkdownBlock`, for screens and PDF (three copies drifted).
-    **Measure through the real renderer.** **A removal takes machine syntax,
-    never the report's words** (golden rule 6). **Narrowing one pattern moves
-    work to the next.** The reader is told (`RemovedCitationNotice`). **#230**
-    (PR #235): what the link pattern misses is *swept*, whitespace tolerance only
-    in the `doc:` scheme, and a sweep leaving the identity is worse than none.
+  - **One parser for the screen and the export** (#233/#230, PRs #242/#235):
+    recognition in `ReportInlineText`, one block splitter (`ReportMarkdownBlock`)
+    for screens and PDF. **Measure through the real renderer.** **A removal
+    takes machine syntax, never the report's words** (golden rule 6), the reader
+    is told (`RemovedCitationNotice`), **narrowing one pattern moves work to the
+    next**, and a sweep leaving the identity is worse than none.
   - **A document's identity may not claim what the article is** (#208, PR #226):
     `Document.id` is an opaque UUID; stored `pmid-` rows are kept, never
     reconstructed. **Find the surface a reader actually reaches** (#221). **A
     shared gate is only shared if every caller reads it.**
-  - **A PubMed URL may only be built from a stated PubMed ID** (#212 + #213, PR
-    #218; contract `doc/cross_platform/fulltext_retrieval.md`). **The shape of a
-    number never states a PubMed ID** (thesis `889149` is also a 1977 mouse
-    paper); **`.both` vouches for nothing**; one predicate,
-    `ArticleIdentifierKind.pubmedID(in:declared:)`, authorises every PubMed URL
-    and `PMID:` line.
-  - **Europe PMC's own word for what an identifier is** (#209, PR #211): the kind
-    is *stated* from the record's `source`, stored, passed back into
-    `fetchFullText`; a stored `nil` means "nobody stated one". The cache tag
-    names the kind, not the rung. One writer for document creation
-    (`applySearchMetadata`), untested on its three paths (**#216**). A lookup
-    must not filter preprints; `isNumber` is not "all digits". Only Swift
-    conforms: #205 (Android), #207 (Python).
-  - **An article without a PMID can reach its PDF** (#202, PR #206): an article
-    is named by a *ladder* (primary slot, PMC ID, DOI), no two identifiers may
-    share a name, and the key comes from the document, never `resolvedPmcId`.
-    `doc/cross_platform/fulltext_retrieval.md` is the port contract.
+  - **An identifier is only what a source stated it to be** — the contract is
+    `doc/cross_platform/fulltext_retrieval.md`, built over PRs #206, #211, #218.
+    **The shape of a number never states a PubMed ID** (thesis `889149` is also
+    a 1977 mouse paper) and one predicate authorises every PubMed URL and
+    `PMID:` line (#212/#213); the kind is *stated* from Europe PMC's `source`,
+    stored and passed back, and a stored `nil` means "nobody stated one" (#209,
+    open on Android #205 and Python #207); an article is named by a *ladder*
+    (primary slot, PMC ID, DOI), the key coming from the document (#202). One
+    writer for document creation, untested on its three paths (**#216**).
   - **A downloaded PDF contributes its text** (PR #198): extraction serves
-    analysis, display prefers the document (`Document.displayedFullText`); an
-    abstract-only deposit is held back rather than returned, so the consumer
-    checks the kind (`analyzableFullText`); coverage travels with the text; a
-    PDF tier's outcome has four states, not two.
+    analysis, display prefers the document; an abstract-only deposit is held
+    back rather than returned, so the consumer checks the kind; coverage travels
+    with the text; a PDF tier's outcome has four states, not two.
   - **A redaction placeholder is only as good as the load path** (PR #195):
     `--json` printed `<redacted>`, a *truthy string* that saved back would go to
     NCBI as a credential. **A guard must name its own cause.** **Prefix-anchor a
@@ -241,6 +248,24 @@ the rest.
 
 ## Potential follow-ups
 
+### The #285 round: what PR #291 lodged
+
+All iOS/macOS, all independent, none blocking.
+
+- **#292** — `isMigrationError` matches `"migration"` as a bare substring, so a
+  passing fault can set a healthy store aside.
+- **#293** — `try? modelContext.save()` discards the failure that decides
+  whether the shortfall record is ever stored.
+- **#294** — iOS: a set-aside store is unreachable to the user and accumulates.
+- **#295** — `ReportSearchCompleteness` is four exclusive states in
+  `Bool × String? × String`.
+- **#296** — `StoreMigrationTests`' earlier-build store has no relationships and
+  no transformables, so it understates what a real bump touches.
+- **#297** — a store the app cannot open ends in `fatalError` rather than a
+  window that explains it.
+- **#298** — a damaged shortfall record is reported as an API error, with no
+  next step for the user.
+
 ### The #282 review round: iOS/macOS storage, errors and tests
 
 Lodged while reviewing PR #282 (2026-09-16). The four critical findings were
@@ -259,11 +284,11 @@ fixed on that branch; these are what it left.
   batch and then misreported as a failed *first* page; dead/confusable public API
   (`redirectRefused` with no callers, `SearchSource.provider` bridging to the
   wrong `SearchProvider` spelling, `httpStatus` vs `forHTTPStatus`).
-- **#289 — a SwiftData version bump crashes at launch**, and **#290** —
-  `AppLogger` is declared twice. Both found doing #285; #289 blocks any model
-  change lightweight migration cannot absorb (a rename, a retype, a property
-  becoming non-optional), because there is no way to add a stage until each
-  version snapshots its own model types.
+- **#289 blocks any model change lightweight migration cannot absorb** (a
+  rename, a retype, a property becoming non-optional): no stage can be added
+  until each version snapshots its own model types — see **Recently landed**.
+  **#290** — `AppLogger` is declared twice, iOS-only and macOS-only, so shared
+  code can use neither.
 - **#281 / #288 — the workflow's own decisions are untested**, because
   `FactCheckWorkflow` takes no injectable search service (the Swift shape of
   #216). But **#288 measured that six of the ten are pure functions that are
@@ -389,15 +414,18 @@ Swift and Kotlin rather than a Swift-side patch.
   call `logging.basicConfig(INFO)` at import and the GUI configures none, so the
   fix needs a GUI setup too. **#245** — those two CLIs take the NCBI key only as
   `--api-key` (shell history, `ps`).
-- **Failures that read as findings, still open** (the #246 review). Nothing
-  connects `analysis_failed` (**#249**); an efetch with no article yields "No
-  conflict of interest statement found" (**#250**, #203's shape). **#258** — the
-  search merge drops a distinct article whose title differs by a number (Python
-  and Swift), silently, as "duplicates removed". **#259** — Python full-text
-  discovery reports an unreachable Europe PMC as "Article not found" (the #247
-  contract, for lookups; Swift's `EuropePMCService.lookup` now raises rather than
-  answering nothing, so Python is the one left). Not done, a decision: esearch
-  `SERVICE_ERROR` is not retried (the `((` answer fails every time).
+- **Failures that read as findings, what is left** (the #246 review) — #261 to
+  #264 are on the branch above. Still open: nothing connects `analysis_failed`
+  (**#249**); an efetch with no article yields "No conflict of interest
+  statement found" (**#250**, #203's shape). **#258** — the search merge drops
+  a distinct article whose title differs by a number (Python and Swift),
+  silently, as "duplicates removed". **#259** — Python full-text discovery
+  reports an unreachable Europe PMC as "Article not found" (the #247 contract,
+  for lookups; Swift's `EuropePMCService.lookup` now raises rather than
+  answering nothing, so Python is the one left). **#300** — Swift and Android
+  are unchecked against the analysis-failure contract; both run the same
+  pipeline with the same shape. Not done, a decision: esearch `SERVICE_ERROR`
+  is not retried (the `((` answer fails every time).
 - **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
   **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
   cheaper, and the exact defect that occurred — a guard failing when a `.swift`

@@ -51,6 +51,7 @@ from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
 from ..quality import QualityAssessment
+from ..analysis_failures import without_analysis_shortfall_notice
 from ..search_failures import without_search_shortfall_notice
 
 # Directory for auto-saved reports
@@ -224,9 +225,10 @@ class ReportTab(QWidget):
         self.audit_btn.setEnabled(bool(scored_documents))
 
         # Auto-save the report, but not a message standing in for one. An
-        # incomplete search puts its notice in front of that message (#247),
-        # so the check reads the text behind the notice.
-        body = without_search_shortfall_notice(report)
+        # incomplete search (#247) and an incomplete analysis (#261) each put
+        # a notice in front of that message, so the check reads the text
+        # behind both of them.
+        body = without_analysis_shortfall_notice(without_search_shortfall_notice(report))
         if body and not body.startswith(("No documents", "Workflow cancelled")):
             self._auto_save_report()
 

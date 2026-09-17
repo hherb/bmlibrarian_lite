@@ -32,7 +32,8 @@ Exception Hierarchy:
     │   └── RetryExhaustedError
     └── LLMError
         ├── JSONParseError
-        └── APIError
+        ├── APIError
+        └── AnalysisFailedError
 
 Usage:
     from bmlibrarian_lite.exceptions import SQLiteError
@@ -47,7 +48,12 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .data_models import RequestFailure, RetrievalShortfall, SearchProvider
+    from .data_models import (
+        AnalysisShortfall,
+        RequestFailure,
+        RetrievalShortfall,
+        SearchProvider,
+    )
 
 
 class LiteError(Exception):
@@ -342,3 +348,38 @@ class APIError(LLMError):
         super().__init__(message)
         self.status_code = status_code
         self.is_retryable = is_retryable
+
+
+class AnalysisFailedError(LLMError):
+    """A stage of the review was left with nothing because every document failed (#262).
+
+    A review whose model could not read some of its documents proceeds on the
+    rest and says what is missing. When every document failed, the honest
+    answer is not "no documents scored 3 or higher" -- nobody knows what they
+    would have scored -- so the stage raises this instead.
+
+    Example:
+        raise AnalysisFailedError(
+            AnalysisShortfall(AnalysisStage.SCORING, 5, 5, (code,))
+        )
+    """
+
+    def __init__(self, shortfall: "AnalysisShortfall") -> None:
+        """Initialize the failed analysis.
+
+        Args:
+            shortfall: What the stage lost, and why. Every document it
+                attempted must have failed.
+
+        Raises:
+            ValueError: If some documents survived. A stage that still has
+                documents to proceed on has not failed, and reporting it as
+                terminal would hide the ones that did survive.
+        """
+        if not shortfall.nothing_survived:
+            raise ValueError(
+                "A failed analysis lost every document it attempted; "
+                "a partial loss is reported, not raised"
+            )
+        super().__init__(f"The review could not continue: {shortfall.describe()}")
+        self.shortfall = shortfall

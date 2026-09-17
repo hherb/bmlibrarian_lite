@@ -49,11 +49,21 @@ Usage:
     reporting_agent = LiteReportingAgent(config=config)
     interrogation_agent = LiteInterrogationAgent(storage=storage, config=config)
 
-    # Execute a research workflow
+    # Execute a research workflow. Scoring and citation extraction answer
+    # with an outcome that says what they could not read (#261, #262); a
+    # report built on their losses opens with a notice saying so.
     session, documents = search_agent.search("cardiovascular effects of exercise")
-    scored = scoring_agent.score_documents("cardiovascular effects", documents)
-    citations = citation_agent.extract_all_citations("cardiovascular effects", scored)
-    report = reporting_agent.generate_report("cardiovascular effects", citations)
+    scoring = scoring_agent.score_documents("cardiovascular effects", documents)
+    extraction = citation_agent.extract_all_citations(
+        "cardiovascular effects", scoring.accepted
+    )
+    report = reporting_agent.generate_report(
+        "cardiovascular effects",
+        extraction.citations,
+        analysis_shortfalls=[
+            s for s in (scoring.shortfall, extraction.shortfall) if s is not None
+        ],
+    )
 """
 
 from .base import LiteBaseAgent

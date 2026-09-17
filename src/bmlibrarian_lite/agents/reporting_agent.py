@@ -21,8 +21,13 @@ professional research summary with proper attribution.
 """
 
 import logging
+from collections.abc import Sequence
 
-from ..data_models import Citation, ReportMetadata
+from ..analysis_failures import (
+    describe_analysis_shortfalls,
+    with_analysis_shortfall_notice,
+)
+from ..data_models import AnalysisShortfall, AnalysisStage, Citation, ReportMetadata
 from ..search_failures import describe_search_shortfalls, with_search_shortfall_notice
 from ..transparency.transparency_models import TransparencyResult
 from .base import LiteBaseAgent
@@ -80,6 +85,7 @@ class LiteReportingAgent(LiteBaseAgent):
         citations: list[Citation],
         metadata: ReportMetadata | None = None,
         transparency_results: dict[str, TransparencyResult] | None = None,
+        analysis_shortfalls: Sequence[AnalysisShortfall] | None = None,
     ) -> str:
         """Generate a research report from citations.
 
@@ -88,17 +94,49 @@ class LiteReportingAgent(LiteBaseAgent):
             citations: List of citations to synthesize
             metadata: Optional report metadata for methodology section
             transparency_results: Optional dict mapping document_id to TransparencyResult
+            analysis_shortfalls: What scoring and citation extraction could
+                not read (#261, #262); taken from *metadata* when not given.
 
         Returns:
             Formatted research report as markdown. When the search behind it
-            was incomplete, the report opens with a notice saying what is
-            missing (#247).
+            was incomplete, or a stage could not read part of what it found,
+            the report opens with a notice saying what is missing (#247,
+            #261).
+
+        Raises:
+            Exception: Whatever the model provider raised; nothing here
+                wraps it. An error message returned as the report is
+                checkpointed, auto-saved and read as a finished report
+                (#263), so it is raised rather than returned.
         """
         shortfalls = metadata.search_shortfalls if metadata else []
+        losses = self._analysis_shortfalls(metadata, analysis_shortfalls)
         report = self._generate_report_body(
-            question, citations, metadata, transparency_results
+            question, citations, metadata, transparency_results, losses
         )
-        return with_search_shortfall_notice(report, shortfalls)
+        return with_search_shortfall_notice(
+            with_analysis_shortfall_notice(report, losses), shortfalls
+        )
+
+    @staticmethod
+    def _analysis_shortfalls(
+        metadata: ReportMetadata | None,
+        analysis_shortfalls: Sequence[AnalysisShortfall] | None,
+    ) -> list[AnalysisShortfall]:
+        """Decide which record of the analysis losses to report from.
+
+        Args:
+            metadata: Optional report metadata, which carries the losses of a
+                review that ran through the GUI workflow.
+            analysis_shortfalls: What the caller passed, if anything.
+
+        Returns:
+            The losses to tell the reader about; the argument wins, so a
+            caller that builds no metadata (MCP) can still report them.
+        """
+        if analysis_shortfalls is not None:
+            return list(analysis_shortfalls)
+        return list(metadata.analysis_shortfalls) if metadata else []
 
     def _generate_report_body(
         self,
@@ -106,6 +144,7 @@ class LiteReportingAgent(LiteBaseAgent):
         citations: list[Citation],
         metadata: ReportMetadata | None,
         transparency_results: dict[str, TransparencyResult] | None,
+        analysis_shortfalls: Sequence[AnalysisShortfall] = (),
     ) -> str:
         """Generate the report itself, without the incomplete-search notice.
 
@@ -114,19 +153,24 @@ class LiteReportingAgent(LiteBaseAgent):
             citations: List of citations to synthesize
             metadata: Optional report metadata for methodology section
             transparency_results: Optional dict mapping document_id to TransparencyResult
+            analysis_shortfalls: What scoring and citation extraction could
+                not read
 
         Returns:
             Formatted research report as markdown
         """
         if not citations:
-            # Check if we had relevant documents but citation extraction failed
-            had_relevant_docs = (
-                metadata is not None
-                and metadata.documents_accepted > 0
-            )
+            # Relevant documents that produced no citation mean the
+            # extraction failed, not that the literature is silent -- known
+            # either from a recorded shortfall (#261) or, for a review that
+            # kept metadata, from the documents it accepted.
+            extraction_failed = any(
+                shortfall.stage is AnalysisStage.CITATION_EXTRACTION
+                for shortfall in analysis_shortfalls
+            ) or (metadata is not None and metadata.documents_accepted > 0)
             report = self._generate_no_evidence_report(
                 question,
-                citation_extraction_failed=had_relevant_docs,
+                citation_extraction_failed=extraction_failed,
             )
             if metadata:
                 report += "\n\n" + self.format_methodology_section(metadata)
@@ -203,9 +247,12 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
 
             return full_report
 
-        except Exception as e:
-            logger.error(f"Failed to generate report: {e}")
-            return f"Error generating report: {str(e)}"
+        except Exception:
+            # Returning the error as the report is what let a failed
+            # generation be checkpointed, auto-saved and returned over MCP as
+            # a finished report (#263).
+            logger.exception("Failed to generate report")
+            raise
 
     def generate_brief_summary(
         self,
@@ -222,6 +269,11 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
 
         Returns:
             Brief summary text
+
+        Raises:
+            Exception: Whatever the model provider raised; nothing here
+                wraps it. An error message returned as the summary reads as
+                one (#263), so it is raised rather than returned.
         """
         if not citations:
             return "No relevant evidence was found for this research question."
@@ -249,9 +301,9 @@ CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above.""
 
         try:
             return self._chat(messages, temperature=0.2, max_tokens=1024)
-        except Exception as e:
-            logger.error(f"Failed to generate summary: {e}")
-            return f"Error generating summary: {str(e)}"
+        except Exception:
+            logger.exception("Failed to generate summary")
+            raise
 
     def _generate_no_evidence_report(
         self,
@@ -530,8 +582,16 @@ Key passages:
             f"- **Documents Scored:** {metadata.documents_scored:,}",
             f"- **Accepted:** {metadata.documents_accepted:,} | "
             f"**Rejected:** {metadata.documents_rejected:,}",
-            "",
         ])
+        # Documents the model could not read are neither accepted nor
+        # rejected: recording them as rejected made a failure read as the
+        # literature's answer (#261, #262).
+        if metadata.analysis_shortfalls:
+            lines.append(
+                "- **Analysis Completeness:** Incomplete: "
+                f"{describe_analysis_shortfalls(metadata.analysis_shortfalls)}"
+            )
+        lines.append("")
 
         # Add score distribution table
         if metadata.score_distribution:

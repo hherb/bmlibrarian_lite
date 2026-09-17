@@ -43,9 +43,17 @@ from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
+from bmlibrarian_lite.analysis_failures import (
+    analysis_failure_advice,
+    with_analysis_shortfall_notice,
+)
 from bmlibrarian_lite.config import LiteConfig
-from bmlibrarian_lite.data_models import RetrievalShortfall, SearchProvider
-from bmlibrarian_lite.exceptions import LiteError, SearchFailedError
+from bmlibrarian_lite.data_models import (
+    AnalysisShortfall,
+    RetrievalShortfall,
+    SearchProvider,
+)
+from bmlibrarian_lite.exceptions import AnalysisFailedError, LiteError, SearchFailedError
 from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
 from bmlibrarian_lite.llm import LLMClient
 from bmlibrarian_lite.search_failures import (
@@ -62,6 +70,15 @@ _INCOMPLETE_SEARCH_DESCRIPTION = (
     "If a literature source or part of a retrieval fails, the result lists "
     "what is missing in retrieval_shortfalls; if failures leave nothing "
     "retrieved, an error is returned rather than an empty result."
+)
+
+# Tells a calling agent how a failed scoring or citation extraction is
+# reported (#261, #262).
+_INCOMPLETE_ANALYSIS_DESCRIPTION = (
+    "If the model cannot score or read some of the documents, the result "
+    "lists what was lost in analysis_shortfalls and the report opens with a "
+    "notice; if no document could be scored at all, an error is returned "
+    "rather than a report saying nothing was relevant."
 )
 
 _PROVIDER_MAP = {
@@ -157,6 +174,8 @@ TOOLS = [
             "Long-running operation (1-5 minutes depending on result count). "
             "An incomplete search's report opens with a notice saying what is missing. "
             + _INCOMPLETE_SEARCH_DESCRIPTION
+            + " "
+            + _INCOMPLETE_ANALYSIS_DESCRIPTION
         ),
         inputSchema={
             "type": "object",
@@ -232,7 +251,8 @@ TOOLS = [
             "Retrieve the full text of a biomedical article by its identifier. "
             "Tries Europe PMC XML, cached PDFs, and PDF download in order. "
             "Returns markdown-formatted content. Also loads the document for "
-            "subsequent ask_document calls."
+            "subsequent ask_document calls: interrogation_available says "
+            "whether that succeeded, and interrogation_error why it did not."
         ),
         inputSchema={
             "type": "object",
@@ -296,6 +316,62 @@ def _shortfalls_payload(shortfalls: Sequence[RetrievalShortfall]) -> list[dict[s
     return [{**shortfall.to_dict(), "description": shortfall.describe()} for shortfall in shortfalls]
 
 
+def _analysis_shortfalls_payload(
+    shortfalls: Sequence[AnalysisShortfall],
+) -> list[dict[str, Any]]:
+    """Describe what the analysis lost, for a calling agent.
+
+    Args:
+        shortfalls: What scoring and citation extraction could not read.
+
+    Returns:
+        One entry per shortfall: its stored fields plus a sentence-ready
+        ``description``. Empty when every document was analysed.
+    """
+    return [
+        {**shortfall.to_dict(), "description": shortfall.describe()}
+        for shortfall in shortfalls
+    ]
+
+
+# Where a failure carries what the analysis had already lost before it. The
+# shortfalls are a local of the handler, so an exception raised after them --
+# report generation, since #263 made it raise -- would otherwise return an
+# error naming only itself, and the documents scoring lost would go with it.
+_CARRIED_SHORTFALLS_ATTR = "_bmll_carried_analysis_shortfalls"
+
+
+def _carrying_analysis_shortfalls(
+    exc: Exception, shortfalls: Sequence[AnalysisShortfall]
+) -> Exception:
+    """Attach what the analysis already lost to a failure that came after it.
+
+    Args:
+        exc: The failure to report.
+        shortfalls: What scoring and extraction had lost by then.
+
+    Returns:
+        The same exception, for raising, carrying the shortfalls so
+        :func:`_error_payload` can report them beside it.
+    """
+    if shortfalls:
+        setattr(exc, _CARRIED_SHORTFALLS_ATTR, tuple(shortfalls))
+    return exc
+
+
+def _carried_analysis_shortfalls(exc: Exception) -> list[AnalysisShortfall]:
+    """Read what a failure carries from the stages before it.
+
+    Args:
+        exc: The failure being reported.
+
+    Returns:
+        The shortfalls attached by :func:`_carrying_analysis_shortfalls`, or
+        an empty list.
+    """
+    return list(getattr(exc, _CARRIED_SHORTFALLS_ATTR, ()))
+
+
 def _fact_check_result(
     report: str,
     search_query: str,
@@ -305,11 +381,13 @@ def _fact_check_result(
     documents_relevant: int = 0,
     citations_extracted: int = 0,
     sources: list[dict[str, Any]] | None = None,
+    analysis_shortfalls: Sequence[AnalysisShortfall] = (),
 ) -> dict[str, Any]:
-    """Build a fact-check result, qualified when its search was incomplete.
+    """Build a fact-check result, qualified when part of it is missing.
 
     Every exit of the fact check goes through here, so none can return a
-    report without the incomplete-search notice or the shortfalls (#247).
+    report without the incomplete-search notice or the shortfalls (#247), nor
+    without what the analysis could not read (#261, #262).
 
     Args:
         report: The report, or a message standing in for one.
@@ -319,18 +397,22 @@ def _fact_check_result(
         documents_relevant: Documents that scored at or above the threshold.
         citations_extracted: Citations extracted from them.
         sources: Summaries of the relevant documents.
+        analysis_shortfalls: What scoring and citation extraction could not
+            read.
 
     Returns:
         The tool result.
     """
+    qualified = with_analysis_shortfall_notice(report, analysis_shortfalls)
     return {
-        "report": with_search_shortfall_notice(report, shortfalls),
+        "report": with_search_shortfall_notice(qualified, shortfalls),
         "search_query": search_query,
         "documents_found": documents_found,
         "documents_relevant": documents_relevant,
         "citations_extracted": citations_extracted,
         "sources": sources or [],
         "retrieval_shortfalls": _shortfalls_payload(shortfalls),
+        "analysis_shortfalls": _analysis_shortfalls_payload(analysis_shortfalls),
     }
 
 
@@ -351,13 +433,17 @@ def _handle_fact_check(
         progress: Optional progress reporter for client notifications.
 
     Returns:
-        Dictionary with report markdown, search metadata, scored sources, and
-        ``retrieval_shortfalls``. When the search was incomplete, every report
-        text opens with a notice saying what is missing.
+        Dictionary with report markdown, search metadata, scored sources,
+        ``retrieval_shortfalls`` and ``analysis_shortfalls``. When the search
+        was incomplete, or a stage could not read part of what it found,
+        every report text opens with a notice saying what is missing.
 
     Raises:
         SearchFailedError: If failures left the search with nothing; the
             server returns it as an error, never as "No documents found".
+        AnalysisFailedError: If no document could be scored at all; the
+            server returns it as an error, never as "none scored above the
+            relevance threshold" (#262).
     """
     claim = args["claim"]
     max_results = int(args.get("max_results", 20))
@@ -396,14 +482,19 @@ def _handle_fact_check(
     scoring_workers = ctx.config.parallel.get_scoring_workers(scoring_provider)
     citation_workers = ctx.config.parallel.get_citation_workers(citation_provider)
 
-    # 2. Score
-    scored_documents = ctx.scoring_agent.score_documents(
+    # 2. Score. Scoring raises rather than answering with nothing when it
+    # could score no document at all (#262).
+    scoring = ctx.scoring_agent.score_documents(
         question=claim,
         documents=documents,
         min_score=min_score,
         progress_callback=progress.make_callback("Scoring documents") if progress else None,
         max_workers=scoring_workers,
     )
+    scored_documents = scoring.accepted
+    analysis_shortfalls: list[AnalysisShortfall] = []
+    if scoring.shortfall is not None:
+        analysis_shortfalls.append(scoring.shortfall)
 
     if not scored_documents:
         return _fact_check_result(
@@ -412,24 +503,38 @@ def _handle_fact_check(
             session.query,
             shortfalls,
             documents_found=len(documents),
+            analysis_shortfalls=analysis_shortfalls,
         )
 
     # 3. Extract citations
-    citations = ctx.citation_agent.extract_all_citations(
+    extraction = ctx.citation_agent.extract_all_citations(
         question=claim,
         scored_documents=scored_documents,
         min_score=min_score,
         progress_callback=progress.make_callback("Extracting citations") if progress else None,
         max_workers=citation_workers,
     )
+    citations = extraction.citations
+    if extraction.shortfall is not None:
+        analysis_shortfalls.append(extraction.shortfall)
 
-    # 4. Generate report
+    # 4. Generate report. The shortfalls travel with the citations, so a
+    # report built on none of them says the extraction failed rather than
+    # that the literature is silent (#261).
     if progress:
         progress.advance("Generating evidence report…")
-    report = ctx.reporting_agent.generate_report(
-        question=claim,
-        citations=citations,
-    )
+    try:
+        report = ctx.reporting_agent.generate_report(
+            question=claim,
+            citations=citations,
+            analysis_shortfalls=analysis_shortfalls,
+        )
+    except Exception as exc:
+        # The report failing does not un-lose what scoring and extraction
+        # lost. Reporting only the report's own error would tell the caller
+        # nothing about the documents already gone (#301 review).
+        _carrying_analysis_shortfalls(exc, analysis_shortfalls)
+        raise
 
     # Build source summaries
     sources = []
@@ -456,6 +561,7 @@ def _handle_fact_check(
         documents_relevant=len(scored_documents),
         citations_extracted=len(citations),
         sources=sources,
+        analysis_shortfalls=analysis_shortfalls,
     )
 
 
@@ -508,7 +614,10 @@ def _handle_fulltext(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any
         ctx: Shared agent context.
 
     Returns:
-        Dictionary with success flag, source type, document ID, and content.
+        Dictionary with success flag, source type, document ID, content, and
+        ``interrogation_available``: whether ``ask_document`` can answer
+        about it. A load failure used to be logged and nothing else, so the
+        caller's next call failed with nothing having said why (#264).
     """
     pmid = args.get("pmid")
     doi = args.get("doi")
@@ -538,24 +647,33 @@ def _handle_fulltext(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any
     doc_id = f"pmid-{pmid}" if pmid else f"doi-{doi}" if doi else f"pmc-{pmc_id}"
     title = result.article_info.title if result.article_info else "Unknown"
 
-    # Load into interrogation agent for subsequent ask_document calls
-    try:
-        loaded_id = ctx.interrogation_agent.load_document(
-            text=result.markdown_content,
-            document_id=doc_id,
-            title=title,
-        )
-        doc_id = loaded_id
-    except Exception as exc:
-        logger.warning("Failed to load document for interrogation: %s", exc)
-
-    return {
+    payload: dict[str, Any] = {
         "success": True,
         "source": result.source_type.value,
         "document_id": doc_id,
         "content_length": len(result.markdown_content),
         "content": result.markdown_content,
+        "interrogation_available": True,
     }
+
+    # Load into interrogation agent for subsequent ask_document calls. The
+    # text was retrieved either way, so this is not a failed retrieval -- but
+    # a caller that is told nothing calls ask_document and fails (#264).
+    try:
+        payload["document_id"] = ctx.interrogation_agent.load_document(
+            text=result.markdown_content,
+            document_id=doc_id,
+            title=title,
+        )
+    except Exception as exc:
+        logger.warning("Failed to load document for interrogation: %s", exc)
+        payload["interrogation_available"] = False
+        payload["interrogation_error"] = (
+            f"The full text was retrieved but could not be prepared for "
+            f"ask_document: {exc}"
+        )
+
+    return payload
 
 
 def _handle_ask_document(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any]:
@@ -603,12 +721,22 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
 
     Returns:
         The error message and type; for a failed search also what failed
-        (``retrieval_shortfalls``) and what to do about it (``advice``).
+        (``retrieval_shortfalls``) and what to do about it (``advice``); for
+        a failed analysis, the same in ``analysis_shortfalls``. A failure
+        that came after an incomplete stage carries that stage's shortfalls
+        too, so what was already lost is not lost again with it.
     """
     payload: dict[str, Any] = {"error": str(exc), "error_type": type(exc).__name__}
     if isinstance(exc, SearchFailedError):
         payload["retrieval_shortfalls"] = _shortfalls_payload(exc.shortfalls)
         payload["advice"] = search_failure_advice(exc.shortfalls)
+    if isinstance(exc, AnalysisFailedError):
+        payload["analysis_shortfalls"] = _analysis_shortfalls_payload([exc.shortfall])
+        payload["advice"] = analysis_failure_advice([exc.shortfall])
+    carried = _carried_analysis_shortfalls(exc)
+    if carried and "analysis_shortfalls" not in payload:
+        payload["analysis_shortfalls"] = _analysis_shortfalls_payload(carried)
+        payload.setdefault("advice", analysis_failure_advice(carried))
     return payload
 
 

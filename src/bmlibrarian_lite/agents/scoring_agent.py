@@ -32,9 +32,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
-from ..data_models import LiteDocument, ScoredDocument, EvaluationErrorCode
-from ..exceptions import JSONParseError, APIError, RetryExhaustedError
-from ..utils import llm_retry, classify_llm_exception
+from ..data_models import (
+    EvaluationErrorCode,
+    LiteDocument,
+    ScoredDocument,
+    ScoringOutcome,
+)
+from ..exceptions import AnalysisFailedError, JSONParseError, APIError, RetryExhaustedError
+from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retries
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -124,9 +129,14 @@ Evaluate the relevance of this document to the research question."""
                 explanation=result["explanation"],
             )
         except RetryExhaustedError as e:
-            error_code = EvaluationErrorCode.RETRY_EXHAUSTED
+            # The retries were spent on something -- an unreachable provider,
+            # a refused key -- and only that says what the user can do about
+            # it. Recording the wrapper instead left every outage advising
+            # "try again later" (#301 review).
+            error_code = classify_exhausted_retries(e)
             logger.error(
-                f"Document {document.id}: Scoring failed after all retries: {e}"
+                f"Document {document.id}: Scoring failed after all retries "
+                f"with {error_code.name}: {e}"
             )
             return ScoredDocument(
                 document=document,
@@ -183,28 +193,37 @@ Evaluate the relevance of this document to the research question."""
         progress_callback: Optional[Callable[[int, int], None]] = None,
         max_workers: int = 1,
         cancelled: Optional[threading.Event] = None,
-    ) -> list[ScoredDocument]:
+    ) -> ScoringOutcome:
         """
         Score multiple documents, optionally in parallel.
 
-        Documents that fail scoring (negative scores) are excluded from results
-        but logged for visibility. Use get_failed_documents() on the result
-        to identify failures if needed.
+        Documents the model could not score are kept apart from documents it
+        scored below the threshold (#262): both are missing from the result,
+        but only the second is the literature's answer. When no document
+        could be scored at all there is nothing to proceed on, so this raises
+        rather than answering with an empty result.
 
         Args:
             question: Research question
             documents: Documents to score
-            min_score: Minimum score to include in results (1-5)
+            min_score: Minimum score to include in the accepted list (1-5)
             progress_callback: Optional callback(current, total) for progress
             max_workers: Number of parallel workers (1=sequential)
             cancelled: Optional threading.Event; when set, stops processing
 
         Returns:
-            List of scored documents (filtered by min_score), sorted by score descending.
-            Failed documents (negative scores) are excluded.
+            The outcome: the documents that met the threshold, sorted by score
+            descending; the documents that failed; and how many were
+            attempted.
+
+        Raises:
+            AnalysisFailedError: If every document attempted failed to score.
+                "No documents scored 3 or higher" would read as the
+                literature's answer.
         """
-        scored = []
-        failed_count = 0
+        scored: list[ScoredDocument] = []
+        failed: list[ScoredDocument] = []
+        attempted = 0
         total = len(documents)
 
         logger.info(
@@ -223,9 +242,8 @@ Evaluate the relevance of this document to the research question."""
                     progress_callback(i + 1, total)
 
                 scored_doc = self.score_document(question, doc)
-                self._collect_scored(scored_doc, scored, min_score, i, total)
-                if scored_doc.score < 0:
-                    failed_count += 1
+                attempted += 1
+                self._collect_scored(scored_doc, scored, failed, min_score, i, total)
         else:
             # Parallel path
             lock = threading.Lock()
@@ -252,9 +270,8 @@ Evaluate the relevance of this document to the research question."""
                     with lock:
                         completed += 1
                         current = completed
-                        self._collect_scored(scored_doc, scored, min_score, idx, total)
-                        if scored_doc.score < 0:
-                            failed_count += 1
+                        attempted += 1
+                        self._collect_scored(scored_doc, scored, failed, min_score, idx, total)
 
                     if progress_callback:
                         progress_callback(current, total)
@@ -262,27 +279,48 @@ Evaluate the relevance of this document to the research question."""
         # Sort by score descending
         scored.sort(key=lambda x: x.score, reverse=True)
 
-        if failed_count > 0:
+        outcome = ScoringOutcome(accepted=scored, failed=failed, documents_attempted=attempted)
+        shortfall = outcome.shortfall
+        if shortfall is not None:
             logger.warning(
                 f"Scoring complete: {len(scored)} passed (score >= {min_score}), "
-                f"{failed_count} failed, {total - len(scored) - failed_count} below threshold"
+                f"{len(failed)} failed, {attempted - len(scored) - len(failed)} below threshold"
             )
+            if shortfall.nothing_survived and not (cancelled and cancelled.is_set()):
+                # Answering with an empty result here is what made an
+                # unreachable provider read as a literature with nothing
+                # relevant in it (#262). A cancelled run is exempt: its
+                # attempted set is whatever the user stopped it after, so one
+                # timed-out document before a cancel would otherwise report
+                # the stage as a total failure (#301 review).
+                raise AnalysisFailedError(shortfall)
         else:
             logger.info(
-                f"Scored {total} documents, {len(scored)} with score >= {min_score}"
+                f"Scored {attempted} documents, {len(scored)} with score >= {min_score}"
             )
-        return scored
+        return outcome
 
     def _collect_scored(
         self,
         scored_doc: ScoredDocument,
         scored: list[ScoredDocument],
+        failed: list[ScoredDocument],
         min_score: int,
         index: int,
         total: int,
     ) -> None:
-        """Collect a scored document result, logging as appropriate."""
+        """Collect a scored document result, logging as appropriate.
+
+        Args:
+            scored_doc: The result to collect.
+            scored: The documents that met the threshold, appended to.
+            failed: The documents that could not be scored, appended to.
+            min_score: Minimum score to accept.
+            index: The document's position, for the log line.
+            total: How many documents there are, for the log line.
+        """
         if scored_doc.score < 0:
+            failed.append(scored_doc)
             logger.warning(
                 f"Document {scored_doc.document.id}: scoring failed with error code "
                 f"{scored_doc.score} ({index+1}/{total})"

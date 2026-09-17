@@ -27,6 +27,7 @@ from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.data_models import (
     Citation,
+    CitationOutcome,
     DocumentSource,
     LiteDocument,
     ReportMetadata,
@@ -34,6 +35,7 @@ from bmlibrarian_lite.data_models import (
     RequestFailureKind,
     RetrievalShortfall,
     ScoredDocument,
+    ScoringOutcome,
     SearchProvider,
     SearchSession,
 )
@@ -285,10 +287,14 @@ class TestTheMcpTools:
         """The calling agent reads the qualification with the verdict."""
         document = make_document()
         context = mcp_context(incomplete_session(), [document])
-        context.scoring_agent.score_documents.return_value = [
-            ScoredDocument(document=document, score=5, explanation="Relevant.")
-        ]
-        context.citation_agent.extract_all_citations.return_value = []
+        context.scoring_agent.score_documents.return_value = ScoringOutcome(
+            accepted=[ScoredDocument(document=document, score=5, explanation="Relevant.")],
+            failed=[],
+            documents_attempted=1,
+        )
+        context.citation_agent.extract_all_citations.return_value = CitationOutcome(
+            citations=[], documents_attempted=1
+        )
         context.reporting_agent.generate_report.return_value = "## Findings"
 
         result = _handle_fact_check({"claim": QUESTION}, context)
@@ -300,7 +306,9 @@ class TestTheMcpTools:
     def test_a_fact_check_with_nothing_relevant_leads_with_the_notice(self) -> None:
         """'None scored above the threshold' is qualified too."""
         context = mcp_context(incomplete_session(), [make_document()])
-        context.scoring_agent.score_documents.return_value = []
+        context.scoring_agent.score_documents.return_value = ScoringOutcome(
+            accepted=[], failed=[], documents_attempted=1
+        )
 
         result = _handle_fact_check({"claim": QUESTION}, context)
 
