@@ -324,6 +324,12 @@ what was found opens with an **Incomplete analysis** notice, and a check that
 decides *what a text is* reads the body behind both notices. The contract is
 `doc/cross_platform/analysis_failure_reporting.md`.
 
+**Classify the failure, not the wrapper.** `llm_retry` retries every provider
+failure, so an agent sees `RetryExhaustedError` rather than the refused key or
+the unreachable host underneath it. Recording the wrapper leaves every outage
+advising "try again later", so both agents pass it through
+`classify_exhausted_retries()` (`utils.py`), which reads `last_error`.
+
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
 The transparency system has two components:

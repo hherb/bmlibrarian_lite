@@ -334,6 +334,44 @@ def _analysis_shortfalls_payload(
     ]
 
 
+# Where a failure carries what the analysis had already lost before it. The
+# shortfalls are a local of the handler, so an exception raised after them --
+# report generation, since #263 made it raise -- would otherwise return an
+# error naming only itself, and the documents scoring lost would go with it.
+_CARRIED_SHORTFALLS_ATTR = "_bmll_carried_analysis_shortfalls"
+
+
+def _carrying_analysis_shortfalls(
+    exc: Exception, shortfalls: Sequence[AnalysisShortfall]
+) -> Exception:
+    """Attach what the analysis already lost to a failure that came after it.
+
+    Args:
+        exc: The failure to report.
+        shortfalls: What scoring and extraction had lost by then.
+
+    Returns:
+        The same exception, for raising, carrying the shortfalls so
+        :func:`_error_payload` can report them beside it.
+    """
+    if shortfalls:
+        setattr(exc, _CARRIED_SHORTFALLS_ATTR, tuple(shortfalls))
+    return exc
+
+
+def _carried_analysis_shortfalls(exc: Exception) -> list[AnalysisShortfall]:
+    """Read what a failure carries from the stages before it.
+
+    Args:
+        exc: The failure being reported.
+
+    Returns:
+        The shortfalls attached by :func:`_carrying_analysis_shortfalls`, or
+        an empty list.
+    """
+    return list(getattr(exc, _CARRIED_SHORTFALLS_ATTR, ()))
+
+
 def _fact_check_result(
     report: str,
     search_query: str,
@@ -485,11 +523,18 @@ def _handle_fact_check(
     # that the literature is silent (#261).
     if progress:
         progress.advance("Generating evidence report…")
-    report = ctx.reporting_agent.generate_report(
-        question=claim,
-        citations=citations,
-        analysis_shortfalls=analysis_shortfalls,
-    )
+    try:
+        report = ctx.reporting_agent.generate_report(
+            question=claim,
+            citations=citations,
+            analysis_shortfalls=analysis_shortfalls,
+        )
+    except Exception as exc:
+        # The report failing does not un-lose what scoring and extraction
+        # lost. Reporting only the report's own error would tell the caller
+        # nothing about the documents already gone (#301 review).
+        _carrying_analysis_shortfalls(exc, analysis_shortfalls)
+        raise
 
     # Build source summaries
     sources = []
@@ -677,7 +722,9 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     Returns:
         The error message and type; for a failed search also what failed
         (``retrieval_shortfalls``) and what to do about it (``advice``); for
-        a failed analysis, the same in ``analysis_shortfalls``.
+        a failed analysis, the same in ``analysis_shortfalls``. A failure
+        that came after an incomplete stage carries that stage's shortfalls
+        too, so what was already lost is not lost again with it.
     """
     payload: dict[str, Any] = {"error": str(exc), "error_type": type(exc).__name__}
     if isinstance(exc, SearchFailedError):
@@ -686,6 +733,10 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, AnalysisFailedError):
         payload["analysis_shortfalls"] = _analysis_shortfalls_payload([exc.shortfall])
         payload["advice"] = analysis_failure_advice([exc.shortfall])
+    carried = _carried_analysis_shortfalls(exc)
+    if carried and "analysis_shortfalls" not in payload:
+        payload["analysis_shortfalls"] = _analysis_shortfalls_payload(carried)
+        payload.setdefault("advice", analysis_failure_advice(carried))
     return payload
 
 

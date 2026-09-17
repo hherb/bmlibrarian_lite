@@ -368,7 +368,18 @@ class AnalysisFailedError(LLMError):
         """Initialize the failed analysis.
 
         Args:
-            shortfall: What the stage lost, and why.
+            shortfall: What the stage lost, and why. Every document it
+                attempted must have failed.
+
+        Raises:
+            ValueError: If some documents survived. A stage that still has
+                documents to proceed on has not failed, and reporting it as
+                terminal would hide the ones that did survive.
         """
+        if not shortfall.nothing_survived:
+            raise ValueError(
+                "A failed analysis lost every document it attempted; "
+                "a partial loss is reported, not raised"
+            )
         super().__init__(f"The review could not continue: {shortfall.describe()}")
         self.shortfall = shortfall

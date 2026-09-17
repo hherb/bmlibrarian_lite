@@ -31,9 +31,38 @@ its slice has landed; add a new section when handing off new work.
   result must not qualify it again. A check that decides *what a text is*
   (the Report tab's auto-save) reads the body behind **both** notices.
 - **A failed document is not a rejected one** — the Methodology section counts
-  them apart and records **Analysis Completeness**.
-- **Verified:** `pytest tests/` green; `lint_delta.py --base-ref origin/master`
-  reports 0 new ruff and 0 new mypy findings. Swift and Android untouched.
+  them apart and records **Analysis Completeness**, and it is not a *scored*
+  one either: `documents_scored == documents_accepted + documents_rejected`,
+  so the three numbers reconcile.
+- **Classify the failure, not the wrapper.** `llm_retry` retries every provider
+  failure, so an agent sees `RetryExhaustedError`, never the refused key or
+  unreachable host underneath. Recording the wrapper left *every* outage
+  advising "try again later" — the tailored advice was unreachable in
+  production, including #262's own Ollama-is-down case. Both agents now go
+  through `classify_exhausted_retries()` (`utils.py`), which reads
+  `last_error`. **Tests that patch `_score_with_retry`/`_extract_with_retry`
+  patch *inside* the retry decorator and cannot see this**; the ones that
+  matter drive `_chat`.
+- **Cancelling is not failing.** A cancelled run's attempted set is only what
+  it got through, so one timed-out document before a cancel used to end the
+  review with "Scoring Failed". The cancel check now precedes the total-loss
+  verdict in both the worker and `score_documents`.
+- **A later failure does not un-lose what an earlier stage lost.** The MCP
+  shortfalls are a handler local, so a report-generation failure (which #263
+  made raise) dropped them; the exception now carries them to `_error_payload`.
+- **The outcome types enforce their own counts.** `ScoringOutcome` and
+  `CitationOutcome` refuse impossible numbers on construction instead of
+  repairing them with `max()` — a floored `attempted` reads as "every document
+  failed", which is a *terminal* verdict, so a caller's slip became a
+  confident lie to the user.
+- **Verified:** `pytest tests/` — 1197 passed, 3 xfailed;
+  `lint_delta.py --base-ref origin/master` reports 0 new ruff and 0 new mypy
+  findings. Swift and Android untouched.
+- **Lodged, not fixed** (all pre-existing on master, all the same family):
+  audit trail writes unscored documents as rejected with an invented reason
+  (issue 302); a well-formed `{"passages": []}` is treated as a parse failure,
+  costing 4x the LLM calls and a false "Incomplete analysis" (issue 303); the
+  GUI's full-text-to-abstract fallback is silent (issue 304).
 
 ## Recently landed (context)
 

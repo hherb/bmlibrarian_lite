@@ -21,6 +21,7 @@ pytest.importorskip("PySide6")
 
 from bmlibrarian_lite.config import LiteConfig  # noqa: E402
 from bmlibrarian_lite.data_models import (  # noqa: E402
+    AnalysisStage,
     Citation,
     CitationOutcome,
     DocumentSource,
@@ -87,6 +88,16 @@ def failed_score(document: LiteDocument) -> ScoredDocument:
         document=document,
         score=UNREACHABLE.value,
         explanation="Scoring failed: Failed to connect to API",
+    )
+
+
+def make_citation() -> Citation:
+    """A citation extraction produced."""
+    return Citation(
+        document=make_document("1"),
+        passage="Aspirin reduced stroke incidence.",
+        relevance_score=4,
+        context="direct",
     )
 
 
@@ -248,7 +259,13 @@ class TestScoringThatFailed:
         [(_, metadata)] = recorder.calls["finished"]
         assert metadata.documents_rejected == 0
         assert metadata.documents_accepted == 1
-        assert metadata.documents_scored == 2
+        # Nor as scored: counted there, the three numbers stop reconciling
+        # and the reader is left to notice the gap themselves.
+        assert metadata.documents_scored == 1
+        assert (
+            metadata.documents_scored
+            == metadata.documents_accepted + metadata.documents_rejected
+        )
 
     def test_a_threshold_message_after_a_partial_failure_is_qualified(
         self, monkeypatch: pytest.MonkeyPatch
@@ -424,3 +441,138 @@ class TestTheReviewTab:
         shown = tab.analysis_notice_label.text()
         assert "could not be scored" in shown
         assert "could not be read for citations" in shown
+
+
+class TestTheCitationStageInTheGui:
+    """#261's own stage: the GUI branch that records what extraction lost."""
+
+    def test_a_partial_extraction_failure_is_recorded_and_shown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without this the report loses its notice and its completeness line."""
+        documents = [make_document("1"), make_document("2")]
+        scores = {
+            documents[0].id: ScoredDocument(
+                document=documents[0], score=4, explanation="On topic."
+            ),
+            documents[1].id: ScoredDocument(
+                document=documents[1], score=4, explanation="On topic."
+            ),
+        }
+        worker, recorder, _ = workflow_worker(
+            monkeypatch,
+            documents,
+            scores,
+            citations=CitationOutcome(
+                citations=[make_citation()],
+                documents_attempted=2,
+                documents_failed=1,
+                causes=(UNREACHABLE,),
+            ),
+        )
+
+        worker.run()
+
+        assert recorder.calls["analysis_incomplete"] == [
+            ("1 of 2 documents could not be read for citations "
+             "(Failed to connect to API)",)
+        ]
+        [(_, metadata)] = recorder.calls["finished"]
+        assert [s.stage for s in metadata.analysis_shortfalls] == [
+            AnalysisStage.CITATION_EXTRACTION
+        ]
+
+    def test_an_extraction_that_read_everything_says_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A complete analysis must never read as a qualified one."""
+        documents = [make_document("1")]
+        scores = {
+            documents[0].id: ScoredDocument(
+                document=documents[0], score=4, explanation="On topic."
+            )
+        }
+        worker, recorder, _ = workflow_worker(
+            monkeypatch,
+            documents,
+            scores,
+            citations=CitationOutcome(
+                citations=[make_citation()], documents_attempted=1
+            ),
+        )
+
+        worker.run()
+
+        assert recorder.calls.get("analysis_incomplete", []) == []
+        [(_, metadata)] = recorder.calls["finished"]
+        assert metadata.analysis_shortfalls == []
+
+
+class TestTheStandingNoticeIsVisible:
+    """A warning the user cannot see is not a warning (golden rule 8)."""
+
+    def test_the_notice_is_shown_not_merely_set(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """The label starts hidden, so setting its text alone shows nobody."""
+        tab = review_tab(monkeypatch, tmp_path)
+        assert tab.analysis_notice_label.isHidden()
+
+        tab._on_analysis_incomplete("1 of 2 documents could not be scored")
+
+        assert not tab.analysis_notice_label.isHidden()
+
+    def test_the_notice_is_gone_at_the_next_run(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A complete review must not wear the previous run's losses."""
+        tab = review_tab(monkeypatch, tmp_path)
+        tab._on_analysis_incomplete("1 of 2 documents could not be scored")
+
+        tab._run_workflow()
+
+        assert tab.analysis_notice_label.isHidden()
+        assert "could not be scored" not in tab.analysis_notice_label.text()
+
+
+class TestTheDialogNamesTheStage:
+    """A dialog titled for the wrong stage sends the user to the wrong place."""
+
+    @pytest.mark.parametrize(
+        ("step", "title"),
+        [
+            ("search", "Search Failed"),
+            ("scoring", "Scoring Failed"),
+            ("report", "Report Generation Failed"),
+        ],
+    )
+    def test_each_ending_step_names_itself(
+        self,
+        qapp: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Any,
+        step: str,
+        title: str,
+    ) -> None:
+        """A failed report lost its dialog entirely when its title went missing."""
+        from bmlibrarian_lite.gui import systematic_review_tab as module
+
+        tab = review_tab(monkeypatch, tmp_path)
+
+        tab._on_error(step, "Something failed.\n\nTry something.")
+
+        [call] = module.QMessageBox.warning.call_args_list
+        assert call.args[1] == title
+
+    def test_a_step_that_does_not_end_the_review_gets_no_dialog(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Extraction losing everything is reportable, so it never ends here."""
+        from bmlibrarian_lite.gui import systematic_review_tab as module
+
+        tab = review_tab(monkeypatch, tmp_path)
+
+        tab._on_error("citations", "Extraction had trouble.")
+
+        assert module.QMessageBox.warning.call_args_list == []
+        assert "Extraction had trouble." in tab.progress_label.text()

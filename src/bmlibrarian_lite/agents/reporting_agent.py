@@ -104,9 +104,10 @@ class LiteReportingAgent(LiteBaseAgent):
             #261).
 
         Raises:
-            LLMError: If the model could not produce the report. An error
-                message returned as the report is checkpointed, auto-saved
-                and read as a finished report (#263).
+            Exception: Whatever the model provider raised; nothing here
+                wraps it. An error message returned as the report is
+                checkpointed, auto-saved and read as a finished report
+                (#263), so it is raised rather than returned.
         """
         shortfalls = metadata.search_shortfalls if metadata else []
         losses = self._analysis_shortfalls(metadata, analysis_shortfalls)
@@ -270,8 +271,9 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
             Brief summary text
 
         Raises:
-            LLMError: If the model could not produce the summary; an error
-                message returned as the summary reads as one (#263).
+            Exception: Whatever the model provider raised; nothing here
+                wraps it. An error message returned as the summary reads as
+                one (#263), so it is raised rather than returned.
         """
         if not citations:
             return "No relevant evidence was found for this research question."

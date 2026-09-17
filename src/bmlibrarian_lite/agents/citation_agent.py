@@ -39,7 +39,7 @@ from ..data_models import (
     distinct_causes,
 )
 from ..exceptions import JSONParseError, RetryExhaustedError
-from ..utils import llm_retry, classify_llm_exception
+from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retries
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -162,10 +162,14 @@ Extract the most relevant passages that help answer the research question."""
             return citations, None
 
         except RetryExhaustedError as e:
+            # See scoring_agent: the wrapper is not the cause, and only the
+            # cause tells the user what to do (#301 review).
+            error_code = classify_exhausted_retries(e)
             logger.error(
-                f"Document {doc.id}: Citation extraction failed after all retries: {e}"
+                f"Document {doc.id}: Citation extraction failed after all "
+                f"retries with {error_code.name}: {e}"
             )
-            return [], EvaluationErrorCode.RETRY_EXHAUSTED
+            return [], error_code
         except Exception as e:
             error_code = classify_llm_exception(e)
             logger.error(

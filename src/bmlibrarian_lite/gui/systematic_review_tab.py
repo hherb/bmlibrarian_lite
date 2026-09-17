@@ -428,13 +428,14 @@ class WorkflowWorker(QThread):
             )
             if scoring_shortfall is not None:
                 metadata.analysis_shortfalls.append(scoring_shortfall)
-                if scoring_shortfall.nothing_survived:
-                    self._fail_analysis("scoring", scoring_shortfall)
-                    return
-                self.analysis_incomplete.emit(scoring_shortfall.describe())
+                if not scoring_shortfall.nothing_survived:
+                    self.analysis_incomplete.emit(scoring_shortfall.describe())
 
-            # Update metadata with scoring stats
-            metadata.documents_scored = len(all_scored_docs)
+            # Update metadata with scoring stats. A document the model could
+            # not score was not scored, so counting it here would leave
+            # "Scored: 20 | Accepted: 5 | Rejected: 12" unreconcilable and
+            # three documents silently unaccounted for (#301 review).
+            metadata.documents_scored = len(all_scored_docs) - len(failed_scores)
             metadata.documents_accepted = len([d for d in all_scored_docs if d.score >= self.min_score])
             metadata.documents_rejected = len(
                 [d for d in all_scored_docs if 0 <= d.score < self.min_score]
@@ -445,8 +446,17 @@ class WorkflowWorker(QThread):
                 score = scored_doc.score
                 metadata.score_distribution[score] = metadata.score_distribution.get(score, 0) + 1
 
+            # A run the user stopped is not a stage that failed. Checked
+            # before the total-loss verdict below, because a cancelled run's
+            # attempted set is only what it got through: one timed-out
+            # document before a cancel would otherwise end the review with
+            # "Scoring Failed" (#301 review).
             if self._cancelled:
                 self.finished.emit("Workflow cancelled.", metadata)
+                return
+
+            if scoring_shortfall is not None and scoring_shortfall.nothing_survived:
+                self._fail_analysis("scoring", scoring_shortfall)
                 return
 
             if not scored_docs:

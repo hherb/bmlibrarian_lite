@@ -39,7 +39,7 @@ from ..data_models import (
     ScoringOutcome,
 )
 from ..exceptions import AnalysisFailedError, JSONParseError, APIError, RetryExhaustedError
-from ..utils import llm_retry, classify_llm_exception
+from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retries
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -129,9 +129,14 @@ Evaluate the relevance of this document to the research question."""
                 explanation=result["explanation"],
             )
         except RetryExhaustedError as e:
-            error_code = EvaluationErrorCode.RETRY_EXHAUSTED
+            # The retries were spent on something -- an unreachable provider,
+            # a refused key -- and only that says what the user can do about
+            # it. Recording the wrapper instead left every outage advising
+            # "try again later" (#301 review).
+            error_code = classify_exhausted_retries(e)
             logger.error(
-                f"Document {document.id}: Scoring failed after all retries: {e}"
+                f"Document {document.id}: Scoring failed after all retries "
+                f"with {error_code.name}: {e}"
             )
             return ScoredDocument(
                 document=document,
@@ -281,10 +286,13 @@ Evaluate the relevance of this document to the research question."""
                 f"Scoring complete: {len(scored)} passed (score >= {min_score}), "
                 f"{len(failed)} failed, {attempted - len(scored) - len(failed)} below threshold"
             )
-            if shortfall.nothing_survived:
+            if shortfall.nothing_survived and not (cancelled and cancelled.is_set()):
                 # Answering with an empty result here is what made an
                 # unreachable provider read as a literature with nothing
-                # relevant in it (#262).
+                # relevant in it (#262). A cancelled run is exempt: its
+                # attempted set is whatever the user stopped it after, so one
+                # timed-out document before a cancel would otherwise report
+                # the stage as a total failure (#301 review).
                 raise AnalysisFailedError(shortfall)
         else:
             logger.info(

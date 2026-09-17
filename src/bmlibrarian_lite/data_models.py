@@ -515,9 +515,12 @@ class AnalysisStage(Enum):
         """How a loss at this stage is described to the reader.
 
         Returns:
-            The verb phrase completing "N of M documents ...".
+            The verb phrase completing "N of M documents ...". A stage added
+            without a clause degrades to a general one rather than raising:
+            the reason degrades, the loss never does -- and this is read at
+            the moment the user is being told something failed.
         """
-        return _STAGE_LOSS_CLAUSES[self]
+        return _STAGE_LOSS_CLAUSES.get(self, "could not be analysed")
 
 
 _STAGE_LOSS_CLAUSES = {
@@ -547,6 +550,7 @@ class AnalysisShortfall:
         ValueError: On construction, if nothing failed, or more documents
             failed than were attempted. A shortfall that lost nothing would
             tell the user a complete analysis was incomplete.
+            See :meth:`__post_init__` for the full set.
     """
 
     stage: AnalysisStage
@@ -560,14 +564,33 @@ class AnalysisShortfall:
         Twenty documents that timed out have one cause between them, so the
         causes are reduced on the way in rather than at each place they are
         read.
+
+        The counts are checked with the same predicate :meth:`from_dict`
+        uses, so a shortfall that can be written can always be read back --
+        and ``bool`` is refused, because ``True`` is not a count.
+
+        Raises:
+            ValueError: If the stage is not an :class:`AnalysisStage`; if
+                either count is not a whole number of at least one; if more
+                documents failed than were attempted; or if the distinct
+                causes outnumber the documents they are causes for.
         """
-        if self.documents_failed < 1:
+        if not isinstance(self.stage, AnalysisStage):
+            raise ValueError("An analysis shortfall names the stage that lost them")
+        if not _is_document_count(self.documents_failed):
             raise ValueError("An analysis shortfall loses at least one document")
+        if not _is_document_count(self.documents_attempted):
+            raise ValueError("An analysis shortfall attempts at least one document")
         if self.documents_attempted < self.documents_failed:
             raise ValueError(
                 "An analysis shortfall cannot lose more documents than it attempted"
             )
         object.__setattr__(self, "causes", distinct_causes(self.causes))
+        if len(self.causes) > self.documents_failed:
+            raise ValueError(
+                "An analysis shortfall cannot have more distinct causes "
+                "than the documents it lost"
+            )
 
     @property
     def nothing_survived(self) -> bool:
@@ -1166,6 +1189,29 @@ class ScoringOutcome:
     failed: list["ScoredDocument"]
     documents_attempted: int
 
+    def __post_init__(self) -> None:
+        """Refuse an outcome whose numbers cannot all be true.
+
+        The counts decide whether the stage raises, so a caller that
+        miscounts must not be quietly corrected into a plausible verdict:
+        floored to the number of failures, an under-counted ``attempted``
+        reads as "every document failed" and ends the review (#301 review).
+
+        Raises:
+            ValueError: If more documents were accepted and lost than were
+                attempted, or if a document in ``failed`` does not carry an
+                error code in place of its score.
+        """
+        if self.documents_attempted < len(self.accepted) + len(self.failed):
+            raise ValueError(
+                "A scoring outcome cannot accept and lose more documents "
+                "than it attempted"
+            )
+        if any(scored.score >= 0 for scored in self.failed):
+            raise ValueError(
+                "A failed document carries its error code as a negative score"
+            )
+
     @property
     def shortfall(self) -> AnalysisShortfall | None:
         """What scoring lost, or ``None`` when it scored every document.
@@ -1207,7 +1253,7 @@ def analysis_shortfall_for_failed_scores(
     return AnalysisShortfall(
         stage=stage,
         documents_failed=len(failed),
-        documents_attempted=max(documents_attempted, len(failed)),
+        documents_attempted=documents_attempted,
         causes=tuple(causes),
     )
 
@@ -1315,19 +1361,43 @@ class CitationOutcome:
     documents_failed: int = 0
     causes: tuple[EvaluationErrorCode, ...] = ()
 
+    def __post_init__(self) -> None:
+        """Refuse an outcome whose numbers cannot all be true.
+
+        ``documents_failed`` may be zero -- extraction losing nothing is the
+        ordinary case -- but a negative count is not "nothing lost", and an
+        under-counted ``attempted`` floored to the failures would report a
+        total loss on a report that is fine (#301 review).
+
+        Raises:
+            ValueError: If either count is negative, if more documents were
+                lost than attempted, or if causes are recorded for no loss.
+        """
+        if self.documents_failed < 0 or self.documents_attempted < 0:
+            raise ValueError("A citation outcome counts documents, never fewer than none")
+        if self.documents_attempted < self.documents_failed:
+            raise ValueError(
+                "A citation outcome cannot lose more documents than it attempted"
+            )
+        object.__setattr__(self, "causes", distinct_causes(self.causes))
+        if self.causes and self.documents_failed < 1:
+            raise ValueError(
+                "A citation outcome that lost nothing has nothing to explain"
+            )
+
     @property
     def shortfall(self) -> AnalysisShortfall | None:
         """What extraction lost, or ``None`` when it read every document.
 
         Returns:
-            The shortfall.
+            The shortfall, or ``None`` when nothing failed.
         """
         if self.documents_failed < 1:
             return None
         return AnalysisShortfall(
             stage=AnalysisStage.CITATION_EXTRACTION,
             documents_failed=self.documents_failed,
-            documents_attempted=max(self.documents_attempted, self.documents_failed),
+            documents_attempted=self.documents_attempted,
             causes=self.causes,
         )
 
@@ -1568,7 +1638,10 @@ class ReportMetadata:
         analysis_shortfalls: What scoring and citation extraction could not
             read (#261, #262); empty when every document was analysed
 
-        documents_scored: Total documents that were scored
+        documents_scored: Documents the model actually scored, which is
+            ``documents_accepted + documents_rejected``. Documents it could
+            not score are counted in ``analysis_shortfalls``, not here: a
+            document that failed was neither scored nor rejected (#262)
         documents_accepted: Documents that met the score threshold
         documents_rejected: Documents below the score threshold
         min_score_threshold: Minimum relevance score used (1-5)

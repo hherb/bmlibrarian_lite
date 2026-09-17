@@ -15,6 +15,7 @@ These tests follow a failed scoring, citation extraction or report generation
 to every surface a person or a calling agent reads.
 """
 
+import threading
 from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock
@@ -42,16 +43,37 @@ from bmlibrarian_lite.data_models import (
     EvaluationErrorCode,
     LiteDocument,
     ReportMetadata,
+    RequestFailure,
+    RequestFailureKind,
+    RetrievalShortfall,
     ScoredDocument,
     ScoringOutcome,
+    SearchProvider,
     SearchSession,
 )
-from bmlibrarian_lite.exceptions import AnalysisFailedError, APIError
+from bmlibrarian_lite.exceptions import (
+    AnalysisFailedError,
+    APIError,
+    RetryExhaustedError,
+)
+from bmlibrarian_lite.search_failures import without_search_shortfall_notice
+from bmlibrarian_lite.utils import classify_exhausted_retries
 
 TIMED_OUT = EvaluationErrorCode.API_TIMEOUT
 UNREACHABLE = EvaluationErrorCode.API_CONNECTION_ERROR
+AUTH_REFUSED = EvaluationErrorCode.API_AUTH_ERROR
+RATE_LIMITED = EvaluationErrorCode.API_RATE_LIMIT
 NOTICE_START = "> **Incomplete analysis:**"
 QUESTION = "Does aspirin prevent stroke?"
+SEARCH_NOTICE_START = "> **Incomplete search:**"
+
+
+def retrieval_shortfall() -> RetrievalShortfall:
+    """A source that could not be searched at all (#247)."""
+    return RetrievalShortfall(
+        SearchProvider.PUBMED,
+        RequestFailure(RequestFailureKind.HTTP_STATUS, 429),
+    )
 
 
 def scoring_shortfall(failed: int = 3, attempted: int = 20) -> AnalysisShortfall:
@@ -79,7 +101,13 @@ def make_document(pmid: str = "12345") -> LiteDocument:
 
 
 def unreachable() -> APIError:
-    """What a provider nobody can reach raises, once its retries are spent."""
+    """What a provider nobody can reach raises.
+
+    Note this is the *raw* failure. In production it reaches an agent wrapped
+    in ``RetryExhaustedError``; the helpers below patch inside the retry
+    decorator, so tests using them see it unwrapped. ``TestTheCauseSurvives\
+    TheRetries`` goes through the real decorator instead.
+    """
     return APIError("Connection refused")
 
 
@@ -739,3 +767,376 @@ class TestTheMcpFullText:
 
         assert result["interrogation_available"] is True
         assert "interrogation_error" not in result
+
+
+
+def failed_score(document: LiteDocument) -> ScoredDocument:
+    """What scoring answers when the provider could not be reached."""
+    return ScoredDocument(
+        document=document,
+        score=UNREACHABLE.value,
+        explanation="Scoring failed: Failed to connect to API",
+    )
+
+
+SCORED_WELL = '{"score": 4, "explanation": "On topic."}'
+
+
+@pytest.fixture
+def without_retry_delays(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spend the retries without waiting out their exponential backoff."""
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda _seconds: None)
+
+
+class TestTheCauseSurvivesTheRetries:
+    """What the retries were spent on is what the user can act on (#301 review).
+
+    ``llm_retry`` retries every provider failure there is, so in production
+    each one reaches an agent wrapped in ``RetryExhaustedError``. Recording
+    the wrapper as the cause left every outage -- a refused key, a rate
+    limit, an unreachable host -- advising "try again later", the one thing
+    the user cannot act on. These tests drive ``_chat``, so the real retry
+    decorator runs; the module's helpers patch inside it, which is what hid
+    this.
+    """
+
+    @pytest.mark.parametrize(
+        ("raised", "expected_cause", "expected_advice"),
+        [
+            (ConnectionError("Failed to connect to Ollama"), UNREACHABLE, "reachable"),
+            (APIError("Unauthorized", status_code=401), AUTH_REFUSED, "Settings"),
+            (APIError("Too Many Requests", status_code=429), RATE_LIMITED, "wait"),
+        ],
+    )
+    def test_a_spent_retry_reports_what_it_was_spent_on(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        without_retry_delays: None,
+        raised: Exception,
+        expected_cause: EvaluationErrorCode,
+        expected_advice: str,
+    ) -> None:
+        """The cause is the provider's failure, not "all retries exhausted"."""
+        documents = [make_document("1"), make_document("2")]
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM([raised] * 4 + [SCORED_WELL]))
+
+        outcome = agent.score_documents(QUESTION, documents, min_score=3)
+
+        assert outcome.failed[0].score == expected_cause.value
+        shortfall = outcome.shortfall
+        assert shortfall is not None
+        assert shortfall.causes == (expected_cause,)
+        assert expected_advice in analysis_failure_advice([shortfall])
+
+    def test_an_unreachable_provider_does_not_advise_waiting(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """#262's own scenario: Ollama is not running, so waiting will not help."""
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM([ConnectionError("Connection refused")] * 4)
+        )
+
+        with pytest.raises(AnalysisFailedError) as raised:
+            agent.score_documents(QUESTION, [make_document("1")], min_score=3)
+
+        advice = analysis_failure_advice([raised.value.shortfall])
+        assert "Ollama" in advice
+        assert advice != "Try again later."
+
+    def test_extraction_keeps_the_cause_through_its_retries_too(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Citation extraction spends the same retries on the same failures."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM([APIError("Unauthorized", status_code=401)] * 4)
+        )
+        scored = ScoredDocument(
+            document=make_document("1"), score=4, explanation="On topic."
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [scored], min_score=3)
+
+        assert outcome.causes == (AUTH_REFUSED,)
+        shortfall = outcome.shortfall
+        assert shortfall is not None
+        assert "Settings" in analysis_failure_advice([shortfall])
+
+    def test_a_wrapper_carrying_nothing_still_names_the_retries(self) -> None:
+        """With no cause to read, the loss is still recorded, reason degraded."""
+        assert (
+            classify_exhausted_retries(RetryExhaustedError("gave up"))
+            is EvaluationErrorCode.RETRY_EXHAUSTED
+        )
+
+
+class TestScoringInParallel:
+    """The parallel branch is the default for cloud providers, and was untested."""
+
+    def test_a_partial_failure_in_parallel_is_a_partial_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Miscounting attempts here reads as "every document failed"."""
+        documents = [make_document(str(n)) for n in range(4)]
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(
+            agent,
+            "_score_with_retry",
+            ScriptedLLM(
+                [
+                    {"score": 4, "explanation": "On topic."},
+                    unreachable(),
+                    {"score": 5, "explanation": "On topic."},
+                    unreachable(),
+                ]
+            ),
+        )
+
+        outcome = agent.score_documents(QUESTION, documents, min_score=3, max_workers=2)
+
+        assert outcome.documents_attempted == 4
+        assert len(outcome.accepted) == 2
+        shortfall = outcome.shortfall
+        assert shortfall is not None
+        assert shortfall.describe() == (
+            "2 of 4 documents could not be scored (Failed to connect to API)"
+        )
+        assert not shortfall.nothing_survived
+
+    def test_extraction_in_parallel_counts_every_attempt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same counting slip on the extraction side."""
+        scored = [
+            ScoredDocument(document=make_document(str(n)), score=4, explanation="ok")
+            for n in range(4)
+        ]
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent,
+            "_extract_with_retry",
+            ScriptedLLM(
+                [
+                    [{"text": "Aspirin helped.", "relevance": "direct"}],
+                    unreachable(),
+                    [{"text": "Aspirin helped again.", "relevance": "direct"}],
+                    unreachable(),
+                ]
+            ),
+        )
+
+        outcome = agent.extract_all_citations(
+            QUESTION, scored, min_score=3, max_workers=2
+        )
+
+        assert outcome.documents_attempted == 4
+        assert outcome.documents_failed == 2
+        assert len(outcome.citations) == 2
+
+
+class TestCancellingIsNotFailing:
+    """A run the user stopped is not a stage that failed (#301 review)."""
+
+    def test_a_cancel_after_a_failure_does_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Its attempted set is only what it got through before the cancel."""
+        cancelled = threading.Event()
+        documents = [make_document(str(n)) for n in range(4)]
+
+        def fail_then_cancel(*args: Any, **kwargs: Any) -> Any:
+            """Fail, and stop the run, so every attempted document failed.
+
+            Args:
+                *args: Ignored.
+                **kwargs: Ignored.
+
+            Raises:
+                APIError: Always.
+            """
+            cancelled.set()
+            raise unreachable()
+
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(agent, "_score_with_retry", fail_then_cancel)
+
+        outcome = agent.score_documents(
+            QUESTION, documents, min_score=3, cancelled=cancelled
+        )
+
+        assert outcome.shortfall is not None
+        assert outcome.shortfall.nothing_survived
+
+    def test_an_uncancelled_total_loss_still_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exemption is cancellation, not total loss itself (#262 stands)."""
+        agent = scoring_agent(monkeypatch, [unreachable()])
+
+        with pytest.raises(AnalysisFailedError):
+            agent.score_documents(QUESTION, [make_document("1")], min_score=3)
+
+
+class TestTheOutcomesRefuseImpossibleNumbers:
+    """The counts decide whether the stage raises, so they are not guessed at."""
+
+    def test_scoring_cannot_attempt_fewer_than_it_answered_for(self) -> None:
+        """Floored to the failures, an undercount reads as a total failure."""
+        failed = [failed_score(make_document("1"))]
+        with pytest.raises(ValueError, match="more documents than it attempted"):
+            ScoringOutcome(accepted=[], failed=failed, documents_attempted=0)
+
+    def test_a_rejected_document_is_not_a_failed_one(self) -> None:
+        """A failure carries an error code; a rejection carries a score."""
+        rejected = ScoredDocument(
+            document=make_document("1"), score=2, explanation="Off topic."
+        )
+        with pytest.raises(ValueError, match="negative score"):
+            ScoringOutcome(accepted=[], failed=[rejected], documents_attempted=5)
+
+    def test_extraction_refuses_a_negative_loss(self) -> None:
+        """``< 1`` read a negative count as "nothing was lost"."""
+        with pytest.raises(ValueError, match="never fewer than none"):
+            CitationOutcome(citations=[], documents_attempted=5, documents_failed=-3)
+
+    def test_extraction_refuses_causes_for_no_loss(self) -> None:
+        """Causes recorded against no loss disappeared silently."""
+        with pytest.raises(ValueError, match="nothing to explain"):
+            CitationOutcome(
+                citations=[],
+                documents_attempted=5,
+                documents_failed=0,
+                causes=(TIMED_OUT,),
+            )
+
+    def test_a_shortfall_refuses_a_bool_as_a_count(self) -> None:
+        """``True`` is not a count, and could be written but not read back."""
+        with pytest.raises(ValueError, match="at least one document"):
+            AnalysisShortfall(AnalysisStage.SCORING, True, True)
+
+    def test_a_shortfall_cannot_have_more_causes_than_losses(self) -> None:
+        """One lost document cannot have three distinct reasons."""
+        with pytest.raises(ValueError, match="more distinct causes"):
+            AnalysisShortfall(
+                AnalysisStage.SCORING, 1, 1, (TIMED_OUT, UNREACHABLE, AUTH_REFUSED)
+            )
+
+    def test_a_partial_loss_is_reported_rather_than_raised(self) -> None:
+        """The terminal error means every attempted document failed."""
+        with pytest.raises(ValueError, match="a partial loss is reported"):
+            AnalysisFailedError(scoring_shortfall(failed=3, attempted=20))
+
+
+class TestTheTwoNoticesCompose:
+    """The producers and the one consumer must agree on which goes first.
+
+    ``report_tab`` strips the search notice then the analysis notice. That
+    only reads the real body if every producer nests them the same way. With
+    the order swapped, the stripper leaves the search notice in front and a
+    stand-in message is auto-saved as a report -- #247 and #263 again. So
+    this drives a real producer rather than the helpers it is built from.
+    """
+
+    def test_a_producer_puts_the_search_notice_in_front(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A review that lost both reads the search first: it came first."""
+        agent = reporting_agent(monkeypatch, "# Evidence Report\n\nAspirin helps.")
+        metadata = ReportMetadata(
+            search_shortfalls=[retrieval_shortfall()],
+            analysis_shortfalls=[scoring_shortfall(failed=1, attempted=2)],
+        )
+
+        report = agent.generate_report(QUESTION, [make_citation()], metadata)
+
+        assert report.startswith(SEARCH_NOTICE_START)
+        assert NOTICE_START in report
+
+    def test_the_stripper_reads_the_body_a_producer_wrote(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The check deciding what a text is must see the text itself."""
+        agent = reporting_agent(monkeypatch, "# Evidence Report\n\nAspirin helps.")
+        metadata = ReportMetadata(
+            search_shortfalls=[retrieval_shortfall()],
+            analysis_shortfalls=[scoring_shortfall(failed=1, attempted=2)],
+        )
+        report = agent.generate_report(QUESTION, [make_citation()], metadata)
+
+        body = without_analysis_shortfall_notice(
+            without_search_shortfall_notice(report)
+        )
+
+        assert body.startswith("# Evidence Report")
+        assert not body.startswith(">")
+
+
+class TestTheReportBuiltFromMetadata:
+    """The GUI passes metadata, never the shortfalls; that path carries the notice."""
+
+    def test_a_report_built_from_metadata_opens_with_the_notice(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only MCP passes the shortfalls directly, so this path was untested."""
+        agent = reporting_agent(monkeypatch, "# Evidence Report\n\nAspirin helps.")
+        metadata = ReportMetadata(
+            analysis_shortfalls=[scoring_shortfall(failed=1, attempted=2)]
+        )
+
+        report = agent.generate_report(QUESTION, [make_citation()], metadata)
+
+        assert report.startswith(NOTICE_START)
+
+    def test_the_argument_wins_over_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A caller that builds no metadata (MCP) can still report its losses."""
+        agent = reporting_agent(monkeypatch, "# Evidence Report\n\nAspirin helps.")
+
+        report = agent.generate_report(
+            QUESTION,
+            [make_citation()],
+            ReportMetadata(),
+            analysis_shortfalls=[scoring_shortfall(failed=4, attempted=9)],
+        )
+
+        assert "4 of 9 documents could not be scored" in report
+
+
+class TestAFailureAfterAnIncompleteStage:
+    """What one stage lost is not lost again when a later stage fails."""
+
+    def test_a_failed_report_still_reports_what_scoring_lost(self) -> None:
+        """The shortfalls are a local of the handler; an exception left with them."""
+        context = fact_check_context()
+        context.scoring_agent.score_documents.return_value = ScoringOutcome(
+            accepted=[relevant(1)],
+            failed=[failed_score(make_document("2"))],
+            documents_attempted=2,
+        )
+        context.reporting_agent.generate_report.side_effect = APIError(
+            "Connection refused"
+        )
+
+        with pytest.raises(APIError) as raised:
+            mcp_server._handle_fact_check({"claim": QUESTION}, context)
+        payload = mcp_server._error_payload(raised.value)
+
+        assert [s["stage"] for s in payload["analysis_shortfalls"]] == ["scoring"]
+        assert "1 of 2 documents could not be scored" in (
+            payload["analysis_shortfalls"][0]["description"]
+        )
+        assert "reachable" in payload["advice"]
+
+    def test_a_failed_report_after_a_complete_analysis_carries_nothing(self) -> None:
+        """Nothing was lost, so nothing is reported as lost."""
+        context = fact_check_context()
+        context.reporting_agent.generate_report.side_effect = APIError("Boom")
+
+        with pytest.raises(APIError) as raised:
+            mcp_server._handle_fact_check({"claim": QUESTION}, context)
+        payload = mcp_server._error_payload(raised.value)
+
+        assert "analysis_shortfalls" not in payload

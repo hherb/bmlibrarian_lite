@@ -52,7 +52,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Generator, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generator, TypeVar
 
 from tenacity import (
     retry,
@@ -76,6 +76,9 @@ from .exceptions import (
     JSONParseError,
     LLMError,
 )
+
+if TYPE_CHECKING:
+    from .data_models import EvaluationErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -514,6 +517,37 @@ def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
         return EvaluationErrorCode.API_CONNECTION_ERROR
 
     return EvaluationErrorCode.UNKNOWN_ERROR
+
+
+def classify_exhausted_retries(exc: RetryExhaustedError) -> "EvaluationErrorCode":
+    """Classify spent retries by the failure they were spent on.
+
+    ``llm_retry`` retries every provider failure there is -- a refused key, a
+    rate limit, an unreachable host, a 5xx -- so in practice each one reaches
+    an agent as :class:`RetryExhaustedError`. Recording that wrapper as the
+    cause tells the user only that retrying did not help, which is the one
+    thing they cannot act on: the advice degrades to "try again later" for an
+    outage whose fix is to start Ollama, and for a key whose fix is Settings.
+    The wrapper keeps the exception it gave up on; this reads it.
+
+    Args:
+        exc: The spent retries, carrying the failure they were spent on.
+
+    Returns:
+        The code classifying ``exc.last_error``, or ``RETRY_EXHAUSTED`` when
+        the wrapper carries nothing to classify.
+
+    Example:
+        try:
+            result = self._score_with_retry(messages)
+        except RetryExhaustedError as e:
+            error_code = classify_exhausted_retries(e)
+    """
+    from .data_models import EvaluationErrorCode
+
+    if exc.last_error is None:
+        return EvaluationErrorCode.RETRY_EXHAUSTED
+    return classify_llm_exception(exc.last_error)
 
 
 # =============================================================================
