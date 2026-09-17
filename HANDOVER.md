@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#261 + #262 + #263 + #264 — a failed analysis is not an empty one**, branch
-`fix/failed-analysis-is-not-an-empty-one-261`. Python only. Compress into
+`fix/failed-analysis-is-not-an-empty-one-261`, PR #301. Python only. Compress into
 **Recently landed** once merged.
 
 - **The contract** is `doc/cross_platform/analysis_failure_reporting.md`, the
