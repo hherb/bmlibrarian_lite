@@ -47,8 +47,8 @@ public struct ReportSearchCompleteness: Sendable, Equatable {
 
     /// The sentence telling the reader what the search is missing, as plain text.
     ///
-    /// `nil` when the search was complete. Drawn ahead of the verdict by every
-    /// surface that shows a report without its own text first.
+    /// `nil` when the search was complete. Every surface that shows a report
+    /// draws this above the verdict, before the report's own text.
     public let notice: String?
 
     /// The report's text with the notice taken off the front.
@@ -66,8 +66,8 @@ public struct ReportSearchCompleteness: Sendable, Equatable {
 
     /// What a report says in place of the notice when its own record cannot be read.
     ///
-    /// Public because the apps pin it: the one sentence such a report must never
-    /// be allowed to replace is the notice itself.
+    /// Public because the apps pin it: what such a report must never say
+    /// instead is that its search was complete.
     public static var unreadableRecordNotice: String { SearchFailureConstants.unreadableRecordNotice }
 
     /// Read what a stored report says about its search.
@@ -104,7 +104,23 @@ public struct ReportSearchCompleteness: Sendable, Equatable {
                 SearchFailureReporting.notice(for: shortfalls)
             )
             self.bodyAfterNotice = SearchFailureReporting.splitPlainNotice(reportText).body
+        } catch let error as DamagedShortfallRecordError {
+            // The reader is told, and so is the log: the reason names the shape
+            // that was wrong and never quotes the stored value, so it is safe to
+            // write down, and without it a damaged record is indistinguishable
+            // from a genuine shortfall in the logs (golden rule 8).
+            BioMedLitLib.logger?.error(
+                "A report's search-shortfall record could not be read: \(error.reason)",
+                category: .search
+            )
+            self.wasIncomplete = true
+            self.notice = SearchFailureConstants.unreadableRecordNotice
+            self.bodyAfterNotice = reportText
         } catch {
+            BioMedLitLib.logger?.error(
+                "A report's search-shortfall record could not be read: \(String(describing: error))",
+                category: .search
+            )
             self.wasIncomplete = true
             self.notice = SearchFailureConstants.unreadableRecordNotice
             self.bodyAfterNotice = reportText

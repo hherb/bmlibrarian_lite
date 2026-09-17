@@ -91,7 +91,7 @@ final class StoreMigrationTests: XCTestCase {
         let container = try CloudKitConfiguration.makeContainer(
             schema: schema,
             configuration: configuration,
-            setAsideUnreadableStore: { setAsideRan = true }
+            setAsideUnreadableStore: { setAsideRan = true; return .noStoreFound }
         )
 
         let sessions = try ModelContext(container).fetch(FetchDescriptor<FactCheckSession>())
@@ -108,7 +108,7 @@ final class StoreMigrationTests: XCTestCase {
         let container = try CloudKitConfiguration.makeContainer(
             schema: schema,
             configuration: configuration,
-            setAsideUnreadableStore: { }
+            setAsideUnreadableStore: { .noStoreFound }
         )
 
         let session = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<FactCheckSession>()).first)
@@ -125,16 +125,138 @@ final class StoreMigrationTests: XCTestCase {
         let container = try CloudKitConfiguration.makeContainer(
             schema: schema,
             configuration: configuration,
-            setAsideUnreadableStore: { _ = StoreRecovery.setAsideStore(in: self.directory) }
+            setAsideUnreadableStore: { StoreRecovery.setAsideStore(in: self.directory) }
         )
 
         XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<FactCheckSession>()).count, 0)
         let kept = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-            .filter { $0.contains("unreadable") }
+            .filter { $0.hasPrefix("unreadable-") }
         XCTAssertEqual(kept.count, 1, "The unreadable store must still be on disk")
         XCTAssertEqual(
-            String(decoding: try Data(contentsOf: directory.appendingPathComponent(kept[0])), as: UTF8.self),
+            String(
+                decoding: try Data(
+                    contentsOf: directory
+                        .appendingPathComponent(kept[0])
+                        .appendingPathComponent("default.store")
+                ),
+                as: UTF8.self
+            ),
             "not a database"
         )
     }
+
+    /// A store still lying where SwiftData writes must not be written over.
+    ///
+    /// A fresh database beside an old write-ahead log is how the bytes this
+    /// whole path exists to keep stop being recoverable, so the app stops
+    /// instead, with the reason in the error rather than in SwiftData's.
+    func testAStoreThatCouldNotBeMovedAsideStopsTheApp() throws {
+        try Data("not a database".utf8).write(to: storeURL)
+        let (schema, configuration) = todaysConfiguration()
+        let leftInPlace = SetAsideStore.leftInPlace(
+            fileNames: ["default.store"],
+            reason: "the volume is read-only"
+        )
+
+        XCTAssertThrowsError(
+            try CloudKitConfiguration.makeContainer(
+                schema: schema,
+                configuration: configuration,
+                setAsideUnreadableStore: { leftInPlace }
+            )
+        ) { error in
+            XCTAssertEqual(error as? StoreSetAsideFailure, StoreSetAsideFailure(outcome: leftInPlace))
+            XCTAssertTrue(
+                (error as? StoreSetAsideFailure)?.errorDescription?.contains("Nothing was deleted") == true,
+                "The reason the app stopped must say the data is still there"
+            )
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: storeURL.path),
+            "The store must still be exactly where it was"
+        )
+    }
+
+    /// The last resort the shipped app actually calls moves the store and tells
+    /// the user — not only the one the other tests inject.
+    func testTheAppsOwnLastResortKeepsTheStoreAndSaysSo() throws {
+        try Data("not a database".utf8).write(to: storeURL)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "store-migration-\(UUID().uuidString)"))
+        let before = try FileManager.default.contentsOfDirectory(atPath: directory.path).count
+
+        let outcome = CloudKitConfiguration.setAsideApplicationSupportStore(
+            in: directory,
+            defaults: defaults
+        )
+
+        guard case .keptWhole(let folder, _) = outcome else {
+            return XCTFail("The store should have been kept whole, got \(outcome)")
+        }
+        XCTAssertEqual(
+            String(
+                decoding: try Data(
+                    contentsOf: directory.appendingPathComponent(folder).appendingPathComponent("default.store")
+                ),
+                as: UTF8.self
+            ),
+            "not a database",
+            "Every byte the user had must still be on disk"
+        )
+        XCTAssertGreaterThanOrEqual(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path).count,
+            before,
+            "Nothing may be removed from the store's directory"
+        )
+        let message = try XCTUnwrap(
+            StoreRecovery.pendingMessage(in: defaults),
+            "An empty History is news the user is owed (#285)"
+        )
+        XCTAssertTrue(message.contains("Nothing was deleted"), message)
+    }
+
+    /// Reaching the last resort with nothing to move still owes the user a word:
+    /// their History is empty and they are entitled to know why.
+    func testALastResortThatFindsNoStoreStillTellsTheUser() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "store-migration-\(UUID().uuidString)"))
+
+        let outcome = CloudKitConfiguration.setAsideApplicationSupportStore(
+            in: directory,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(outcome, .noStoreFound)
+        let message = try XCTUnwrap(StoreRecovery.pendingMessage(in: defaults))
+        XCTAssertTrue(message.contains("Nothing was deleted"), message)
+    }
+
+    // MARK: - Which errors another strategy might survive
+
+    /// The error every upgrade past a model change raises is one to carry on from.
+    func testTheOrdinaryUpgradeIsAMigrationError() {
+        XCTAssertTrue(CloudKitConfiguration.isMigrationError(
+            SwiftDataTestError(description: "SwiftDataError(_error: SwiftData.SwiftDataError._Error.unknownDataStoreSchema)")
+        ))
+        XCTAssertTrue(CloudKitConfiguration.isMigrationError(
+            SwiftDataTestError(description: "Cannot use staged migration with an unknown model version")
+        ))
+    }
+
+    /// An error that is not about the schema is the caller's to raise: setting a
+    /// healthy store aside for a passing fault is the #285 harm by another door.
+    func testAnErrorThatIsNotAboutTheSchemaIsNotAMigrationError() {
+        XCTAssertFalse(CloudKitConfiguration.isMigrationError(
+            NSError(domain: NSCocoaErrorDomain, code: 513, userInfo: [NSLocalizedDescriptionKey: "permission denied"])
+        ))
+        XCTAssertFalse(CloudKitConfiguration.isMigrationError(
+            SwiftDataTestError(description: "The file could not be opened because there is no such file.")
+        ))
+    }
+}
+
+/// An error whose description is what the test is about.
+///
+/// `SwiftDataError` cannot be built outside SwiftData, and `isMigrationError`
+/// reads an error as text, so this stands in for one.
+private struct SwiftDataTestError: Error, CustomStringConvertible {
+    let description: String
 }

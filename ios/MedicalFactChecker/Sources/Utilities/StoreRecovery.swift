@@ -19,21 +19,68 @@ import Foundation
 /// What became of a store that could not be opened.
 ///
 /// Returned by ``StoreRecovery/setAsideStore(in:at:fileManager:)`` so the caller
-/// can log it and the next launch can tell the user about it, rather than the
-/// store quietly vanishing.
-struct SetAsideStore: Equatable {
-    /// The names the store's files now have, in the order they were moved.
-    let keptAs: [String]
+/// can log it, decide whether a fresh store may be opened where it stood, and
+/// tell the user at the next launch.
+///
+/// ## Why there is no "some of it moved" case
+///
+/// A store is only whole with all of its files: a database separated from its
+/// write-ahead log has lost whatever that log had not yet checkpointed. So the
+/// move is all or nothing — anything moved is moved back before this returns.
+/// ``leftInPieces`` is the one exception, and it exists only because moving a
+/// file back can fail too.
+enum SetAsideStore: Equatable {
+    /// There was no store to set aside, so nothing happened to the user's data.
+    case noStoreFound
 
-    /// The names of the files that could not be moved out of the way.
+    /// The whole store was moved into a folder of its own, beside where it was.
     ///
-    /// They are still where they were. A store file left behind is why the app
-    /// may meet the same wall on the next launch, so it is reported, not passed
-    /// over (golden rule 8).
-    let couldNotMove: [String]
+    /// - Parameters:
+    ///   - directoryName: The folder the store now lives in.
+    ///   - fileNames: The store's own file names, unchanged, inside that folder.
+    case keptWhole(directoryName: String, fileNames: [String])
 
-    /// Whether there was a store to set aside at all.
-    var isEmpty: Bool { keptAs.isEmpty && couldNotMove.isEmpty }
+    /// Nothing was moved, and the store is exactly where it was.
+    ///
+    /// Whatever had been moved was moved back, so the store is still whole. The
+    /// app will meet the same wall next launch, which is why the reason is
+    /// carried out rather than dropped (golden rule 8).
+    case leftInPlace(fileNames: [String], reason: String)
+
+    /// Part of the store was moved and could not be moved back.
+    ///
+    /// The worst outcome and the rarest. Nothing is deleted, but nothing may be
+    /// written here either: a fresh database beside an orphaned write-ahead log
+    /// is how data that *was* recoverable stops being so.
+    case leftInPieces(directoryName: String, moved: [String], leftBehind: [String], reason: String)
+
+    /// Whether a fresh, empty store may be opened where this one stood.
+    ///
+    /// `false` whenever any of the store's files are still where SwiftData
+    /// writes: a new database beside an old write-ahead log is a corruption
+    /// hazard, not a leftover.
+    var isSafeToStartFresh: Bool {
+        switch self {
+        case .noStoreFound, .keptWhole:
+            return true
+        case .leftInPlace, .leftInPieces:
+            return false
+        }
+    }
+}
+
+/// Why the app could not start, when setting the store aside did not work either.
+///
+/// Raised instead of opening a fresh store over files that are still in place,
+/// so the reason reaches the log rather than SwiftData failing obscurely a
+/// moment later.
+struct StoreSetAsideFailure: LocalizedError, Equatable {
+    /// What became of the store.
+    let outcome: SetAsideStore
+
+    var errorDescription: String? {
+        StoreRecovery.message(for: outcome) ?? StoreRecovery.unreachableStoreMessage
+    }
 }
 
 /// Keeps a store that cannot be opened, and carries the news to the next launch.
@@ -52,7 +99,8 @@ enum StoreRecovery {
 
     // MARK: - Constants
 
-    /// The store's own files: the database and SQLite's two write-ahead files.
+    /// The store's own files: the database, SQLite's write-ahead log, and the
+    /// shared-memory index that log is read through.
     ///
     /// A store is only whole with all three, so they are moved together.
     static let storeFileNames = [
@@ -61,24 +109,38 @@ enum StoreRecovery {
         "default.store-wal",
     ]
 
-    /// Marks a file as one this app could not read, ahead of the moment it happened.
-    private static let setAsideSuffix = ".unreadable-"
+    /// Names the folder an unreadable store is kept in, ahead of the moment it happened.
+    private static let setAsideDirectoryPrefix = "unreadable-"
 
     /// How the moment is written into the name: sortable, and legal on every filesystem.
     private static let setAsideDateFormat = "yyyyMMdd-HHmmss"
 
-    /// Separates the names of files in a sentence.
-    private static let nameSeparator = ", "
+    /// How many names to try before giving up on finding a free one.
+    ///
+    /// The stamp has one-second resolution, so two failures in the same second
+    /// want the same folder. Stepping past a taken name is what makes "a device
+    /// this happens to twice keeps both copies" true rather than nearly true.
+    private static let maxSetAsideAttempts = 10
 
-    /// Opens what the user is told: their History is empty, and this is why.
+    /// The alert's title. The sentences below do not repeat it.
+    static let noticeTitle = "Your saved fact checks could not be opened"
+
+    /// Opens what the user is told when the app started anyway.
     private static let emptyHistorySentence =
-        "Your saved fact checks could not be opened, so this app has started with an empty History."
+        "This app has started with an empty History."
+
+    /// Opens what the user is told when the store could not be moved aside either.
+    private static let couldNotSetAsideSentence =
+        "This app could not move the old database aside either, so it may not start until that is put right."
+
+    /// The assurance every message owes the user, whatever else happened.
+    private static let nothingDeleted = "Nothing was deleted"
 
     /// What the user is told when there is not even a directory to set the store aside in.
     ///
     /// Rare, and still theirs to know: the History they had is not the History
     /// they now see, and nothing this app did removed it.
-    static let unreachableStoreMessage = emptyHistorySentence + " Nothing was deleted."
+    static let unreachableStoreMessage = emptyHistorySentence + " " + nothingDeleted + "."
 
     /// Where the pending message waits for the next launch.
     private static let pendingMessageKey = "store_recovery_pending_message"
@@ -87,36 +149,128 @@ enum StoreRecovery {
 
     /// Move a store that could not be opened out of the way, keeping every byte.
     ///
+    /// All of the store's files move into one new folder, or none of them do.
+    ///
     /// - Parameters:
     ///   - directory: Where the store lives, usually Application Support.
     ///   - date: The moment the store was found to be unreadable, which names
-    ///     the files it is kept under.
+    ///     the folder it is kept in.
     ///   - fileManager: The file manager to move with; the default is the shared one.
-    /// - Returns: What was moved and what could not be, for the caller to log
-    ///   and to tell the user about.
+    /// - Returns: What became of the store, for the caller to log, to decide
+    ///   whether it may start fresh, and to tell the user about.
     static func setAsideStore(
         in directory: URL,
         at date: Date = Date(),
         fileManager: FileManager = .default
     ) -> SetAsideStore {
-        let stamp = timestamp(for: date)
-        var keptAs: [String] = []
-        var couldNotMove: [String] = []
+        let present = storeFileNames.filter {
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
+        guard !present.isEmpty else { return .noStoreFound }
 
-        for name in storeFileNames {
-            let original = directory.appendingPathComponent(name)
-            guard fileManager.fileExists(atPath: original.path) else { continue }
+        let destination: URL
+        do {
+            destination = try makeSetAsideDirectory(in: directory, at: date, fileManager: fileManager)
+        } catch {
+            return .leftInPlace(fileNames: present, reason: error.localizedDescription)
+        }
 
-            let keptName = name + setAsideSuffix + stamp
+        var moved: [String] = []
+        for name in present {
             do {
-                try fileManager.moveItem(at: original, to: directory.appendingPathComponent(keptName))
-                keptAs.append(keptName)
+                try fileManager.moveItem(
+                    at: directory.appendingPathComponent(name),
+                    to: destination.appendingPathComponent(name)
+                )
+                moved.append(name)
             } catch {
-                couldNotMove.append(name)
+                // One file short is not a store worth keeping apart from its
+                // own log, so put back what moved before reporting.
+                return rollBack(
+                    moved,
+                    from: destination,
+                    to: directory,
+                    present: present,
+                    reason: error.localizedDescription,
+                    fileManager: fileManager
+                )
             }
         }
 
-        return SetAsideStore(keptAs: keptAs, couldNotMove: couldNotMove)
+        return .keptWhole(directoryName: destination.lastPathComponent, fileNames: moved)
+    }
+
+    /// Put back everything this attempt had moved, so the store is whole again.
+    ///
+    /// - Returns: ``SetAsideStore/leftInPlace(fileNames:reason:)`` when every
+    ///   file is back, and ``SetAsideStore/leftInPieces(directoryName:moved:leftBehind:reason:)``
+    ///   when one could not be.
+    private static func rollBack(
+        _ moved: [String],
+        from destination: URL,
+        to directory: URL,
+        present: [String],
+        reason: String,
+        fileManager: FileManager
+    ) -> SetAsideStore {
+        var stranded: [String] = []
+        for name in moved {
+            do {
+                try fileManager.moveItem(
+                    at: destination.appendingPathComponent(name),
+                    to: directory.appendingPathComponent(name)
+                )
+            } catch {
+                stranded.append(name)
+            }
+        }
+
+        guard stranded.isEmpty else {
+            return .leftInPieces(
+                directoryName: destination.lastPathComponent,
+                moved: stranded,
+                leftBehind: present.filter { !stranded.contains($0) },
+                reason: reason
+            )
+        }
+
+        // Only ever the empty folder this attempt made, never the user's data.
+        if let left = try? fileManager.contentsOfDirectory(atPath: destination.path), left.isEmpty {
+            try? fileManager.removeItem(at: destination)
+        }
+        return .leftInPlace(fileNames: present, reason: reason)
+    }
+
+    /// Make a folder of its own for a store that could not be read.
+    ///
+    /// - Returns: The new folder, which was not there before this call.
+    /// - Throws: Whatever the last attempt to create one raised.
+    private static func makeSetAsideDirectory(
+        in directory: URL,
+        at date: Date,
+        fileManager: FileManager
+    ) throws -> URL {
+        let stamp = timestamp(for: date)
+        var lastError: Error?
+
+        for attempt in 1...maxSetAsideAttempts {
+            let suffix = attempt == 1 ? "" : "-\(attempt)"
+            let candidate = directory.appendingPathComponent(
+                setAsideDirectoryPrefix + stamp + suffix,
+                isDirectory: true
+            )
+            do {
+                // `withIntermediateDirectories: false` so a folder that is
+                // already there is a name to step past, never one to move a
+                // second store into on top of the first.
+                try fileManager.createDirectory(at: candidate, withIntermediateDirectories: false)
+                return candidate
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? CocoaError(.fileWriteUnknown)
     }
 
     /// Write the moment into a name that sorts and that every filesystem accepts.
@@ -133,30 +287,45 @@ enum StoreRecovery {
 
     // MARK: - What the user is told
 
-    /// The sentence telling the user their history could not be opened.
+    /// The sentences telling the user what became of their saved fact checks.
+    ///
+    /// Every one of them says that nothing was deleted, which is the whole
+    /// point of the change they describe.
     ///
     /// - Parameter outcome: What became of the store.
-    /// - Returns: What to show at the next launch, or `nil` when there was no
-    ///   store to set aside and so nothing happened to the user's data.
+    /// - Returns: What to show, or `nil` when there was no store to set aside
+    ///   and so nothing happened to the user's data.
     static func message(for outcome: SetAsideStore) -> String? {
-        guard !outcome.isEmpty else { return nil }
+        switch outcome {
+        case .noStoreFound:
+            return nil
 
-        var sentences: [String] = [emptyHistorySentence]
-        if !outcome.keptAs.isEmpty {
-            sentences.append(
-                "Nothing was deleted: the old database is kept as "
-                    + outcome.keptAs.joined(separator: nameSeparator)
-                    + "."
-            )
+        case .keptWhole(let directoryName, _):
+            return emptyHistorySentence + " " + nothingDeleted
+                + ": the old database is kept in a folder named " + directoryName + "."
+
+        case .leftInPlace(let fileNames, let reason):
+            return couldNotSetAsideSentence + " " + nothingDeleted + ": "
+                + list(fileNames) + (fileNames.count == 1 ? " is" : " are")
+                + " still where it was. The reason given was: " + reason
+
+        case .leftInPieces(let directoryName, let moved, let leftBehind, let reason):
+            return couldNotSetAsideSentence + " " + nothingDeleted + ", but the old database"
+                + " could not be moved aside whole: " + list(moved)
+                + (moved.count == 1 ? " is" : " are") + " now in a folder named " + directoryName
+                + ", while " + list(leftBehind) + (leftBehind.count == 1 ? " is" : " are")
+                + " still where it was. The reason given was: " + reason
         }
-        if !outcome.couldNotMove.isEmpty {
-            sentences.append(
-                "These files could not be moved aside, so this may happen again: "
-                    + outcome.couldNotMove.joined(separator: nameSeparator)
-                    + "."
-            )
-        }
-        return sentences.joined(separator: " ")
+    }
+
+    /// Name some files the way a sentence does.
+    ///
+    /// - Parameter names: The file names, in the order they should be read.
+    /// - Returns: One name, or names separated by commas and a final "and".
+    private static func list(_ names: [String]) -> String {
+        guard let last = names.last else { return "" }
+        guard names.count > 1 else { return last }
+        return names.dropLast().joined(separator: ", ") + " and " + last
     }
 
     // MARK: - Reaching the next launch

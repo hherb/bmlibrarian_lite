@@ -16,6 +16,43 @@
 
 import SwiftUI
 
+/// The one message about the store, for the whole app.
+///
+/// App-scoped rather than per-view because the message is app-scoped: macOS
+/// restores several windows of the same `WindowGroup`, and a copy held in each
+/// window's own `@State` is told to the user once per window.
+///
+/// It is also what stops the message being thrown away unread. It is forgotten
+/// only when ``acknowledge()`` is called, which only the alert's button does —
+/// never SwiftUI dismissing the alert for reasons of its own.
+@Observable
+final class StoreRecoveryMessage {
+    /// The app's message, read once when the app starts.
+    static let shared = StoreRecoveryMessage()
+
+    /// What the user has yet to be told, or `nil` on an ordinary launch.
+    private(set) var pending: String?
+
+    /// Where the message waits between launches.
+    private let defaults: UserDefaults
+
+    /// - Parameter defaults: Where the message was kept; the default is the
+    ///   standard defaults.
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.pending = StoreRecovery.pendingMessage(in: defaults)
+    }
+
+    /// Forget the message, now that the user has read it.
+    ///
+    /// Called only from the alert's button, so a message the user never saw is
+    /// still there to be shown again.
+    func acknowledge() {
+        pending = nil
+        StoreRecovery.clearPendingMessage(in: defaults)
+    }
+}
+
 /// Tells the user, once, that the fact checks they had saved could not be opened.
 ///
 /// The store is opened while the app is starting, before there is any window to
@@ -26,37 +63,36 @@ import SwiftUI
 /// Shared by both platforms' root views, so what iOS and macOS say is the same
 /// sentence.
 struct StoreRecoveryNotice: ViewModifier {
-    /// What the user has yet to be told, read once the view appears.
-    @State private var message: String?
+    /// The message this view shows, app-scoped so it is shown once.
+    let message: StoreRecoveryMessage
 
     func body(content: Content) -> some View {
         content
-            .onAppear { message = StoreRecovery.pendingMessage() }
             .alert(
-                "Your saved fact checks could not be opened",
+                StoreRecovery.noticeTitle,
                 isPresented: Binding(
-                    get: { message != nil },
-                    set: { if !$0 { acknowledge() } }
+                    get: { message.pending != nil },
+                    // Deliberately does nothing. SwiftUI drives this to `false`
+                    // for reasons that are not the user reading it — a view torn
+                    // down, or a sibling alert on the same view presented
+                    // instead — and a message dropped then is the very silence
+                    // #285 is about. Only the button below forgets it.
+                    set: { _ in }
                 )
             ) {
-                Button("OK", role: .cancel) { acknowledge() }
+                Button("OK", role: .cancel) { message.acknowledge() }
             } message: {
-                Text(message ?? "")
+                Text(message.pending ?? "")
             }
-    }
-
-    /// Forget the message, so the user is told once rather than at every launch.
-    private func acknowledge() {
-        StoreRecovery.clearPendingMessage()
-        message = nil
     }
 }
 
 extension View {
     /// Show what became of a store that could not be opened, once.
     ///
-    /// - Returns: The view, showing the pending message at its first appearance.
-    func storeRecoveryNotice() -> some View {
-        modifier(StoreRecoveryNotice())
+    /// - Parameter message: The message to show; the default is the app's.
+    /// - Returns: The view, showing the pending message when there is one.
+    func storeRecoveryNotice(_ message: StoreRecoveryMessage = .shared) -> some View {
+        modifier(StoreRecoveryNotice(message: message))
     }
 }

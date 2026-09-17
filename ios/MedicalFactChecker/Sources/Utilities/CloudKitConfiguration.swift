@@ -141,7 +141,7 @@ enum CloudKitConfiguration {
         return try makeContainer(
             schema: schema,
             configuration: configuration,
-            setAsideUnreadableStore: setAsideApplicationSupportStore
+            setAsideUnreadableStore: { setAsideApplicationSupportStore() }
         )
     }
 
@@ -150,19 +150,25 @@ enum CloudKitConfiguration {
     /// - Parameters:
     ///   - schema: The schema of the models to store.
     ///   - configuration: Where and how the store is kept.
-    ///   - setAsideUnreadableStore: Called once, before the last resort, to move
-    ///     a store no migration could read out of the way. It must not delete
-    ///     it: what the user saved is kept, whether or not this app can read it.
-    /// - Returns: The container, empty only if the store had to be set aside.
+    ///   - setAsideUnreadableStore: Called at most once, as the last resort, to
+    ///     move a store no migration could read out of the way. It must not
+    ///     delete it: what the user saved is kept, whether or not this app can
+    ///     read it. What it returns decides whether a fresh store may be opened.
+    /// - Returns: The container. It holds what the store held, unless the store
+    ///   was set aside — or there was no store yet, as on a first launch.
     /// - Throws: Whatever SwiftData raised, for anything that is not a migration
-    ///   failure, and for a fresh store that could not be created either.
+    ///   failure; ``StoreSetAsideFailure`` when the store could not be moved out
+    ///   of the way, because a fresh database beside an old write-ahead log
+    ///   would put the data still on disk beyond recovery; and whatever a fresh
+    ///   store raised when it could not be created either.
     ///
     /// ## The three strategies
     ///
-    /// 1. Staged migration with the full plan. A store written by an earlier
-    ///    build matches no version in the plan — see the note at the top of
-    ///    `SchemaVersions.swift` — so this fails with "unknown model version"
-    ///    for exactly the upgrade it looks like it is for.
+    /// 1. Staged migration with the full plan. A store written by a build whose
+    ///    models differed matches no version in the plan — see the
+    ///    "Why there is no Schema Version 3" note in `SchemaVersions.swift` — so
+    ///    this fails with "unknown model version" for exactly the upgrade it
+    ///    looks like it is for.
     /// 2. Automatic lightweight migration, which is what actually carries a
     ///    user's fact checks across a property being added.
     /// 3. Set the store aside and start empty. The user's data is not lost, but
@@ -170,7 +176,7 @@ enum CloudKitConfiguration {
     static func makeContainer(
         schema: Schema,
         configuration: ModelConfiguration,
-        setAsideUnreadableStore: () -> Void
+        setAsideUnreadableStore: () -> SetAsideStore
     ) throws -> ModelContainer {
         // Strategy 1: Try staged migration with full plan
         do {
@@ -200,7 +206,13 @@ enum CloudKitConfiguration {
         }
 
         // Strategy 3: Keep the store the app cannot read, and start fresh
-        setAsideUnreadableStore()
+        let outcome = setAsideUnreadableStore()
+        guard outcome.isSafeToStartFresh else {
+            // Some of the store is still where SwiftData writes. Opening a fresh
+            // database next to an old write-ahead log is what would destroy the
+            // bytes this whole path exists to keep, so the app stops instead.
+            throw StoreSetAsideFailure(outcome: outcome)
+        }
 
         return try ModelContainer(
             for: schema,
@@ -224,16 +236,22 @@ enum CloudKitConfiguration {
     /// macOS 27 and iOS 27, far above this app's minimum, so the case name in
     /// the error's own description is what there is to match on.
     ///
-    /// `unknownDataStoreSchema` is the ordinary upgrade: **every** store written
-    /// by an earlier build raises it, because a schema's checksum is computed
-    /// from the live model classes and any added property moves it. Missing it
+    /// `unknownDataStoreSchema` is the ordinary upgrade: every store written by a
+    /// build whose model classes differed from these raises it, because a
+    /// schema's checksum is computed from the live model classes and any added
+    /// property moves it. (A release that leaves every `@Model` alone is not
+    /// affected, which is why the migration plan is not dead code.) Missing it
     /// made the app raise that error out of container creation, where both entry
     /// points end in `fatalError` — a crash at launch for exactly the users
     /// whose data the strategies exist to keep (found by `StoreMigrationTests`).
     ///
+    /// Measured on macOS 27; the wording of the underlying diagnostic may differ
+    /// on the older systems this app still supports, which is why the numeric
+    /// codes and "unknown model version" stay in the list beside it.
+    ///
     /// - Parameter error: What opening the store raised.
     /// - Returns: `true` when another strategy is worth trying.
-    private static func isMigrationError(_ error: Error) -> Bool {
+    static func isMigrationError(_ error: Error) -> Bool {
         let errorDescription = String(describing: error)
 
         let migrationIndicators = [
@@ -254,31 +272,48 @@ enum CloudKitConfiguration {
     /// Move the app's own store out of the way, keeping every byte of it.
     ///
     /// The last resort when no migration could read it. Nothing is deleted: the
-    /// files are renamed, the move is logged, and the sentence the user is owed
-    /// waits for the first view that can show it (#285, golden rule 8).
-    private static func setAsideApplicationSupportStore() {
-        guard let appSupport = FileManager.default.urls(
+    /// files are moved into a folder of their own, what happened is logged, and
+    /// the sentence the user is owed waits for the first view that can show it
+    /// (#285, golden rule 8).
+    ///
+    /// - Parameters:
+    ///   - directory: Where the store lives. The default is Application
+    ///     Support, which is where `ModelConfiguration` puts `default.store`;
+    ///     tests pass their own.
+    ///   - defaults: Where the pending message waits.
+    ///   - fileManager: The file manager to look and move with.
+    /// - Returns: What became of the store, which decides whether the caller may
+    ///   open a fresh one.
+    static func setAsideApplicationSupportStore(
+        in directory: URL? = nil,
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> SetAsideStore {
+        guard let storeDirectory = directory ?? fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first else {
             logger.error(
                 "The store could not be read and this device has no Application Support directory to set it aside in"
             )
-            StoreRecovery.recordPendingMessage(StoreRecovery.unreachableStoreMessage)
-            return
+            StoreRecovery.recordPendingMessage(StoreRecovery.unreachableStoreMessage, in: defaults)
+            return .noStoreFound
         }
 
-        let outcome = StoreRecovery.setAsideStore(in: appSupport)
+        let outcome = StoreRecovery.setAsideStore(in: storeDirectory, fileManager: fileManager)
         logger.error(
             """
-            An unreadable store was set aside in \(appSupport.path, privacy: .public). \
-            Kept: \(outcome.keptAs.joined(separator: ", "), privacy: .public). \
-            Could not move: \(outcome.couldNotMove.joined(separator: ", "), privacy: .public)
+            A store that could not be read was set aside in \(storeDirectory.path, privacy: .public): \
+            \(String(describing: outcome), privacy: .public)
             """
         )
-        if let message = StoreRecovery.message(for: outcome) {
-            StoreRecovery.recordPendingMessage(message)
-        }
+        // Reaching here at all means a store failed to open, so an empty History
+        // is news the user is owed even when this app found no file to move.
+        StoreRecovery.recordPendingMessage(
+            StoreRecovery.message(for: outcome) ?? StoreRecovery.unreachableStoreMessage,
+            in: defaults
+        )
+        return outcome
     }
 
     // MARK: - Sync Control

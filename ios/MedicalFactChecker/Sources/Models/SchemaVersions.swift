@@ -116,18 +116,19 @@ enum SchemaV2: VersionedSchema {
 //
 // - Every version in this file is built from the *live* model classes, so a new
 //   property moves all their checksums at once. A V3 listing the same models as
-//   V2 is therefore byte-identical to it, and building a container against a
-//   store that matches no version raises `NSInvalidArgumentException`,
-//   "Duplicate version checksums detected" — an Objective-C exception no Swift
-//   `catch` can take, so every user whose store predates the current shape would
-//   meet it at launch. It is the same trap the V0 note below describes.
-// - A store written by an earlier build already matches no version — its
-//   checksum was computed from the model classes as they were — so staged
+//   V2 therefore computes the same schema checksum, and building a container
+//   against a store that matches no version raises `NSInvalidArgumentException`
+//   — an Objective-C exception no Swift `catch` can take, so every user whose
+//   store predates the current shape would meet it at launch. It is the same
+//   trap the note on `schemas` below describes, which quotes the message.
+// - A store written by a build whose models differed already matches no version
+//   — its checksum was computed from the model classes as they were — so staged
 //   migration refuses it with "Cannot use staged migration with an unknown model
 //   version" (NSCocoaError 134504), whatever versions this file lists.
 //   `CloudKitConfiguration.makeContainer` then falls to automatic lightweight
 //   migration, which is what actually carries the user's fact checks across an
-//   added property. `StoreMigrationTests` pins that.
+//   added property. `StoreMigrationTests` pins that the data survives, and that
+//   such a store never reaches the last resort.
 //
 // Making a version bump mean something requires snapshotting each model type
 // inside its own version instead of sharing the live classes, which is #289.

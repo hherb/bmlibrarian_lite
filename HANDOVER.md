@@ -12,33 +12,57 @@ its slice has landed; add a new section when handing off new work.
 search lost**, branch `fix/swift-store-schema-and-report-shortfalls-285`, PR #291.
 iOS/macOS only. Compress into **Recently landed** once merged.
 
-- **Nothing is deleted any more.** `StoreRecovery.setAsideStore` renames
-  `default.store{,-shm,-wal}` to `…unreadable-<yyyyMMdd-HHmmss>` (user's
-  decision, 2026-09-17), logs it, and leaves the sentence the user is owed in
-  `UserDefaults` for `.storeRecoveryNotice()` on both root views — the store is
-  opened before any window exists. A file that could not be moved is named too.
+- **Nothing is deleted any more, and the store moves whole or not at all.**
+  `StoreRecovery.setAsideStore` moves `default.store{,-shm,-wal}` into one
+  `unreadable-<yyyyMMdd-HHmmss>/` folder (stepping to `-2` when a second failure
+  lands in the same second), and rolls every move back if any one of them fails.
+  A database parted from its write-ahead log has lost what that log still held,
+  so a half-moved store is never left behind — and `makeContainer` refuses to
+  open a fresh database when anything is still lying where SwiftData writes,
+  raising `StoreSetAsideFailure` instead. `SetAsideStore` is a sum type carrying
+  why the move failed; the caller logs it and the user is told it.
+- **Every message says "Nothing was deleted"** — including the case where
+  *nothing* could be moved, which is the one case where the store is provably
+  still whole on disk.
+- **The message is app-scoped and cannot be dropped unread.**
+  `StoreRecoveryMessage` (`@Observable`, like `AppSettings`) is read once per
+  launch, so several macOS windows say it once between them, and the alert's
+  binding setter is deliberately inert: only the OK button forgets it. SwiftUI
+  drives that setter to `false` for reasons that are not the user reading it —
+  a sibling alert on the same view, a view torn down — and a message dropped
+  then was the silence #285 is about. Attached to the whole root view, not just
+  the post-onboarding branch.
 - **A version bump would crash the app, so there is none.** Every
   `VersionedSchema` is built from the *live* model classes, so a `SchemaV3`
-  listing V2's models is byte-identical to it, and a store matching no version
-  then raises `NSInvalidArgumentException`, "Duplicate version checksums
-  detected" — an ObjC exception no Swift `catch` takes, on a `fatalError` path.
-  **#289**; the measurement is in `SchemaVersions.swift`. Two probes called it
-  safe; only a test against a store written by an *earlier build* caught it.
+  listing V2's models computes the same schema checksum, and a store matching no
+  version then raises `NSInvalidArgumentException` — an ObjC exception no Swift
+  `catch` takes, on a `fatalError` path. **#289**; the measurement is in
+  `SchemaVersions.swift`. Two probes called it safe; only a test against a store
+  written by an *earlier build* caught it.
 - **A live defect that test also found:** such a store is refused with
   `SwiftDataError.unknownDataStoreSchema` (SwiftData drops the 134504 Cocoa
   error behind it), `isMigrationError` did not know the name, so the factory
   rethrew into `fatalError` — a launch crash for everyone upgrading past a model
-  change. `StoreMigrationTests` pins the ladder now.
+  change. `StoreMigrationTests` pins the ladder now, and `isMigrationError` is
+  tested in both directions. Its looser indicators are **#292**.
 - **The report records what its search lost** (`EvidenceReport`'s private
   `searchShortfallsJSON`, `"[]"` when complete) instead of matching its own
   prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before the
-  record and is read off its text; a damaged record reports as incomplete and
-  says it cannot tell the reader what is missing. The contract's **iOS and
-  macOS** section records that divergence from Python's "no key reads as `[]`".
-- **Also lodged: #290** — `AppLogger` exists twice, iOS- and macOS-only, so
-  shared code can use neither.
-- **Verified:** `swift test` 370 (app) + 1200 (BioMedLit), macOS `xcodebuild`,
-  iOS Simulator build. Python and Android untouched.
+  record and is read off its text; a damaged record reports as incomplete, says
+  it cannot tell the reader what is missing, and now logs *why*. The contract's
+  **iOS and macOS** section records both divergences from Python — "no key reads
+  as `[]`", and a damaged record degrading where Python refuses.
+- **Lodged while working here:** **#290** (`AppLogger` twice, so shared code can
+  use neither), **#292** (the migration heuristic matches `"migration"` as a bare
+  substring), **#293** (`try? modelContext.save()` discards the failure that
+  decides whether the record lands), **#294** (a set-aside store is unreachable
+  to the user on iOS and accumulates), **#295** (`ReportSearchCompleteness` is
+  four states in `Bool × String? × String`), **#296** (the earlier-build test
+  schema has no relationships or transformables), **#297** (`fatalError` rather
+  than a window that explains), **#298** (a damaged record reported as an API
+  error).
+- **Verified:** `swift test` 385 (app) + 1200 (BioMedLit), macOS `xcodebuild`,
+  iOS Simulator build — all four green. Python and Android untouched.
 
 ## Recently landed (context)
 
