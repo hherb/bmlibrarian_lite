@@ -29,7 +29,7 @@ import logging
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, Callable
+from typing import Any, Optional, Callable
 
 from ..data_models import (
     Citation,
@@ -43,6 +43,33 @@ from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retrie
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
+
+
+def readable_passages(data: object) -> list[dict[str, Any]] | None:
+    """The passages a parsed extraction response holds, or None if it has none.
+
+    An empty list is an answer: the model read the text and found nothing
+    quotable for the question (#303). Only a response we could not read at
+    all, or one whose every passage arrived in a shape we cannot use, is a
+    failure -- and only a failure is worth retrying.
+
+    Args:
+        data: Whatever parsing the response produced.
+
+    Returns:
+        The passages carrying text, possibly none of them, or None if the
+        response carries no readable answer.
+    """
+    if not isinstance(data, dict):
+        return None
+    passages = data.get("passages")
+    if not isinstance(passages, list):
+        return None
+    readable = [p for p in passages if isinstance(p, dict) and "text" in p]
+    if passages and not readable:
+        return None
+    return readable
+
 
 # System prompt for citation extraction
 CITATION_SYSTEM_PROMPT = """You are a medical research citation extractor. Your task is to identify the most relevant passages from a document that help answer a research question.
@@ -179,7 +206,7 @@ Extract the most relevant passages that help answer the research question."""
             return [], error_code
 
     @llm_retry(max_retries=3, retry_on_json_error=True)
-    def _extract_with_retry(self, messages: list) -> list[dict]:
+    def _extract_with_retry(self, messages: list) -> list[dict[str, Any]]:
         """
         Internal method that performs citation extraction with retry logic.
 
@@ -199,10 +226,12 @@ Extract the most relevant passages that help answer the research question."""
         response = self._chat(messages, temperature=0.1, json_mode=True)
         passages = self._parse_citation_response(response)
 
-        # If we got no passages, it might be a parse failure - retry
-        if not passages:
+        # An empty list is the model's answer that nothing here is quotable,
+        # and retrying will not change it. Only a response we could not read
+        # is a parse failure (#303).
+        if passages is None:
             raise JSONParseError(
-                "No passages extracted from response",
+                "Could not read passages from response",
                 raw_response=response,
             )
 
@@ -337,7 +366,9 @@ Extract the most relevant passages that help answer the research question."""
             causes=distinct_causes(causes),
         )
 
-    def _parse_citation_response(self, response: str) -> list[dict]:
+    def _parse_citation_response(
+        self, response: str
+    ) -> list[dict[str, Any]] | None:
         """
         Parse LLM response to extract passages.
 
@@ -345,7 +376,9 @@ Extract the most relevant passages that help answer the research question."""
             response: LLM response text
 
         Returns:
-            List of passage dictionaries
+            The passage dictionaries the response holds -- an empty list when
+            the model found nothing quotable -- or None when the response
+            carries no readable answer at all (#303).
         """
         # Strip markdown code fences if present
         cleaned = response.strip()
@@ -358,15 +391,9 @@ Extract the most relevant passages that help answer the research question."""
         try:
             # Try parsing the entire cleaned response as JSON first
             # This is the most reliable method
-            data = json.loads(cleaned)
-            if isinstance(data, dict) and "passages" in data:
-                passages = data["passages"]
-                # Validate passages
-                valid_passages = []
-                for p in passages:
-                    if isinstance(p, dict) and "text" in p:
-                        valid_passages.append(p)
-                return valid_passages
+            passages = readable_passages(json.loads(cleaned))
+            if passages is not None:
+                return passages
 
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.debug(f"Direct JSON parsing failed: {e}")
@@ -387,13 +414,9 @@ Extract the most relevant passages that help answer the research question."""
                             # Found matching closing brace
                             json_str = response[start_idx:i + 1]
                             try:
-                                data = json.loads(json_str)
-                                if isinstance(data, dict) and "passages" in data:
-                                    valid_passages = []
-                                    for p in data["passages"]:
-                                        if isinstance(p, dict) and "text" in p:
-                                            valid_passages.append(p)
-                                    return valid_passages
+                                passages = readable_passages(json.loads(json_str))
+                                if passages is not None:
+                                    return passages
                             except json.JSONDecodeError:
                                 pass
                             break
@@ -401,9 +424,9 @@ Extract the most relevant passages that help answer the research question."""
         except Exception as e:
             logger.debug(f"Brace-matching JSON parsing failed: {e}")
 
-        # Fallback: return empty list
+        # Nothing here we can read as an answer; the caller retries.
         logger.warning(f"Could not parse citations from: {response}")
-        return []
+        return None
 
     def group_citations_by_document(
         self,

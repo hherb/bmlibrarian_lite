@@ -30,6 +30,7 @@ Features:
 
 import logging
 from pathlib import Path
+from collections.abc import Callable
 from typing import List, Optional
 
 from PySide6.QtWidgets import (
@@ -76,6 +77,7 @@ from .dialogs import (
     OpenAthensSetupDialog,
 )
 from .citation_loader import (
+    abstract_source_label,
     build_doc_metadata,
     build_abstract_text,
     has_pdf_identifiers,
@@ -83,6 +85,18 @@ from .citation_loader import (
 )
 
 logger = logging.getLogger(__name__)
+
+# What a fall back from the full text to the abstract is told to the reader as
+# (#304). Each names its own cause, and none of them carries the provider's
+# error text: a URL is what an NCBI API key travels in, and these strings go on
+# the screen. The raw failure stays in the log.
+FULLTEXT_UNAVAILABLE = "the full text could not be retrieved"
+FULLTEXT_EMPTY = "the full text retrieved was empty"
+FULLTEXT_UNREADABLE = "the full text was retrieved but could not be read"
+FULLTEXT_PAYWALLED = "the full text is behind a paywall"
+NO_FULLTEXT_IDENTIFIER = "the article carries no identifier to find a full text by"
+PDF_NO_TEXT = "no text could be extracted from the PDF"
+PDF_UNREADABLE = "the PDF was retrieved but could not be read"
 
 # Constants for layout proportions
 DOCUMENT_PANE_WIDTH = 600  # Initial width proportion for document viewer
@@ -604,18 +618,32 @@ class DocumentInterrogationTab(QWidget):
             # Configure OpenAthens
             self._configure_openathens()
         elif action == OpenAthensPromptDialog.ACTION_SKIP:
-            # User chose to skip - load abstract if we have a citation
-            if self._pending_citation:
-                self._load_citation_abstract(self._pending_citation)
-            elif callback:
-                callback("Skipped - using abstract only")
-            else:
-                self._add_chat_bubble(
-                    "PDF could not be downloaded due to paywall restrictions.\n\n"
-                    "You can try configuring OpenAthens institutional access in Settings.",
-                    is_user=False
-                )
+            self._skip_paywalled_fulltext(callback)
         # else: cancelled - do nothing
+
+    def _skip_paywalled_fulltext(
+        self, callback: Callable[[str], None] | None = None
+    ) -> None:
+        """Fall back to the abstract after the user skipped a paywall.
+
+        The user chose this, but the choice scrolls out of the chat while the
+        answers drawn from the abstract alone do not, so the source keeps
+        saying what it is (#304).
+
+        Args:
+            callback: What to tell instead, when a caller is waiting on one.
+        """
+        if self._pending_citation:
+            self._load_citation_abstract(self._pending_citation, FULLTEXT_PAYWALLED)
+        elif callback:
+            callback("Skipped - using abstract only")
+        else:
+            self._add_chat_bubble(
+                "PDF could not be downloaded due to paywall restrictions.\n\n"
+                "You can try configuring OpenAthens institutional access in "
+                "Settings.",
+                is_user=False,
+            )
 
     def _configure_openathens(self) -> None:
         """Show OpenAthens configuration dialog."""
@@ -771,14 +799,16 @@ class DocumentInterrogationTab(QWidget):
         logger.info(f"load_from_citation: has_pdf_identifiers={has_ids}")
         if not has_ids:
             logger.info("load_from_citation: No identifiers, loading abstract")
-            self._load_citation_abstract(citation)
+            self._load_citation_abstract(citation, NO_FULLTEXT_IDENTIFIER)
             return
 
         # Start full-text discovery (tries Europe PMC XML first, then PDF)
         logger.info("load_from_citation: Starting full-text discovery")
         self._start_fulltext_discovery(
             self._current_doc_metadata, title, citation,
-            on_error=lambda e: self._load_citation_abstract(citation)
+            on_error=lambda _error: self._load_citation_abstract(
+                citation, FULLTEXT_UNAVAILABLE
+            ),
         )
 
     def _start_fulltext_discovery(
@@ -859,8 +889,7 @@ class DocumentInterrogationTab(QWidget):
         if callback:
             callback(error)
         else:
-            # Fall back to abstract
-            self._load_citation_abstract(citation)
+            self._load_citation_abstract(citation, FULLTEXT_UNAVAILABLE)
 
     def _cancel_fulltext_discovery(self) -> None:
         """Cancel ongoing full-text discovery."""
@@ -872,16 +901,16 @@ class DocumentInterrogationTab(QWidget):
         title = get_document_title(citation)
         try:
             if not content.strip():
-                self._load_citation_abstract(citation)
+                self._load_citation_abstract(citation, FULLTEXT_EMPTY)
                 return
 
             self._agent.load_document(content, title=title)
             self.document_view.set_text(content, title)
             self.document_view.show_fulltext_tab()
             self._finalize_citation_load(citation, source_type, show_wrong_pdf=False)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load full-text")
-            self._load_citation_abstract(citation)
+            self._load_citation_abstract(citation, FULLTEXT_UNREADABLE)
 
     def _load_citation_pdf(self, pdf_path: Path, citation: 'Citation', source_type: str) -> None:
         """Load PDF for citation."""
@@ -889,7 +918,7 @@ class DocumentInterrogationTab(QWidget):
         try:
             text = extract_pdf_text(pdf_path)
             if not text.strip():
-                self._load_citation_abstract(citation)
+                self._load_citation_abstract(citation, PDF_NO_TEXT)
                 return
 
             self._current_pdf_path = pdf_path
@@ -900,12 +929,25 @@ class DocumentInterrogationTab(QWidget):
             else:
                 self.document_view.show_fulltext_tab()
             self._finalize_citation_load(citation, source_type, show_wrong_pdf=True)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load PDF")
-            self._load_citation_abstract(citation)
+            self._load_citation_abstract(citation, PDF_UNREADABLE)
 
-    def _load_citation_abstract(self, citation: 'Citation') -> None:
-        """Load abstract for citation."""
+    def _load_citation_abstract(
+        self,
+        citation: 'Citation',
+        degradation: str | None = None,
+    ) -> None:
+        """Load the abstract for a citation, saying what was lost to get here.
+
+        Args:
+            citation: The citation whose document to load.
+            degradation: What the full-text path lost on the way to this
+                fallback, or None when the abstract is what was asked for.
+                It is named where the source is named, because every later
+                answer is drawn from the abstract alone and the reader is
+                deciding how much to trust it (#304).
+        """
         title = get_document_title(citation)
         text = build_abstract_text(citation)
         if not text.strip():
@@ -915,7 +957,7 @@ class DocumentInterrogationTab(QWidget):
             self._agent.load_document(text, title=title)
             self.document_view.set_text(text, title)
             self.document_view.show_fulltext_tab()
-            self._finalize_citation_load(citation, "Abstract")
+            self._finalize_citation_load(citation, abstract_source_label(degradation))
         except Exception as e:
             logger.exception("Failed to load abstract")
             QMessageBox.critical(self, "Error", f"Failed to load document:\n{str(e)}")

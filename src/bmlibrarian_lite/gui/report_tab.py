@@ -48,8 +48,15 @@ from PySide6.QtCore import Signal, QUrl
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig
+from ..constants import DEFAULT_MIN_SCORE
 from ..storage import LiteStorage
 from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
+from ..audit_records import (
+    DocumentOutcomes,
+    classify_document_outcomes,
+    scoring_failure_code,
+    scoring_failure_reason,
+)
 from ..quality import QualityAssessment
 from ..analysis_failures import without_analysis_shortfall_notice
 from ..search_failures import without_search_shortfall_notice
@@ -105,7 +112,7 @@ class ReportTab(QWidget):
 
         # Audit trail data
         self._documents_found: List[LiteDocument] = []
-        self._scored_documents: List[ScoredDocument] = []
+        self._all_scored_documents: List[ScoredDocument] = []
         self._all_citations: List[Citation] = []
         self._quality_assessments: Dict[str, QualityAssessment] = {}
         self._current_report_path: Optional[Path] = None
@@ -179,7 +186,7 @@ class ReportTab(QWidget):
         question: str,
         citations: List[Citation],
         documents_found: List[LiteDocument],
-        scored_documents: List[ScoredDocument],
+        all_scored_documents: List[ScoredDocument],
         quality_assessments: Optional[Dict[str, QualityAssessment]] = None,
         quality_filter_settings: Optional[Dict[str, Any]] = None,
         report_metadata: Optional[ReportMetadata] = None,
@@ -192,7 +199,11 @@ class ReportTab(QWidget):
             question: Research question
             citations: List of citations extracted
             documents_found: All documents found in search
-            scored_documents: Documents that passed scoring
+            all_scored_documents: Every document that received a score --
+                accepted, rejected and failed alike. The audit trail sorts
+                them by the score they got, because inferring "rejected"
+                from absence wrote failures into the record as judgements
+                (#302)
             quality_assessments: Optional quality assessments by doc ID
             quality_filter_settings: Optional quality filter settings used
             report_metadata: Optional metadata for reproducibility
@@ -201,10 +212,11 @@ class ReportTab(QWidget):
         self._current_question = question
         self._all_citations = citations
         self._documents_found = documents_found
-        self._scored_documents = scored_documents
+        self._all_scored_documents = all_scored_documents
         self._quality_assessments = quality_assessments or {}
         self._quality_filter_settings = quality_filter_settings
         self._report_metadata = report_metadata
+        self._loaded_audit_data = None
 
         # Store citations by document ID
         self._citations_by_doc_id.clear()
@@ -222,7 +234,7 @@ class ReportTab(QWidget):
             "Click citations to view documents"
         )
         self.export_btn.setEnabled(bool(report))
-        self.audit_btn.setEnabled(bool(scored_documents))
+        self.audit_btn.setEnabled(bool(all_scored_documents))
 
         # Auto-save the report, but not a message standing in for one. An
         # incomplete search (#247) and an incomplete analysis (#261) each put
@@ -407,6 +419,31 @@ class ReportTab(QWidget):
             except Exception as e:
                 self.status_label.setText(f"Export failed: {e}")
 
+    def _min_score_threshold(self) -> int:
+        """The relevance threshold this report's run accepted at.
+
+        Returns:
+            The threshold the metadata states, or the default when the run
+            did not record one (a report restored from a checkpoint, which
+            does not persist it).
+        """
+        if self._report_metadata is not None:
+            return self._report_metadata.min_score_threshold
+        return DEFAULT_MIN_SCORE
+
+    def _document_outcomes(self) -> DocumentOutcomes:
+        """What became of each document this report was built from.
+
+        Returns:
+            The documents sorted by the score they actually received, never
+            by their absence from the accepted list (#302).
+        """
+        return classify_document_outcomes(
+            self._documents_found,
+            self._all_scored_documents,
+            self._min_score_threshold(),
+        )
+
     def _auto_save_report(self) -> None:
         """
         Auto-save report with audit trail to ~/bmlibrarian_reports/.
@@ -436,6 +473,8 @@ class ReportTab(QWidget):
             if report_metadata:
                 methodology = report_metadata.to_dict()
 
+            outcomes = self._document_outcomes()
+
             audit_data = {
                 "metadata": {
                     "timestamp": datetime.now().isoformat(),
@@ -446,8 +485,12 @@ class ReportTab(QWidget):
                 "methodology": methodology,
                 "workflow_summary": {
                     "documents_searched": len(self._documents_found),
-                    "documents_scored_relevant": len(self._scored_documents),
-                    "documents_rejected": len(self._documents_found) - len(self._scored_documents),
+                    "documents_scored": outcomes.documents_scored,
+                    "documents_scored_relevant": len(outcomes.accepted),
+                    "documents_rejected": len(outcomes.rejected),
+                    "documents_failed": len(outcomes.failed),
+                    "documents_not_scored": len(outcomes.not_scored),
+                    "min_score_threshold": self._min_score_threshold(),
                     "citations_extracted": len(self._all_citations),
                     "quality_filter_applied": bool(quality_filter_settings),
                     "quality_assessments_count": len(self._quality_assessments),
@@ -484,16 +527,36 @@ class ReportTab(QWidget):
                         "explanation": sd.explanation,
                         "is_relevant": sd.is_relevant,
                     }
-                    for sd in self._scored_documents
+                    for sd in outcomes.accepted
                 ],
+                # A document the model read and scored below the threshold,
+                # with the reason the model itself gave. Nothing else belongs
+                # here (#302).
                 "rejected_documents": [
                     {
-                        "id": doc.id,
-                        "title": doc.title,
-                        "reason": "Score below minimum threshold",
+                        "id": sd.document.id,
+                        "title": sd.document.title,
+                        "score": sd.score,
+                        "reason": sd.explanation,
                     }
-                    for doc in self._documents_found
-                    if doc.id not in {sd.document.id for sd in self._scored_documents}
+                    for sd in outcomes.rejected
+                ],
+                # A document nobody could score. It was not judged.
+                "failed_documents": [
+                    {
+                        "id": sd.document.id,
+                        "title": sd.document.title,
+                        "error_code": scoring_failure_code(sd),
+                        "reason": scoring_failure_reason(sd),
+                    }
+                    for sd in outcomes.failed
+                ],
+                # A document scoring never reached -- removed by the quality
+                # filter, or left over when the run stopped. No reason is
+                # recorded, because none was given.
+                "unscored_documents": [
+                    {"id": doc.id, "title": doc.title}
+                    for doc in outcomes.not_scored
                 ],
                 "citations": [
                     {
@@ -597,94 +660,175 @@ class ReportTab(QWidget):
             logger.exception("Failed to load report")
             QMessageBox.critical(self, "Load Error", f"Failed to load report:\n{e}")
 
-    def _show_audit_trail(self) -> None:
-        """Show the audit trail dialog with workflow details."""
+    def _audit_trail_data(self) -> dict[str, Any]:
+        """The audit record this tab would show, live or as loaded from disk.
+
+        Returns:
+            The same categories the saved audit file carries: documents the
+            model accepted, rejected, could not score, and never scored.
+        """
         if self._loaded_audit_data:
-            audit_data = self._loaded_audit_data
-        else:
-            audit_data = {
-                "metadata": {
-                    "research_question": self._current_question,
-                },
-                "workflow_summary": {
-                    "documents_searched": len(self._documents_found),
-                    "documents_scored_relevant": len(self._scored_documents),
-                    "documents_rejected": len(self._documents_found) - len(self._scored_documents),
-                    "citations_extracted": len(self._all_citations),
-                },
-                "scored_documents": [
-                    {
-                        "id": sd.document.id,
-                        "title": sd.document.title,
-                        "score": sd.score,
-                        "explanation": sd.explanation,
-                    }
-                    for sd in self._scored_documents
-                ],
-                "rejected_documents": [
-                    {
-                        "id": doc.id,
-                        "title": doc.title,
-                    }
-                    for doc in self._documents_found
-                    if doc.id not in {sd.document.id for sd in self._scored_documents}
-                ],
-                "citations": [
-                    {
-                        "document_title": c.document.title,
-                        "passage": c.passage[:200] + "..." if len(c.passage) > 200 else c.passage,
-                        "relevance_score": c.relevance_score,
-                    }
-                    for c in self._all_citations
-                ],
-            }
+            return self._loaded_audit_data
+
+        outcomes = self._document_outcomes()
+        return {
+            "metadata": {
+                "research_question": self._current_question,
+            },
+            "workflow_summary": {
+                "documents_searched": len(self._documents_found),
+                "documents_scored": outcomes.documents_scored,
+                "documents_scored_relevant": len(outcomes.accepted),
+                "documents_rejected": len(outcomes.rejected),
+                "documents_failed": len(outcomes.failed),
+                "documents_not_scored": len(outcomes.not_scored),
+                "citations_extracted": len(self._all_citations),
+            },
+            "scored_documents": [
+                {
+                    "id": sd.document.id,
+                    "title": sd.document.title,
+                    "score": sd.score,
+                    "explanation": sd.explanation,
+                }
+                for sd in outcomes.accepted
+            ],
+            "rejected_documents": [
+                {
+                    "id": sd.document.id,
+                    "title": sd.document.title,
+                    "score": sd.score,
+                    "reason": sd.explanation,
+                }
+                for sd in outcomes.rejected
+            ],
+            "failed_documents": [
+                {
+                    "id": sd.document.id,
+                    "title": sd.document.title,
+                    "error_code": scoring_failure_code(sd),
+                    "reason": scoring_failure_reason(sd),
+                }
+                for sd in outcomes.failed
+            ],
+            "unscored_documents": [
+                {"id": doc.id, "title": doc.title} for doc in outcomes.not_scored
+            ],
+            "citations": [
+                {
+                    "document_title": c.document.title,
+                    "passage": c.passage[:200] + "..." if len(c.passage) > 200 else c.passage,
+                    "relevance_score": c.relevance_score,
+                }
+                for c in self._all_citations
+            ],
+        }
+
+    def _audit_trail_text(self) -> str:
+        """Render the audit record as markdown.
+
+        A document the model could not score is counted and named apart from
+        one it judged below the threshold, and a document scoring never
+        reached is neither (#302). The record may also have been written by
+        an older build, so every key is read defensively (golden rule 1).
+
+        Returns:
+            The audit trail in markdown.
+        """
+        audit_data = self._audit_trail_data()
+        metadata = audit_data.get("metadata") or {}
+        summary = audit_data.get("workflow_summary") or {}
 
         lines = [
             "# Audit Trail",
             "",
-            f"**Research Question:** {audit_data['metadata']['research_question']}",
+            f"**Research Question:** {metadata.get('research_question', '')}",
             "",
             "## Summary",
             "",
-            f"- Documents searched: {audit_data['workflow_summary']['documents_searched']}",
-            f"- Documents scored as relevant: {audit_data['workflow_summary']['documents_scored_relevant']}",
-            f"- Documents rejected: {audit_data['workflow_summary']['documents_rejected']}",
-            f"- Citations extracted: {audit_data['workflow_summary']['citations_extracted']}",
-            "",
-            "## Relevant Documents (with scores)",
-            "",
         ]
+        for label, key in (
+            ("Documents searched", "documents_searched"),
+            ("Documents scored", "documents_scored"),
+            ("Documents scored as relevant", "documents_scored_relevant"),
+            ("Documents rejected", "documents_rejected"),
+            ("Documents that could not be scored", "documents_failed"),
+            ("Documents not scored", "documents_not_scored"),
+            ("Citations extracted", "citations_extracted"),
+        ):
+            if key in summary:
+                lines.append(f"- {label}: {summary[key]}")
 
+        lines.extend(["", "## Relevant Documents (with scores)", ""])
         for sd in audit_data.get("scored_documents", []):
-            lines.append(f"### {sd['title']}")
-            lines.append(f"- **Score:** {sd['score']}/5")
-            lines.append(f"- **ID:** {sd['id']}")
-            if sd.get('explanation'):
+            lines.append(f"### {sd.get('title', '')}")
+            lines.append(f"- **Score:** {sd.get('score')}/5")
+            lines.append(f"- **ID:** {sd.get('id', '')}")
+            if sd.get("explanation"):
                 lines.append(f"- **Explanation:** {sd['explanation']}")
             lines.append("")
 
         lines.append("## Rejected Documents")
         lines.append("")
-
         rejected = audit_data.get("rejected_documents", [])
         if rejected:
-            for rd in rejected[:20]:
-                lines.append(f"- {rd['title']}")
-            if len(rejected) > 20:
-                lines.append(f"- ... and {len(rejected) - 20} more")
+            lines.extend(self._audit_document_lines(rejected))
         else:
             lines.append("*No documents were rejected*")
+
+        # Only shown when something was lost: a heading that is always there
+        # is a heading nobody reads.
+        failed = audit_data.get("failed_documents", [])
+        if failed:
+            lines.extend(["", "## Documents That Could Not Be Scored", ""])
+            lines.append(
+                "These documents were not judged. Nothing about their "
+                "relevance is known."
+            )
+            lines.append("")
+            lines.extend(self._audit_document_lines(failed))
+
+        unscored = audit_data.get("unscored_documents", [])
+        if unscored:
+            lines.extend(["", "## Documents Not Scored", ""])
+            lines.append(
+                "Scoring never reached these documents -- removed by the "
+                "quality filter, or left over when the run stopped."
+            )
+            lines.append("")
+            lines.extend(self._audit_document_lines(unscored))
 
         lines.append("")
         lines.append("## Citations Extracted")
         lines.append("")
 
         for i, cit in enumerate(audit_data.get("citations", []), 1):
-            lines.append(f"### Citation {i}: {cit['document_title']}")
-            lines.append(f"> {cit['passage']}")
+            lines.append(f"### Citation {i}: {cit.get('document_title', '')}")
+            lines.append(f"> {cit.get('passage', '')}")
             lines.append("")
 
-        audit_text = "\n".join(lines)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _audit_document_lines(entries: list[dict[str, Any]]) -> list[str]:
+        """One bullet per document, naming its reason where one was given.
+
+        Args:
+            entries: Audit entries, each with a title and optionally a reason.
+
+        Returns:
+            The markdown bullets, every entry listed.
+        """
+        return [
+            f"- {entry.get('title', '')}" + (
+                f" — {entry['reason']}" if entry.get("reason") else ""
+            )
+            for entry in entries
+        ]
+
+    def _show_audit_trail(self) -> None:
+        """Show the audit trail dialog with workflow details."""
+        audit_text = self._audit_trail_text()
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Audit Trail")

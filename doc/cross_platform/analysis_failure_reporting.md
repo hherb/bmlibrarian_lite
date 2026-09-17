@@ -55,6 +55,17 @@ A document that failed was not scored and was not rejected. `documents_scored`
 is `documents_accepted + documents_rejected`; counting the failures there
 leaves the three numbers unreconcilable in the Methodology section.
 
+**An answer with nothing in it is an answer** (#303). Citation extraction's
+`{"passages": []}` is well-formed: the model read the text and found nothing
+quotable for the question. Treating it as a parse failure spent the retries on
+a verdict that was never going to change, cost four model calls per silent
+document, and reported a run in which every abstract was read correctly as an
+incomplete analysis — while making the "the literature really is silent"
+branch the design depends on unreachable in production. A port must tell
+*parsed, nothing found* from *could not be read*: a response holding no
+readable answer at all, or one whose every passage arrived in a shape the
+parser cannot use, is the failure; an empty list is not.
+
 ## What a stage records
 
 `AnalysisShortfall` (`data_models.py`) is the unit:
@@ -135,6 +146,27 @@ to read a record written elsewhere.
   `get_document_fulltext` reports `interrogation_available`, and
   `interrogation_error` when it is false: the text was retrieved, but
   `ask_document` cannot answer about it.
+- **The audit trail** — the durable record, which outlives the session —
+  sorts documents by the score they actually received, never by their absence
+  from the accepted list (#302). Four outcomes, together holding each found
+  document exactly once: **accepted**, **rejected** (carrying the model's own
+  explanation, never a sentence the code made up), **failed** (carrying the
+  error code and its description), and **not scored** (the quality filter's
+  removals and whatever a stopped run never reached — no reason is recorded,
+  because none was given). The record states the threshold its accepted /
+  rejected split was made with, since a reader cannot check "below threshold"
+  without knowing which. A failure section is drawn only when something
+  failed; the summary keeps its zero, because the four counts only reconcile
+  against the documents found if all four are shown.
+- **A degraded source is named where the source is named** (#304). Falling
+  back from full text to the abstract — discovery failing, content arriving
+  empty, the load raising, PDF extraction yielding nothing, a paywall the user
+  skipped, an article with no identifier to search by — says so wherever the
+  source is stated, not only in the log. "The abstract says nothing about X"
+  and "the full text says nothing about X" are different claims, and every
+  later answer is drawn from whichever was loaded. The reason is a fixed
+  phrase per cause: **the provider's error text never reaches the screen**,
+  because a URL is what an API key travels in (the #196 rule).
 
 ## Advice
 
@@ -163,7 +195,10 @@ same pipeline with the same shape — a parallel scoring service that drops
 what it could not score, and a report built from whatever citations arrived —
 so the same defects are likely present. A port conforms when a review whose
 model is unreachable ends in an error naming the stage, the counts and the
-cause, with the matching advice from the table above — and when no report can
-be built from an empty citation list without saying why it is empty. Note
+cause, with the matching advice from the table above; when no report can
+be built from an empty citation list without saying why it is empty; when a
+document the model read and found nothing quotable in is not retried and not
+counted as failed; and when no durable record or source label states a reason
+nobody gave. Note
 that no platform names the *provider* in that error today; it is a gap to
 close in all three, not a conformance criterion.

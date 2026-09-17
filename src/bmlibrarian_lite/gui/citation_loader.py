@@ -137,3 +137,29 @@ def get_document_title(citation: 'Citation', default: str = "Untitled Document")
         Document title or default
     """
     return citation.document.title or default
+
+
+#: What the source is called when the full text was available all along.
+ABSTRACT_SOURCE = "Abstract"
+
+
+def abstract_source_label(degradation: str | None = None) -> str:
+    """Name the abstract as a source, saying what was lost to reach it.
+
+    Falling back from the full text to the abstract used to be a
+    ``logger.warning`` and nothing else, so every later answer was drawn from
+    the abstract alone while the reader believed they were interrogating the
+    best available content (#304). In a fact-checking tool "the abstract says
+    nothing about X" and "the full text says nothing about X" are different
+    claims, so the degradation belongs where the source is named.
+
+    Args:
+        degradation: What was lost on the way here, or None when the abstract
+            is simply what was asked for.
+
+    Returns:
+        ``"Abstract"``, or ``"Abstract (<what was lost>)"``.
+    """
+    if not degradation:
+        return ABSTRACT_SOURCE
+    return f"{ABSTRACT_SOURCE} ({degradation})"

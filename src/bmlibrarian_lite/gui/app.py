@@ -323,7 +323,7 @@ class LiteMainWindow(QMainWindow):
         question: str,
         citations: list,
         documents_found: list,
-        scored_documents: list,
+        all_scored_documents: list,
         quality_assessments: dict,
         quality_filter_settings: dict,
         report_metadata: object = None,
@@ -338,7 +338,9 @@ class LiteMainWindow(QMainWindow):
             question: Research question
             citations: List of citations extracted
             documents_found: All documents found in search
-            scored_documents: Documents that passed scoring
+            all_scored_documents: Every document that received a score --
+                accepted, rejected and failed alike, so the audit trail can
+                tell them apart rather than infer from absence (#302)
             quality_assessments: Quality assessments by doc ID
             quality_filter_settings: Quality filter settings used
             report_metadata: Optional ReportMetadata for reproducibility
@@ -349,7 +351,7 @@ class LiteMainWindow(QMainWindow):
             question=question,
             citations=citations,
             documents_found=documents_found,
-            scored_documents=scored_documents,
+            all_scored_documents=all_scored_documents,
             quality_assessments=quality_assessments,
             quality_filter_settings=quality_filter_settings,
             report_metadata=report_metadata,
@@ -621,7 +623,7 @@ class LiteMainWindow(QMainWindow):
                 question=question,
                 citations=citations,
                 documents_found=documents_found,
-                scored_documents=scored_documents,
+                all_scored_documents=scored_documents,
                 quality_assessments=quality_assessments,
                 quality_filter_settings={},  # Not stored in checkpoint
             )

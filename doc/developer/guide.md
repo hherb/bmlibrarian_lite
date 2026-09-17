@@ -89,6 +89,8 @@ bmlibrarian_lite/
 │   ├── search_merger.py     # Deduplication (PMID/DOI/PMC/title)
 │   ├── search_service.py    # Unified search across providers
 │   ├── search_failures.py   # Failed requests → shortfalls → reader-facing notice
+│   ├── analysis_failures.py # Analysis shortfalls → notice and advice
+│   ├── audit_records.py     # What became of each document, classified not inferred
 │   ├── query_translator.py  # Natural language → structured query
 │   ├── fulltext_discovery.py # Europe PMC XML → Unpaywall → DOI
 │   ├── pdf_discovery.py     # PDF source discovery
@@ -329,6 +331,44 @@ failure, so an agent sees `RetryExhaustedError` rather than the refused key or
 the unreachable host underneath it. Recording the wrapper leaves every outage
 advising "try again later", so both agents pass it through
 `classify_exhausted_retries()` (`utils.py`), which reads `last_error`.
+
+**An answer with nothing in it is an answer** (#303). Citation extraction's
+`{"passages": []}` is the model saying this text holds nothing quotable for
+the question. `readable_passages()` (`agents/citation_agent.py`) tells that
+from a response it could not read — returning `None` only for the latter — so
+a silent document costs one model call instead of four and is not counted as
+unreadable.
+
+#### Audit Records (`audit_records.py`)
+
+What became of each document, classified from the score it received rather
+than inferred from its absence:
+
+```python
+from bmlibrarian_lite.audit_records import classify_document_outcomes
+
+outcomes = classify_document_outcomes(documents_found, all_scored, min_score)
+outcomes.accepted    # met the threshold
+outcomes.rejected    # read and scored below it, carrying the model's reason
+outcomes.failed      # could not be scored, carrying the error code
+outcomes.not_scored  # never reached scoring: the quality filter, or a stop
+```
+
+**The record says what happened, not what absence suggests** (#302). The
+audit trail used to list every found document that was not accepted as
+rejected, with the invented reason "Score below minimum threshold" — so a run
+with a flaky provider produced a report saying "3 of 20 documents could not be
+scored" beside an audit file asserting those 3 were read and found wanting.
+`DocumentOutcomes` refuses a record that counts one document twice, and
+`scoring_failure_reason()` degrades a code this build cannot name without ever
+dropping the failure. The Report tab is given every scored document, not only
+the accepted ones, so it can tell them apart.
+
+**A degraded source is named where the source is named** (#304). The
+interrogation tab's fall back from full text to the abstract states its cause
+in the source label and the chat — `abstract_source_label()`
+(`gui/citation_loader.py`) — with a fixed phrase per cause, because the
+provider's error text can carry an API key in a URL.
 
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 

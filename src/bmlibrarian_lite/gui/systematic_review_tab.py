@@ -705,6 +705,10 @@ class SystematicReviewTab(QWidget):
         # Audit trail data - stored during workflow execution
         self._documents_found: List[LiteDocument] = []
         self._scored_documents: List[ScoredDocument] = []
+        # Every document that received a score, accepted, rejected and failed
+        # alike. The audit trail sorts them by what they got; inferring
+        # "rejected" from absence recorded failures as judgements (#302).
+        self._all_scored_documents: list[ScoredDocument] = []
         self._all_citations: List[Citation] = []
         self._quality_assessments: Dict[str, QualityAssessment] = {}
 
@@ -855,6 +859,7 @@ class SystematicReviewTab(QWidget):
         # Clear previous audit data
         self._documents_found = []
         self._scored_documents = []
+        self._all_scored_documents = []
         self._all_citations = []
         self._quality_assessments = {}
         self.quality_summary.setVisible(False)
@@ -897,7 +902,7 @@ class SystematicReviewTab(QWidget):
 
         # Connect worker audit trail signals to tab signals
         self._worker.query_generated.connect(self.query_generated)
-        self._worker.document_scored.connect(self.document_scored)
+        self._worker.document_scored.connect(self._on_document_scored)
         self._worker.citation_extracted.connect(self.citation_extracted)
         self._worker.quality_assessed.connect(self.quality_assessed)
 
@@ -990,6 +995,19 @@ class SystematicReviewTab(QWidget):
             self._all_citations = citations
             self.progress_label.setText(f"Extracted {len(citations)} citations")
 
+    def _on_document_scored(self, scored_doc: ScoredDocument) -> None:
+        """Keep the whole scoring record, and pass the document on.
+
+        ``step_complete("scoring", ...)`` carries only the documents that met
+        the threshold, so this is the one place that sees a document the
+        model could not score (#302).
+
+        Args:
+            scored_doc: A document the model answered about, well or badly.
+        """
+        self._all_scored_documents.append(scored_doc)
+        self.document_scored.emit(scored_doc)
+
     def _on_search_incomplete(self, missing: str) -> None:
         """Tell the user the review is proceeding on an incomplete search.
 
@@ -1077,7 +1095,7 @@ class SystematicReviewTab(QWidget):
             self._current_question,
             self._all_citations,
             self._documents_found,
-            self._scored_documents,
+            self._all_scored_documents,
             self._quality_assessments,
             quality_filter_settings,
             metadata,

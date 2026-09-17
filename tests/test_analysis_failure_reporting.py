@@ -1140,3 +1140,112 @@ class TestAFailureAfterAnIncompleteStage:
         payload = mcp_server._error_payload(raised.value)
 
         assert "analysis_shortfalls" not in payload
+
+
+class TestNothingQuotableIsNotAFailedRead:
+    """Nothing quotable is not a document nobody could read (#303).
+
+    ``{"passages": []}`` is well-formed: the answer that this abstract holds
+    nothing for the question. Treating it as a parse failure spent four
+    retries on it and then recorded the document as unreadable, so a run in
+    which every abstract was read correctly told the user the analysis was
+    incomplete. These tests drive ``_chat``, because the guess lives inside
+    the retry decorator.
+    """
+
+    def test_an_empty_passage_list_is_an_answer(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Nothing quotable, read successfully: no cause, no shortfall."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM(['{"passages": []}']))
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.citations == []
+        assert outcome.documents_failed == 0
+        assert outcome.causes == ()
+        assert outcome.shortfall is None
+
+    def test_a_silent_document_costs_one_call_not_four(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """The retries were spent on an answer that was never going to change."""
+        agent = LiteCitationAgent()
+        calls = 0
+
+        def chat(*_args: Any, **_kwargs: Any) -> str:
+            nonlocal calls
+            calls += 1
+            return '{"passages": []}'
+
+        monkeypatch.setattr(agent, "_chat", chat)
+
+        agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert calls == 1, "The agent retried an answer it had understood"
+
+    def test_a_silent_run_leaves_the_report_free_of_a_failure_notice(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """"The literature is silent" is the finding, and it must be reachable."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM(['{"passages": []}'] * 2)
+        )
+
+        outcome = agent.extract_all_citations(
+            QUESTION, [relevant(1), relevant(2)], min_score=3
+        )
+
+        assert outcome.shortfall is None
+        assert not outcome.citations
+
+    def test_a_response_nobody_can_parse_is_still_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """The distinction only helps if the other side of it still holds."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM(["Sorry, I cannot help."] * 4))
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.documents_failed == 1
+        assert outcome.causes == (EvaluationErrorCode.JSON_PARSE_ERROR,)
+
+    def test_passages_the_model_sent_in_a_shape_we_cannot_read_are_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Dropping every passage the model named is not "nothing quotable"."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent,
+            "_chat",
+            ScriptedLLM(['{"passages": [{"quote": "Aspirin reduced stroke."}]}'] * 4),
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.documents_failed == 1
+        assert outcome.causes == (EvaluationErrorCode.JSON_PARSE_ERROR,)
+
+    def test_a_passage_we_can_read_survives_a_sibling_we_cannot(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """A partial answer is an answer; only losing all of it is a failure."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent,
+            "_chat",
+            ScriptedLLM(
+                [
+                    '{"passages": [{"quote": "dropped"},'
+                    ' {"text": "Aspirin reduced stroke."}]}'
+                ]
+            ),
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert [c.passage for c in outcome.citations] == ["Aspirin reduced stroke."]
+        assert outcome.documents_failed == 0
