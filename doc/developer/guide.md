@@ -337,7 +337,11 @@ advising "try again later", so both agents pass it through
 the question. `readable_passages()` (`agents/citation_agent.py`) tells that
 from a response it could not read — returning `None` only for the latter — so
 a silent document costs one model call instead of four and is not counted as
-unreadable.
+unreadable. A passage counts only if its `text` is a non-blank string. The
+report on no citations then says which of three things happened: the
+extraction failed (a recorded shortfall, the only evidence of that), the
+relevant documents held nothing quotable, or nothing was relevant. MCP passes
+`documents_accepted` for the second, since it builds no metadata.
 
 #### Audit Records (`audit_records.py`)
 
@@ -359,16 +363,20 @@ audit trail used to list every found document that was not accepted as
 rejected, with the invented reason "Score below minimum threshold" — so a run
 with a flaky provider produced a report saying "3 of 20 documents could not be
 scored" beside an audit file asserting those 3 were read and found wanting.
-`DocumentOutcomes` refuses a record that counts one document twice, and
-`scoring_failure_reason()` degrades a code this build cannot name without ever
-dropping the failure. The Report tab is given every scored document, not only
-the accepted ones, so it can tell them apart.
+`DocumentOutcomes` refuses a record that counts one document twice or files
+one where its score says it does not belong, and `scoring_failure_reason()`
+degrades a code this build cannot name without ever dropping the failure.
+`outcome_summary()` and `outcome_entries()` build the part of the record the
+saved file and the dialog share, so the two cannot drift. The Report tab is
+given every scored document, not only the accepted ones, so it can tell them
+apart.
 
-**A degraded source is named where the source is named** (#304). The
-interrogation tab's fall back from full text to the abstract states its cause
-in the source label and the chat — `abstract_source_label()`
-(`gui/citation_loader.py`) — with a fixed phrase per cause, because the
-provider's error text can carry an API key in a URL.
+A report restored from the Research Questions tab reads the scores of its own
+checkpoint and the threshold that checkpoint recorded (`recorded_min_score()`;
+the worker writes it as the run starts), and is not saved again — the run
+saved its own record when it ran. A record an older build wrote is detected by
+`predates_outcome_split()` and shown with a note, and without the stock reason
+it gave every non-accepted document (`without_invented_reason()`).
 
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
@@ -408,6 +416,16 @@ Automatic full-text retrieval with fallback chain:
 2. Europe PMC PDF
 3. Unpaywall PDF (open access)
 4. DOI resolution (publisher website)
+
+**A degraded source is named where the source is named** (#304). The
+interrogation tab's fall back from full text to the abstract states its cause
+in the source label and the chat — `abstract_source_label()`
+(`gui/citation_loader.py`) — with a fixed phrase per cause. The provider's
+error text never reaches the screen: it prints the request URL, and the
+Unpaywall URL carries the user's email address. Close the progress dialog
+with `_close_progress_dialog()`, never `close()` directly: Qt's
+`QProgressDialog.close()` emits `canceled`, which is wired to "the user
+stopped it".
 
 ### GUI Architecture
 

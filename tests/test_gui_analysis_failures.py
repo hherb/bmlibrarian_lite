@@ -19,6 +19,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from bmlibrarian_lite.audit_records import recorded_min_score  # noqa: E402
 from bmlibrarian_lite.config import LiteConfig  # noqa: E402
 from bmlibrarian_lite.data_models import (  # noqa: E402
     AnalysisStage,
@@ -266,6 +267,28 @@ class TestScoringThatFailed:
             metadata.documents_scored
             == metadata.documents_accepted + metadata.documents_rejected
         )
+
+    def test_the_checkpoint_keeps_the_threshold_the_run_used(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A report restored from it states the threshold instead of guessing.
+
+        Without it, the restored audit split every run at the default and
+        recorded the default as though the run had used it (#302).
+        """
+        documents = [make_document("1")]
+        scores = {
+            documents[0].id: ScoredDocument(
+                document=documents[0], score=4, explanation="On topic."
+            )
+        }
+        worker, _, storage = workflow_worker(monkeypatch, documents, scores)
+        worker.min_score = 4
+
+        worker.run()
+
+        stored = storage.create_checkpoint.call_args.kwargs.get("metadata")
+        assert recorded_min_score(stored) == 4
 
     def test_a_threshold_message_after_a_partial_failure_is_qualified(
         self, monkeypatch: pytest.MonkeyPatch

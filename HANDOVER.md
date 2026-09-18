@@ -11,40 +11,61 @@ its slice has landed; add a new section when handing off new work.
 **#302 + #303 + #304 — a failure is not a finding, one layer down**, branch
 `fix/failure-is-not-an-answer-302`, PR #305. Python only. Compress into **Recently
 landed** once merged. The three defects PR #301 lodged rather than fixed, all
-the same family as #261–#264 and all pre-existing on master.
+the same family as #261–#264 and all pre-existing on master; the PR's own
+review then found the fix had created one false claim and left two half-done.
 
-- **The contract gained three rules**, in
-  `doc/cross_platform/analysis_failure_reporting.md` — Swift and Android are
-  still unchecked against any of it (**#300**).
+- **The contract gained the rules**, in
+  `doc/cross_platform/analysis_failure_reporting.md`, precise enough to port
+  (what makes an answer readable, the eight source phrases, the restore and
+  legacy-record rules) — Swift and Android are still unchecked against any of
+  it (**#300**).
 - **An answer with nothing in it is an answer** (#303). Citation extraction's
   `{"passages": []}` is well-formed: the model read the abstract and found
-  nothing quotable. Retrying it spent four calls on a verdict that was never
-  going to change and reported a correct run as an incomplete analysis — and
-  made the "the literature really is silent" branch **unreachable in
-  production**, so the state a test constructed by hand was one the agent
-  could not produce. `readable_passages()` (`agents/citation_agent.py`)
-  answers `None` only for a response holding no readable answer, or one whose
-  **every** passage arrived in a shape the parser cannot use: dropping
-  everything the model said is a failure, dropping some of it is not.
+  nothing quotable. `readable_passages()` (`agents/citation_agent.py`) answers
+  `None` only for a response with no passage list, or one whose **every**
+  passage is unusable; a passage counts only if its `text` is a non-blank
+  string (`{"text": null}` reached a NOT NULL column and ended the review).
+  **The report had to change too**: `reporting_agent.py` inferred a failed
+  extraction from `documents_accepted > 0`, which is always true in the GUI,
+  so a silent run still blamed "API or network errors". It now decides from
+  the recorded shortfall alone and says *documents judged relevant: N, none
+  held a quotable passage*; MCP passes `documents_accepted`.
 - **The audit trail classifies instead of inferring** (#302). `audit_records.py`
   sorts documents by the score they actually got — accepted, rejected (the
-  model's own explanation), failed (the error code), not scored (the quality
-  filter's removals; **no reason, because none was given**) — and
-  `DocumentOutcomes` refuses a record counting one document twice. The record
-  states the threshold its split was made with. **The plumbing is the point**:
-  `display_report` takes `all_scored_documents`, renamed so the call sites
-  could not silently keep passing the accepted ones, and
-  `SystematicReviewTab._on_document_scored` is the only place that sees a
-  document the model could not score.
-- **A degraded source is named where the source is named** (#304). Six paths
-  fell back to the abstract behind a `logger.warning`; each now says which.
-  **The raw provider error never reaches the screen** — a URL is what an API
-  key travels in — so each cause is a fixed phrase. The path production
-  actually takes is the `on_error` callback `load_from_citation` passes, not
-  the branch inside `_on_fulltext_error`, which no caller reaches.
-- **Verified:** `pytest tests/` — 1239 passed, 3 xfailed; `lint_delta.py
+  model's own explanation), failed (the error code, and the raw code as its
+  score), not scored (**no reason, because none was given**).
+  `DocumentOutcomes` carries its threshold and refuses a document counted
+  twice or filed where its score says it does not belong;
+  `outcome_summary()`/`outcome_entries()` build what the file and the dialog
+  share, which had already drifted. `display_report` takes
+  `all_scored_documents`; `SystematicReviewTab._on_document_scored` is the only
+  signal that brings the tab a document the model could not score.
+  - **A restore is not a new record.** Selecting a question used to auto-save a
+    fresh audit rebuilt from every run of the question, highest score first,
+    at a guessed threshold of 3. Now the worker writes the threshold into the
+    checkpoint (`CHECKPOINT_MIN_SCORE_KEY`), a restore reads that checkpoint's
+    scores only and its threshold (`recorded_min_score()`, "not recorded" for
+    older ones), and **does not auto-save** — Horst's call, 2026-09-19.
+  - **An older record** (no `failed_documents`) is shown with a note, and
+    without the stock "Score below minimum threshold" — also Horst's call; the
+    file is never changed.
+- **A degraded source is named where the source is named** (#304). Seven
+  paths fell back to the abstract with at most a log line; each now says
+  which, and a user's cancel says *cancelled*. Each cause is a fixed phrase
+  because provider error text prints the request URL, and the Unpaywall URL
+  carries the user's email — **a credential never travels in a URL at all**
+  (#196). **`QProgressDialog.close()` emits `canceled`**: every handler closed
+  the dialog first, so every *successful* load announced the full text "could
+  not be retrieved". Close it with `_close_progress_dialog()`, never directly.
+- **Lodged, not addressed here** (all Python, none blocking): #306 benchmark
+  failures scored as 1; #307 the Audit Trail tab's "-4/5" cards; #308 the
+  paywall flow (stale pending citation, empty pane on Cancel); #309 three
+  fallbacks still misstating their cause; #310 per-document extraction
+  failures missing from the audit; #311 raw error text in the PDF and
+  OpenAthens dialogs; #312 a restore's found-documents list spans every run.
+- **Verified:** `pytest tests/` — 1300 passed, 3 xfailed; `lint_delta.py
   --base-ref origin/master` reports 0 new ruff and 0 new mypy findings (both
-  totals fell). Swift and Android untouched.
+  totals below master). Swift and Android untouched.
 
 ## Recently landed (context)
 
@@ -109,12 +130,14 @@ the rest.
     Only a store written by an **earlier build** reaches it — two probes
     against a matching checksum called it safe. `isMigrationError` must know
     `SwiftDataError.unknownDataStoreSchema` (SwiftData hides Cocoa 134504
-    behind it) or every upgrading app hits `fatalError`.
+    behind it) or every upgrading app hits `fatalError`; `StoreMigrationTests`
+    pins the ladder.
   - **The report records what its search lost** in `EvidenceReport`'s private
     `searchShortfallsJSON` (`"[]"` when complete) instead of matching its own
     prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before
     the record and is read off its text; a damaged record reports as
-    incomplete and says it cannot name what is missing.
+    incomplete and says it cannot name what is missing. Both divergences from
+    Python are in the contract's iOS/macOS section.
 
 - **A failed source is not an empty one** — all three platforms conform
   (#247/#248 PR #260, Android #252 PR #276, iOS/macOS #256/#253 PR #282;

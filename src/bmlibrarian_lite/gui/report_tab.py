@@ -48,14 +48,17 @@ from PySide6.QtCore import Signal, QUrl
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig
-from ..constants import DEFAULT_MIN_SCORE
+from ..constants import DEFAULT_MIN_SCORE, SCORE_MAX
 from ..storage import LiteStorage
 from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
 from ..audit_records import (
     DocumentOutcomes,
     classify_document_outcomes,
-    scoring_failure_code,
-    scoring_failure_reason,
+    outcome_entries,
+    outcome_summary,
+    predates_outcome_split,
+    score_failure_reason,
+    without_invented_reason,
 )
 from ..quality import QualityAssessment
 from ..analysis_failures import without_analysis_shortfall_notice
@@ -118,6 +121,9 @@ class ReportTab(QWidget):
         self._current_report_path: Optional[Path] = None
         self._loaded_audit_data: Optional[Dict[str, Any]] = None
         self._report_metadata: Optional[ReportMetadata] = None
+        # The threshold a restored checkpoint recorded; None when it predates
+        # recording one. Metadata, when present, states it instead.
+        self._restored_min_score: int | None = None
 
         # Ensure reports directory exists
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -190,6 +196,8 @@ class ReportTab(QWidget):
         quality_assessments: Optional[Dict[str, QualityAssessment]] = None,
         quality_filter_settings: Optional[Dict[str, Any]] = None,
         report_metadata: Optional[ReportMetadata] = None,
+        min_score_threshold: int | None = None,
+        auto_save: bool = True,
     ) -> None:
         """
         Display a report from the systematic review workflow.
@@ -207,6 +215,14 @@ class ReportTab(QWidget):
             quality_assessments: Optional quality assessments by doc ID
             quality_filter_settings: Optional quality filter settings used
             report_metadata: Optional metadata for reproducibility
+            min_score_threshold: The threshold the run accepted at, for a
+                report with no metadata to state it (one restored from a
+                checkpoint); None when the run never recorded it
+            auto_save: False for a report restored from a checkpoint. The
+                run saved its own report and audit when it ran; one rebuilt
+                from the database would be a second, poorer record -- the
+                checkpoint never kept the quality filter settings, and an
+                older one never kept the threshold either
         """
         self._current_report = report
         self._current_question = question
@@ -216,6 +232,7 @@ class ReportTab(QWidget):
         self._quality_assessments = quality_assessments or {}
         self._quality_filter_settings = quality_filter_settings
         self._report_metadata = report_metadata
+        self._restored_min_score = min_score_threshold
         self._loaded_audit_data = None
 
         # Store citations by document ID
@@ -241,7 +258,11 @@ class ReportTab(QWidget):
         # a notice in front of that message, so the check reads the text
         # behind both of them.
         body = without_analysis_shortfall_notice(without_search_shortfall_notice(report))
-        if body and not body.startswith(("No documents", "Workflow cancelled")):
+        if (
+            auto_save
+            and body
+            and not body.startswith(("No documents", "Workflow cancelled"))
+        ):
             self._auto_save_report()
 
     def _make_citations_clickable(self, markdown_report: str) -> str:
@@ -419,29 +440,32 @@ class ReportTab(QWidget):
             except Exception as e:
                 self.status_label.setText(f"Export failed: {e}")
 
-    def _min_score_threshold(self) -> int:
-        """The relevance threshold this report's run accepted at.
+    def _recorded_min_score(self) -> int | None:
+        """The relevance threshold this report's run recorded, if it did.
 
         Returns:
-            The threshold the metadata states, or the default when the run
-            did not record one (a report restored from a checkpoint, which
-            does not persist it).
+            The threshold the metadata states, or the one a restored
+            checkpoint recorded; None for a run restored from a checkpoint
+            that predates recording it.
         """
         if self._report_metadata is not None:
             return self._report_metadata.min_score_threshold
-        return DEFAULT_MIN_SCORE
+        return self._restored_min_score
 
     def _document_outcomes(self) -> DocumentOutcomes:
         """What became of each document this report was built from.
 
         Returns:
             The documents sorted by the score they actually received, never
-            by their absence from the accepted list (#302).
+            by their absence from the accepted list (#302). A run that never
+            recorded its threshold is split at the default, and its record
+            says the threshold was not recorded.
         """
+        recorded = self._recorded_min_score()
         return classify_document_outcomes(
             self._documents_found,
             self._all_scored_documents,
-            self._min_score_threshold(),
+            DEFAULT_MIN_SCORE if recorded is None else recorded,
         )
 
     def _auto_save_report(self) -> None:
@@ -474,6 +498,7 @@ class ReportTab(QWidget):
                 methodology = report_metadata.to_dict()
 
             outcomes = self._document_outcomes()
+            threshold_recorded = self._recorded_min_score() is not None
 
             audit_data = {
                 "metadata": {
@@ -485,12 +510,9 @@ class ReportTab(QWidget):
                 "methodology": methodology,
                 "workflow_summary": {
                     "documents_searched": len(self._documents_found),
-                    "documents_scored": outcomes.documents_scored,
-                    "documents_scored_relevant": len(outcomes.accepted),
-                    "documents_rejected": len(outcomes.rejected),
-                    "documents_failed": len(outcomes.failed),
-                    "documents_not_scored": len(outcomes.not_scored),
-                    "min_score_threshold": self._min_score_threshold(),
+                    **outcome_summary(
+                        outcomes, threshold_recorded=threshold_recorded
+                    ),
                     "citations_extracted": len(self._all_citations),
                     "quality_filter_applied": bool(quality_filter_settings),
                     "quality_assessments_count": len(self._quality_assessments),
@@ -519,45 +541,7 @@ class ReportTab(QWidget):
                     }
                     for doc in self._documents_found
                 ],
-                "scored_documents": [
-                    {
-                        "id": sd.document.id,
-                        "title": sd.document.title,
-                        "score": sd.score,
-                        "explanation": sd.explanation,
-                        "is_relevant": sd.is_relevant,
-                    }
-                    for sd in outcomes.accepted
-                ],
-                # A document the model read and scored below the threshold,
-                # with the reason the model itself gave. Nothing else belongs
-                # here (#302).
-                "rejected_documents": [
-                    {
-                        "id": sd.document.id,
-                        "title": sd.document.title,
-                        "score": sd.score,
-                        "reason": sd.explanation,
-                    }
-                    for sd in outcomes.rejected
-                ],
-                # A document nobody could score. It was not judged.
-                "failed_documents": [
-                    {
-                        "id": sd.document.id,
-                        "title": sd.document.title,
-                        "error_code": scoring_failure_code(sd),
-                        "reason": scoring_failure_reason(sd),
-                    }
-                    for sd in outcomes.failed
-                ],
-                # A document scoring never reached -- removed by the quality
-                # filter, or left over when the run stopped. No reason is
-                # recorded, because none was given.
-                "unscored_documents": [
-                    {"id": doc.id, "title": doc.title}
-                    for doc in outcomes.not_scored
-                ],
+                **outcome_entries(outcomes),
                 "citations": [
                     {
                         "document_id": c.document.id,
@@ -649,6 +633,10 @@ class ReportTab(QWidget):
                     f"Loaded report with {len(self._citations_by_doc_id)} citations"
                 )
             else:
+                # Nothing of the previous report's record belongs to this one.
+                self._loaded_audit_data = None
+                self._citations_by_doc_id.clear()
+                self.audit_btn.setEnabled(False)
                 self.status_label.setText("Loaded report (no audit trail found)")
 
             # Display the report
@@ -667,7 +655,7 @@ class ReportTab(QWidget):
             The same categories the saved audit file carries: documents the
             model accepted, rejected, could not score, and never scored.
         """
-        if self._loaded_audit_data:
+        if self._loaded_audit_data is not None:
             return self._loaded_audit_data
 
         outcomes = self._document_outcomes()
@@ -677,47 +665,17 @@ class ReportTab(QWidget):
             },
             "workflow_summary": {
                 "documents_searched": len(self._documents_found),
-                "documents_scored": outcomes.documents_scored,
-                "documents_scored_relevant": len(outcomes.accepted),
-                "documents_rejected": len(outcomes.rejected),
-                "documents_failed": len(outcomes.failed),
-                "documents_not_scored": len(outcomes.not_scored),
+                **outcome_summary(
+                    outcomes,
+                    threshold_recorded=self._recorded_min_score() is not None,
+                ),
                 "citations_extracted": len(self._all_citations),
             },
-            "scored_documents": [
-                {
-                    "id": sd.document.id,
-                    "title": sd.document.title,
-                    "score": sd.score,
-                    "explanation": sd.explanation,
-                }
-                for sd in outcomes.accepted
-            ],
-            "rejected_documents": [
-                {
-                    "id": sd.document.id,
-                    "title": sd.document.title,
-                    "score": sd.score,
-                    "reason": sd.explanation,
-                }
-                for sd in outcomes.rejected
-            ],
-            "failed_documents": [
-                {
-                    "id": sd.document.id,
-                    "title": sd.document.title,
-                    "error_code": scoring_failure_code(sd),
-                    "reason": scoring_failure_reason(sd),
-                }
-                for sd in outcomes.failed
-            ],
-            "unscored_documents": [
-                {"id": doc.id, "title": doc.title} for doc in outcomes.not_scored
-            ],
+            **outcome_entries(outcomes),
             "citations": [
                 {
                     "document_title": c.document.title,
-                    "passage": c.passage[:200] + "..." if len(c.passage) > 200 else c.passage,
+                    "passage": c.passage,
                     "relevance_score": c.relevance_score,
                 }
                 for c in self._all_citations
@@ -730,14 +688,19 @@ class ReportTab(QWidget):
         A document the model could not score is counted and named apart from
         one it judged below the threshold, and a document scoring never
         reached is neither (#302). The record may also have been written by
-        an older build, so every key is read defensively (golden rule 1).
+        an older build, so every key and entry is read defensively (golden
+        rule 1), and a record from before failures were told apart says so
+        rather than repeating the reason it gave every document.
 
         Returns:
             The audit trail in markdown.
         """
         audit_data = self._audit_trail_data()
-        metadata = audit_data.get("metadata") or {}
-        summary = audit_data.get("workflow_summary") or {}
+        metadata = audit_data.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        summary = audit_data.get("workflow_summary")
+        summary = summary if isinstance(summary, dict) else {}
+        predates_split = predates_outcome_split(audit_data)
 
         lines = [
             "# Audit Trail",
@@ -758,11 +721,13 @@ class ReportTab(QWidget):
         ):
             if key in summary:
                 lines.append(f"- {label}: {summary[key]}")
+        if "min_score_threshold" in summary:
+            lines.append(self._threshold_line(summary["min_score_threshold"]))
 
         lines.extend(["", "## Relevant Documents (with scores)", ""])
-        for sd in audit_data.get("scored_documents", []):
+        for sd in self._audit_entries(audit_data, "scored_documents"):
             lines.append(f"### {sd.get('title', '')}")
-            lines.append(f"- **Score:** {sd.get('score')}/5")
+            lines.append(f"- **Score:** {self._score_text(sd.get('score'))}")
             lines.append(f"- **ID:** {sd.get('id', '')}")
             if sd.get("explanation"):
                 lines.append(f"- **Explanation:** {sd['explanation']}")
@@ -770,7 +735,18 @@ class ReportTab(QWidget):
 
         lines.append("## Rejected Documents")
         lines.append("")
-        rejected = audit_data.get("rejected_documents", [])
+        rejected = self._audit_entries(audit_data, "rejected_documents")
+        if predates_split:
+            # The file cannot be corrected, but the reader can be told what it
+            # could not tell apart -- and not shown the reason it gave all.
+            lines.append(
+                "*This record predates failures being told apart from "
+                "rejections: a document listed here may have failed to be "
+                "scored, or never reached scoring, rather than been judged "
+                "below the threshold.*"
+            )
+            lines.append("")
+            rejected = [without_invented_reason(entry) for entry in rejected]
         if rejected:
             lines.extend(self._audit_document_lines(rejected))
         else:
@@ -778,7 +754,7 @@ class ReportTab(QWidget):
 
         # Only shown when something was lost: a heading that is always there
         # is a heading nobody reads.
-        failed = audit_data.get("failed_documents", [])
+        failed = self._audit_entries(audit_data, "failed_documents")
         if failed:
             lines.extend(["", "## Documents That Could Not Be Scored", ""])
             lines.append(
@@ -788,7 +764,7 @@ class ReportTab(QWidget):
             lines.append("")
             lines.extend(self._audit_document_lines(failed))
 
-        unscored = audit_data.get("unscored_documents", [])
+        unscored = self._audit_entries(audit_data, "unscored_documents")
         if unscored:
             lines.extend(["", "## Documents Not Scored", ""])
             lines.append(
@@ -802,12 +778,66 @@ class ReportTab(QWidget):
         lines.append("## Citations Extracted")
         lines.append("")
 
-        for i, cit in enumerate(audit_data.get("citations", []), 1):
+        for i, cit in enumerate(self._audit_entries(audit_data, "citations"), 1):
             lines.append(f"### Citation {i}: {cit.get('document_title', '')}")
             lines.append(f"> {cit.get('passage', '')}")
             lines.append("")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _audit_entries(audit_data: dict[str, Any], key: str) -> list[dict[str, Any]]:
+        """The entries a record lists under a key, whatever the file holds.
+
+        Args:
+            audit_data: The audit record, live or loaded.
+            key: The list to read.
+
+        Returns:
+            The entries that are objects; a missing, null or malformed list
+            reads as empty rather than failing the dialog.
+        """
+        entries = audit_data.get(key)
+        if not isinstance(entries, list):
+            return []
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    @staticmethod
+    def _threshold_line(threshold: object) -> str:
+        """The summary line stating the threshold the split was made at.
+
+        Args:
+            threshold: What the record states; None when the run never
+                recorded one.
+
+        Returns:
+            The markdown bullet.
+        """
+        if threshold is None:
+            return (
+                "- Relevance threshold: not recorded for this run; relevant "
+                "and rejected are split at the default, "
+                f"{DEFAULT_MIN_SCORE}/{SCORE_MAX}"
+            )
+        return f"- Relevance threshold: {threshold}/{SCORE_MAX}"
+
+    @staticmethod
+    def _score_text(score: object) -> str:
+        """A recorded score as the reader should see it.
+
+        Args:
+            score: The score an entry records.
+
+        Returns:
+            ``"N/5"``, or why the scoring failed when the score is an
+            error code -- which an older record listed among the relevant
+            documents, as though it were a score.
+        """
+        if isinstance(score, int) and not isinstance(score, bool):
+            reason = score_failure_reason(score)
+            if reason is not None:
+                return f"could not be scored ({reason})"
+        return f"{score}/{SCORE_MAX}"
 
     @staticmethod
     def _audit_document_lines(entries: list[dict[str, Any]]) -> list[str]:

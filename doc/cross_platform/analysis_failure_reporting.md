@@ -6,11 +6,13 @@ the failed LLM call to the words the reader sees. It is the companion of
 [Search Failure Reporting](search_failure_reporting.md), which covers the
 stage before: a source that failed is not a source with no evidence.
 
-Python (`analysis_failures.py`, `agents/`) is the reference.
+Python (`analysis_failures.py`, `audit_records.py`, `agents/`, and for the
+source label `gui/document_interrogation_tab.py` with `gui/citation_loader.py`)
+is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -60,11 +62,29 @@ leaves the three numbers unreconcilable in the Methodology section.
 quotable for the question. Treating it as a parse failure spent the retries on
 a verdict that was never going to change, cost four model calls per silent
 document, and reported a run in which every abstract was read correctly as an
-incomplete analysis — while making the "the literature really is silent"
-branch the design depends on unreachable in production. A port must tell
-*parsed, nothing found* from *could not be read*: a response holding no
-readable answer at all, or one whose every passage arrived in a shape the
-parser cannot use, is the failure; an empty list is not.
+incomplete analysis. A port must tell *parsed, nothing found* from *could
+not be read*, as Python's `readable_passages` does:
+
+- An answer is readable when it parses — whole, after stripping a code fence,
+  or as the first balanced `{…}` in surrounding prose — to a JSON object whose
+  `passages` is an array. A missing or `null` `passages`, or any other shape,
+  is a failure, and is retried.
+- A passage is usable when it is an object whose `text` is a string holding
+  more than whitespace. (`{"text": null}` would become a citation with no
+  passage, which storage refuses — ending the whole review over one quote.)
+- An empty array is the answer *nothing quotable*: not retried, not counted
+  as failed.
+- A non-empty array none of whose passages is usable is a failure. One with
+  some usable passages keeps them and drops the rest, logging what it dropped.
+
+The report built on no citations then tells three situations apart, because
+they are different findings: the extraction **failed** (known only from a
+recorded `citation_extraction` shortfall), the relevant documents **held
+nothing quotable** (documents were accepted, and nothing was lost — the report
+names how many were read, and says each was read successfully), or **no
+document was relevant** (the "no relevant evidence" text). Inferring a failure
+from the accepted count is the defect: extraction only runs once a document
+was accepted, so it called every silent run a failed one.
 
 ## What a stage records
 
@@ -151,13 +171,28 @@ to read a record written elsewhere.
   from the accepted list (#302). Four outcomes, together holding each found
   document exactly once: **accepted**, **rejected** (carrying the model's own
   explanation, never a sentence the code made up), **failed** (carrying the
-  error code and its description), and **not scored** (the quality filter's
-  removals and whatever a stopped run never reached — no reason is recorded,
-  because none was given). The record states the threshold its accepted /
-  rejected split was made with, since a reader cannot check "below threshold"
+  error code, its description, and the raw code as its score), and **not
+  scored** (the quality filter's removals and whatever a stopped run never
+  reached — no reason is recorded, because none was given). A document the
+  found list lacks but a score names, as a restored session can hold, is
+  still counted, so the four can then sum to more than were searched. The
+  record states the threshold its accepted / rejected split was made with, in
+  the file and on screen, since a reader cannot check "below threshold"
   without knowing which. A failure section is drawn only when something
   failed; the summary keeps its zero, because the four counts only reconcile
   against the documents found if all four are shown.
+  - **A restored report** is split at the threshold its checkpoint recorded
+    (`min_score_threshold` in the checkpoint's metadata, written as the run
+    starts), from the scores of that checkpoint's run only — never every run
+    of the question merged — and is not saved again: the run saved its own
+    record when it ran, and a rebuild from the database is a poorer one. A
+    checkpoint older than the key states its threshold as *not recorded*,
+    never as the default the split then falls back to.
+  - **A record an older build wrote** (no `failed_documents` key) listed
+    failures and filtered documents as rejected, each with the reason "Score
+    below minimum threshold". It is shown with a note saying so, and without
+    that one stock reason; any other reason is the model's and stays. A score
+    that is an error code is shown as the failure it names, never as "−4/5".
 - **A degraded source is named where the source is named** (#304). Falling
   back from full text to the abstract — discovery failing, content arriving
   empty, the load raising, PDF extraction yielding nothing, a paywall the user
@@ -165,8 +200,27 @@ to read a record written elsewhere.
   source is stated, not only in the log. "The abstract says nothing about X"
   and "the full text says nothing about X" are different claims, and every
   later answer is drawn from whichever was loaded. The reason is a fixed
-  phrase per cause: **the provider's error text never reaches the screen**,
-  because a URL is what an API key travels in (the #196 rule).
+  phrase per cause, because **the provider's error text never reaches the
+  screen**: error text prints the request URL, and on this path that URL
+  carries the user's email address (the Unpaywall query). Python states it as
+  `Abstract (<phrase>)` in the document header and in the chat's `Source:`
+  line; a port may word the phrases in its own idiom, but keeps one per cause:
+
+  | Cause | Python's phrase |
+  |-------|-----------------|
+  | Discovery failed | the full text could not be retrieved |
+  | Content arrived empty | the full text retrieved was empty |
+  | Loading the full text raised | the full text was retrieved but could not be read |
+  | Paywall, and the user skipped it | the full text is behind a paywall |
+  | The user cancelled retrieval | retrieving the full text was cancelled |
+  | No DOI, PMID or PMC ID to search by | the article has no DOI, PMID or PMC ID to find a full text by |
+  | The PDF yielded no text | no text could be extracted from the PDF |
+  | Loading the PDF raised | the PDF was retrieved but could not be read |
+
+  A cancellation is not a failure. Nor is closing a progress indicator
+  because the work finished: Qt's `QProgressDialog.close()` emits
+  `canceled`, which is how every successful load came to announce first that
+  the full text "could not be retrieved".
 
 ## Advice
 
@@ -197,8 +251,11 @@ so the same defects are likely present. A port conforms when a review whose
 model is unreachable ends in an error naming the stage, the counts and the
 cause, with the matching advice from the table above; when no report can
 be built from an empty citation list without saying why it is empty; when a
-document the model read and found nothing quotable in is not retried and not
-counted as failed; and when no durable record or source label states a reason
-nobody gave. Note
+document the model read and found nothing quotable in is not retried, not
+counted as failed, and not reported as a failed extraction; when the audit
+record sorts every found document into accepted, rejected, failed or not
+scored by the score it received, and states the threshold it split at; and
+when a fall back from full text to the abstract names its cause wherever the
+source is named. Note
 that no platform names the *provider* in that error today; it is a gap to
 close in all three, not a conformance criterion.

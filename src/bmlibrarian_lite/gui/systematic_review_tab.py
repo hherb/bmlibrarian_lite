@@ -51,6 +51,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import get_stylesheet_generator
 from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 
+from ..audit_records import CHECKPOINT_MIN_SCORE_KEY
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import (
@@ -343,9 +344,12 @@ class WorkflowWorker(QThread):
                     documents = filtered
 
             # Step 3: Score documents
-            # Create checkpoint BEFORE scoring so we can persist results immediately
+            # Create checkpoint BEFORE scoring so we can persist results
+            # immediately. It keeps the threshold, so a report restored from
+            # it states the split it was made at instead of guessing (#302).
             checkpoint = self.storage.create_checkpoint(
                 research_question=self.question,
+                metadata={CHECKPOINT_MIN_SCORE_KEY: self.min_score},
             )
             self._checkpoint_id = checkpoint.id
 
@@ -704,6 +708,8 @@ class SystematicReviewTab(QWidget):
 
         # Audit trail data - stored during workflow execution
         self._documents_found: List[LiteDocument] = []
+        # The accepted documents only (step_complete("scoring") carries no
+        # others); the audit trail reads _all_scored_documents below.
         self._scored_documents: List[ScoredDocument] = []
         # Every document that received a score, accepted, rejected and failed
         # alike. The audit trail sorts them by what they got; inferring
@@ -999,11 +1005,12 @@ class SystematicReviewTab(QWidget):
         """Keep the whole scoring record, and pass the document on.
 
         ``step_complete("scoring", ...)`` carries only the documents that met
-        the threshold, so this is the one place that sees a document the
-        model could not score (#302).
+        the threshold, so this is the only signal that brings this tab a
+        document the model could not score (#302).
 
         Args:
-            scored_doc: A document the model answered about, well or badly.
+            scored_doc: Any scoring result, including a failure carried as a
+                negative score.
         """
         self._all_scored_documents.append(scored_doc)
         self.document_scored.emit(scored_doc)

@@ -86,6 +86,7 @@ class LiteReportingAgent(LiteBaseAgent):
         metadata: ReportMetadata | None = None,
         transparency_results: dict[str, TransparencyResult] | None = None,
         analysis_shortfalls: Sequence[AnalysisShortfall] | None = None,
+        documents_accepted: int | None = None,
     ) -> str:
         """Generate a research report from citations.
 
@@ -96,6 +97,10 @@ class LiteReportingAgent(LiteBaseAgent):
             transparency_results: Optional dict mapping document_id to TransparencyResult
             analysis_shortfalls: What scoring and citation extraction could
                 not read (#261, #262); taken from *metadata* when not given.
+            documents_accepted: How many documents met the relevance
+                threshold and were read for citations; taken from *metadata*
+                when not given. With no citations and no extraction loss,
+                these documents held nothing quotable (#303).
 
         Returns:
             Formatted research report as markdown. When the search behind it
@@ -111,8 +116,15 @@ class LiteReportingAgent(LiteBaseAgent):
         """
         shortfalls = metadata.search_shortfalls if metadata else []
         losses = self._analysis_shortfalls(metadata, analysis_shortfalls)
+        if documents_accepted is None:
+            documents_accepted = metadata.documents_accepted if metadata else 0
         report = self._generate_report_body(
-            question, citations, metadata, transparency_results, losses
+            question,
+            citations,
+            metadata,
+            transparency_results,
+            losses,
+            documents_accepted,
         )
         return with_search_shortfall_notice(
             with_analysis_shortfall_notice(report, losses), shortfalls
@@ -145,6 +157,7 @@ class LiteReportingAgent(LiteBaseAgent):
         metadata: ReportMetadata | None,
         transparency_results: dict[str, TransparencyResult] | None,
         analysis_shortfalls: Sequence[AnalysisShortfall] = (),
+        documents_accepted: int = 0,
     ) -> str:
         """Generate the report itself, without the incomplete-search notice.
 
@@ -155,22 +168,25 @@ class LiteReportingAgent(LiteBaseAgent):
             transparency_results: Optional dict mapping document_id to TransparencyResult
             analysis_shortfalls: What scoring and citation extraction could
                 not read
+            documents_accepted: How many relevant documents were read for
+                citations
 
         Returns:
             Formatted research report as markdown
         """
         if not citations:
-            # Relevant documents that produced no citation mean the
-            # extraction failed, not that the literature is silent -- known
-            # either from a recorded shortfall (#261) or, for a review that
-            # kept metadata, from the documents it accepted.
+            # Only a recorded loss says the extraction failed (#261). Relevant
+            # documents that yielded nothing are otherwise the model's answer
+            # that none held a quotable passage (#303) -- inferring a failure
+            # from the accepted count called every such run a failed one.
             extraction_failed = any(
                 shortfall.stage is AnalysisStage.CITATION_EXTRACTION
                 for shortfall in analysis_shortfalls
-            ) or (metadata is not None and metadata.documents_accepted > 0)
+            )
             report = self._generate_no_evidence_report(
                 question,
                 citation_extraction_failed=extraction_failed,
+                documents_accepted=documents_accepted,
             )
             if metadata:
                 report += "\n\n" + self.format_methodology_section(metadata)
@@ -309,13 +325,20 @@ CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above.""
         self,
         question: str,
         citation_extraction_failed: bool = False,
+        documents_accepted: int = 0,
     ) -> str:
         """Generate a report when no citations are available.
+
+        Three situations, told apart because they are different findings: the
+        extraction failed, relevant documents held nothing quotable, or no
+        document was relevant at all.
 
         Args:
             question: Research question
             citation_extraction_failed: True if relevant documents were found
-                but citation extraction failed for all of them
+                but citation extraction could not read them
+            documents_accepted: How many relevant documents were read for
+                citations
 
         Returns:
             Report text explaining the situation
@@ -336,6 +359,27 @@ Relevant documents were found during the search, but citation extraction was una
 - Try running the search again
 - Review the scored documents in the Audit Trail to see what was found
 - If the problem persists, check the application logs for errors
+
+---
+
+*No citations extracted*
+"""
+        if documents_accepted > 0:
+            return f"""## Research Summary
+
+**Research Question:** {question}
+
+Documents judged relevant: {documents_accepted}. Their abstracts were read for citations, but none held a passage that addresses the question. Each abstract was read successfully: this is what they say, not a failure to read them. This may indicate:
+
+1. The documents concern the topic without answering this question
+2. The answer lies in the full text rather than the abstract
+3. The research question may need to be rephrased
+
+### Recommendations
+
+- Review the relevant documents in the Audit Trail
+- Open a document in the Document Interrogation tab to question its full text
+- Consider rephrasing the question
 
 ---
 

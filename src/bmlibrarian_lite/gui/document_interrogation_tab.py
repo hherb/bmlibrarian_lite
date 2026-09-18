@@ -88,13 +88,15 @@ logger = logging.getLogger(__name__)
 
 # What a fall back from the full text to the abstract is told to the reader as
 # (#304). Each names its own cause, and none of them carries the provider's
-# error text: a URL is what an NCBI API key travels in, and these strings go on
-# the screen. The raw failure stays in the log.
+# error text, because these strings go on the screen: error text prints the
+# request URL, and on this path that URL holds the user's email address (the
+# Unpaywall query). Any raw failure text stays in the log.
 FULLTEXT_UNAVAILABLE = "the full text could not be retrieved"
 FULLTEXT_EMPTY = "the full text retrieved was empty"
 FULLTEXT_UNREADABLE = "the full text was retrieved but could not be read"
 FULLTEXT_PAYWALLED = "the full text is behind a paywall"
-NO_FULLTEXT_IDENTIFIER = "the article carries no identifier to find a full text by"
+FULLTEXT_CANCELLED = "retrieving the full text was cancelled"
+NO_FULLTEXT_IDENTIFIER = "the article has no DOI, PMID or PMC ID to find a full text by"
 PDF_NO_TEXT = "no text could be extracted from the PDF"
 PDF_UNREADABLE = "the PDF was retrieved but could not be read"
 
@@ -500,14 +502,27 @@ class DocumentInterrogationTab(QWidget):
         if self._pdf_progress_dialog:
             self._pdf_progress_dialog.setLabelText(get_progress_stage_message(stage, status))
 
+    def _close_progress_dialog(self) -> None:
+        """Close the progress dialog without reporting a cancellation.
+
+        ``QProgressDialog.close()`` emits ``canceled`` -- Qt's close event
+        does -- and ``canceled`` is wired to "the user stopped it". So closing
+        the dialog because the work had finished told the full-text path the
+        user had cancelled, and it fell back to the abstract saying the full
+        text could not be retrieved, on every successful load too (#305
+        review). A dialog closed here was not cancelled, so it says nothing.
+        """
+        dialog, self._pdf_progress_dialog = self._pdf_progress_dialog, None
+        if dialog is not None:
+            dialog.blockSignals(True)
+            dialog.close()
+
     def _cancel_pdf_discovery(self) -> None:
         """Cancel any running PDF discovery."""
         if self._pdf_worker:
             self._pdf_worker.cancel()
             self._pdf_worker = None
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
 
     def _fetch_pdf_from_identifier(self) -> None:
         """Fetch PDF using DOI/PMID."""
@@ -560,9 +575,7 @@ class DocumentInterrogationTab(QWidget):
 
     def _on_pdf_ready(self, file_path: str, callback=None) -> None:
         """Handle PDF download completion."""
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
         self._pdf_worker = None
         if callback:
             callback(file_path)
@@ -571,9 +584,7 @@ class DocumentInterrogationTab(QWidget):
 
     def _on_pdf_error(self, error: str, callback=None) -> None:
         """Handle PDF download error."""
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
         self._pdf_worker = None
         if callback:
             callback(error)
@@ -582,18 +593,14 @@ class DocumentInterrogationTab(QWidget):
 
     def _on_pdf_warning(self, file_path: str, warning: str) -> None:
         """Handle PDF verification warning."""
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
         self._pdf_worker = None
         logger.warning(f"PDF verification failed: {warning}")
         QMessageBox.warning(self, "PDF Verification Failed", f"Downloaded PDF may not match.\n\n{warning}\n\nFile: {file_path}")
 
     def _on_paywall_detected(self, article_url: str, error: str, callback=None) -> None:
         """Handle paywall detection - prompt for OpenAthens authentication."""
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
         self._pdf_worker = None
 
         logger.info(f"Paywall detected for {article_url}: {error}")
@@ -628,7 +635,8 @@ class DocumentInterrogationTab(QWidget):
 
         The user chose this, but the choice scrolls out of the chat while the
         answers drawn from the abstract alone do not, so the source keeps
-        saying what it is (#304).
+        saying what it is (#304). Only a citation being loaded has an abstract
+        to fall back to; otherwise the caller, or the chat, is told instead.
 
         Args:
             callback: What to tell instead, when a caller is waiting on one.
@@ -735,9 +743,7 @@ class DocumentInterrogationTab(QWidget):
     def _load_pdf_file(self, pdf_path: Path, title: str) -> None:
         """Load a PDF file into the viewer."""
         # Ensure progress dialog is closed (defensive - should already be closed)
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
 
         if not pdf_path.exists():
             QMessageBox.warning(self, "File Not Found", f"PDF not found:\n{pdf_path}")
@@ -809,6 +815,9 @@ class DocumentInterrogationTab(QWidget):
             on_error=lambda _error: self._load_citation_abstract(
                 citation, FULLTEXT_UNAVAILABLE
             ),
+            on_cancel=lambda: self._load_citation_abstract(
+                citation, FULLTEXT_CANCELLED
+            ),
         )
 
     def _start_fulltext_discovery(
@@ -816,15 +825,26 @@ class DocumentInterrogationTab(QWidget):
         doc_dict: dict,
         display_title: str,
         citation: 'Citation',
-        on_error=None,
+        on_error: Callable[[str], None] | None = None,
+        on_cancel: Callable[[], None] | None = None,
     ) -> None:
-        """Start full-text discovery in background (Europe PMC XML or PDF)."""
+        """Start full-text discovery in background (Europe PMC XML or PDF).
+
+        Args:
+            doc_dict: The document's identifiers.
+            display_title: What to call the document meanwhile.
+            citation: The citation being loaded.
+            on_error: Told when discovery failed, with the provider's error
+                text -- which is for the log, never the screen.
+            on_cancel: Told when the user stopped discovery. A cancellation
+                is not a failure, so it is not routed through ``on_error``.
+        """
         self._current_doc_metadata = doc_dict
         self._pending_fetch_title = display_title
 
         self._pdf_progress_dialog = self._create_progress_dialog("Fetching Full Text")
         self._pdf_progress_dialog.canceled.connect(
-            lambda: (self._cancel_fulltext_discovery(), on_error and on_error("Cancelled"))
+            lambda: (self._cancel_fulltext_discovery(), on_cancel and on_cancel())
         )
         self._pdf_progress_dialog.show()
 
@@ -857,9 +877,7 @@ class DocumentInterrogationTab(QWidget):
         citation: 'Citation',
     ) -> None:
         """Handle full-text discovery completion."""
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
         self._fulltext_worker = None
 
         # Map source type to user-friendly label
@@ -880,15 +898,16 @@ class DocumentInterrogationTab(QWidget):
 
     def _on_fulltext_error(self, error: str, citation: 'Citation', callback=None) -> None:
         """Handle full-text discovery error."""
-        if self._pdf_progress_dialog:
-            self._pdf_progress_dialog.close()
-            self._pdf_progress_dialog = None
+        self._close_progress_dialog()
         self._fulltext_worker = None
 
         logger.warning(f"Full-text discovery failed: {error}")
         if callback:
             callback(error)
         else:
+            # Unreached today: load_from_citation, the only caller, always
+            # passes a callback. Kept so a caller without one still names
+            # the cause rather than falling back silently.
             self._load_citation_abstract(citation, FULLTEXT_UNAVAILABLE)
 
     def _cancel_fulltext_discovery(self) -> None:
@@ -901,6 +920,7 @@ class DocumentInterrogationTab(QWidget):
         title = get_document_title(citation)
         try:
             if not content.strip():
+                logger.warning(f"Full text for {title!r} arrived empty")
                 self._load_citation_abstract(citation, FULLTEXT_EMPTY)
                 return
 
@@ -918,6 +938,7 @@ class DocumentInterrogationTab(QWidget):
         try:
             text = extract_pdf_text(pdf_path)
             if not text.strip():
+                logger.warning(f"No text could be extracted from {pdf_path}")
                 self._load_citation_abstract(citation, PDF_NO_TEXT)
                 return
 

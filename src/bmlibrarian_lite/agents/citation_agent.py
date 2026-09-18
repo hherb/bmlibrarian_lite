@@ -45,29 +45,52 @@ from .base import LiteBaseAgent
 logger = logging.getLogger(__name__)
 
 
+def is_readable_passage(passage: object) -> bool:
+    """Whether one passage carries text that can be quoted.
+
+    Args:
+        passage: One entry of the response's ``passages`` list.
+
+    Returns:
+        True for an object whose ``text`` is a string with something in it.
+        ``{"text": null}`` would become a citation with no passage, which
+        storage refuses -- ending the whole review over one quote.
+    """
+    if not isinstance(passage, dict):
+        return False
+    text = passage.get("text")
+    return isinstance(text, str) and bool(text.strip())
+
+
 def readable_passages(data: object) -> list[dict[str, Any]] | None:
-    """The passages a parsed extraction response holds, or None if it has none.
+    """The readable passages a parsed extraction response holds, or None.
 
     An empty list is an answer: the model read the text and found nothing
-    quotable for the question (#303). Only a response we could not read at
-    all, or one whose every passage arrived in a shape we cannot use, is a
-    failure -- and only a failure is worth retrying.
+    quotable for the question (#303). Only a response holding no passage
+    list, or one whose every passage arrived in a shape we cannot use, is a
+    failure -- and only a failure is worth retrying. A partial answer keeps
+    what it can, and the rest is logged.
 
     Args:
         data: Whatever parsing the response produced.
 
     Returns:
-        The passages carrying text, possibly none of them, or None if the
-        response carries no readable answer.
+        The passages with quotable text, possibly none of them, or None if
+        the response carries no readable answer.
     """
     if not isinstance(data, dict):
         return None
     passages = data.get("passages")
     if not isinstance(passages, list):
         return None
-    readable = [p for p in passages if isinstance(p, dict) and "text" in p]
+    readable = [p for p in passages if is_readable_passage(p)]
     if passages and not readable:
         return None
+    if len(readable) < len(passages):
+        logger.warning(
+            f"Dropped {len(passages) - len(readable)} of {len(passages)} "
+            f"passages in a shape that cannot be quoted: {passages!r}"
+        )
     return readable
 
 
@@ -122,14 +145,18 @@ class LiteCitationAgent(LiteBaseAgent):
 
         Uses tenacity-based retry logic for API failures. On complete failure
         after all retries, returns an empty list rather than a fallback
-        citation, allowing the caller to handle the error appropriately.
+        citation. An empty list is therefore ambiguous here -- nothing
+        quotable, or nothing readable -- so a caller that must tell the two
+        apart uses :meth:`extract_all_citations`, whose outcome records the
+        failures (#303).
 
         Args:
             question: Research question
             scored_doc: Document with relevance score
 
         Returns:
-            List of extracted citations. Empty list on failure.
+            List of extracted citations: empty when the document held nothing
+            quotable, and also when it could not be read.
         """
         citations, _ = self._extract_with_cause(question, scored_doc)
         return citations
@@ -376,9 +403,10 @@ Extract the most relevant passages that help answer the research question."""
             response: LLM response text
 
         Returns:
-            The passage dictionaries the response holds -- an empty list when
-            the model found nothing quotable -- or None when the response
-            carries no readable answer at all (#303).
+            The readable passage dictionaries the response holds -- an empty
+            list when the model found nothing quotable -- or None when it
+            carries no readable answer: no passage list, or none of its
+            passages usable (#303). See :func:`readable_passages`.
         """
         # Strip markdown code fences if present
         cleaned = response.strip()
