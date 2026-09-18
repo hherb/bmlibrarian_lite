@@ -578,6 +578,38 @@ class TestTheReport:
 
         assert "No relevant evidence was found" in report
 
+    def test_relevant_documents_that_held_nothing_quotable_are_not_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#303 half-closed: the GUI blamed "API or network errors" for an answer.
+
+        The GUI always passes metadata, and extraction only runs once a
+        document was accepted, so inferring a failure from
+        ``documents_accepted`` made every silent run read as a failed one.
+        """
+        agent = reporting_agent(monkeypatch, "## Findings")
+
+        report = agent.generate_report(
+            QUESTION,
+            [],
+            ReportMetadata(research_question=QUESTION, documents_accepted=2),
+        )
+
+        assert "API or network errors" not in report
+        assert "No relevant evidence was found" not in report
+        assert "Documents judged relevant: 2" in report
+
+    def test_a_caller_without_metadata_can_say_how_many_were_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MCP builds no metadata, and its silent run is the same finding."""
+        agent = reporting_agent(monkeypatch, "## Findings")
+
+        report = agent.generate_report(QUESTION, [], documents_accepted=3)
+
+        assert "No relevant evidence was found" not in report
+        assert "Documents judged relevant: 3" in report
+
     def test_a_report_on_part_of_the_evidence_opens_with_the_notice(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -676,6 +708,21 @@ class TestTheMcpFactCheck:
             }
         ]
         assert "reachable" in payload["advice"]
+
+    def test_an_extraction_that_found_nothing_quotable_says_so(self) -> None:
+        """#303 through MCP: the documents were relevant, and were read."""
+        context = fact_check_context()
+        context.citation_agent.extract_all_citations.return_value = CitationOutcome(
+            citations=[], documents_attempted=1
+        )
+        context.reporting_agent.generate_report = LiteReportingAgent(
+            config=LiteConfig()
+        ).generate_report
+
+        result = mcp_server._handle_fact_check({"claim": QUESTION}, context)
+
+        assert "No relevant evidence was found" not in result["report"]
+        assert "Documents judged relevant: 1" in result["report"]
 
     def test_an_extraction_that_failed_everywhere_is_not_an_empty_literature(
         self,
@@ -1140,3 +1187,226 @@ class TestAFailureAfterAnIncompleteStage:
         payload = mcp_server._error_payload(raised.value)
 
         assert "analysis_shortfalls" not in payload
+
+
+class TestNothingQuotableIsNotAFailedRead:
+    """Nothing quotable is not a document nobody could read (#303).
+
+    ``{"passages": []}`` is well-formed: the answer that this abstract holds
+    nothing for the question. Treating it as a parse failure spent four
+    retries on it and then recorded the document as unreadable, so a run in
+    which every abstract was read correctly told the user the analysis was
+    incomplete. These tests drive ``_chat``, because the guess lives inside
+    the retry decorator.
+    """
+
+    def test_an_empty_passage_list_is_an_answer(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Nothing quotable, read successfully: no cause, no shortfall."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM(['{"passages": []}']))
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.citations == []
+        assert outcome.documents_failed == 0
+        assert outcome.causes == ()
+        assert outcome.shortfall is None
+
+    def test_a_silent_document_costs_one_call_not_four(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """The retries were spent on an answer that was never going to change."""
+        agent = LiteCitationAgent()
+        calls = 0
+
+        def chat(*_args: Any, **_kwargs: Any) -> str:
+            nonlocal calls
+            calls += 1
+            return '{"passages": []}'
+
+        monkeypatch.setattr(agent, "_chat", chat)
+
+        agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert calls == 1, "The agent retried an answer it had understood"
+
+    def test_a_silent_run_leaves_the_report_free_of_a_failure_notice(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """"Nothing quotable" is the finding, and the report must say so.
+
+        Built the way the GUI builds it: the outcome's losses in the metadata,
+        beside the count of documents accepted.
+        """
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM(['{"passages": []}'] * 2)
+        )
+
+        outcome = agent.extract_all_citations(
+            QUESTION, [relevant(1), relevant(2)], min_score=3
+        )
+        report = LiteReportingAgent(config=LiteConfig()).generate_report(
+            QUESTION,
+            outcome.citations,
+            ReportMetadata(
+                research_question=QUESTION,
+                documents_accepted=2,
+                analysis_shortfalls=[outcome.shortfall] if outcome.shortfall else [],
+            ),
+        )
+
+        assert not report.startswith(NOTICE_START)
+        assert "API or network errors" not in report
+        assert "Documents judged relevant: 2" in report
+
+    def test_a_response_nobody_can_parse_is_still_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """The distinction only helps if the other side of it still holds."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM(["Sorry, I cannot help."] * 4))
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.documents_failed == 1
+        assert outcome.causes == (EvaluationErrorCode.JSON_PARSE_ERROR,)
+
+    def test_passages_the_model_sent_in_a_shape_we_cannot_read_are_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Dropping every passage the model named is not "nothing quotable"."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent,
+            "_chat",
+            ScriptedLLM(['{"passages": [{"quote": "Aspirin reduced stroke."}]}'] * 4),
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.documents_failed == 1
+        assert outcome.causes == (EvaluationErrorCode.JSON_PARSE_ERROR,)
+
+    def test_a_passage_we_can_read_survives_a_sibling_we_cannot(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """A partial answer is an answer; only losing all of it is a failure."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent,
+            "_chat",
+            ScriptedLLM(
+                [
+                    '{"passages": [{"quote": "dropped"},'
+                    ' {"text": "Aspirin reduced stroke."}]}'
+                ]
+            ),
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert [c.passage for c in outcome.citations] == ["Aspirin reduced stroke."]
+        assert outcome.documents_failed == 0
+
+    def test_a_passage_dropped_from_a_partial_answer_is_logged(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        without_retry_delays: None,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Keeping the rest is right; dropping some without a trace is not."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent,
+            "_chat",
+            ScriptedLLM(
+                ['{"passages": [{"text": null}, {"text": "Aspirin reduced stroke."}]}']
+            ),
+        )
+
+        with caplog.at_level("WARNING"):
+            agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert "1 of 2 passages" in caplog.text
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            "{}",
+            '{"passages": null}',
+            '{"error": "context length exceeded"}',
+            '{"citations": [{"text": "Aspirin reduced stroke."}]}',
+        ],
+    )
+    def test_an_object_with_no_passage_list_is_not_an_answer(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        without_retry_delays: None,
+        answer: str,
+    ) -> None:
+        """Well-formed JSON is not an answer unless it holds a passage list.
+
+        Read as "nothing quotable", these would be the reverse of #303: a
+        failure recorded as a finding, never retried and never counted.
+        """
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM([answer] * 4))
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.documents_failed == 1
+        assert outcome.causes == (EvaluationErrorCode.JSON_PARSE_ERROR,)
+
+    @pytest.mark.parametrize(
+        "passage",
+        ['{"text": null}', '{"text": ""}', '{"text": "   "}', '{"text": ["a"]}', '{"text": 5}'],
+    )
+    def test_a_passage_with_no_text_to_quote_is_not_read_as_one(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        without_retry_delays: None,
+        passage: str,
+    ) -> None:
+        """``{"text": null}`` became a citation with no passage.
+
+        Storage refuses a citation without one, so a single null quote ended
+        the whole review after every model call had been paid for.
+        """
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM([f'{{"passages": [{passage}]}}'] * 4)
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.citations == []
+        assert outcome.documents_failed == 1
+
+    def test_an_empty_answer_wrapped_in_prose_is_still_an_answer(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Local models put prose around JSON even in JSON mode."""
+        agent = LiteCitationAgent()
+        script = ScriptedLLM(['Here you go: {"passages": []}'])
+        monkeypatch.setattr(agent, "_chat", script)
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert outcome.documents_failed == 0
+        assert script.answers == [], "The agent never asked"
+
+    def test_an_unreadable_answer_is_asked_again(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """Only a failure is worth retrying -- and a failure still is."""
+        agent = LiteCitationAgent()
+        script = ScriptedLLM(["Sorry, I cannot help.", '{"passages": []}'])
+        monkeypatch.setattr(agent, "_chat", script)
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant(1)], min_score=3)
+
+        assert script.answers == [], "The unreadable answer was not retried"
+        assert outcome.documents_failed == 0

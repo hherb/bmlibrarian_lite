@@ -520,7 +520,8 @@ def _handle_fact_check(
 
     # 4. Generate report. The shortfalls travel with the citations, so a
     # report built on none of them says the extraction failed rather than
-    # that the literature is silent (#261).
+    # that the literature is silent (#261); the accepted count lets one whose
+    # relevant documents held nothing quotable say that instead (#303).
     if progress:
         progress.advance("Generating evidence report…")
     try:
@@ -528,6 +529,7 @@ def _handle_fact_check(
             question=claim,
             citations=citations,
             analysis_shortfalls=analysis_shortfalls,
+            documents_accepted=len(scored_documents),
         )
     except Exception as exc:
         # The report failing does not un-lose what scoring and extraction

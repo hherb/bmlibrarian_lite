@@ -2643,6 +2643,7 @@ class LiteStorage:
         self,
         question: str,
         min_score: Optional[int] = None,
+        checkpoint_id: str | None = None,
     ) -> list[ScoredDocument]:
         """
         Get all scored documents for a research question.
@@ -2650,9 +2651,14 @@ class LiteStorage:
         Args:
             question: The research question text
             min_score: Optional minimum score filter
+            checkpoint_id: Only the scores of this checkpoint's run. Without
+                it, every run of the question -- earlier reviews and benchmark
+                runs alike -- is merged, which describes none of them.
 
         Returns:
-            List of ScoredDocument objects sorted by score descending
+            List of ScoredDocument objects sorted by score descending, one
+            per document: where a document was scored more than once, its
+            highest score.
         """
         with self._sqlite_connection() as conn:
             # Build query with optional score filter
@@ -2671,6 +2677,10 @@ class LiteStorage:
             """
             params: list = [question]
 
+            if checkpoint_id is not None:
+                query += " AND sd.checkpoint_id = ?"
+                params.append(checkpoint_id)
+
             if min_score is not None:
                 query += " AND sd.score >= ?"
                 params.append(min_score)
@@ -2685,7 +2695,8 @@ class LiteStorage:
             for row in cursor:
                 doc_id = row["document_id"]
 
-                # Skip duplicates (keep most recent)
+                # Skip duplicates: rows arrive highest score first, so the
+                # first kept is the highest, the most recent among equals.
                 if doc_id in seen_docs:
                     continue
                 seen_docs.add(doc_id)

@@ -29,7 +29,7 @@ import logging
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, Callable
+from typing import Any, Optional, Callable
 
 from ..data_models import (
     Citation,
@@ -43,6 +43,56 @@ from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retrie
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
+
+
+def is_readable_passage(passage: object) -> bool:
+    """Whether one passage carries text that can be quoted.
+
+    Args:
+        passage: One entry of the response's ``passages`` list.
+
+    Returns:
+        True for an object whose ``text`` is a string with something in it.
+        ``{"text": null}`` would become a citation with no passage, which
+        storage refuses -- ending the whole review over one quote.
+    """
+    if not isinstance(passage, dict):
+        return False
+    text = passage.get("text")
+    return isinstance(text, str) and bool(text.strip())
+
+
+def readable_passages(data: object) -> list[dict[str, Any]] | None:
+    """The readable passages a parsed extraction response holds, or None.
+
+    An empty list is an answer: the model read the text and found nothing
+    quotable for the question (#303). Only a response holding no passage
+    list, or one whose every passage arrived in a shape we cannot use, is a
+    failure -- and only a failure is worth retrying. A partial answer keeps
+    what it can, and the rest is logged.
+
+    Args:
+        data: Whatever parsing the response produced.
+
+    Returns:
+        The passages with quotable text, possibly none of them, or None if
+        the response carries no readable answer.
+    """
+    if not isinstance(data, dict):
+        return None
+    passages = data.get("passages")
+    if not isinstance(passages, list):
+        return None
+    readable = [p for p in passages if is_readable_passage(p)]
+    if passages and not readable:
+        return None
+    if len(readable) < len(passages):
+        logger.warning(
+            f"Dropped {len(passages) - len(readable)} of {len(passages)} "
+            f"passages in a shape that cannot be quoted: {passages!r}"
+        )
+    return readable
+
 
 # System prompt for citation extraction
 CITATION_SYSTEM_PROMPT = """You are a medical research citation extractor. Your task is to identify the most relevant passages from a document that help answer a research question.
@@ -95,14 +145,18 @@ class LiteCitationAgent(LiteBaseAgent):
 
         Uses tenacity-based retry logic for API failures. On complete failure
         after all retries, returns an empty list rather than a fallback
-        citation, allowing the caller to handle the error appropriately.
+        citation. An empty list is therefore ambiguous here -- nothing
+        quotable, or nothing readable -- so a caller that must tell the two
+        apart uses :meth:`extract_all_citations`, whose outcome records the
+        failures (#303).
 
         Args:
             question: Research question
             scored_doc: Document with relevance score
 
         Returns:
-            List of extracted citations. Empty list on failure.
+            List of extracted citations: empty when the document held nothing
+            quotable, and also when it could not be read.
         """
         citations, _ = self._extract_with_cause(question, scored_doc)
         return citations
@@ -179,7 +233,7 @@ Extract the most relevant passages that help answer the research question."""
             return [], error_code
 
     @llm_retry(max_retries=3, retry_on_json_error=True)
-    def _extract_with_retry(self, messages: list) -> list[dict]:
+    def _extract_with_retry(self, messages: list) -> list[dict[str, Any]]:
         """
         Internal method that performs citation extraction with retry logic.
 
@@ -199,10 +253,12 @@ Extract the most relevant passages that help answer the research question."""
         response = self._chat(messages, temperature=0.1, json_mode=True)
         passages = self._parse_citation_response(response)
 
-        # If we got no passages, it might be a parse failure - retry
-        if not passages:
+        # An empty list is the model's answer that nothing here is quotable,
+        # and retrying will not change it. Only a response we could not read
+        # is a parse failure (#303).
+        if passages is None:
             raise JSONParseError(
-                "No passages extracted from response",
+                "Could not read passages from response",
                 raw_response=response,
             )
 
@@ -337,7 +393,9 @@ Extract the most relevant passages that help answer the research question."""
             causes=distinct_causes(causes),
         )
 
-    def _parse_citation_response(self, response: str) -> list[dict]:
+    def _parse_citation_response(
+        self, response: str
+    ) -> list[dict[str, Any]] | None:
         """
         Parse LLM response to extract passages.
 
@@ -345,7 +403,10 @@ Extract the most relevant passages that help answer the research question."""
             response: LLM response text
 
         Returns:
-            List of passage dictionaries
+            The readable passage dictionaries the response holds -- an empty
+            list when the model found nothing quotable -- or None when it
+            carries no readable answer: no passage list, or none of its
+            passages usable (#303). See :func:`readable_passages`.
         """
         # Strip markdown code fences if present
         cleaned = response.strip()
@@ -358,15 +419,9 @@ Extract the most relevant passages that help answer the research question."""
         try:
             # Try parsing the entire cleaned response as JSON first
             # This is the most reliable method
-            data = json.loads(cleaned)
-            if isinstance(data, dict) and "passages" in data:
-                passages = data["passages"]
-                # Validate passages
-                valid_passages = []
-                for p in passages:
-                    if isinstance(p, dict) and "text" in p:
-                        valid_passages.append(p)
-                return valid_passages
+            passages = readable_passages(json.loads(cleaned))
+            if passages is not None:
+                return passages
 
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.debug(f"Direct JSON parsing failed: {e}")
@@ -387,13 +442,9 @@ Extract the most relevant passages that help answer the research question."""
                             # Found matching closing brace
                             json_str = response[start_idx:i + 1]
                             try:
-                                data = json.loads(json_str)
-                                if isinstance(data, dict) and "passages" in data:
-                                    valid_passages = []
-                                    for p in data["passages"]:
-                                        if isinstance(p, dict) and "text" in p:
-                                            valid_passages.append(p)
-                                    return valid_passages
+                                passages = readable_passages(json.loads(json_str))
+                                if passages is not None:
+                                    return passages
                             except json.JSONDecodeError:
                                 pass
                             break
@@ -401,9 +452,9 @@ Extract the most relevant passages that help answer the research question."""
         except Exception as e:
             logger.debug(f"Brace-matching JSON parsing failed: {e}")
 
-        # Fallback: return empty list
+        # Nothing here we can read as an answer; the caller retries.
         logger.warning(f"Could not parse citations from: {response}")
-        return []
+        return None
 
     def group_citations_by_document(
         self,

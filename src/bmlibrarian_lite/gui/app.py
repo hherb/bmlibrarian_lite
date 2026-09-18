@@ -48,6 +48,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import StylesheetGenerator
 from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 
+from ..audit_records import recorded_min_score
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from .research_questions_tab import ResearchQuestionsTab
@@ -323,7 +324,7 @@ class LiteMainWindow(QMainWindow):
         question: str,
         citations: list,
         documents_found: list,
-        scored_documents: list,
+        all_scored_documents: list,
         quality_assessments: dict,
         quality_filter_settings: dict,
         report_metadata: object = None,
@@ -338,7 +339,9 @@ class LiteMainWindow(QMainWindow):
             question: Research question
             citations: List of citations extracted
             documents_found: All documents found in search
-            scored_documents: Documents that passed scoring
+            all_scored_documents: Every document that received a score --
+                accepted, rejected and failed alike, so the audit trail can
+                tell them apart rather than infer from absence (#302)
             quality_assessments: Quality assessments by doc ID
             quality_filter_settings: Quality filter settings used
             report_metadata: Optional ReportMetadata for reproducibility
@@ -349,7 +352,7 @@ class LiteMainWindow(QMainWindow):
             question=question,
             citations=citations,
             documents_found=documents_found,
-            scored_documents=scored_documents,
+            all_scored_documents=all_scored_documents,
             quality_assessments=quality_assessments,
             quality_filter_settings=quality_filter_settings,
             report_metadata=report_metadata,
@@ -585,8 +588,13 @@ class LiteMainWindow(QMainWindow):
             ]
             documents_found = [d for d in documents_found if d is not None]
 
-            # 3. Load all scored documents
-            scored_documents = self.storage.get_scored_documents_for_question(question)
+            # 3. Load the scores of the run this report came from. Every run
+            # of the question merged, highest score first, would describe
+            # none of them: a document that failed in this run but scored in
+            # an earlier one would be audited as accepted (#302).
+            scored_documents = self.storage.get_scored_documents_for_question(
+                question, checkpoint_id=checkpoint.id
+            )
 
             # 4. Load all citations
             citations = self.storage.get_citations_for_question(question)
@@ -621,9 +629,13 @@ class LiteMainWindow(QMainWindow):
                 question=question,
                 citations=citations,
                 documents_found=documents_found,
-                scored_documents=scored_documents,
+                all_scored_documents=scored_documents,
                 quality_assessments=quality_assessments,
                 quality_filter_settings={},  # Not stored in checkpoint
+                min_score_threshold=recorded_min_score(checkpoint.metadata),
+                # The run saved its own report and audit when it ran; a record
+                # rebuilt from the database would be a second, poorer one.
+                auto_save=False,
             )
 
             # 9. Load benchmark results if available

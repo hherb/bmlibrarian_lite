@@ -51,6 +51,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import get_stylesheet_generator
 from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 
+from ..audit_records import CHECKPOINT_MIN_SCORE_KEY
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import (
@@ -343,9 +344,12 @@ class WorkflowWorker(QThread):
                     documents = filtered
 
             # Step 3: Score documents
-            # Create checkpoint BEFORE scoring so we can persist results immediately
+            # Create checkpoint BEFORE scoring so we can persist results
+            # immediately. It keeps the threshold, so a report restored from
+            # it states the split it was made at instead of guessing (#302).
             checkpoint = self.storage.create_checkpoint(
                 research_question=self.question,
+                metadata={CHECKPOINT_MIN_SCORE_KEY: self.min_score},
             )
             self._checkpoint_id = checkpoint.id
 
@@ -704,7 +708,13 @@ class SystematicReviewTab(QWidget):
 
         # Audit trail data - stored during workflow execution
         self._documents_found: List[LiteDocument] = []
+        # The accepted documents only (step_complete("scoring") carries no
+        # others); the audit trail reads _all_scored_documents below.
         self._scored_documents: List[ScoredDocument] = []
+        # Every document that received a score, accepted, rejected and failed
+        # alike. The audit trail sorts them by what they got; inferring
+        # "rejected" from absence recorded failures as judgements (#302).
+        self._all_scored_documents: list[ScoredDocument] = []
         self._all_citations: List[Citation] = []
         self._quality_assessments: Dict[str, QualityAssessment] = {}
 
@@ -855,6 +865,7 @@ class SystematicReviewTab(QWidget):
         # Clear previous audit data
         self._documents_found = []
         self._scored_documents = []
+        self._all_scored_documents = []
         self._all_citations = []
         self._quality_assessments = {}
         self.quality_summary.setVisible(False)
@@ -897,7 +908,7 @@ class SystematicReviewTab(QWidget):
 
         # Connect worker audit trail signals to tab signals
         self._worker.query_generated.connect(self.query_generated)
-        self._worker.document_scored.connect(self.document_scored)
+        self._worker.document_scored.connect(self._on_document_scored)
         self._worker.citation_extracted.connect(self.citation_extracted)
         self._worker.quality_assessed.connect(self.quality_assessed)
 
@@ -990,6 +1001,20 @@ class SystematicReviewTab(QWidget):
             self._all_citations = citations
             self.progress_label.setText(f"Extracted {len(citations)} citations")
 
+    def _on_document_scored(self, scored_doc: ScoredDocument) -> None:
+        """Keep the whole scoring record, and pass the document on.
+
+        ``step_complete("scoring", ...)`` carries only the documents that met
+        the threshold, so this is the only signal that brings this tab a
+        document the model could not score (#302).
+
+        Args:
+            scored_doc: Any scoring result, including a failure carried as a
+                negative score.
+        """
+        self._all_scored_documents.append(scored_doc)
+        self.document_scored.emit(scored_doc)
+
     def _on_search_incomplete(self, missing: str) -> None:
         """Tell the user the review is proceeding on an incomplete search.
 
@@ -1077,7 +1102,7 @@ class SystematicReviewTab(QWidget):
             self._current_question,
             self._all_citations,
             self._documents_found,
-            self._scored_documents,
+            self._all_scored_documents,
             self._quality_assessments,
             quality_filter_settings,
             metadata,

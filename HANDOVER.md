@@ -8,61 +8,64 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#261 + #262 + #263 + #264 — a failed analysis is not an empty one**, branch
-`fix/failed-analysis-is-not-an-empty-one-261`, PR #301. Python only. Compress into
-**Recently landed** once merged.
+**#302 + #303 + #304 — a failure is not a finding, one layer down**, branch
+`fix/failure-is-not-an-answer-302`, PR #305. Python only. Compress into **Recently
+landed** once merged. The three defects PR #301 lodged rather than fixed, all
+the same family as #261–#264 and all pre-existing on master; the PR's own
+review then found the fix had created one false claim and left two half-done.
 
-- **The contract** is `doc/cross_platform/analysis_failure_reporting.md`, the
-  companion of the search one for the stages after the search. Swift and
-  Android are **unchecked** against it (**#300**).
-- **The vocabulary.** `AnalysisShortfall` (in `data_models.py`, beside
-  `RetrievalShortfall`) records stage + failed + attempted + causes; the pure
-  functions are in `analysis_failures.py`. A shortfall that lost nothing is
-  refused on construction, repeated causes are reduced on the way in, and a
-  cause a build cannot name degrades while the count never does.
-- **Scoring raises** (`AnalysisFailedError`) when every attempted document
-  failed; otherwise it answers with a `ScoringOutcome` whose failures are kept
-  apart from documents scored below the threshold. **Citation extraction never
-  raises** — the documents are known to be relevant, so a report can say the
-  extraction failed, which is more than a threshold message could.
-  **Report generation raises** rather than returning `Error generating report:
-  …` as the report (which the GUI checkpointed as complete and auto-saved).
-- **The notice is idempotent**: the agent qualifies the report, and the MCP
-  result must not qualify it again. A check that decides *what a text is*
-  (the Report tab's auto-save) reads the body behind **both** notices.
-- **A failed document is not a rejected one** — the Methodology section counts
-  them apart and records **Analysis Completeness**, and it is not a *scored*
-  one either: `documents_scored == documents_accepted + documents_rejected`,
-  so the three numbers reconcile.
-- **Classify the failure, not the wrapper.** `llm_retry` retries every provider
-  failure, so an agent sees `RetryExhaustedError`, never the refused key or
-  unreachable host underneath. Recording the wrapper left *every* outage
-  advising "try again later" — the tailored advice was unreachable in
-  production, including #262's own Ollama-is-down case. Both agents now go
-  through `classify_exhausted_retries()` (`utils.py`), which reads
-  `last_error`. **Tests that patch `_score_with_retry`/`_extract_with_retry`
-  patch *inside* the retry decorator and cannot see this**; the ones that
-  matter drive `_chat`.
-- **Cancelling is not failing.** A cancelled run's attempted set is only what
-  it got through, so one timed-out document before a cancel used to end the
-  review with "Scoring Failed". The cancel check now precedes the total-loss
-  verdict in both the worker and `score_documents`.
-- **A later failure does not un-lose what an earlier stage lost.** The MCP
-  shortfalls are a handler local, so a report-generation failure (which #263
-  made raise) dropped them; the exception now carries them to `_error_payload`.
-- **The outcome types enforce their own counts.** `ScoringOutcome` and
-  `CitationOutcome` refuse impossible numbers on construction instead of
-  repairing them with `max()` — a floored `attempted` reads as "every document
-  failed", which is a *terminal* verdict, so a caller's slip became a
-  confident lie to the user.
-- **Verified:** `pytest tests/` — 1197 passed, 3 xfailed;
-  `lint_delta.py --base-ref origin/master` reports 0 new ruff and 0 new mypy
-  findings. Swift and Android untouched.
-- **Lodged, not fixed** (all pre-existing on master, all the same family):
-  audit trail writes unscored documents as rejected with an invented reason
-  (issue 302); a well-formed `{"passages": []}` is treated as a parse failure,
-  costing 4x the LLM calls and a false "Incomplete analysis" (issue 303); the
-  GUI's full-text-to-abstract fallback is silent (issue 304).
+- **The contract gained the rules**, in
+  `doc/cross_platform/analysis_failure_reporting.md`, precise enough to port
+  (what makes an answer readable, the eight source phrases, the restore and
+  legacy-record rules) — Swift and Android are still unchecked against any of
+  it (**#300**).
+- **An answer with nothing in it is an answer** (#303). Citation extraction's
+  `{"passages": []}` is well-formed: the model read the abstract and found
+  nothing quotable. `readable_passages()` (`agents/citation_agent.py`) answers
+  `None` only for a response with no passage list, or one whose **every**
+  passage is unusable; a passage counts only if its `text` is a non-blank
+  string (`{"text": null}` reached a NOT NULL column and ended the review).
+  **The report had to change too**: `reporting_agent.py` inferred a failed
+  extraction from `documents_accepted > 0`, which is always true in the GUI,
+  so a silent run still blamed "API or network errors". It now decides from
+  the recorded shortfall alone and says *documents judged relevant: N, none
+  held a quotable passage*; MCP passes `documents_accepted`.
+- **The audit trail classifies instead of inferring** (#302). `audit_records.py`
+  sorts documents by the score they actually got — accepted, rejected (the
+  model's own explanation), failed (the error code, and the raw code as its
+  score), not scored (**no reason, because none was given**).
+  `DocumentOutcomes` carries its threshold and refuses a document counted
+  twice or filed where its score says it does not belong;
+  `outcome_summary()`/`outcome_entries()` build what the file and the dialog
+  share, which had already drifted. `display_report` takes
+  `all_scored_documents`; `SystematicReviewTab._on_document_scored` is the only
+  signal that brings the tab a document the model could not score.
+  - **A restore is not a new record.** Selecting a question used to auto-save a
+    fresh audit rebuilt from every run of the question, highest score first,
+    at a guessed threshold of 3. Now the worker writes the threshold into the
+    checkpoint (`CHECKPOINT_MIN_SCORE_KEY`), a restore reads that checkpoint's
+    scores only and its threshold (`recorded_min_score()`, "not recorded" for
+    older ones), and **does not auto-save** — Horst's call, 2026-09-19.
+  - **An older record** (no `failed_documents`) is shown with a note, and
+    without the stock "Score below minimum threshold" — also Horst's call; the
+    file is never changed.
+- **A degraded source is named where the source is named** (#304). Seven
+  paths fell back to the abstract with at most a log line; each now says
+  which, and a user's cancel says *cancelled*. Each cause is a fixed phrase
+  because provider error text prints the request URL, and the Unpaywall URL
+  carries the user's email — **a credential never travels in a URL at all**
+  (#196). **`QProgressDialog.close()` emits `canceled`**: every handler closed
+  the dialog first, so every *successful* load announced the full text "could
+  not be retrieved". Close it with `_close_progress_dialog()`, never directly.
+- **Lodged, not addressed here** (all Python, none blocking): #306 benchmark
+  failures scored as 1; #307 the Audit Trail tab's "-4/5" cards; #308 the
+  paywall flow (stale pending citation, empty pane on Cancel); #309 three
+  fallbacks still misstating their cause; #310 per-document extraction
+  failures missing from the audit; #311 raw error text in the PDF and
+  OpenAthens dialogs; #312 a restore's found-documents list spans every run.
+- **Verified:** `pytest tests/` — 1300 passed, 3 xfailed; `lint_delta.py
+  --base-ref origin/master` reports 0 new ruff and 0 new mypy findings (both
+  totals below master). Swift and Android untouched.
 
 ## Recently landed (context)
 
@@ -70,64 +73,99 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **A failed analysis is not an empty one** (#261–#264; PR #301, merged
+  2026-09-17). Python only; the contract is
+  `doc/cross_platform/analysis_failure_reporting.md`.
+  - **The vocabulary.** `AnalysisShortfall` (`data_models.py`) records stage +
+    failed + attempted + causes; the pure functions live in
+    `analysis_failures.py`. A shortfall that lost nothing is refused on
+    construction, repeated causes are reduced on the way in, and a cause a
+    build cannot name degrades while the count never does. `ScoringOutcome`
+    and `CitationOutcome` refuse impossible counts rather than repairing them
+    with `max()`: a floored `attempted` reads as "every document failed",
+    which is a *terminal* verdict, so a caller's slip became a confident lie.
+  - **Each stage fails in its own register.** Scoring raises
+    (`AnalysisFailedError`) only when *every* attempted document failed.
+    Citation extraction **never** raises — the documents are known relevant,
+    so the report can say the extraction failed. Report generation raises
+    rather than returning `Error generating report: …` *as* the report, which
+    the GUI checkpointed as complete and auto-saved.
+  - **The notice is idempotent**: the agent qualifies the report, the MCP
+    result must not qualify it again, and a check deciding *what a text is*
+    reads the body behind **both** notices. **A failed document is neither a
+    rejected nor a scored one**, and
+    `documents_scored == documents_accepted + documents_rejected` reconciles.
+  - **Classify the failure, not the wrapper.** `llm_retry` retries every
+    provider failure, so an agent sees `RetryExhaustedError`, never the
+    refused key or unreachable host underneath — recording the wrapper left
+    *every* outage advising "try again later". Both agents go through
+    `classify_exhausted_retries()` (`utils.py`), which reads `last_error`. **A
+    test patching `_score_with_retry`/`_extract_with_retry` patches *inside*
+    the retry decorator and cannot see this** — drive `_chat`.
+  - **Cancelling is not failing**: the cancel check precedes the total-loss
+    verdict, because a cancelled run's attempted set is only what it got
+    through. **A later failure does not un-lose what an earlier stage lost** —
+    the report-generation exception carries the MCP shortfalls to
+    `_error_payload`.
+
 - **An unreadable store is kept whole, and a report records what its search
   lost** (#285 + #284; PR #291, merged 2026-09-17). iOS/macOS only.
   - **Nothing is deleted.** `StoreRecovery.setAsideStore` moves
     `default.store{,-shm,-wal}` into one `unreadable-<timestamp>/` folder and
     rolls every move back if any one fails — a database parted from its
-    write-ahead log has lost what that log still held — and `makeContainer`
-    refuses to open a fresh database while anything is left where SwiftData
-    writes. **Every message says "Nothing was deleted"**, the nothing-could-be-
-    moved case included, which is the one case where the store is provably whole.
+    write-ahead log has lost what that log held — and `makeContainer` refuses
+    to open a fresh database while anything is left where SwiftData writes.
+    **Every message says "Nothing was deleted"**, the nothing-could-be-moved
+    case included, which is the one case where the store is provably whole.
   - **A recovery message is app-scoped and cannot be dropped unread.**
-    `StoreRecoveryMessage` (`@Observable`) is read once per launch, so several
-    macOS windows say it once between them, and the alert's binding setter is
-    deliberately inert: only OK forgets it. SwiftUI drives that setter to `false`
-    for reasons that are not the user reading it, and that silence was #285.
-    Attach such an alert to the whole root view, not one branch of it.
+    `StoreRecoveryMessage` (`@Observable`) is read once per launch, and the
+    alert's binding setter is deliberately inert: only OK forgets it, because
+    SwiftUI drives that setter to `false` for reasons that are not the user
+    reading it. **Attach such an alert to the whole root view**, not one
+    branch of it.
   - **A SwiftData version bump still crashes at launch**, so there is none:
     every `VersionedSchema` is built from the *live* model classes, so two
     versions share a checksum and a store matching neither raises
-    `NSInvalidArgumentException`, which no Swift `catch` takes (**#289**;
-    measured in `SchemaVersions.swift`). Only a store written by an **earlier
-    build** reaches it — two probes against a matching checksum called it safe.
-    `isMigrationError` must know `SwiftDataError.unknownDataStoreSchema`
-    (SwiftData hides Cocoa 134504 behind it) or every upgrading app hits
-    `fatalError`; `StoreMigrationTests` pins the ladder.
+    `NSInvalidArgumentException`, which no Swift `catch` takes (**#289**).
+    Only a store written by an **earlier build** reaches it — two probes
+    against a matching checksum called it safe. `isMigrationError` must know
+    `SwiftDataError.unknownDataStoreSchema` (SwiftData hides Cocoa 134504
+    behind it) or every upgrading app hits `fatalError`; `StoreMigrationTests`
+    pins the ladder.
   - **The report records what its search lost** in `EvidenceReport`'s private
     `searchShortfallsJSON` (`"[]"` when complete) instead of matching its own
     prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before
-    the record and is read off its text; a damaged record reports as incomplete
-    and says it cannot name what is missing. Both divergences from Python are in
-    the contract's iOS/macOS section.
+    the record and is read off its text; a damaged record reports as
+    incomplete and says it cannot name what is missing. Both divergences from
+    Python are in the contract's iOS/macOS section.
 
-- **A failed source is not an empty one** — all three platforms conform: Python
-  (#247, #248; PR #260), Android (#252; PR #276), iOS/macOS (#256, #253; PR
-  #282), merged 2026-09-15/16, with #255 (E-utilities failing with HTTP 200)
-  closed on all three on 2026-09-17. The contract, one section per platform, is
-  `doc/cross_platform/search_failure_reporting.md`; read it before touching any
-  of this. What it is easiest to get wrong again:
+- **A failed source is not an empty one** — all three platforms conform
+  (#247/#248 PR #260, Android #252 PR #276, iOS/macOS #256/#253 PR #282;
+  #255 closed everywhere 2026-09-17). The contract, one section per platform,
+  is `doc/cross_platform/search_failure_reporting.md`; **read it before
+  touching any of this.** What is easiest to get wrong again:
   - **Failures that leave nothing are an error**, never "No documents found"
-    (user, 2026-09-14), and a failure travels as kind + HTTP status only: **no
-    exception, body or parser message is kept** (each of those can print the
-    NCBI API key). **An HTTP 200 can be a failure**, a missing count is
-    malformed rather than 0, and **PubMed lists only 9,999 records**.
+    (user, 2026-09-14), and a failure travels as kind + HTTP status only:
+    **no exception, body or parser message is kept** (each can print the NCBI
+    API key). **An HTTP 200 can be a failure**, a missing count is malformed
+    rather than 0, and **PubMed lists only 9,999 records**.
   - **Shortfalls ride with the documents into the review** — a dialog alone
-    left the report claiming a complete search. Notice and Methodology line are
-    added by code, never the LLM. A stored shortfall degrades but is never
+    left the report claiming a complete search. Notice and Methodology line
+    are added by code, never the LLM. A stored shortfall degrades but is never
     dropped; a damaged record stops a session before it spends anything.
   - **A page that failures leave with no new document changes nothing**; a
     failed later Europe PMC page ends the cursor, and **an ended cursor misses
     every hit not received**. A failed alternative (smart-search) query has
     **its own clause**; counts combine only within one query.
-  - **Swift shape.** The clients raise (`SourceRequestError`), the app decides;
-    paging travels as a `SearchContinuation`, and **`SourceRequestError` must
-    conform to `RetryableError`** or a 429 stops being retried. **A lookup is
-    not a page.** `refreshPaginationState` replays pages already held: **no**
-    shortfall, and finding nothing new is ordinary — treating it as failure
-    locked "Get more evidence" out of every resumed session.
-  - Lodged across the three rounds: #258, #259, #261–#266 (Python), #267–#275,
-    #277–#280 (Android), #281, #283–#290 (Swift).
+  - **Swift shape.** The clients raise (`SourceRequestError`), the app
+    decides; paging travels as a `SearchContinuation`, and
+    **`SourceRequestError` must conform to `RetryableError`** or a 429 stops
+    being retried. **A lookup is not a page.** `refreshPaginationState`
+    replays pages already held: **no** shortfall, and finding nothing new is
+    ordinary — treating it as failure locked "Get more evidence" out of every
+    resumed session.
+  - Lodged across the three rounds: #258, #259, #261–#266 (Python),
+    #267–#275, #277–#280 (Android), #281, #283–#290 (Swift).
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
   #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs
@@ -247,6 +285,13 @@ the rest.
     (declaration-order init silently appends nothing). `RegexHelper` uses `(?U)`.
 
 ## Potential follow-ups
+
+### The analysis-failure family: what is left
+
+- **#300 — Swift and Android are unchecked against
+  `doc/cross_platform/analysis_failure_reporting.md`**, now three rules
+  longer. Both run the same pipeline with the same shape, so the same defects
+  are likely present. The largest remaining slice of this family.
 
 ### The #285 round: what PR #291 lodged
 
@@ -415,7 +460,7 @@ Swift and Kotlin rather than a Swift-side patch.
   fix needs a GUI setup too. **#245** — those two CLIs take the NCBI key only as
   `--api-key` (shell history, `ps`).
 - **Failures that read as findings, what is left** (the #246 review) — #261 to
-  #264 are on the branch above. Still open: nothing connects `analysis_failed`
+  #264 landed in PR #301. Still open: nothing connects `analysis_failed`
   (**#249**); an efetch with no article yields "No conflict of interest
   statement found" (**#250**, #203's shape). **#258** — the search merge drops
   a distinct article whose title differs by a number (Python and Swift),
