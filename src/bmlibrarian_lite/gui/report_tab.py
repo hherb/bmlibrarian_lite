@@ -29,6 +29,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Optional, List, Dict, Any
 
 from PySide6.QtWidgets import (
@@ -50,12 +51,23 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from ..config import LiteConfig
 from ..constants import DEFAULT_MIN_SCORE, SCORE_MAX
 from ..storage import LiteStorage
-from ..data_models import LiteDocument, ScoredDocument, Citation, ReportMetadata
+from ..data_models import (
+    Citation,
+    ExtractionFailure,
+    LiteDocument,
+    ReportMetadata,
+    ScoredDocument,
+)
 from ..audit_records import (
+    CITATION_EXTRACTION_FAILED_KEY,
+    EXTRACTION_FAILED_COUNT_KEY,
     DocumentOutcomes,
     classify_document_outcomes,
+    extraction_failure_record,
+    extraction_failure_summary,
     outcome_entries,
     outcome_summary,
+    predates_extraction_failures,
     predates_outcome_split,
     score_failure_reason,
     without_invented_reason,
@@ -124,6 +136,9 @@ class ReportTab(QWidget):
         # The threshold a restored checkpoint recorded; None when it predates
         # recording one. Metadata, when present, states it instead.
         self._restored_min_score: int | None = None
+        # The relevant documents whose citations could not be extracted;
+        # None when the run never recorded them (#310)
+        self._citation_extraction_failures: list[ExtractionFailure] | None = None
 
         # Ensure reports directory exists
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -198,6 +213,7 @@ class ReportTab(QWidget):
         report_metadata: Optional[ReportMetadata] = None,
         min_score_threshold: int | None = None,
         auto_save: bool = True,
+        citation_extraction_failures: Sequence[ExtractionFailure] | None = None,
     ) -> None:
         """
         Display a report from the systematic review workflow.
@@ -223,6 +239,12 @@ class ReportTab(QWidget):
                 from the database would be a second, poorer record -- the
                 checkpoint never kept the quality filter settings, and an
                 older one never kept the threshold either
+            citation_extraction_failures: The relevant documents whose
+                citations could not be extracted. An uncited relevant
+                document is either silent or unread, and only this says
+                which (#310). None when the run never recorded them -- a
+                report restored from an older checkpoint -- which the audit
+                trail states, rather than claiming none failed
         """
         self._current_report = report
         self._current_question = question
@@ -233,6 +255,11 @@ class ReportTab(QWidget):
         self._quality_filter_settings = quality_filter_settings
         self._report_metadata = report_metadata
         self._restored_min_score = min_score_threshold
+        self._citation_extraction_failures = (
+            None
+            if citation_extraction_failures is None
+            else list(citation_extraction_failures)
+        )
         self._loaded_audit_data = None
 
         # Store citations by document ID
@@ -514,6 +541,7 @@ class ReportTab(QWidget):
                         outcomes, threshold_recorded=threshold_recorded
                     ),
                     "citations_extracted": len(self._all_citations),
+                    **extraction_failure_summary(self._citation_extraction_failures),
                     "quality_filter_applied": bool(quality_filter_settings),
                     "quality_assessments_count": len(self._quality_assessments),
                 },
@@ -542,6 +570,7 @@ class ReportTab(QWidget):
                     for doc in self._documents_found
                 ],
                 **outcome_entries(outcomes),
+                **extraction_failure_record(self._citation_extraction_failures),
                 "citations": [
                     {
                         "document_id": c.document.id,
@@ -670,10 +699,13 @@ class ReportTab(QWidget):
                     threshold_recorded=self._recorded_min_score() is not None,
                 ),
                 "citations_extracted": len(self._all_citations),
+                **extraction_failure_summary(self._citation_extraction_failures),
             },
             **outcome_entries(outcomes),
+            **extraction_failure_record(self._citation_extraction_failures),
             "citations": [
                 {
+                    "document_id": c.document.id,
                     "document_title": c.document.title,
                     "passage": c.passage,
                     "relevance_score": c.relevance_score,
@@ -718,11 +750,20 @@ class ReportTab(QWidget):
             ("Documents that could not be scored", "documents_failed"),
             ("Documents not scored", "documents_not_scored"),
             ("Citations extracted", "citations_extracted"),
+            (
+                "Relevant documents whose citations could not be extracted",
+                EXTRACTION_FAILED_COUNT_KEY,
+            ),
         ):
             if key in summary:
-                lines.append(f"- {label}: {summary[key]}")
+                value = summary[key]
+                shown = "not recorded for this run" if value is None else value
+                lines.append(f"- {label}: {shown}")
         if "min_score_threshold" in summary:
             lines.append(self._threshold_line(summary["min_score_threshold"]))
+
+        extraction_failed = self._audit_entries(audit_data, CITATION_EXTRACTION_FAILED_KEY)
+        extraction_recorded = not predates_extraction_failures(audit_data)
 
         lines.extend(["", "## Relevant Documents (with scores)", ""])
         for sd in self._audit_entries(audit_data, "scored_documents"):
@@ -731,6 +772,11 @@ class ReportTab(QWidget):
             lines.append(f"- **ID:** {sd.get('id', '')}")
             if sd.get("explanation"):
                 lines.append(f"- **Explanation:** {sd['explanation']}")
+            if extraction_recorded:
+                lines.append(
+                    "- **Citations:** "
+                    + self._citation_state_text(sd.get("id"), audit_data, extraction_failed)
+                )
             lines.append("")
 
         lines.append("## Rejected Documents")
@@ -774,9 +820,28 @@ class ReportTab(QWidget):
             lines.append("")
             lines.extend(self._audit_document_lines(unscored))
 
+        # Only shown when something was lost, as for scoring
+        if extraction_failed:
+            lines.extend(
+                ["", "## Relevant Documents Whose Citations Could Not Be Extracted", ""]
+            )
+            lines.append(
+                "These documents were judged relevant, but could not be read "
+                "for citations. What they say is not known from this review."
+            )
+            lines.append("")
+            lines.extend(self._audit_document_lines(extraction_failed))
+
         lines.append("")
         lines.append("## Citations Extracted")
         lines.append("")
+        if not extraction_recorded:
+            lines.append(
+                "*This run predates extraction failures being recorded: a "
+                "relevant document without a citation may have held nothing "
+                "quotable, or its extraction may have failed.*"
+            )
+            lines.append("")
 
         for i, cit in enumerate(self._audit_entries(audit_data, "citations"), 1):
             lines.append(f"### Citation {i}: {cit.get('document_title', '')}")
@@ -801,6 +866,37 @@ class ReportTab(QWidget):
         if not isinstance(entries, list):
             return []
         return [entry for entry in entries if isinstance(entry, dict)]
+
+    @classmethod
+    def _citation_state_text(
+        cls,
+        document_id: object,
+        audit_data: dict[str, Any],
+        extraction_failed: list[dict[str, Any]],
+    ) -> str:
+        """What extraction made of one relevant document.
+
+        Cited, silent or unread -- by the record's own account (#310).
+
+        Args:
+            document_id: The relevant document's id, as the record states it.
+            audit_data: The audit record.
+            extraction_failed: The record's extraction failures.
+
+        Returns:
+            How many citations it gave; that it held nothing quotable; or
+            that it could not be read, and why.
+        """
+        for entry in extraction_failed:
+            if entry.get("id") == document_id:
+                reason = entry.get("reason")
+                return f"could not be extracted ({reason})" if reason else "could not be extracted"
+        cited = sum(
+            1
+            for citation in cls._audit_entries(audit_data, "citations")
+            if citation.get("document_id") == document_id
+        )
+        return str(cited) if cited else "none quotable"
 
     @staticmethod
     def _threshold_line(threshold: object) -> str:

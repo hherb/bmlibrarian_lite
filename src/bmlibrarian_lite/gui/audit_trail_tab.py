@@ -97,6 +97,7 @@ class AuditTrailTab(QWidget):
         self._current_query: Optional[str] = None
         self._documents_found_count = 0
         self._documents_scored_count = 0
+        self._documents_failed_count = 0
         self._citations_count = 0
 
         self._setup_ui()
@@ -182,6 +183,7 @@ class AuditTrailTab(QWidget):
                 documents_found=self._documents_found_count,
                 documents_scored=self._documents_scored_count,
                 citations_extracted=self._citations_count,
+                documents_failed=self._documents_failed_count,
             )
 
     def on_query_generated(self, pubmed_query: str, nl_query: str) -> None:
@@ -198,6 +200,7 @@ class AuditTrailTab(QWidget):
         self._current_query = pubmed_query
         self._documents_found_count = 0
         self._documents_scored_count = 0
+        self._documents_failed_count = 0
         self._citations_count = 0
 
         self.queries_tab.add_query(pubmed_query, nl_query)
@@ -227,15 +230,20 @@ class AuditTrailTab(QWidget):
         """
         Handle document scoring.
 
-        Updates score in the Literature sub-tab.
+        Updates score in the Literature sub-tab. A document the model could
+        not score carries its error code as a negative score; it is counted
+        apart, since it was not scored (#307).
 
         Args:
-            scored_doc: Scored document
+            scored_doc: Scored document, or a failure
         """
         logger.debug(
             f"Audit trail: document scored - {scored_doc.document.id} = {scored_doc.score}"
         )
-        self._documents_scored_count += 1
+        if scored_doc.score < 0:
+            self._documents_failed_count += 1
+        else:
+            self._documents_scored_count += 1
 
         self.literature_tab.update_score(scored_doc)
 
@@ -244,6 +252,7 @@ class AuditTrailTab(QWidget):
             self.queries_tab.update_query_stats(
                 self._current_query,
                 documents_scored=self._documents_scored_count,
+                documents_failed=self._documents_failed_count,
             )
 
     def on_citation_extracted(self, citation: Citation) -> None:
@@ -333,6 +342,7 @@ class AuditTrailTab(QWidget):
         self._current_query = None
         self._documents_found_count = 0
         self._documents_scored_count = 0
+        self._documents_failed_count = 0
         self._citations_count = 0
 
         self.queries_tab.clear()

@@ -22,9 +22,14 @@ and other statistics useful for comparing evaluators.
 """
 
 import statistics
-from typing import Optional
+from collections.abc import Sequence
 
-from ..data_models import Evaluator, ScoredDocument
+from ..audit_records import (
+    UNNAMED_FAILURE_REASON,
+    is_scoring_failure,
+    scoring_failure_reason,
+)
+from ..data_models import Evaluator, LiteDocument, ScoredDocument
 from ..constants import DEFAULT_MIN_SCORE
 from .models import EvaluatorStats, DocumentComparison
 
@@ -36,28 +41,20 @@ def compute_evaluator_stats(
     """
     Compute statistics for a single evaluator.
 
+    A document the evaluator could not score is counted as a failure and
+    left out of every figure describing its judgements (#306). What the
+    attempt cost is still counted: the call was made.
+
     Args:
         evaluator: The evaluator to compute stats for
-        scored_documents: All scored documents from this evaluator
+        scored_documents: All scored documents from this evaluator,
+            failures included
 
     Returns:
         EvaluatorStats with aggregated metrics
     """
-    if not scored_documents:
-        return EvaluatorStats(
-            evaluator=evaluator,
-            scores=[],
-            mean_score=0.0,
-            std_dev=0.0,
-            score_distribution={1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
-            total_evaluations=0,
-            mean_latency_ms=0.0,
-            total_tokens_input=0,
-            total_tokens_output=0,
-            total_cost_usd=0.0,
-        )
-
-    scores = [sd.score for sd in scored_documents]
+    judged = [sd for sd in scored_documents if not is_scoring_failure(sd)]
+    scores = [sd.score for sd in judged]
 
     # Score distribution
     distribution = {i: 0 for i in range(1, 6)}
@@ -65,8 +62,9 @@ def compute_evaluator_stats(
         if 1 <= score <= 5:
             distribution[score] += 1
 
-    # Latency stats
-    latencies = [sd.latency_ms for sd in scored_documents if sd.latency_ms is not None]
+    # Latency stats: how long the evaluator takes to answer, which a
+    # timed-out attempt does not say
+    latencies = [sd.latency_ms for sd in judged if sd.latency_ms is not None]
     mean_latency = statistics.mean(latencies) if latencies else 0.0
 
     # Token stats
@@ -76,37 +74,40 @@ def compute_evaluator_stats(
     # Cost stats
     total_cost = sum(sd.cost_usd or 0.0 for sd in scored_documents)
 
+    if not scores:
+        mean_score: float | None = None
+        std_dev: float | None = None
+    else:
+        mean_score = statistics.mean(scores)
+        std_dev = statistics.stdev(scores) if len(scores) > 1 else 0.0
+
     return EvaluatorStats(
         evaluator=evaluator,
         scores=scores,
-        mean_score=statistics.mean(scores),
-        std_dev=statistics.stdev(scores) if len(scores) > 1 else 0.0,
+        mean_score=mean_score,
+        std_dev=std_dev,
         score_distribution=distribution,
-        total_evaluations=len(scored_documents),
+        total_evaluations=len(judged),
         mean_latency_ms=mean_latency,
         total_tokens_input=total_input,
         total_tokens_output=total_output,
         total_cost_usd=total_cost,
+        failed_evaluations=len(scored_documents) - len(judged),
     )
 
 
-def compute_agreement(
-    scores1: list[int],
-    scores2: list[int],
-    tolerance: int = 1,
-) -> float:
-    """
-    Compute agreement percentage between two score lists.
-
-    Agreement is defined as scores being within the tolerance threshold.
+def _judged_pairs(
+    scores1: Sequence[int | None],
+    scores2: Sequence[int | None],
+) -> list[tuple[int, int]]:
+    """The documents both evaluators judged, as pairs of their scores.
 
     Args:
-        scores1: First evaluator's scores (ordered by document)
+        scores1: First evaluator's scores, None where it gave none
         scores2: Second evaluator's scores (same order)
-        tolerance: Maximum difference to count as agreement
 
     Returns:
-        Agreement percentage (0.0 to 1.0)
+        One pair per document both scored.
 
     Raises:
         ValueError: If score lists have different lengths
@@ -115,51 +116,84 @@ def compute_agreement(
         raise ValueError(
             f"Score lists must have same length: {len(scores1)} vs {len(scores2)}"
         )
+    return [
+        (s1, s2)
+        for s1, s2 in zip(scores1, scores2)
+        if s1 is not None and s2 is not None
+    ]
 
-    if not scores1:
-        return 1.0  # Empty lists agree perfectly
 
-    agreements = sum(
-        1 for s1, s2 in zip(scores1, scores2)
-        if abs(s1 - s2) <= tolerance
-    )
+def compute_agreement(
+    scores1: Sequence[int | None],
+    scores2: Sequence[int | None],
+    tolerance: int = 1,
+) -> float | None:
+    """
+    Compute agreement percentage between two score lists.
 
-    return agreements / len(scores1)
+    Agreement is defined as scores being within the tolerance threshold,
+    over the documents both evaluators judged. A document one of them could
+    not score is no evidence either way: compared as a score, an outage
+    counted as a disagreement of several points (#306).
+
+    Args:
+        scores1: First evaluator's scores (ordered by document), None where
+            it gave none
+        scores2: Second evaluator's scores (same order)
+        tolerance: Maximum difference to count as agreement
+
+    Returns:
+        Agreement percentage (0.0 to 1.0), or None when the two judged no
+        document in common -- which "agreed perfectly" before, so two
+        outages scored 100%
+
+    Raises:
+        ValueError: If score lists have different lengths
+    """
+    pairs = _judged_pairs(scores1, scores2)
+    if not pairs:
+        return None
+
+    agreements = sum(1 for s1, s2 in pairs if abs(s1 - s2) <= tolerance)
+    return agreements / len(pairs)
 
 
 def compute_exact_agreement(
-    scores1: list[int],
-    scores2: list[int],
-) -> float:
+    scores1: Sequence[int | None],
+    scores2: Sequence[int | None],
+) -> float | None:
     """
     Compute exact agreement percentage (scores must match exactly).
 
     Args:
-        scores1: First evaluator's scores
+        scores1: First evaluator's scores, None where it gave none
         scores2: Second evaluator's scores
 
     Returns:
-        Exact agreement percentage (0.0 to 1.0)
+        Exact agreement percentage (0.0 to 1.0), or None when the two judged
+        no document in common
     """
     return compute_agreement(scores1, scores2, tolerance=0)
 
 
 def compute_agreement_matrix(
-    evaluator_scores: dict[str, list[int]],
+    evaluator_scores: dict[str, list[int | None]],
     tolerance: int = 1,
-) -> dict[tuple[str, str], float]:
+) -> dict[tuple[str, str], float | None]:
     """
     Compute pairwise agreement matrix for all evaluators.
 
     Args:
-        evaluator_scores: Mapping of evaluator name to ordered score list
+        evaluator_scores: Mapping of evaluator name to ordered score list,
+            None where it gave no score
         tolerance: Maximum difference to count as agreement
 
     Returns:
-        Dict with (name1, name2) tuple keys mapping to agreement percentage
+        Dict with (name1, name2) tuple keys mapping to agreement percentage;
+        None for a pair that judged no document in common
     """
     evaluator_names = list(evaluator_scores.keys())
-    matrix: dict[tuple[str, str], float] = {}
+    matrix: dict[tuple[str, str], float | None] = {}
 
     for name1 in evaluator_names:
         for name2 in evaluator_names:
@@ -176,49 +210,48 @@ def compute_agreement_matrix(
 
 
 def compute_inclusion_agreement(
-    scores1: list[int],
-    scores2: list[int],
+    scores1: Sequence[int | None],
+    scores2: Sequence[int | None],
     inclusion_threshold: int = DEFAULT_MIN_SCORE,
-) -> float:
+) -> float | None:
     """
     Compute inclusion decision agreement between two score lists.
 
     Inclusion agreement measures whether evaluators agree on the binary
     decision of including or excluding a document based on the threshold.
     This is more clinically significant than score agreement since it
-    directly affects which documents appear in final results.
+    directly affects which documents appear in final results. Only the
+    documents both evaluators judged are compared: a document one of them
+    could not score was not excluded by it.
 
     Args:
-        scores1: First evaluator's scores (ordered by document)
+        scores1: First evaluator's scores (ordered by document), None where
+            it gave none
         scores2: Second evaluator's scores (same order)
         inclusion_threshold: Minimum score for document inclusion
 
     Returns:
-        Inclusion agreement percentage (0.0 to 1.0)
+        Inclusion agreement percentage (0.0 to 1.0), or None when the two
+        judged no document in common
 
     Raises:
         ValueError: If score lists have different lengths
     """
-    if len(scores1) != len(scores2):
-        raise ValueError(
-            f"Score lists must have same length: {len(scores1)} vs {len(scores2)}"
-        )
-
-    if not scores1:
-        return 1.0  # Empty lists agree perfectly
+    pairs = _judged_pairs(scores1, scores2)
+    if not pairs:
+        return None
 
     agreements = sum(
-        1 for s1, s2 in zip(scores1, scores2)
+        1 for s1, s2 in pairs
         if (s1 >= inclusion_threshold) == (s2 >= inclusion_threshold)
     )
-
-    return agreements / len(scores1)
+    return agreements / len(pairs)
 
 
 def compute_inclusion_agreement_matrix(
-    evaluator_scores: dict[str, list[int]],
+    evaluator_scores: dict[str, list[int | None]],
     inclusion_threshold: int = DEFAULT_MIN_SCORE,
-) -> dict[tuple[str, str], float]:
+) -> dict[tuple[str, str], float | None]:
     """
     Compute pairwise inclusion agreement matrix for all evaluators.
 
@@ -227,14 +260,16 @@ def compute_inclusion_agreement_matrix(
     clinically significant form of agreement.
 
     Args:
-        evaluator_scores: Mapping of evaluator name to ordered score list
+        evaluator_scores: Mapping of evaluator name to ordered score list,
+            None where it gave no score
         inclusion_threshold: Minimum score for document inclusion
 
     Returns:
-        Dict with (name1, name2) tuple keys mapping to inclusion agreement percentage
+        Dict with (name1, name2) tuple keys mapping to inclusion agreement
+        percentage; None for a pair that judged no document in common
     """
     evaluator_names = list(evaluator_scores.keys())
-    matrix: dict[tuple[str, str], float] = {}
+    matrix: dict[tuple[str, str], float | None] = {}
 
     for name1 in evaluator_names:
         for name2 in evaluator_names:
@@ -253,7 +288,7 @@ def compute_inclusion_agreement_matrix(
 def compute_kendall_tau(
     scores1: list[int],
     scores2: list[int],
-) -> Optional[float]:
+) -> float | None:
     """
     Compute Kendall's tau rank correlation between two score lists.
 
@@ -301,41 +336,44 @@ def compute_kendall_tau(
 
 
 def compute_document_comparison(
-    document: "LiteDocument",
+    document: LiteDocument,
     scored_by_evaluator: dict[str, ScoredDocument],
 ) -> DocumentComparison:
     """
     Create a document comparison from scores by different evaluators.
+
+    An evaluator that could not score the document is named among the
+    failures, with why, and not among the scores (#306).
 
     Args:
         document: The document being compared
         scored_by_evaluator: Mapping of evaluator display name to ScoredDocument
 
     Returns:
-        DocumentComparison with all evaluator scores
+        DocumentComparison with every evaluator's score or failure
     """
-    from ..data_models import LiteDocument  # Import here to avoid circular
-
-    scores = {
-        eval_name: sd.score
-        for eval_name, sd in scored_by_evaluator.items()
-    }
-    explanations = {
-        eval_name: sd.explanation
-        for eval_name, sd in scored_by_evaluator.items()
-    }
+    scores: dict[str, int] = {}
+    explanations: dict[str, str] = {}
+    failures: dict[str, str] = {}
+    for eval_name, sd in scored_by_evaluator.items():
+        if is_scoring_failure(sd):
+            failures[eval_name] = scoring_failure_reason(sd) or UNNAMED_FAILURE_REASON
+        else:
+            scores[eval_name] = sd.score
+            explanations[eval_name] = sd.explanation
 
     return DocumentComparison(
         document=document,
         scores=scores,
         explanations=explanations,
+        failures=failures,
     )
 
 
 def compute_score_correlation(
     scores1: list[int],
     scores2: list[int],
-) -> Optional[float]:
+) -> float | None:
     """
     Compute Pearson correlation between two score lists.
 

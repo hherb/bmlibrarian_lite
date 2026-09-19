@@ -1340,50 +1340,83 @@ class Citation:
 
 
 @dataclass(frozen=True)
+class ExtractionFailure:
+    """A relevant document whose citations could not be extracted (#310).
+
+    Attributes:
+        document: The document the model could not read.
+        cause: Why, as the failure it was spent on.
+    """
+
+    document: LiteDocument
+    cause: EvaluationErrorCode
+
+
+@dataclass(frozen=True)
 class CitationOutcome:
     """What citation extraction produced, and what it could not do (#261).
 
     A relevant document the model could not read is not a document with
     nothing to say, but both used to leave extraction as an absent citation.
     A report built on no citations at all then told the reader that the
-    literature was silent.
+    literature was silent. The outcome names each document it could not read
+    (#310): counted only, the audit record could not tell which of the
+    uncited relevant documents were silent and which were never read.
 
     Attributes:
         citations: The passages that were extracted.
         documents_attempted: How many documents extraction tried: those at or
             above the threshold, minus any the run was cancelled before.
-        documents_failed: How many of them it could not read.
-        causes: Why, each cause once, in the order it first occurred.
+        failed: The documents it could not read, each with why, in the order
+            they failed. The count and the causes are read from these.
     """
 
     citations: list["Citation"]
     documents_attempted: int
-    documents_failed: int = 0
-    causes: tuple[EvaluationErrorCode, ...] = ()
+    failed: tuple[ExtractionFailure, ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse an outcome whose numbers cannot all be true.
 
-        ``documents_failed`` may be zero -- extraction losing nothing is the
-        ordinary case -- but a negative count is not "nothing lost", and an
-        under-counted ``attempted`` floored to the failures would report a
-        total loss on a report that is fine (#301 review).
+        An under-counted ``attempted`` floored to the failures would report a
+        total loss on a report that is fine (#301 review), so an impossible
+        count is refused rather than repaired.
 
         Raises:
-            ValueError: If either count is negative, if more documents were
-                lost than attempted, or if causes are recorded for no loss.
+            ValueError: If the attempted count is negative, if more documents
+                were lost than attempted, if a document failed twice, or if a
+                document that failed was also cited.
         """
-        if self.documents_failed < 0 or self.documents_attempted < 0:
+        object.__setattr__(self, "failed", tuple(self.failed))
+        if self.documents_attempted < 0:
             raise ValueError("A citation outcome counts documents, never fewer than none")
-        if self.documents_attempted < self.documents_failed:
+        if self.documents_attempted < len(self.failed):
             raise ValueError(
                 "A citation outcome cannot lose more documents than it attempted"
             )
-        object.__setattr__(self, "causes", distinct_causes(self.causes))
-        if self.causes and self.documents_failed < 1:
-            raise ValueError(
-                "A citation outcome that lost nothing has nothing to explain"
-            )
+        failed_ids = [failure.document.id for failure in self.failed]
+        if len(failed_ids) != len(set(failed_ids)):
+            raise ValueError("A document's extraction is attempted, and fails, once")
+        if any(citation.document.id in failed_ids for citation in self.citations):
+            raise ValueError("A document whose extraction failed cannot have been cited")
+
+    @property
+    def documents_failed(self) -> int:
+        """How many of the documents attempted could not be read.
+
+        Returns:
+            The number of failed documents.
+        """
+        return len(self.failed)
+
+    @property
+    def causes(self) -> tuple[EvaluationErrorCode, ...]:
+        """Why, each cause once, in the order it first occurred.
+
+        Returns:
+            The distinct causes of the failures.
+        """
+        return distinct_causes(failure.cause for failure in self.failed)
 
     @property
     def shortfall(self) -> AnalysisShortfall | None:
@@ -1392,7 +1425,7 @@ class CitationOutcome:
         Returns:
             The shortfall, or ``None`` when nothing failed.
         """
-        if self.documents_failed < 1:
+        if not self.failed:
             return None
         return AnalysisShortfall(
             stage=AnalysisStage.CITATION_EXTRACTION,

@@ -669,6 +669,8 @@ SCORE_COLOR_EXCELLENT = "#2E7D32"  # Green - scores >= 4.5
 SCORE_COLOR_GOOD = "#1976D2"       # Blue - scores >= 3.5
 SCORE_COLOR_MODERATE = "#F57C00"   # Orange - scores >= 2.5
 SCORE_COLOR_POOR = "#C62828"       # Red - scores < 2.5
+# Grey - no score: the scoring failed, so nothing was judged (#307)
+SCORE_COLOR_FAILED = "#757575"
 
 # Citation highlight color (yellow)
 CITATION_HIGHLIGHT_COLOR = "#FFEB3B"
@@ -710,6 +712,9 @@ BENCHMARK_AGREEMENT_LOW = "#FFCDD2"     # < 75% agreement
 # Inclusion disagreement color (more severe than score disagreement)
 # Used when models disagree on the include/exclude decision
 BENCHMARK_INCLUSION_DISAGREEMENT = "#EF5350"  # Red - critical disagreement
+
+# How many places each ranking line of the Benchmark tab names
+BENCHMARK_RANKING_SIZE = 3
 
 # Question hash length for benchmark run lookup
 # 16 hex chars = 64 bits = sufficient for uniqueness while remaining readable

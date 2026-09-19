@@ -26,6 +26,7 @@ A lightweight version of BMLibrarian with three tabs:
 import logging
 import os
 import sys
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Optional
 
 # Suppress tokenizers parallelism warning when forking for Qt threads
@@ -48,7 +49,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import StylesheetGenerator
 from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 
-from ..audit_records import recorded_min_score
+from ..audit_records import recorded_extraction_failures, recorded_min_score
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from .research_questions_tab import ResearchQuestionsTab
@@ -62,7 +63,7 @@ from .quality_benchmark_results_dialog import QualityBenchmarkResultsTab
 from ..benchmarking import BenchmarkRunner
 
 if TYPE_CHECKING:
-    from bmlibrarian_lite.data_models import RetrievalShortfall
+    from bmlibrarian_lite.data_models import ExtractionFailure, RetrievalShortfall
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +329,7 @@ class LiteMainWindow(QMainWindow):
         quality_assessments: dict,
         quality_filter_settings: dict,
         report_metadata: object = None,
+        citation_extraction_failures: "Sequence[ExtractionFailure] | None" = None,
     ) -> None:
         """
         Handle report generation from systematic review.
@@ -345,6 +347,9 @@ class LiteMainWindow(QMainWindow):
             quality_assessments: Quality assessments by doc ID
             quality_filter_settings: Quality filter settings used
             report_metadata: Optional ReportMetadata for reproducibility
+            citation_extraction_failures: The relevant documents whose
+                citations could not be extracted, so the audit trail can tell
+                them from the ones that held nothing quotable (#310)
         """
         # Display report in the Report tab
         self.report_tab.display_report(
@@ -356,6 +361,7 @@ class LiteMainWindow(QMainWindow):
             quality_assessments=quality_assessments,
             quality_filter_settings=quality_filter_settings,
             report_metadata=report_metadata,
+            citation_extraction_failures=citation_extraction_failures,
         )
 
         # Switch to Report tab
@@ -633,6 +639,14 @@ class LiteMainWindow(QMainWindow):
                 quality_assessments=quality_assessments,
                 quality_filter_settings={},  # Not stored in checkpoint
                 min_score_threshold=recorded_min_score(checkpoint.metadata),
+                # None for a checkpoint older than the record (#310)
+                citation_extraction_failures=recorded_extraction_failures(
+                    checkpoint.metadata,
+                    {
+                        **{doc.id: doc for doc in documents_found if doc is not None},
+                        **{sd.document.id: sd.document for sd in scored_documents},
+                    },
+                ),
                 # The run saved its own report and audit when it ran; a record
                 # rebuilt from the database would be a second, poorer one.
                 auto_save=False,

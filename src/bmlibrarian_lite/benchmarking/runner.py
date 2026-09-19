@@ -23,22 +23,26 @@ with caching of existing evaluations and progress tracking.
 
 import json
 import logging
-import re
 import time
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable
 
+from ..agents.scoring_agent import SCORING_SYSTEM_PROMPT, parse_score_response
+from ..audit_records import is_scoring_failure
 from ..config import LiteConfig
 from ..constants import calculate_cost
 from ..data_models import (
     BenchmarkRun,
     BenchmarkStatus,
+    EvaluationErrorCode,
     Evaluator,
     LiteDocument,
     ScoredDocument,
 )
+from ..exceptions import RetryExhaustedError
 from ..llm import LLMClient, LLMMessage
 from ..storage import LiteStorage
+from ..utils import classify_exhausted_retries, classify_llm_exception
 from .models import BenchmarkResult, DocumentComparison, EvaluatorStats
 from .statistics import (
     compute_agreement_matrix,
@@ -49,27 +53,38 @@ from .statistics import (
 
 logger = logging.getLogger(__name__)
 
-# System prompt for document scoring (from scoring_agent.py)
-SCORING_SYSTEM_PROMPT = """You are a medical research relevance assessor. Your task is to evaluate how relevant a document is to answering a specific research question.
+def _stored_count(value: object) -> int | None:
+    """A count read back from a stored summary, if it holds one.
 
-Score each document on a scale of 1-5:
-- 5: Directly answers the question with strong evidence
-- 4: Highly relevant, provides substantial supporting information
-- 3: Moderately relevant, contains useful related information
-- 2: Marginally relevant, tangentially related
-- 1: Not relevant to the research question
+    Args:
+        value: What the summary stored -- JSON from the database, so it is
+            read as input (golden rule 1).
 
-Consider:
-- How directly the abstract addresses the research question
-- The quality and strength of evidence presented
-- The specificity of findings to the question topic
-- Whether the document provides actionable information
+    Returns:
+        The count, or None when the summary holds none (or not a count).
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
-Respond in JSON format:
-{
-    "score": <1-5>,
-    "explanation": "<brief explanation of relevance>"
-}"""
+
+def _stored_failures(value: object) -> dict[str, str]:
+    """The failures a stored document comparison names, if any.
+
+    Args:
+        value: What the summary stored: evaluator name to reason.
+
+    Returns:
+        The entries that are a name and a reason; none for a summary stored
+        before failures were named, which ``failures_recorded`` reports.
+    """
+    if not isinstance(value, dict):
+        return {}
+    return {
+        name: reason
+        for name, reason in value.items()
+        if isinstance(name, str) and isinstance(reason, str)
+    }
 
 
 class BenchmarkRunner:
@@ -90,8 +105,8 @@ class BenchmarkRunner:
 
     def __init__(
         self,
-        config: Optional[LiteConfig] = None,
-        storage: Optional[LiteStorage] = None,
+        config: LiteConfig | None = None,
+        storage: LiteStorage | None = None,
     ):
         """
         Initialize the benchmark runner.
@@ -102,7 +117,7 @@ class BenchmarkRunner:
         """
         self.config = config or LiteConfig.load()
         self.storage = storage or LiteStorage(self.config)
-        self._llm_client: Optional[LLMClient] = None
+        self._llm_client: LLMClient | None = None
 
     @property
     def llm_client(self) -> LLMClient:
@@ -153,7 +168,7 @@ class BenchmarkRunner:
         evaluators: list[Evaluator],
         documents: list[LiteDocument],
         task_type: str = "document_scoring",
-        description: Optional[str] = None,
+        description: str | None = None,
     ) -> BenchmarkRun:
         """
         Create a new benchmark run.
@@ -190,9 +205,9 @@ class BenchmarkRunner:
         self,
         run_id: str,
         checkpoint_id: str,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
         reuse_existing: bool = True,
-        existing_scores: Optional[list[ScoredDocument]] = None,
+        existing_scores: list[ScoredDocument] | None = None,
         reuse_cross_run: bool = True,
     ) -> BenchmarkResult:
         """
@@ -295,8 +310,13 @@ class BenchmarkRunner:
                     # Check for existing scores from initial scoring
                     # if this evaluator matches the baseline model
                     if existing_scores_map and evaluator.model_string == baseline_model:
-                        if document.id in existing_scores_map:
-                            existing = existing_scores_map[document.id]
+                        existing_baseline = existing_scores_map.get(document.id)
+                        # A failure is retried, never replayed as the
+                        # evaluator's answer (#306)
+                        if existing_baseline is not None and not is_scoring_failure(
+                            existing_baseline
+                        ):
+                            existing = existing_baseline
                             logger.debug(
                                 f"Reusing initial scoring result for {document.id} "
                                 f"(baseline model: {evaluator.display_name})"
@@ -320,8 +340,9 @@ class BenchmarkRunner:
 
                     # Check for cross-run scores from previous benchmarks
                     if reuse_cross_run and evaluator.id in cross_run_scores:
-                        if document.id in cross_run_scores[evaluator.id]:
-                            existing = cross_run_scores[evaluator.id][document.id]
+                        earlier = cross_run_scores[evaluator.id].get(document.id)
+                        if earlier is not None and not is_scoring_failure(earlier):
+                            existing = earlier
                             logger.debug(
                                 f"Reusing cross-run score for {document.id} "
                                 f"by {evaluator.display_name}"
@@ -338,7 +359,7 @@ class BenchmarkRunner:
                             evaluator_id=evaluator.id,
                             checkpoint_id=checkpoint_id,
                         )
-                        if existing:
+                        if existing and not is_scoring_failure(existing):
                             logger.debug(
                                 f"Reusing existing score for {document.id} "
                                 f"by {evaluator.display_name}"
@@ -400,10 +421,10 @@ class BenchmarkRunner:
         question: str,
         documents: list[LiteDocument],
         models: list[str],
-        checkpoint_id: Optional[str] = None,
-        name: Optional[str] = None,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-        existing_scores: Optional[list[ScoredDocument]] = None,
+        checkpoint_id: str | None = None,
+        name: str | None = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        existing_scores: list[ScoredDocument] | None = None,
         reuse_cross_run: bool = True,
     ) -> BenchmarkResult:
         """
@@ -503,79 +524,97 @@ Evaluate the relevance of this document to the research question."""
                 max_tokens=evaluator.max_tokens or 256,
                 json_mode=True,
             )
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            # Parse response
-            score_data = self._parse_score_response(response.content)
-
-            # Calculate cost
-            cost = calculate_cost(
-                evaluator.model_string or "",
-                response.input_tokens,
-                response.output_tokens,
+        except Exception as e:
+            # The provider's text stays in the log: it can print the request,
+            # and the record is shown to the user (#306).
+            error_code = (
+                classify_exhausted_retries(e)
+                if isinstance(e, RetryExhaustedError)
+                else classify_llm_exception(e)
             )
+            logger.error(
+                f"Failed to score document {document.id} with "
+                f"{evaluator.display_name} ({error_code.name}): {e}"
+            )
+            return self._failed_score(
+                document,
+                evaluator,
+                error_code,
+                latency_ms=int((time.time() - start_time) * 1000),
+            )
+        latency_ms = int((time.time() - start_time) * 1000)
 
-            return ScoredDocument(
-                document=document,
-                score=score_data["score"],
-                explanation=score_data["explanation"],
-                evaluator_id=evaluator.id,
-                evaluator=evaluator,
+        # The call was made and billed whether or not its answer is usable
+        cost = calculate_cost(
+            evaluator.model_string or "",
+            response.input_tokens,
+            response.output_tokens,
+        )
+
+        parsed = parse_score_response(response.content)
+        if parsed is None:
+            return self._failed_score(
+                document,
+                evaluator,
+                EvaluationErrorCode.JSON_PARSE_ERROR,
                 latency_ms=latency_ms,
                 tokens_input=response.input_tokens,
                 tokens_output=response.output_tokens,
                 cost_usd=cost,
             )
 
-        except Exception as e:
-            logger.error(
-                f"Failed to score document {document.id} with "
-                f"{evaluator.display_name}: {e}"
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
-            return ScoredDocument(
-                document=document,
-                score=1,
-                explanation=f"Scoring failed: {str(e)}",
-                evaluator_id=evaluator.id,
-                evaluator=evaluator,
-                latency_ms=latency_ms,
-            )
+        score, explanation = parsed
+        return ScoredDocument(
+            document=document,
+            score=score,
+            explanation=explanation,
+            evaluator_id=evaluator.id,
+            evaluator=evaluator,
+            latency_ms=latency_ms,
+            tokens_input=response.input_tokens,
+            tokens_output=response.output_tokens,
+            cost_usd=cost,
+        )
 
-    def _parse_score_response(self, response: str) -> dict:
-        """
-        Parse LLM response to extract score and explanation.
+    @staticmethod
+    def _failed_score(
+        document: LiteDocument,
+        evaluator: Evaluator,
+        error_code: EvaluationErrorCode,
+        latency_ms: int,
+        tokens_input: int | None = None,
+        tokens_output: int | None = None,
+        cost_usd: float | None = None,
+    ) -> ScoredDocument:
+        """A scoring the evaluator could not produce, recorded as a failure.
+
+        Recorded as a score of 1, as it was until #306, an outage read as a
+        confident "not relevant" in every statistic the benchmark computes.
+        The review records a failure the same way (#262).
 
         Args:
-            response: LLM response text
+            document: The document that could not be scored.
+            evaluator: The evaluator that could not score it.
+            error_code: What went wrong.
+            latency_ms: How long the attempt took.
+            tokens_input: Input tokens billed, when a response arrived.
+            tokens_output: Output tokens billed, when a response arrived.
+            cost_usd: What the attempt cost, when a response arrived.
 
         Returns:
-            Dictionary with 'score' and 'explanation'
+            The failure, its error code in place of a score.
         """
-        # Try to parse as JSON
-        try:
-            json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                score = int(data.get("score", 1))
-                score = max(1, min(5, score))  # Clamp to 1-5
-                return {
-                    "score": score,
-                    "explanation": data.get("explanation", ""),
-                }
-        except (json.JSONDecodeError, ValueError, TypeError):
-            pass
-
-        # Fallback: try to extract score from text
-        score_match = re.search(r'score[:\s]+(\d)', response, re.IGNORECASE)
-        if score_match:
-            score = int(score_match.group(1))
-            score = max(1, min(5, score))
-            return {"score": score, "explanation": response}
-
-        # Default
-        logger.warning(f"Could not parse score from: {response}")
-        return {"score": 1, "explanation": "Could not parse response"}
+        return ScoredDocument(
+            document=document,
+            score=error_code.value,
+            explanation=f"Scoring failed: {error_code.description}",
+            evaluator_id=evaluator.id,
+            evaluator=evaluator,
+            latency_ms=latency_ms,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            cost_usd=cost_usd,
+        )
 
     def _compute_results(
         self,
@@ -623,16 +662,20 @@ Evaluate the relevance of this document to the research question."""
                 )
                 document_comparisons.append(comparison)
 
-        # Compute agreement matrix using display names
+        # Compute agreement matrix using display names. A document the
+        # evaluator did not score -- missing, or a failure -- has no score to
+        # compare: recorded as 0 or as its error code, it was compared as
+        # though it were a judgement (#306).
         doc_ids = [d.id for d in documents]
-        evaluator_scores: dict[str, list[int]] = {}
+        evaluator_scores: dict[str, list[int | None]] = {}
         for evaluator in evaluators:
-            scores = []
+            scores: list[int | None] = []
             for doc_id in doc_ids:
-                if doc_id in all_scores.get(evaluator.id, {}):
-                    scores.append(all_scores[evaluator.id][doc_id].score)
+                scored = all_scores.get(evaluator.id, {}).get(doc_id)
+                if scored is None or is_scoring_failure(scored):
+                    scores.append(None)
                 else:
-                    scores.append(0)  # Missing score
+                    scores.append(scored.score)
             evaluator_scores[evaluator.display_name] = scores
 
         agreement_matrix = compute_agreement_matrix(evaluator_scores, tolerance=1)
@@ -656,7 +699,7 @@ Evaluate the relevance of this document to the research question."""
             baseline_evaluator_name=baseline_name,
         )
 
-    def get_benchmark_result(self, run_id: str) -> Optional[BenchmarkResult]:
+    def get_benchmark_result(self, run_id: str) -> BenchmarkResult | None:
         """
         Get cached benchmark result from storage.
 
@@ -691,6 +734,11 @@ Evaluate the relevance of this document to the research question."""
                         total_tokens_input=stat_data["total_tokens_input"],
                         total_tokens_output=stat_data["total_tokens_output"],
                         total_cost_usd=stat_data["total_cost_usd"],
+                        # None for a summary stored before failures were
+                        # counted, whose scores may hold them as 1s (#306)
+                        failed_evaluations=_stored_count(
+                            stat_data.get("failed_evaluations")
+                        ),
                     )
                     evaluator_stats.append(stats)
 
@@ -704,12 +752,13 @@ Evaluate the relevance of this document to the research question."""
                         document=document,
                         scores=comp_data["scores"],
                         explanations=comp_data["explanations"],
+                        failures=_stored_failures(comp_data.get("failures")),
                     )
                     document_comparisons.append(comparison)
 
             # Reconstruct agreement matrix (convert string keys back to tuples)
             raw_matrix = data.get("agreement_matrix", {})
-            agreement_matrix: dict[tuple[str, str], float] = {}
+            agreement_matrix: dict[tuple[str, str], float | None] = {}
             for key_str, value in raw_matrix.items():
                 if "|" in key_str:
                     parts = key_str.split("|", 1)
@@ -717,7 +766,7 @@ Evaluate the relevance of this document to the research question."""
 
             # Reconstruct inclusion agreement matrix
             raw_inclusion_matrix = data.get("inclusion_agreement_matrix", {})
-            inclusion_agreement_matrix: dict[tuple[str, str], float] = {}
+            inclusion_agreement_matrix: dict[tuple[str, str], float | None] = {}
             for key_str, value in raw_inclusion_matrix.items():
                 if "|" in key_str:
                     parts = key_str.split("|", 1)
@@ -743,7 +792,7 @@ Evaluate the relevance of this document to the research question."""
     def get_latest_benchmark_result_for_question(
         self,
         question: str,
-    ) -> Optional[BenchmarkResult]:
+    ) -> BenchmarkResult | None:
         """
         Get the most recent completed benchmark result for a research question.
 

@@ -23,7 +23,7 @@ enabling comparison of evaluator performance.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
@@ -38,31 +38,37 @@ class EvaluatorStats:
     Statistics for a single evaluator in a benchmark.
 
     Aggregates performance metrics across all documents
-    evaluated by this evaluator.
+    evaluated by this evaluator. A scoring the evaluator could not produce is
+    counted apart, never among its scores: recorded as a 1, an outage read as
+    a confident "not relevant" (#306).
 
     Attributes:
         evaluator: The evaluator these stats are for
-        scores: List of all scores assigned
-        mean_score: Average score
-        std_dev: Standard deviation of scores
+        scores: The scores it gave, failures excluded
+        mean_score: Average score; None when it judged no document
+        std_dev: Standard deviation of scores; None when it judged no document
         score_distribution: Count of each score value (1-5)
-        total_evaluations: Number of documents evaluated
-        mean_latency_ms: Average response time
-        total_tokens_input: Total input tokens used
-        total_tokens_output: Total output tokens used
-        total_cost_usd: Total estimated cost
+        total_evaluations: Number of documents it judged
+        mean_latency_ms: Average response time of the judgements
+        total_tokens_input: Total input tokens used, failed calls included
+        total_tokens_output: Total output tokens used, failed calls included
+        total_cost_usd: Total estimated cost, failed calls included
+        failed_evaluations: Number of documents it could not score; None for
+            a result stored before failures were told apart, whose scores
+            may count them as 1s
     """
 
     evaluator: Evaluator
     scores: list[int]
-    mean_score: float
-    std_dev: float
+    mean_score: float | None
+    std_dev: float | None
     score_distribution: dict[int, int]  # score -> count
     total_evaluations: int
     mean_latency_ms: float
     total_tokens_input: int
     total_tokens_output: int
     total_cost_usd: float
+    failed_evaluations: int | None = None
 
     @property
     def cost_per_evaluation(self) -> float:
@@ -95,6 +101,7 @@ class EvaluatorStats:
             "total_cost_usd": self.total_cost_usd,
             "cost_per_evaluation": self.cost_per_evaluation,
             "tokens_per_evaluation": self.tokens_per_evaluation,
+            "failed_evaluations": self.failed_evaluations,
         }
 
 
@@ -103,16 +110,24 @@ class DocumentComparison:
     """
     Comparison of scores for a single document across evaluators.
 
+    Only judgements are compared. An evaluator that could not score the
+    document is named in ``failures`` instead: among the scores, its error
+    code made the document look like the benchmark's widest disagreement
+    (#306).
+
     Attributes:
         document: The document being compared (for access to full metadata)
         scores: Mapping of evaluator display name to score
         explanations: Mapping of evaluator display name to explanation
+        failures: Mapping of evaluator display name to why it could not
+            score the document
         max_score_difference: Maximum score difference between evaluators
     """
 
     document: "LiteDocument"
     scores: dict[str, int]  # evaluator display name -> score
     explanations: dict[str, str]  # evaluator display name -> explanation
+    failures: dict[str, str] = field(default_factory=dict)
 
     @property
     def document_id(self) -> str:
@@ -172,6 +187,7 @@ class DocumentComparison:
             "document_title": self.document.title,
             "scores": self.scores,
             "explanations": self.explanations,
+            "failures": self.failures,
             "max_score_difference": self.max_score_difference,
             "has_disagreement": self.has_disagreement,
             "has_inclusion_disagreement": self.has_inclusion_disagreement(),
@@ -192,8 +208,11 @@ class BenchmarkResult:
         task_type: Type of task benchmarked
         evaluator_stats: Per-evaluator statistics
         document_comparisons: Per-document score comparisons
-        agreement_matrix: Pairwise agreement percentages (score within ±1)
-        inclusion_agreement_matrix: Pairwise inclusion decision agreement
+        agreement_matrix: Pairwise agreement percentages (score within ±1),
+            over the documents both evaluators judged; None for a pair that
+            judged no document in common
+        inclusion_agreement_matrix: Pairwise inclusion decision agreement,
+            likewise
         inclusion_threshold: Score threshold for document inclusion
         total_duration_seconds: Total benchmark execution time
         created_at: When results were computed
@@ -204,19 +223,32 @@ class BenchmarkResult:
     task_type: str
     evaluator_stats: list[EvaluatorStats]
     document_comparisons: list[DocumentComparison]
-    agreement_matrix: dict[tuple[str, str], float]  # (eval1, eval2) -> agreement%
-    inclusion_agreement_matrix: dict[tuple[str, str], float] = field(
+    # (eval1, eval2) -> agreement%
+    agreement_matrix: dict[tuple[str, str], float | None]
+    inclusion_agreement_matrix: dict[tuple[str, str], float | None] = field(
         default_factory=dict
     )  # (eval1, eval2) -> inclusion agreement%
     inclusion_threshold: int = DEFAULT_MIN_SCORE
     total_duration_seconds: float = 0.0
-    baseline_evaluator_name: Optional[str] = None
+    baseline_evaluator_name: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
     def total_evaluations(self) -> int:
         """Total number of evaluations across all evaluators."""
         return sum(s.total_evaluations for s in self.evaluator_stats)
+
+    @property
+    def failures_recorded(self) -> bool:
+        """Whether this result told failed scorings apart from scores.
+
+        A result stored before #306 counted a failure as a score of 1, and
+        nothing in it says which 1s those were.
+
+        Returns:
+            True when every evaluator's failures were counted.
+        """
+        return all(s.failed_evaluations is not None for s in self.evaluator_stats)
 
     @property
     def total_cost_usd(self) -> float:
@@ -264,18 +296,27 @@ class BenchmarkResult:
             len(self.document_comparisons)
         )
 
-    def get_ranking_by_mean_score(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_mean_score(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by mean score (descending).
 
         Returns:
-            List of (evaluator, mean_score) tuples, highest first
+            List of (evaluator, mean_score) tuples, highest first; an
+            evaluator that judged no document has no mean and comes last
         """
-        return sorted(
-            [(s.evaluator, s.mean_score) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        ranked: list[tuple[Evaluator, float | None]] = sorted(
+            (
+                (s.evaluator, s.mean_score)
+                for s in self.evaluator_stats
+                if s.mean_score is not None
+            ),
+            key=lambda x: x[1] or 0.0,
             reverse=True,
         )
+        unranked: list[tuple[Evaluator, float | None]] = [
+            (s.evaluator, None) for s in self.evaluator_stats if s.mean_score is None
+        ]
+        return ranked + unranked
 
     def get_ranking_by_cost(self) -> list[tuple[Evaluator, float]]:
         """

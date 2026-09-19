@@ -51,12 +51,16 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import get_stylesheet_generator
 from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 
-from ..audit_records import CHECKPOINT_MIN_SCORE_KEY
+from ..audit_records import (
+    CHECKPOINT_MIN_SCORE_KEY,
+    checkpoint_metadata_with_extraction_failures,
+)
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import (
     AnalysisShortfall,
     AnalysisStage,
+    ExtractionFailure,
     LiteDocument,
     ScoredDocument,
     Citation,
@@ -143,6 +147,8 @@ class WorkflowWorker(QThread):
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
     document_scored = Signal(object)  # ScoredDocument
     citation_extracted = Signal(object)  # Citation
+    # A relevant document whose citations could not be extracted (#310)
+    citation_extraction_failed = Signal(object)  # ExtractionFailure
     quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
 
     def __init__(
@@ -347,9 +353,10 @@ class WorkflowWorker(QThread):
             # Create checkpoint BEFORE scoring so we can persist results
             # immediately. It keeps the threshold, so a report restored from
             # it states the split it was made at instead of guessing (#302).
+            checkpoint_metadata = {CHECKPOINT_MIN_SCORE_KEY: self.min_score}
             checkpoint = self.storage.create_checkpoint(
                 research_question=self.question,
-                metadata={CHECKPOINT_MIN_SCORE_KEY: self.min_score},
+                metadata=checkpoint_metadata,
             )
             self._checkpoint_id = checkpoint.id
 
@@ -502,6 +509,18 @@ class WorkflowWorker(QThread):
                 metadata.analysis_shortfalls.append(extraction.shortfall)
                 self.analysis_incomplete.emit(extraction.shortfall.describe())
 
+            # Which relevant documents could not be read, so the audit record
+            # can tell them from the ones that held nothing quotable (#310) --
+            # and kept in the checkpoint, so a report restored later can too
+            for failure in extraction.failed:
+                self.citation_extraction_failed.emit(failure)
+            self.storage.update_checkpoint(
+                checkpoint_id=checkpoint.id,
+                metadata=checkpoint_metadata_with_extraction_failures(
+                    checkpoint_metadata, extraction.failed
+                ),
+            )
+
             # Emit per-citation signals for audit trail and save to database
             for citation in citations:
                 self.storage.save_citation(citation, checkpoint.id)
@@ -646,8 +665,9 @@ class SystematicReviewTab(QWidget):
 
     # Emitted when a report is generated - contains all data needed for display
     # Args: report, question, citations, documents_found, scored_documents,
-    #       quality_assessments, quality_filter_settings, report_metadata
-    report_generated = Signal(str, str, list, list, list, dict, dict, object)
+    #       quality_assessments, quality_filter_settings, report_metadata,
+    #       citation_extraction_failures
+    report_generated = Signal(str, str, list, list, list, dict, dict, object, list)
 
     # Audit Trail signals - emitted during workflow for real-time updates
     workflow_started = Signal()  # Emitted when workflow begins
@@ -716,6 +736,10 @@ class SystematicReviewTab(QWidget):
         # "rejected" from absence recorded failures as judgements (#302).
         self._all_scored_documents: list[ScoredDocument] = []
         self._all_citations: List[Citation] = []
+        # The relevant documents whose citations could not be extracted. An
+        # uncited relevant document is silent or unread, and only this says
+        # which (#310).
+        self._citation_extraction_failures: list[ExtractionFailure] = []
         self._quality_assessments: Dict[str, QualityAssessment] = {}
 
         # Pre-loaded documents from Research Questions tab (skip search if set)
@@ -867,6 +891,7 @@ class SystematicReviewTab(QWidget):
         self._scored_documents = []
         self._all_scored_documents = []
         self._all_citations = []
+        self._citation_extraction_failures = []
         self._quality_assessments = {}
         self.quality_summary.setVisible(False)
         self.search_notice_label.clear()
@@ -910,6 +935,9 @@ class SystematicReviewTab(QWidget):
         self._worker.query_generated.connect(self.query_generated)
         self._worker.document_scored.connect(self._on_document_scored)
         self._worker.citation_extracted.connect(self.citation_extracted)
+        self._worker.citation_extraction_failed.connect(
+            self._on_citation_extraction_failed
+        )
         self._worker.quality_assessed.connect(self.quality_assessed)
 
         # Clear preloaded documents after starting (only used once)
@@ -1015,6 +1043,14 @@ class SystematicReviewTab(QWidget):
         self._all_scored_documents.append(scored_doc)
         self.document_scored.emit(scored_doc)
 
+    def _on_citation_extraction_failed(self, failure: ExtractionFailure) -> None:
+        """Keep a relevant document whose citations could not be extracted.
+
+        Args:
+            failure: The document, and why it could not be read.
+        """
+        self._citation_extraction_failures.append(failure)
+
     def _on_search_incomplete(self, missing: str) -> None:
         """Tell the user the review is proceeding on an incomplete search.
 
@@ -1106,6 +1142,7 @@ class SystematicReviewTab(QWidget):
             self._quality_assessments,
             quality_filter_settings,
             metadata,
+            list(self._citation_extraction_failures),
         )
 
     def _reset_ui(self) -> None:

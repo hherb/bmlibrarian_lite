@@ -32,8 +32,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
+from ..constants import SCORE_MAX, SCORE_MIN
 from ..data_models import (
-    EvaluationErrorCode,
     LiteDocument,
     ScoredDocument,
     ScoringOutcome,
@@ -65,6 +65,72 @@ Respond in JSON format:
     "score": <1-5>,
     "explanation": "<brief explanation of relevance>"
 }"""
+
+
+def _first_json_object(response: str) -> str | None:
+    """The first balanced ``{...}`` in a response, nested objects included.
+
+    Args:
+        response: LLM response text.
+
+    Returns:
+        The object's text, or None when the response holds no balanced one.
+    """
+    start_idx = response.find("{")
+    if start_idx == -1:
+        return None
+    depth = 0
+    for i, char in enumerate(response[start_idx:], start_idx):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return response[start_idx:i + 1]
+    return None
+
+
+def parse_score_response(response: str) -> tuple[int, str] | None:
+    """Read a relevance score and its explanation from a model's answer.
+
+    The review and the benchmark read answers here, so the two cannot drift:
+    the benchmark's own copy turned an answer with no ``score`` -- or none at
+    all -- into a 1, a verdict nobody gave (#306).
+
+    Args:
+        response: LLM response text.
+
+    Returns:
+        The score, clamped to the scale, and the explanation; or None when
+        the answer holds no score, which the caller records as a failure and
+        never as a score.
+    """
+    try:
+        json_str = _first_json_object(response)
+        if json_str is not None:
+            data = json.loads(json_str)
+            raw_score = data.get("score")
+            # A missing/None score means the model did not actually score
+            # the document. Do NOT default to a valid score here - fall
+            # through to the text/parse-failure handling so the caller can
+            # retry instead of recording a fabricated score.
+            if raw_score is not None:
+                score = max(SCORE_MIN, min(SCORE_MAX, int(raw_score)))
+                explanation = data.get("explanation", "")
+                if isinstance(explanation, dict):
+                    explanation = json.dumps(explanation)
+                return score, explanation
+    except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+        pass
+
+    # Fallback: a score stated in prose
+    score_match = re.search(r'score[:\s]+(\d)', response, re.IGNORECASE)
+    if score_match:
+        score = max(SCORE_MIN, min(SCORE_MAX, int(score_match.group(1))))
+        return score, response
+
+    logger.warning(f"Could not parse score from: {response}")
+    return None
 
 
 class LiteScoringAgent(LiteBaseAgent):
@@ -174,16 +240,17 @@ Evaluate the relevance of this document to the research question."""
             RetryExhaustedError: If all retries exhausted
         """
         response = self._chat(messages, temperature=0.1, json_mode=True)
-        result = self._parse_score_response(response)
+        parsed = parse_score_response(response)
 
-        # If parsing returned the default failure, raise to trigger retry
-        if result.get("parse_failed", False):
+        # An answer holding no score is retried, and never recorded as one
+        if parsed is None:
             raise JSONParseError(
                 "Could not parse score from response",
                 raw_response=response,
             )
 
-        return result
+        score, explanation = parsed
+        return {"score": score, "explanation": explanation}
 
     def score_documents(
         self,
@@ -334,74 +401,6 @@ Evaluate the relevance of this document to the research question."""
             f"Document {scored_doc.document.id}: score={scored_doc.score} "
             f"({index+1}/{total})"
         )
-
-    def _parse_score_response(self, response: str) -> dict:
-        """
-        Parse LLM response to extract score and explanation.
-
-        Args:
-            response: LLM response text
-
-        Returns:
-            Dictionary with 'score', 'explanation', and optionally 'parse_failed'.
-            If 'parse_failed' is True, the caller should consider retrying.
-        """
-        # Try to parse as JSON - handle nested objects
-        try:
-            # Find the outermost JSON object by matching balanced braces
-            start_idx = response.find("{")
-            if start_idx != -1:
-                # Find matching closing brace
-                depth = 0
-                end_idx = start_idx
-                for i, char in enumerate(response[start_idx:], start_idx):
-                    if char == "{":
-                        depth += 1
-                    elif char == "}":
-                        depth -= 1
-                        if depth == 0:
-                            end_idx = i + 1
-                            break
-
-                if depth == 0 and end_idx > start_idx:
-                    json_str = response[start_idx:end_idx]
-                    data = json.loads(json_str)
-                    raw_score = data.get("score")
-                    # A missing/None score means the model did not actually
-                    # score the document. Do NOT default to a valid score here -
-                    # fall through to the text/parse-failure handling so the
-                    # caller can retry instead of recording a fabricated score.
-                    if raw_score is not None:
-                        score = int(raw_score)
-                        score = max(1, min(5, score))  # Clamp to 1-5
-
-                        # Handle explanation that might be a nested object
-                        explanation = data.get("explanation", "")
-                        if isinstance(explanation, dict):
-                            # Convert nested explanation to string
-                            explanation = json.dumps(explanation)
-
-                        return {
-                            "score": score,
-                            "explanation": explanation,
-                        }
-        except (json.JSONDecodeError, ValueError, TypeError):
-            pass
-
-        # Fallback: try to extract score from text
-        score_match = re.search(r'score[:\s]+(\d)', response, re.IGNORECASE)
-        if score_match:
-            score = int(score_match.group(1))
-            score = max(1, min(5, score))
-            return {"score": score, "explanation": response}
-
-        # Parse failed - signal this to caller
-        logger.warning(f"Could not parse score from: {response}")
-        return {
-            "score": EvaluationErrorCode.JSON_PARSE_ERROR.value,
-            "explanation": "Could not parse response",
-            "parse_failed": True,
-        }
 
     def filter_by_score(
         self,

@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -137,7 +137,10 @@ to read a record written elsewhere.
   with a `CitationOutcome` and never raises: losing every document is
   reportable, because the documents are known to be relevant. A report built
   on no citations then says the extraction failed rather than that the
-  literature is silent.
+  literature is silent. The outcome **names each document it could not read**,
+  with its cause (#310); the failed count and the causes are read from that
+  list, so they cannot disagree with it. It refuses a document that failed
+  twice, or that failed and was also cited.
 - **Report generation** (`LiteReportingAgent.generate_report`,
   `generate_brief_summary`) **raises**. An error message returned as the
   report is a report as far as every caller is concerned.
@@ -161,7 +164,9 @@ to read a record written elsewhere.
   stage does* above. Cancellation is not failure: a run the user stopped
   reports as cancelled even when every document it got through had failed.
 - **MCP** carries `analysis_shortfalls` beside `retrieval_shortfalls` in every
-  `fact_check_claim` result, each entry with a sentence-ready `description`.
+  `fact_check_claim` result, each entry with a sentence-ready `description`,
+  and each source carries `citation_extraction_error`: `null`, or why its
+  citations could not be extracted (#310).
   A failed analysis is an error result carrying the same list plus `advice`.
   `get_document_fulltext` reports `interrogation_available`, and
   `interrogation_error` when it is false: the text was retrieved, but
@@ -193,6 +198,40 @@ to read a record written elsewhere.
     below minimum threshold". It is shown with a note saying so, and without
     that one stock reason; any other reason is the model's and stays. A score
     that is an error code is shown as the failure it names, never as "−4/5".
+  - **Silent or unread** (#310). An accepted document with no citation either
+    held nothing quotable or could not be read, and only the record can say
+    which: it lists the second under `citation_extraction_failed` (id, title,
+    error code name, description) and counts them in its summary as
+    `documents_citation_extraction_failed`. The dialog says, per relevant
+    document, how many citations it gave, "none quotable", or that it could
+    not be extracted and why. The checkpoint keeps the list
+    (`{"document_id", "error_code"}` with the code's integer value) beside its
+    threshold, so a restore can say it too. **Not recorded is not "none
+    failed"**: a checkpoint or record older than the list states the count as
+    not recorded, omits the list, and says an uncited relevant document may
+    have been either. A checkpoint entry that cannot be read whole makes the
+    record unreadable rather than shorter; an unknown cause code degrades to
+    `UNKNOWN_ERROR`.
+  - **A stored failure has two forms.** Every build since #306 stores a
+    failure as its negative code; older ones stored it as a **1** with the
+    explanation `"Scoring failed: …"` or `"Could not parse response"` (Python's
+    benchmark runner until #306, its review scorer until 2025-12-23). A reader
+    that reuses or aggregates stored scores recognises both, by score and
+    explanation together — a model that answers 1 gives its own reasons.
+- **The live Audit Trail view** follows the record (#307): a document that
+  could not be scored is drawn as a failure with its reason (Python: a grey
+  "Scoring failed" badge, the description as tooltip), never as its code on
+  the score scale, and a listing orders judged documents by score, then the
+  failures, then the never scored. The running count of documents scored
+  excludes the failures, which are counted beside it.
+- **A model benchmark** counts a failure apart from its scores (#306): not in
+  the mean, the distribution, the per-document spread, or the agreement
+  between models, which is computed over the documents both models judged —
+  and is *no figure*, never 100% or 0%, when they judged none in common. A
+  model that judged nothing has no mean. What a failed call cost still counts.
+  A stored failure is scored again by the next benchmark of the question,
+  never replayed as that model's answer. A result stored before failures were
+  counted says its 1s may include them.
 - **A degraded source is named where the source is named** (#304). Falling
   back from full text to the abstract — discovery failing, content arriving
   empty, the load raising, PDF extraction yielding nothing, a paywall the user
@@ -254,8 +293,10 @@ be built from an empty citation list without saying why it is empty; when a
 document the model read and found nothing quotable in is not retried, not
 counted as failed, and not reported as a failed extraction; when the audit
 record sorts every found document into accepted, rejected, failed or not
-scored by the score it received, and states the threshold it split at; and
-when a fall back from full text to the abstract names its cause wherever the
-source is named. Note
+scored by the score it received, and states the threshold it split at; when
+the record names each relevant document whose citations could not be
+extracted, and says "not recorded" where it cannot; when a failure is never
+drawn or counted as a score, live or in a benchmark; and when a fall back from
+full text to the abstract names its cause wherever the source is named. Note
 that no platform names the *provider* in that error today; it is a gap to
 close in all three, not a conformance criterion.

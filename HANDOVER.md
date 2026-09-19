@@ -8,70 +8,54 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#302 + #303 + #304 — a failure is not a finding, one layer down**, branch
-`fix/failure-is-not-an-answer-302`, PR #305. Python only. Compress into **Recently
-landed** once merged. The three defects PR #301 lodged rather than fixed, all
-the same family as #261–#264 and all pre-existing on master; the PR's own
-review then found the fix had created one false claim and left two half-done.
+**#306 + #307 + #310 — a failure is not a score**, branch
+`fix/failure-is-not-a-score-306`. Python only. Three defects PR #305's review
+lodged, each a failure still read or shown as a judgement:
 
-- **The contract gained the rules**, in
-  `doc/cross_platform/analysis_failure_reporting.md`, precise enough to port
-  (what makes an answer readable, the eight source phrases, the restore and
-  legacy-record rules) — Swift and Android are still unchecked against any of
-  it (**#300**).
-- **An answer with nothing in it is an answer** (#303). Citation extraction's
-  `{"passages": []}` is well-formed: the model read the abstract and found
-  nothing quotable. `readable_passages()` (`agents/citation_agent.py`) answers
-  `None` only for a response with no passage list, or one whose **every**
-  passage is unusable; a passage counts only if its `text` is a non-blank
-  string (`{"text": null}` reached a NOT NULL column and ended the review).
-  **The report had to change too**: `reporting_agent.py` inferred a failed
-  extraction from `documents_accepted > 0`, which is always true in the GUI,
-  so a silent run still blamed "API or network errors". It now decides from
-  the recorded shortfall alone and says *documents judged relevant: N, none
-  held a quotable passage*; MCP passes `documents_accepted`.
-- **The audit trail classifies instead of inferring** (#302). `audit_records.py`
-  sorts documents by the score they actually got — accepted, rejected (the
-  model's own explanation), failed (the error code, and the raw code as its
-  score), not scored (**no reason, because none was given**).
-  `DocumentOutcomes` carries its threshold and refuses a document counted
-  twice or filed where its score says it does not belong;
-  `outcome_summary()`/`outcome_entries()` build what the file and the dialog
-  share, which had already drifted. `display_report` takes
-  `all_scored_documents`; `SystematicReviewTab._on_document_scored` is the only
-  signal that brings the tab a document the model could not score.
-  - **A restore is not a new record.** Selecting a question used to auto-save a
-    fresh audit rebuilt from every run of the question, highest score first,
-    at a guessed threshold of 3. Now the worker writes the threshold into the
-    checkpoint (`CHECKPOINT_MIN_SCORE_KEY`), a restore reads that checkpoint's
-    scores only and its threshold (`recorded_min_score()`, "not recorded" for
-    older ones), and **does not auto-save** — Horst's call, 2026-09-19.
-  - **An older record** (no `failed_documents`) is shown with a note, and
-    without the stock "Score below minimum threshold" — also Horst's call; the
-    file is never changed.
-- **A degraded source is named where the source is named** (#304). Seven
-  paths fell back to the abstract with at most a log line; each now says
-  which, and a user's cancel says *cancelled*. Each cause is a fixed phrase
-  because provider error text prints the request URL, and the Unpaywall URL
-  carries the user's email — **a credential never travels in a URL at all**
-  (#196). **`QProgressDialog.close()` emits `canceled`**: every handler closed
-  the dialog first, so every *successful* load announced the full text "could
-  not be retrieved". Close it with `_close_progress_dialog()`, never directly.
-- **Lodged, not addressed here** (all Python, none blocking): #306 benchmark
-  failures scored as 1; #307 the Audit Trail tab's "-4/5" cards; #308 the
-  paywall flow (stale pending citation, empty pane on Cancel); #309 three
-  fallbacks still misstating their cause; #310 per-document extraction
-  failures missing from the audit; #311 raw error text in the PDF and
-  OpenAthens dialogs; #312 a restore's found-documents list spans every run.
-- **Verified:** `pytest tests/` — 1300 passed, 3 xfailed; `lint_delta.py
-  --base-ref origin/master` reports 0 new ruff and 0 new mypy findings (both
-  totals below master). Swift and Android untouched.
+- **#306** — `BenchmarkRunner._score_document` records a failed call as a
+  score of **1** with the raw exception as its explanation, and its own parser
+  defaults an unreadable answer (or a missing `score`) to 1 as well. The
+  statistics then count an outage as a confident "irrelevant", agreement
+  compares error codes and a missing score (0) as though they were scores,
+  and cross-run reuse replays a stored failure into every later benchmark of
+  the question. Old rows — `score=1`, `"Scoring failed: …"` or `"Could not
+  parse response"` — were written by both the runner and, before 2025-12-23,
+  the review scorer.
+- **#307** — the Audit Trail tab's card shows a failed document's error code as
+  a red **"-4/5"** relevance score.
+- **#310** — `CitationOutcome` keeps only counts and causes, so the audit record
+  cannot tell an accepted document with nothing quotable from one whose
+  extraction failed. It should carry the failed documents, and the record list
+  them; the contract gains the rule.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A failure is not a finding, one layer down** (#302–#304; PR #305, merged
+  2026-09-18). Python only; the contract
+  (`doc/cross_platform/analysis_failure_reporting.md`) gained the rules.
+  - **An answer with nothing in it is an answer** (#303): `{"passages": []}`
+    is *nothing quotable*, not a parse failure — `readable_passages()` answers
+    `None` only for no passage list or **every** passage unusable (non-blank
+    string `text`). The report decides "extraction failed" from the recorded
+    shortfall alone, never from `documents_accepted > 0`.
+  - **The audit trail classifies instead of inferring** (#302):
+    `audit_records.py` sorts by the score actually received — accepted,
+    rejected (the model's own explanation), failed (code + description, raw
+    code as score), not scored (no reason, because none was given).
+    `SystematicReviewTab._on_document_scored` is the only signal that brings
+    the tab a failed document. **A restore is not a new record**: it reads its
+    own checkpoint's scores and threshold (`CHECKPOINT_MIN_SCORE_KEY`, "not
+    recorded" for older ones) and does not auto-save. **An older record** (no
+    `failed_documents`) is shown with a note, without the stock "Score below
+    minimum threshold"; the file is never changed. Both Horst's calls.
+  - **A degraded source is named where the source is named** (#304): a fixed
+    phrase per cause, never provider error text (the Unpaywall URL carries the
+    user's email). **`QProgressDialog.close()` emits `canceled`** — close it
+    with `_close_progress_dialog()`, never directly.
 
 - **A failed analysis is not an empty one** (#261–#264; PR #301, merged
   2026-09-17). Python only; the contract is
@@ -292,6 +276,12 @@ the rest.
   `doc/cross_platform/analysis_failure_reporting.md`**, now three rules
   longer. Both run the same pipeline with the same shape, so the same defects
   are likely present. The largest remaining slice of this family.
+- **What PR #305 lodged and this branch does not take** (all Python): #308 the
+  Interrogation paywall flow (stale pending citation, empty pane on Cancel);
+  #309 three abstract fallbacks still misstating their cause; #311 raw
+  provider error text in the PDF and OpenAthens dialogs; #312 a restore's
+  found-documents list spans every run, and the checkpoint keeps no quality
+  filter settings.
 
 ### The #285 round: what PR #291 lodged
 

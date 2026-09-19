@@ -40,7 +40,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from .constants import SCORE_MAX, SCORE_MIN
-from .data_models import EvaluationErrorCode, LiteDocument, ScoredDocument
+from .data_models import (
+    EvaluationErrorCode,
+    ExtractionFailure,
+    LiteDocument,
+    ScoredDocument,
+)
 
 #: What a failure whose code this build cannot name is recorded as. The count
 #: never degrades, only the reason (the #301 rule); the code itself is kept
@@ -57,6 +62,23 @@ LEGACY_REJECTION_REASON = "Score below minimum threshold"
 #: Where a review checkpoint keeps the threshold its run accepted at, so a
 #: report restored from it states that threshold rather than guessing one.
 CHECKPOINT_MIN_SCORE_KEY = "min_score_threshold"
+
+#: Where the audit record lists the relevant documents whose citations could
+#: not be extracted (#310), and where a review checkpoint keeps them.
+CITATION_EXTRACTION_FAILED_KEY = "citation_extraction_failed"
+CHECKPOINT_EXTRACTION_FAILURES_KEY = CITATION_EXTRACTION_FAILED_KEY
+
+#: The audit summary's count of those documents; None when not recorded.
+EXTRACTION_FAILED_COUNT_KEY = "documents_citation_extraction_failed"
+
+#: How older builds began the explanation of a scoring call that raised,
+#: stored with a score of 1: the benchmark runner until #306, and the review
+#: scorer until 2025-12-23. What followed was the raw exception text.
+LEGACY_FAILURE_EXPLANATION_PREFIX = "Scoring failed: "
+
+#: The explanation older builds stored, with a score of 1, for an answer they
+#: could not read.
+LEGACY_UNREADABLE_EXPLANATION = "Could not parse response"
 
 
 @dataclass(frozen=True)
@@ -174,6 +196,28 @@ def classify_document_outcomes(
     )
 
 
+def outcome_sort_key(score: int | None) -> tuple[int, int]:
+    """Where a document goes when documents are listed by outcome.
+
+    The order of the audit record's categories: documents the model judged,
+    highest score first; then those it could not score; then those scoring
+    never reached. A failure's negative code is not a score, so it is not
+    sorted as one (#307).
+
+    Args:
+        score: The document's score as recorded -- negative when the scoring
+            failed -- or None when it was never scored.
+
+    Returns:
+        A key that sorts ascending into that order.
+    """
+    if score is None:
+        return (2, 0)
+    if score < 0:
+        return (1, 0)
+    return (0, -score)
+
+
 def score_failure_reason(score: int) -> str | None:
     """Why a scoring failed, in the reader's words, from the score it left.
 
@@ -191,6 +235,29 @@ def score_failure_reason(score: int) -> str | None:
         return EvaluationErrorCode(score).description
     except ValueError:
         return UNNAMED_FAILURE_REASON
+
+
+def is_scoring_failure(scored: ScoredDocument) -> bool:
+    """Whether a stored score records a failure rather than a judgement.
+
+    Every build since #306 stores a failure as its negative error code. Older
+    ones stored it as a 1 -- the lowest judgement there is -- with one of two
+    explanations only the code ever wrote, so those rows are recognised by
+    both together: a model that answers 1 gives its own reasons.
+
+    Args:
+        scored: A score as stored.
+
+    Returns:
+        True for a failure in either form.
+    """
+    if scored.score < 0:
+        return True
+    explanation = scored.explanation if isinstance(scored.explanation, str) else ""
+    return scored.score == SCORE_MIN and (
+        explanation.startswith(LEGACY_FAILURE_EXPLANATION_PREFIX)
+        or explanation == LEGACY_UNREADABLE_EXPLANATION
+    )
 
 
 def scoring_failure_reason(scored: ScoredDocument) -> str | None:
@@ -301,6 +368,159 @@ def outcome_entries(outcomes: DocumentOutcomes) -> dict[str, list[dict[str, Any]
             for document in outcomes.not_scored
         ],
     }
+
+
+def extraction_failure_entries(
+    failures: Sequence[ExtractionFailure],
+) -> list[dict[str, Any]]:
+    """One audit entry per relevant document that could not be read (#310).
+
+    An accepted document with no citation is either one the model read and
+    found nothing quotable in (#303), or one it could not read at all. Only
+    this list tells them apart: without it the record reads a failure as
+    silence, #261's harm in the file that outlives the session.
+
+    Args:
+        failures: The documents whose extraction failed.
+
+    Returns:
+        Entries shaped as a failed scoring's are: the document, the error
+        code's name and its description.
+    """
+    return [
+        {
+            "id": failure.document.id,
+            "title": failure.document.title,
+            "error_code": failure.cause.name,
+            "reason": failure.cause.description,
+        }
+        for failure in failures
+    ]
+
+
+def extraction_failure_summary(
+    failures: Sequence[ExtractionFailure] | None,
+) -> dict[str, int | None]:
+    """The audit summary's count of relevant documents that were not read.
+
+    Args:
+        failures: The run's extraction failures, or None when the run never
+            recorded them (a report restored from an older checkpoint).
+
+    Returns:
+        The count, None stating it was not recorded -- never 0, which would
+        say every uncited relevant document was read and found silent.
+    """
+    return {EXTRACTION_FAILED_COUNT_KEY: None if failures is None else len(failures)}
+
+
+def extraction_failure_record(
+    failures: Sequence[ExtractionFailure] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """The audit record's list of relevant documents that were not read.
+
+    Args:
+        failures: The run's extraction failures, or None when not recorded.
+
+    Returns:
+        The list under its key -- empty when every document was read, which
+        is a statement -- or nothing at all when the run never recorded it,
+        so the record reads as one that cannot tell.
+    """
+    if failures is None:
+        return {}
+    return {CITATION_EXTRACTION_FAILED_KEY: extraction_failure_entries(failures)}
+
+
+def predates_extraction_failures(record: Mapping[str, Any]) -> bool:
+    """Whether an audit record was written before extraction failures were.
+
+    Args:
+        record: An audit record, as loaded.
+
+    Returns:
+        True for a record whose uncited relevant documents may each have
+        been silent or unread.
+    """
+    return CITATION_EXTRACTION_FAILED_KEY not in record
+
+
+def checkpoint_metadata_with_extraction_failures(
+    metadata: Mapping[str, Any],
+    failures: Sequence[ExtractionFailure],
+) -> dict[str, Any]:
+    """A checkpoint's metadata with its run's extraction failures added.
+
+    Updating a checkpoint replaces its metadata whole, so everything it
+    already kept -- the threshold -- is carried over.
+
+    Args:
+        metadata: What the checkpoint keeps so far.
+        failures: The documents whose extraction failed, possibly none.
+
+    Returns:
+        The new metadata: each failure as its document's id and the error
+        code's integer value, the form the codes persist in elsewhere.
+    """
+    return {
+        **metadata,
+        CHECKPOINT_EXTRACTION_FAILURES_KEY: [
+            {"document_id": failure.document.id, "error_code": failure.cause.value}
+            for failure in failures
+        ],
+    }
+
+
+def recorded_extraction_failures(
+    checkpoint_metadata: object,
+    documents: Mapping[str, LiteDocument],
+) -> list[ExtractionFailure] | None:
+    """The extraction failures a checkpoint recorded for its run.
+
+    Args:
+        checkpoint_metadata: The checkpoint's stored metadata -- JSON from
+            the database, so it is read as input (golden rule 1).
+        documents: The run's documents by id, to name each failure by.
+
+    Returns:
+        The failures, possibly none; or None when the checkpoint recorded
+        none (a run from before they were kept) or a record that cannot be
+        read whole -- skipping what it cannot read would under-count what
+        failed. A cause this build cannot name degrades to
+        ``UNKNOWN_ERROR``: the reason degrades, the loss never does.
+    """
+    if not isinstance(checkpoint_metadata, Mapping):
+        return None
+    entries = checkpoint_metadata.get(CHECKPOINT_EXTRACTION_FAILURES_KEY)
+    if not isinstance(entries, list):
+        return None
+    failures: list[ExtractionFailure] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            return None
+        document_id = entry.get("document_id")
+        document = documents.get(document_id) if isinstance(document_id, str) else None
+        if document is None:
+            return None
+        failures.append(ExtractionFailure(document, _recorded_cause(entry.get("error_code"))))
+    return failures
+
+
+def _recorded_cause(value: object) -> EvaluationErrorCode:
+    """The cause a stored error code names.
+
+    Args:
+        value: The stored code.
+
+    Returns:
+        The code, or ``UNKNOWN_ERROR`` for one this build cannot name.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return EvaluationErrorCode.UNKNOWN_ERROR
+    try:
+        return EvaluationErrorCode(value)
+    except ValueError:
+        return EvaluationErrorCode.UNKNOWN_ERROR
 
 
 def predates_outcome_split(record: Mapping[str, Any]) -> bool:

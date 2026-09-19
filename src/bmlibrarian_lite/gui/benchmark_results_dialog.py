@@ -15,22 +15,24 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Benchmark results display dialogs for BMLibrarian Lite.
+Benchmark results display for BMLibrarian Lite.
 
-Provides dialogs for:
-- BenchmarkResultsDialog: Display benchmark results with tables and charts
-- DocumentComparisonDialog: Show document-level score comparisons
+Provides:
+- BenchmarkResultsTab: Display benchmark results with tables and charts
+- DocumentExplanationsDialog: Show one document's assessments side by side
+
+What each cell says -- including a figure that does not exist, and a
+document a model could not score -- is decided in
+:mod:`bmlibrarian_lite.benchmarking.display` (#306).
 """
 
 import csv
 import json
 import logging
-from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -52,17 +54,27 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
+from ..benchmarking.display import (
+    agreement_background,
+    cost_ranking,
+    failed_count_text,
+    failures_note,
+    format_agreement,
+    format_statistic,
+    mean_score_ranking,
+    score_cell,
+)
 from ..constants import (
     BENCHMARK_SCORE_COLORS,
     BENCHMARK_AGREEMENT_HIGH,
     BENCHMARK_AGREEMENT_MEDIUM,
     BENCHMARK_AGREEMENT_LOW,
     BENCHMARK_INCLUSION_DISAGREEMENT,
-    DEFAULT_MIN_SCORE,
 )
 
 if TYPE_CHECKING:
     from ..benchmarking.models import BenchmarkResult, EvaluatorStats, DocumentComparison
+    from ..data_models import LiteDocument
 
 logger = logging.getLogger(__name__)
 
@@ -91,18 +103,16 @@ def _create_score_agreement_matrix_widget(
             else:
                 key = (name1, name2)
                 alt_key = (name2, name1)
+                # None: the pair judged no document in common (#306)
                 agreement = result.agreement_matrix.get(
-                    key, result.agreement_matrix.get(alt_key, 0.0)
+                    key, result.agreement_matrix.get(alt_key)
                 )
-                pct = agreement * 100
-                item = QTableWidgetItem(f"{pct:.0f}%")
-
-                if pct >= 90:
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                elif pct >= 75:
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
-                else:
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
+                item = QTableWidgetItem(format_agreement(agreement))
+                colour = agreement_background(
+                    agreement, 0.90, 0.75, BENCHMARK_AGREEMENT_LOW
+                )
+                if colour is not None:
+                    item.setBackground(QColor(colour))
 
             item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, j, item)
@@ -126,8 +136,10 @@ def _create_score_agreement_matrix_widget(
     layout.addLayout(legend_layout)
 
     explanation = QLabel(
-        "<small>Score agreement: percentage of documents where "
-        "evaluators gave scores within ±1 of each other.</small>"
+        "<small>Score agreement: percentage of the documents both evaluators "
+        "scored where their scores were within ±1 of each other. A document "
+        "either could not score is not compared; n/a means they scored no "
+        "document in common.</small>"
     )
     explanation.setWordWrap(True)
     layout.addWidget(explanation)
@@ -160,17 +172,14 @@ def _create_inclusion_agreement_matrix_widget(
                 key = (name1, name2)
                 alt_key = (name2, name1)
                 agreement = result.inclusion_agreement_matrix.get(
-                    key, result.inclusion_agreement_matrix.get(alt_key, 0.0)
+                    key, result.inclusion_agreement_matrix.get(alt_key)
                 )
-                pct = agreement * 100
-                item = QTableWidgetItem(f"{pct:.0f}%")
-
-                if pct >= 95:
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                elif pct >= 85:
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
-                else:
-                    item.setBackground(QColor(BENCHMARK_INCLUSION_DISAGREEMENT))
+                item = QTableWidgetItem(format_agreement(agreement))
+                colour = agreement_background(
+                    agreement, 0.95, 0.85, BENCHMARK_INCLUSION_DISAGREEMENT
+                )
+                if colour is not None:
+                    item.setBackground(QColor(colour))
 
             item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, j, item)
@@ -211,476 +220,6 @@ def _create_inclusion_agreement_matrix_widget(
     layout.addWidget(explanation)
 
     return widget
-
-
-class BenchmarkResultsDialog(QDialog):
-    """
-    Dialog displaying benchmark results.
-
-    Shows:
-    - Model comparison table with statistics
-    - Agreement matrix between evaluators
-    - Score distribution per model
-    - Export options
-    """
-
-    view_details_requested = Signal(object)  # BenchmarkResult
-
-    def __init__(
-        self,
-        result: "BenchmarkResult",
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        """
-        Initialize the results dialog.
-
-        Args:
-            result: Benchmark results to display
-            parent: Optional parent widget
-        """
-        super().__init__(parent)
-        self.result = result
-
-        self.setWindowTitle("Benchmark Results")
-        self.setMinimumSize(scaled(700), scaled(550))
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        """Set up the dialog UI."""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(scaled(12))
-
-        # Header with summary
-        header_layout = QVBoxLayout()
-
-        question_label = QLabel(f"<b>Question:</b> {self.result.question[:100]}...")
-        question_label.setWordWrap(True)
-        header_layout.addWidget(question_label)
-
-        # Summary stats
-        doc_count = len(self.result.document_comparisons)
-        model_count = len(self.result.evaluator_stats)
-        duration = self.result.total_duration_seconds
-        cost = self.result.total_cost_usd
-
-        summary_label = QLabel(
-            f"<b>Documents:</b> {doc_count} | "
-            f"<b>Models:</b> {model_count} | "
-            f"<b>Duration:</b> {duration:.1f}s | "
-            f"<b>Total Cost:</b> ${cost:.4f}"
-        )
-        header_layout.addWidget(summary_label)
-
-        layout.addLayout(header_layout)
-
-        # Tab widget for different views
-        tabs = QTabWidget()
-
-        # Model Comparison tab
-        comparison_tab = self._create_comparison_tab()
-        tabs.addTab(comparison_tab, "Model Comparison")
-
-        # Agreement Matrix tab
-        agreement_tab = self._create_agreement_tab()
-        tabs.addTab(agreement_tab, "Agreement Matrix")
-
-        # Score Distribution tab
-        distribution_tab = self._create_distribution_tab()
-        tabs.addTab(distribution_tab, "Score Distribution")
-
-        # Document Details tab
-        details_tab = self._create_details_tab()
-        tabs.addTab(details_tab, "Document Details")
-
-        layout.addWidget(tabs)
-
-        # Button row
-        button_layout = QHBoxLayout()
-
-        # Export button with menu
-        export_btn = QPushButton("Export...")
-        export_menu = QMenu(self)
-        export_menu.addAction("Export as CSV", self._export_csv)
-        export_menu.addAction("Export as JSON", self._export_json)
-        export_btn.setMenu(export_menu)
-        button_layout.addWidget(export_btn)
-
-        button_layout.addStretch()
-
-        # Close button
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        button_layout.addWidget(close_btn)
-
-        layout.addLayout(button_layout)
-
-    def _create_comparison_tab(self) -> QWidget:
-        """Create the model comparison tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        # Comparison table
-        table = QTableWidget()
-        table.setColumnCount(7)
-        table.setHorizontalHeaderLabels([
-            "Model", "Mean Score", "Std Dev", "Evaluations",
-            "Avg Latency", "Total Tokens", "Total Cost"
-        ])
-
-        stats_list = self.result.evaluator_stats
-        table.setRowCount(len(stats_list))
-
-        for row, stats in enumerate(stats_list):
-            # Model name
-            model_item = QTableWidgetItem(stats.evaluator.display_name)
-            if stats.evaluator.display_name == self.result.baseline_evaluator_name:
-                model_item.setText(f"{stats.evaluator.display_name} (baseline)")
-                model_item.setBackground(QColor("#E3F2FD"))
-            table.setItem(row, 0, model_item)
-
-            # Mean score
-            mean_item = QTableWidgetItem(f"{stats.mean_score:.2f}")
-            mean_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 1, mean_item)
-
-            # Std dev
-            std_item = QTableWidgetItem(f"{stats.std_dev:.2f}")
-            std_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 2, std_item)
-
-            # Evaluation count
-            count_item = QTableWidgetItem(str(stats.total_evaluations))
-            count_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 3, count_item)
-
-            # Average latency
-            latency_item = QTableWidgetItem(f"{stats.mean_latency_ms:.0f}ms")
-            latency_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 4, latency_item)
-
-            # Total tokens
-            tokens = stats.total_tokens_input + stats.total_tokens_output
-            tokens_item = QTableWidgetItem(f"{tokens:,}")
-            tokens_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 5, tokens_item)
-
-            # Total cost
-            cost_item = QTableWidgetItem(f"${stats.total_cost_usd:.4f}")
-            cost_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 6, cost_item)
-
-        # Configure table
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 7):
-            table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setAlternatingRowColors(True)
-
-        layout.addWidget(table)
-
-        # Rankings summary
-        rankings_group = QGroupBox("Rankings")
-        rankings_layout = QVBoxLayout(rankings_group)
-
-        # Sort by mean score
-        sorted_by_score = sorted(stats_list, key=lambda s: s.mean_score, reverse=True)
-        score_ranking = ", ".join(
-            f"{i+1}. {s.evaluator.display_name} ({s.mean_score:.2f})"
-            for i, s in enumerate(sorted_by_score[:3])
-        )
-        rankings_layout.addWidget(QLabel(f"<b>By Mean Score:</b> {score_ranking}"))
-
-        # Sort by cost efficiency
-        sorted_by_cost = sorted(
-            stats_list,
-            key=lambda s: s.total_cost_usd / s.total_evaluations if s.total_evaluations > 0 else float('inf')
-        )
-        cost_ranking = ", ".join(
-            f"{i+1}. {s.evaluator.display_name} (${s.total_cost_usd/s.total_evaluations:.4f}/eval)"
-            for i, s in enumerate(sorted_by_cost[:3])
-        )
-        rankings_layout.addWidget(QLabel(f"<b>By Cost Efficiency:</b> {cost_ranking}"))
-
-        layout.addWidget(rankings_group)
-
-        return tab
-
-    def _create_agreement_tab(self) -> QWidget:
-        """Create the agreement matrix tab with sub-tabs for score and inclusion agreement."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        agreement_tabs = QTabWidget()
-        agreement_tabs.addTab(
-            _create_score_agreement_matrix_widget(self.result),
-            "Score Agreement (±1)"
-        )
-        agreement_tabs.addTab(
-            _create_inclusion_agreement_matrix_widget(self.result),
-            "Inclusion Agreement"
-        )
-        layout.addWidget(agreement_tabs)
-
-        return tab
-
-    def _create_distribution_tab(self) -> QWidget:
-        """Create the score distribution tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        # Score distribution table (text-based visualization)
-        table = QTableWidget()
-        table.setColumnCount(6)
-        table.setHorizontalHeaderLabels(["Model", "1", "2", "3", "4", "5"])
-
-        stats_list = self.result.evaluator_stats
-        table.setRowCount(len(stats_list))
-
-        for row, stats in enumerate(stats_list):
-            # Model name
-            table.setItem(row, 0, QTableWidgetItem(stats.evaluator.display_name))
-
-            # Score counts with visual bar
-            total = stats.total_evaluations
-            for score in range(1, 6):
-                count = stats.score_distribution.get(score, 0)
-                pct = (count / total * 100) if total > 0 else 0
-
-                item = QTableWidgetItem(f"{count} ({pct:.0f}%)")
-                item.setTextAlignment(Qt.AlignCenter)
-                item.setBackground(QColor(BENCHMARK_SCORE_COLORS[score]))
-                table.setItem(row, score, item)
-
-        # Configure table
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 6):
-            table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setAlternatingRowColors(True)
-
-        layout.addWidget(table)
-
-        # Score legend
-        legend_layout = QHBoxLayout()
-        legend_layout.addWidget(QLabel("Score Legend:"))
-        for score, color in BENCHMARK_SCORE_COLORS.items():
-            label = QLabel(f"  {score}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
-            legend_layout.addWidget(label)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-
-        return tab
-
-    def _create_details_tab(self) -> QWidget:
-        """Create the document details tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        # Filter options
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Show:"))
-
-        self.show_all_btn = QPushButton("All Documents")
-        self.show_all_btn.setCheckable(True)
-        self.show_all_btn.setChecked(True)
-        self.show_all_btn.clicked.connect(lambda: self._filter_documents("all"))
-        filter_layout.addWidget(self.show_all_btn)
-
-        self.show_disagreements_btn = QPushButton("Score Disagreements")
-        self.show_disagreements_btn.setCheckable(True)
-        self.show_disagreements_btn.clicked.connect(lambda: self._filter_documents("disagreements"))
-        filter_layout.addWidget(self.show_disagreements_btn)
-
-        self.show_inclusion_btn = QPushButton("Inclusion Disagreements")
-        self.show_inclusion_btn.setCheckable(True)
-        self.show_inclusion_btn.clicked.connect(lambda: self._filter_documents("inclusion"))
-        filter_layout.addWidget(self.show_inclusion_btn)
-
-        filter_layout.addStretch()
-        layout.addLayout(filter_layout)
-
-        # Document list with scores
-        self.details_table = QTableWidget()
-        evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-
-        self.details_table.setColumnCount(2 + len(evaluator_names))
-        headers = ["Document", "Max Diff"] + evaluator_names
-        self.details_table.setHorizontalHeaderLabels(headers)
-
-        self._populate_details_table(self.result.document_comparisons)
-
-        # Configure table
-        self.details_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 2 + len(evaluator_names)):
-            self.details_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        self.details_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.details_table.setAlternatingRowColors(True)
-        self.details_table.cellDoubleClicked.connect(self._on_document_double_clicked)
-
-        layout.addWidget(self.details_table)
-
-        # Instructions
-        instructions = QLabel(
-            "<small>Double-click a document to see detailed explanations from each model.</small>"
-        )
-        layout.addWidget(instructions)
-
-        return tab
-
-    def _populate_details_table(
-        self,
-        comparisons: List["DocumentComparison"],
-    ) -> None:
-        """Populate the details table with document comparisons."""
-        self.details_table.setRowCount(len(comparisons))
-        self._current_comparisons = comparisons
-
-        for row, comparison in enumerate(comparisons):
-            # Document title
-            title = comparison.document.title[:60] + "..." if len(comparison.document.title) > 60 else comparison.document.title
-            title_item = QTableWidgetItem(title)
-            title_item.setToolTip(comparison.document.title)
-            self.details_table.setItem(row, 0, title_item)
-
-            # Max difference - highlight inclusion disagreements more prominently
-            max_diff = comparison.max_score_difference
-            has_inclusion = comparison.has_inclusion_disagreement(self.result.inclusion_threshold)
-            diff_text = f"{max_diff}" + (" ⚠" if has_inclusion else "")
-            diff_item = QTableWidgetItem(diff_text)
-            diff_item.setTextAlignment(Qt.AlignCenter)
-            if has_inclusion:
-                diff_item.setBackground(QColor(BENCHMARK_INCLUSION_DISAGREEMENT))
-                diff_item.setToolTip("Inclusion disagreement: models disagree on include/exclude")
-            elif max_diff > 1:
-                diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
-            self.details_table.setItem(row, 1, diff_item)
-
-            # Scores per evaluator
-            for col, stats in enumerate(self.result.evaluator_stats):
-                evaluator_name = stats.evaluator.display_name
-                score = comparison.scores.get(evaluator_name, "-")
-                score_item = QTableWidgetItem(str(score))
-                score_item.setTextAlignment(Qt.AlignCenter)
-                if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
-                    score_item.setBackground(QColor(BENCHMARK_SCORE_COLORS[score]))
-                self.details_table.setItem(row, col + 2, score_item)
-
-    def _filter_documents(self, filter_type: str) -> None:
-        """Filter documents in the details view."""
-        self.show_all_btn.setChecked(filter_type == "all")
-        self.show_disagreements_btn.setChecked(filter_type == "disagreements")
-        self.show_inclusion_btn.setChecked(filter_type == "inclusion")
-
-        if filter_type == "all":
-            self._populate_details_table(self.result.document_comparisons)
-        elif filter_type == "disagreements":
-            # Filter to only score disagreements (max_diff > 1)
-            disagreements = [
-                c for c in self.result.document_comparisons
-                if c.max_score_difference > 1
-            ]
-            self._populate_details_table(disagreements)
-        elif filter_type == "inclusion":
-            # Filter to only inclusion disagreements (most clinically significant)
-            inclusion_disagreements = [
-                c for c in self.result.document_comparisons
-                if c.has_inclusion_disagreement(self.result.inclusion_threshold)
-            ]
-            self._populate_details_table(inclusion_disagreements)
-
-    def _on_document_double_clicked(self, row: int, col: int) -> None:
-        """Handle document double-click to show explanations."""
-        if row < len(self._current_comparisons):
-            comparison = self._current_comparisons[row]
-            dialog = DocumentExplanationsDialog(comparison, self.result.evaluator_stats, self)
-            dialog.exec()
-
-    def _export_csv(self) -> None:
-        """Export results to CSV."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Results as CSV",
-            "benchmark_results.csv",
-            "CSV Files (*.csv)"
-        )
-        if not file_path:
-            return
-
-        try:
-            with open(file_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-
-                # Header
-                evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-                writer.writerow(["Document ID", "Document Title"] + evaluator_names)
-
-                # Data rows
-                for comparison in self.result.document_comparisons:
-                    row = [
-                        comparison.document.id,
-                        comparison.document.title,
-                    ]
-                    for name in evaluator_names:
-                        row.append(comparison.scores.get(name, ""))
-                    writer.writerow(row)
-
-            logger.info(f"Exported benchmark results to {file_path}")
-        except Exception as e:
-            logger.error(f"Failed to export CSV: {e}")
-
-    def _export_json(self) -> None:
-        """Export results to JSON."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Results as JSON",
-            "benchmark_results.json",
-            "JSON Files (*.json)"
-        )
-        if not file_path:
-            return
-
-        try:
-            data = {
-                "question": self.result.question,
-                "total_duration_seconds": self.result.total_duration_seconds,
-                "total_cost_usd": self.result.total_cost_usd,
-                "evaluators": [
-                    {
-                        "name": s.evaluator.display_name,
-                        "mean_score": s.mean_score,
-                        "std_dev": s.std_dev,
-                        "total_evaluations": s.total_evaluations,
-                        "mean_latency_ms": s.mean_latency_ms,
-                        "total_tokens_input": s.total_tokens_input,
-                        "total_tokens_output": s.total_tokens_output,
-                        "total_cost_usd": s.total_cost_usd,
-                        "score_distribution": s.score_distribution,
-                    }
-                    for s in self.result.evaluator_stats
-                ],
-                "agreement_matrix": {
-                    f"{k[0]} vs {k[1]}": v
-                    for k, v in self.result.agreement_matrix.items()
-                },
-                "documents": [
-                    {
-                        "id": c.document.id,
-                        "title": c.document.title,
-                        "scores": c.scores,
-                        "explanations": c.explanations,
-                        "max_difference": c.max_score_difference,
-                    }
-                    for c in self.result.document_comparisons
-                ],
-            }
-
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-
-            logger.info(f"Exported benchmark results to {file_path}")
-        except Exception as e:
-            logger.error(f"Failed to export JSON: {e}")
 
 
 class BenchmarkResultsTab(QWidget):
@@ -811,6 +350,14 @@ class BenchmarkResultsTab(QWidget):
         )
         header_layout.addWidget(summary_label)
 
+        # A result stored before failures were counted cannot tell its 1s
+        # from outages, and says so (#306)
+        note = failures_note(self.result)
+        if note is not None:
+            note_label = QLabel(f"<i>{note}</i>")
+            note_label.setWordWrap(True)
+            header_layout.addWidget(note_label)
+
         self._main_layout.addLayout(header_layout)
 
         # Tab widget for different views
@@ -854,12 +401,15 @@ class BenchmarkResultsTab(QWidget):
         """Create the model comparison tab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        if self.result is None:
+            # Built only once a result is shown; the tab is empty without one
+            return tab
 
         # Comparison table
         table = QTableWidget()
-        table.setColumnCount(7)
+        table.setColumnCount(8)
         table.setHorizontalHeaderLabels([
-            "Model", "Mean Score", "Std Dev", "Evaluations",
+            "Model", "Mean Score", "Std Dev", "Evaluations", "Failed",
             "Avg Latency", "Total Tokens", "Total Cost"
         ])
 
@@ -874,40 +424,45 @@ class BenchmarkResultsTab(QWidget):
                 model_item.setBackground(QColor("#E3F2FD"))
             table.setItem(row, 0, model_item)
 
-            # Mean score
-            mean_item = QTableWidgetItem(f"{stats.mean_score:.2f}")
+            # Mean score -- n/a for a model that scored no document
+            mean_item = QTableWidgetItem(format_statistic(stats.mean_score))
             mean_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(row, 1, mean_item)
 
             # Std dev
-            std_item = QTableWidgetItem(f"{stats.std_dev:.2f}")
+            std_item = QTableWidgetItem(format_statistic(stats.std_dev))
             std_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(row, 2, std_item)
 
-            # Evaluation count
+            # Evaluation count: the documents it scored
             count_item = QTableWidgetItem(str(stats.total_evaluations))
             count_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(row, 3, count_item)
 
+            # The documents it could not score, counted apart (#306)
+            failed_item = QTableWidgetItem(failed_count_text(stats))
+            failed_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 4, failed_item)
+
             # Average latency
             latency_item = QTableWidgetItem(f"{stats.mean_latency_ms:.0f}ms")
             latency_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 4, latency_item)
+            table.setItem(row, 5, latency_item)
 
             # Total tokens
             tokens = stats.total_tokens_input + stats.total_tokens_output
             tokens_item = QTableWidgetItem(f"{tokens:,}")
             tokens_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 5, tokens_item)
+            table.setItem(row, 6, tokens_item)
 
             # Total cost
             cost_item = QTableWidgetItem(f"${stats.total_cost_usd:.4f}")
             cost_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 6, cost_item)
+            table.setItem(row, 7, cost_item)
 
         # Configure table
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 7):
+        for col in range(1, 8):
             table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.setAlternatingRowColors(True)
@@ -918,24 +473,14 @@ class BenchmarkResultsTab(QWidget):
         rankings_group = QGroupBox("Rankings")
         rankings_layout = QVBoxLayout(rankings_group)
 
-        # Sort by mean score
-        sorted_by_score = sorted(stats_list, key=lambda s: s.mean_score, reverse=True)
-        score_ranking = ", ".join(
-            f"{i+1}. {s.evaluator.display_name} ({s.mean_score:.2f})"
-            for i, s in enumerate(sorted_by_score[:3])
+        # A model that scored no document has no mean and no cost per
+        # evaluation; both rankings place it last rather than crash (#306)
+        rankings_layout.addWidget(
+            QLabel(f"<b>By Mean Score:</b> {mean_score_ranking(self.result)}")
         )
-        rankings_layout.addWidget(QLabel(f"<b>By Mean Score:</b> {score_ranking}"))
-
-        # Sort by cost efficiency
-        sorted_by_cost = sorted(
-            stats_list,
-            key=lambda s: s.total_cost_usd / s.total_evaluations if s.total_evaluations > 0 else float('inf')
+        rankings_layout.addWidget(
+            QLabel(f"<b>By Cost Efficiency:</b> {cost_ranking(stats_list)}")
         )
-        cost_ranking = ", ".join(
-            f"{i+1}. {s.evaluator.display_name} (${s.total_cost_usd/s.total_evaluations:.4f}/eval)"
-            for i, s in enumerate(sorted_by_cost[:3])
-        )
-        rankings_layout.addWidget(QLabel(f"<b>By Cost Efficiency:</b> {cost_ranking}"))
 
         layout.addWidget(rankings_group)
 
@@ -1092,13 +637,16 @@ class BenchmarkResultsTab(QWidget):
                 diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
             self.details_table.setItem(row, 1, diff_item)
 
-            # Scores per evaluator
+            # Scores per evaluator; a document one could not score says so
             for col, stats in enumerate(self.result.evaluator_stats):
                 evaluator_name = stats.evaluator.display_name
-                score = comparison.scores.get(evaluator_name, "-")
-                score_item = QTableWidgetItem(str(score))
+                text, tooltip = score_cell(comparison, evaluator_name)
+                score_item = QTableWidgetItem(text)
                 score_item.setTextAlignment(Qt.AlignCenter)
-                if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
+                if tooltip is not None:
+                    score_item.setToolTip(tooltip)
+                score = comparison.scores.get(evaluator_name)
+                if score in BENCHMARK_SCORE_COLORS:
                     score_item.setBackground(QColor(BENCHMARK_SCORE_COLORS[score]))
                 self.details_table.setItem(row, col + 2, score_item)
 
@@ -1163,7 +711,8 @@ class BenchmarkResultsTab(QWidget):
                         comparison.document.title,
                     ]
                     for name in evaluator_names:
-                        row.append(comparison.scores.get(name, ""))
+                        text, _ = score_cell(comparison, name)
+                        row.append(text)
                     writer.writerow(row)
 
             logger.info(f"Exported benchmark results to {file_path}")
@@ -1192,6 +741,7 @@ class BenchmarkResultsTab(QWidget):
                         "mean_score": s.mean_score,
                         "std_dev": s.std_dev,
                         "total_evaluations": s.total_evaluations,
+                        "failed_evaluations": s.failed_evaluations,
                         "mean_latency_ms": s.mean_latency_ms,
                         "total_tokens_input": s.total_tokens_input,
                         "total_tokens_output": s.total_tokens_output,
@@ -1210,6 +760,7 @@ class BenchmarkResultsTab(QWidget):
                         "title": c.document.title,
                         "scores": c.scores,
                         "explanations": c.explanations,
+                        "failures": c.failures,
                         "max_difference": c.max_score_difference,
                     }
                     for c in self.result.document_comparisons
@@ -1301,9 +852,14 @@ class DocumentExplanationsDialog(QDialog):
         self._gold_buttons: Dict[str, QPushButton] = {}
         for stats in self.evaluator_stats:
             name = stats.evaluator.display_name
-            score = self.comparison.scores.get(name, "?")
-            btn = QPushButton(f"{name} (Score: {score})")
+            score_text, failure_reason = score_cell(self.comparison, name)
+            btn = QPushButton(f"{name} (Score: {score_text})")
             btn.setCheckable(True)
+            if failure_reason is not None:
+                # A model that could not score the document made no
+                # assessment to choose (#306)
+                btn.setEnabled(False)
+                btn.setToolTip(failure_reason)
             btn.clicked.connect(lambda checked, n=name: self._on_gold_selected(n))
             gold_layout.addWidget(btn)
             self._gold_buttons[name] = btn
@@ -1334,8 +890,6 @@ class DocumentExplanationsDialog(QDialog):
 
     def _create_abstract_tab(self, doc: "LiteDocument") -> QWidget:
         """Create the abstract display tab."""
-        from ..data_models import LiteDocument  # Import for type hint
-
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
@@ -1352,9 +906,13 @@ class DocumentExplanationsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Score summary at top
-        scores = self.comparison.scores
-        score_text = " | ".join(f"<b>{name}:</b> {score}" for name, score in scores.items())
+        # Score summary at top, a model that could not score the document
+        # named as failed rather than left out
+        score_text = " | ".join(
+            f"<b>{stats.evaluator.display_name}:</b> "
+            f"{score_cell(self.comparison, stats.evaluator.display_name)[0]}"
+            for stats in self.evaluator_stats
+        )
         score_label = QLabel(f"Scores: {score_text}")
         layout.addWidget(score_label)
 
@@ -1389,16 +947,20 @@ class DocumentExplanationsDialog(QDialog):
     def _create_evaluator_panel(self, stats: "EvaluatorStats") -> QWidget:
         """Create a panel showing one evaluator's assessment."""
         name = stats.evaluator.display_name
-        score = self.comparison.scores.get(name, "?")
-        explanation = self.comparison.explanations.get(name, "No explanation available")
+        score_text, failure_reason = score_cell(self.comparison, name)
+        score = self.comparison.scores.get(name)
+        if failure_reason is not None:
+            explanation = f"This model could not score the document: {failure_reason}."
+        else:
+            explanation = self.comparison.explanations.get(name, "No explanation available")
 
         # Group box with colored header based on score
         group = QGroupBox(f"{name}")
         group_layout = QVBoxLayout(group)
 
         # Score badge
-        score_label = QLabel(f"<b>Score: {score}</b>")
-        if isinstance(score, int) and score in BENCHMARK_SCORE_COLORS:
+        score_label = QLabel(f"<b>Score: {score_text}</b>")
+        if score in BENCHMARK_SCORE_COLORS:
             score_label.setStyleSheet(
                 f"background-color: {BENCHMARK_SCORE_COLORS[score]}; "
                 f"padding: {scaled(4)}px; border-radius: {scaled(4)}px;"

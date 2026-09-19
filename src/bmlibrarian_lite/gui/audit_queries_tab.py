@@ -84,6 +84,7 @@ class QueryCard(QFrame):
         # Statistics (updated during workflow)
         self._documents_found = 0
         self._documents_scored = 0
+        self._documents_failed = 0
         self._citations_extracted = 0
 
         self._setup_ui()
@@ -152,6 +153,7 @@ class QueryCard(QFrame):
                 self._documents_found,
                 self._documents_scored,
                 self._citations_extracted,
+                documents_failed=self._documents_failed,
             )
         )
         self.stats_label.setStyleSheet("color: #555; font-size: 10pt;")
@@ -180,6 +182,15 @@ class QueryCard(QFrame):
         self._documents_scored = count
         self._update_stats()
 
+    def set_documents_failed(self, count: int) -> None:
+        """Update the count of documents the model could not score.
+
+        Args:
+            count: Number of documents whose scoring failed
+        """
+        self._documents_failed = count
+        self._update_stats()
+
     def set_citations_extracted(self, count: int) -> None:
         """
         Update citations extracted count.
@@ -197,6 +208,7 @@ class QueryCard(QFrame):
                 self._documents_found,
                 self._documents_scored,
                 self._citations_extracted,
+                documents_failed=self._documents_failed,
             )
         )
 
@@ -313,6 +325,7 @@ class AuditQueriesTab(QWidget):
         documents_found: Optional[int] = None,
         documents_scored: Optional[int] = None,
         citations_extracted: Optional[int] = None,
+        documents_failed: int | None = None,
     ) -> None:
         """
         Update statistics for a query.
@@ -322,6 +335,7 @@ class AuditQueriesTab(QWidget):
             documents_found: New documents found count
             documents_scored: New documents scored count
             citations_extracted: New citations extracted count
+            documents_failed: New count of documents that could not be scored
         """
         card = self._query_cards.get(pubmed_query)
         if not card:
@@ -332,6 +346,8 @@ class AuditQueriesTab(QWidget):
             card.set_documents_found(documents_found)
         if documents_scored is not None:
             card.set_documents_scored(documents_scored)
+        if documents_failed is not None:
+            card.set_documents_failed(documents_failed)
         if citations_extracted is not None:
             card.set_citations_extracted(citations_extracted)
 

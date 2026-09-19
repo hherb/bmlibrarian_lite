@@ -114,6 +114,12 @@ relevant in it.
   report opens with an **Incomplete analysis** notice, and its Methodology
   section records it under Analysis Completeness. Those documents are not
   counted as rejected.
+- **The audit trail names them.** Its dialog lists the documents that could
+  not be scored, and the relevant documents whose citations could not be
+  extracted, each with the reason. For every relevant document it says whether
+  it was cited, held nothing quotable, or could not be read — three different
+  things. A report restored from an older run that never recorded this says
+  so rather than guessing.
 - **A report that could not be generated is not saved.** The review ends with
   an error in the report step, and nothing is added to the report folder or
   offered under Load Report.
@@ -151,7 +157,9 @@ The Audit Trail tab provides real-time visibility into the systematic review wor
 
 Shows all generated search queries during the workflow:
 - The natural language question and resulting search query
-- Statistics: documents found, scored, citations extracted
+- Statistics: documents found, scored, citations extracted — and, when any
+  failed, the documents the model could not score, counted apart from those
+  it scored
 - Query history for the current session
 
 #### Literature Tab
@@ -159,7 +167,7 @@ Shows all generated search queries during the workflow:
 Displays document cards for all retrieved articles:
 
 **Document Cards:**
-- **Header**: Shows quality badge (RCT, SR, etc.), relevance score (1-5), transparency risk badge, and title
+- **Header**: Shows quality badge (RCT, SR, etc.), relevance score (1-5), transparency risk badge, and title. A document the model could not score shows a grey **Scoring failed** badge instead of a score; hover over it for the reason. After the review finishes, cards are ordered by score, then the documents that could not be scored, then those never scored
 - **Metadata**: Authors, journal, year, PMID/DOI
 - **Click to expand**: View the full abstract
 - **LLM Rationale**: See why the document received its score
@@ -236,6 +244,15 @@ Compare how different LLM models score document relevance and classify study qua
 - Per-document score comparison with disagreement highlighting
 - Cost and latency tracking per model
 - Export results to CSV/JSON
+
+A document a model could not score — its provider unreachable, or an answer
+that could not be read — is counted in that model's **Failed** column and
+shown as **failed** in the document details (hover for why). It is never
+counted as a score: not in the mean, the distribution, or the agreement
+between models, which compares only documents both models scored (**n/a**
+when they scored none in common). The next benchmark of the same question
+scores it again rather than reusing the failure. A result saved before this
+was recorded says so: its scores of 1 may include failures.
 
 ### Quality Assessment
 

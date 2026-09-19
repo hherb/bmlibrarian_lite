@@ -35,8 +35,8 @@ from ..data_models import (
     Citation,
     CitationOutcome,
     EvaluationErrorCode,
+    ExtractionFailure,
     ScoredDocument,
-    distinct_causes,
 )
 from ..exceptions import JSONParseError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retries
@@ -291,12 +291,11 @@ Extract the most relevant passages that help answer the research question."""
 
         Returns:
             The outcome: the citations, how many documents were attempted,
-            and how many could not be read, with the causes.
+            and which could not be read, with why.
         """
         all_citations: list[Citation] = []
-        causes: list[EvaluationErrorCode] = []
+        failed: list[ExtractionFailure] = []
         attempted = 0
-        failed_count = 0
         # Filter out documents with negative scores (error codes) and below threshold
         eligible = [d for d in scored_documents if d.score >= min_score]
         total = len(eligible)
@@ -319,8 +318,7 @@ Extract the most relevant passages that help answer the research question."""
                 attempted += 1
 
                 if cause is not None:
-                    failed_count += 1
-                    causes.append(cause)
+                    failed.append(ExtractionFailure(scored_doc.document, cause))
                     logger.warning(
                         f"Document {scored_doc.document.id}: No citations extracted "
                         f"({i+1}/{total})"
@@ -355,15 +353,15 @@ Extract the most relevant passages that help answer the research question."""
 
                     idx = futures[future]
                     citations, cause = future.result()
-                    doc_id = eligible[idx].document.id
+                    document = eligible[idx].document
+                    doc_id = document.id
 
                     with lock:
                         completed += 1
                         current = completed
                         attempted += 1
                         if cause is not None:
-                            failed_count += 1
-                            causes.append(cause)
+                            failed.append(ExtractionFailure(document, cause))
                             logger.warning(
                                 f"Document {doc_id}: No citations extracted "
                                 f"({current}/{total})"
@@ -377,10 +375,10 @@ Extract the most relevant passages that help answer the research question."""
                     if progress_callback:
                         progress_callback(current, total)
 
-        if failed_count > 0:
+        if failed:
             logger.warning(
                 f"Citation extraction complete: {len(all_citations)} citations from "
-                f"{attempted - failed_count} documents, {failed_count} failed"
+                f"{attempted - len(failed)} documents, {len(failed)} failed"
             )
         else:
             logger.info(
@@ -389,8 +387,7 @@ Extract the most relevant passages that help answer the research question."""
         return CitationOutcome(
             citations=all_citations,
             documents_attempted=attempted,
-            documents_failed=failed_count,
-            causes=distinct_causes(causes),
+            failed=tuple(failed),
         )
 
     def _parse_citation_response(
