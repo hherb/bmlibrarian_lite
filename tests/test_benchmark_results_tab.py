@@ -12,6 +12,7 @@ document dialog over such a result.
 """
 
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,8 +24,10 @@ from bmlibrarian_lite.benchmarking.display import (  # noqa: E402
 )
 from bmlibrarian_lite.benchmarking.models import BenchmarkResult  # noqa: E402
 from bmlibrarian_lite.benchmarking.statistics import (  # noqa: E402
+    compute_agreement_matrix,
     compute_document_comparison,
     compute_evaluator_stats,
+    compute_inclusion_agreement_matrix,
 )
 from bmlibrarian_lite.data_models import (  # noqa: E402
     DocumentSource,
@@ -82,6 +85,10 @@ def outage_result() -> BenchmarkResult:
         )
         for d in documents
     ]
+    by_model: dict[str, list[int | None]] = {
+        ANSWERED.display_name: [4, 4],
+        DOWN.display_name: [None, None],
+    }
     return BenchmarkResult(
         run_id="run",
         question="Does aspirin prevent stroke?",
@@ -96,8 +103,8 @@ def outage_result() -> BenchmarkResult:
             )
             for d, a, f in zip(documents, answered, down, strict=True)
         ],
-        agreement_matrix={(ANSWERED.display_name, DOWN.display_name): None},
-        inclusion_agreement_matrix={(ANSWERED.display_name, DOWN.display_name): None},
+        agreement_matrix=compute_agreement_matrix(by_model),
+        inclusion_agreement_matrix=compute_inclusion_agreement_matrix(by_model),
     )
 
 
@@ -152,6 +159,61 @@ class TestTheTabOpensOverAnOutage:
         for matrix in matrices:
             assert matrix.item(0, 1).text() == NOT_AVAILABLE
 
+    def test_a_model_that_judged_nothing_has_no_self_agreement(self, qapp: Any) -> None:
+        """The diagonal was a green 100% for it too."""
+        tab = BenchmarkResultsTab(result=outage_result())
+
+        for matrix in tables_headed(tab, ANSWERED.display_name, DOWN.display_name):
+            assert matrix.item(0, 0).text() == "100%"
+            assert matrix.item(1, 1).text() == NOT_AVAILABLE
+
+    def test_no_comparable_document_has_no_disagreement_rate(self, qapp: Any) -> None:
+        """"0.0%" sat under a matrix that said n/a."""
+        from PySide6.QtWidgets import QLabel
+
+        tab = BenchmarkResultsTab(result=outage_result())
+
+        rates = [
+            label.text() for label in tab.findChildren(QLabel)
+            if "inclusion disagreement:" in label.text()
+        ]
+        assert rates and all(f"</b> {NOT_AVAILABLE}" in text for text in rates)
+
+    def test_a_document_one_model_judged_has_no_spread(self, qapp: Any) -> None:
+        """Its "Max Diff" read 0 -- full agreement with nobody."""
+        tab = BenchmarkResultsTab(result=outage_result())
+
+        assert tab.details_table.item(0, 1).text() == NOT_AVAILABLE
+
+    def test_a_model_that_judged_nothing_has_no_latency(self, qapp: Any) -> None:
+        """"0ms" ranked it the fastest."""
+        tab = BenchmarkResultsTab(result=outage_result())
+
+        [comparison] = tables_headed(tab, "Model", "Mean Score")
+
+        assert cell_texts(comparison, 1)[5] == NOT_AVAILABLE
+
+    def test_a_failed_export_is_reported(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only logged, it left the user believing the file was saved."""
+        from bmlibrarian_lite.gui import benchmark_results_dialog as module
+
+        unwritable = tmp_path / "missing" / "results.csv"
+        monkeypatch.setattr(
+            module.QFileDialog,
+            "getSaveFileName",
+            lambda *_args, **_kwargs: (str(unwritable), ""),
+        )
+        warning = MagicMock()
+        monkeypatch.setattr(module.QMessageBox, "warning", warning)
+        tab = BenchmarkResultsTab(result=outage_result())
+
+        tab._export_csv()
+        tab._export_json()
+
+        assert warning.call_count == 2
+
     def test_a_failed_cell_says_so_and_why(self, qapp: Any) -> None:
         """Shown as "-", the model looked as though it was never asked."""
         tab = BenchmarkResultsTab(result=outage_result())
@@ -188,3 +250,80 @@ class TestTheDocumentDialog:
 
         assert not button.isEnabled()
         assert FAILED_SCORE_TEXT in button.text()
+
+
+class TestTheConfirmDialog:
+    """The cost estimate counts what can be reused, not that a run happened."""
+
+    def test_a_run_that_failed_everywhere_is_not_promised_as_free(
+        self, qapp: Any, tmp_path: Any
+    ) -> None:
+        """"$0.00 (reusing existing)" -- then every failure was scored, and billed."""
+        from bmlibrarian_lite.benchmarking.runner import BenchmarkRunner
+        from bmlibrarian_lite.config import BenchmarkModelConfig, LiteConfig
+        from bmlibrarian_lite.gui.benchmark_dialog import BenchmarkConfirmDialog
+        from bmlibrarian_lite.storage import LiteStorage
+
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        config.benchmark.models = [
+            BenchmarkModelConfig(provider="anthropic", model="claude-sonnet-5")
+        ]
+        storage = LiteStorage(config)
+        documents = [make_document("1"), make_document("2")]
+        down = MagicMock()
+        down.chat.side_effect = ConnectionError("refused")
+        runner = BenchmarkRunner(config=config, storage=storage)
+        runner._llm_client = down
+        runner.run_quick_benchmark(
+            question="Q", documents=documents, models=["anthropic:claude-sonnet-5"]
+        )
+
+        dialog = BenchmarkConfirmDialog(
+            config=config, documents=documents, question="Q", storage=storage
+        )
+
+        assert "reusing" not in dialog.cost_label.text()
+
+
+class TestTheCompletionMessage:
+    """The Systematic Review tab's status line after a benchmark."""
+
+    def test_it_names_the_failures(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """"Benchmark complete" alone hid a model that answered nothing."""
+        from bmlibrarian_lite.config import LiteConfig
+        from bmlibrarian_lite.gui.systematic_review_tab import SystematicReviewTab
+
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        tab = SystematicReviewTab(config=config, storage=MagicMock())
+        tab._benchmark_progress_dialog = None
+
+        tab._on_benchmark_finished(outage_result())
+
+        assert "2 of 4 scorings failed" in tab.progress_label.text()
+
+
+class TestSelectingAQuestion:
+    """A benchmark that cannot be loaded is not shown as another question's."""
+
+    def test_a_failed_load_clears_the_previous_result(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The last question's benchmark stayed on screen, only logged."""
+        from bmlibrarian_lite.gui import app as app_module
+        from bmlibrarian_lite.gui.app import LiteMainWindow
+
+        broken = MagicMock()
+        broken.return_value.get_latest_benchmark_result_for_question.side_effect = (
+            OSError("disk I/O error")
+        )
+        monkeypatch.setattr(app_module, "BenchmarkRunner", broken)
+        window = MagicMock()
+
+        LiteMainWindow._load_benchmark_results_for_question(window, "Q")
+
+        window.benchmark_tab.update_result.assert_called_once_with(None)
+        assert "could not be loaded" in window.status_bar.showMessage.call_args.args[0]

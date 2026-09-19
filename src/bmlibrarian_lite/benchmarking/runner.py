@@ -25,12 +25,12 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from ..agents.scoring_agent import SCORING_SYSTEM_PROMPT, parse_score_response
-from ..audit_records import is_scoring_failure
+from ..audit_records import UNNAMED_FAILURE_REASON, is_scoring_failure
 from ..config import LiteConfig
-from ..constants import calculate_cost
+from ..constants import SCORE_MAX, SCORE_MIN, calculate_cost
 from ..data_models import (
     BenchmarkRun,
     BenchmarkStatus,
@@ -85,6 +85,65 @@ def _stored_failures(value: object) -> dict[str, str]:
         for name, reason in value.items()
         if isinstance(name, str) and isinstance(reason, str)
     }
+
+
+def _stored_distribution(value: object) -> dict[int, int]:
+    """A stored score distribution, keyed by score again.
+
+    JSON keeps object keys as strings, so a distribution read back as stored
+    was looked up by ``1``..``5`` and showed every loaded result as 0 (0%).
+
+    Args:
+        value: The stored distribution.
+
+    Returns:
+        Each score on the scale and its count; 0 for a score the summary
+        does not state.
+    """
+    counts = value if isinstance(value, dict) else {}
+    distribution: dict[int, int] = {}
+    for score in range(SCORE_MIN, SCORE_MAX + 1):
+        count = counts.get(str(score), counts.get(score, 0))
+        distribution[score] = count if isinstance(count, int) else 0
+    return distribution
+
+
+def _stored_comparison(document: LiteDocument, data: dict[str, Any]) -> DocumentComparison:
+    """A stored document comparison, an older build's failures told apart.
+
+    A summary stored before #306 lists a failed scoring among the scores, as
+    a 1 whose explanation is the raw exception text. Those entries are
+    recognisable exactly (``is_scoring_failure``) and are read as failures,
+    without the text: shown as the model's reasoning, it can carry the
+    request URL.
+
+    Args:
+        document: The document compared.
+        data: The stored comparison.
+
+    Returns:
+        The comparison.
+    """
+    scores: dict[str, int] = {}
+    explanations: dict[str, str] = {}
+    failures = _stored_failures(data.get("failures"))
+    stored_explanations = data.get("explanations") or {}
+    for name, score in (data.get("scores") or {}).items():
+        if isinstance(score, bool) or not isinstance(score, int):
+            logger.warning(f"Stored comparison of {document.id} holds no score for {name}")
+            continue
+        explanation = stored_explanations.get(name, "")
+        if is_scoring_failure(ScoredDocument(document, score, explanation)):
+            failures.setdefault(name, UNNAMED_FAILURE_REASON)
+        else:
+            scores[name] = score
+            explanations[name] = explanation
+    return DocumentComparison(
+        document=document,
+        scores=scores,
+        explanations=explanations,
+        failures=failures,
+    )
 
 
 class BenchmarkRunner:
@@ -728,7 +787,9 @@ Evaluate the relevance of this document to the research question."""
                         scores=stat_data["scores"],
                         mean_score=stat_data["mean_score"],
                         std_dev=stat_data["std_dev"],
-                        score_distribution=stat_data["score_distribution"],
+                        score_distribution=_stored_distribution(
+                            stat_data["score_distribution"]
+                        ),
                         total_evaluations=stat_data["total_evaluations"],
                         mean_latency_ms=stat_data["mean_latency_ms"],
                         total_tokens_input=stat_data["total_tokens_input"],
@@ -748,12 +809,7 @@ Evaluate the relevance of this document to the research question."""
                 doc_id = comp_data["document_id"]
                 document = self.storage.get_document(doc_id)
                 if document:
-                    comparison = DocumentComparison(
-                        document=document,
-                        scores=comp_data["scores"],
-                        explanations=comp_data["explanations"],
-                        failures=_stored_failures(comp_data.get("failures")),
-                    )
+                    comparison = _stored_comparison(document, comp_data)
                     document_comparisons.append(comparison)
 
             # Reconstruct agreement matrix (convert string keys back to tuples)

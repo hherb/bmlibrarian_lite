@@ -49,6 +49,8 @@ from PySide6.QtWidgets import (
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
+from ..benchmarking.display import failed_scorings_sentence
+from ..benchmarking.models import BenchmarkResult
 from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
 from ..data_models import LiteDocument, ResearchQuestionSummary, RetrievalShortfall
@@ -647,8 +649,14 @@ class ResearchQuestionsTab(QWidget):
 
         doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
         model_count = len(result.evaluator_stats) if hasattr(result, 'evaluator_stats') else 0
+        # A model that could not answer is named, not hidden behind
+        # "complete" (#306)
+        failures = (
+            failed_scorings_sentence(result) if isinstance(result, BenchmarkResult) else None
+        )
         self.progress_label.setText(
             f"Benchmark complete: {doc_count} documents, {model_count} models"
+            + (f" - {failures}" if failures else "")
         )
 
         # Clean up worker

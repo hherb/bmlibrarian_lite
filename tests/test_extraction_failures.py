@@ -30,7 +30,7 @@ from bmlibrarian_lite.audit_records import (
     CHECKPOINT_MIN_SCORE_KEY,
     checkpoint_metadata_with_extraction_failures,
     extraction_failure_entries,
-    predates_extraction_failures,
+    readable_extraction_failures,
     recorded_extraction_failures,
 )
 from bmlibrarian_lite.data_models import (
@@ -218,6 +218,24 @@ class TestTheAgentRecordsWhichDocumentFailed:
         assert outcome.citations == []
 
 
+class TestADocumentListedTwice:
+    """A relevant document listed twice is one document."""
+
+    def test_it_is_read_once_and_nothing_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Extraction never raises; counted twice, its failure would (review)."""
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(
+            agent, "_extract_with_retry", ScriptedLLM([ConnectionError("down")])
+        )
+
+        outcome = agent.extract_all_citations(QUESTION, [relevant("1"), relevant("1")])
+
+        assert outcome.documents_attempted == 1
+        assert [f.document.id for f in outcome.failed] == ["doc-1"]
+
+
 class TestTheAuditRecordEntries:
     """What the audit file writes for each document it could not read."""
 
@@ -232,10 +250,15 @@ class TestTheAuditRecordEntries:
             "reason": UNREACHABLE.description,
         }
 
-    def test_an_older_record_is_recognised(self) -> None:
+    def test_an_older_record_cannot_say(self) -> None:
         """A record without the list cannot tell silence from failure."""
-        assert predates_extraction_failures({"citations": []})
-        assert not predates_extraction_failures({"citation_extraction_failed": []})
+        assert readable_extraction_failures({"citations": []}) is None
+        assert readable_extraction_failures({"citation_extraction_failed": []}) == []
+
+    @pytest.mark.parametrize("damaged", [None, "none", [None], ["entry"]])
+    def test_a_list_that_cannot_be_read_whole_cannot_say(self, damaged: Any) -> None:
+        """Read as empty, it would vouch that every uncited document was silent."""
+        assert readable_extraction_failures({"citation_extraction_failed": damaged}) is None
 
 
 class TestTheCheckpointKeepsThem:
@@ -339,3 +362,44 @@ class TestTheMcpSourcesSayWhichWereRead:
             s["document_id"]: s["citation_extraction_error"] for s in result["sources"]
         }
         assert errors == {"doc-1": None, "doc-2": UNREACHABLE.description}
+
+
+class TestARestoreReadsItsOwnRun:
+    """What a restore reads from storage belongs to the run it restores."""
+
+    @pytest.fixture
+    def storage(self, tmp_path: Any) -> Any:
+        """A database this test owns."""
+        from bmlibrarian_lite.config import LiteConfig
+        from bmlibrarian_lite.storage import LiteStorage
+
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        return LiteStorage(config)
+
+    def test_its_citations_are_its_own(self, storage: Any) -> None:
+        """Counted per document, another run's citations misstated this one.
+
+        A document this run read and found silent was listed as cited.
+        """
+        document = make_document("1")
+        storage.add_document(document)
+        earlier = storage.create_checkpoint(research_question=QUESTION)
+        this_run = storage.create_checkpoint(research_question=QUESTION)
+        storage.save_citation(citation_from(document), earlier.id)
+
+        assert storage.get_citations_for_question(QUESTION, checkpoint_id=this_run.id) == []
+        assert len(storage.get_citations_for_question(QUESTION)) == 1
+
+    def test_the_checkpoint_restored_is_the_one_with_a_report(self, storage: Any) -> None:
+        """A benchmark's later checkpoint hid the review: "No report found"."""
+        review = storage.create_checkpoint(research_question=QUESTION)
+        storage.update_checkpoint(checkpoint_id=review.id, report="## Findings", step="complete")
+        storage.create_checkpoint(
+            research_question=QUESTION, metadata={"type": "benchmark"}
+        )
+
+        restored = storage.get_checkpoint_for_question(QUESTION)
+
+        assert restored is not None
+        assert restored.id == review.id

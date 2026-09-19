@@ -65,7 +65,7 @@ def compute_evaluator_stats(
     # Latency stats: how long the evaluator takes to answer, which a
     # timed-out attempt does not say
     latencies = [sd.latency_ms for sd in judged if sd.latency_ms is not None]
-    mean_latency = statistics.mean(latencies) if latencies else 0.0
+    mean_latency = statistics.mean(latencies) if latencies else None
 
     # Token stats
     total_input = sum(sd.tokens_input or 0 for sd in scored_documents)
@@ -121,6 +121,19 @@ def _judged_pairs(
         for s1, s2 in zip(scores1, scores2)
         if s1 is not None and s2 is not None
     ]
+
+
+def _self_agreement(scores: Sequence[int | None]) -> float | None:
+    """An evaluator's agreement with itself.
+
+    Args:
+        scores: Its scores, None where it gave none.
+
+    Returns:
+        1.0, or None for an evaluator that judged no document: it agrees
+        with nothing, itself included.
+    """
+    return 1.0 if any(score is not None for score in scores) else None
 
 
 def compute_agreement(
@@ -198,7 +211,8 @@ def compute_agreement_matrix(
     for name1 in evaluator_names:
         for name2 in evaluator_names:
             if name1 == name2:
-                matrix[(name1, name2)] = 1.0  # Perfect self-agreement
+                # Self-agreement, for an evaluator that judged anything
+                matrix[(name1, name2)] = _self_agreement(evaluator_scores[name1])
             else:
                 scores1 = evaluator_scores[name1]
                 scores2 = evaluator_scores[name2]
@@ -274,7 +288,8 @@ def compute_inclusion_agreement_matrix(
     for name1 in evaluator_names:
         for name2 in evaluator_names:
             if name1 == name2:
-                matrix[(name1, name2)] = 1.0  # Perfect self-agreement
+                # Self-agreement, for an evaluator that judged anything
+                matrix[(name1, name2)] = _self_agreement(evaluator_scores[name1])
             else:
                 scores1 = evaluator_scores[name1]
                 scores2 = evaluator_scores[name2]
@@ -427,7 +442,7 @@ def find_high_disagreement_documents(
     """
     return [
         dc for dc in document_comparisons
-        if dc.max_disagreement >= threshold
+        if dc.max_disagreement is not None and dc.max_disagreement >= threshold
     ]
 
 

@@ -1677,11 +1677,16 @@ class LiteStorage:
         """
         Get the most recent checkpoint for a research question.
 
+        A checkpoint holding a report is preferred: a benchmark or a re-score
+        creates a checkpoint for the question too, and the latest of those
+        hid the review behind "No report found".
+
         Args:
             question: The research question text
 
         Returns:
-            Most recent ReviewCheckpoint if found, None otherwise
+            The most recent checkpoint with a report, else the most recent
+            one; None if the question has none
         """
         with self._sqlite_connection() as conn:
             cursor = conn.execute(
@@ -1690,7 +1695,8 @@ class LiteStorage:
                        search_session_id, report, metadata
                 FROM review_checkpoints
                 WHERE LOWER(TRIM(research_question)) = LOWER(TRIM(?))
-                ORDER BY updated_at DESC
+                ORDER BY (report IS NOT NULL AND report != '') DESC,
+                         updated_at DESC
                 LIMIT 1
                 """,
                 (question,),
@@ -2781,29 +2787,36 @@ class LiteStorage:
     def get_citations_for_question(
         self,
         question: str,
+        checkpoint_id: str | None = None,
     ) -> list["Citation"]:
         """
         Get all citations for a research question.
 
         Args:
             question: The research question text
+            checkpoint_id: Only the citations of this checkpoint's run.
+                Without it every run of the question is merged, so a document
+                one run found nothing quotable in reads as cited (#310).
 
         Returns:
             List of Citation objects
         """
         from .data_models import Citation
 
+        query = """
+            SELECT c.document_id, c.passage, c.relevance_score, c.context
+            FROM citations c
+            INNER JOIN review_checkpoints rc ON c.checkpoint_id = rc.id
+            WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
+        """
+        params: list[Any] = [question]
+        if checkpoint_id is not None:
+            query += " AND c.checkpoint_id = ?"
+            params.append(checkpoint_id)
+        query += " ORDER BY c.relevance_score DESC"
+
         with self._sqlite_connection() as conn:
-            cursor = conn.execute(
-                """
-                SELECT c.document_id, c.passage, c.relevance_score, c.context
-                FROM citations c
-                INNER JOIN review_checkpoints rc ON c.checkpoint_id = rc.id
-                WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
-                ORDER BY c.relevance_score DESC
-                """,
-                (question,),
-            )
+            cursor = conn.execute(query, params)
 
             results: list[Citation] = []
             for row in cursor:
@@ -3611,17 +3624,21 @@ class LiteStorage:
 
             all_scores[evaluator_id] = {}
 
-            # Get all scores by this evaluator (most recent first)
+            # Get this evaluator's scores for this question (most recent
+            # first). A relevance score answers one question: read for every
+            # question, one question's judgement was reused as another's.
             with self._sqlite_connection() as conn:
                 query = """
                     SELECT DISTINCT sd.document_id, sd.score, sd.explanation,
                            sd.latency_ms, sd.tokens_input, sd.tokens_output,
                            sd.cost_usd, sd.scored_at
                     FROM scored_documents sd
+                    INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
                     WHERE sd.evaluator_id = ?
+                      AND LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
                     ORDER BY sd.scored_at DESC
                 """
-                cursor = conn.execute(query, (evaluator_id,))
+                cursor = conn.execute(query, (evaluator_id, question))
 
                 seen_docs: set[str] = set()
                 for row in cursor:

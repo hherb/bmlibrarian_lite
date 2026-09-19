@@ -381,21 +381,28 @@ it gave every non-accepted document (`without_invented_reason()`).
 **Silent or unread** (#310). `CitationOutcome.failed` names each relevant
 document whose extraction failed as an `ExtractionFailure(document, cause)`;
 `documents_failed` and `causes` are read from it, so a count and a list cannot
-disagree. The worker emits `citation_extraction_failed` per document and writes
-them into the checkpoint (`checkpoint_metadata_with_extraction_failures()`,
-read back by `recorded_extraction_failures()`), and the audit record lists them
-under `citation_extraction_failed` (`extraction_failure_record()`). An uncited
-relevant document absent from that list held nothing quotable. **`None` means
-not recorded, never "none failed"**: a restore from an older checkpoint passes
-`None`, and the record then omits the list and says it cannot tell. MCP sources
+disagree. Once extraction has run to the end — never for a cancelled run — the
+worker emits `citation_extraction_recorded` with the whole list and writes it
+into the checkpoint (`checkpoint_metadata_with_extraction_failures()`, read
+back by `recorded_extraction_failures()`), and the audit record lists them
+under `citation_extraction_failed` (`extraction_failure_record()`, read back by
+`readable_extraction_failures()`). An uncited relevant document absent from
+that list held nothing quotable. **`None` means not recorded, never "none
+failed"**: a cancelled run, a restore from an older checkpoint, and a list that
+cannot be read whole all say they cannot tell. A restore reads its own run's
+citations (`get_citations_for_question(..., checkpoint_id=...)`). MCP sources
 carry `citation_extraction_error`.
 
 **A stored failure is recognised in both forms** (#306). `is_scoring_failure()`
 is true for a negative score, and for the score of 1 older builds wrote with
 `"Scoring failed: …"` or `"Could not parse response"` (the benchmark runner
-until #306, the review scorer until 2025-12-23). The benchmark runner never
-reuses one; `outcome_sort_key()` orders a listing judged-then-failed-then-
-unscored, which the Audit Trail's literature cards follow (#307).
+until #306, the review scorer until 2025-12-23); `scoring_failure_sql()` states
+it for a query, and a restore passes each stored score through
+`as_recorded_failure()` (#315). The benchmark runner never reuses one, and
+reuses only the same question's scores; `benchmarking/display.py` states every
+figure the benchmark could not compute as `n/a`. `outcome_sort_key()` orders a
+listing judged-then-failed-then-unscored, which the Audit Trail's literature
+cards follow (#307).
 
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
@@ -524,8 +531,9 @@ documents_found = Signal(list)  # list[LiteDocument]
 document_scored = Signal(object)  # ScoredDocument
 quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
 citation_extracted = Signal(object)  # Citation
-# From WorkflowWorker, kept by SystematicReviewTab for the Report tab (#310)
-citation_extraction_failed = Signal(object)  # ExtractionFailure
+# From WorkflowWorker once extraction has run to the end, kept by
+# SystematicReviewTab for the Report tab (#310)
+citation_extraction_recorded = Signal(list)  # list[ExtractionFailure]
 ```
 
 ### Data Models

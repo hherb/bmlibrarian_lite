@@ -48,7 +48,8 @@ from PySide6.QtCore import Signal, QThread
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..config import LiteConfig, BenchmarkModelConfig
-from ..data_models import LiteDocument, ScoredDocument, Evaluator
+from ..data_models import LiteDocument, ScoredDocument
+from ..benchmarking.display import documents_left_to_score, reusable_documents_by_model
 from ..constants import calculate_cost, get_model_pricing
 
 logger = logging.getLogger(__name__)
@@ -178,13 +179,18 @@ class BenchmarkConfirmDialog(QDialog):
         self.question = question
         self.storage = storage
         self._model_checkboxes: List[tuple[QCheckBox, BenchmarkModelConfig]] = []
-        self._existing_evaluators: List[Evaluator] = []
         self.reuse_cross_run_check: Optional[QCheckBox] = None
 
-        # Check for existing scores
+        # The documents each model already judged for this question, which a
+        # benchmark reuses. A stored failure is scored again (#306), so an
+        # earlier run is not a promise of reuse -- a run that failed
+        # everywhere was shown as "$0.00 (reusing existing)".
+        self._reusable_by_model: dict[str, set[str]] = {}
         if self.storage:
-            self._existing_evaluators = self.storage.get_evaluators_for_question(
-                self.question
+            self._reusable_by_model = reusable_documents_by_model(
+                self.storage.get_all_scores_for_question(
+                    self.question, [doc.id for doc in self.documents]
+                )
             )
 
         self.setWindowTitle("Run Benchmark")
@@ -207,11 +213,11 @@ class BenchmarkConfirmDialog(QDialog):
         layout.addWidget(docs_label)
 
         # Show existing scores if available
-        if self._existing_evaluators:
-            existing_names = [e.display_name for e in self._existing_evaluators]
+        if self._reusable_by_model:
+            existing_names = sorted(self._reusable_by_model)
             existing_label = QLabel(
                 f"<span style='color: green;'><b>Existing scores found:</b> "
-                f"{len(self._existing_evaluators)} model(s) have previously "
+                f"{len(existing_names)} model(s) have previously "
                 f"scored documents for this question</span>"
             )
             existing_label.setWordWrap(True)
@@ -320,11 +326,7 @@ class BenchmarkConfirmDialog(QDialog):
             else self.sample_size_spin.value()
         )
 
-        # Check for reuse and existing evaluators
         reuse_enabled = self.get_reuse_cross_run()
-        existing_model_strings = {
-            e.model_string for e in self._existing_evaluators if e.model_string
-        }
 
         # Estimate tokens per document (rough estimate)
         avg_input_tokens = 500  # System prompt + document context
@@ -337,30 +339,30 @@ class BenchmarkConfirmDialog(QDialog):
         for model_string in selected_models:
             pricing = get_model_pricing(model_string)
 
-            # Check if this model has existing scores
-            if reuse_enabled and model_string in existing_model_strings:
-                reused_count += 1
-                model_name = (
-                    model_string.split(":", 1)[-1]
-                    if ":" in model_string
-                    else model_string
-                )
-                lines.append(f"• {model_name}: $0.00 (reusing existing)")
-                continue
-
-            model_cost = calculate_cost(
-                model_string,
-                avg_input_tokens * doc_count,
-                avg_output_tokens * doc_count,
+            # Only the documents this model already judged are reused
+            reusable = (
+                len(self._reusable_by_model.get(model_string, set()))
+                if reuse_enabled
+                else 0
             )
-            total_cost += model_cost
-
-            # Get short model name
+            to_score = documents_left_to_score(doc_count, len(self.documents), reusable)
             model_name = (
                 model_string.split(":", 1)[-1]
                 if ":" in model_string
                 else model_string
             )
+            if to_score == 0:
+                reused_count += 1
+                lines.append(f"• {model_name}: $0.00 (reusing existing)")
+                continue
+
+            model_cost = calculate_cost(
+                model_string,
+                avg_input_tokens * to_score,
+                avg_output_tokens * to_score,
+            )
+            total_cost += model_cost
+
             if pricing["input"] == 0 and pricing["output"] == 0:
                 lines.append(f"• {model_name}: $0.00 (local)")
             else:

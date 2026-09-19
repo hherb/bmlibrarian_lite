@@ -49,7 +49,11 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import StylesheetGenerator
 from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 
-from ..audit_records import recorded_extraction_failures, recorded_min_score
+from ..audit_records import (
+    as_recorded_failure,
+    recorded_extraction_failures,
+    recorded_min_score,
+)
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from .research_questions_tab import ResearchQuestionsTab
@@ -556,7 +560,13 @@ class LiteMainWindow(QMainWindow):
                 self.benchmark_tab.update_result(None)
 
         except Exception as e:
+            # Left in place, the previous question's benchmark read as this
+            # one's
             logger.warning(f"Failed to load benchmark results: {e}")
+            self.benchmark_tab.update_result(None)
+            self.status_bar.showMessage(
+                "This question's benchmark results could not be loaded", 5000
+            )
 
     def _on_question_selected(
         self,
@@ -598,12 +608,19 @@ class LiteMainWindow(QMainWindow):
             # of the question merged, highest score first, would describe
             # none of them: a document that failed in this run but scored in
             # an earlier one would be audited as accepted (#302).
-            scored_documents = self.storage.get_scored_documents_for_question(
+            # A failure an older build stored as a 1 reads as one (#315).
+            scored_documents = [
+                as_recorded_failure(scored)
+                for scored in self.storage.get_scored_documents_for_question(
+                    question, checkpoint_id=checkpoint.id
+                )
+            ]
+
+            # 4. Load that run's citations: counted per document against every
+            # run's, a document this run found silent read as cited (#310)
+            citations = self.storage.get_citations_for_question(
                 question, checkpoint_id=checkpoint.id
             )
-
-            # 4. Load all citations
-            citations = self.storage.get_citations_for_question(question)
 
             # 5. Load quality assessments
             quality_assessments = self.storage.get_quality_assessments_for_question(

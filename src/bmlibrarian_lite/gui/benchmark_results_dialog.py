@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -60,6 +61,9 @@ from ..benchmarking.display import (
     failed_count_text,
     failures_note,
     format_agreement,
+    format_latency,
+    format_rate,
+    format_spread,
     format_statistic,
     mean_score_ranking,
     score_cell,
@@ -97,22 +101,17 @@ def _create_score_agreement_matrix_widget(
 
     for i, name1 in enumerate(evaluator_names):
         for j, name2 in enumerate(evaluator_names):
-            if i == j:
-                item = QTableWidgetItem("100%")
-                item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-            else:
-                key = (name1, name2)
-                alt_key = (name2, name1)
-                # None: the pair judged no document in common (#306)
-                agreement = result.agreement_matrix.get(
-                    key, result.agreement_matrix.get(alt_key)
-                )
-                item = QTableWidgetItem(format_agreement(agreement))
-                colour = agreement_background(
-                    agreement, 0.90, 0.75, BENCHMARK_AGREEMENT_LOW
-                )
-                if colour is not None:
-                    item.setBackground(QColor(colour))
+            # None: the pair judged no document in common -- on the
+            # diagonal, a model that judged none at all (#306)
+            agreement = result.agreement_matrix.get(
+                (name1, name2), result.agreement_matrix.get((name2, name1))
+            )
+            item = QTableWidgetItem(format_agreement(agreement))
+            colour = agreement_background(
+                agreement, 0.90, 0.75, BENCHMARK_AGREEMENT_LOW
+            )
+            if colour is not None:
+                item.setBackground(QColor(colour))
 
             item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, j, item)
@@ -165,21 +164,15 @@ def _create_inclusion_agreement_matrix_widget(
 
     for i, name1 in enumerate(evaluator_names):
         for j, name2 in enumerate(evaluator_names):
-            if i == j:
-                item = QTableWidgetItem("100%")
-                item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-            else:
-                key = (name1, name2)
-                alt_key = (name2, name1)
-                agreement = result.inclusion_agreement_matrix.get(
-                    key, result.inclusion_agreement_matrix.get(alt_key)
-                )
-                item = QTableWidgetItem(format_agreement(agreement))
-                colour = agreement_background(
-                    agreement, 0.95, 0.85, BENCHMARK_INCLUSION_DISAGREEMENT
-                )
-                if colour is not None:
-                    item.setBackground(QColor(colour))
+            agreement = result.inclusion_agreement_matrix.get(
+                (name1, name2), result.inclusion_agreement_matrix.get((name2, name1))
+            )
+            item = QTableWidgetItem(format_agreement(agreement))
+            colour = agreement_background(
+                agreement, 0.95, 0.85, BENCHMARK_INCLUSION_DISAGREEMENT
+            )
+            if colour is not None:
+                item.setBackground(QColor(colour))
 
             item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, j, item)
@@ -202,11 +195,13 @@ def _create_inclusion_agreement_matrix_widget(
     legend_layout.addStretch()
     layout.addLayout(legend_layout)
 
-    inclusion_rate = result.inclusion_disagreement_rate * 100
+    # Over the documents at least two models judged; n/a when there were
+    # none, which "0.0%" stated as full agreement (#306)
+    inclusion_rate = format_rate(result.inclusion_disagreement_rate)
     threshold = result.inclusion_threshold
     summary = QLabel(
         f"<small><b>Inclusion threshold:</b> score ≥ {threshold} | "
-        f"<b>Documents with inclusion disagreement:</b> {inclusion_rate:.1f}%</small>"
+        f"<b>Documents with inclusion disagreement:</b> {inclusion_rate}</small>"
     )
     summary.setWordWrap(True)
     layout.addWidget(summary)
@@ -226,9 +221,8 @@ class BenchmarkResultsTab(QWidget):
     """
     Tab widget displaying benchmark results.
 
-    This is a non-modal version of BenchmarkResultsDialog that can be
-    embedded as a tab in the main window, allowing users to switch
-    between the systematic review and benchmark results freely.
+    Embedded as a tab in the main window, allowing users to switch between
+    the systematic review and benchmark results freely.
 
     Can be created empty and updated later with results.
 
@@ -445,7 +439,7 @@ class BenchmarkResultsTab(QWidget):
             table.setItem(row, 4, failed_item)
 
             # Average latency
-            latency_item = QTableWidgetItem(f"{stats.mean_latency_ms:.0f}ms")
+            latency_item = QTableWidgetItem(format_latency(stats.mean_latency_ms))
             latency_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(row, 5, latency_item)
 
@@ -627,13 +621,14 @@ class BenchmarkResultsTab(QWidget):
             # Max difference - highlight inclusion disagreements more prominently
             max_diff = comparison.max_score_difference
             has_inclusion = comparison.has_inclusion_disagreement(self.result.inclusion_threshold)
-            diff_text = f"{max_diff}" + (" ⚠" if has_inclusion else "")
+            # n/a when fewer than two models judged the document (#306)
+            diff_text = format_spread(max_diff) + (" ⚠" if has_inclusion else "")
             diff_item = QTableWidgetItem(diff_text)
             diff_item.setTextAlignment(Qt.AlignCenter)
             if has_inclusion:
                 diff_item.setBackground(QColor(BENCHMARK_INCLUSION_DISAGREEMENT))
                 diff_item.setToolTip("Inclusion disagreement: models disagree on include/exclude")
-            elif max_diff > 1:
+            elif comparison.has_disagreement:
                 diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
             self.details_table.setItem(row, 1, diff_item)
 
@@ -662,7 +657,7 @@ class BenchmarkResultsTab(QWidget):
             # Filter to only score disagreements (max_diff > 1)
             disagreements = [
                 c for c in self.result.document_comparisons
-                if c.max_score_difference > 1
+                if c.has_disagreement
             ]
             self._populate_details_table(disagreements)
         elif filter_type == "inclusion":
@@ -716,8 +711,12 @@ class BenchmarkResultsTab(QWidget):
                     writer.writerow(row)
 
             logger.info(f"Exported benchmark results to {file_path}")
-        except Exception as e:
+        except (OSError, csv.Error) as e:
+            # Logged only, a failed export left the user believing it saved
             logger.error(f"Failed to export CSV: {e}")
+            QMessageBox.warning(
+                self, "Export Failed", f"The results could not be saved to {file_path}:\n{e}"
+            )
 
     def _export_json(self) -> None:
         """Export results to JSON."""
@@ -771,8 +770,11 @@ class BenchmarkResultsTab(QWidget):
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
             logger.info(f"Exported benchmark results to {file_path}")
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to export JSON: {e}")
+            QMessageBox.warning(
+                self, "Export Failed", f"The results could not be saved to {file_path}:\n{e}"
+            )
 
 
 class DocumentExplanationsDialog(QDialog):

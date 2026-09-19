@@ -296,8 +296,16 @@ Extract the most relevant passages that help answer the research question."""
         all_citations: list[Citation] = []
         failed: list[ExtractionFailure] = []
         attempted = 0
-        # Filter out documents with negative scores (error codes) and below threshold
-        eligible = [d for d in scored_documents if d.score >= min_score]
+        # Filter out documents with negative scores (error codes) and below
+        # threshold. A document listed twice is one document: read twice, its
+        # failure would be counted twice, which the outcome refuses -- and
+        # extraction never raises (#310 review).
+        eligible: list[ScoredDocument] = []
+        seen_ids: set[str] = set()
+        for scored_doc in scored_documents:
+            if scored_doc.score >= min_score and scored_doc.document.id not in seen_ids:
+                seen_ids.add(scored_doc.document.id)
+                eligible.append(scored_doc)
         total = len(eligible)
 
         logger.info(

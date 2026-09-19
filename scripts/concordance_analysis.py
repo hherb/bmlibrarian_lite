@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.storage import LiteStorage
+from bmlibrarian_lite.audit_records import is_scoring_failure
 from bmlibrarian_lite.constants import DEFAULT_MIN_SCORE
 from bmlibrarian_lite.benchmarking.statistics import (
     compute_agreement,
@@ -148,7 +149,13 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
                 scored_doc = storage.get_scored_document_for_question(
                     doc_id, evaluator.id, question
                 )
-                if scored_doc and 1 <= scored_doc.score <= 5:
+                # A failure an older build stored as a 1 is not a judgement
+                # (#306), and would count as "not relevant" here
+                if (
+                    scored_doc
+                    and 1 <= scored_doc.score <= 5
+                    and not is_scoring_failure(scored_doc)
+                ):
                     # Use composite key (doc_id, question) to track question-specific scores
                     score_key = f"{doc_id}|{question[:50]}"
                     all_evaluator_scores[evaluator.display_name][score_key] = scored_doc.score
@@ -205,21 +212,29 @@ def compute_pairwise_concordance(
     doc_to_idx1 = {doc_id: i for i, doc_id in enumerate(eval1_data.document_ids)}
     doc_to_idx2 = {doc_id: i for i, doc_id in enumerate(eval2_data.document_ids)}
 
-    scores1 = []
-    scores2 = []
+    scores1: list[int] = []
+    scores2: list[int] = []
     for doc_id in common_docs:
         scores1.append(eval1_data.scores[doc_to_idx1[doc_id]])
         scores2.append(eval2_data.scores[doc_to_idx2[doc_id]])
+
+    score_agreement = compute_agreement(scores1, scores2, tolerance=1)
+    exact_agreement = compute_agreement(scores1, scores2, tolerance=0)
+    inclusion_agreement = compute_inclusion_agreement(
+        scores1, scores2, inclusion_threshold
+    )
+    # The agreement functions answer None only for no document judged by
+    # both, and every document compared here was
+    if score_agreement is None or exact_agreement is None or inclusion_agreement is None:
+        return None
 
     return PairwiseConcordance(
         evaluator1=eval1_data.evaluator_name,
         evaluator2=eval2_data.evaluator_name,
         documents_compared=len(common_docs),
-        score_agreement=compute_agreement(scores1, scores2, tolerance=1),
-        exact_agreement=compute_agreement(scores1, scores2, tolerance=0),
-        inclusion_agreement=compute_inclusion_agreement(
-            scores1, scores2, inclusion_threshold
-        ),
+        score_agreement=score_agreement,
+        exact_agreement=exact_agreement,
+        inclusion_agreement=inclusion_agreement,
         mean_absolute_difference=compute_mean_absolute_difference(scores1, scores2),
         kendall_tau=compute_kendall_tau(scores1, scores2),
     )

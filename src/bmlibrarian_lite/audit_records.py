@@ -36,7 +36,7 @@ The companion of :mod:`~bmlibrarian_lite.analysis_failures`, whose contract is
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .constants import SCORE_MAX, SCORE_MIN
@@ -260,6 +260,53 @@ def is_scoring_failure(scored: ScoredDocument) -> bool:
     )
 
 
+def scoring_failure_sql(table: str = "") -> str:
+    """The SQL condition :func:`is_scoring_failure` states, for a query.
+
+    Built from this module's constants only, never from input.
+
+    Args:
+        table: The alias of the ``scored_documents`` table, if it has one.
+
+    Returns:
+        A parenthesised condition true for a stored failure in either form.
+    """
+    column = f"{table}." if table else ""
+    prefix = LEGACY_FAILURE_EXPLANATION_PREFIX
+    # substr, not LIKE: SQLite's LIKE ignores ASCII case, and the Python rule
+    # does not
+    return (
+        f"({column}score < 0 OR ({column}score = {SCORE_MIN} AND "
+        f"(substr({column}explanation, 1, {len(prefix)}) = '{prefix}' "
+        f"OR {column}explanation = '{LEGACY_UNREADABLE_EXPLANATION}')))"
+    )
+
+
+def as_recorded_failure(scored: ScoredDocument) -> ScoredDocument:
+    """A stored score, with an older build's failure made to read as one.
+
+    Older builds stored a failed scoring as a 1 with the raw exception text
+    (#315). Read as it stands it is a rejection, whose "reason" is provider
+    text that can carry the request URL. It becomes a failure whose cause
+    cannot be named -- which is true: the text that named it is not shown.
+
+    Args:
+        scored: A score as stored.
+
+    Returns:
+        The score unchanged, or for an older failure a copy carrying
+        ``UNKNOWN_ERROR`` in place of the score and no provider text.
+    """
+    if scored.score < 0 or not is_scoring_failure(scored):
+        return scored
+    code = EvaluationErrorCode.UNKNOWN_ERROR
+    return replace(
+        scored,
+        score=code.value,
+        explanation=f"{LEGACY_FAILURE_EXPLANATION_PREFIX}{code.description}",
+    )
+
+
 def scoring_failure_reason(scored: ScoredDocument) -> str | None:
     """Why this document's scoring failed, in the reader's words.
 
@@ -432,17 +479,26 @@ def extraction_failure_record(
     return {CITATION_EXTRACTION_FAILED_KEY: extraction_failure_entries(failures)}
 
 
-def predates_extraction_failures(record: Mapping[str, Any]) -> bool:
-    """Whether an audit record was written before extraction failures were.
+def readable_extraction_failures(
+    record: Mapping[str, Any],
+) -> list[Mapping[str, Any]] | None:
+    """The extraction failures an audit record lists, if it can be read whole.
 
     Args:
-        record: An audit record, as loaded.
+        record: An audit record, as loaded -- input (golden rule 1).
 
     Returns:
-        True for a record whose uncited relevant documents may each have
-        been silent or unread.
+        The entries, possibly none; or None for a record that cannot say:
+        one written before the list was kept, or one whose list is not a list
+        of entries. Read as empty, such a record would vouch that every
+        uncited relevant document was silent.
     """
-    return CITATION_EXTRACTION_FAILED_KEY not in record
+    entries = record.get(CITATION_EXTRACTION_FAILED_KEY)
+    if not isinstance(entries, list):
+        return None
+    if not all(isinstance(entry, Mapping) for entry in entries):
+        return None
+    return entries
 
 
 def checkpoint_metadata_with_extraction_failures(

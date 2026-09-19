@@ -24,18 +24,25 @@ from typing import Any
 import pytest
 
 from bmlibrarian_lite.agents.scoring_agent import parse_score_response
-from bmlibrarian_lite.audit_records import is_scoring_failure
+from bmlibrarian_lite.audit_records import (
+    as_recorded_failure,
+    is_scoring_failure,
+    scoring_failure_sql,
+)
 from bmlibrarian_lite.benchmarking.display import (
     FAILED_SCORE_TEXT,
     NOT_AVAILABLE,
     NOT_RECORDED,
     agreement_background,
     cost_ranking,
+    documents_left_to_score,
     failed_count_text,
+    failed_scorings_sentence,
     failures_note,
     format_agreement,
     format_statistic,
     mean_score_ranking,
+    reusable_documents_by_model,
     score_cell,
 )
 from bmlibrarian_lite.benchmarking.models import (
@@ -275,6 +282,25 @@ class TestAnOlderFailureIsRecognised:
 
         assert not is_scoring_failure(row)
 
+    def test_an_older_failure_is_read_as_one_it_cannot_name(self) -> None:
+        """#315: restored as it stands, it was a rejection giving provider text."""
+        row = ScoredDocument(
+            document=make_document("1"), score=1, explanation=f"Scoring failed: {LEAKY_ERROR}"
+        )
+
+        read = as_recorded_failure(row)
+
+        assert read.score == EvaluationErrorCode.UNKNOWN_ERROR.value
+        assert "SECRET" not in read.explanation
+
+    def test_anything_else_is_read_as_it_stands(self) -> None:
+        """A judgement, and a failure already stored as one, are unchanged."""
+        judged_one = judged(make_document("1"), 1, make_evaluator())
+        stored_failure = failure(make_document("2"), make_evaluator())
+
+        assert as_recorded_failure(judged_one) is judged_one
+        assert as_recorded_failure(stored_failure) is stored_failure
+
     def test_the_prefix_alone_does_not_make_a_higher_score_a_failure(self) -> None:
         """Only a 1 was ever written with it."""
         row = ScoredDocument(
@@ -382,7 +408,7 @@ class TestDocumentComparison:
         comparison = self.comparison()
 
         assert comparison.scores == {"first": 4}
-        assert comparison.max_score_difference == 0
+        assert comparison.max_score_difference is None
 
     def test_a_failure_is_not_an_inclusion_disagreement(self) -> None:
         """A negative score read as a vote to exclude."""
@@ -682,3 +708,279 @@ class TestWhatTheResultsTabShows:
 
         note = failures_note(result)
         assert note is not None and "score of 1" in note
+
+
+class TestOnlyComparableDocumentsAreCompared:
+    """A document fewer than two models judged has no disagreement figure."""
+
+    def comparison(self, *scores: int) -> DocumentComparison:
+        """A document the given scores -- negative for a failure -- were given."""
+        document = make_document("1")
+        rows = {}
+        for i, score in enumerate(scores):
+            evaluator = make_evaluator(f"ollama:judge-{i}")
+            rows[f"judge-{i}"] = (
+                judged(document, score, evaluator)
+                if score > 0
+                else failure(document, evaluator)
+            )
+        return compute_document_comparison(document, rows)
+
+    def result(self, *comparisons: DocumentComparison) -> BenchmarkResult:
+        """A result over these comparisons."""
+        return BenchmarkResult(
+            run_id="run",
+            question=QUESTION,
+            task_type="document_scoring",
+            evaluator_stats=[],
+            document_comparisons=list(comparisons),
+            agreement_matrix={},
+        )
+
+    def test_one_judgement_has_no_spread(self) -> None:
+        """Its "Max Diff" read 0: full agreement, with nothing to agree with."""
+        comparison = self.comparison(4, -4)
+
+        assert comparison.max_score_difference is None
+        assert not comparison.has_disagreement
+
+    def test_no_comparable_document_is_no_rate(self) -> None:
+        """"0.0% disagreement" under a matrix that says n/a (review)."""
+        result = self.result(self.comparison(4, -4), self.comparison(2, -4))
+
+        assert result.disagreement_rate is None
+        assert result.inclusion_disagreement_rate is None
+        assert result.to_dict()["inclusion_disagreement_rate"] is None
+
+    def test_the_rate_is_over_comparable_documents(self) -> None:
+        """Documents only one model judged diluted the rate."""
+        result = self.result(
+            self.comparison(5, 2), self.comparison(4, 4), self.comparison(4, -4)
+        )
+
+        assert result.disagreement_rate == 0.5
+        assert result.inclusion_disagreement_rate == 0.5
+
+    def test_high_disagreement_skips_what_was_not_compared(self) -> None:
+        """Comparing a missing spread with the threshold raised a TypeError."""
+        from bmlibrarian_lite.benchmarking.statistics import (
+            find_high_disagreement_documents,
+        )
+
+        wide = self.comparison(5, 1)
+
+        assert find_high_disagreement_documents([wide, self.comparison(4, -4)]) == [wide]
+
+    def test_a_model_that_judged_nothing_agrees_with_nobody(self) -> None:
+        """The diagonal was 100% even for a model that scored no document."""
+        matrix = compute_agreement_matrix({"down": [None, None], "up": [4, 3]})
+
+        assert matrix[("down", "down")] is None
+        assert matrix[("up", "up")] == 1.0
+
+    def test_a_model_that_judged_nothing_has_no_latency(self) -> None:
+        """"0ms" read as the fastest model of all."""
+        evaluator = make_evaluator()
+        stats = compute_evaluator_stats(
+            evaluator, [failure(make_document("1"), evaluator)]
+        )
+
+        assert stats.mean_latency_ms is None
+
+
+class TestAStoredResultIsReadBackTruthfully:
+    """What a later session shows of a stored benchmark."""
+
+    def stored(self, storage: LiteStorage) -> tuple[BenchmarkRunner, str]:
+        """A benchmark of one document by two models, the second down."""
+        runner = runner_with(storage, ScriptedClient(ON_TOPIC, ConnectionError(LEAKY_ERROR)))
+        result = runner.run_quick_benchmark(
+            question=QUESTION, documents=[make_document("1")], models=[MODEL, OTHER_MODEL]
+        )
+        return runner, result.run_id
+
+    def test_the_distribution_survives_being_stored(self, storage: LiteStorage) -> None:
+        """Its keys came back as strings, so every loaded result showed 0 (0%)."""
+        runner, run_id = self.stored(storage)
+
+        stored = runner.get_benchmark_result(run_id)
+
+        assert stored is not None
+        assert stored.evaluator_stats[0].score_distribution[4] == 1
+
+    def test_an_older_failure_is_read_as_one(self, storage: LiteStorage) -> None:
+        """Stored before #306 as a 1 with the raw exception.
+
+        The details and the export then showed it as the model's reasoning.
+        """
+        runner, run_id = self.stored(storage)
+        run = storage.get_benchmark_run(run_id)
+        summary = json.loads(run.results_summary)
+        down = summary["evaluator_stats"][1]["evaluator_display_name"]
+        comparison = summary["document_comparisons"][0]
+        comparison["scores"][down] = 1
+        comparison["explanations"][down] = f"Scoring failed: {LEAKY_ERROR}"
+        del comparison["failures"]
+        storage.update_benchmark_run(run_id, results_summary=json.dumps(summary))
+
+        stored = runner.get_benchmark_result(run_id)
+
+        assert stored is not None
+        [read] = stored.document_comparisons
+        assert down not in read.scores
+        assert down in read.failures
+        assert "SECRET" not in json.dumps(read.to_dict())
+
+    def test_a_score_for_another_question_is_not_reused(self, storage: LiteStorage) -> None:
+        """One question's relevance judgement stood as another's (review).
+
+        Cross-run reuse read every score the model ever gave the document.
+        """
+        document = make_document("1")
+        runner_with(storage, ScriptedClient('{"score": 2, "explanation": "Off."}')).run_quick_benchmark(
+            question="A different question", documents=[document], models=[MODEL]
+        )
+        client = ScriptedClient(ON_TOPIC)
+
+        result = runner_with(storage, client).run_quick_benchmark(
+            question=QUESTION, documents=[document], models=[MODEL]
+        )
+
+        assert client.calls == [MODEL]
+        assert result.evaluator_stats[0].scores == [4]
+
+
+class TestAnAnswerThatOverflows:
+    """An unreadable answer is a parse failure, never the end of the run."""
+
+    def test_an_infinite_score_is_unreadable(self) -> None:
+        """Python's json accepts Infinity, and int() of it raised."""
+        assert parse_score_response('{"score": Infinity, "explanation": "x"}') is None
+
+    def test_it_is_recorded_as_a_failure(self) -> None:
+        """Raised outside the try, it ended the whole benchmark."""
+        scored = score_once(ScriptedClient('{"score": Infinity}'))
+
+        assert scored.score == EvaluationErrorCode.JSON_PARSE_ERROR.value
+
+
+class TestWhatTheRunSaysWhenItFinishes:
+    """The completion message says when scorings failed."""
+
+    def test_failures_are_named(self) -> None:
+        """"Benchmark complete" alone hid a model that answered nothing."""
+        evaluator = make_evaluator()
+        result = BenchmarkResult(
+            run_id="run",
+            question=QUESTION,
+            task_type="document_scoring",
+            evaluator_stats=[
+                compute_evaluator_stats(
+                    evaluator,
+                    [
+                        judged(make_document("1"), 4, evaluator),
+                        failure(make_document("2"), evaluator),
+                    ],
+                )
+            ],
+            document_comparisons=[],
+            agreement_matrix={},
+        )
+
+        assert failed_scorings_sentence(result) == (
+            "1 of 2 scorings failed (see the Failed column)"
+        )
+
+    def test_nothing_is_added_when_nothing_failed(self) -> None:
+        """The ordinary case."""
+        evaluator = make_evaluator()
+        result = BenchmarkResult(
+            run_id="run",
+            question=QUESTION,
+            task_type="document_scoring",
+            evaluator_stats=[
+                compute_evaluator_stats(evaluator, [judged(make_document("1"), 4, evaluator)])
+            ],
+            document_comparisons=[],
+            agreement_matrix={},
+        )
+
+        assert failed_scorings_sentence(result) is None
+
+
+class TestWhatCanBeReused:
+    """The confirm dialog's estimate counts judgements, not earlier runs."""
+
+    def test_a_failure_is_not_reusable(self, storage: LiteStorage) -> None:
+        """A run that failed everywhere was promised as "$0.00 (reusing existing)"."""
+        document = make_document("1")
+        runner_with(storage, ScriptedClient(ConnectionError(LEAKY_ERROR))).run_quick_benchmark(
+            question=QUESTION, documents=[document], models=[MODEL]
+        )
+        runner_with(storage, ScriptedClient(ON_TOPIC)).run_quick_benchmark(
+            question=QUESTION, documents=[make_document("2")], models=[MODEL]
+        )
+
+        reusable = reusable_documents_by_model(
+            storage.get_all_scores_for_question(QUESTION, ["doc-1", "doc-2"])
+        )
+
+        assert reusable == {MODEL: {"doc-2"}}
+
+
+class TestHowManyDocumentsAreLeftToScore:
+    """The estimate's arithmetic."""
+
+    def test_every_document_reusable_leaves_none(self) -> None:
+        """The case that is actually free."""
+        assert documents_left_to_score(10, 10, 10) == 0
+
+    def test_all_documents_less_the_reusable(self) -> None:
+        """Using every document, the reusable ones are exactly known."""
+        assert documents_left_to_score(10, 10, 4) == 6
+
+    def test_a_sample_expects_its_share(self) -> None:
+        """Which documents a random sample draws is not known in advance."""
+        assert documents_left_to_score(5, 10, 4) == 3
+
+
+class TestTheSqlFormAgrees:
+    """Scripts select stored failures in SQL; it must match the Python rule."""
+
+    def test_it_selects_exactly_what_is_scoring_failure_does(
+        self, storage: LiteStorage
+    ) -> None:
+        """A script that missed the older form re-ran none of those failures."""
+        rows = [
+            (-4, "Scoring failed: Failed to connect to API"),
+            (1, f"Scoring failed: {LEAKY_ERROR}"),
+            (1, "Could not parse response"),
+            (1, "Off topic entirely."),
+            (1, "Scoring failed_ but not really"),
+            (1, "scoring failed: said the model, in lower case"),
+            (2, "Scoring failed: x"),
+            (4, "On topic."),
+        ]
+        checkpoint = storage.create_checkpoint(research_question=QUESTION)
+        for i, (score, explanation) in enumerate(rows):
+            document = make_document(str(i))
+            storage.upsert_document(document)
+            storage.save_scored_document(
+                ScoredDocument(document, score, explanation), checkpoint.id
+            )
+
+        with storage._sqlite_connection() as conn:
+            selected = {
+                row["document_id"]
+                for row in conn.execute(
+                    f"SELECT sd.document_id FROM scored_documents sd "
+                    f"WHERE {scoring_failure_sql('sd')}"
+                )
+            }
+
+        expected = {
+            f"doc-{i}"
+            for i, (score, explanation) in enumerate(rows)
+            if is_scoring_failure(ScoredDocument(make_document(str(i)), score, explanation))
+        }
+        assert selected == expected == {"doc-0", "doc-1", "doc-2"}

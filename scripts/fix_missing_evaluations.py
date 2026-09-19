@@ -43,6 +43,7 @@ from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.llm import LLMClient
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
+from bmlibrarian_lite.audit_records import scoring_failure_sql  # noqa: E402
 from bmlibrarian_lite.data_models import (
     Evaluator,
     EvaluationErrorCode,
@@ -109,13 +110,14 @@ def get_failed_evaluations(
     if question_filter:
         filter_terms = [t.strip().lower() for t in question_filter.split(",")]
 
-    # Query for all negative scores from this evaluator
-    query = """
+    # Query for all failures from this evaluator -- negative codes, and the
+    # score-1 rows older builds wrote (#306)
+    query = f"""
         SELECT sd.document_id, sd.score, sd.explanation, sd.scored_at,
                rc.research_question
         FROM scored_documents sd
         JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
-        WHERE sd.evaluator_id = ? AND sd.score < 0
+        WHERE sd.evaluator_id = ? AND {scoring_failure_sql("sd")}
         ORDER BY rc.research_question, sd.scored_at DESC
     """
 
@@ -144,6 +146,7 @@ def get_failed_evaluations(
                 error_code = EvaluationErrorCode(row["score"])
                 error_name = error_code.name
             except ValueError:
+                # Also a failure an older build stored as a score of 1
                 error_name = f"UNKNOWN({row['score']})"
 
             failed.append({
@@ -174,9 +177,9 @@ def delete_failed_evaluation(
     Returns:
         True if deleted, False otherwise
     """
-    query = """
+    query = f"""
         DELETE FROM scored_documents
-        WHERE document_id = ? AND evaluator_id = ? AND score < 0
+        WHERE document_id = ? AND evaluator_id = ? AND {scoring_failure_sql()}
     """
 
     with storage._sqlite_connection() as conn:

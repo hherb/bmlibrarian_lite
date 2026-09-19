@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #315) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -209,15 +209,26 @@ to read a record written elsewhere.
     threshold, so a restore can say it too. **Not recorded is not "none
     failed"**: a checkpoint or record older than the list states the count as
     not recorded, omits the list, and says an uncited relevant document may
-    have been either. A checkpoint entry that cannot be read whole makes the
-    record unreadable rather than shorter; an unknown cause code degrades to
-    `UNKNOWN_ERROR`.
+    have been either. **The list is recorded only once extraction has run to
+    the end**: a cancelled run's unreached documents were never read, and
+    recorded as complete they read as "none quotable". A list — in a
+    checkpoint or an audit file — that cannot be read whole makes the record
+    unreadable rather than shorter; an unknown cause code degrades to
+    `UNKNOWN_ERROR`. A failed write of the checkpoint's list does not end the
+    review; its restore then says "not recorded". **A restore reads its own
+    run's citations**, as it reads its own scores: counted against every
+    run's, a document this run found silent reads as cited.
   - **A stored failure has two forms.** Every build since #306 stores a
     failure as its negative code; older ones stored it as a **1** with the
     explanation `"Scoring failed: …"` or `"Could not parse response"` (Python's
     benchmark runner until #306, its review scorer until 2025-12-23). A reader
-    that reuses or aggregates stored scores recognises both, by score and
-    explanation together — a model that answers 1 gives its own reasons.
+    that restores, reuses or aggregates stored scores recognises both, by
+    score and explanation together — a model that answers 1 gives its own
+    reasons — and never shows the older form's text, which is raw provider
+    output. Python: `is_scoring_failure()`, its SQL form
+    `scoring_failure_sql()` (an exact, case-sensitive prefix match), and
+    `as_recorded_failure()`, which a restore applies so the older form is
+    audited as a failure whose cause cannot be named (#315).
 - **The live Audit Trail view** follows the record (#307): a document that
   could not be scored is drawn as a failure with its reason (Python: a grey
   "Scoring failed" badge, the description as tooltip), never as its code on
@@ -228,10 +239,16 @@ to read a record written elsewhere.
   the mean, the distribution, the per-document spread, or the agreement
   between models, which is computed over the documents both models judged —
   and is *no figure*, never 100% or 0%, when they judged none in common. A
-  model that judged nothing has no mean. What a failed call cost still counts.
-  A stored failure is scored again by the next benchmark of the question,
-  never replayed as that model's answer. A result stored before failures were
-  counted says its 1s may include them.
+  model that judged nothing has no mean, no latency and no agreement with
+  itself; a document fewer than two models judged has no spread; and the
+  disagreement rates are over the documents at least two models judged. What
+  a failed call cost still counts. A stored failure is scored again by the
+  next benchmark of the question, never replayed as that model's answer —
+  and reuse is of the same question only: a relevance score answers one
+  question. A cost estimate counts the documents a model has judged, not that
+  it ran before. A result stored before failures were counted says its 1s
+  may include them, and reads its older-form entries as failures. The run's
+  completion message says how many scorings failed.
 - **A degraded source is named where the source is named** (#304). Falling
   back from full text to the abstract — discovery failing, content arriving
   empty, the load raising, PDF extraction yielding nothing, a paywall the user

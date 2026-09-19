@@ -49,7 +49,8 @@ class EvaluatorStats:
         std_dev: Standard deviation of scores; None when it judged no document
         score_distribution: Count of each score value (1-5)
         total_evaluations: Number of documents it judged
-        mean_latency_ms: Average response time of the judgements
+        mean_latency_ms: Average response time of the judgements; None when
+            no judgement recorded one
         total_tokens_input: Total input tokens used, failed calls included
         total_tokens_output: Total output tokens used, failed calls included
         total_cost_usd: Total estimated cost, failed calls included
@@ -64,7 +65,7 @@ class EvaluatorStats:
     std_dev: float | None
     score_distribution: dict[int, int]  # score -> count
     total_evaluations: int
-    mean_latency_ms: float
+    mean_latency_ms: float | None
     total_tokens_input: int
     total_tokens_output: int
     total_cost_usd: float
@@ -140,22 +141,38 @@ class DocumentComparison:
         return self.document.title
 
     @property
-    def max_score_difference(self) -> int:
-        """Maximum score difference between any two evaluators."""
-        if len(self.scores) < 2:
-            return 0
+    def is_comparable(self) -> bool:
+        """Whether at least two evaluators judged the document.
+
+        Returns:
+            True when there is a spread to measure.
+        """
+        return len(self.scores) >= 2
+
+    @property
+    def max_score_difference(self) -> int | None:
+        """Maximum score difference between any two evaluators.
+
+        Returns:
+            The spread, or None when fewer than two evaluators judged the
+            document: read as 0, a document one model could not score looked
+            like full agreement (#306 review).
+        """
+        if not self.is_comparable:
+            return None
         score_values = list(self.scores.values())
         return max(score_values) - min(score_values)
 
     @property
-    def max_disagreement(self) -> int:
+    def max_disagreement(self) -> int | None:
         """Alias for max_score_difference for backwards compatibility."""
         return self.max_score_difference
 
     @property
     def has_disagreement(self) -> bool:
         """Check if evaluators disagree (diff > 1)."""
-        return self.max_score_difference > 1
+        spread = self.max_score_difference
+        return spread is not None and spread > 1
 
     def has_inclusion_disagreement(
         self, inclusion_threshold: int = DEFAULT_MIN_SCORE
@@ -274,27 +291,43 @@ class BenchmarkResult:
         ]
 
     @property
-    def disagreement_rate(self) -> float:
-        """Percentage of documents with evaluator disagreement."""
-        if not self.document_comparisons:
-            return 0.0
-        return len(self.documents_with_disagreement) / len(self.document_comparisons)
+    def comparable_documents(self) -> list[DocumentComparison]:
+        """Documents at least two evaluators judged: the ones rates are over.
+
+        A document only one model could score cannot agree or disagree;
+        counted, it diluted every rate, and with none comparable the rates
+        read 0% (#306 review).
+        """
+        return [d for d in self.document_comparisons if d.is_comparable]
 
     @property
-    def inclusion_disagreement_rate(self) -> float:
+    def disagreement_rate(self) -> float | None:
+        """Fraction of comparable documents with evaluator disagreement.
+
+        Returns:
+            The fraction, or None when no document was comparable.
         """
-        Percentage of documents with inclusion decision disagreement.
+        comparable = self.comparable_documents
+        if not comparable:
+            return None
+        return len(self.documents_with_disagreement) / len(comparable)
+
+    @property
+    def inclusion_disagreement_rate(self) -> float | None:
+        """
+        Fraction of comparable documents with inclusion decision disagreement.
 
         This is the most clinically significant metric - it represents
         documents that would be included or excluded differently depending
         on which model was used.
+
+        Returns:
+            The fraction, or None when no document was comparable.
         """
-        if not self.document_comparisons:
-            return 0.0
-        return (
-            len(self.documents_with_inclusion_disagreement) /
-            len(self.document_comparisons)
-        )
+        comparable = self.comparable_documents
+        if not comparable:
+            return None
+        return len(self.documents_with_inclusion_disagreement) / len(comparable)
 
     def get_ranking_by_mean_score(self) -> list[tuple[Evaluator, float | None]]:
         """
@@ -330,17 +363,26 @@ class BenchmarkResult:
             key=lambda x: x[1],
         )
 
-    def get_ranking_by_speed(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_speed(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by response speed (ascending).
 
         Returns:
-            List of (evaluator, mean_latency_ms) tuples, fastest first
+            List of (evaluator, mean_latency_ms) tuples, fastest first; an
+            evaluator with no latency recorded comes last
         """
-        return sorted(
-            [(s.evaluator, s.mean_latency_ms) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        timed: list[tuple[Evaluator, float | None]] = sorted(
+            (
+                (s.evaluator, s.mean_latency_ms)
+                for s in self.evaluator_stats
+                if s.mean_latency_ms is not None
+            ),
+            key=lambda x: x[1] or 0.0,
         )
+        untimed: list[tuple[Evaluator, float | None]] = [
+            (s.evaluator, None) for s in self.evaluator_stats if s.mean_latency_ms is None
+        ]
+        return timed + untimed
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""

@@ -120,7 +120,8 @@ def parse_score_response(response: str) -> tuple[int, str] | None:
                 if isinstance(explanation, dict):
                     explanation = json.dumps(explanation)
                 return score, explanation
-    except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+    except (json.JSONDecodeError, ValueError, TypeError, AttributeError, OverflowError):
+        # OverflowError: json accepts Infinity, and int() of it raises
         pass
 
     # Fallback: a score stated in prose

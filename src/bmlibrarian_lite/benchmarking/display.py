@@ -24,13 +24,15 @@ so, and why. The functions are pure, so the Benchmark tab's choices can be
 tested without a window.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
+from ..audit_records import is_scoring_failure
 from ..constants import (
     BENCHMARK_AGREEMENT_HIGH,
     BENCHMARK_AGREEMENT_MEDIUM,
     BENCHMARK_RANKING_SIZE,
 )
+from ..data_models import ScoredDocument
 from .models import BenchmarkResult, DocumentComparison, EvaluatorStats
 
 #: What stands in for a figure that does not exist.
@@ -120,6 +122,118 @@ def score_cell(comparison: DocumentComparison, evaluator_name: str) -> tuple[str
     if evaluator_name in comparison.failures:
         return FAILED_SCORE_TEXT, comparison.failures[evaluator_name]
     return NO_SCORE_TEXT, None
+
+
+def format_spread(spread: int | None) -> str:
+    """A document's score spread across the models that judged it.
+
+    Args:
+        spread: The widest difference, or None when fewer than two models
+            judged the document.
+
+    Returns:
+        The spread, or :data:`NOT_AVAILABLE` -- shown as 0, a document one
+        model could not score read as full agreement.
+    """
+    if spread is None:
+        return NOT_AVAILABLE
+    return str(spread)
+
+
+def format_latency(milliseconds: float | None) -> str:
+    """A mean latency as the tab shows it.
+
+    Args:
+        milliseconds: The latency, or None when no judgement recorded one.
+
+    Returns:
+        "Nms", or :data:`NOT_AVAILABLE` -- shown as 0ms, a model that
+        answered nothing read as the fastest.
+    """
+    if milliseconds is None:
+        return NOT_AVAILABLE
+    return f"{milliseconds:.0f}ms"
+
+
+def format_rate(value: float | None) -> str:
+    """A fraction of documents as a percentage with one decimal.
+
+    Args:
+        value: The fraction, or None when no document could be compared.
+
+    Returns:
+        "N.N%", or :data:`NOT_AVAILABLE`.
+    """
+    if value is None:
+        return NOT_AVAILABLE
+    return f"{value * 100:.1f}%"
+
+
+def failed_scorings_sentence(result: BenchmarkResult) -> str | None:
+    """What a finished benchmark says about the scorings that failed.
+
+    Args:
+        result: The benchmark result.
+
+    Returns:
+        "N of M scorings failed (see the Failed column)", or None when none
+        did -- or when the result never counted them.
+    """
+    if not result.failures_recorded:
+        return None
+    failed = sum(s.failed_evaluations or 0 for s in result.evaluator_stats)
+    if failed == 0:
+        return None
+    attempted = failed + sum(s.total_evaluations for s in result.evaluator_stats)
+    return f"{failed} of {attempted} scorings failed (see the Failed column)"
+
+
+def reusable_documents_by_model(
+    stored_scores: Mapping[str, Mapping[str, ScoredDocument]],
+) -> dict[str, set[str]]:
+    """Which documents each model has a judgement for that a benchmark reuses.
+
+    A stored failure is scored again rather than reused (#306), so a model
+    whose earlier run failed everywhere has nothing to reuse -- its cost is
+    not $0.00.
+
+    Args:
+        stored_scores: Evaluator id to document id to its latest stored
+            score, as ``LiteStorage.get_all_scores_for_question`` answers.
+
+    Returns:
+        Model string ("provider:model") to the documents it has judged; a
+        model with no judgement is absent.
+    """
+    reusable: dict[str, set[str]] = {}
+    for by_document in stored_scores.values():
+        for document_id, scored in by_document.items():
+            model = scored.evaluator.model_string if scored.evaluator else None
+            if model and not is_scoring_failure(scored):
+                reusable.setdefault(model, set()).add(document_id)
+    return reusable
+
+
+def documents_left_to_score(
+    documents_benchmarked: int,
+    documents_available: int,
+    documents_reusable: int,
+) -> int:
+    """How many documents a model will be asked to score, for an estimate.
+
+    Args:
+        documents_benchmarked: How many documents the benchmark will use.
+        documents_available: How many it draws them from.
+        documents_reusable: How many of those the model already judged.
+
+    Returns:
+        The documents left to score. Using every document, that is exact;
+        for a random sample, its expected share of the unjudged ones.
+    """
+    if documents_available <= 0:
+        return documents_benchmarked
+    unjudged = max(documents_available - documents_reusable, 0)
+    return -(-documents_benchmarked * unjudged // documents_available)
 
 
 def failed_count_text(stats: EvaluatorStats) -> str:

@@ -112,8 +112,19 @@ class Recorder:
         return record
 
 
-def run_worker(monkeypatch: pytest.MonkeyPatch) -> tuple[Recorder, MagicMock]:
+def run_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_during_extraction: bool = False,
+    metadata_write_error: Exception | None = None,
+) -> tuple[Recorder, MagicMock]:
     """Run a review whose extraction could not read one relevant document.
+
+    Args:
+        monkeypatch: The fixture used to replace the agents.
+        cancel_during_extraction: Whether the user cancels while extraction
+            runs.
+        metadata_write_error: What writing the checkpoint's metadata raises,
+            if anything.
 
     Returns:
         A recorder of the worker's signals, and the storage it wrote to.
@@ -134,7 +145,7 @@ def run_worker(monkeypatch: pytest.MonkeyPatch) -> tuple[Recorder, MagicMock]:
     scoring_agent.score_document.side_effect = lambda question, doc: relevant(doc)
     monkeypatch.setattr(systematic_review_tab, "LiteScoringAgent", lambda **_: scoring_agent)
     citation_agent = MagicMock()
-    citation_agent.extract_all_citations.return_value = CitationOutcome(
+    outcome = CitationOutcome(
         citations=[citation_from(CITED)], documents_attempted=3, failed=(FAILURE,)
     )
     monkeypatch.setattr(
@@ -151,12 +162,28 @@ def run_worker(monkeypatch: pytest.MonkeyPatch) -> tuple[Recorder, MagicMock]:
     monkeypatch.setattr(config.transparency, "enabled", False)
     storage = MagicMock()
     storage.create_checkpoint.return_value.id = "checkpoint-1"
+
+    def update_checkpoint(**kwargs: Any) -> None:
+        if "metadata" in kwargs and metadata_write_error is not None:
+            raise metadata_write_error
+
+    storage.update_checkpoint.side_effect = update_checkpoint
     worker = WorkflowWorker(
         question=QUESTION, config=config, storage=storage, min_score=MIN_SCORE
     )
+
+    def extract(*_args: Any, **_kwargs: Any) -> CitationOutcome:
+        if cancel_during_extraction:
+            worker.cancel()
+        return outcome
+
+    citation_agent.extract_all_citations.side_effect = extract
     recorder = Recorder()
-    worker.citation_extraction_failed.connect(recorder.slot("citation_extraction_failed"))
+    worker.citation_extraction_recorded.connect(
+        recorder.slot("citation_extraction_recorded")
+    )
     worker.error.connect(recorder.slot("error"))
+    worker.finished.connect(recorder.slot("finished"))
     worker.run()
     assert "error" not in recorder.calls
     return recorder, storage
@@ -165,11 +192,40 @@ def run_worker(monkeypatch: pytest.MonkeyPatch) -> tuple[Recorder, MagicMock]:
 class TestTheWorker:
     """The worker hands on which documents it could not read."""
 
-    def test_it_emits_each_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The tab can only record what it is told."""
+    def test_it_hands_on_the_whole_record(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The tab can only record what it is told, once extraction is done."""
         recorder, _ = run_worker(monkeypatch)
 
-        assert recorder.calls["citation_extraction_failed"] == [(FAILURE,)]
+        assert recorder.calls["citation_extraction_recorded"] == [([FAILURE],)]
+
+    def test_a_cancelled_extraction_records_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Its unreached documents were not read and found silent (review).
+
+        Recorded as complete, every document the cancel left unread read as
+        "none quotable" in the Audit Trail dialog.
+        """
+        recorder, storage = run_worker(monkeypatch, cancel_during_extraction=True)
+
+        assert "citation_extraction_recorded" not in recorder.calls
+        assert not [
+            call for call in storage.update_checkpoint.call_args_list
+            if "metadata" in call.kwargs
+        ]
+
+    def test_a_checkpoint_that_cannot_be_written_does_not_end_the_review(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every extraction call was already spent; a restore says "not recorded"."""
+        import sqlite3
+
+        recorder, _ = run_worker(
+            monkeypatch, metadata_write_error=sqlite3.OperationalError("database is locked")
+        )
+
+        assert recorder.calls["finished"][0][0] == "## Findings"
+        assert recorder.calls["citation_extraction_recorded"] == [([FAILURE],)]
 
     def test_it_records_them_in_the_checkpoint(
         self, monkeypatch: pytest.MonkeyPatch
@@ -215,21 +271,34 @@ class TestTheReviewTab:
         emitted: list[Any] = []
         tab.report_generated.connect(lambda *args: emitted.append(args))
 
-        tab._on_citation_extraction_failed(FAILURE)
+        tab._on_citation_extraction_recorded([FAILURE])
         tab._on_finished("# Evidence Report", ReportMetadata(research_question=QUESTION))
 
         assert emitted[0][-1] == [FAILURE]
+
+    def test_a_run_that_never_finished_extraction_recorded_nothing(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A cancelled run passes "not recorded", never "none failed"."""
+        tab = review_tab(monkeypatch, tmp_path)
+        emitted: list[Any] = []
+        tab.report_generated.connect(lambda *args: emitted.append(args))
+        tab._run_workflow()
+
+        tab._on_finished("Workflow cancelled.", ReportMetadata(research_question=QUESTION))
+
+        assert emitted[0][-1] is None
 
     def test_a_new_run_starts_without_them(
         self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
         """A previous run's failures must not be recorded against this one."""
         tab = review_tab(monkeypatch, tmp_path)
-        tab._on_citation_extraction_failed(FAILURE)
+        tab._on_citation_extraction_recorded([FAILURE])
 
         tab._run_workflow()
 
-        assert tab._citation_extraction_failures == []
+        assert tab._citation_extraction_failures is None
 
 
 @pytest.fixture
@@ -364,10 +433,43 @@ class TestTheDialog:
         assert "none quotable" not in text
 
 
+class TestADamagedAuditFile:
+    """A list that cannot be read is not a list of none."""
+
+    def test_a_null_list_is_not_read_as_none_failed(
+        self, tab: ReportTab, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hand-edited or corrupted, it cannot vouch that anything was silent."""
+        display(tab, [FAILURE])
+        audit_path = sorted(tmp_path.glob("*_audit.json"))[-1]
+        damaged = json.loads(audit_path.read_text(encoding="utf-8"))
+        damaged["citation_extraction_failed"] = None
+        audit_path.write_text(json.dumps(damaged), encoding="utf-8")
+        report_path = sorted(tmp_path.glob("*_report.md"))[-1]
+        monkeypatch.setattr(
+            report_tab_module.QFileDialog,
+            "getOpenFileName",
+            lambda *_args, **_kwargs: (str(report_path), ""),
+        )
+        tab._load_report()
+
+        text = tab._audit_trail_text()
+
+        assert "none quotable" not in text
+        assert (
+            "- Relevant documents whose citations could not be extracted: "
+            "not recorded for this run"
+        ) in text
+
+
 class TestRestoringAQuestion:
     """A restored report reads the failures its checkpoint recorded."""
 
-    def restored(self, checkpoint_metadata: dict[str, Any]) -> Any:
+    def restored(
+        self,
+        checkpoint_metadata: dict[str, Any],
+        legacy_rows: tuple[ScoredDocument, ...] = (),
+    ) -> Any:
         """Restore a question whose latest checkpoint carries the metadata."""
         from bmlibrarian_lite.gui.app import LiteMainWindow
 
@@ -383,7 +485,10 @@ class TestRestoringAQuestion:
         )
         window.storage.get_document_ids_for_question.return_value = [UNREAD.id]
         window.storage.get_document.side_effect = lambda doc_id: {UNREAD.id: UNREAD}.get(doc_id)
-        window.storage.get_scored_documents_for_question.return_value = [relevant(UNREAD)]
+        window.storage.get_scored_documents_for_question.return_value = [
+            relevant(UNREAD),
+            *legacy_rows,
+        ]
         window.storage.get_citations_for_question.return_value = []
         window.storage.get_quality_assessments_for_question.return_value = {}
 
@@ -403,6 +508,38 @@ class TestRestoringAQuestion:
 
         kwargs = window.report_tab.display_report.call_args.kwargs
         assert kwargs["citation_extraction_failures"] == [FAILURE]
+
+    def test_it_reads_the_citations_of_its_own_run(self) -> None:
+        """Every run's citations, counted per document, misstated this one."""
+        window = self.restored({CHECKPOINT_MIN_SCORE_KEY: MIN_SCORE})
+
+        window.storage.get_citations_for_question.assert_called_once_with(
+            QUESTION, checkpoint_id="checkpoint-2"
+        )
+
+    def test_a_failure_an_older_build_stored_as_one_is_a_failure(self) -> None:
+        """#315: a restore audited an older build's failure as a rejection.
+
+        Before 2025-12-23 a failed scoring was stored as a 1 with the raw
+        exception text.
+        """
+        legacy = ScoredDocument(
+            document=SILENT,
+            score=1,
+            explanation="Scoring failed: Connection refused http://host/?key=SECRET",
+        )
+        window = self.restored({CHECKPOINT_MIN_SCORE_KEY: MIN_SCORE}, (legacy,))
+
+        kwargs = window.report_tab.display_report.call_args.kwargs
+        [restored_legacy] = [
+            sd for sd in kwargs["all_scored_documents"] if sd.document.id == SILENT.id
+        ]
+        assert restored_legacy.score == EvaluationErrorCode.UNKNOWN_ERROR.value
+        assert "SECRET" not in restored_legacy.explanation
+        shown = [
+            call.args[0] for call in window.audit_trail_tab.on_document_scored.call_args_list
+        ]
+        assert restored_legacy in shown
 
     def test_an_older_checkpoint_passes_on_that_it_recorded_none(self) -> None:
         """None: not recorded -- never an empty list, which says none failed."""

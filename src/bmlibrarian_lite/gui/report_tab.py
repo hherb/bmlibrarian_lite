@@ -59,7 +59,6 @@ from ..data_models import (
     ScoredDocument,
 )
 from ..audit_records import (
-    CITATION_EXTRACTION_FAILED_KEY,
     EXTRACTION_FAILED_COUNT_KEY,
     DocumentOutcomes,
     classify_document_outcomes,
@@ -67,8 +66,8 @@ from ..audit_records import (
     extraction_failure_summary,
     outcome_entries,
     outcome_summary,
-    predates_extraction_failures,
     predates_outcome_split,
+    readable_extraction_failures,
     score_failure_reason,
     without_invented_reason,
 )
@@ -733,6 +732,11 @@ class ReportTab(QWidget):
         summary = audit_data.get("workflow_summary")
         summary = summary if isinstance(summary, dict) else {}
         predates_split = predates_outcome_split(audit_data)
+        # None when the record cannot say which relevant documents were not
+        # read: then no document is called silent (#310)
+        readable_failures = readable_extraction_failures(audit_data)
+        extraction_recorded = readable_failures is not None
+        extraction_failed = [dict(entry) for entry in readable_failures or []]
 
         lines = [
             "# Audit Trail",
@@ -757,13 +761,13 @@ class ReportTab(QWidget):
         ):
             if key in summary:
                 value = summary[key]
+                if key == EXTRACTION_FAILED_COUNT_KEY and not extraction_recorded:
+                    value = None
                 shown = "not recorded for this run" if value is None else value
                 lines.append(f"- {label}: {shown}")
         if "min_score_threshold" in summary:
             lines.append(self._threshold_line(summary["min_score_threshold"]))
 
-        extraction_failed = self._audit_entries(audit_data, CITATION_EXTRACTION_FAILED_KEY)
-        extraction_recorded = not predates_extraction_failures(audit_data)
 
         lines.extend(["", "## Relevant Documents (with scores)", ""])
         for sd in self._audit_entries(audit_data, "scored_documents"):
