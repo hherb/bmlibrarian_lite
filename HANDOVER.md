@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#306 + #307 + #310 + #315 — a failure is not a score**, branch
-`fix/failure-is-not-a-score-306`, PR (see the branch). Python only. Compress
+`fix/failure-is-not-a-score-306`, PR #317. Python only. Compress
 into **Recently landed** once merged. Every place a failed model call was
 still read, drawn, counted or reused as a judgement; the contract
 (`doc/cross_platform/analysis_failure_reporting.md`) gained the rules.
