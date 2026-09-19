@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#314 + #316 — a quality benchmark counts a failure apart, and a rerun
-retries one**, branch `fix/benchmark-and-rerun-failures-314-316`. Python only.
+retries one**, branch `fix/benchmark-and-rerun-failures-314-316`, PR #321. Python only. Compress into **Recently landed** once merged.
 #306's rules carried to the two places PR #317 left. Contract
 (`doc/cross_platform/analysis_failure_reporting.md`) updated; Python's only
 known gap there is now #319.
