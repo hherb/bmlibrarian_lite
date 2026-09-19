@@ -43,10 +43,15 @@ from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.llm import LLMClient
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
+from bmlibrarian_lite.audit_records import (  # noqa: E402
+    is_scoring_failure,
+    scoring_failure_sql,
+)
 from bmlibrarian_lite.data_models import (
     Evaluator,
     EvaluationErrorCode,
     LiteDocument,
+    ScoredDocument,
 )
 from bmlibrarian_lite.constants import (
     LLM_TASK_TYPES,
@@ -96,6 +101,9 @@ def get_failed_evaluations(
     """
     Get all failed evaluations for an evaluator.
 
+    Only a (question, document) whose latest row is a failure is listed: one
+    scored successfully since is done, and re-scoring it only costs money.
+
     Args:
         storage: Storage instance
         evaluator_id: Evaluator ID to check
@@ -109,13 +117,15 @@ def get_failed_evaluations(
     if question_filter:
         filter_terms = [t.strip().lower() for t in question_filter.split(",")]
 
-    # Query for all negative scores from this evaluator
-    query = """
+    # Every row from this evaluator, newest first, marked as a failure in
+    # either form: a negative code, or the score-1 rows older builds wrote
+    # (#315)
+    query = f"""
         SELECT sd.document_id, sd.score, sd.explanation, sd.scored_at,
-               rc.research_question
+               rc.research_question, {scoring_failure_sql("sd")} AS is_failure
         FROM scored_documents sd
         JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
-        WHERE sd.evaluator_id = ? AND sd.score < 0
+        WHERE sd.evaluator_id = ?
         ORDER BY rc.research_question, sd.scored_at DESC
     """
 
@@ -133,18 +143,21 @@ def get_failed_evaluations(
                 if not any(term in question.lower() for term in filter_terms):
                     continue
 
-            # Skip duplicates (keep only the most recent failure)
+            # Only the most recent row counts: a failure followed by a
+            # judgement is done
             key = (question, doc_id)
             if key in seen:
                 continue
             seen.add(key)
+            if not row["is_failure"]:
+                continue
 
             # Get the error code name
             try:
-                error_code = EvaluationErrorCode(row["score"])
-                error_name = error_code.name
+                error_name = EvaluationErrorCode(row["score"]).name
             except ValueError:
-                error_name = f"UNKNOWN({row['score']})"
+                # A failure an older build stored as a score of 1
+                error_name = f"RECORDED_AS_{row['score']}"
 
             failed.append({
                 "question": question,
@@ -162,27 +175,67 @@ def delete_failed_evaluation(
     storage: LiteStorage,
     document_id: str,
     evaluator_id: str,
+    question: str,
 ) -> bool:
     """
-    Delete a failed evaluation so it can be re-run.
+    Delete a document's failed evaluations for one question.
+
+    Only that question's: across every question, a failure under a question
+    this run was filtered away from was erased and never re-scored, and that
+    question's audit then read the document as never scored.
 
     Args:
         storage: Storage instance
         document_id: Document ID
         evaluator_id: Evaluator ID
+        question: The research question whose failures to delete
 
     Returns:
         True if deleted, False otherwise
     """
-    query = """
+    query = f"""
         DELETE FROM scored_documents
-        WHERE document_id = ? AND evaluator_id = ? AND score < 0
+        WHERE document_id = ? AND evaluator_id = ? AND {scoring_failure_sql()}
+          AND checkpoint_id IN (
+              SELECT id FROM review_checkpoints
+              WHERE LOWER(TRIM(research_question)) = LOWER(TRIM(?))
+          )
     """
 
     with storage._sqlite_connection() as conn:
-        cursor = conn.execute(query, [document_id, evaluator_id])
+        cursor = conn.execute(query, [document_id, evaluator_id, question])
         conn.commit()
         return cursor.rowcount > 0
+
+
+def record_rescore(
+    storage: LiteStorage,
+    scored_doc: ScoredDocument,
+    question: str,
+    evaluator_id: str,
+    checkpoint_id: str,
+) -> bool:
+    """Save a re-score, and only once it is saved retire the failure it replaces.
+
+    Deleted first, a re-score that raised -- or whose save did -- left the
+    document with no record that it ever failed.
+
+    Args:
+        storage: Storage instance
+        scored_doc: The new score, or failure
+        question: The research question it was scored for
+        evaluator_id: Evaluator ID
+        checkpoint_id: The fix run's checkpoint
+
+    Returns:
+        True if the document is now judged, False if it failed again; its
+        earlier failures are then kept alongside the new one.
+    """
+    storage.save_scored_document(scored_doc, checkpoint_id)
+    if is_scoring_failure(scored_doc):
+        return False
+    delete_failed_evaluation(storage, scored_doc.document.id, evaluator_id, question)
+    return True
 
 
 def format_duration(seconds: float) -> str:
@@ -354,14 +407,15 @@ def fix_failed_evaluations(
             # Get the document
             doc = storage.get_document(doc_id)
             if not doc:
+                tqdm.write(
+                    f"Could not re-score {doc_id}: the document is no longer stored",
+                    file=sys.stderr,
+                )
                 stats["still_failed"] += 1
                 doc_pbar.update(1)
                 continue
 
-            # Delete the old failed evaluation
-            delete_failed_evaluation(storage, doc_id, evaluator.id)
-
-            # Re-score
+            # Re-score; the old failure is retired only once this is saved
             score_start = time.time()
             try:
                 scored_doc = scoring_agent.score_document(question, doc)
@@ -384,17 +438,22 @@ def fix_failed_evaluations(
                 scored_doc.tokens_output = tokens_output
                 scored_doc.cost_usd = cost
 
-                # Save to storage
-                storage.save_scored_document(scored_doc, checkpoint.id)
-
-                if scored_doc.score > 0:
+                if record_rescore(
+                    storage, scored_doc, question, evaluator.id, checkpoint.id
+                ):
                     stats["fixed"] += 1
                     stats["total_cost_usd"] += cost
                     stats["total_latency_ms"] += latency_ms
                 else:
                     stats["still_failed"] += 1
 
-            except Exception:
+            except Exception as e:
+                # The earlier failure is still stored; say why this one failed
+                tqdm.write(
+                    f"Could not re-score {doc_id}: {type(e).__name__}: {e}",
+                    file=sys.stderr,
+                )
+                logger.warning(f"Re-scoring {doc_id} failed", exc_info=True)
                 stats["still_failed"] += 1
 
             doc_pbar.update(1)

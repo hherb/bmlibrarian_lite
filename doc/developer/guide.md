@@ -137,7 +137,7 @@ bmlibrarian_lite/
 │   │   ├── metadata_filter.py
 │   │   ├── report_formatter.py
 │   │   └── data_models.py
-│   ├── benchmarking/        # Multi-model benchmarking
+│   ├── benchmarking/        # Multi-model benchmarking; display.py states results
 │   ├── transparency/        # Transparency infrastructure
 │   │   ├── transparency_manager.py
 │   │   ├── transparency_models.py
@@ -378,6 +378,45 @@ saved its own record when it ran. A record an older build wrote is detected by
 `predates_outcome_split()` and shown with a note, and without the stock reason
 it gave every non-accepted document (`without_invented_reason()`).
 
+**Silent or unread** (#310). `CitationOutcome.failed` names each relevant
+document whose extraction failed as an `ExtractionFailure(document, cause)`;
+`documents_failed` and `causes` are read from it, so a count and a list cannot
+disagree. Once extraction has run to the end — never for a cancelled run — the
+worker emits `citation_extraction_recorded` with the whole list and writes it
+into the checkpoint (`checkpoint_metadata_with_extraction_failures()`, read
+back by `recorded_extraction_failures()`), and the audit record lists them
+under `citation_extraction_failed` (`extraction_failure_record()`, read back by
+`readable_extraction_failures()`). An uncited relevant document absent from
+that list held nothing quotable. **`None` means not recorded, never "none
+failed"**: a cancelled run, a restore from an older checkpoint, and a list that
+cannot be read whole all say they cannot tell. A restore reads its own run's
+citations (`get_citations_for_question(..., checkpoint_id=...)`). MCP sources
+carry `citation_extraction_error`.
+
+**A stored failure is recognised in both forms** (#306). `is_scoring_failure()`
+is true for a negative score, and for the score of 1 older builds wrote with
+`"Scoring failed: …"` or `"Could not parse response"` (the benchmark runner
+until #306, the review scorer until 2025-12-23); `scoring_failure_sql()` states
+it for a query, and `classify_document_outcomes()` passes each score through
+`as_recorded_failure()` itself (#315), so no load path has to. One older form
+cannot be recognised: the pre-#306 runner also stored an answer with no
+`score` as a 1 with the model's own explanation, which is why an older result
+says its 1s may include failures. The benchmark runner never reuses a
+failure, and reuses only the same question's scores; `benchmarking/display.py`
+states every figure the benchmark could not compute as `n/a`, including the
+cost per judgement and the distribution of a model that judged nothing. A
+stored result that cannot be read raises `StoredResultUnreadableError`, which
+the Benchmark tab shows as "could not be loaded" (`show_unreadable()`), never as
+no results.
+
+**An answer holding no score on the scale is a failure.**
+`parse_score_response()` (shared by the review and the benchmark) returns
+`None` — retried, then recorded as `JSON_PARSE_ERROR` — for a `score` that is
+missing, null, not a whole number or off 1–5, and for prose whose number is on
+another scale or is a range; a JSON answer is read as that object alone. `outcome_sort_key()` orders a
+listing judged-then-failed-then-unscored, which the Audit Trail's literature
+cards follow (#307).
+
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
 The transparency system has two components:
@@ -492,6 +531,9 @@ The Audit Trail system provides real-time workflow visibility:
 - Supports quality badges, score badges, and transparency risk badges
 - Shows LLM rationale for scoring/quality decisions
 - Emits signals: `clicked(doc_id)`, `send_to_interrogator(doc_id)`
+- A negative score is an error code, not a score: the badge text, colour and
+  tooltip come from `card_utils.score_badge_text/_color/_tooltip()`, which say
+  the scoring failed and why (#307)
 
 Key signals for audit trail:
 ```python
@@ -502,7 +544,14 @@ documents_found = Signal(list)  # list[LiteDocument]
 document_scored = Signal(object)  # ScoredDocument
 quality_assessed = Signal(str, object)  # (doc_id, QualityAssessment)
 citation_extracted = Signal(object)  # Citation
+# From WorkflowWorker once extraction has run to the end, kept by
+# SystematicReviewTab for the Report tab (#310)
+citation_extraction_recorded = Signal(list)  # list[ExtractionFailure]
 ```
+
+`citation_extraction_recorded` is listed here for completeness: the Audit
+Trail tab does not connect to it; `SystematicReviewTab` keeps its list for the
+Report tab's audit record.
 
 ### Data Models
 

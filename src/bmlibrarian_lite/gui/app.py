@@ -26,6 +26,7 @@ A lightweight version of BMLibrarian with three tabs:
 import logging
 import os
 import sys
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Optional
 
 # Suppress tokenizers parallelism warning when forking for Qt threads
@@ -48,7 +49,11 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import StylesheetGenerator
 from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 
-from ..audit_records import recorded_min_score
+from ..audit_records import (
+    as_recorded_failure,
+    recorded_extraction_failures,
+    recorded_min_score,
+)
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from .research_questions_tab import ResearchQuestionsTab
@@ -62,7 +67,7 @@ from .quality_benchmark_results_dialog import QualityBenchmarkResultsTab
 from ..benchmarking import BenchmarkRunner
 
 if TYPE_CHECKING:
-    from bmlibrarian_lite.data_models import RetrievalShortfall
+    from bmlibrarian_lite.data_models import ExtractionFailure, RetrievalShortfall
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +333,7 @@ class LiteMainWindow(QMainWindow):
         quality_assessments: dict,
         quality_filter_settings: dict,
         report_metadata: object = None,
+        citation_extraction_failures: "Sequence[ExtractionFailure] | None" = None,
     ) -> None:
         """
         Handle report generation from systematic review.
@@ -345,6 +351,9 @@ class LiteMainWindow(QMainWindow):
             quality_assessments: Quality assessments by doc ID
             quality_filter_settings: Quality filter settings used
             report_metadata: Optional ReportMetadata for reproducibility
+            citation_extraction_failures: The relevant documents whose
+                citations could not be extracted, so the audit trail can tell
+                them from the ones that held nothing quotable (#310)
         """
         # Display report in the Report tab
         self.report_tab.display_report(
@@ -356,6 +365,7 @@ class LiteMainWindow(QMainWindow):
             quality_assessments=quality_assessments,
             quality_filter_settings=quality_filter_settings,
             report_metadata=report_metadata,
+            citation_extraction_failures=citation_extraction_failures,
         )
 
         # Switch to Report tab
@@ -550,7 +560,11 @@ class LiteMainWindow(QMainWindow):
                 self.benchmark_tab.update_result(None)
 
         except Exception as e:
-            logger.warning(f"Failed to load benchmark results: {e}")
+            # Left in place, the previous question's benchmark read as this
+            # one's; shown as "no results", it invited a paid re-run; and said
+            # only in the status bar, the "Loaded question" message replaced it
+            logger.warning(f"Failed to load benchmark results: {e!r}")
+            self.benchmark_tab.show_unreadable()
 
     def _on_question_selected(
         self,
@@ -592,12 +606,19 @@ class LiteMainWindow(QMainWindow):
             # of the question merged, highest score first, would describe
             # none of them: a document that failed in this run but scored in
             # an earlier one would be audited as accepted (#302).
-            scored_documents = self.storage.get_scored_documents_for_question(
+            # A failure an older build stored as a 1 reads as one (#315).
+            scored_documents = [
+                as_recorded_failure(scored)
+                for scored in self.storage.get_scored_documents_for_question(
+                    question, checkpoint_id=checkpoint.id
+                )
+            ]
+
+            # 4. Load that run's citations: counted per document against every
+            # run's, a document this run found silent read as cited (#310)
+            citations = self.storage.get_citations_for_question(
                 question, checkpoint_id=checkpoint.id
             )
-
-            # 4. Load all citations
-            citations = self.storage.get_citations_for_question(question)
 
             # 5. Load quality assessments
             quality_assessments = self.storage.get_quality_assessments_for_question(
@@ -633,6 +654,14 @@ class LiteMainWindow(QMainWindow):
                 quality_assessments=quality_assessments,
                 quality_filter_settings={},  # Not stored in checkpoint
                 min_score_threshold=recorded_min_score(checkpoint.metadata),
+                # None for a checkpoint older than the record (#310)
+                citation_extraction_failures=recorded_extraction_failures(
+                    checkpoint.metadata,
+                    {
+                        **{doc.id: doc for doc in documents_found if doc is not None},
+                        **{sd.document.id: sd.document for sd in scored_documents},
+                    },
+                ),
                 # The run saved its own report and audit when it ran; a record
                 # rebuilt from the database would be a second, poorer one.
                 auto_save=False,
@@ -644,9 +673,12 @@ class LiteMainWindow(QMainWindow):
             # 10. Switch to Report tab
             self.tab_widget.setCurrentWidget(self.report_tab)
 
+            # A failure is not a scored document (#307)
+            failed_count = sum(1 for scored in scored_documents if scored.score < 0)
+            failed_text = f" ({failed_count} could not be scored)" if failed_count else ""
             self.status_bar.showMessage(
-                f"Loaded question with {len(scored_documents)} scored docs, "
-                f"{len(citations)} citations",
+                f"Loaded question with {len(scored_documents) - failed_count} "
+                f"scored docs{failed_text}, {len(citations)} citations",
                 5000
             )
 

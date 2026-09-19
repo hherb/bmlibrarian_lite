@@ -538,7 +538,11 @@ def _handle_fact_check(
         _carrying_analysis_shortfalls(exc, analysis_shortfalls)
         raise
 
-    # Build source summaries
+    # Build source summaries. A source with no citation was either read and
+    # found silent, or never read; the error says which (#310).
+    extraction_errors = {
+        failure.document.id: failure.cause.description for failure in extraction.failed
+    }
     sources = []
     for sd in scored_documents:
         doc = sd.document
@@ -553,6 +557,7 @@ def _handle_fact_check(
             "score": sd.score,
             "explanation": sd.explanation,
             "document_id": doc.id,
+            "citation_extraction_error": extraction_errors.get(doc.id),
         })
 
     return _fact_check_result(

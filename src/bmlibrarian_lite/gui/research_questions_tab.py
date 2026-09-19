@@ -49,6 +49,8 @@ from PySide6.QtWidgets import (
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
+from ..benchmarking.display import failed_scorings_sentence
+from ..benchmarking.models import BenchmarkResult
 from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
 from ..data_models import LiteDocument, ResearchQuestionSummary, RetrievalShortfall
@@ -58,6 +60,21 @@ from .workers import IncrementalSearchWorker, ReclassifyWorker, RescoreWorker
 from .benchmark_dialog import BenchmarkWorker
 
 logger = logging.getLogger(__name__)
+
+
+def scored_count_text(question: ResearchQuestionSummary) -> str:
+    """The Scored column: documents with a score, and any that failed.
+
+    Args:
+        question: The question's summary.
+
+    Returns:
+        e.g. "12", or "12 (+3 failed)". Counted among the scores, a
+        question whose provider was down looked fully reviewed (#307).
+    """
+    if question.failed_documents:
+        return f"{question.scored_documents} (+{question.failed_documents} failed)"
+    return str(question.scored_documents)
 
 
 class ResearchQuestionsTab(QWidget):
@@ -372,7 +389,7 @@ class ResearchQuestionsTab(QWidget):
                 row, 2, QTableWidgetItem(str(question.total_documents))
             )
             self.questions_table.setItem(
-                row, 3, QTableWidgetItem(str(question.scored_documents))
+                row, 3, QTableWidgetItem(scored_count_text(question))
             )
             self.questions_table.setItem(
                 row, 4, QTableWidgetItem(str(question.run_count))
@@ -404,8 +421,12 @@ class ResearchQuestionsTab(QWidget):
                     else f"Selected: {question.question}"
                 )
 
-                # Enable Load button if question has scored documents (has a report)
-                self.load_btn.setEnabled(question.scored_documents > 0)
+                # Enable Load button if question has scored documents (has a
+                # report). Failures count here as they always did: a question
+                # whose every scoring failed stays loadable, to show them
+                self.load_btn.setEnabled(
+                    question.scored_documents + question.failed_documents > 0
+                )
         else:
             self.benchmark_btn.setEnabled(False)
             self.load_btn.setEnabled(False)
@@ -647,8 +668,14 @@ class ResearchQuestionsTab(QWidget):
 
         doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
         model_count = len(result.evaluator_stats) if hasattr(result, 'evaluator_stats') else 0
+        # A model that could not answer is named, not hidden behind
+        # "complete" (#306)
+        failures = (
+            failed_scorings_sentence(result) if isinstance(result, BenchmarkResult) else None
+        )
         self.progress_label.setText(
             f"Benchmark complete: {doc_count} documents, {model_count} models"
+            + (f" - {failures}" if failures else "")
         )
 
         # Clean up worker
@@ -929,7 +956,7 @@ class ResearchQuestionsTab(QWidget):
             f"Delete this research question and all associated data?\n\n"
             f"Question: {question.question[:100]}...\n\n"
             f"This will remove:\n"
-            f"• {question.scored_documents} scored document records\n"
+            f"• Scores of {question.scored_documents + question.failed_documents} documents\n"
             f"• All associated citations\n"
             f"• All review checkpoints\n\n"
             "Documents themselves are preserved for other questions.\n"

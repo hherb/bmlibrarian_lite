@@ -27,6 +27,7 @@ from bmlibrarian_lite.data_models import (  # noqa: E402
     CitationOutcome,
     DocumentSource,
     EvaluationErrorCode,
+    ExtractionFailure,
     LiteDocument,
     ScoredDocument,
     SearchSession,
@@ -489,8 +490,7 @@ class TestTheCitationStageInTheGui:
             citations=CitationOutcome(
                 citations=[make_citation()],
                 documents_attempted=2,
-                documents_failed=1,
-                causes=(UNREACHABLE,),
+                failed=(ExtractionFailure(documents[1], UNREACHABLE),),
             ),
         )
 

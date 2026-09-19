@@ -89,6 +89,22 @@ class LiteStorageError(LiteError):
     pass
 
 
+class StoredResultUnreadableError(LiteStorageError):
+    """A stored result exists but could not be read back.
+
+    Kept apart from "no result stored": read as that, a benchmark whose
+    stored summary was damaged invited the user to pay for it again.
+
+    Example:
+        try:
+            result = runner.get_benchmark_result(run_id)
+        except StoredResultUnreadableError as e:
+            show_unreadable(e)
+    """
+
+    pass
+
+
 class SQLiteError(LiteStorageError):
     """
     SQLite-specific storage error.

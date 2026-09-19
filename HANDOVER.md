@@ -8,64 +8,75 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#302 + #303 + #304 — a failure is not a finding, one layer down**, branch
-`fix/failure-is-not-an-answer-302`, PR #305. Python only. Compress into **Recently
-landed** once merged. The three defects PR #301 lodged rather than fixed, all
-the same family as #261–#264 and all pre-existing on master; the PR's own
-review then found the fix had created one false claim and left two half-done.
+**#306 + #307 + #310 + #315 — a failure is not a score**, branch
+`fix/failure-is-not-a-score-306`, PR #317. Python only. Compress
+into **Recently landed** once merged. Every place a failed model call was
+still read, drawn, counted or reused as a judgement; the contract
+(`doc/cross_platform/analysis_failure_reporting.md`) gained the rules.
 
-- **The contract gained the rules**, in
-  `doc/cross_platform/analysis_failure_reporting.md`, precise enough to port
-  (what makes an answer readable, the eight source phrases, the restore and
-  legacy-record rules) — Swift and Android are still unchecked against any of
-  it (**#300**).
-- **An answer with nothing in it is an answer** (#303). Citation extraction's
-  `{"passages": []}` is well-formed: the model read the abstract and found
-  nothing quotable. `readable_passages()` (`agents/citation_agent.py`) answers
-  `None` only for a response with no passage list, or one whose **every**
-  passage is unusable; a passage counts only if its `text` is a non-blank
-  string (`{"text": null}` reached a NOT NULL column and ended the review).
-  **The report had to change too**: `reporting_agent.py` inferred a failed
-  extraction from `documents_accepted > 0`, which is always true in the GUI,
-  so a silent run still blamed "API or network errors". It now decides from
-  the recorded shortfall alone and says *documents judged relevant: N, none
-  held a quotable passage*; MCP passes `documents_accepted`.
-- **The audit trail classifies instead of inferring** (#302). `audit_records.py`
-  sorts documents by the score they actually got — accepted, rejected (the
-  model's own explanation), failed (the error code, and the raw code as its
-  score), not scored (**no reason, because none was given**).
-  `DocumentOutcomes` carries its threshold and refuses a document counted
-  twice or filed where its score says it does not belong;
-  `outcome_summary()`/`outcome_entries()` build what the file and the dialog
-  share, which had already drifted. `display_report` takes
-  `all_scored_documents`; `SystematicReviewTab._on_document_scored` is the only
-  signal that brings the tab a document the model could not score.
-  - **A restore is not a new record.** Selecting a question used to auto-save a
-    fresh audit rebuilt from every run of the question, highest score first,
-    at a guessed threshold of 3. Now the worker writes the threshold into the
-    checkpoint (`CHECKPOINT_MIN_SCORE_KEY`), a restore reads that checkpoint's
-    scores only and its threshold (`recorded_min_score()`, "not recorded" for
-    older ones), and **does not auto-save** — Horst's call, 2026-09-19.
-  - **An older record** (no `failed_documents`) is shown with a note, and
-    without the stock "Score below minimum threshold" — also Horst's call; the
-    file is never changed.
-- **A degraded source is named where the source is named** (#304). Seven
-  paths fell back to the abstract with at most a log line; each now says
-  which, and a user's cancel says *cancelled*. Each cause is a fixed phrase
-  because provider error text prints the request URL, and the Unpaywall URL
-  carries the user's email — **a credential never travels in a URL at all**
-  (#196). **`QProgressDialog.close()` emits `canceled`**: every handler closed
-  the dialog first, so every *successful* load announced the full text "could
-  not be retrieved". Close it with `_close_progress_dialog()`, never directly.
-- **Lodged, not addressed here** (all Python, none blocking): #306 benchmark
-  failures scored as 1; #307 the Audit Trail tab's "-4/5" cards; #308 the
-  paywall flow (stale pending citation, empty pane on Cancel); #309 three
-  fallbacks still misstating their cause; #310 per-document extraction
-  failures missing from the audit; #311 raw error text in the PDF and
-  OpenAthens dialogs; #312 a restore's found-documents list spans every run.
-- **Verified:** `pytest tests/` — 1300 passed, 3 xfailed; `lint_delta.py
-  --base-ref origin/master` reports 0 new ruff and 0 new mypy findings (both
-  totals below master). Swift and Android untouched.
+- **The benchmark** (#306). `BenchmarkRunner` reads answers with the review's
+  `parse_score_response()` and records a failure as its classified code — it
+  stored a 1 with the raw exception, and defaulted an unreadable answer to 1.
+  Statistics count failures apart: no mean, latency or self-agreement for a
+  model that judged nothing, agreement over documents both models judged,
+  spread and disagreement rates over documents at least two judged — `None`,
+  shown as `n/a` by `benchmarking/display.py`, never 0% or 100%. **A stored
+  failure is never reused, and reuse is of the same question only** (it read
+  every question's scores). A stored pre-#306 result reads its legacy entries
+  as failures and says its 1s may include them; its distribution reloads with
+  int keys (it showed 0 everywhere). The confirm dialog's estimate counts
+  judged documents per model, not earlier runs. `BenchmarkResultsDialog`, an
+  unused duplicate of the tab's code, is gone.
+- **An answer holding no score on the scale is a failure** (second review).
+  `parse_score_response()` clamped "0"/"-3"/"42" to a verdict, read `true` as
+  1, read "Score: 10/10" and "a score 1-5" as 1, and searched a null-score
+  JSON answer's explanation for a digit. It now returns `None` for all of
+  these (retried, then `JSON_PARSE_ERROR`); a JSON answer is that object
+  alone. Also: cost/tokens per judgement are `None` for a model that judged
+  nothing (`get_ranking_by_cost` ranked it cheapest and stored 0.0); an
+  unreadable stored benchmark raises `StoredResultUnreadableError` and the tab
+  says "could not be loaded" (it read as "no results", inviting a paid
+  re-run); older empty stats reload with no mean or latency; the distribution
+  of a model that judged nothing is `n/a`; the Research Questions tab and
+  restore message count failures apart (`scored_count_text()`).
+- **A stored failure has two forms.** `is_scoring_failure()` (+
+  `scoring_failure_sql()`, exact prefix via `substr` because SQLite `LIKE`
+  ignores case) recognises the score-1 rows older builds wrote; a restore
+  passes scores through `as_recorded_failure()` (#315) so they audit as
+  failures without their raw text — and `classify_document_outcomes()` now
+  applies it itself, so no load path has to remember. One older form cannot
+  be recognised (the pre-#306 runner's 1 for an answer with no `score`); the
+  older-result note says so. **Scripts:** `concordance_analysis.py` counts
+  failures per model, shows a pair with too few shared documents as `n/a`
+  (was 0%), and keys by the whole question (50 characters let two collide);
+  `fix_missing_evaluations.py` deletes a failure only for its own question
+  and only after the re-score is saved, and skips pairs judged since;
+  `run_benchmark.py` retries the older form too.
+- **The Audit Trail tab** (#307): a grey "Scoring failed" badge with the
+  reason, never "-4/5"; cards sort judged, failed, never scored
+  (`outcome_sort_key()`); the Queries card counts failures apart.
+- **Silent or unread** (#310). `CitationOutcome.failed` names each
+  `ExtractionFailure`; counts and causes derive from it. **Recorded only when
+  extraction ran to the end** (`citation_extraction_recorded`): an earlier
+  revision of this branch recorded a cancelled run's unread documents as
+  "none quotable". A stored list naming a document twice, or a cause of
+  `SUCCESS`, reads as not recorded / `UNKNOWN_ERROR`. The audit
+  file lists them, the dialog says per relevant document cited / none
+  quotable / could not be extracted, the checkpoint keeps them, and **`None`
+  is "not recorded", never "none failed"**. A restore reads its own run's
+  citations and prefers the question's checkpoint with a report (a later
+  benchmark checkpoint hid the review). MCP sources carry
+  `citation_extraction_error`.
+- **Lodged, not addressed here:** #314 the quality benchmark records a failed
+  call as an "unclassified" study; #316 a rerun treats a failed document as
+  already scored; #318 "a failure is not a score" is a convention, not a type
+  invariant (`ScoredDocument` accepts 0, storage getters return the older
+  form as a judgement, mutable `CitationOutcome.citations`).
+- **Verified:** `pytest tests/` — 1499 passed, 3 xfailed; `lint_delta.py
+  --base-ref master` 0 new ruff, 0 new mypy (both totals below master).
+  Swift and Android untouched. Reviewed twice by independent agents (the
+  second a five-agent review with mutation testing); every finding fixed or
+  lodged above.
 
 ## Recently landed (context)
 
@@ -73,71 +84,48 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A failed analysis is not an empty one** (#261–#264; PR #301, merged
-  2026-09-17). Python only; the contract is
-  `doc/cross_platform/analysis_failure_reporting.md`.
-  - **The vocabulary.** `AnalysisShortfall` (`data_models.py`) records stage +
-    failed + attempted + causes; the pure functions live in
-    `analysis_failures.py`. A shortfall that lost nothing is refused on
-    construction, repeated causes are reduced on the way in, and a cause a
-    build cannot name degrades while the count never does. `ScoringOutcome`
-    and `CitationOutcome` refuse impossible counts rather than repairing them
-    with `max()`: a floored `attempted` reads as "every document failed",
-    which is a *terminal* verdict, so a caller's slip became a confident lie.
+- **The analysis-failure family** (Python; #261–#264 PR #301, #302–#304 PR
+  #305, merged 2026-09-17/18). The contract is
+  `doc/cross_platform/analysis_failure_reporting.md`; read it first.
+  - **Vocabulary.** `AnalysisShortfall` (stage, failed, attempted, causes) in
+    `data_models.py`, pure functions in `analysis_failures.py`. Impossible
+    counts are *refused*, never repaired with `max()`: a floored `attempted`
+    reads as "every document failed", a terminal verdict.
   - **Each stage fails in its own register.** Scoring raises
-    (`AnalysisFailedError`) only when *every* attempted document failed.
-    Citation extraction **never** raises — the documents are known relevant,
-    so the report can say the extraction failed. Report generation raises
-    rather than returning `Error generating report: …` *as* the report, which
-    the GUI checkpointed as complete and auto-saved.
-  - **The notice is idempotent**: the agent qualifies the report, the MCP
-    result must not qualify it again, and a check deciding *what a text is*
-    reads the body behind **both** notices. **A failed document is neither a
-    rejected nor a scored one**, and
-    `documents_scored == documents_accepted + documents_rejected` reconciles.
-  - **Classify the failure, not the wrapper.** `llm_retry` retries every
-    provider failure, so an agent sees `RetryExhaustedError`, never the
-    refused key or unreachable host underneath — recording the wrapper left
-    *every* outage advising "try again later". Both agents go through
-    `classify_exhausted_retries()` (`utils.py`), which reads `last_error`. **A
-    test patching `_score_with_retry`/`_extract_with_retry` patches *inside*
-    the retry decorator and cannot see this** — drive `_chat`.
-  - **Cancelling is not failing**: the cancel check precedes the total-loss
-    verdict, because a cancelled run's attempted set is only what it got
-    through. **A later failure does not un-lose what an earlier stage lost** —
-    the report-generation exception carries the MCP shortfalls to
-    `_error_payload`.
+    `AnalysisFailedError` only when *every* document failed; citation
+    extraction **never** raises; report generation raises rather than
+    returning its error as the report. A failed document is neither scored nor
+    rejected: `documents_scored == accepted + rejected`.
+  - **Classify the failure, not the wrapper.** `llm_retry` wraps every provider
+    failure in `RetryExhaustedError`; `classify_exhausted_retries()` reads
+    `last_error`. **A test patching `_score_with_retry`/`_extract_with_retry`
+    patches inside the decorator and cannot see this** — drive `_chat`.
+    Cancelling is not failing, and a later failure does not un-lose what an
+    earlier stage lost.
+  - **An answer with nothing in it is an answer** (#303): `{"passages": []}`
+    is *nothing quotable*; the report decides "extraction failed" from the
+    recorded shortfall alone, never from `documents_accepted > 0`.
+  - **The audit trail classifies instead of inferring** (#302): accepted,
+    rejected (the model's reason), failed (code + description), not scored (no
+    reason). **A restore is not a new record** — its own checkpoint's scores
+    and threshold, no auto-save; **an older record** gets a note, not the stock
+    "Score below minimum threshold". Both Horst's calls.
+  - **A degraded source is named where the source is named** (#304), in a
+    fixed phrase, never provider text. **`QProgressDialog.close()` emits
+    `canceled`** — use `_close_progress_dialog()`.
 
 - **An unreadable store is kept whole, and a report records what its search
-  lost** (#285 + #284; PR #291, merged 2026-09-17). iOS/macOS only.
-  - **Nothing is deleted.** `StoreRecovery.setAsideStore` moves
-    `default.store{,-shm,-wal}` into one `unreadable-<timestamp>/` folder and
-    rolls every move back if any one fails — a database parted from its
-    write-ahead log has lost what that log held — and `makeContainer` refuses
-    to open a fresh database while anything is left where SwiftData writes.
-    **Every message says "Nothing was deleted"**, the nothing-could-be-moved
-    case included, which is the one case where the store is provably whole.
-  - **A recovery message is app-scoped and cannot be dropped unread.**
-    `StoreRecoveryMessage` (`@Observable`) is read once per launch, and the
-    alert's binding setter is deliberately inert: only OK forgets it, because
-    SwiftUI drives that setter to `false` for reasons that are not the user
-    reading it. **Attach such an alert to the whole root view**, not one
-    branch of it.
-  - **A SwiftData version bump still crashes at launch**, so there is none:
-    every `VersionedSchema` is built from the *live* model classes, so two
-    versions share a checksum and a store matching neither raises
-    `NSInvalidArgumentException`, which no Swift `catch` takes (**#289**).
-    Only a store written by an **earlier build** reaches it — two probes
-    against a matching checksum called it safe. `isMigrationError` must know
-    `SwiftDataError.unknownDataStoreSchema` (SwiftData hides Cocoa 134504
-    behind it) or every upgrading app hits `fatalError`; `StoreMigrationTests`
-    pins the ladder.
-  - **The report records what its search lost** in `EvidenceReport`'s private
-    `searchShortfallsJSON` (`"[]"` when complete) instead of matching its own
-    prose. `ReportSearchCompleteness` reads it: `nil` is a report saved before
-    the record and is read off its text; a damaged record reports as
-    incomplete and says it cannot name what is missing. Both divergences from
-    Python are in the contract's iOS/macOS section.
+  lost** (iOS/macOS; #285 + #284, PR #291, merged 2026-09-17).
+  `StoreRecovery.setAsideStore` moves `default.store{,-shm,-wal}` together
+  into `unreadable-<timestamp>/`, rolling back if any move fails, and **every
+  message says "Nothing was deleted"**. `StoreRecoveryMessage` is app-scoped;
+  its alert's binding setter is inert (only OK forgets it) and **attaches to
+  the whole root view**. **A SwiftData version bump still crashes at launch**
+  (#289: every `VersionedSchema` shares the live classes, so only an
+  **earlier build's** store reaches the `NSInvalidArgumentException`);
+  `isMigrationError` must know `SwiftDataError.unknownDataStoreSchema`. A
+  report's search losses live in `EvidenceReport.searchShortfallsJSON`
+  (`"[]"` when complete; `nil` = saved before the record).
 
 - **A failed source is not an empty one** — all three platforms conform
   (#247/#248 PR #260, Android #252 PR #276, iOS/macOS #256/#253 PR #282;
@@ -286,274 +274,133 @@ the rest.
 
 ## Potential follow-ups
 
+Open issues by family; each issue carries the detail. None blocks another.
+
 ### The analysis-failure family: what is left
 
 - **#300 — Swift and Android are unchecked against
-  `doc/cross_platform/analysis_failure_reporting.md`**, now three rules
-  longer. Both run the same pipeline with the same shape, so the same defects
-  are likely present. The largest remaining slice of this family.
+  `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
+  longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
+  same shape. The largest remaining slice of this family.
+- Python, lodged by PR #305: **#308** the Interrogation paywall flow (stale
+  pending citation, empty pane on Cancel); **#309** three abstract fallbacks
+  still misstating their cause; **#311** raw provider error text in the PDF and
+  OpenAthens dialogs; **#312** a restore's found documents span every run of
+  the question, and the checkpoint keeps no quality filter settings (its
+  citations half was fixed by PR #317).
+- Python, lodged by this branch: **#314** the *quality* benchmark records a
+  failed call as an "unclassified" study (the relevance benchmark's #306
+  shape); **#316** a Research Questions rerun treats a document whose scoring
+  failed as already scored, so it is never retried; **#318** make "a failure
+  is not a score" a type invariant rather than a convention.
+- Older: **#249** nothing connects `analysis_failed`; **#250** an efetch with no
+  article yields "No conflict of interest statement found"; **#258** the search
+  merge drops a distinct article whose title differs by a number, as
+  "duplicates removed"; **#259** Python full-text discovery reports an
+  unreachable Europe PMC as "Article not found". A decision, not done: esearch
+  `SERVICE_ERROR` is not retried.
 
-### The #285 round: what PR #291 lodged
+### iOS/macOS storage, errors and tests (#282 and #285 rounds)
 
-All iOS/macOS, all independent, none blocking.
+- **#289 blocks any model change lightweight migration cannot absorb** until
+  each `VersionedSchema` snapshots its own model types. **#297** a store the app
+  cannot open ends in `fatalError`; **#292** `isMigrationError` matches
+  `"migration"` as a bare substring; **#293** `try? modelContext.save()` drops
+  the failure that decides whether a shortfall record is stored; **#294** a
+  set-aside store is unreachable on iOS and accumulates; **#295**
+  `ReportSearchCompleteness` is four states in `Bool × String? × String`;
+  **#296** the migration test's earlier-build store has no relationships;
+  **#298** a damaged shortfall record reads as an API error.
+- **#287** four error paths that swallow or misreport (smart-search shortfalls
+  dropped when the budget throws; `TransparencyAnalysisService` swallowing
+  `SourceRequestError`; the macOS PDF export a silent stub; a keychain read
+  failure reading as "no NCBI key"). **#286** a non-`Sendable` formatter static
+  (Swift 6 error), an empty PubMed search re-issued every batch, confusable API.
+  **#290** `AppLogger` declared twice, per platform.
+- **#281 / #288 — the workflow's own decisions are untested**; #288 measured six
+  of ten are pure functions `private` by accident. The boundary that matters:
+  `failedEuropePMCPage`'s `max(1, …)`, without which a failed later page
+  reports as complete.
 
-- **#292** — `isMigrationError` matches `"migration"` as a bare substring, so a
-  passing fault can set a healthy store aside.
-- **#293** — `try? modelContext.save()` discards the failure that decides
-  whether the shortfall record is ever stored.
-- **#294** — iOS: a set-aside store is unreachable to the user and accumulates.
-- **#295** — `ReportSearchCompleteness` is four exclusive states in
-  `Bool × String? × String`.
-- **#296** — `StoreMigrationTests`' earlier-build store has no relationships and
-  no transformables, so it understates what a real bump touches.
-- **#297** — a store the app cannot open ends in `fatalError` rather than a
-  window that explains it.
-- **#298** — a damaged shortfall record is reported as an API error, with no
-  next step for the user.
+### Identity and citations (#206 and #226 rounds)
 
-### The #282 review round: iOS/macOS storage, errors and tests
+- **#227** workflow maps and `CheckpointManager` key documents by the ambiguous
+  primary slot (a resume replays one score onto every document sharing it);
+  **#228** an identity and a citation identifier are the same type (wants
+  `CitationIdentifier` + `DocumentIdentity`, related #219, #222); **#232** rows
+  written before #208 keep a derived identity and a collision goes undetected;
+  **#223** a malformed source token warns per redraw.
+- **#224** an unresolvable report reference is a silent no-op (both platforms);
+  **#237** the export deletes citations and tells only the log (the parts exist:
+  `RemovedCitationNotice`); **#236** a `doc:` target missing its `(` survives
+  the sweep — widening it wants a decision (golden rule 6); **#238** BioMedLit
+  discards diagnostics by default; **#240 / #241** block rendering differs from
+  export (emphasis over a reference, a wrapped reference).
+- **#231** transparency cannot run from full text alone (needs a "not assessed"
+  state — a contract change, with #203). Android: **#234** the PDF export
+  prints raw `doc:` targets; **#229** Android and Python still build `pmid-`
+  references; **#205** Android asks `src:med` for every identifier; **#220**
+  Android builds a PubMed URL from an unvouched `pmid`. Python: **#207** no
+  preprint routing, first rung only, PMC rung first.
+- **#214 / #215** `FullTextService` never reports what the retrieval chain learns,
+  and misreports cache failures as download failures; **#216** nothing tests
+  `FactCheckWorkflow`'s three document-creation paths; **#210** macOS shows a
+  preprint as plain "Europe PMC".
 
-Lodged while reviewing PR #282 (2026-09-16). The four critical findings were
-fixed on that branch; these are what it left.
+### Extracted text and the transparency analyser (#198 round)
 
-- **#287 — four error paths that still swallow or misreport.** Pending
-  smart-search shortfalls dropped when the budget throws mid-loop;
-  `TransparencyAnalysisService` swallowing `SourceRequestError` and cancellation;
-  macOS PDF export a silent `nil`-returning stub (so the contract's "the PDF
-  draws the notice" holds on iOS only); a keychain read failure reading as "no
-  NCBI API key", which makes the 429 advice tell the user to set the key they
-  have set.
-- **#286 — three in the failure types themselves**: a non-`Sendable`
-  `NumberFormatter` static (a Swift 6 hard error, reached from two isolation
-  domains); a PubMed search that legitimately matched nothing re-issued on every
-  batch and then misreported as a failed *first* page; dead/confusable public API
-  (`redirectRefused` with no callers, `SearchSource.provider` bridging to the
-  wrong `SearchProvider` spelling, `httpStatus` vs `forHTTPStatus`).
-- **#289 blocks any model change lightweight migration cannot absorb** (a
-  rename, a retype, a property becoming non-optional): no stage can be added
-  until each version snapshots its own model types — see **Recently landed**.
-  **#290** — `AppLogger` is declared twice, iOS-only and macOS-only, so shared
-  code can use neither.
-- **#281 / #288 — the workflow's own decisions are untested**, because
-  `FactCheckWorkflow` takes no injectable search service (the Swift shape of
-  #216). But **#288 measured that six of the ten are pure functions that are
-  `private` by accident** and testable today: the boundary that matters is
-  `failedEuropePMCPage`'s `max(1, …)`, without which **a failed later Europe PMC
-  page reports as a complete one** and nothing catches it.
+All want one decision across Python, Swift and Kotlin.
 
-### The #226 review round: identity, one layer down
+- **#199** the extractors over-capture on PDF prose (`(?=\n\n|\z)` on text with
+  no blank runs). **A bounded cap is already disproved** (0c2c268, reverted
+  a2b5cd8): it cut "…all other authors declare no competing interests" off a
+  well-formed disclosure. The repair is section segmentation
+  (`doc/cross_platform/ios_bmlib_alignment.md`).
+- **#203** a negative finding from partial text is recorded as absence; **#200**
+  `isComplete` is satisfied by one character per page (and Python and Swift
+  count a text-free page differently, deliberately — resolve together).
+- **#244** `bmll -v` never enables DEBUG; **#245** the transparency CLIs take the
+  NCBI key only as `--api-key`.
 
-Lodged while reviewing #226, #230 and #233 (2026-09-11 to 09-13). Independent of
-each other.
+### Full-text retrieval and JATS
 
-- **#227 — the workflow and the checkpoints key documents by the ambiguous
-  primary slot.** Three `[String: Document]` maps on `doc.pmid`: of N documents
-  sharing a slot value, N-1 are never scored, and `CheckpointManager` persists
-  the same key, so a resume replays one document's score onto all of them. The
-  persisted half is a schema question, which is why #226 left it.
-- **#228 — an identity and a citation identifier are the same type**, so swapping
-  them compiles and produces #212's output; both filled from the same `doc`
-  thirty lines apart. Wants `CitationIdentifier` in `BioMedLit` and a
-  `DocumentIdentity` wrapper — a currency type, not a storage change: the column
-  stays `String`, since stored rows hold `pmid-12662058`. Related to #219, #222
-  (a "PubMed" badge beside no PubMed link, `searchSourceEnum` guessing where
-  `recordedProvider` refuses).
-- **#232 — rows written before #208 keep a derived identity and nothing detects a
-  collision**: both report-resolution sites pick `.first { $0.id == … }`; wants a
-  `filter` and an error log. **#223** — a malformed Europe PMC source token warns
-  once per SwiftUI redraw; validate once in `applySearchMetadata`.
-- **#224 — an unresolvable report reference is a silent no-op**, both platforms:
-  `findDocumentById` answers `nil` and nothing presents (golden rule 8). Since
-  #233 both views resolve through `ReportReferenceLink`, and `ReportCitation`
-  logs a tap fitting no document or several — the reader still sees nothing. A
-  display-text fallback needs a second associated value first.
-- **#237 — the export deletes citations and tells only the log**, with the export
-  sheet in front of the user. The parts exist since #233: `PDFExporter` parses
-  once through `ReportMarkdownBlock`, `RemovedCitationNotice(parses:)` is the
-  sentence; what remains is showing it on the PDF and in `plainTextReport`
-  (which also leaves literal `\n` unconverted). **#236** — a `doc:` target that
-  lost its opening parenthesis survives the sweep, keyed on `(doc:`; widening it
-  deletes text on a bare scheme in prose, so it wants a decision (golden rule 6).
-  **#238** — `BioMedLit` defaults to discarding diagnostics though it now removes
-  text; both apps configure a real logger, so this is enforcement.
-- **#240 / #241 — block rendering still differs from the text export**: emphasis
-  spanning a reference prints `**`, and a reference wrapped after a list item or
-  heading splits across blocks. Both live in `ReportMarkdownBlock` since #233.
-- **#231 — transparency analysis cannot run from full text alone**, though
-  `analyzeCOI` and `analyzeDataAvailability` need no identifier; 60 of 100
-  sampled `SRC:ETH OR SRC:CBA OR SRC:HIR` records carry no DOI. Needs a "not
-  assessed" state, which makes it a contract change — see #203.
-- **Android's share of this round**: **#234** (the PDF export never flattens
-  links, so every citation prints its `[Author, Year](doc:pmid-…)` source; #230
-  ports directly) and **#229** (Android and Python still build and parse `pmid-`
-  references — no shared contract breaks, but close it deliberately).
+- **Reporting honestly about retrieval**: **#189** a failed Unpaywall lookup
+  reads as "no OA PDF"; **#192** a 403/410 gets the sentence that invites a
+  retry (a fourth reason: a spec and three-port change); **#194** make
+  `unspecified` unwritable by construction; **#193** the PDF cache swallows its
+  failures; **#201** concurrent fetches for one PDF both download.
+- **The spec still specifies defects**: **#197** an invented figure number;
+  **#188** contributor state as single slots, no `<string-name>`. A port
+  contract is a place a fixed defect survives.
+- **Parser defects the corpus found** (each moves the digests — see
+  **Verify**): **#154** affiliations never captured (98.7% link them by
+  `<xref ref-type="aff">`); **#155** `<mixed-citation>` yields no structured
+  metadata (74.6% of real references); **#162** `rowspan` never read, so later
+  columns shift; **#172 / #174** a table deposited as a `<graphic>` is dropped,
+  an unlabelled exhibit gets a fabricated "Figure N"; **#177** wants publisher
+  spread first; **#144** captions on supplementary material are dropped;
+  **#204** unsectioned `<back>` sweeps `<ref-list>` into the body (bmlib decides
+  by an ancestor test; port it, or record the divergence); **#257, #272, #299**
+  JATS reference/metadata defects in Swift and Kotlin; **#121** Android's
+  parser swallows errors and is unit-untestable.
+- **#190** CI never builds the iOS app target; cheapest guard: fail when a
+  `.swift` file under `ios/MedicalFactChecker/Sources/` belongs to no target.
 
-### The #206 round: identifier identity, on the other two platforms
+### Transparency parity and pricing
 
-The Swift fix is one platform's half of a contract change. All independent.
-
-- **#214 — what the retrieval chain learns never reaches the reader or the error
-  queue**, and **#215 — cache read and write failures are misreported as download
-  failures.** Both in `FullTextService`; both the honesty-of-reporting shape
-  #183/#186/#187 established.
-- **#216 — nothing tests `FactCheckWorkflow`'s three document-creation paths**,
-  which is how the third hand-copying site survived the whole of #209.
-- **#210 — macOS shows a preprint as plain "Europe PMC".** `MacScoredDocumentsView`
-  draws `MacProviderBadge`, which takes no preprint flag, while the macOS badge
-  that does is referenced only by its own preview: the two platforms disagree
-  about what they tell the reader.
-- **#205 — Android asks `src:med` for every identifier** (`FullTextService.kt:308`)
-  and never asks for a PMC ID. A verbatim port of the Swift repair, plus the
-  revised "Cache Keys" section **and the stated kind** (#209). **#220** — Android
-  builds a PubMed URL from an unvouched `pmid` (`Document.kt:167`,
-  `ReportViewModel.kt:347`); unreachable under today's mapping, the shape Swift
-  had before #212 — port the rule, not the fix.
-- **#207 — Python has no preprint routing, runs only the first matching rung, and
-  puts the PMC rung first** (`europepmc.py`, `get_article_info`). Less severe than
-  Swift's was, since Python keeps identifiers in separate parameters and never
-  asks for a PMC accession under `src:med`. Wants the stated kind (#209) too; no
-  PDF cache, so the tag half does not apply.
-- **#204 — unsectioned `<back>` routing sweeps `<ref-list>` apparatus into
-  `bodySections`.** Found from bmlib's side: `case "p"` ends on the ambient
-  `inBack`, so a `<ref-list>`'s own `<p>` becomes article prose — 191 paragraphs
-  in 39 of 8,117 served articles (0.47%), 1,354 in 307 of 97,909 (0.25%). Small,
-  but a corruption rather than a blank. **bmlib refuses `<ref-list>` and nothing
-  else, decided by an ancestor test on the element stack** — a bare `inRefList`
-  flag is re-admitted by a nested list's close tag. Port it, or record the
-  divergence knowingly.
-
-### Extracted PDF text misrepresents an article to the transparency analyser
-
-Three ways, all opened by PR #198 and all needing a decision that covers Python,
-Swift and Kotlin rather than a Swift-side patch.
-
-- **#199 — the extractors over-capture on PDF prose.** `PDFPage.string` emits no
-  blank runs within a page, so page joins are the only `\n\n`, and all eight
-  patterns in `TransparencyAnalysisService` terminate on `(?=\n\n|\z)` — a
-  header found mid-page captures the rest of that page, and on the last page the
-  rest of the document. An article can then be recorded as having industry ties
-  it never declared. **The obvious fix is already disproved**: a bounded cap
-  (0c2c268, reverted in a2b5cd8) pushed "…all other authors declare no competing
-  interests" past the cap on a long, *well-formed* JATS disclosure, storing a
-  conflict the article had explicitly declared away — a worse failure, on the
-  common path. The repair is section segmentation, scoped in
-  `doc/cross_platform/ios_bmlib_alignment.md`.
-- **#203 — a negative finding from partial text is recorded as absence.** The
-  analysers pass `nil` when the regex finds nothing and the detail view prints
-  "No COI statement found", while the pages that fail to extract are
-  disproportionately the last ones — exactly where funding, competing-interest
-  and data-availability statements live. Coverage is on the document (#198) but
-  does not reach analysis; the contract needs an "unknown because the source was
-  partial" state, which changes what a stored verdict means on all three
-  platforms.
-- **#200 — `isComplete` is satisfied by one character per page.** A scanned
-  article with a per-page download stamp, watermark or DOI reports a whole
-  extraction, warns about nothing, and delivers a list of download stamps to the
-  analyser. Wants a per-page minimum and a total minimum, named constants, agreed
-  once for both. **The two already diverge deliberately** (#198): Python counts a
-  text-free page as converted, Swift does not. Resolve that in the same pass.
-
-### The rest of the #198 round
-
-- **#244 — `bmll -v` never enables DEBUG**: the analyser and `batch_analyzer.py`
-  call `logging.basicConfig(INFO)` at import and the GUI configures none, so the
-  fix needs a GUI setup too. **#245** — those two CLIs take the NCBI key only as
-  `--api-key` (shell history, `ps`).
-- **Failures that read as findings, what is left** (the #246 review) — #261 to
-  #264 landed in PR #301. Still open: nothing connects `analysis_failed`
-  (**#249**); an efetch with no article yields "No conflict of interest
-  statement found" (**#250**, #203's shape). **#258** — the search merge drops
-  a distinct article whose title differs by a number (Python and Swift),
-  silently, as "duplicates removed". **#259** — Python full-text discovery
-  reports an unreachable Europe PMC as "Article not found" (the #247 contract,
-  for lookups; Swift's `EuropePMCService.lookup` now raises rather than
-  answering nothing, so Python is the one left). **#300** — Swift and Android
-  are unchecked against the analysis-failure contract; both run the same
-  pipeline with the same shape. Not done, a decision: esearch `SERVICE_ERROR`
-  is not retried (the `((` answer fails every time).
-- **#190 — CI never builds the iOS app target** (#218 added macOS `xcodebuild`;
-  **Verify** says why `swift test` misses it). Wants an iOS Simulator job and —
-  cheaper, and the exact defect that occurred — a guard failing when a `.swift`
-  file under `ios/MedicalFactChecker/Sources/` belongs to no target.
-- **Reporting honestly about full-text retrieval**, all one family. **#189** — a
-  failed Unpaywall lookup reads as an article with no OA PDF; it cannot reuse
-  `europePMCUnreachable`, so it wants its own reason and sentence. **#192** — a
-  403/410, and a malformed PMC ID of ours, land in the catch-all `else` and get
-  the one sentence that *invites a retry*; wants a fourth reason, so a
-  `jats_parsing.md` change and a three-port change. **#194** — make `unspecified`
-  unwritable by construction: one debug `assert` on the wrong type holds a rule
-  the persisted contract depends on, and reading a newer build's reason
-  *downgrades* it; wants the write-side enum split from a lossless read-side one.
-  **#193** — the same file's PDF cache swallows its failures (golden rule 8).
-  **#201** — concurrent fetches for one PDF both download.
-- **#197 / #188 — `doc/cross_platform/jats_parsing.md` still specifies defects.**
-  The normative spec invents a figure number the publisher did not deposit
-  (#174's shape), and specifies contributor state as single slots while omitting
-  `<string-name>` (#154's neighbourhood). A faithful Kotlin port would rebuild
-  both from the spec. #175's lesson: the port contract is a place a fixed defect
-  survives.
-- **#148 — `INDUSTRY_KEYWORDS` has drifted Python↔Swift**: Python matches
-  `pharma(?:ceutical)?s?`, Swift lacks the `s?`, so a plural raises the
-  industry-ties indicator on desktop only. One-character fix, but wants a shared
-  fixture like #147's `sponsor_patterns.json`, or it recurs.
-- **#172, #174, #177 — what is left of the #171 review round.** #172 (a table
-  deposited as a `<graphic>` is dropped; bmlib's `graphic_url` is the port) and
-  #174 (an unlabelled exhibit gets a fabricated `"Figure N"`, `alt` included) go
-  together. #177 wants publisher spread first.
-- **#154, #155, #162 — the JATS parser defects the corpus found that are still
-  open.** Fixing any of them moves the corpus digests and needs the sibling
-  parsers checked — see **Verify**.
-  - **#154 — author affiliations are never captured.** `currentAffiliations` is
-    written once and read nowhere, and `<xref ref-type="aff">` is unhandled.
-    98.7% of real articles link affiliations that way; only 4.4% inline `<aff>`
-    inside `<contrib>`, which is the shape every synthetic test uses.
-  - **#155 — `<mixed-citation>` yields no structured reference metadata.** 80.9%
-    of articles, **74.6% of all real references**. The citation string survives,
-    so it degrades quietly.
-  - **#162 — `rowspan` is never read.** A spanning cell contributes to its first
-    row only, every later row is a cell short, and `padRow` pads the gap so the
-    columns after it shift. `markdownRowCount` could never see it — which is why
-    the digest now stores a `markdownDigest` hash of the rendering.
-- **#159 / #160 — transparency caveats and confidences, Python↔Swift.** **#159**:
-  when only ClinicalTrials.gov names an industry sponsor, both platforms report
-  `industry_funding_detected=True` at confidence 0.0 ("YES (0%)"); wants one
-  named confidence in `sponsor_patterns.json`, strictly below
-  `known_industry_doi` or the ladder test needs rework. **#160**: Swift never
-  raises Python's unrecognised-funder caveat (78% of corpus names) nor the two
-  trial-registry caveats (ISRCTN/EudraCT only; ClinicalTrials.gov unreachable).
-- **#150 — spelled-out NIH institute names match no government pattern** on
-  either platform, so a US federal agency tiers NONPROFIT (`sponsor_type` only).
-  Pinned `xfail(strict=True)`; `\bnational institutes? of\b` also reaches non-US
-  bodies, so measure on both platforms before widening.
-- **#144 — captions on `<supplementary-material>`/`<media>`/`<boxed-text>` are
-  dropped**: no longer corrupting the enclosing section, but there is no model to
-  capture them into. 417 occurrences across 386 articles. **#145** — stale
-  transparency results still feed report aggregates and the exported PDF:
-  `TransparencySummarySection` and `PrintableReportView` average v1 and v2 scores
-  into one unlabelled figure.
-- **#121 — Android's JATS parser still swallows parse errors** and is
-  unit-untestable (`XmlPullParser`). The PubMed efetch half of #123 is done on the
-  #252 branch. The logging seam it waited for exists: the test sources shadow
-  `android.util.Log`. Leave `setXIncludeAware` uncalled, since it throws only
-  on-device.
-- **Android transparency, remaining #116 slices**: COI analyzer, scorer + risk
-  indicators, funding/trial (network), JATS statement extraction, Room
-  persistence + `DocumentCard` UI. **#109 — LLM-assisted disambiguation of repo +
-  soft-restriction**: kept FULL_OPEN today; wants an optional config-gated LLM
-  layer at the orchestration layer, classifier and parity tests unchanged.
-- **#136/#137 — pricing is hardcoded in six places per platform and has
-  drifted** (GPT-5.2 billed at the wrong rate; `mistral-large-latest` at the
-  `defaultPricing` placeholder); #136 needs a decision on current figures.
-  **#138** — the model-list fetch has no retry/backoff. **#139** — four
-  providers still filter models by whitelist, the pattern that broke DeepSeek,
-  riskier now that the healing logic rewrites a selection a whitelist drops.
-- **Small and cosmetic.** **#140** — `ThinkingConfig.type` is a raw `String` for
-  a two-valued toggle. **#126** — redundant "Data not openly available" label
-  (tiers are correct). **#111** — cache compiled regexes in Swift `RegexHelper`,
-  negligible until it hits a hot path. **#225** — two dead file-path constants in
-  `FullTextConstants`, one spelling `"pmid-"`. **Swift's risk *level* heuristic**
-  (`TransparencyScorer.calculateRiskLevel`) has no Python counterpart; revisit
-  only if a canonical definition appears.
+- **#148** `INDUSTRY_KEYWORDS` drifted (`pharma…s?` on Python only) — wants a
+  shared fixture like `sponsor_patterns.json`; **#159** a ClinicalTrials.gov-only
+  industry sponsor reports "YES (0%)"; **#160** Swift never raises Python's
+  unrecognised-funder or trial-registry caveats; **#150** spelled-out NIH
+  institutes match no government pattern (pinned `xfail(strict=True)`);
+  **#145** stale transparency results feed report aggregates.
+- Android transparency, remaining **#116** slices; **#109** optional LLM
+  disambiguation of repository restrictions.
+- **#136/#137** pricing hardcoded in six places per platform, drifted (#136
+  needs current figures); **#138** model-list fetch has no retry; **#139** four
+  providers still filter models by whitelist.
+- Small: **#140**, **#126**, **#111**, **#225**; Swift's risk *level*
+  heuristic has no Python counterpart.
 
 ### Verify
 

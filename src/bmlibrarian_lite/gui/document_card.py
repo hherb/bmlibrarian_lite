@@ -58,7 +58,15 @@ from ..constants import (
 from ..data_models import LiteDocument, DocumentSource
 from ..quality.data_models import QualityAssessment
 from ..transparency import TransparencyResult
-from .card_utils import format_authors, format_metadata, get_score_color
+from ..audit_records import score_failure_reason
+from .card_utils import (
+    SCORING_FAILED_TEXT,
+    format_authors,
+    format_metadata,
+    score_badge_color,
+    score_badge_text,
+    score_badge_tooltip,
+)
 from .quality_badge import QualityBadge
 from .transparency_badge import TransparencyBadge
 
@@ -70,10 +78,12 @@ class ScoreBadge(QFrame):
     Color-coded badge displaying relevance score.
 
     Shows score as fraction (e.g., "4/5") with background color
-    indicating quality level.
+    indicating quality level. A document the model could not score carries
+    its error code where the score would be; the badge says the scoring
+    failed, and why, rather than drawing the code as a score (#307).
 
     Attributes:
-        score: Current relevance score (1-5)
+        score: Current relevance score (1-5), or a negative error code
     """
 
     def __init__(
@@ -104,7 +114,7 @@ class ScoreBadge(QFrame):
         layout.setSpacing(0)
 
         # Score label
-        self.score_label = QLabel(f"{self._score}/{self._max_score}")
+        self.score_label = QLabel()
         self.score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Style font
@@ -113,15 +123,7 @@ class ScoreBadge(QFrame):
         font.setBold(True)
         self.score_label.setFont(font)
 
-        # Apply colors
-        color = get_score_color(self._score)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {color};
-                border-radius: {scaled(3)}px;
-                border: none;
-            }}
-        """)
+        self._show_score()
         self.score_label.setStyleSheet("""
             QLabel {
                 color: white;
@@ -142,13 +144,16 @@ class ScoreBadge(QFrame):
         Update the displayed score.
 
         Args:
-            score: New score value (1-5)
+            score: New score value (1-5), or a negative error code
         """
         self._score = score
-        self.score_label.setText(f"{self._score}/{self._max_score}")
+        self._show_score()
 
-        # Update color
-        color = get_score_color(self._score)
+    def _show_score(self) -> None:
+        """Draw the current score: its text, colour and tooltip."""
+        self.score_label.setText(score_badge_text(self._score, self._max_score))
+        self.setToolTip(score_badge_tooltip(self._score) or "")
+        color = score_badge_color(self._score)
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {color};
@@ -504,8 +509,14 @@ class DocumentCard(QFrame):
         """
         parts: List[str] = []
 
-        # Score rationale
-        if self._score_rationale:
+        # Score rationale. A failure's is not the model's reasoning, and is
+        # stated from its code rather than from whatever text it carries
+        failure_reason = (
+            score_failure_reason(self._score) if self._score is not None else None
+        )
+        if failure_reason is not None:
+            parts.append(f"{SCORING_FAILED_TEXT}: {failure_reason}")
+        elif self._score_rationale:
             parts.append(f"Score: {self._score_rationale}")
 
         # Quality assessment rationale
@@ -631,13 +642,14 @@ class DocumentCard(QFrame):
         Creates score badge if not present, otherwise updates existing.
 
         Args:
-            score: New relevance score (1-5)
+            score: New relevance score (1-5), or a negative error code when
+                the scoring failed
             rationale: LLM explanation for the score
         """
         self._score = score
         if rationale:
             self._score_rationale = rationale
-            self._update_rationale_display()
+        self._update_rationale_display()
 
         if self._score_badge:
             self._score_badge.set_score(score)

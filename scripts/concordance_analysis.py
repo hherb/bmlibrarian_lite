@@ -30,7 +30,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.storage import LiteStorage
-from bmlibrarian_lite.constants import DEFAULT_MIN_SCORE
+from bmlibrarian_lite.audit_records import is_scoring_failure
+from bmlibrarian_lite.constants import DEFAULT_MIN_SCORE, SCORE_MAX, SCORE_MIN
+# What a figure nobody could compute is shown as, as the Benchmark tab shows
+# it. Shown as 0%, two models that judged no document in common "disagreed
+# completely".
+from bmlibrarian_lite.benchmarking.display import NOT_AVAILABLE
 from bmlibrarian_lite.benchmarking.statistics import (
     compute_agreement,
     compute_inclusion_agreement,
@@ -45,6 +50,10 @@ REFERENCE_MODEL_PATTERNS = [
     "claude-sonnet",
 ]
 
+#: An agreement between two evaluators, or None when they judged fewer than
+#: two documents in common.
+AgreementMatrix = dict[tuple[str, str], float | None]
+
 
 @dataclass
 class EvaluatorScoreData:
@@ -57,7 +66,13 @@ class EvaluatorScoreData:
     document_ids: list[str]
     latencies_ms: list[Optional[int]]  # Latency per document (ms)
     total_latency_ms: int = 0  # Total latency across all documents
-    avg_latency_ms: float = 0.0  # Average ms per document
+    # Average ms per document; None when none recorded one, which as 0.0
+    # read as the fastest model
+    avg_latency_ms: float | None = None
+    # Documents it could not score. Left out of every agreement, so a model
+    # that failed on 40% of them would otherwise look as complete as one
+    # that failed on none (#306).
+    failed_documents: int = 0
 
 
 @dataclass
@@ -81,7 +96,8 @@ class EvaluatorTimingData:
     evaluator_name: str
     total_documents: int
     total_latency_ms: int
-    avg_latency_ms: float
+    avg_latency_ms: float | None
+    failed_documents: int = 0
 
 
 @dataclass
@@ -94,11 +110,47 @@ class ConcordanceReport:
     total_evaluators: int
     evaluator_names: list[str]
     reference_models: list[str]
-    score_agreement_matrix: dict[tuple[str, str], float]
-    inclusion_agreement_matrix: dict[tuple[str, str], float]
+    score_agreement_matrix: AgreementMatrix
+    inclusion_agreement_matrix: AgreementMatrix
     pairwise_concordances: list[PairwiseConcordance]
     reference_concordance_summary: dict[str, dict[str, float]]
     evaluator_timing: dict[str, EvaluatorTimingData]  # Timing data per evaluator
+
+
+def format_percentage(value: float | None) -> str:
+    """An agreement as a percentage, or n/a when it could not be computed.
+
+    Args:
+        value: The fraction, or None.
+
+    Returns:
+        e.g. "87.5%", or "n/a".
+    """
+    return NOT_AVAILABLE if value is None else f"{value * 100:.1f}%"
+
+
+def format_fraction(value: float | None) -> str:
+    """An agreement as a CSV fraction, or n/a when it could not be computed.
+
+    Args:
+        value: The fraction, or None.
+
+    Returns:
+        e.g. "0.8750", or "n/a".
+    """
+    return NOT_AVAILABLE if value is None else f"{value:.4f}"
+
+
+def seconds(milliseconds: float | None) -> float | None:
+    """A latency in seconds, or None when none was recorded.
+
+    Args:
+        milliseconds: The latency, or None.
+
+    Returns:
+        The latency in seconds, or None.
+    """
+    return None if milliseconds is None else milliseconds / 1000
 
 
 def is_reference_model(evaluator_name: str) -> bool:
@@ -123,6 +175,7 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
     # Store both score and latency per document
     all_evaluator_scores: dict[str, dict[str, int]] = defaultdict(dict)
     all_evaluator_latencies: dict[str, dict[str, Optional[int]]] = defaultdict(dict)
+    all_evaluator_failures: dict[str, int] = defaultdict(int)
     evaluator_id_map: dict[str, str] = {}
 
     print(f"Found {len(questions)} research questions in database")
@@ -148,15 +201,27 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
                 scored_doc = storage.get_scored_document_for_question(
                     doc_id, evaluator.id, question
                 )
-                if scored_doc and 1 <= scored_doc.score <= 5:
-                    # Use composite key (doc_id, question) to track question-specific scores
-                    score_key = f"{doc_id}|{question[:50]}"
+                if scored_doc is None:
+                    continue
+                # A failure an older build stored as a 1 is not a judgement
+                # (#315), and would count as "not relevant" here
+                if is_scoring_failure(scored_doc):
+                    all_evaluator_failures[evaluator.display_name] += 1
+                elif SCORE_MIN <= scored_doc.score <= SCORE_MAX:
+                    # The whole question: cut to 50 characters, two questions
+                    # sharing a beginning overwrote each other's scores
+                    score_key = f"{doc_id}|{question}"
                     all_evaluator_scores[evaluator.display_name][score_key] = scored_doc.score
                     all_evaluator_latencies[evaluator.display_name][score_key] = scored_doc.latency_ms
 
     # Convert to EvaluatorScoreData
     # Note: Keys are now composite "doc_id|question" to ensure question-specific scores
     result = {}
+    for evaluator_name, failed in sorted(all_evaluator_failures.items()):
+        if not all_evaluator_scores.get(evaluator_name):
+            # Nothing to compare, but a model that failed on every document
+            # is not one that was never asked
+            print(f"  - {evaluator_name}: judged no document, could not score {failed}")
     for evaluator_name, doc_scores in all_evaluator_scores.items():
         if not doc_scores:
             continue  # Skip evaluators with no valid scores
@@ -169,7 +234,7 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
         # Calculate total and average latency (only from non-None values)
         valid_latencies = [lat for lat in latencies if lat is not None]
         total_latency = sum(valid_latencies) if valid_latencies else 0
-        avg_latency = total_latency / len(valid_latencies) if valid_latencies else 0.0
+        avg_latency = total_latency / len(valid_latencies) if valid_latencies else None
 
         result[evaluator_name] = EvaluatorScoreData(
             evaluator_name=evaluator_name,
@@ -180,6 +245,7 @@ def collect_all_scores(storage: LiteStorage) -> dict[str, EvaluatorScoreData]:
             latencies_ms=latencies,
             total_latency_ms=total_latency,
             avg_latency_ms=avg_latency,
+            failed_documents=all_evaluator_failures.get(evaluator_name, 0),
         )
 
     return result
@@ -205,21 +271,29 @@ def compute_pairwise_concordance(
     doc_to_idx1 = {doc_id: i for i, doc_id in enumerate(eval1_data.document_ids)}
     doc_to_idx2 = {doc_id: i for i, doc_id in enumerate(eval2_data.document_ids)}
 
-    scores1 = []
-    scores2 = []
+    scores1: list[int] = []
+    scores2: list[int] = []
     for doc_id in common_docs:
         scores1.append(eval1_data.scores[doc_to_idx1[doc_id]])
         scores2.append(eval2_data.scores[doc_to_idx2[doc_id]])
+
+    score_agreement = compute_agreement(scores1, scores2, tolerance=1)
+    exact_agreement = compute_agreement(scores1, scores2, tolerance=0)
+    inclusion_agreement = compute_inclusion_agreement(
+        scores1, scores2, inclusion_threshold
+    )
+    # The agreement functions answer None only for no document judged by
+    # both, and every document compared here was
+    if score_agreement is None or exact_agreement is None or inclusion_agreement is None:
+        return None
 
     return PairwiseConcordance(
         evaluator1=eval1_data.evaluator_name,
         evaluator2=eval2_data.evaluator_name,
         documents_compared=len(common_docs),
-        score_agreement=compute_agreement(scores1, scores2, tolerance=1),
-        exact_agreement=compute_agreement(scores1, scores2, tolerance=0),
-        inclusion_agreement=compute_inclusion_agreement(
-            scores1, scores2, inclusion_threshold
-        ),
+        score_agreement=score_agreement,
+        exact_agreement=exact_agreement,
+        inclusion_agreement=inclusion_agreement,
         mean_absolute_difference=compute_mean_absolute_difference(scores1, scores2),
         kendall_tau=compute_kendall_tau(scores1, scores2),
     )
@@ -240,8 +314,8 @@ def build_concordance_report(
 
     # Compute all pairwise concordances
     pairwise_concordances = []
-    score_agreement_matrix: dict[tuple[str, str], float] = {}
-    inclusion_agreement_matrix: dict[tuple[str, str], float] = {}
+    score_agreement_matrix: AgreementMatrix = {}
+    inclusion_agreement_matrix: AgreementMatrix = {}
 
     for i, name1 in enumerate(evaluator_names):
         for name2 in evaluator_names[i:]:
@@ -256,7 +330,12 @@ def build_concordance_report(
                 inclusion_threshold,
             )
 
-            if concordance:
+            if concordance is None:
+                # Too few documents in common to compare: not a 0% agreement
+                for key in ((name1, name2), (name2, name1)):
+                    score_agreement_matrix[key] = None
+                    inclusion_agreement_matrix[key] = None
+            else:
                 pairwise_concordances.append(concordance)
                 score_agreement_matrix[(name1, name2)] = concordance.score_agreement
                 score_agreement_matrix[(name2, name1)] = concordance.score_agreement
@@ -276,10 +355,12 @@ def build_concordance_report(
         ref_scores = {}
         for ref_model in reference_models:
             key = (evaluator_name, ref_model)
-            if key in score_agreement_matrix:
+            score_agreement = score_agreement_matrix.get(key)
+            inclusion_agreement = inclusion_agreement_matrix.get(key)
+            if score_agreement is not None and inclusion_agreement is not None:
                 ref_scores[ref_model] = {
-                    "score_agreement": score_agreement_matrix[key],
-                    "inclusion_agreement": inclusion_agreement_matrix[key],
+                    "score_agreement": score_agreement,
+                    "inclusion_agreement": inclusion_agreement,
                 }
 
         if ref_scores:
@@ -299,6 +380,7 @@ def build_concordance_report(
             total_documents=data.total_documents,
             total_latency_ms=data.total_latency_ms,
             avg_latency_ms=data.avg_latency_ms,
+            failed_documents=data.failed_documents,
         )
 
     return ConcordanceReport(
@@ -317,7 +399,7 @@ def build_concordance_report(
 
 
 def format_matrix_table(
-    matrix: dict[tuple[str, str], float],
+    matrix: AgreementMatrix,
     evaluator_names: list[str],
     title: str,
 ) -> str:
@@ -339,8 +421,7 @@ def format_matrix_table(
     for i, name in enumerate(evaluator_names):
         row = f"{short_names[i]:<{max_name_len}} |"
         for name2 in evaluator_names:
-            value = matrix.get((name, name2), 0.0)
-            row += f" {value * 100:>7.1f}%"
+            row += f" {format_percentage(matrix.get((name, name2))):>8}"
         lines.append(row)
 
     return "\n".join(lines)
@@ -374,7 +455,7 @@ def format_reference_summary(report: ConcordanceReport) -> str:
         for i, (ref_model, metrics) in enumerate(sorted(ref_data.items())):
             display_name = model_name if i == 0 else ""
             # Only show timing on first row for this model
-            if i == 0 and timing and timing.total_latency_ms > 0:
+            if i == 0 and timing and timing.avg_latency_ms is not None:
                 total_secs = timing.total_latency_ms / 1000
                 avg_secs = timing.avg_latency_ms / 1000
                 total_time_str = f"{total_secs:>12,.1f}"
@@ -418,8 +499,7 @@ def export_to_csv(report: ConcordanceReport, output_dir: Path) -> None:
         for name1 in report.evaluator_names:
             row = [name1]
             for name2 in report.evaluator_names:
-                value = report.score_agreement_matrix.get((name1, name2), 0.0)
-                row.append(f"{value:.4f}")
+                row.append(format_fraction(report.score_agreement_matrix.get((name1, name2))))
             writer.writerow(row)
     print(f"Wrote: {score_csv}")
 
@@ -431,8 +511,9 @@ def export_to_csv(report: ConcordanceReport, output_dir: Path) -> None:
         for name1 in report.evaluator_names:
             row = [name1]
             for name2 in report.evaluator_names:
-                value = report.inclusion_agreement_matrix.get((name1, name2), 0.0)
-                row.append(f"{value:.4f}")
+                row.append(
+                    format_fraction(report.inclusion_agreement_matrix.get((name1, name2)))
+                )
             writer.writerow(row)
     print(f"Wrote: {incl_csv}")
 
@@ -442,7 +523,7 @@ def export_to_csv(report: ConcordanceReport, output_dir: Path) -> None:
         writer = csv.writer(f)
         writer.writerow(
             ["Model", "Reference Model", "Score Agreement", "Inclusion Agreement",
-             "Total Documents", "Total Time (s)", "Time per Doc (s)"]
+             "Total Documents", "Could Not Score", "Total Time (s)", "Time per Doc (s)"]
         )
         for model_name, ref_data in report.reference_concordance_summary.items():
             timing = report.evaluator_timing.get(model_name)
@@ -454,8 +535,13 @@ def export_to_csv(report: ConcordanceReport, output_dir: Path) -> None:
                         f"{metrics['score_agreement']:.4f}",
                         f"{metrics['inclusion_agreement']:.4f}",
                         timing.total_documents if timing else "",
+                        timing.failed_documents if timing else "",
                         f"{timing.total_latency_ms / 1000:.1f}" if timing else "",
-                        f"{timing.avg_latency_ms / 1000:.1f}" if timing else "",
+                        (
+                            f"{timing.avg_latency_ms / 1000:.1f}"
+                            if timing and timing.avg_latency_ms is not None
+                            else NOT_AVAILABLE
+                        ),
                     ]
                 )
     print(f"Wrote: {ref_csv}")
@@ -496,8 +582,9 @@ def export_to_json(report: ConcordanceReport, output_dir: Path) -> None:
         "evaluator_timing": {
             name: {
                 "total_documents": timing.total_documents,
+                "failed_documents": timing.failed_documents,
                 "total_time_seconds": timing.total_latency_ms / 1000,
-                "time_per_doc_seconds": timing.avg_latency_ms / 1000,
+                "time_per_doc_seconds": seconds(timing.avg_latency_ms),
             }
             for name, timing in report.evaluator_timing.items()
         },
@@ -531,7 +618,17 @@ def export_to_markdown(
         f"| Reference Models | {', '.join(report.reference_models) or 'None found'} |",
         f"| Inclusion Threshold | >= {inclusion_threshold} |",
         "",
+        "## Evaluators",
+        "",
+        "Documents a model could not score are left out of every agreement below.",
+        "",
+        "| Model | Documents Judged | Could Not Score |",
+        "|-------|-----------------:|----------------:|",
     ]
+    for name in report.evaluator_names:
+        timing = report.evaluator_timing[name]
+        lines.append(f"| {name} | {timing.total_documents} | {timing.failed_documents} |")
+    lines.append("")
 
     # Reference model concordance summary (most important table)
     if report.reference_concordance_summary:
@@ -563,7 +660,7 @@ def export_to_markdown(
                 incl_pct = metrics["inclusion_agreement"] * 100
 
                 # Only show timing on first row for this model
-                if i == 0 and timing and timing.total_latency_ms > 0:
+                if i == 0 and timing and timing.avg_latency_ms is not None:
                     total_secs = timing.total_latency_ms / 1000
                     avg_secs = timing.avg_latency_ms / 1000
                     total_str = f"{total_secs:,.1f}"
@@ -582,7 +679,8 @@ def export_to_markdown(
     lines.extend([
         "## Score Agreement Matrix",
         "",
-        "Percentage of documents where evaluators agree within ±1 score point:",
+        "Percentage of documents where evaluators agree within ±1 score point "
+        f"({NOT_AVAILABLE}: fewer than two documents judged by both):",
         "",
     ])
     lines.append(_format_markdown_matrix(
@@ -649,7 +747,7 @@ def export_to_markdown(
 
 
 def _format_markdown_matrix(
-    matrix: dict[tuple[str, str], float],
+    matrix: AgreementMatrix,
     evaluator_names: list[str],
 ) -> str:
     """Format a concordance matrix as a Markdown table."""
@@ -679,8 +777,7 @@ def _format_markdown_matrix(
     for i, name in enumerate(evaluator_names):
         row = f"| **[{i+1}]** {name} |"
         for name2 in evaluator_names:
-            value = matrix.get((name, name2), 0.0)
-            row += f" {value * 100:.1f}% |"
+            row += f" {format_percentage(matrix.get((name, name2)))} |"
         lines.append(row)
 
     return "\n".join(lines)
@@ -724,13 +821,16 @@ def main() -> None:
 
     print(f"\nFound scores from {len(evaluator_data)} evaluators:")
     for name, data in sorted(evaluator_data.items()):
-        if data.total_latency_ms > 0:
+        failed = (
+            f", could not score {data.failed_documents}" if data.failed_documents else ""
+        )
+        if data.avg_latency_ms is not None:
             total_secs = data.total_latency_ms / 1000
             avg_secs = data.avg_latency_ms / 1000
-            print(f"  - {name}: {data.total_documents} documents, "
+            print(f"  - {name}: {data.total_documents} documents{failed}, "
                   f"{total_secs:,.1f}s total, {avg_secs:.1f}s/doc")
         else:
-            print(f"  - {name}: {data.total_documents} documents (no timing data)")
+            print(f"  - {name}: {data.total_documents} documents{failed} (no timing data)")
 
     print("\nBuilding concordance report...")
     report = build_concordance_report(evaluator_data, args.inclusion_threshold)

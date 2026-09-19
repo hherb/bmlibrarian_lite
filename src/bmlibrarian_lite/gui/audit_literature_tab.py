@@ -33,11 +33,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QScrollArea,
     QLabel,
-    QSizePolicy,
 )
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
+from ..audit_records import outcome_sort_key
 from ..constants import AUDIT_CARD_SPACING, AUDIT_UI_UPDATE_DELAY_MS
 from ..data_models import LiteDocument, ScoredDocument
 from ..quality.data_models import QualityAssessment
@@ -319,21 +319,22 @@ class AuditLiteratureTab(QWidget):
                 self._add_document_card(data)
 
     def resort_by_score(self) -> None:
-        """
-        Re-sort cards by score (highest first).
+        """Re-sort cards by outcome, the audit record's order.
 
-        Called after scoring completes to reorder documents.
-        Documents without scores are placed at the end.
+        Judged documents by score (highest first), then documents the model
+        could not score, then documents never scored. A failure's negative
+        code is not a score to sort by (#307). Called when the workflow
+        finishes (``AuditTrailTab.on_workflow_finished``).
         """
         with self._lock:
-            # Get cards with scores
             cards_with_scores = [
-                (card, self._scores.get(card.doc_id, 0))
+                (card, outcome_sort_key(self._scores.get(card.doc_id)))
                 for card in self._cards_by_doc_id.values()
             ]
 
-            # Sort by score descending
-            cards_with_scores.sort(key=lambda x: x[1], reverse=True)
+            # list.sort() is stable: documents with the same outcome keep the
+            # order they were added in
+            cards_with_scores.sort(key=lambda x: x[1])
 
             # Remove all cards from layout
             for card, _ in cards_with_scores:
@@ -398,5 +399,13 @@ class AuditLiteratureTab(QWidget):
 
     @property
     def scored_count(self) -> int:
-        """Get number of documents with scores."""
-        return len(self._scores)
+        """Get number of documents the model scored.
+
+        A document it could not score was not scored (#307).
+        """
+        return sum(1 for score in self._scores.values() if score >= 0)
+
+    @property
+    def failed_count(self) -> int:
+        """Get number of documents the model could not score."""
+        return sum(1 for score in self._scores.values() if score < 0)

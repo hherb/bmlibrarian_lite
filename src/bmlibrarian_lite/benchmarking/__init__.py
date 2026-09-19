@@ -22,6 +22,7 @@ on document scoring and quality assessment tasks.
 
 Usage:
     from bmlibrarian_lite.benchmarking import BenchmarkRunner, BenchmarkResult
+    from bmlibrarian_lite.benchmarking.display import format_statistic
 
     # Scoring benchmark
     runner = BenchmarkRunner(config, storage)
@@ -34,7 +35,13 @@ Usage:
 
     print(f"Total cost: ${result.total_cost_usd:.4f}")
     for stats in result.evaluator_stats:
-        print(f"{stats.evaluator.display_name}: mean={stats.mean_score:.2f}")
+        # mean_score is None for a model that scored no document; failed
+        # scorings are counted apart, never as scores (#306)
+        print(
+            f"{stats.evaluator.display_name}: "
+            f"mean={format_statistic(stats.mean_score)}, "
+            f"failed={stats.failed_evaluations}"
+        )
 
     # Quality benchmark
     from bmlibrarian_lite.benchmarking import QualityBenchmarkRunner, QualityBenchmarkResult

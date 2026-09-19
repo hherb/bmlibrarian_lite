@@ -181,11 +181,18 @@ scoring, citation extraction, and report generation.
       "pmc_id": "PMC12101959",
       "score": 5,
       "explanation": "Directly answers the question with RCT evidence.",
-      "document_id": "pmid-39521399"
+      "document_id": "pmid-39521399",
+      "citation_extraction_error": null
     }
   ]
 }
 ```
+
+Each source's `citation_extraction_error` is `null` when the source was read,
+or why it could not be (for example `"Failed to connect to API"`). A source
+that was read may still have held nothing quotable: the result gives only the
+total `citations_extracted`, and the citations themselves appear in the
+report, so a `null` error says the source was read, not that it was cited.
 
 **Note:** This is a long-running operation (1-5 minutes) because it makes
 multiple LLM calls to score each document and extract citations.

@@ -22,18 +22,26 @@ and other card-related utilities. Following the golden rules, these are
 reusable pure functions factored out for general use.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
+from ..audit_records import score_failure_reason
 from ..constants import (
     MAX_AUTHORS_BEFORE_ET_AL,
+    SCORE_MAX,
     SCORE_THRESHOLD_EXCELLENT,
     SCORE_THRESHOLD_GOOD,
     SCORE_THRESHOLD_MODERATE,
     SCORE_COLOR_EXCELLENT,
+    SCORE_COLOR_FAILED,
     SCORE_COLOR_GOOD,
     SCORE_COLOR_MODERATE,
     SCORE_COLOR_POOR,
 )
+
+#: What a score badge says for a document the model could not score. Not
+#: "not scored": the audit record uses that for documents scoring never
+#: reached, which is a different thing.
+SCORING_FAILED_TEXT = "Scoring failed"
 
 
 def format_authors(authors: Optional[List[str]], max_authors: int = MAX_AUTHORS_BEFORE_ET_AL) -> str:
@@ -265,19 +273,73 @@ def format_query_stats(
     documents_found: int,
     documents_scored: int,
     citations_extracted: int,
+    documents_failed: int = 0,
 ) -> str:
     """
     Format query statistics for display.
 
     Args:
         documents_found: Number of documents found
-        documents_scored: Number of documents that passed scoring
+        documents_scored: Number of documents the model scored
         citations_extracted: Number of citations extracted
+        documents_failed: Number of documents the model could not score.
+            Counted among the scored, a failure read as a judged document
+            (#307); named only when there is one
 
     Returns:
         Formatted statistics string
     """
-    return f"Found: {documents_found} | Scored: {documents_scored} | Citations: {citations_extracted}"
+    parts = [f"Found: {documents_found}", f"Scored: {documents_scored}"]
+    if documents_failed > 0:
+        parts.append(f"Could not score: {documents_failed}")
+    parts.append(f"Citations: {citations_extracted}")
+    return " | ".join(parts)
+
+
+def score_badge_text(score: int, max_score: int = SCORE_MAX) -> str:
+    """What a score badge says.
+
+    Args:
+        score: The score as recorded; negative when the scoring failed.
+        max_score: The top of the scale.
+
+    Returns:
+        "N/max", or :data:`SCORING_FAILED_TEXT` for a failure -- whose code
+        read as "-4/5", the worst score there is (#307).
+    """
+    if score_failure_reason(score) is not None:
+        return SCORING_FAILED_TEXT
+    return f"{score}/{max_score}"
+
+
+def score_badge_color(score: int) -> str:
+    """The colour a score badge is drawn in.
+
+    Args:
+        score: The score as recorded; negative when the scoring failed.
+
+    Returns:
+        The score's colour, or a neutral one for a failure: red is the colour
+        of a document judged irrelevant.
+    """
+    if score_failure_reason(score) is not None:
+        return SCORE_COLOR_FAILED
+    return get_score_color(score)
+
+
+def score_badge_tooltip(score: int) -> str | None:
+    """Why a document has no score, for its badge's tooltip.
+
+    Args:
+        score: The score as recorded; negative when the scoring failed.
+
+    Returns:
+        The failure's description, or None for a score.
+    """
+    reason = score_failure_reason(score)
+    if reason is None:
+        return None
+    return f"The document could not be scored: {reason}"
 
 
 def escape_html(text: str) -> str:

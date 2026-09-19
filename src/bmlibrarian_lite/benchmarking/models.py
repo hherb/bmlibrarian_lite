@@ -23,7 +23,7 @@ enabling comparison of evaluator performance.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
@@ -38,44 +38,62 @@ class EvaluatorStats:
     Statistics for a single evaluator in a benchmark.
 
     Aggregates performance metrics across all documents
-    evaluated by this evaluator.
+    evaluated by this evaluator. A scoring the evaluator could not produce is
+    counted apart, never among its scores: recorded as a 1, an outage read as
+    a confident "not relevant" (#306).
 
     Attributes:
         evaluator: The evaluator these stats are for
-        scores: List of all scores assigned
-        mean_score: Average score
-        std_dev: Standard deviation of scores
+        scores: The scores it gave, failures excluded
+        mean_score: Average score; None when it judged no document
+        std_dev: Standard deviation of scores; None when it judged no document
         score_distribution: Count of each score value (1-5)
-        total_evaluations: Number of documents evaluated
-        mean_latency_ms: Average response time
-        total_tokens_input: Total input tokens used
-        total_tokens_output: Total output tokens used
-        total_cost_usd: Total estimated cost
+        total_evaluations: Number of documents it judged
+        mean_latency_ms: Average response time of the judgements; None when
+            no judgement recorded one
+        total_tokens_input: Total input tokens used, failed calls included
+        total_tokens_output: Total output tokens used, failed calls included
+        total_cost_usd: Total estimated cost, failed calls included
+        failed_evaluations: Number of documents it could not score; None for
+            a result stored before failures were told apart, whose scores
+            may count them as 1s
     """
 
     evaluator: Evaluator
     scores: list[int]
-    mean_score: float
-    std_dev: float
+    mean_score: float | None
+    std_dev: float | None
     score_distribution: dict[int, int]  # score -> count
     total_evaluations: int
-    mean_latency_ms: float
+    mean_latency_ms: float | None
     total_tokens_input: int
     total_tokens_output: int
     total_cost_usd: float
+    failed_evaluations: int | None = None
 
     @property
-    def cost_per_evaluation(self) -> float:
-        """Average cost per document evaluation."""
+    def cost_per_evaluation(self) -> float | None:
+        """What each judgement cost, failed calls included.
+
+        Returns:
+            The cost, failed calls included since they were billed, divided
+            by the judgements it bought; None when it judged no document. As
+            0.0, a model whose every call failed ranked as the cheapest.
+        """
         if self.total_evaluations == 0:
-            return 0.0
+            return None
         return self.total_cost_usd / self.total_evaluations
 
     @property
-    def tokens_per_evaluation(self) -> float:
-        """Average tokens per document evaluation."""
+    def tokens_per_evaluation(self) -> float | None:
+        """What each judgement took in tokens, failed calls included.
+
+        Returns:
+            The tokens, failed calls included, divided by the judgements;
+            None when it judged no document.
+        """
         if self.total_evaluations == 0:
-            return 0.0
+            return None
         total = self.total_tokens_input + self.total_tokens_output
         return total / self.total_evaluations
 
@@ -95,6 +113,7 @@ class EvaluatorStats:
             "total_cost_usd": self.total_cost_usd,
             "cost_per_evaluation": self.cost_per_evaluation,
             "tokens_per_evaluation": self.tokens_per_evaluation,
+            "failed_evaluations": self.failed_evaluations,
         }
 
 
@@ -103,16 +122,24 @@ class DocumentComparison:
     """
     Comparison of scores for a single document across evaluators.
 
+    Only judgements are compared. An evaluator that could not score the
+    document is named in ``failures`` instead: among the scores, its error
+    code made the document look like the benchmark's widest disagreement
+    (#306).
+
     Attributes:
         document: The document being compared (for access to full metadata)
         scores: Mapping of evaluator display name to score
         explanations: Mapping of evaluator display name to explanation
+        failures: Mapping of evaluator display name to why it could not
+            score the document
         max_score_difference: Maximum score difference between evaluators
     """
 
     document: "LiteDocument"
     scores: dict[str, int]  # evaluator display name -> score
     explanations: dict[str, str]  # evaluator display name -> explanation
+    failures: dict[str, str] = field(default_factory=dict)
 
     @property
     def document_id(self) -> str:
@@ -125,22 +152,38 @@ class DocumentComparison:
         return self.document.title
 
     @property
-    def max_score_difference(self) -> int:
-        """Maximum score difference between any two evaluators."""
-        if len(self.scores) < 2:
-            return 0
+    def is_comparable(self) -> bool:
+        """Whether at least two evaluators judged the document.
+
+        Returns:
+            True when there is a spread to measure.
+        """
+        return len(self.scores) >= 2
+
+    @property
+    def max_score_difference(self) -> int | None:
+        """Maximum score difference between any two evaluators.
+
+        Returns:
+            The spread, or None when fewer than two evaluators judged the
+            document: read as 0, a document one model could not score looked
+            like full agreement (#306 review).
+        """
+        if not self.is_comparable:
+            return None
         score_values = list(self.scores.values())
         return max(score_values) - min(score_values)
 
     @property
-    def max_disagreement(self) -> int:
+    def max_disagreement(self) -> int | None:
         """Alias for max_score_difference for backwards compatibility."""
         return self.max_score_difference
 
     @property
     def has_disagreement(self) -> bool:
         """Check if evaluators disagree (diff > 1)."""
-        return self.max_score_difference > 1
+        spread = self.max_score_difference
+        return spread is not None and spread > 1
 
     def has_inclusion_disagreement(
         self, inclusion_threshold: int = DEFAULT_MIN_SCORE
@@ -158,7 +201,7 @@ class DocumentComparison:
         Returns:
             True if at least one evaluator would include and another exclude
         """
-        if len(self.scores) < 2:
+        if not self.is_comparable:
             return False
         score_values = list(self.scores.values())
         includes = any(s >= inclusion_threshold for s in score_values)
@@ -172,6 +215,7 @@ class DocumentComparison:
             "document_title": self.document.title,
             "scores": self.scores,
             "explanations": self.explanations,
+            "failures": self.failures,
             "max_score_difference": self.max_score_difference,
             "has_disagreement": self.has_disagreement,
             "has_inclusion_disagreement": self.has_inclusion_disagreement(),
@@ -192,8 +236,11 @@ class BenchmarkResult:
         task_type: Type of task benchmarked
         evaluator_stats: Per-evaluator statistics
         document_comparisons: Per-document score comparisons
-        agreement_matrix: Pairwise agreement percentages (score within ±1)
-        inclusion_agreement_matrix: Pairwise inclusion decision agreement
+        agreement_matrix: Pairwise agreement percentages (score within ±1),
+            over the documents both evaluators judged; None for a pair that
+            judged no document in common
+        inclusion_agreement_matrix: Pairwise inclusion decision agreement,
+            likewise
         inclusion_threshold: Score threshold for document inclusion
         total_duration_seconds: Total benchmark execution time
         created_at: When results were computed
@@ -204,19 +251,32 @@ class BenchmarkResult:
     task_type: str
     evaluator_stats: list[EvaluatorStats]
     document_comparisons: list[DocumentComparison]
-    agreement_matrix: dict[tuple[str, str], float]  # (eval1, eval2) -> agreement%
-    inclusion_agreement_matrix: dict[tuple[str, str], float] = field(
+    # (eval1, eval2) -> agreement%
+    agreement_matrix: dict[tuple[str, str], float | None]
+    inclusion_agreement_matrix: dict[tuple[str, str], float | None] = field(
         default_factory=dict
     )  # (eval1, eval2) -> inclusion agreement%
     inclusion_threshold: int = DEFAULT_MIN_SCORE
     total_duration_seconds: float = 0.0
-    baseline_evaluator_name: Optional[str] = None
+    baseline_evaluator_name: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
     def total_evaluations(self) -> int:
         """Total number of evaluations across all evaluators."""
         return sum(s.total_evaluations for s in self.evaluator_stats)
+
+    @property
+    def failures_recorded(self) -> bool:
+        """Whether this result told failed scorings apart from scores.
+
+        A result stored before #306 counted a failure as a score of 1, and
+        nothing in it says which 1s those were.
+
+        Returns:
+            True when every evaluator's failures were counted.
+        """
+        return all(s.failed_evaluations is not None for s in self.evaluator_stats)
 
     @property
     def total_cost_usd(self) -> float:
@@ -242,64 +302,110 @@ class BenchmarkResult:
         ]
 
     @property
-    def disagreement_rate(self) -> float:
-        """Percentage of documents with evaluator disagreement."""
-        if not self.document_comparisons:
-            return 0.0
-        return len(self.documents_with_disagreement) / len(self.document_comparisons)
+    def comparable_documents(self) -> list[DocumentComparison]:
+        """Documents at least two evaluators judged: the ones rates are over.
+
+        A document only one model could score cannot agree or disagree;
+        counted, it diluted every rate, and with none comparable the rates
+        read 0% (#306 review).
+        """
+        return [d for d in self.document_comparisons if d.is_comparable]
 
     @property
-    def inclusion_disagreement_rate(self) -> float:
+    def disagreement_rate(self) -> float | None:
+        """Fraction of comparable documents with evaluator disagreement.
+
+        Returns:
+            The fraction, or None when no document was comparable.
         """
-        Percentage of documents with inclusion decision disagreement.
+        comparable = self.comparable_documents
+        if not comparable:
+            return None
+        return len(self.documents_with_disagreement) / len(comparable)
+
+    @property
+    def inclusion_disagreement_rate(self) -> float | None:
+        """
+        Fraction of comparable documents with inclusion decision disagreement.
 
         This is the most clinically significant metric - it represents
         documents that would be included or excluded differently depending
         on which model was used.
-        """
-        if not self.document_comparisons:
-            return 0.0
-        return (
-            len(self.documents_with_inclusion_disagreement) /
-            len(self.document_comparisons)
-        )
 
-    def get_ranking_by_mean_score(self) -> list[tuple[Evaluator, float]]:
+        Returns:
+            The fraction, or None when no document was comparable.
+        """
+        comparable = self.comparable_documents
+        if not comparable:
+            return None
+        return len(self.documents_with_inclusion_disagreement) / len(comparable)
+
+    def get_ranking_by_mean_score(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by mean score (descending).
 
         Returns:
-            List of (evaluator, mean_score) tuples, highest first
+            List of (evaluator, mean_score) tuples, highest first; an
+            evaluator that judged no document has no mean and comes last
         """
-        return sorted(
-            [(s.evaluator, s.mean_score) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        ranked: list[tuple[Evaluator, float | None]] = sorted(
+            (
+                (s.evaluator, s.mean_score)
+                for s in self.evaluator_stats
+                if s.mean_score is not None
+            ),
+            key=lambda x: x[1] or 0.0,
             reverse=True,
         )
+        unranked: list[tuple[Evaluator, float | None]] = [
+            (s.evaluator, None) for s in self.evaluator_stats if s.mean_score is None
+        ]
+        return ranked + unranked
 
-    def get_ranking_by_cost(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_cost(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by cost efficiency (ascending).
 
         Returns:
-            List of (evaluator, cost_per_eval) tuples, cheapest first
+            List of (evaluator, cost_per_eval) tuples, cheapest first; an
+            evaluator that judged no document has no cost per judgement and
+            comes last
         """
-        return sorted(
-            [(s.evaluator, s.cost_per_evaluation) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        priced: list[tuple[Evaluator, float | None]] = sorted(
+            (
+                (s.evaluator, s.cost_per_evaluation)
+                for s in self.evaluator_stats
+                if s.cost_per_evaluation is not None
+            ),
+            key=lambda x: x[1] or 0.0,
         )
+        unpriced: list[tuple[Evaluator, float | None]] = [
+            (s.evaluator, None)
+            for s in self.evaluator_stats
+            if s.cost_per_evaluation is None
+        ]
+        return priced + unpriced
 
-    def get_ranking_by_speed(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_speed(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by response speed (ascending).
 
         Returns:
-            List of (evaluator, mean_latency_ms) tuples, fastest first
+            List of (evaluator, mean_latency_ms) tuples, fastest first; an
+            evaluator with no latency recorded comes last
         """
-        return sorted(
-            [(s.evaluator, s.mean_latency_ms) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        timed: list[tuple[Evaluator, float | None]] = sorted(
+            (
+                (s.evaluator, s.mean_latency_ms)
+                for s in self.evaluator_stats
+                if s.mean_latency_ms is not None
+            ),
+            key=lambda x: x[1] or 0.0,
         )
+        untimed: list[tuple[Evaluator, float | None]] = [
+            (s.evaluator, None) for s in self.evaluator_stats if s.mean_latency_ms is None
+        ]
+        return timed + untimed
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""

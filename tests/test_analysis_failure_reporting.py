@@ -41,6 +41,7 @@ from bmlibrarian_lite.data_models import (
     CitationOutcome,
     DocumentSource,
     EvaluationErrorCode,
+    ExtractionFailure,
     LiteDocument,
     ReportMetadata,
     RequestFailure,
@@ -730,7 +731,12 @@ class TestTheMcpFactCheck:
         """The #261 symptom: "No relevant evidence was found"."""
         context = fact_check_context()
         context.citation_agent.extract_all_citations.return_value = CitationOutcome(
-            citations=[], documents_attempted=2, documents_failed=2, causes=(UNREACHABLE,)
+            citations=[],
+            documents_attempted=2,
+            failed=(
+                ExtractionFailure(make_document("1"), UNREACHABLE),
+                ExtractionFailure(make_document("2"), UNREACHABLE),
+            ),
         )
         context.reporting_agent.generate_report = LiteReportingAgent(
             config=LiteConfig()
@@ -754,7 +760,12 @@ class TestTheMcpFactCheck:
         """The agent qualifies the report; the result must not do it again."""
         context = fact_check_context()
         context.citation_agent.extract_all_citations.return_value = CitationOutcome(
-            citations=[], documents_attempted=2, documents_failed=2, causes=(UNREACHABLE,)
+            citations=[],
+            documents_attempted=2,
+            failed=(
+                ExtractionFailure(make_document("1"), UNREACHABLE),
+                ExtractionFailure(make_document("2"), UNREACHABLE),
+            ),
         )
         context.reporting_agent.generate_report = LiteReportingAgent(
             config=LiteConfig()
@@ -911,6 +922,50 @@ class TestTheCauseSurvivesTheRetries:
         assert shortfall is not None
         assert "Settings" in analysis_failure_advice([shortfall])
 
+    @pytest.mark.parametrize(
+        "unreadable",
+        [
+            '{"explanation": "no idea"}',
+            '{"score": null, "explanation": "A score: 5 needs an abstract."}',
+            '{"score": 0, "explanation": "cannot assess"}',
+            "I cannot assign a score 1-5 without an abstract.",
+        ],
+    )
+    def test_an_answer_holding_no_score_is_a_failure_not_a_score(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        without_retry_delays: None,
+        unreadable: str,
+    ) -> None:
+        """Retried, then recorded as unreadable -- never as a verdict (#306).
+
+        Every other scoring test patches ``_score_with_retry`` away, so none
+        of them reach the check that turns an unreadable answer into a retry.
+        """
+        documents = [make_document("1"), make_document("2")]
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM([unreadable] * 4 + [SCORED_WELL]))
+
+        outcome = agent.score_documents(QUESTION, documents, min_score=1)
+
+        assert [sd.document.id for sd in outcome.failed] == [documents[0].id]
+        assert outcome.failed[0].score == EvaluationErrorCode.JSON_PARSE_ERROR.value
+        assert [sd.document.id for sd in outcome.accepted] == [documents[1].id]
+
+    def test_an_unreadable_answer_is_retried_until_one_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """The retry is what the unreadable answer is turned into."""
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM(['{"explanation": "no idea"}', SCORED_WELL])
+        )
+
+        outcome = agent.score_documents(QUESTION, [make_document("1")], min_score=1)
+
+        assert outcome.failed == []
+        assert [sd.score for sd in outcome.accepted] == [4]
+
     def test_a_wrapper_carrying_nothing_still_names_the_retries(self) -> None:
         """With no cause to read, the loss is still recorded, reason degraded."""
         assert (
@@ -1043,20 +1098,21 @@ class TestTheOutcomesRefuseImpossibleNumbers:
         with pytest.raises(ValueError, match="negative score"):
             ScoringOutcome(accepted=[], failed=[rejected], documents_attempted=5)
 
-    def test_extraction_refuses_a_negative_loss(self) -> None:
+    def test_extraction_refuses_a_negative_count(self) -> None:
         """``< 1`` read a negative count as "nothing was lost"."""
         with pytest.raises(ValueError, match="never fewer than none"):
-            CitationOutcome(citations=[], documents_attempted=5, documents_failed=-3)
+            CitationOutcome(citations=[], documents_attempted=-3)
 
-    def test_extraction_refuses_causes_for_no_loss(self) -> None:
-        """Causes recorded against no loss disappeared silently."""
-        with pytest.raises(ValueError, match="nothing to explain"):
-            CitationOutcome(
-                citations=[],
-                documents_attempted=5,
-                documents_failed=0,
-                causes=(TIMED_OUT,),
-            )
+    def test_extraction_has_no_causes_without_a_loss(self) -> None:
+        """Causes recorded against no loss disappeared silently.
+
+        Since #310 the causes are read from the failed documents, so they
+        cannot be written at all.
+        """
+        outcome = CitationOutcome(citations=[], documents_attempted=5)
+
+        assert outcome.causes == ()
+        assert outcome.shortfall is None
 
     def test_a_shortfall_refuses_a_bool_as_a_count(self) -> None:
         """``True`` is not a count, and could be written but not read back."""

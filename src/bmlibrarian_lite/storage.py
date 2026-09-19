@@ -54,6 +54,7 @@ sqlite3.register_converter(
     lambda b: datetime.fromisoformat(b.decode().replace(" ", "T"))
 )
 
+from .audit_records import scoring_failure_sql  # noqa: E402
 from .config import LiteConfig
 from .constants import (
     BENCHMARK_QUESTION_HASH_LENGTH,
@@ -1677,11 +1678,16 @@ class LiteStorage:
         """
         Get the most recent checkpoint for a research question.
 
+        A checkpoint holding a report is preferred: a benchmark or a re-score
+        creates a checkpoint for the question too, and the latest of those
+        hid the review behind "No report found".
+
         Args:
             question: The research question text
 
         Returns:
-            Most recent ReviewCheckpoint if found, None otherwise
+            The most recent checkpoint with a report, else the most recent
+            one; None if the question has none
         """
         with self._sqlite_connection() as conn:
             cursor = conn.execute(
@@ -1690,7 +1696,8 @@ class LiteStorage:
                        search_session_id, report, metadata
                 FROM review_checkpoints
                 WHERE LOWER(TRIM(research_question)) = LOWER(TRIM(?))
-                ORDER BY updated_at DESC
+                ORDER BY (report IS NOT NULL AND report != '') DESC,
+                         updated_at DESC
                 LIMIT 1
                 """,
                 (question,),
@@ -1787,7 +1794,7 @@ class LiteStorage:
                 question_hash = compute_question_hash(question)
 
                 # Count scored documents for this question
-                scored_count = self._count_scored_documents_for_question(
+                scored_count, failed_count = self._count_scored_documents_for_question(
                     conn, question
                 )
 
@@ -1799,6 +1806,7 @@ class LiteStorage:
                     total_documents=row["total_documents"] or 0,
                     scored_documents=scored_count,
                     run_count=row["run_count"],
+                    failed_documents=failed_count,
                 ))
 
             return summaries
@@ -1807,22 +1815,29 @@ class LiteStorage:
         self,
         conn: sqlite3.Connection,
         question: str,
-    ) -> int:
+    ) -> tuple[int, int]:
         """
         Count scored documents for a research question.
+
+        A failed scoring is not a score (#307), in either form it is stored
+        in; counted as one, an outage read as a finished review.
 
         Args:
             conn: Active SQLite connection
             question: The research question text
 
         Returns:
-            Count of unique scored documents
+            The documents with a score, and those every scoring of which
+            failed
         """
-        # Find checkpoints matching this question directly
-        # Then count unique document_ids in scored_documents
+        # COALESCE: the condition is NULL for a 1 stored with no explanation,
+        # which is a score
         cursor = conn.execute(
-            """
-            SELECT COUNT(DISTINCT sd.document_id) as count
+            f"""
+            SELECT
+                COUNT(DISTINCT CASE WHEN NOT COALESCE({scoring_failure_sql("sd")}, 0)
+                      THEN sd.document_id END) AS judged,
+                COUNT(DISTINCT sd.document_id) AS total
             FROM scored_documents sd
             INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
             WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
@@ -1830,7 +1845,9 @@ class LiteStorage:
             (question,),
         )
         row = cursor.fetchone()
-        return row["count"] if row else 0
+        if not row:
+            return 0, 0
+        return row["judged"], row["total"] - row["judged"]
 
     def get_scored_document_ids_for_question(
         self,
@@ -2781,29 +2798,36 @@ class LiteStorage:
     def get_citations_for_question(
         self,
         question: str,
+        checkpoint_id: str | None = None,
     ) -> list["Citation"]:
         """
         Get all citations for a research question.
 
         Args:
             question: The research question text
+            checkpoint_id: Only the citations of this checkpoint's run.
+                Without it every run of the question is merged, so a document
+                one run found nothing quotable in reads as cited (#310).
 
         Returns:
             List of Citation objects
         """
         from .data_models import Citation
 
+        query = """
+            SELECT c.document_id, c.passage, c.relevance_score, c.context
+            FROM citations c
+            INNER JOIN review_checkpoints rc ON c.checkpoint_id = rc.id
+            WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
+        """
+        params: list[Any] = [question]
+        if checkpoint_id is not None:
+            query += " AND c.checkpoint_id = ?"
+            params.append(checkpoint_id)
+        query += " ORDER BY c.relevance_score DESC"
+
         with self._sqlite_connection() as conn:
-            cursor = conn.execute(
-                """
-                SELECT c.document_id, c.passage, c.relevance_score, c.context
-                FROM citations c
-                INNER JOIN review_checkpoints rc ON c.checkpoint_id = rc.id
-                WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
-                ORDER BY c.relevance_score DESC
-                """,
-                (question,),
-            )
+            cursor = conn.execute(query, params)
 
             results: list[Citation] = []
             for row in cursor:
@@ -3569,9 +3593,11 @@ class LiteStorage:
         """
         Get all benchmark scores for a research question across all runs.
 
-        Aggregates scores from all completed benchmark runs for the
-        given question. For documents scored multiple times by the
-        same evaluator, returns the most recent score.
+        Finds the evaluators of the question's completed benchmark runs, and
+        returns every score each gave in any checkpoint of this question --
+        review runs included -- never another question's. For documents
+        scored multiple times by the same evaluator, returns the most recent
+        score.
 
         Args:
             question: Research question text
@@ -3611,17 +3637,21 @@ class LiteStorage:
 
             all_scores[evaluator_id] = {}
 
-            # Get all scores by this evaluator (most recent first)
+            # Get this evaluator's scores for this question (most recent
+            # first). A relevance score answers one question: read for every
+            # question, one question's judgement was reused as another's.
             with self._sqlite_connection() as conn:
                 query = """
                     SELECT DISTINCT sd.document_id, sd.score, sd.explanation,
                            sd.latency_ms, sd.tokens_input, sd.tokens_output,
                            sd.cost_usd, sd.scored_at
                     FROM scored_documents sd
+                    INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
                     WHERE sd.evaluator_id = ?
+                      AND LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
                     ORDER BY sd.scored_at DESC
                 """
-                cursor = conn.execute(query, (evaluator_id,))
+                cursor = conn.execute(query, (evaluator_id, question))
 
                 seen_docs: set[str] = set()
                 for row in cursor:
