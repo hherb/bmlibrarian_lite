@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#320 — a cancelled run on the Research Questions tab ends, and says so**,
-branch `fix/cancelled-rerun-320`. Python only. Compress into **Recently
+branch `fix/cancelled-rerun-320`, PR #325. Python only. Compress into **Recently
 landed** once merged.
 
 - `IncrementalSearchWorker`, `ReclassifyWorker` and `RescoreWorker` each end a
