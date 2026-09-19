@@ -523,12 +523,17 @@ class IncrementalSearchWorker(QThread):
             shortfalls list is empty unless part of the search failed, and
             never set when there is nothing to score
         error: Emitted on error (error message, with advice for a failed search)
+        cancelled: Emitted when the search ends because it was cancelled;
+            what it found is dropped (#320)
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
     """
 
     progress = Signal(int, int, str)  # new_docs_found, target, message
     batch_complete = Signal(list)  # batch of new LiteDocuments
     finished = Signal(list, list)  # all new LiteDocuments, List[RetrievalShortfall]
     error = Signal(str)
+    cancelled = Signal()
 
     def __init__(
         self,
@@ -719,16 +724,23 @@ class IncrementalSearchWorker(QThread):
                 # whether the failed records held new documents (#247).
                 raise SearchFailedError(shortfalls)
 
-            if not self._cancelled:
+            if self._cancelled:
+                self.cancelled.emit()
+            else:
                 self.finished.emit(self.retry_documents + all_new_docs, shortfalls)
 
         except SearchFailedError as e:
             logger.warning(f"Incremental search failed: {e}")
-            if not self._cancelled:
+            # Cancelling is not failing
+            if self._cancelled:
+                self.cancelled.emit()
+            else:
                 self.error.emit(format_search_failure_message(e))
         except Exception as e:
             logger.exception("Incremental search failed")
-            if not self._cancelled:
+            if self._cancelled:
+                self.cancelled.emit()
+            else:
                 self.error.emit(
                     unexpected_rerun_error_text(str(e), len(self.retry_documents))
                 )
@@ -768,11 +780,16 @@ class ReclassifyWorker(QThread):
         progress: Emitted with (current, total, message) during classification
         finished: Emitted with (success_count, fail_count) when complete
         error: Emitted with error message on failure
+        cancelled: Emitted with (success_count, fail_count, total) when
+            cancelled before every document was classified (#320)
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
     """
 
     progress = Signal(int, int, str)  # current, total, message
     finished = Signal(int, int)  # success_count, fail_count
     error = Signal(str)
+    cancelled = Signal(int, int, int)  # success_count, fail_count, total
 
     def __init__(
         self,
@@ -798,18 +815,19 @@ class ReclassifyWorker(QThread):
 
     def run(self) -> None:
         """Execute re-classification in background thread."""
+        success_count = 0
+        fail_count = 0
+        total = len(self.documents)
+        stopped = False
         try:
             from ..quality.study_classifier import LiteStudyClassifier
             from ..quality.data_models import StudyDesign
 
             classifier = LiteStudyClassifier(config=self.config)
 
-            success_count = 0
-            fail_count = 0
-            total = len(self.documents)
-
             for i, doc in enumerate(self.documents):
                 if self._cancelled:
+                    stopped = True
                     break
 
                 self.progress.emit(
@@ -846,12 +864,18 @@ class ReclassifyWorker(QThread):
                         f"Failed to classify document {doc.id}: {e}"
                     )
 
-            if not self._cancelled:
+            # A cancel that came after the last document stopped nothing
+            if stopped:
+                self.cancelled.emit(success_count, fail_count, total)
+            else:
                 self.finished.emit(success_count, fail_count)
 
         except Exception as e:
             logger.exception("Reclassification failed")
-            if not self._cancelled:
+            # Cancelling is not failing
+            if self._cancelled:
+                self.cancelled.emit(success_count, fail_count, total)
+            else:
                 self.error.emit(str(e))
 
     def cancel(self) -> None:
@@ -870,11 +894,17 @@ class RescoreWorker(QThread):
         progress: Emitted with (current, total, message) during scoring
         finished: Emitted with (success_count, fail_count) when complete
         error: Emitted with error message on failure
+        cancelled: Emitted with (success_count, fail_count, total) when
+            cancelled before every document was scored (#320)
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
+    A scoring that failed counts as failed, though its failure is stored.
     """
 
     progress = Signal(int, int, str)  # current, total, message
     finished = Signal(int, int)  # success_count, fail_count
     error = Signal(str)
+    cancelled = Signal(int, int, int)  # success_count, fail_count, total
 
     def __init__(
         self,
@@ -903,14 +933,15 @@ class RescoreWorker(QThread):
 
     def run(self) -> None:
         """Execute re-scoring in background thread."""
+        success_count = 0
+        fail_count = 0
+        total = len(self.documents)
+        stopped = False
         try:
             from ..agents.scoring_agent import LiteScoringAgent
+            from ..audit_records import is_scoring_failure
 
             scoring_agent = LiteScoringAgent(config=self.config)
-
-            success_count = 0
-            fail_count = 0
-            total = len(self.documents)
 
             # Get or create a checkpoint for this re-scoring run
             checkpoint = self.storage.create_checkpoint(
@@ -919,6 +950,7 @@ class RescoreWorker(QThread):
 
             for i, doc in enumerate(self.documents):
                 if self._cancelled:
+                    stopped = True
                     break
 
                 self.progress.emit(
@@ -932,11 +964,17 @@ class RescoreWorker(QThread):
                         self.question, doc
                     )
 
-                    # Save the scored document to storage
+                    # Save the scored document to storage -- a failure
+                    # too, which a rerun then scores again (#316)
                     self.storage.save_scored_document(
                         scored_doc, checkpoint.id
                     )
-                    success_count += 1
+                    # The agent returns a failure rather than raising it;
+                    # counted as a success, an outage read "all succeeded"
+                    if is_scoring_failure(scored_doc):
+                        fail_count += 1
+                    else:
+                        success_count += 1
 
                 except Exception as e:
                     fail_count += 1
@@ -944,12 +982,18 @@ class RescoreWorker(QThread):
                         f"Failed to score document {doc.id}: {e}"
                     )
 
-            if not self._cancelled:
+            # A cancel that came after the last document stopped nothing
+            if stopped:
+                self.cancelled.emit(success_count, fail_count, total)
+            else:
                 self.finished.emit(success_count, fail_count)
 
         except Exception as e:
             logger.exception("Re-scoring failed")
-            if not self._cancelled:
+            # Cancelling is not failing
+            if self._cancelled:
+                self.cancelled.emit(success_count, fail_count, total)
+            else:
                 self.error.emit(str(e))
 
     def cancel(self) -> None:
