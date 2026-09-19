@@ -129,6 +129,43 @@ def rerun_found_text(new: int, retried: int) -> str:
     return found
 
 
+RERUN_CANCELLED_TEXT = "Re-run cancelled. No documents were passed on for scoring."
+"""What a cancelled rerun says: what it found is dropped, not scored (#320)."""
+
+
+def pass_cancelled_text(
+    pass_name: str, verb: str, succeeded: int, failed: int, total: int
+) -> str:
+    """What a cancelled pass over a question's documents says it did.
+
+    Args:
+        pass_name: The pass, as a sentence starts, e.g. "Re-scoring".
+        verb: What it does to one document, e.g. "re-scored".
+        succeeded: Documents it finished.
+        failed: Documents it tried and could not finish.
+        total: Documents it was given.
+
+    Returns:
+        e.g. "Re-scoring cancelled after 4 of 10 documents: 3 re-scored,
+        1 failed. The other 6 were not re-scored." What was done before
+        the cancel stays done, so it is counted, not called off (#320).
+    """
+    attempted = succeeded + failed
+    text = (
+        f"{pass_name} cancelled after {attempted} of {documents_text(total)}: "
+        f"{succeeded} {verb}"
+    )
+    if failed:
+        text += f", {failed} failed"
+    text += "."
+    remaining = total - attempted
+    if remaining == 1:
+        text += f" The other one was not {verb}."
+    elif remaining > 1:
+        text += f" The other {remaining} were not {verb}."
+    return text
+
+
 class ResearchQuestionsTab(QWidget):
     """
     Tab widget displaying past research questions.
@@ -328,13 +365,7 @@ class ResearchQuestionsTab(QWidget):
         if not question:
             return
 
-        # Check if any worker is running
-        is_busy = (
-            self._worker is not None
-            or self._benchmark_worker is not None
-            or self._reclassify_worker is not None
-            or self._rescore_worker is not None
-        )
+        is_busy = self._is_busy()
 
         menu = QMenu(self)
 
@@ -449,11 +480,29 @@ class ResearchQuestionsTab(QWidget):
                 row, 4, QTableWidgetItem(str(question.run_count))
             )
 
+    def _is_busy(self) -> bool:
+        """Whether any of the tab's workers is still held."""
+        return (
+            self._worker is not None
+            or self._benchmark_worker is not None
+            or self._reclassify_worker is not None
+            or self._rescore_worker is not None
+        )
+
     def _on_selection_changed(self) -> None:
         """Handle table selection change."""
+        self._update_action_buttons(announce_selection=True)
+
+    def _update_action_buttons(self, announce_selection: bool = False) -> None:
+        """Enable the actions the selection and the workers allow.
+
+        Args:
+            announce_selection: Also name the selected question in the
+                progress line. A worker's cleanup re-checks the buttons
+                without it, so what the run said stays on screen.
+        """
         selected = self.questions_table.selectedItems()
-        is_idle = self._worker is None and self._benchmark_worker is None
-        has_selection = len(selected) > 0 and is_idle
+        has_selection = len(selected) > 0 and not self._is_busy()
         self.rerun_btn.setEnabled(has_selection)
 
         # Enable benchmark button if question has documents available
@@ -469,11 +518,12 @@ class ResearchQuestionsTab(QWidget):
                     and len(self.config.benchmark.models) > 0
                 )
                 self.benchmark_btn.setEnabled(has_documents and benchmarking_available)
-                self.progress_label.setText(
-                    f"Selected: {question.question[:80]}..."
-                    if len(question.question) > 80
-                    else f"Selected: {question.question}"
-                )
+                if announce_selection:
+                    self.progress_label.setText(
+                        f"Selected: {question.question[:80]}..."
+                        if len(question.question) > 80
+                        else f"Selected: {question.question}"
+                    )
 
                 # Enable Load button if question has scored documents (has a
                 # report). Failures count here as they always did: a question
@@ -550,6 +600,7 @@ class ResearchQuestionsTab(QWidget):
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_search_finished)
         self._worker.error.connect(self._on_search_error)
+        self._worker.cancelled.connect(self._on_search_cancelled)
 
         # Update UI state
         self.rerun_btn.setEnabled(False)
@@ -561,10 +612,25 @@ class ResearchQuestionsTab(QWidget):
         self._worker.start()
 
     def _on_cancel_clicked(self) -> None:
-        """Handle cancel button click."""
-        if self._worker:
-            self._worker.cancel()
-            self.progress_label.setText("Cancelling...")
+        """Ask the running search, re-classification or re-scoring to stop.
+
+        Each ends by emitting ``cancelled``, which returns the tab to ready
+        (#320). A benchmark cannot be stopped once started, so Cancel is
+        never enabled for one.
+        """
+        worker = next(
+            (
+                w
+                for w in (self._worker, self._reclassify_worker, self._rescore_worker)
+                if w is not None
+            ),
+            None,
+        )
+        if worker is None:
+            return
+        worker.cancel()
+        self.cancel_btn.setEnabled(False)
+        self.progress_label.setText("Cancelling...")
 
     def _on_progress(self, found: int, target: int, message: str) -> None:
         """Handle progress updates from worker."""
@@ -648,14 +714,20 @@ class ResearchQuestionsTab(QWidget):
             f"An error occurred during the search:\n\n{error_message}",
         )
 
+    def _on_search_cancelled(self) -> None:
+        """A cancelled rerun: back to ready, and nothing passed on (#320)."""
+        self._reset_ui()
+        self.progress_label.setText(RERUN_CANCELLED_TEXT)
+
     def _reset_ui(self) -> None:
         """Reset UI to ready state."""
         self.rerun_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.questions_table.setEnabled(True)
-        # Re-enable benchmark button based on selection
-        self._on_selection_changed()
+        # The worker is still held here, so this disables Re-run;
+        # its cleanup enables the actions again
+        self._update_action_buttons()
 
         # Clean up workers
         QTimer.singleShot(100, self._cleanup_worker)
@@ -666,6 +738,7 @@ class ResearchQuestionsTab(QWidget):
             if self._worker.isRunning():
                 self._worker.wait(2000)
             self._worker = None
+            self._update_action_buttons()
 
     def _on_benchmark_clicked(self) -> None:
         """Handle benchmark button click."""
@@ -722,7 +795,9 @@ class ResearchQuestionsTab(QWidget):
         # Update UI state
         self.rerun_btn.setEnabled(False)
         self.benchmark_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(True)
+        # The benchmark runner cannot be stopped mid-run: a Cancel that only
+        # dropped its result would let it go on spending
+        self.cancel_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.questions_table.setEnabled(False)
@@ -774,18 +849,13 @@ class ResearchQuestionsTab(QWidget):
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_benchmark_worker)
 
-    def _cancel_benchmark(self) -> None:
-        """Cancel the running benchmark."""
-        if self._benchmark_worker:
-            self._benchmark_worker.cancel()
-            self.progress_label.setText("Cancelling benchmark...")
-
     def _cleanup_benchmark_worker(self) -> None:
         """Clean up benchmark worker after completion."""
         if self._benchmark_worker is not None:
             if self._benchmark_worker.isRunning():
                 self._benchmark_worker.wait(2000)
             self._benchmark_worker = None
+            self._update_action_buttons()
 
     # -------------------------------------------------------------------------
     # Re-classify handlers
@@ -837,6 +907,7 @@ class ResearchQuestionsTab(QWidget):
         self._reclassify_worker.progress.connect(self._on_reclassify_progress)
         self._reclassify_worker.finished.connect(self._on_reclassify_finished)
         self._reclassify_worker.error.connect(self._on_reclassify_error)
+        self._reclassify_worker.cancelled.connect(self._on_reclassify_cancelled)
 
         # Update UI state
         self._set_busy_state(True)
@@ -896,12 +967,22 @@ class ResearchQuestionsTab(QWidget):
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
+    def _on_reclassify_cancelled(self, succeeded: int, failed: int, total: int) -> None:
+        """A cancelled re-classification: what it did stays done (#320)."""
+        self._reset_ui()
+        self._load_questions()  # Refresh the table
+        self.progress_label.setText(
+            pass_cancelled_text("Re-classification", "re-classified", succeeded, failed, total)
+        )
+        QTimer.singleShot(100, self._cleanup_reclassify_worker)
+
     def _cleanup_reclassify_worker(self) -> None:
         """Clean up reclassify worker after completion."""
         if self._reclassify_worker is not None:
             if self._reclassify_worker.isRunning():
                 self._reclassify_worker.wait(2000)
             self._reclassify_worker = None
+            self._update_action_buttons()
 
     # -------------------------------------------------------------------------
     # Re-score handlers
@@ -954,6 +1035,7 @@ class ResearchQuestionsTab(QWidget):
         self._rescore_worker.progress.connect(self._on_rescore_progress)
         self._rescore_worker.finished.connect(self._on_rescore_finished)
         self._rescore_worker.error.connect(self._on_rescore_error)
+        self._rescore_worker.cancelled.connect(self._on_rescore_cancelled)
 
         # Update UI state
         self._set_busy_state(True)
@@ -1010,12 +1092,22 @@ class ResearchQuestionsTab(QWidget):
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_rescore_worker)
 
+    def _on_rescore_cancelled(self, succeeded: int, failed: int, total: int) -> None:
+        """A cancelled re-scoring: what it did stays done (#320)."""
+        self._reset_ui()
+        self._load_questions()  # Refresh the table
+        self.progress_label.setText(
+            pass_cancelled_text("Re-scoring", "re-scored", succeeded, failed, total)
+        )
+        QTimer.singleShot(100, self._cleanup_rescore_worker)
+
     def _cleanup_rescore_worker(self) -> None:
         """Clean up rescore worker after completion."""
         if self._rescore_worker is not None:
             if self._rescore_worker.isRunning():
                 self._rescore_worker.wait(2000)
             self._rescore_worker = None
+            self._update_action_buttons()
 
     # -------------------------------------------------------------------------
     # Delete handler
