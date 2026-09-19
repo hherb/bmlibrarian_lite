@@ -17,26 +17,29 @@
 """
 Quality benchmark results display dialogs for BMLibrarian Lite.
 
-Provides dialogs for:
-- QualityBenchmarkResultsDialog: Display quality benchmark results with tables and charts
+Provides:
+- QualityBenchmarkResultsTab: Display quality benchmark results with tables
 - QualityDocumentComparisonDialog: Show document-level quality assessment comparisons
+
+A document a model could not assess is shown as failed, with why, and a
+figure the benchmark could not compute as n/a (#314); the choices are made
+by the pure functions in ``benchmarking.quality_display``.
 """
 
 import csv
 import json
 import logging
-from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -47,20 +50,30 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
+from ..benchmarking.display import (
+    format_agreement,
+    format_latency,
+    format_statistic,
+)
+from ..benchmarking.quality_display import (
+    design_cell,
+    design_distribution_cell,
+    design_label,
+    export_design_value,
+    failed_assessments_sentence,
+    format_tier_difference,
+    matrix_value,
+    quality_agreement_background,
+)
 from ..constants import (
-    BENCHMARK_AGREEMENT_HIGH,
     BENCHMARK_AGREEMENT_MEDIUM,
     BENCHMARK_AGREEMENT_LOW,
-    QUALITY_BENCHMARK_DESIGN_AGREEMENT_HIGH,
-    QUALITY_BENCHMARK_DESIGN_AGREEMENT_MEDIUM,
-    QUALITY_BENCHMARK_TIER_AGREEMENT_HIGH,
-    QUALITY_BENCHMARK_TIER_AGREEMENT_MEDIUM,
 )
-from ..quality.data_models import DESIGN_LABELS, TIER_LABELS
+from ..quality.data_models import TIER_LABELS
 
 if TYPE_CHECKING:
     from ..benchmarking.quality_models import (
@@ -90,576 +103,6 @@ DESIGN_COLORS: Dict[str, str] = {
     "other": "#E0E0E0",  # Gray - unknown
     "unknown": "#E0E0E0",
 }
-
-
-def _get_agreement_color(agreement: float, is_design: bool = False) -> str:
-    """Get color for agreement percentage based on thresholds."""
-    if is_design:
-        # Design agreement uses stricter thresholds (exact match)
-        if agreement >= QUALITY_BENCHMARK_DESIGN_AGREEMENT_HIGH:
-            return BENCHMARK_AGREEMENT_HIGH
-        elif agreement >= QUALITY_BENCHMARK_DESIGN_AGREEMENT_MEDIUM:
-            return BENCHMARK_AGREEMENT_MEDIUM
-        else:
-            return BENCHMARK_AGREEMENT_LOW
-    else:
-        # Tier agreement uses more lenient thresholds (±1 tier)
-        if agreement >= QUALITY_BENCHMARK_TIER_AGREEMENT_HIGH:
-            return BENCHMARK_AGREEMENT_HIGH
-        elif agreement >= QUALITY_BENCHMARK_TIER_AGREEMENT_MEDIUM:
-            return BENCHMARK_AGREEMENT_MEDIUM
-        else:
-            return BENCHMARK_AGREEMENT_LOW
-
-
-class QualityBenchmarkResultsDialog(QDialog):
-    """
-    Dialog displaying quality benchmark results.
-
-    Shows:
-    - Model comparison table with statistics
-    - Design agreement matrix between evaluators
-    - Tier agreement matrix between evaluators
-    - Design distribution per model
-    - Document details with design comparisons
-    """
-
-    def __init__(
-        self,
-        result: "QualityBenchmarkResult",
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        """
-        Initialize the results dialog.
-
-        Args:
-            result: Quality benchmark results to display
-            parent: Optional parent widget
-        """
-        super().__init__(parent)
-        self.result = result
-
-        self.setWindowTitle("Quality Benchmark Results")
-        self.setMinimumSize(scaled(750), scaled(600))
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        """Set up the dialog UI."""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(scaled(12))
-
-        # Header with summary
-        header_layout = QVBoxLayout()
-
-        question_label = QLabel(f"<b>Question:</b> {self.result.question[:100]}...")
-        question_label.setWordWrap(True)
-        header_layout.addWidget(question_label)
-
-        # Summary stats
-        doc_count = len(self.result.document_comparisons)
-        model_count = len(self.result.evaluator_stats)
-        duration = self.result.total_duration_seconds
-        cost = self.result.total_cost_usd
-        task_type = "Classification" if "classification" in self.result.task_type else "Assessment"
-
-        summary_label = QLabel(
-            f"<b>Task:</b> {task_type} | "
-            f"<b>Documents:</b> {doc_count} | "
-            f"<b>Models:</b> {model_count} | "
-            f"<b>Duration:</b> {duration:.1f}s | "
-            f"<b>Total Cost:</b> ${cost:.4f}"
-        )
-        header_layout.addWidget(summary_label)
-
-        layout.addLayout(header_layout)
-
-        # Tab widget for different views
-        tabs = QTabWidget()
-
-        # Model Comparison tab
-        comparison_tab = self._create_comparison_tab()
-        tabs.addTab(comparison_tab, "Model Comparison")
-
-        # Design Agreement Matrix tab
-        design_agreement_tab = self._create_design_agreement_tab()
-        tabs.addTab(design_agreement_tab, "Design Agreement")
-
-        # Tier Agreement Matrix tab
-        tier_agreement_tab = self._create_tier_agreement_tab()
-        tabs.addTab(tier_agreement_tab, "Tier Agreement")
-
-        # Design Distribution tab
-        distribution_tab = self._create_distribution_tab()
-        tabs.addTab(distribution_tab, "Design Distribution")
-
-        # Document Details tab
-        details_tab = self._create_details_tab()
-        tabs.addTab(details_tab, "Document Details")
-
-        layout.addWidget(tabs)
-
-        # Button row
-        button_layout = QHBoxLayout()
-
-        # Export button with menu
-        export_btn = QPushButton("Export...")
-        export_menu = QMenu(self)
-        export_menu.addAction("Export as CSV", self._export_csv)
-        export_menu.addAction("Export as JSON", self._export_json)
-        export_btn.setMenu(export_menu)
-        button_layout.addWidget(export_btn)
-
-        button_layout.addStretch()
-
-        # Close button
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        button_layout.addWidget(close_btn)
-
-        layout.addLayout(button_layout)
-
-    def _create_comparison_tab(self) -> QWidget:
-        """Create the model comparison tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        # Comparison table
-        table = QTableWidget()
-        table.setColumnCount(6)
-        table.setHorizontalHeaderLabels([
-            "Model", "Assessments", "Mean Confidence",
-            "Avg Latency", "Total Tokens", "Total Cost"
-        ])
-
-        stats_list = self.result.evaluator_stats
-        table.setRowCount(len(stats_list))
-
-        for row, stats in enumerate(stats_list):
-            # Model name
-            model_item = QTableWidgetItem(stats.evaluator.display_name)
-            if stats.evaluator.display_name == self.result.baseline_evaluator_name:
-                model_item.setText(f"{stats.evaluator.display_name} (baseline)")
-                model_item.setBackground(QColor("#E3F2FD"))
-            table.setItem(row, 0, model_item)
-
-            # Assessment count
-            count_item = QTableWidgetItem(str(stats.total_evaluations))
-            count_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 1, count_item)
-
-            # Mean confidence
-            conf_item = QTableWidgetItem(f"{stats.mean_confidence:.2f}")
-            conf_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 2, conf_item)
-
-            # Average latency
-            latency_item = QTableWidgetItem(f"{stats.mean_latency_ms:.0f}ms")
-            latency_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 3, latency_item)
-
-            # Total tokens
-            tokens = stats.total_tokens_input + stats.total_tokens_output
-            tokens_item = QTableWidgetItem(f"{tokens:,}")
-            tokens_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 4, tokens_item)
-
-            # Total cost
-            cost_item = QTableWidgetItem(f"${stats.total_cost_usd:.4f}")
-            cost_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 5, cost_item)
-
-        # Configure table
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 6):
-            table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setAlternatingRowColors(True)
-
-        layout.addWidget(table)
-
-        # Rankings summary
-        rankings_group = QGroupBox("Rankings")
-        rankings_layout = QVBoxLayout(rankings_group)
-
-        # Sort by confidence
-        sorted_by_conf = sorted(stats_list, key=lambda s: s.mean_confidence, reverse=True)
-        conf_ranking = ", ".join(
-            f"{i+1}. {s.evaluator.display_name} ({s.mean_confidence:.2f})"
-            for i, s in enumerate(sorted_by_conf[:3])
-        )
-        rankings_layout.addWidget(QLabel(f"<b>By Mean Confidence:</b> {conf_ranking}"))
-
-        # Sort by cost efficiency
-        sorted_by_cost = sorted(
-            stats_list,
-            key=lambda s: s.total_cost_usd / s.total_evaluations if s.total_evaluations > 0 else float('inf')
-        )
-        cost_ranking = ", ".join(
-            f"{i+1}. {s.evaluator.display_name} (${s.total_cost_usd/s.total_evaluations:.4f}/eval)"
-            for i, s in enumerate(sorted_by_cost[:3])
-        )
-        rankings_layout.addWidget(QLabel(f"<b>By Cost Efficiency:</b> {cost_ranking}"))
-
-        layout.addWidget(rankings_group)
-
-        return tab
-
-    def _create_design_agreement_tab(self) -> QWidget:
-        """Create the design agreement matrix tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-        n = len(evaluator_names)
-
-        table = QTableWidget()
-        table.setRowCount(n)
-        table.setColumnCount(n)
-        table.setHorizontalHeaderLabels(evaluator_names)
-        table.setVerticalHeaderLabels(evaluator_names)
-
-        for i, name1 in enumerate(evaluator_names):
-            for j, name2 in enumerate(evaluator_names):
-                if i == j:
-                    item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                else:
-                    key = (name1, name2)
-                    alt_key = (name2, name1)
-                    agreement = self.result.design_agreement_matrix.get(
-                        key, self.result.design_agreement_matrix.get(alt_key, 0.0)
-                    )
-                    pct = agreement * 100
-                    item = QTableWidgetItem(f"{pct:.0f}%")
-                    item.setBackground(QColor(_get_agreement_color(agreement, is_design=True)))
-
-                item.setTextAlignment(Qt.AlignCenter)
-                table.setItem(i, j, item)
-
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(table)
-
-        # Legend
-        legend_layout = QHBoxLayout()
-        legend_layout.addStretch()
-        for level, color in [
-            ("High (≥80%)", BENCHMARK_AGREEMENT_HIGH),
-            ("Medium (≥60%)", BENCHMARK_AGREEMENT_MEDIUM),
-            ("Low (<60%)", BENCHMARK_AGREEMENT_LOW),
-        ]:
-            label = QLabel(f"  {level}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
-            legend_layout.addWidget(label)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-
-        # Explanation
-        disagree_rate = self.result.design_disagreement_rate * 100
-        explanation = QLabel(
-            f"<small><b>Design agreement:</b> percentage of documents where "
-            f"evaluators assigned the exact same study design. "
-            f"<b>Documents with disagreement:</b> {disagree_rate:.1f}%</small>"
-        )
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
-
-        return widget
-
-    def _create_tier_agreement_tab(self) -> QWidget:
-        """Create the tier agreement matrix tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-        n = len(evaluator_names)
-
-        table = QTableWidget()
-        table.setRowCount(n)
-        table.setColumnCount(n)
-        table.setHorizontalHeaderLabels(evaluator_names)
-        table.setVerticalHeaderLabels(evaluator_names)
-
-        for i, name1 in enumerate(evaluator_names):
-            for j, name2 in enumerate(evaluator_names):
-                if i == j:
-                    item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                else:
-                    key = (name1, name2)
-                    alt_key = (name2, name1)
-                    agreement = self.result.tier_agreement_matrix.get(
-                        key, self.result.tier_agreement_matrix.get(alt_key, 0.0)
-                    )
-                    pct = agreement * 100
-                    item = QTableWidgetItem(f"{pct:.0f}%")
-                    item.setBackground(QColor(_get_agreement_color(agreement, is_design=False)))
-
-                item.setTextAlignment(Qt.AlignCenter)
-                table.setItem(i, j, item)
-
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(table)
-
-        # Legend
-        legend_layout = QHBoxLayout()
-        legend_layout.addStretch()
-        for level, color in [
-            ("High (≥90%)", BENCHMARK_AGREEMENT_HIGH),
-            ("Medium (≥75%)", BENCHMARK_AGREEMENT_MEDIUM),
-            ("Low (<75%)", BENCHMARK_AGREEMENT_LOW),
-        ]:
-            label = QLabel(f"  {level}  ")
-            label.setStyleSheet(f"background-color: {color}; padding: {scaled(4)}px;")
-            legend_layout.addWidget(label)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-
-        # Explanation
-        disagree_rate = self.result.tier_disagreement_rate * 100
-        explanation = QLabel(
-            f"<small><b>Tier agreement:</b> percentage of documents where "
-            f"evaluators assigned quality tiers within ±1 of each other. "
-            f"<b>Documents with tier disagreement (>1):</b> {disagree_rate:.1f}%</small>"
-        )
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
-
-        return widget
-
-    def _create_distribution_tab(self) -> QWidget:
-        """Create the design distribution tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        # Get all unique designs across all evaluators
-        all_designs = set()
-        for stats in self.result.evaluator_stats:
-            all_designs.update(stats.design_distribution.keys())
-        design_list = sorted(all_designs)
-
-        # Create table
-        table = QTableWidget()
-        table.setColumnCount(1 + len(design_list))
-        headers = ["Model"] + [DESIGN_LABELS.get(d, d) for d in design_list]
-        table.setHorizontalHeaderLabels(headers)
-
-        stats_list = self.result.evaluator_stats
-        table.setRowCount(len(stats_list))
-
-        for row, stats in enumerate(stats_list):
-            # Model name
-            table.setItem(row, 0, QTableWidgetItem(stats.evaluator.display_name))
-
-            # Design counts
-            total = stats.total_evaluations
-            for col, design in enumerate(design_list):
-                count = stats.design_distribution.get(design, 0)
-                pct = (count / total * 100) if total > 0 else 0
-
-                item = QTableWidgetItem(f"{count} ({pct:.0f}%)")
-                item.setTextAlignment(Qt.AlignCenter)
-                color = DESIGN_COLORS.get(design, "#E0E0E0")
-                item.setBackground(QColor(color))
-                table.setItem(row, col + 1, item)
-
-        # Configure table
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 1 + len(design_list)):
-            table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setAlternatingRowColors(True)
-
-        layout.addWidget(table)
-
-        return tab
-
-    def _create_details_tab(self) -> QWidget:
-        """Create the document details tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        # Filter options
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Show:"))
-
-        self.show_all_btn = QPushButton("All Documents")
-        self.show_all_btn.setCheckable(True)
-        self.show_all_btn.setChecked(True)
-        self.show_all_btn.clicked.connect(lambda: self._filter_documents("all"))
-        filter_layout.addWidget(self.show_all_btn)
-
-        self.show_design_btn = QPushButton("Design Disagreements")
-        self.show_design_btn.setCheckable(True)
-        self.show_design_btn.clicked.connect(lambda: self._filter_documents("design"))
-        filter_layout.addWidget(self.show_design_btn)
-
-        self.show_tier_btn = QPushButton("Tier Disagreements")
-        self.show_tier_btn.setCheckable(True)
-        self.show_tier_btn.clicked.connect(lambda: self._filter_documents("tier"))
-        filter_layout.addWidget(self.show_tier_btn)
-
-        filter_layout.addStretch()
-        layout.addLayout(filter_layout)
-
-        # Document list with designs
-        self.details_table = QTableWidget()
-        evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-
-        self.details_table.setColumnCount(2 + len(evaluator_names))
-        headers = ["Document", "Tier Diff"] + evaluator_names
-        self.details_table.setHorizontalHeaderLabels(headers)
-
-        self._populate_details_table(self.result.document_comparisons)
-
-        # Configure table
-        self.details_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 2 + len(evaluator_names)):
-            self.details_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        self.details_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.details_table.setAlternatingRowColors(True)
-        self.details_table.cellDoubleClicked.connect(self._on_document_double_clicked)
-
-        layout.addWidget(self.details_table)
-
-        # Instructions
-        instructions = QLabel(
-            "<small>Double-click a document to see detailed assessments from each model.</small>"
-        )
-        layout.addWidget(instructions)
-
-        return tab
-
-    def _populate_details_table(
-        self,
-        comparisons: List["QualityDocumentComparison"],
-    ) -> None:
-        """Populate the details table with document comparisons."""
-        self.details_table.setRowCount(len(comparisons))
-        self._current_comparisons = comparisons
-
-        for row, comparison in enumerate(comparisons):
-            # Document title
-            title = comparison.document.title[:60] + "..." if len(comparison.document.title) > 60 else comparison.document.title
-            title_item = QTableWidgetItem(title)
-            title_item.setToolTip(comparison.document.title)
-            self.details_table.setItem(row, 0, title_item)
-
-            # Tier difference
-            tier_diff = comparison.max_tier_difference
-            has_design_disagreement = comparison.has_design_disagreement
-            diff_text = f"{tier_diff}" + (" ⚠" if has_design_disagreement else "")
-            diff_item = QTableWidgetItem(diff_text)
-            diff_item.setTextAlignment(Qt.AlignCenter)
-            if has_design_disagreement:
-                diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
-                diff_item.setToolTip("Design disagreement: models assigned different study designs")
-            elif tier_diff > 1:
-                diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
-            self.details_table.setItem(row, 1, diff_item)
-
-            # Designs per evaluator
-            for col, stats in enumerate(self.result.evaluator_stats):
-                evaluator_name = stats.evaluator.display_name
-                design = comparison.designs.get(evaluator_name)
-                if design:
-                    design_label = DESIGN_LABELS.get(design.value, design.value)
-                    design_item = QTableWidgetItem(design_label)
-                    design_item.setTextAlignment(Qt.AlignCenter)
-                    color = DESIGN_COLORS.get(design.value, "#E0E0E0")
-                    design_item.setBackground(QColor(color))
-                else:
-                    design_item = QTableWidgetItem("-")
-                    design_item.setTextAlignment(Qt.AlignCenter)
-                self.details_table.setItem(row, col + 2, design_item)
-
-    def _filter_documents(self, filter_type: str) -> None:
-        """Filter documents in the details view."""
-        self.show_all_btn.setChecked(filter_type == "all")
-        self.show_design_btn.setChecked(filter_type == "design")
-        self.show_tier_btn.setChecked(filter_type == "tier")
-
-        if filter_type == "all":
-            self._populate_details_table(self.result.document_comparisons)
-        elif filter_type == "design":
-            # Filter to design disagreements
-            disagreements = [
-                c for c in self.result.document_comparisons
-                if c.has_design_disagreement
-            ]
-            self._populate_details_table(disagreements)
-        elif filter_type == "tier":
-            # Filter to tier disagreements (>1)
-            disagreements = [
-                c for c in self.result.document_comparisons
-                if c.max_tier_difference > 1
-            ]
-            self._populate_details_table(disagreements)
-
-    def _on_document_double_clicked(self, row: int, col: int) -> None:
-        """Handle document double-click to show assessments."""
-        if row < len(self._current_comparisons):
-            comparison = self._current_comparisons[row]
-            dialog = QualityDocumentComparisonDialog(
-                comparison, self.result.evaluator_stats, self
-            )
-            dialog.exec()
-
-    def _export_csv(self) -> None:
-        """Export results to CSV."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Results as CSV",
-            "quality_benchmark_results.csv",
-            "CSV Files (*.csv)"
-        )
-        if not file_path:
-            return
-
-        try:
-            with open(file_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-
-                # Header
-                evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
-                writer.writerow(["Document ID", "Document Title"] + evaluator_names)
-
-                # Data rows
-                for comparison in self.result.document_comparisons:
-                    row = [
-                        comparison.document.id,
-                        comparison.document.title,
-                    ]
-                    for name in evaluator_names:
-                        design = comparison.designs.get(name)
-                        row.append(design.value if design else "")
-                    writer.writerow(row)
-
-            logger.info(f"Exported quality benchmark results to {file_path}")
-        except Exception as e:
-            logger.error(f"Failed to export CSV: {e}")
-
-    def _export_json(self) -> None:
-        """Export results to JSON."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Results as JSON",
-            "quality_benchmark_results.json",
-            "JSON Files (*.json)"
-        )
-        if not file_path:
-            return
-
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.result.to_dict(), f, indent=2, ensure_ascii=False)
-
-            logger.info(f"Exported quality benchmark results to {file_path}")
-        except Exception as e:
-            logger.error(f"Failed to export JSON: {e}")
 
 
 class QualityDocumentComparisonDialog(QDialog):
@@ -744,11 +187,11 @@ class QualityDocumentComparisonDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Summary at top
-        designs = self.comparison.designs
+        # Summary at top: every evaluator, a failure named as one
         design_text = " | ".join(
-            f"<b>{name}:</b> {DESIGN_LABELS.get(design.value, design.value)}"
-            for name, design in designs.items()
+            f"<b>{stats.evaluator.display_name}:</b> "
+            f"{design_cell(self.comparison, stats.evaluator.display_name)[0]}"
+            for stats in self.evaluator_stats
         )
         design_label = QLabel(f"Study Designs: {design_text}")
         design_label.setWordWrap(True)
@@ -785,27 +228,36 @@ class QualityDocumentComparisonDialog(QDialog):
         name = stats.evaluator.display_name
         design = self.comparison.designs.get(name)
         tier = self.comparison.tiers.get(name)
-        confidence = self.comparison.confidences.get(name, 0.0)
+        confidence = self.comparison.confidences.get(name)
         assessment = self.comparison.assessments.get(name)
 
         group = QGroupBox(f"{name}")
         group_layout = QVBoxLayout(group)
 
+        failure = self.comparison.failures.get(name)
+        if failure is not None:
+            failure_label = QLabel(f"<b>Assessment failed:</b> {failure}")
+            failure_label.setWordWrap(True)
+            group_layout.addWidget(failure_label)
+            return group
+
         # Design badge
-        if design:
-            design_label_text = DESIGN_LABELS.get(design.value, design.value)
-            design_label = QLabel(f"<b>Study Design:</b> {design_label_text}")
+        if design is not None:
+            design_badge = QLabel(f"<b>Study Design:</b> {design_label(design.value)}")
             color = DESIGN_COLORS.get(design.value, "#E0E0E0")
-            design_label.setStyleSheet(
+            design_badge.setStyleSheet(
                 f"background-color: {color}; "
                 f"padding: {scaled(4)}px; border-radius: {scaled(4)}px;"
             )
-            group_layout.addWidget(design_label)
+            group_layout.addWidget(design_badge)
 
         # Tier and confidence
-        if tier:
+        if tier is not None:
             tier_label_text = TIER_LABELS.get(tier, f"Tier {tier.value}")
-            tier_label = QLabel(f"<b>Quality Tier:</b> {tier_label_text} | <b>Confidence:</b> {confidence:.2f}")
+            tier_label = QLabel(
+                f"<b>Quality Tier:</b> {tier_label_text} | "
+                f"<b>Confidence:</b> {format_statistic(confidence)}"
+            )
             group_layout.addWidget(tier_label)
 
         # Additional details if available
@@ -913,6 +365,14 @@ class QualityBenchmarkResultsTab(QWidget):
         )
         header_layout.addWidget(summary_label)
 
+        failed_sentence = (
+            failed_assessments_sentence(self.result) if self.result is not None else None
+        )
+        if failed_sentence:
+            failed_label = QLabel(failed_sentence)
+            failed_label.setWordWrap(True)
+            header_layout.addWidget(failed_label)
+
         container_layout.addLayout(header_layout)
 
         # Tab widget for different views
@@ -974,9 +434,9 @@ class QualityBenchmarkResultsTab(QWidget):
         layout = QVBoxLayout(tab)
 
         table = QTableWidget()
-        table.setColumnCount(6)
+        table.setColumnCount(7)
         table.setHorizontalHeaderLabels([
-            "Model", "Assessments", "Mean Confidence",
+            "Model", "Assessments", "Failed", "Mean Confidence",
             "Avg Latency", "Total Tokens", "Total Cost"
         ])
 
@@ -994,25 +454,29 @@ class QualityBenchmarkResultsTab(QWidget):
             count_item.setTextAlignment(Qt.AlignCenter)
             table.setItem(row, 1, count_item)
 
-            conf_item = QTableWidgetItem(f"{stats.mean_confidence:.2f}")
-            conf_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 2, conf_item)
+            failed_item = QTableWidgetItem(str(stats.failed_evaluations))
+            failed_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 2, failed_item)
 
-            latency_item = QTableWidgetItem(f"{stats.mean_latency_ms:.0f}ms")
+            conf_item = QTableWidgetItem(format_statistic(stats.mean_confidence))
+            conf_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 3, conf_item)
+
+            latency_item = QTableWidgetItem(format_latency(stats.mean_latency_ms))
             latency_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 3, latency_item)
+            table.setItem(row, 4, latency_item)
 
             tokens = stats.total_tokens_input + stats.total_tokens_output
             tokens_item = QTableWidgetItem(f"{tokens:,}")
             tokens_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 4, tokens_item)
+            table.setItem(row, 5, tokens_item)
 
             cost_item = QTableWidgetItem(f"${stats.total_cost_usd:.4f}")
             cost_item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 5, cost_item)
+            table.setItem(row, 6, cost_item)
 
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 6):
+        for col in range(1, 7):
             table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.setAlternatingRowColors(True)
@@ -1037,18 +501,13 @@ class QualityBenchmarkResultsTab(QWidget):
 
         for i, name1 in enumerate(evaluator_names):
             for j, name2 in enumerate(evaluator_names):
-                if i == j:
-                    item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                else:
-                    key = (name1, name2)
-                    alt_key = (name2, name1)
-                    agreement = self.result.design_agreement_matrix.get(
-                        key, self.result.design_agreement_matrix.get(alt_key, 0.0)
-                    )
-                    pct = agreement * 100
-                    item = QTableWidgetItem(f"{pct:.0f}%")
-                    item.setBackground(QColor(_get_agreement_color(agreement, is_design=True)))
+                # The diagonal too: a model that assessed nothing agrees
+                # with nothing, itself included
+                agreement = matrix_value(self.result.design_agreement_matrix, name1, name2)
+                item = QTableWidgetItem(format_agreement(agreement))
+                colour = quality_agreement_background(agreement, is_design=True)
+                if colour is not None:
+                    item.setBackground(QColor(colour))
 
                 item.setTextAlignment(Qt.AlignCenter)
                 table.setItem(i, j, item)
@@ -1076,18 +535,13 @@ class QualityBenchmarkResultsTab(QWidget):
 
         for i, name1 in enumerate(evaluator_names):
             for j, name2 in enumerate(evaluator_names):
-                if i == j:
-                    item = QTableWidgetItem("100%")
-                    item.setBackground(QColor(BENCHMARK_AGREEMENT_HIGH))
-                else:
-                    key = (name1, name2)
-                    alt_key = (name2, name1)
-                    agreement = self.result.tier_agreement_matrix.get(
-                        key, self.result.tier_agreement_matrix.get(alt_key, 0.0)
-                    )
-                    pct = agreement * 100
-                    item = QTableWidgetItem(f"{pct:.0f}%")
-                    item.setBackground(QColor(_get_agreement_color(agreement, is_design=False)))
+                # The diagonal too: a model that assessed nothing agrees
+                # with nothing, itself included
+                agreement = matrix_value(self.result.tier_agreement_matrix, name1, name2)
+                item = QTableWidgetItem(format_agreement(agreement))
+                colour = quality_agreement_background(agreement, is_design=False)
+                if colour is not None:
+                    item.setBackground(QColor(colour))
 
                 item.setTextAlignment(Qt.AlignCenter)
                 table.setItem(i, j, item)
@@ -1111,7 +565,7 @@ class QualityBenchmarkResultsTab(QWidget):
 
         table = QTableWidget()
         table.setColumnCount(1 + len(design_list))
-        headers = ["Model"] + [DESIGN_LABELS.get(d, d) for d in design_list]
+        headers = ["Model"] + [design_label(d) for d in design_list]
         table.setHorizontalHeaderLabels(headers)
 
         stats_list = self.result.evaluator_stats
@@ -1120,12 +574,8 @@ class QualityBenchmarkResultsTab(QWidget):
         for row, stats in enumerate(stats_list):
             table.setItem(row, 0, QTableWidgetItem(stats.evaluator.display_name))
 
-            total = stats.total_evaluations
             for col, design in enumerate(design_list):
-                count = stats.design_distribution.get(design, 0)
-                pct = (count / total * 100) if total > 0 else 0
-
-                item = QTableWidgetItem(f"{count} ({pct:.0f}%)")
+                item = QTableWidgetItem(design_distribution_cell(stats, design))
                 item.setTextAlignment(Qt.AlignCenter)
                 color = DESIGN_COLORS.get(design, "#E0E0E0")
                 item.setBackground(QColor(color))
@@ -1180,29 +630,30 @@ class QualityBenchmarkResultsTab(QWidget):
             title_item.setToolTip(comparison.document.title)
             self.details_table.setItem(row, 0, title_item)
 
-            tier_diff = comparison.max_tier_difference
             has_design_disagreement = comparison.has_design_disagreement
-            diff_text = f"{tier_diff}" + (" ⚠" if has_design_disagreement else "")
+            diff_text = format_tier_difference(comparison.max_tier_difference) + (
+                " ⚠" if has_design_disagreement else ""
+            )
             diff_item = QTableWidgetItem(diff_text)
             diff_item.setTextAlignment(Qt.AlignCenter)
             if has_design_disagreement:
                 diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_LOW))
-            elif tier_diff > 1:
+            elif comparison.has_tier_disagreement:
                 diff_item.setBackground(QColor(BENCHMARK_AGREEMENT_MEDIUM))
             self.details_table.setItem(row, 1, diff_item)
 
             for col, stats in enumerate(self.result.evaluator_stats):
                 evaluator_name = stats.evaluator.display_name
+                text, tooltip = design_cell(comparison, evaluator_name)
+                design_item = QTableWidgetItem(text)
+                design_item.setTextAlignment(Qt.AlignCenter)
                 design = comparison.designs.get(evaluator_name)
-                if design:
-                    design_label = DESIGN_LABELS.get(design.value, design.value)
-                    design_item = QTableWidgetItem(design_label)
-                    design_item.setTextAlignment(Qt.AlignCenter)
-                    color = DESIGN_COLORS.get(design.value, "#E0E0E0")
-                    design_item.setBackground(QColor(color))
-                else:
-                    design_item = QTableWidgetItem("-")
-                    design_item.setTextAlignment(Qt.AlignCenter)
+                if design is not None:
+                    design_item.setBackground(
+                        QColor(DESIGN_COLORS.get(design.value, "#E0E0E0"))
+                    )
+                if tooltip is not None:
+                    design_item.setToolTip(tooltip)
                 self.details_table.setItem(row, col + 2, design_item)
 
     def _on_document_double_clicked(self, row: int, col: int) -> None:
@@ -1237,13 +688,15 @@ class QualityBenchmarkResultsTab(QWidget):
                         comparison.document.title,
                     ]
                     for name in evaluator_names:
-                        design = comparison.designs.get(name)
-                        row.append(design.value if design else "")
+                        row.append(export_design_value(comparison, name))
                     writer.writerow(row)
 
             logger.info(f"Exported quality benchmark results to {file_path}")
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to export CSV: {e}")
+            QMessageBox.warning(
+                self, "Export Failed", f"The results could not be written to {file_path}."
+            )
 
     def _export_json(self) -> None:
         """Export results to JSON."""
@@ -1261,5 +714,8 @@ class QualityBenchmarkResultsTab(QWidget):
                 json.dump(self.result.to_dict(), f, indent=2, ensure_ascii=False)
 
             logger.info(f"Exported quality benchmark results to {file_path}")
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to export JSON: {e}")
+            QMessageBox.warning(
+                self, "Export Failed", f"The results could not be written to {file_path}."
+            )

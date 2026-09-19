@@ -22,6 +22,7 @@ and other statistics useful for comparing quality assessors.
 """
 
 import statistics
+from collections.abc import Sequence
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -43,27 +44,19 @@ def compute_quality_evaluator_stats(
     """
     Compute statistics for a single evaluator in a quality benchmark.
 
+    A document the evaluator could not assess is counted as a failure and
+    left out of every figure describing its assessments (#314). What the
+    attempt cost is still counted: the call was made.
+
     Args:
         evaluator: The evaluator to compute stats for
-        evaluations: All evaluations from this evaluator
+        evaluations: All evaluations from this evaluator, failures included
 
     Returns:
         QualityEvaluatorStats with aggregated metrics
     """
-    if not evaluations:
-        return QualityEvaluatorStats(
-            evaluator=evaluator,
-            assessments=[],
-            design_distribution={},
-            tier_distribution={},
-            mean_confidence=0.0,
-            mean_latency_ms=0.0,
-            total_tokens_input=0,
-            total_tokens_output=0,
-            total_cost_usd=0.0,
-        )
-
-    assessments = [e.assessment for e in evaluations]
+    judged = [e for e in evaluations if e.assessment is not None]
+    assessments = [e.assessment for e in judged if e.assessment is not None]
 
     # Design distribution
     design_distribution: dict[str, int] = {}
@@ -79,11 +72,12 @@ def compute_quality_evaluator_stats(
 
     # Confidence stats
     confidences = [a.confidence for a in assessments]
-    mean_confidence = statistics.mean(confidences) if confidences else 0.0
+    mean_confidence = statistics.mean(confidences) if confidences else None
 
-    # Latency stats
-    latencies = [e.latency_ms for e in evaluations if e.latency_ms > 0]
-    mean_latency = statistics.mean(latencies) if latencies else 0.0
+    # Latency stats: how long the evaluator takes to answer, which a
+    # timed-out attempt does not say
+    latencies = [e.latency_ms for e in judged if e.latency_ms > 0]
+    mean_latency = statistics.mean(latencies) if latencies else None
 
     # Token stats
     total_input = sum(e.tokens_input for e in evaluations)
@@ -102,92 +96,134 @@ def compute_quality_evaluator_stats(
         total_tokens_input=total_input,
         total_tokens_output=total_output,
         total_cost_usd=total_cost,
+        failed_evaluations=len(evaluations) - len(judged),
     )
 
 
+def _assessed_pairs[Judgement](
+    values1: Sequence[Judgement | None],
+    values2: Sequence[Judgement | None],
+) -> list[tuple[Judgement, Judgement]]:
+    """The documents both evaluators assessed, as pairs of their answers.
+
+    Args:
+        values1: First evaluator's answers (ordered by document), None where
+            it gave none
+        values2: Second evaluator's answers (same order)
+
+    Returns:
+        One pair per document both assessed.
+
+    Raises:
+        ValueError: If the lists have different lengths
+    """
+    if len(values1) != len(values2):
+        raise ValueError(
+            f"Lists must have same length: {len(values1)} vs {len(values2)}"
+        )
+    return [
+        (v1, v2) for v1, v2 in zip(values1, values2) if v1 is not None and v2 is not None
+    ]
+
+
+def _self_agreement(values: Sequence[object | None]) -> float | None:
+    """An evaluator's agreement with itself.
+
+    Args:
+        values: Its answers, None where it gave none.
+
+    Returns:
+        1.0, or None for an evaluator that assessed no document: it agrees
+        with nothing, itself included.
+    """
+    return 1.0 if any(value is not None for value in values) else None
+
+
 def compute_design_agreement(
-    designs1: list[StudyDesign],
-    designs2: list[StudyDesign],
-) -> float:
+    designs1: Sequence[StudyDesign | None],
+    designs2: Sequence[StudyDesign | None],
+) -> float | None:
     """
     Compute exact design agreement percentage between two evaluators.
 
+    Only the documents both evaluators assessed are compared. A document one
+    of them could not assess is no evidence either way: compared as
+    "unknown", an outage counted as a disagreement (#314).
+
     Args:
-        designs1: First evaluator's study designs (ordered by document)
+        designs1: First evaluator's study designs (ordered by document),
+            None where it gave none
         designs2: Second evaluator's study designs (same order)
 
     Returns:
-        Agreement percentage (0.0 to 1.0)
+        Agreement percentage (0.0 to 1.0), or None when the two assessed no
+        document in common -- which "agreed perfectly" before
 
     Raises:
         ValueError: If design lists have different lengths
     """
-    if len(designs1) != len(designs2):
-        raise ValueError(
-            f"Design lists must have same length: {len(designs1)} vs {len(designs2)}"
-        )
+    pairs = _assessed_pairs(designs1, designs2)
+    if not pairs:
+        return None
 
-    if not designs1:
-        return 1.0  # Empty lists agree perfectly
-
-    agreements = sum(1 for d1, d2 in zip(designs1, designs2) if d1 == d2)
-    return agreements / len(designs1)
+    agreements = sum(1 for d1, d2 in pairs if d1 == d2)
+    return agreements / len(pairs)
 
 
 def compute_tier_agreement(
-    tiers1: list[QualityTier],
-    tiers2: list[QualityTier],
+    tiers1: Sequence[QualityTier | None],
+    tiers2: Sequence[QualityTier | None],
     tolerance: int = 1,
-) -> float:
+) -> float | None:
     """
     Compute tier agreement percentage between two evaluators.
 
-    Agreement is defined as tier values being within the tolerance threshold.
+    Agreement is defined as tier values being within the tolerance threshold,
+    over the documents both evaluators assessed.
 
     Args:
-        tiers1: First evaluator's quality tiers (ordered by document)
+        tiers1: First evaluator's quality tiers (ordered by document), None
+            where it gave none
         tiers2: Second evaluator's quality tiers (same order)
         tolerance: Maximum difference in tier values to count as agreement
 
     Returns:
-        Agreement percentage (0.0 to 1.0)
+        Agreement percentage (0.0 to 1.0), or None when the two assessed no
+        document in common
 
     Raises:
         ValueError: If tier lists have different lengths
     """
-    if len(tiers1) != len(tiers2):
-        raise ValueError(
-            f"Tier lists must have same length: {len(tiers1)} vs {len(tiers2)}"
-        )
+    pairs = _assessed_pairs(tiers1, tiers2)
+    if not pairs:
+        return None
 
-    if not tiers1:
-        return 1.0  # Empty lists agree perfectly
-
-    agreements = sum(
-        1 for t1, t2 in zip(tiers1, tiers2) if abs(t1.value - t2.value) <= tolerance
-    )
-    return agreements / len(tiers1)
+    agreements = sum(1 for t1, t2 in pairs if abs(t1.value - t2.value) <= tolerance)
+    return agreements / len(pairs)
 
 
 def compute_design_agreement_matrix(
-    evaluator_designs: dict[str, list[StudyDesign]],
-) -> dict[tuple[str, str], float]:
+    evaluator_designs: dict[str, list[StudyDesign | None]],
+) -> dict[tuple[str, str], float | None]:
     """
     Compute pairwise exact design agreement matrix for all evaluators.
 
     Args:
-        evaluator_designs: Mapping of evaluator name to ordered design list
+        evaluator_designs: Mapping of evaluator name to ordered design list,
+            None where it gave no design
 
     Returns:
-        Dict with (name1, name2) tuple keys mapping to agreement percentage
+        Dict with (name1, name2) tuple keys mapping to agreement percentage;
+        None for a pair that assessed no document in common
     """
     evaluator_names = list(evaluator_designs.keys())
-    matrix: dict[tuple[str, str], float] = {}
+    matrix: dict[tuple[str, str], float | None] = {}
 
     for name1 in evaluator_names:
         for name2 in evaluator_names:
             if name1 == name2:
-                matrix[(name1, name2)] = 1.0  # Perfect self-agreement
+                # Self-agreement, for an evaluator that assessed anything
+                matrix[(name1, name2)] = _self_agreement(evaluator_designs[name1])
             else:
                 designs1 = evaluator_designs[name1]
                 designs2 = evaluator_designs[name2]
@@ -197,26 +233,29 @@ def compute_design_agreement_matrix(
 
 
 def compute_tier_agreement_matrix(
-    evaluator_tiers: dict[str, list[QualityTier]],
+    evaluator_tiers: dict[str, list[QualityTier | None]],
     tolerance: int = 1,
-) -> dict[tuple[str, str], float]:
+) -> dict[tuple[str, str], float | None]:
     """
     Compute pairwise tier agreement matrix for all evaluators.
 
     Args:
-        evaluator_tiers: Mapping of evaluator name to ordered tier list
+        evaluator_tiers: Mapping of evaluator name to ordered tier list, None
+            where it gave no tier
         tolerance: Maximum difference in tier values to count as agreement
 
     Returns:
-        Dict with (name1, name2) tuple keys mapping to agreement percentage
+        Dict with (name1, name2) tuple keys mapping to agreement percentage;
+        None for a pair that assessed no document in common
     """
     evaluator_names = list(evaluator_tiers.keys())
-    matrix: dict[tuple[str, str], float] = {}
+    matrix: dict[tuple[str, str], float | None] = {}
 
     for name1 in evaluator_names:
         for name2 in evaluator_names:
             if name1 == name2:
-                matrix[(name1, name2)] = 1.0  # Perfect self-agreement
+                # Self-agreement, for an evaluator that assessed anything
+                matrix[(name1, name2)] = _self_agreement(evaluator_tiers[name1])
             else:
                 tiers1 = evaluator_tiers[name1]
                 tiers2 = evaluator_tiers[name2]
@@ -234,30 +273,31 @@ def compute_quality_document_comparison(
 
     Args:
         document: The document being compared
-        evaluations_by_evaluator: Mapping of evaluator display name to evaluation
+        evaluations_by_evaluator: Mapping of evaluator display name to
+            evaluation, failures included
 
     Returns:
-        QualityDocumentComparison with all evaluator assessments
+        QualityDocumentComparison with every evaluator's assessment, and
+        each evaluator that could not assess the document named with why
     """
     assessments = {
-        eval_name: e.assessment for eval_name, e in evaluations_by_evaluator.items()
+        eval_name: e.assessment
+        for eval_name, e in evaluations_by_evaluator.items()
+        if e.assessment is not None
     }
-    designs = {
-        eval_name: e.study_design for eval_name, e in evaluations_by_evaluator.items()
-    }
-    tiers = {
-        eval_name: e.quality_tier for eval_name, e in evaluations_by_evaluator.items()
-    }
-    confidences = {
-        eval_name: e.confidence for eval_name, e in evaluations_by_evaluator.items()
+    failures = {
+        eval_name: e.failure.description
+        for eval_name, e in evaluations_by_evaluator.items()
+        if e.failure is not None
     }
 
     return QualityDocumentComparison(
         document=document,
         assessments=assessments,
-        designs=designs,
-        tiers=tiers,
-        confidences=confidences,
+        designs={name: a.study_design for name, a in assessments.items()},
+        tiers={name: a.quality_tier for name, a in assessments.items()},
+        confidences={name: a.confidence for name, a in assessments.items()},
+        failures=failures,
     )
 
 
@@ -288,9 +328,14 @@ def find_tier_disagreement_documents(
         threshold: Minimum tier difference to flag
 
     Returns:
-        Documents where max tier difference >= threshold
+        Documents where max tier difference >= threshold; a document fewer
+        than two evaluators assessed has no difference
     """
-    return [dc for dc in document_comparisons if dc.max_tier_difference >= threshold]
+    return [
+        dc
+        for dc in document_comparisons
+        if (difference := dc.max_tier_difference) is not None and difference >= threshold
+    ]
 
 
 def compute_confidence_correlation(

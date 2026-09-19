@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #315), except two known gaps: a Research Questions rerun reuses a failed document as already scored (#316), and the quality benchmark records a failure as "unclassified" (#314) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316), except one known gap: the review's quality filter records a failed classification as an "unknown" design (#319) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -269,7 +269,18 @@ to read a record written elsewhere.
   never "no results": that invited paying for the benchmark again. Offline
   comparisons across questions (Python: `scripts/concordance_analysis.py`)
   follow the same rules — failures counted per model and left out, a pair
-  with too few documents in common shown as "n/a", never 0%.
+  with too few documents in common shown as "n/a", never 0%. **A quality
+  benchmark** (study design classification or detailed assessment) follows
+  them too (#314): a failed call, or an answer naming no design on the list
+  the prompt offers, is a failure — never the "unknown" design, which is
+  an answer — counted apart from the design and tier distributions and the
+  agreement between models. A review's assessment stands in for its model's
+  answer only when that model made it for the same task and it names a
+  design; a design read from publication-type metadata answers for no model.
+- **A rerun retries a failure** (#316). Deduplicating a search for more
+  documents against those already scored, a document whose every scoring
+  failed is not scored: it is scored again, and the user is told how many are
+  retried. A document judged in any run stays judged.
 - **A degraded source is named where the source is named** (#304). Falling
   back from full text to the abstract — discovery failing, content arriving
   empty, the load raising, PDF extraction yielding nothing, a paywall the user

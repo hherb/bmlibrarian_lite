@@ -146,7 +146,10 @@ The Research Questions tab lets you manage and revisit past searches:
 
 - View all previous research questions. The **Scored** column counts the documents a model scored; documents whose every scoring failed are shown beside it, for example **12 (+3 failed)**
 - Re-run searches with incremental pagination (fetch more results)
-- Automatic deduplication of already-scored documents
+- Automatic deduplication of already-scored documents. A document whose every
+  scoring failed is not counted as scored: a re-run hands it back to be scored
+  again, and says how many it is retrying (for example **Found 5 new
+  documents, and 3 whose scoring failed before**)
 - Context menu: re-classify, re-score, delete, or run benchmarks
 
 ### Audit Trail
@@ -257,6 +260,16 @@ than $0.00 or 0%. A result saved before this was recorded says so: its scores
 of 1 may include failures. If a saved result cannot be read back, the
 Benchmark tab says the results **could not be loaded**; that is not the same
 as having none, and running the benchmark again would repeat its cost.
+
+The quality benchmark follows the same rules. A document a model could not
+classify is counted in its **Failed** column and shown as **failed** in the
+document details (hover for why), never as an "Unknown" design: "Unknown" is
+an answer, a failure is none. Design and tier agreement compare only
+documents both models classified. An answer that names no study design on
+the list the model is given is counted as a failure. When the benchmark
+reuses the review's own classifications for the review's model, it reuses
+only classifications that model actually made for the same task, never one
+the review could not make or one read from PubMed's publication types.
 
 A model's answer counts as a score only when it gives a whole number from 1
 to 5. An answer that declines to score, gives 0, or scores on another scale

@@ -26,6 +26,7 @@ The tab provides:
 """
 
 import logging
+import sqlite3
 from datetime import datetime
 from typing import Optional
 
@@ -54,6 +55,7 @@ from ..benchmarking.models import BenchmarkResult
 from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
 from ..data_models import LiteDocument, ResearchQuestionSummary, RetrievalShortfall
+from ..exceptions import SQLiteError
 from ..search_failures import describe_search_shortfalls
 from ..storage import LiteStorage
 from .workers import IncrementalSearchWorker, ReclassifyWorker, RescoreWorker
@@ -75,6 +77,55 @@ def scored_count_text(question: ResearchQuestionSummary) -> str:
     if question.failed_documents:
         return f"{question.scored_documents} (+{question.failed_documents} failed)"
     return str(question.scored_documents)
+
+
+def _documents(count: int) -> str:
+    """A count of documents, in words that agree with it."""
+    return f"{count} document" if count == 1 else f"{count} documents"
+
+
+def rerun_start_text(judged: int, retrying: int, missing: int) -> str:
+    """What a rerun says as it starts: what it skips, and what it retries.
+
+    Args:
+        judged: Documents already scored, which the rerun skips.
+        retrying: Documents whose every scoring failed, scored again.
+        missing: Documents whose every scoring failed but whose record is
+            gone, so they cannot be scored again.
+
+    Returns:
+        e.g. "12 documents already scored; 3 whose scoring failed will be
+        scored again". Counted among the scored, a failed document was never
+        retried (#316).
+    """
+    parts = [f"{_documents(judged)} already scored"]
+    if retrying:
+        parts.append(f"{retrying} whose scoring failed will be scored again")
+    if missing:
+        parts.append(
+            f"{missing} whose scoring failed can no longer be loaded, and "
+            "will be found again only if the search lists them"
+        )
+    return "; ".join(parts)
+
+
+def rerun_found_text(new: int, retried: int) -> str:
+    """What a finished rerun found to score.
+
+    Args:
+        new: Documents the search found that were never scored.
+        retried: Documents whose every scoring failed, to be scored again.
+
+    Returns:
+        e.g. "Found 5 new documents, and 3 whose scoring failed before".
+        The retried documents are not new, and are not counted as such.
+    """
+    if retried and not new:
+        return f"Found no new documents; {_documents(retried)} whose scoring failed before"
+    found = f"Found {new} new document" + ("" if new == 1 else "s")
+    if retried:
+        return f"{found}, and {retried} whose scoring failed before"
+    return found
 
 
 class ResearchQuestionsTab(QWidget):
@@ -121,6 +172,8 @@ class ResearchQuestionsTab(QWidget):
         self.storage = storage
         self._questions: list[ResearchQuestionSummary] = []
         self._worker: Optional[IncrementalSearchWorker] = None
+        # Documents the running rerun retries because every scoring failed
+        self._retried_ids: set[str] = set()
         self._benchmark_worker: Optional[BenchmarkWorker] = None
         self._reclassify_worker: Optional[ReclassifyWorker] = None
         self._rescore_worker: Optional[RescoreWorker] = None
@@ -453,13 +506,31 @@ class ResearchQuestionsTab(QWidget):
         if not question:
             return
 
-        # Get already scored document IDs
-        already_scored = self.storage.get_scored_document_ids_for_question(
-            question.question
-        )
+        # A document whose every scoring failed is scored again, not
+        # skipped as scored (#316)
+        try:
+            judged, failed = self.storage.get_rerun_document_ids_for_question(
+                question.question
+            )
+            retry_documents = self.storage.get_documents(sorted(failed))
+        except (SQLiteError, sqlite3.Error) as e:
+            logger.error(f"Could not read the scores of the question to re-run: {e}")
+            QMessageBox.warning(
+                self,
+                "Re-run Failed",
+                "The scores recorded for this question could not be read, so "
+                "the re-run cannot tell which documents to skip.",
+            )
+            return
+        self._retried_ids = {document.id for document in retry_documents}
+        missing = len(failed) - len(self._retried_ids)
+        if missing:
+            logger.warning(
+                f"{missing} documents whose scoring failed have no stored record"
+            )
 
         self.progress_label.setText(
-            f"Found {len(already_scored)} previously scored documents"
+            rerun_start_text(len(judged), len(self._retried_ids), missing)
         )
 
         # Start incremental search worker
@@ -467,10 +538,11 @@ class ResearchQuestionsTab(QWidget):
             question=question.question,
             pubmed_query=question.pubmed_query,
             target_new_docs=self.target_spin.value(),
-            already_scored_ids=already_scored,
+            already_scored_ids=judged | failed,
             config=self.config,
             storage=self.storage,
             parent=self,
+            retry_documents=retry_documents,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_search_finished)
@@ -504,7 +576,8 @@ class ResearchQuestionsTab(QWidget):
         """Handle search completion.
 
         Args:
-            new_docs: The new documents found.
+            new_docs: The documents to score: those whose every scoring
+                failed before, then the new ones found (#316).
             shortfalls: What the search is missing. A search that stopped on
                 a failure is never reported as one that ran out of documents,
                 and the shortfalls travel with the documents to the review
@@ -520,9 +593,11 @@ class ResearchQuestionsTab(QWidget):
         self._reset_ui()
         self._load_questions()  # Refresh the table
 
+        retried = sum(1 for document in new_docs if document.id in self._retried_ids)
+        found = rerun_found_text(len(new_docs) - retried, retried)
         if new_docs:
             self.progress_label.setText(
-                f"Found {len(new_docs)} new documents. "
+                f"{found}. "
                 "Switch to Systematic Review tab to score them."
                 + (f" {warning}" if warning else "")
             )
@@ -533,7 +608,7 @@ class ResearchQuestionsTab(QWidget):
                 QMessageBox.warning(
                     self,
                     "Search Incomplete",
-                    f"Found {len(new_docs)} new documents for this question, "
+                    f"{found} for this question, "
                     f"but the search is incomplete.\n\n{warning}\n\n"
                     "You can switch to the Systematic Review tab to score "
                     "the documents found, or run the search again later.",
@@ -542,7 +617,7 @@ class ResearchQuestionsTab(QWidget):
                 QMessageBox.information(
                     self,
                     "Search Complete",
-                    f"Found {len(new_docs)} new documents for this question.\n\n"
+                    f"{found} for this question.\n\n"
                     "You can now switch to the Systematic Review tab to "
                     "score and process these documents.",
                 )

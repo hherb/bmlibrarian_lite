@@ -29,12 +29,11 @@ from typing import Any, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
 
-from ..data_models import Evaluator
+from ..data_models import EvaluationErrorCode, Evaluator
 from ..quality.data_models import (
     QualityAssessment,
     StudyDesign,
     QualityTier,
-    StudyClassification,
 )
 
 
@@ -43,48 +42,66 @@ class QualityEvaluatorStats:
     """
     Statistics for a single evaluator in a quality benchmark.
 
-    Aggregates performance metrics across all documents
-    evaluated by this evaluator for quality assessment.
+    Aggregates performance metrics across all documents evaluated by this
+    evaluator for quality assessment. An assessment the evaluator could not
+    produce is counted apart, never among its assessments: recorded as
+    "unclassified", an outage read as the model's own verdict that it could
+    not tell the design (#314).
 
     Attributes:
         evaluator: The evaluator these stats are for
-        assessments: List of all quality assessments
+        assessments: The assessments it made, failures excluded
         design_distribution: Count of each study design {design_name: count}
         tier_distribution: Count of each quality tier {tier_value: count}
-        mean_confidence: Average confidence score (0-1)
-        mean_latency_ms: Average response time
-        total_tokens_input: Total input tokens used
-        total_tokens_output: Total output tokens used
-        total_cost_usd: Total estimated cost
+        mean_confidence: Average confidence score (0-1); None when it
+            assessed no document
+        mean_latency_ms: Average response time of its assessments; None when
+            no assessment recorded one
+        total_tokens_input: Total input tokens used, failed calls included
+        total_tokens_output: Total output tokens used, failed calls included
+        total_cost_usd: Total estimated cost, failed calls included
+        failed_evaluations: Number of documents it could not assess
     """
 
     evaluator: Evaluator
     assessments: list[QualityAssessment]
     design_distribution: dict[str, int]  # design_name -> count
     tier_distribution: dict[int, int]  # tier_value -> count
-    mean_confidence: float
-    mean_latency_ms: float
+    mean_confidence: float | None
+    mean_latency_ms: float | None
     total_tokens_input: int
     total_tokens_output: int
     total_cost_usd: float
+    failed_evaluations: int
 
     @property
     def total_evaluations(self) -> int:
-        """Total number of documents evaluated."""
+        """Number of documents it assessed, failures excluded."""
         return len(self.assessments)
 
     @property
-    def cost_per_evaluation(self) -> float:
-        """Average cost per document evaluation."""
+    def cost_per_evaluation(self) -> float | None:
+        """What each assessment cost, failed calls included.
+
+        Returns:
+            The cost, failed calls included since they were billed, divided
+            by the assessments it bought; None when it assessed no document.
+            As 0.0, a model whose every call failed ranked as the cheapest.
+        """
         if self.total_evaluations == 0:
-            return 0.0
+            return None
         return self.total_cost_usd / self.total_evaluations
 
     @property
-    def tokens_per_evaluation(self) -> float:
-        """Average tokens per document evaluation."""
+    def tokens_per_evaluation(self) -> float | None:
+        """What each assessment took in tokens, failed calls included.
+
+        Returns:
+            The tokens, failed calls included, divided by the assessments;
+            None when it assessed no document.
+        """
         if self.total_evaluations == 0:
-            return 0.0
+            return None
         total = self.total_tokens_input + self.total_tokens_output
         return total / self.total_evaluations
 
@@ -103,6 +120,7 @@ class QualityEvaluatorStats:
             "total_cost_usd": self.total_cost_usd,
             "cost_per_evaluation": self.cost_per_evaluation,
             "tokens_per_evaluation": self.tokens_per_evaluation,
+            "failed_evaluations": self.failed_evaluations,
         }
 
 
@@ -111,12 +129,18 @@ class QualityDocumentComparison:
     """
     Comparison of quality assessments for a single document across evaluators.
 
+    Only assessments are compared. An evaluator that could not assess the
+    document is named in ``failures`` instead: among the assessments, its
+    "unknown" design made the document look like a disagreement (#314).
+
     Attributes:
         document: The document being compared (for access to full metadata)
         assessments: Mapping of evaluator display name to QualityAssessment
         designs: Mapping of evaluator display name to StudyDesign
         tiers: Mapping of evaluator display name to QualityTier
         confidences: Mapping of evaluator display name to confidence score
+        failures: Mapping of evaluator display name to why it could not
+            assess the document
     """
 
     document: "LiteDocument"
@@ -124,6 +148,7 @@ class QualityDocumentComparison:
     designs: dict[str, StudyDesign]  # evaluator display name -> design
     tiers: dict[str, QualityTier]  # evaluator display name -> tier
     confidences: dict[str, float]  # evaluator display name -> confidence
+    failures: dict[str, str] = field(default_factory=dict)
 
     @property
     def document_id(self) -> str:
@@ -136,9 +161,18 @@ class QualityDocumentComparison:
         return self.document.title
 
     @property
+    def is_comparable(self) -> bool:
+        """Whether at least two evaluators assessed the document.
+
+        Returns:
+            True when there is a difference to measure.
+        """
+        return len(self.designs) >= 2
+
+    @property
     def has_design_disagreement(self) -> bool:
         """Check if evaluators disagree on study design."""
-        if len(self.designs) < 2:
+        if not self.is_comparable:
             return False
         design_values = list(self.designs.values())
         return len(set(design_values)) > 1
@@ -146,13 +180,20 @@ class QualityDocumentComparison:
     @property
     def has_tier_disagreement(self) -> bool:
         """Check if evaluators disagree on quality tier (diff > 1)."""
-        return self.max_tier_difference > 1
+        difference = self.max_tier_difference
+        return difference is not None and difference > 1
 
     @property
-    def max_tier_difference(self) -> int:
-        """Maximum tier difference between any two evaluators."""
+    def max_tier_difference(self) -> int | None:
+        """Maximum tier difference between any two evaluators.
+
+        Returns:
+            The difference, or None when fewer than two evaluators assessed
+            the document: read as 0, a document one model could not assess
+            looked like full agreement.
+        """
         if len(self.tiers) < 2:
-            return 0
+            return None
         tier_values = [t.value for t in self.tiers.values()]
         return max(tier_values) - min(tier_values)
 
@@ -182,6 +223,7 @@ class QualityDocumentComparison:
             "designs": {k: v.value for k, v in self.designs.items()},
             "tiers": {k: v.value for k, v in self.tiers.items()},
             "confidences": self.confidences,
+            "failures": self.failures,
             "has_design_disagreement": self.has_design_disagreement,
             "has_tier_disagreement": self.has_tier_disagreement,
             "max_tier_difference": self.max_tier_difference,
@@ -208,8 +250,11 @@ class QualityBenchmarkResult:
             "quality_assessment")
         evaluator_stats: Per-evaluator statistics
         document_comparisons: Per-document assessment comparisons
-        design_agreement_matrix: Pairwise exact design match percentages
-        tier_agreement_matrix: Pairwise within ±1 tier agreement percentages
+        design_agreement_matrix: Pairwise exact design match percentages,
+            over the documents both evaluators assessed; None for a pair
+            that assessed no document in common
+        tier_agreement_matrix: Pairwise within ±1 tier agreement percentages,
+            likewise
         total_duration_seconds: Total benchmark execution time
         baseline_evaluator_name: Name of baseline evaluator (if applicable)
         created_at: When results were computed
@@ -220,8 +265,9 @@ class QualityBenchmarkResult:
     task_type: str
     evaluator_stats: list[QualityEvaluatorStats]
     document_comparisons: list[QualityDocumentComparison]
-    design_agreement_matrix: dict[tuple[str, str], float]  # (eval1, eval2) -> agreement%
-    tier_agreement_matrix: dict[tuple[str, str], float]  # (eval1, eval2) -> agreement%
+    # (eval1, eval2) -> agreement%
+    design_agreement_matrix: dict[tuple[str, str], float | None]
+    tier_agreement_matrix: dict[tuple[str, str], float | None]
     total_duration_seconds: float = 0.0
     baseline_evaluator_name: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
@@ -232,9 +278,23 @@ class QualityBenchmarkResult:
         return sum(s.total_evaluations for s in self.evaluator_stats)
 
     @property
+    def failed_evaluations(self) -> int:
+        """Total number of assessments that failed, across all evaluators."""
+        return sum(s.failed_evaluations for s in self.evaluator_stats)
+
+    @property
     def total_cost_usd(self) -> float:
         """Total cost across all evaluators."""
         return sum(s.total_cost_usd for s in self.evaluator_stats)
+
+    @property
+    def comparable_documents(self) -> list[QualityDocumentComparison]:
+        """Documents at least two evaluators assessed: the ones rates are over.
+
+        A document only one model could assess cannot agree or disagree;
+        counted, it diluted every rate.
+        """
+        return [d for d in self.document_comparisons if d.is_comparable]
 
     @property
     def documents_with_design_disagreement(self) -> list[QualityDocumentComparison]:
@@ -247,58 +307,89 @@ class QualityBenchmarkResult:
         return [d for d in self.document_comparisons if d.has_tier_disagreement]
 
     @property
-    def design_disagreement_rate(self) -> float:
-        """Percentage of documents with study design disagreement."""
-        if not self.document_comparisons:
-            return 0.0
-        return (
-            len(self.documents_with_design_disagreement) / len(self.document_comparisons)
-        )
+    def design_disagreement_rate(self) -> float | None:
+        """Fraction of comparable documents with study design disagreement.
+
+        Returns:
+            The fraction, or None when no document was comparable.
+        """
+        comparable = self.comparable_documents
+        if not comparable:
+            return None
+        return len(self.documents_with_design_disagreement) / len(comparable)
 
     @property
-    def tier_disagreement_rate(self) -> float:
-        """Percentage of documents with tier disagreement (diff > 1)."""
-        if not self.document_comparisons:
-            return 0.0
-        return (
-            len(self.documents_with_tier_disagreement) / len(self.document_comparisons)
-        )
+    def tier_disagreement_rate(self) -> float | None:
+        """Fraction of comparable documents with tier disagreement (diff > 1).
 
-    def get_ranking_by_confidence(self) -> list[tuple[Evaluator, float]]:
+        Returns:
+            The fraction, or None when no document was comparable.
+        """
+        comparable = self.comparable_documents
+        if not comparable:
+            return None
+        return len(self.documents_with_tier_disagreement) / len(comparable)
+
+    def _ranking(
+        self,
+        values: list[tuple[Evaluator, float | None]],
+        descending: bool = False,
+    ) -> list[tuple[Evaluator, float | None]]:
+        """Evaluators ranked by a figure, those without one last.
+
+        Args:
+            values: Each evaluator and its figure, None where it has none.
+            descending: Whether the highest figure ranks first.
+
+        Returns:
+            The ranked evaluators; an evaluator with no figure is never
+            ranked as best or worst by a stand-in value.
+        """
+        ranked: list[tuple[Evaluator, float | None]] = sorted(
+            ((evaluator, value) for evaluator, value in values if value is not None),
+            key=lambda entry: entry[1] or 0.0,
+            reverse=descending,
+        )
+        unranked: list[tuple[Evaluator, float | None]] = [
+            (evaluator, value) for evaluator, value in values if value is None
+        ]
+        return ranked + unranked
+
+    def get_ranking_by_confidence(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by mean confidence (descending).
 
         Returns:
-            List of (evaluator, mean_confidence) tuples, highest first
+            List of (evaluator, mean_confidence) tuples, highest first; an
+            evaluator that assessed no document comes last
         """
-        return sorted(
+        return self._ranking(
             [(s.evaluator, s.mean_confidence) for s in self.evaluator_stats],
-            key=lambda x: x[1],
-            reverse=True,
+            descending=True,
         )
 
-    def get_ranking_by_cost(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_cost(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by cost efficiency (ascending).
 
         Returns:
-            List of (evaluator, cost_per_eval) tuples, cheapest first
+            List of (evaluator, cost_per_eval) tuples, cheapest first; an
+            evaluator that assessed no document comes last
         """
-        return sorted(
-            [(s.evaluator, s.cost_per_evaluation) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        return self._ranking(
+            [(s.evaluator, s.cost_per_evaluation) for s in self.evaluator_stats]
         )
 
-    def get_ranking_by_speed(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_speed(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by response speed (ascending).
 
         Returns:
-            List of (evaluator, mean_latency_ms) tuples, fastest first
+            List of (evaluator, mean_latency_ms) tuples, fastest first; an
+            evaluator with no latency recorded comes last
         """
-        return sorted(
-            [(s.evaluator, s.mean_latency_ms) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        return self._ranking(
+            [(s.evaluator, s.mean_latency_ms) for s in self.evaluator_stats]
         )
 
     def get_design_distribution_summary(self) -> dict[str, dict[str, int]]:
@@ -344,6 +435,7 @@ class QualityBenchmarkResult:
             "tier_agreement_matrix": serializable_tier_matrix,
             "total_duration_seconds": self.total_duration_seconds,
             "total_evaluations": self.total_evaluations,
+            "failed_evaluations": self.failed_evaluations,
             "total_cost_usd": self.total_cost_usd,
             "design_disagreement_rate": self.design_disagreement_rate,
             "tier_disagreement_rate": self.tier_disagreement_rate,
@@ -364,12 +456,16 @@ class QualityEvaluation:
     A single quality evaluation result with metadata.
 
     Used for tracking individual evaluations during benchmark runs
-    before aggregation into QualityEvaluatorStats.
+    before aggregation into QualityEvaluatorStats. It holds either the
+    model's assessment or why there is none -- never both, and never a
+    stand-in assessment for a failure (#314).
 
     Attributes:
         document_id: ID of the evaluated document
         evaluator: Evaluator that produced this evaluation
-        assessment: The quality assessment result
+        assessment: The quality assessment result; None when it failed
+        failure: Why the evaluator could not assess the document; None when
+            it did
         latency_ms: Response time in milliseconds
         tokens_input: Number of input tokens used
         tokens_output: Number of output tokens used
@@ -379,27 +475,48 @@ class QualityEvaluation:
 
     document_id: str
     evaluator: Evaluator
-    assessment: QualityAssessment
+    assessment: QualityAssessment | None = None
+    failure: EvaluationErrorCode | None = None
     latency_ms: float = 0.0
     tokens_input: int = 0
     tokens_output: int = 0
     cost_usd: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
 
-    @property
-    def study_design(self) -> StudyDesign:
-        """Get the study design from the assessment."""
-        return self.assessment.study_design
+    def __post_init__(self) -> None:
+        """Refuse an evaluation that is both, or neither, an answer and a failure.
+
+        Raises:
+            ValueError: If exactly one of ``assessment`` and ``failure`` is
+                not given, or the failure is ``SUCCESS``.
+        """
+        if (self.assessment is None) == (self.failure is None):
+            raise ValueError(
+                f"Evaluation of {self.document_id} needs exactly one of an "
+                "assessment and a failure"
+            )
+        if self.failure is EvaluationErrorCode.SUCCESS:
+            raise ValueError(f"Evaluation of {self.document_id}: SUCCESS is not a failure")
 
     @property
-    def quality_tier(self) -> QualityTier:
-        """Get the quality tier from the assessment."""
-        return self.assessment.quality_tier
+    def is_failure(self) -> bool:
+        """Whether the evaluator could not assess the document."""
+        return self.failure is not None
 
     @property
-    def confidence(self) -> float:
-        """Get the confidence from the assessment."""
-        return self.assessment.confidence
+    def study_design(self) -> StudyDesign | None:
+        """The study design from the assessment; None when it failed."""
+        return self.assessment.study_design if self.assessment is not None else None
+
+    @property
+    def quality_tier(self) -> QualityTier | None:
+        """The quality tier from the assessment; None when it failed."""
+        return self.assessment.quality_tier if self.assessment is not None else None
+
+    @property
+    def confidence(self) -> float | None:
+        """The confidence from the assessment; None when it failed."""
+        return self.assessment.confidence if self.assessment is not None else None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -407,9 +524,14 @@ class QualityEvaluation:
             "document_id": self.document_id,
             "evaluator_id": self.evaluator.id,
             "evaluator_display_name": self.evaluator.display_name,
-            "study_design": self.assessment.study_design.value,
-            "quality_tier": self.assessment.quality_tier.value,
-            "confidence": self.assessment.confidence,
+            "study_design": (
+                self.study_design.value if self.study_design is not None else None
+            ),
+            "quality_tier": (
+                self.quality_tier.value if self.quality_tier is not None else None
+            ),
+            "confidence": self.confidence,
+            "failure": self.failure.name if self.failure else None,
             "latency_ms": self.latency_ms,
             "tokens_input": self.tokens_input,
             "tokens_output": self.tokens_output,

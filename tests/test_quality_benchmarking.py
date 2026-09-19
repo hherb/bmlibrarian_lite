@@ -121,6 +121,7 @@ class TestQualityEvaluatorStats:
             total_tokens_input=400,
             total_tokens_output=200,
             total_cost_usd=0.002,
+            failed_evaluations=0,
         )
         assert stats.total_evaluations == 2
 
@@ -140,6 +141,7 @@ class TestQualityEvaluatorStats:
             total_tokens_input=400,
             total_tokens_output=200,
             total_cost_usd=0.004,
+            failed_evaluations=0,
         )
         assert stats.cost_per_evaluation == pytest.approx(0.002)
 
@@ -153,13 +155,15 @@ class TestQualityEvaluatorStats:
             assessments=[],
             design_distribution={},
             tier_distribution={},
-            mean_confidence=0.0,
-            mean_latency_ms=0.0,
+            mean_confidence=None,
+            mean_latency_ms=None,
             total_tokens_input=0,
             total_tokens_output=0,
             total_cost_usd=0.0,
+            failed_evaluations=0,
         )
-        assert stats.cost_per_evaluation == 0.0
+        # As 0.0, a model that assessed nothing ranked as the cheapest (#314)
+        assert stats.cost_per_evaluation is None
 
     def test_to_dict(
         self,
@@ -177,6 +181,7 @@ class TestQualityEvaluatorStats:
             total_tokens_input=200,
             total_tokens_output=100,
             total_cost_usd=0.001,
+            failed_evaluations=0,
         )
         result = stats.to_dict()
 
@@ -292,6 +297,7 @@ class TestQualityBenchmarkResult:
             total_tokens_input=400,
             total_tokens_output=200,
             total_cost_usd=0.002,
+            failed_evaluations=0,
         )
 
         result = QualityBenchmarkResult(
@@ -322,6 +328,7 @@ class TestQualityBenchmarkResult:
             total_tokens_input=200,
             total_tokens_output=100,
             total_cost_usd=0.001,
+            failed_evaluations=0,
         )
         stats2 = QualityEvaluatorStats(
             evaluator=sample_evaluator,
@@ -333,6 +340,7 @@ class TestQualityBenchmarkResult:
             total_tokens_input=200,
             total_tokens_output=100,
             total_cost_usd=0.002,
+            failed_evaluations=0,
         )
 
         result = QualityBenchmarkResult(
@@ -374,8 +382,8 @@ class TestComputeDesignAgreement:
         assert agreement == pytest.approx(2/3)  # 2 out of 3 match
 
     def test_empty_lists(self):
-        """Test with empty lists (perfect agreement)."""
-        assert compute_design_agreement([], []) == 1.0
+        """Two evaluators with no document in common have no agreement (#314)."""
+        assert compute_design_agreement([], []) is None
 
     def test_mismatched_lengths_raises(self):
         """Test that mismatched lengths raise ValueError."""
@@ -632,5 +640,5 @@ class TestComputeQualityEvaluatorStats:
         stats = compute_quality_evaluator_stats(sample_evaluator, [])
 
         assert stats.total_evaluations == 0
-        assert stats.mean_confidence == 0.0
+        assert stats.mean_confidence is None
         assert stats.design_distribution == {}

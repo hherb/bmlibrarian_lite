@@ -359,6 +359,42 @@ class TestTheIncrementalSearchWorker:
         assert [document.pmid for document in documents] == ["1", "2"]
         assert shortfalls == []
 
+    def test_documents_whose_scoring_failed_lead_and_are_not_new(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Retried documents come first and do not use up the target (#316)."""
+        script = {
+            ESEARCH_PATH: [esearch_hits(["1", "2"], count=2)],
+            EFETCH_PATH: [pubmed_articles(["1", "2"])],
+        }
+        with running(script) as server:
+            point_pubmed_client_at(monkeypatch, server.url)
+            worker, recorder = incremental_worker(target=1)
+            worker.retry_documents = [make_document("9")]
+            worker.already_scored_ids = {"pmid-9"}
+
+            worker.run()
+
+        [(documents, shortfalls)] = recorder.calls["finished"]
+        assert [document.pmid for document in documents] == ["9", "1"]
+        assert shortfalls == []
+
+    def test_a_failed_search_still_hands_on_the_documents_to_retry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """They need no search: the failure travels with them, not as an error."""
+        with running({ESEARCH_PATH: [status_answer(HTTPStatus.TOO_MANY_REQUESTS)]}) as server:
+            point_pubmed_client_at(monkeypatch, server.url)
+            worker, recorder = incremental_worker(target=5)
+            worker.retry_documents = [make_document("9")]
+
+            worker.run()
+
+        assert "error" not in recorder.calls
+        [(documents, shortfalls)] = recorder.calls["finished"]
+        assert [document.pmid for document in documents] == ["9"]
+        assert [shortfall.provider for shortfall in shortfalls] == [SearchProvider.PUBMED]
+
     def test_a_complete_search_of_scored_documents_is_not_a_failure(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

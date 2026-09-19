@@ -417,6 +417,25 @@ another scale or is a range; a JSON answer is read as that object alone. `outcom
 listing judged-then-failed-then-unscored, which the Audit Trail's literature
 cards follow (#307).
 
+**The quality benchmark follows the same rule** (#314). A `QualityEvaluation`
+holds an `assessment` or a `failure` (an `EvaluationErrorCode`), exactly one,
+checked in `__post_init__`; the runner classifies a raised call as the review
+does, and an answer naming no design on the prompt's list -- `"unknown"`
+included -- is `JSON_PARSE_ERROR` (`parse_study_design()`). Statistics count
+failures apart and state what nothing assessed as `None`; the tab's cells come
+from `benchmarking/quality_display.py`. The review's assessments are reused for
+the baseline model only through `is_reusable_assessment()`: the task's tier and
+a known design, because the review's classifier and assessor still record a
+failure as "unknown"/"unclassified".
+
+**A rerun retries a failure** (#316). `get_rerun_document_ids_for_question()`
+splits a question's scored documents into judged (any judgement) and failed
+(every scoring a failure, in either form); the Research Questions rerun skips
+both in the search and hands the failed ones to `IncrementalSearchWorker` as
+`retry_documents`, which lead what it emits and survive a failed search.
+`get_scored_document_ids_for_question()` still counts every row, which is what
+the benchmark launchers want.
+
 #### Study Transparency (`transparency/` and `study_transparency_analyzer/`)
 
 The transparency system has two components:
