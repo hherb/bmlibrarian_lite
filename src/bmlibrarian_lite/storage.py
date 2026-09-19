@@ -1856,8 +1856,10 @@ class LiteStorage:
         """
         Get all document IDs that have been scored for a research question.
 
-        This includes documents of any score (even low ones) to enable
-        deduplication during incremental searches.
+        This includes documents of any score (even low ones), and documents
+        whose every scoring failed. The benchmark launchers use it; a rerun
+        uses :meth:`get_rerun_document_ids_for_question`, which tells the
+        failed apart so they are scored again (#316).
 
         Args:
             question: The research question text

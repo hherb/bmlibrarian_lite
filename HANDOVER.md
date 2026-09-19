@@ -14,20 +14,30 @@ retries one**, branch `fix/benchmark-and-rerun-failures-314-316`, PR #321. Pytho
 (`doc/cross_platform/analysis_failure_reporting.md`) updated; Python's only
 known gap there is now #319.
 
-- **Quality benchmark** (#314). `QualityEvaluation` holds exactly one of
-  `assessment` / `failure` (`EvaluationErrorCode`, checked in
-  `__post_init__`). The runner's shared `_evaluate()` classifies a raised call
-  (`classify_exhausted_retries` for the wrapper) and records an answer naming
-  no design on the prompt's list — `"unknown"` included — as
-  `JSON_PARSE_ERROR` (`parse_study_design()`); tokens and cost still count.
+- **Quality benchmark** (#314). `QualityEvaluation` (frozen) holds exactly one
+  of `assessment` / `failure` (`EvaluationErrorCode`, checked in
+  `__post_init__`, which also refuses an `"unknown"` design and a reused
+  failure). The runner's shared `_evaluate()` classifies a raised call
+  (`classify_exhausted_retries` for the wrapper); an answer is `EMPTY_RESPONSE`
+  (blank), `JSON_PARSE_ERROR` (no JSON) or `INVALID_RESPONSE_FORMAT` (JSON
+  naming no mapped design, `"unknown"` included, or a malformed field), and
+  anything a parser raises is caught there as that document's failure, not
+  the run's; tokens and cost still count.
   Statistics: `failed_evaluations`, `None` for the mean confidence, latency,
   cost/tokens per assessment of a model that assessed nothing; agreement over
   documents both assessed (`None` when none, self-agreement too); tier
   difference and disagreement rates over comparable documents only; rankings
-  put a model with no figure last. **The review's assessments are replayed as
-  the baseline's only through `is_reusable_assessment()`** (task tier + a
-  known design), because the review's classifier/assessor still record a
-  failure as "unknown"/"unclassified" (#319). Tab cells come from the new
+  put a model with no figure last. **The review's assessments are replayed
+  only through `is_reusable_assessment()`**: task tier, a known design, no
+  transparency downgrade, and `extraction_method == llm_extraction_method(the
+  evaluator's model)`. The review's detailed assessor now records its model
+  (it wrote `"llm_sonnet"` whatever was configured), and the baseline shown is
+  the benchmark task's model, not always the classifier's; the review's
+  classifier/assessor still record a failure as "unknown"/"unclassified"
+  (#319). A replayed evaluation is `reused`, left out of cost/tokens per
+  assessment and latency. `QualityDocumentComparison` refuses an evaluator
+  both assessed and failed. The Systematic Review status line names failed
+  assessments (`quality_benchmark_finished_text()`). Tab cells come from the new
   pure `benchmarking/quality_display.py`: "failed" + reason tooltip, `n/a`,
   no colour for no figure, a Failed column, a header sentence. Also fixed on
   the way: `DESIGN_LABELS` is keyed by the enum and was looked up by value,
@@ -37,19 +47,29 @@ known gap there is now #319.
   per-document evaluations; no checkbox is ever built).
 - **Rerun** (#316). `get_rerun_document_ids_for_question()` splits judged (any
   judgement) from failed (every scoring a failure, either form); the rerun's
-  search skips both, loads the failed ones and passes them to
-  `IncrementalSearchWorker(retry_documents=…)`, which puts them first, keeps
-  them out of the target count, and still emits them when the search fails
-  (with the shortfalls). Messages: `rerun_start_text()`, `rerun_found_text()`.
+  search skips the judged and the loaded failed ones — not a failed one whose
+  record is gone, so the search can find it again — and passes the loaded ones
+  to `IncrementalSearchWorker(retry_documents=…)`, which puts them first, keeps
+  them out of the target count, and still emits them when the search ends in
+  shortfalls; an unexpected error says they were not rescored
+  (`unexpected_rerun_error_text()`). Messages: `rerun_start_text()`,
+  `rerun_found_text()`.
   `get_scored_document_ids_for_question()` is unchanged for the benchmark
   launchers.
 - **Lodged:** #319 the review's quality filter records a failed
-  classification as an "unknown" design (and confidence defaults to 0.5);
-  #320 cancelling a rerun leaves the tab stuck on "Cancelling..." (the
-  worker emits nothing when cancelled; pre-existing).
-- **Verified:** `pytest tests/` — 1586 passed, 3 xfailed; `lint_delta.py
+  classification as an "unknown" design; #320 cancelling a rerun leaves the
+  tab stuck on "Cancelling..." (the worker emits nothing when cancelled;
+  pre-existing); #322 the quality parsers (benchmark and review) invent a 0.5
+  confidence that the benchmark averages and ranks by; #323 "other" is scored
+  as tier 0 in tier comparisons. Further type refinements (derived
+  projections, failure codes kept as codes, `latency_ms`/`task_type`) are
+  noted on #318.
+- **Verified:** `pytest tests/` — 1622 passed, 3 xfailed; `lint_delta.py
   --base-ref master` 0 new ruff, 0 new mypy (both totals below master).
-  Reviewed by an independent agent: no defects found.
+  Second review (five agents) acted on: a malformed answer ended the whole
+  run, a failed document with no record could never be retried, and a quality
+  model's assessments were credited to the classifier; each fix has a test
+  seen to fail without it.
 
 ## Recently landed (context)
 

@@ -419,20 +419,32 @@ cards follow (#307).
 
 **The quality benchmark follows the same rule** (#314). A `QualityEvaluation`
 holds an `assessment` or a `failure` (an `EvaluationErrorCode`), exactly one,
-checked in `__post_init__`; the runner classifies a raised call as the review
-does, and an answer naming no design on the prompt's list -- `"unknown"`
-included -- is `JSON_PARSE_ERROR` (`parse_study_design()`). Statistics count
-failures apart and state what nothing assessed as `None`; the tab's cells come
-from `benchmarking/quality_display.py`. The review's assessments are reused for
-the baseline model only through `is_reusable_assessment()`: the task's tier and
-a known design, because the review's classifier and assessor still record a
-failure as "unknown"/"unclassified".
+checked in `__post_init__` (the dataclass is frozen, and an `"unknown"` design
+is refused); the runner classifies a raised call as the review does. An
+answer is `EMPTY_RESPONSE` when blank, `JSON_PARSE_ERROR` when it holds no
+JSON, and `INVALID_RESPONSE_FORMAT` when it is JSON naming no design the
+classifier's mapping recognises -- `"unknown"` included
+(`parse_study_design()`) -- or has a malformed field. Anything else a parser
+raises is caught in `_evaluate()` as that document's `INVALID_RESPONSE_FORMAT`,
+so one answer cannot end the run. Statistics count failures apart and state
+what nothing assessed as `None`; the tab's cells come from
+`benchmarking/quality_display.py`. The review's assessments are reused only
+through `is_reusable_assessment()`: the task's tier, a known design, no
+transparency downgrade, and an `extraction_method` naming the evaluator's own
+model (`llm_extraction_method()`, which the review's classifier and assessor
+both record). The review's classifier and assessor still record a failure as
+"unknown"/"unclassified". A reused evaluation is marked `reused`, and its $0
+and 0 ms are left out of cost per assessment and latency. The baseline shown
+is the model configured for the benchmark's task.
 
 **A rerun retries a failure** (#316). `get_rerun_document_ids_for_question()`
 splits a question's scored documents into judged (any judgement) and failed
 (every scoring a failure, in either form); the Research Questions rerun skips
 both in the search and hands the failed ones to `IncrementalSearchWorker` as
-`retry_documents`, which lead what it emits and survive a failed search.
+`retry_documents`, which lead what it emits and survive a search that ended
+in recorded failures (an unexpected error says they were not rescored). A
+failed document whose record is gone is not skipped, so the search can find
+it again.
 `get_scored_document_ids_for_question()` still counts every row, which is what
 the benchmark launchers want.
 

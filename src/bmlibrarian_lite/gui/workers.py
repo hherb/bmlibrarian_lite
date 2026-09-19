@@ -473,6 +473,26 @@ class QualityFilterWorker(QThread):
         self._cancelled = True
 
 
+def unexpected_rerun_error_text(error: str, retrying: int) -> str:
+    """What a rerun that stopped on an unexpected error says.
+
+    Args:
+        error: The error's text.
+        retrying: Documents the rerun was to score again.
+
+    Returns:
+        The error, and -- when there were any -- that the documents to
+        retry were not scored again, which the error alone left unsaid.
+    """
+    if not retrying:
+        return error
+    if retrying == 1:
+        unscored = "1 document whose scoring failed before was not scored again"
+    else:
+        unscored = f"{retrying} documents whose scoring failed before were not scored again"
+    return f"{error}\n\n{unscored}; re-run the question to retry them."
+
+
 class IncrementalSearchWorker(QThread):
     """
     Background worker for incremental PubMed searches with deduplication.
@@ -536,7 +556,10 @@ class IncrementalSearchWorker(QThread):
             retry_documents: Documents whose every scoring failed, to be
                 scored again (#316). They lead the documents found, do not
                 count toward ``target_new_docs``, and survive a search that
-                failed: they need no search to be scored.
+                ended in recorded failures (shortfalls): they need no search
+                to be scored. An unexpected error ends the rerun without
+                them, and says so; they are still failed, so the next rerun
+                retries them.
         """
         super().__init__(parent)
         self.question = question
@@ -706,7 +729,9 @@ class IncrementalSearchWorker(QThread):
         except Exception as e:
             logger.exception("Incremental search failed")
             if not self._cancelled:
-                self.error.emit(str(e))
+                self.error.emit(
+                    unexpected_rerun_error_text(str(e), len(self.retry_documents))
+                )
 
     def _extract_year(self, date_str: Optional[str]) -> Optional[int]:
         """

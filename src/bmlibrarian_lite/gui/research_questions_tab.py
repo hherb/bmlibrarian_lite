@@ -79,7 +79,7 @@ def scored_count_text(question: ResearchQuestionSummary) -> str:
     return str(question.scored_documents)
 
 
-def _documents(count: int) -> str:
+def documents_text(count: int) -> str:
     """A count of documents, in words that agree with it."""
     return f"{count} document" if count == 1 else f"{count} documents"
 
@@ -91,14 +91,15 @@ def rerun_start_text(judged: int, retrying: int, missing: int) -> str:
         judged: Documents already scored, which the rerun skips.
         retrying: Documents whose every scoring failed, scored again.
         missing: Documents whose every scoring failed but whose record is
-            gone, so they cannot be scored again.
+            gone: the search does not skip them, so they are scored again
+            only if it finds them.
 
     Returns:
         e.g. "12 documents already scored; 3 whose scoring failed will be
         scored again". Counted among the scored, a failed document was never
         retried (#316).
     """
-    parts = [f"{_documents(judged)} already scored"]
+    parts = [f"{documents_text(judged)} already scored"]
     if retrying:
         parts.append(f"{retrying} whose scoring failed will be scored again")
     if missing:
@@ -121,7 +122,7 @@ def rerun_found_text(new: int, retried: int) -> str:
         The retried documents are not new, and are not counted as such.
     """
     if retried and not new:
-        return f"Found no new documents; {_documents(retried)} whose scoring failed before"
+        return f"Found no new documents; {documents_text(retried)} whose scoring failed before"
     found = f"Found {new} new document" + ("" if new == 1 else "s")
     if retried:
         return f"{found}, and {retried} whose scoring failed before"
@@ -538,7 +539,9 @@ class ResearchQuestionsTab(QWidget):
             question=question.question,
             pubmed_query=question.pubmed_query,
             target_new_docs=self.target_spin.value(),
-            already_scored_ids=judged | failed,
+            # A failed document with no stored record is left for the
+            # search to find again: skipped, it could never be retried
+            already_scored_ids=judged | self._retried_ids,
             config=self.config,
             storage=self.storage,
             parent=self,

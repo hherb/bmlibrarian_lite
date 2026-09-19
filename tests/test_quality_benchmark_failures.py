@@ -17,6 +17,7 @@ The relevance benchmark was held to the rule in #306; these tests hold the
 quality benchmark to it, from the runner to the tab's cells.
 """
 
+import dataclasses
 import json
 from typing import Any
 
@@ -33,11 +34,13 @@ from bmlibrarian_lite.benchmarking.quality_display import (
     format_tier_difference,
     matrix_value,
     quality_agreement_background,
+    quality_benchmark_finished_text,
 )
 from bmlibrarian_lite.benchmarking.quality_models import (
     QUALITY_TASK_QUALITY_ASSESSMENT,
     QUALITY_TASK_STUDY_CLASSIFICATION,
     QualityBenchmarkResult,
+    QualityDocumentComparison,
     QualityEvaluation,
 )
 from bmlibrarian_lite.benchmarking.quality_runner import (
@@ -53,7 +56,7 @@ from bmlibrarian_lite.benchmarking.quality_statistics import (
     compute_tier_agreement,
     find_tier_disagreement_documents,
 )
-from bmlibrarian_lite.config import LiteConfig
+from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.data_models import (
     DocumentSource,
     EvaluationErrorCode,
@@ -67,6 +70,7 @@ from bmlibrarian_lite.quality.data_models import (
     QualityTier,
     StudyClassification,
     StudyDesign,
+    llm_extraction_method,
 )
 from bmlibrarian_lite.storage import LiteStorage
 
@@ -238,6 +242,27 @@ class TestAnEvaluationIsAnAnswerOrAFailure:
                 failure=EvaluationErrorCode.SUCCESS,
             )
 
+    def test_an_unknown_design_is_refused(self) -> None:
+        """No prompt offers it: it is how a failure was recorded (#314)."""
+        with pytest.raises(ValueError):
+            evaluated("doc-1", assessment(StudyDesign.UNKNOWN, QualityTier.UNCLASSIFIED))
+
+    def test_a_failure_cannot_be_reused(self) -> None:
+        """Only an answer is replayed from the review."""
+        with pytest.raises(ValueError):
+            QualityEvaluation(
+                document_id="doc-1",
+                evaluator=make_evaluator(),
+                failure=EvaluationErrorCode.API_TIMEOUT,
+                reused=True,
+            )
+
+    def test_the_rule_holds_after_construction(self) -> None:
+        """Emptied afterwards, it would be neither an answer nor a failure."""
+        evaluation = failed("doc-1")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            evaluation.failure = None  # type: ignore[misc]
+
     def test_a_failure_has_no_design(self) -> None:
         """Not "unknown": no answer at all."""
         evaluation = failed("doc-1")
@@ -289,20 +314,27 @@ class TestAFailureIsRecordedAsOne:
         assert evaluation.failure is EvaluationErrorCode.API_TIMEOUT
 
     @pytest.mark.parametrize(
-        "answer",
+        "answer, code",
         [
-            "",
-            "I think it is a trial.",
-            "[]",
-            "{}",
-            json.dumps({"study_design": None}),
-            json.dumps({"study_design": 3}),
-            json.dumps({"study_design": "unknown"}),
-            json.dumps({"study_design": "phase 2 umbrella trial"}),
+            ("", EvaluationErrorCode.EMPTY_RESPONSE),
+            ("  \n", EvaluationErrorCode.EMPTY_RESPONSE),
+            ("I think it is a trial.", EvaluationErrorCode.JSON_PARSE_ERROR),
+            ('{"study_design": "rct",', EvaluationErrorCode.JSON_PARSE_ERROR),
+            ("[]", EvaluationErrorCode.INVALID_RESPONSE_FORMAT),
+            ("{}", EvaluationErrorCode.INVALID_RESPONSE_FORMAT),
+            (json.dumps({"study_design": None}), EvaluationErrorCode.INVALID_RESPONSE_FORMAT),
+            (json.dumps({"study_design": 3}), EvaluationErrorCode.INVALID_RESPONSE_FORMAT),
+            (json.dumps({"study_design": "unknown"}), EvaluationErrorCode.INVALID_RESPONSE_FORMAT),
+            (
+                json.dumps({"study_design": "phase 2 umbrella trial"}),
+                EvaluationErrorCode.INVALID_RESPONSE_FORMAT,
+            ),
         ],
         ids=[
             "empty",
+            "blank",
             "prose",
+            "broken-json",
             "not-an-object",
             "no-design",
             "null-design",
@@ -311,20 +343,86 @@ class TestAFailureIsRecordedAsOne:
             "off-the-list",
         ],
     )
-    def test_an_answer_naming_no_design_is_a_parse_failure(self, answer: str) -> None:
-        """Read as "unknown", an unreadable answer became the model's verdict."""
+    def test_an_answer_naming_no_design_is_a_failure_with_its_cause(
+        self, answer: str, code: EvaluationErrorCode
+    ) -> None:
+        """Read as "unknown", an unreadable answer became the model's verdict.
+
+        Well-formed JSON naming no design is not reported as unparseable.
+        """
         evaluation = classify_once(ScriptedClient(answer))
-        assert evaluation.failure is EvaluationErrorCode.JSON_PARSE_ERROR
+        assert evaluation.failure is code
 
     def test_the_detailed_parser_refuses_the_same_answers(self) -> None:
         """Tier 3 reads the design by the same rule."""
         evaluation = assess_once(ScriptedClient(json.dumps({"study_design": "unknown"})))
-        assert evaluation.failure is EvaluationErrorCode.JSON_PARSE_ERROR
+        assert evaluation.failure is EvaluationErrorCode.INVALID_RESPONSE_FORMAT
 
-    def test_an_unreadable_answer_still_costs_what_it_cost(self) -> None:
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            {"study_design": "rct", "design_characteristics": "yes"},
+            {"study_design": "rct", "bias_risk": ["low"]},
+        ],
+        ids=["characteristics-not-an-object", "bias-risk-not-an-object"],
+    )
+    def test_a_malformed_field_is_that_document_s_failure(self, answer: dict[str, Any]) -> None:
+        """A named design with a malformed field is a failure, not a crash."""
+        evaluation = assess_once(ScriptedClient(json.dumps(answer)))
+        assert evaluation.failure is EvaluationErrorCode.INVALID_RESPONSE_FORMAT
+
+    def test_an_infinite_sample_size_is_no_sample_size(self) -> None:
+        """JSON reads 1e999 as infinity, which int() cannot take."""
+        evaluation = classify_once(
+            ScriptedClient(json.dumps({"study_design": "rct", "sample_size": 1e999}))
+        )
+        assert evaluation.study_design is StudyDesign.RCT
+        assert evaluation.assessment is not None
+        assert evaluation.assessment.sample_size is None
+
+    def test_a_nan_is_not_read_as_the_top_of_the_scale(self) -> None:
+        """Clamped, NaN became full confidence and a perfect score."""
+        answer = '{"study_design": "rct", "confidence": NaN, "quality_score": NaN}'
+        evaluation = assess_once(ScriptedClient(answer))
+        assert evaluation.assessment is not None
+        assert evaluation.assessment.confidence != 1.0
+        assert evaluation.assessment.quality_score == 0.0
+
+    def test_an_answer_the_parser_did_not_foresee_does_not_end_the_run(
+        self, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One document's unreadable answer is its failure; the rest are read."""
+        runner = runner_with(storage, ScriptedClient(RCT_ANSWER))
+        parse = runner._parse_classification_response
+        calls: list[str] = []
+
+        def parse_once_badly(response: str) -> Any:
+            """Raise what no parser foresees on the first answer only."""
+            calls.append(response)
+            if len(calls) == 1:
+                raise KeyError("unforeseen")
+            return parse(response)
+
+        monkeypatch.setattr(runner, "_parse_classification_response", parse_once_badly)
+        result = runner.run_quick_benchmark(
+            question=QUESTION,
+            documents=[make_document("1"), make_document("2")],
+            models=[MODEL],
+        )
+
+        [stats] = result.evaluator_stats
+        assert (stats.total_evaluations, stats.failed_evaluations) == (1, 1)
+
+    def test_an_unreadable_answer_still_costs_what_it_cost(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The call was made and billed."""
+        from bmlibrarian_lite.benchmarking import quality_runner
+
+        monkeypatch.setattr(quality_runner, "calculate_cost", lambda *_: 0.003)
         evaluation = classify_once(ScriptedClient("not json"))
         assert (evaluation.tokens_input, evaluation.tokens_output) == (100, 20)
+        assert evaluation.cost_usd == 0.003
 
     @pytest.mark.parametrize(
         "label, design",
@@ -347,7 +445,30 @@ class TestAReviewAssessmentIsReusedOnlyIfTheModelMadeIt:
 
     def test_a_classification_is_reused_for_classification(self) -> None:
         """What reuse is for."""
-        assert is_reusable_assessment(RCT, QUALITY_TASK_STUDY_CLASSIFICATION)
+        assert is_reusable_assessment(RCT, QUALITY_TASK_STUDY_CLASSIFICATION, MODEL)
+
+    def test_another_model_s_answer_is_not(self) -> None:
+        """Credited to this model, another's answer fabricated its agreement."""
+        assert not is_reusable_assessment(RCT, QUALITY_TASK_STUDY_CLASSIFICATION, OTHER_MODEL)
+
+    def test_an_answer_naming_no_model_is_not(self) -> None:
+        """Whose it was cannot be told."""
+        anonymous = dataclasses.replace(RCT, extraction_method="llm")
+        assert not is_reusable_assessment(anonymous, QUALITY_TASK_STUDY_CLASSIFICATION, MODEL)
+
+    def test_a_human_evaluator_answers_for_no_review_assessment(self) -> None:
+        """A human has no model string."""
+        assert not is_reusable_assessment(RCT, QUALITY_TASK_STUDY_CLASSIFICATION, None)
+
+    def test_a_transparency_downgrade_is_not_the_model_s_tier(self) -> None:
+        """The review lowered the tier; the model did not answer it."""
+        downgraded = dataclasses.replace(
+            RCT,
+            quality_tier=QualityTier.TIER_2_OBSERVATIONAL,
+            original_quality_tier=QualityTier.TIER_4_EXPERIMENTAL,
+            transparency_adjusted=True,
+        )
+        assert not is_reusable_assessment(downgraded, QUALITY_TASK_STUDY_CLASSIFICATION, MODEL)
 
     def test_the_review_classifier_failure_is_not(self) -> None:
         """The classifier records a failed call as an "unknown" design."""
@@ -355,22 +476,24 @@ class TestAReviewAssessmentIsReusedOnlyIfTheModelMadeIt:
             StudyClassification(study_design=StudyDesign.UNKNOWN, confidence=0.0),
             model_name=MODEL,
         )
-        assert not is_reusable_assessment(failure, QUALITY_TASK_STUDY_CLASSIFICATION)
+        assert not is_reusable_assessment(failure, QUALITY_TASK_STUDY_CLASSIFICATION, MODEL)
 
     def test_the_review_assessor_failure_is_not(self) -> None:
         """The assessor records a failed call as "unclassified"."""
         assert not is_reusable_assessment(
-            QualityAssessment.unclassified(), QUALITY_TASK_QUALITY_ASSESSMENT
+            QualityAssessment.unclassified(), QUALITY_TASK_QUALITY_ASSESSMENT, MODEL
         )
 
     def test_a_design_from_publication_types_is_not(self) -> None:
         """PubMed's metadata is no model's answer."""
         from_metadata = assessment(StudyDesign.RCT, QualityTier.TIER_4_EXPERIMENTAL, tier_number=1)
-        assert not is_reusable_assessment(from_metadata, QUALITY_TASK_STUDY_CLASSIFICATION)
+        assert not is_reusable_assessment(
+            from_metadata, QUALITY_TASK_STUDY_CLASSIFICATION, MODEL
+        )
 
     def test_a_classification_does_not_answer_a_detailed_assessment(self) -> None:
         """A tier 2 answer is not the tier 3 task's."""
-        assert not is_reusable_assessment(RCT, QUALITY_TASK_QUALITY_ASSESSMENT)
+        assert not is_reusable_assessment(RCT, QUALITY_TASK_QUALITY_ASSESSMENT, MODEL)
 
     def test_the_runner_asks_again_rather_than_replay_a_failure(
         self, storage: LiteStorage
@@ -400,11 +523,60 @@ class TestAReviewAssessmentIsReusedOnlyIfTheModelMadeIt:
             question=QUESTION,
             documents=[document],
             models=[baseline],
-            existing_assessments={document.id: COHORT},
+            existing_assessments={
+                document.id: dataclasses.replace(
+                    COHORT, extraction_method=llm_extraction_method(baseline)
+                )
+            },
         )
 
         assert client.calls == []
         assert result.evaluator_stats[0].design_distribution == {"cohort_prospective": 1}
+        assert result.evaluator_stats[0].reused_evaluations == 1
+
+    def test_the_review_s_detailed_assessment_names_its_model(self) -> None:
+        """Recorded as "llm_sonnet", it could be credited to no model -- or any."""
+        from bmlibrarian_lite.quality.quality_agent import LiteQualityAgent
+
+        config = LiteConfig()
+        config.models.tasks["quality_assessment"] = TaskModelConfig(
+            provider="ollama", model="assessor"
+        )
+        agent = LiteQualityAgent(config=config)
+
+        answer = agent._parse_response(RCT_ANSWER)
+
+        assert answer.extraction_method == llm_extraction_method("ollama:assessor")
+        assert is_reusable_assessment(
+            answer, QUALITY_TASK_QUALITY_ASSESSMENT, "ollama:assessor"
+        )
+
+    def test_the_quality_model_s_assessment_is_not_the_classifier_s(
+        self, storage: LiteStorage
+    ) -> None:
+        """The detailed assessment's baseline is the model that made it."""
+        document = make_document("1")
+        models = storage.config.models
+        models.tasks["study_classification"] = TaskModelConfig(provider="ollama", model="classifier")
+        models.tasks["quality_assessment"] = TaskModelConfig(provider="ollama", model="assessor")
+        classifier = models.get_model_string("study_classification")
+        assessor = models.get_model_string("quality_assessment")
+        by_assessor = dataclasses.replace(
+            assessment(StudyDesign.RCT, QualityTier.TIER_4_EXPERIMENTAL, tier_number=3),
+            extraction_method=llm_extraction_method(assessor),
+        )
+        client = ScriptedClient(COHORT_ANSWER)
+
+        result = runner_with(storage, client).run_quick_benchmark(
+            question=QUESTION,
+            documents=[document],
+            models=[classifier, assessor],
+            task_type=QUALITY_TASK_QUALITY_ASSESSMENT,
+            existing_assessments={document.id: by_assessor},
+        )
+
+        assert client.calls == [classifier]
+        assert result.baseline_evaluator_name == make_evaluator(assessor).display_name
 
 
 class TestEvaluatorStatistics:
@@ -437,6 +609,28 @@ class TestEvaluatorStatistics:
         stats = compute_quality_evaluator_stats(make_evaluator(), self.evaluations)
         assert stats.total_cost_usd == pytest.approx(0.04)
         assert stats.cost_per_evaluation == pytest.approx(0.02)
+
+    def test_a_replayed_assessment_was_not_bought(self) -> None:
+        """At $0 and 0ms, the review's answers made the baseline look cheap and fast."""
+        replayed = QualityEvaluation(
+            document_id="doc-4", evaluator=make_evaluator(), assessment=RCT, reused=True
+        )
+        stats = compute_quality_evaluator_stats(
+            make_evaluator(), [*self.evaluations, replayed]
+        )
+        assert (stats.total_evaluations, stats.reused_evaluations) == (3, 1)
+        assert stats.cost_per_evaluation == pytest.approx(0.02)
+        assert stats.tokens_per_evaluation == pytest.approx(120.0)
+        assert stats.mean_latency_ms == 400.0
+
+    def test_an_evaluator_that_only_replayed_has_no_cost_figure(self) -> None:
+        """It bought nothing in this run; $0.00 would rank it cheapest."""
+        replayed = QualityEvaluation(
+            document_id="doc-1", evaluator=make_evaluator(), assessment=RCT, reused=True
+        )
+        stats = compute_quality_evaluator_stats(make_evaluator(), [replayed])
+        assert stats.cost_per_evaluation is None
+        assert stats.mean_latency_ms is None
 
     def test_an_evaluator_that_assessed_nothing_has_no_figures(self) -> None:
         """Not a confidence of 0, a latency of 30s, or a cost of $0.00."""
@@ -475,6 +669,38 @@ class TestAgreement:
         assert matrix[("a", "a")] == 1.0
         assert matrix[("b", "b")] is None
         assert matrix[("a", "b")] is None
+
+    def test_the_export_counts_the_failures(self, storage: LiteStorage) -> None:
+        """The saved summary says how many failed and how many were replayed."""
+        client = ScriptedClient(RCT_ANSWER, ConnectionError(LEAKY_ERROR))
+        result = runner_with(storage, client).run_quick_benchmark(
+            question=QUESTION,
+            documents=[make_document("1"), make_document("2")],
+            models=[MODEL],
+        )
+        data = result.to_dict()
+        assert data["failed_evaluations"] == 1
+        [stats] = data["evaluator_stats"]
+        assert (stats["failed_evaluations"], stats["reused_evaluations"]) == (1, 0)
+
+    def test_the_status_line_names_the_failures(self, storage: LiteStorage) -> None:
+        """Its cost alone read as success when every assessment had failed."""
+        client = ScriptedClient(ConnectionError(LEAKY_ERROR))
+        result = runner_with(storage, client).run_quick_benchmark(
+            question=QUESTION, documents=[make_document("1")], models=[MODEL]
+        )
+        assert quality_benchmark_finished_text(result) == (
+            "Quality benchmark complete - 1 of 1 assessments failed - Total cost: $0.0000"
+        )
+
+    def test_a_clean_run_s_status_line_is_its_cost(self, storage: LiteStorage) -> None:
+        """The control."""
+        result = runner_with(storage, ScriptedClient(RCT_ANSWER)).run_quick_benchmark(
+            question=QUESTION, documents=[make_document("1")], models=[MODEL]
+        )
+        assert quality_benchmark_finished_text(result) == (
+            f"Quality benchmark complete - Total cost: ${result.total_cost_usd:.4f}"
+        )
 
     def test_the_run_compares_assessed_documents(self, storage: LiteStorage) -> None:
         """The first model answered; the second's provider was down on one document."""
@@ -543,6 +769,51 @@ class TestDocumentComparison:
         assert result.design_disagreement_rate is None
         assert result.tier_disagreement_rate is None
 
+    def test_a_rate_s_denominator_leaves_out_what_was_not_compared(self) -> None:
+        """One of two comparable documents disagrees: 50%, not a third."""
+        disagreeing = compute_quality_document_comparison(
+            make_document("2"),
+            {"a": evaluated("doc-2", RCT), "b": evaluated("doc-2", CASE_REPORT)},
+        )
+        agreeing = compute_quality_document_comparison(
+            make_document("3"),
+            {"a": evaluated("doc-3", RCT), "b": evaluated("doc-3", RCT)},
+        )
+        result = QualityBenchmarkResult(
+            run_id="run",
+            question=QUESTION,
+            task_type=QUALITY_TASK_STUDY_CLASSIFICATION,
+            evaluator_stats=[],
+            document_comparisons=[self.comparison(), disagreeing, agreeing],
+            design_agreement_matrix={},
+            tier_agreement_matrix={},
+        )
+        assert result.design_disagreement_rate == 0.5
+        assert result.tier_disagreement_rate == 0.5
+
+    def test_an_evaluator_cannot_both_assess_and_fail(self) -> None:
+        """The table showed the design; the dialog showed the failure."""
+        with pytest.raises(ValueError):
+            QualityDocumentComparison(
+                document=make_document("1"),
+                assessments={"a": RCT},
+                designs={"a": RCT.study_design},
+                tiers={"a": RCT.quality_tier},
+                confidences={"a": RCT.confidence},
+                failures={"a": EvaluationErrorCode.API_TIMEOUT.description},
+            )
+
+    def test_a_design_without_its_assessment_is_refused(self) -> None:
+        """Counted as comparable by designs, it had no tier to compare."""
+        with pytest.raises(ValueError):
+            QualityDocumentComparison(
+                document=make_document("1"),
+                assessments={"a": RCT},
+                designs={"a": RCT.study_design, "b": StudyDesign.RCT},
+                tiers={"a": RCT.quality_tier},
+                confidences={"a": RCT.confidence},
+            )
+
     def test_a_disagreement_is_still_one(self) -> None:
         """The control: two assessments that differ disagree."""
         comparison = compute_quality_document_comparison(
@@ -573,6 +844,62 @@ class TestRankings:
             design_agreement_matrix={},
             tier_agreement_matrix={},
         )
+
+    def ranked_with_figures(self) -> QualityBenchmarkResult:
+        """Two models with figures, cheap-fast-unsure and dear-slow-sure, and one without."""
+        cheap = compute_quality_evaluator_stats(
+            make_evaluator(MODEL),
+            [
+                QualityEvaluation(
+                    document_id="doc-1",
+                    evaluator=make_evaluator(MODEL),
+                    assessment=dataclasses.replace(RCT, confidence=0.4),
+                    latency_ms=100.0,
+                    cost_usd=0.01,
+                )
+            ],
+        )
+        dear = compute_quality_evaluator_stats(
+            make_evaluator(OTHER_MODEL),
+            [
+                QualityEvaluation(
+                    document_id="doc-1",
+                    evaluator=make_evaluator(OTHER_MODEL),
+                    assessment=dataclasses.replace(RCT, confidence=0.9),
+                    latency_ms=900.0,
+                    cost_usd=0.05,
+                )
+            ],
+        )
+        silent = compute_quality_evaluator_stats(
+            make_evaluator("ollama:silent"), [failed("doc-1")]
+        )
+        return QualityBenchmarkResult(
+            run_id="run",
+            question=QUESTION,
+            task_type=QUALITY_TASK_STUDY_CLASSIFICATION,
+            evaluator_stats=[silent, dear, cheap],
+            document_comparisons=[],
+            design_agreement_matrix={},
+            tier_agreement_matrix={},
+        )
+
+    @pytest.mark.parametrize(
+        "ranking, first",
+        [
+            ("get_ranking_by_cost", MODEL),
+            ("get_ranking_by_speed", MODEL),
+            ("get_ranking_by_confidence", OTHER_MODEL),
+        ],
+    )
+    def test_the_best_figure_ranks_first(self, ranking: str, first: str) -> None:
+        """Cheapest, fastest, and most confident first; no figure last."""
+        ranked = getattr(self.ranked_with_figures(), ranking)()
+        assert [e.model_string for e, _ in ranked] == [
+            first,
+            OTHER_MODEL if first == MODEL else MODEL,
+            "ollama:silent",
+        ]
 
     @pytest.mark.parametrize(
         "ranking", ["get_ranking_by_cost", "get_ranking_by_speed", "get_ranking_by_confidence"]

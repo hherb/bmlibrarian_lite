@@ -409,6 +409,19 @@ class BiasRisk:
         )
 
 
+def llm_extraction_method(model_string: str) -> str:
+    """The extraction method recorded for an assessment a model made.
+
+    Args:
+        model_string: The model, as "provider:model".
+
+    Returns:
+        e.g. "llm:anthropic:claude-3-5-haiku-20241022". Naming the model
+        lets the quality benchmark reuse the answer as that model's alone.
+    """
+    return f"llm:{model_string}"
+
+
 @dataclass
 class QualityAssessment:
     """
@@ -420,7 +433,8 @@ class QualityAssessment:
 
     Attributes:
         assessment_tier: Source tier (1=metadata, 2=Haiku, 3=Sonnet)
-        extraction_method: Method used (metadata/llm_haiku/llm_sonnet)
+        extraction_method: Method used ("metadata", or "llm:<provider:model>"
+            from :func:`llm_extraction_method`)
         study_design: Classified study design
         quality_tier: Assigned quality tier
         quality_score: Quality score (0-10)
@@ -618,7 +632,7 @@ class QualityAssessment:
             QualityAssessment from classification
         """
         if model_name:
-            extraction_method = f"llm:{model_name}"
+            extraction_method = llm_extraction_method(model_name)
             detail = f"Fast classification via {model_name}"
         else:
             extraction_method = "llm"

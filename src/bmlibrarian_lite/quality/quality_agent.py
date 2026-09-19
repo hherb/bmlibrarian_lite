@@ -47,6 +47,7 @@ from .data_models import (
     BiasRisk,
     DESIGN_TO_TIER,
     DESIGN_TO_SCORE,
+    llm_extraction_method,
 )
 from .study_classifier import STUDY_DESIGN_MAPPING
 
@@ -67,7 +68,7 @@ CRITICAL RULES:
 
 class LiteQualityAgent(LiteBaseAgent):
     """
-    Comprehensive quality assessment using Claude Sonnet.
+    Comprehensive quality assessment by the "quality_assessment" task's model.
 
     Provides detailed evaluation including:
     - Study design classification
@@ -237,9 +238,12 @@ Focus on THIS study's methodology, not studies it references."""
             # Parse confidence
             confidence = self._parse_confidence(data.get("confidence", 0.5))
 
+            # The model is recorded so the benchmark reuses this answer as
+            # that model's, and no other's
+            model = self._get_model()
             return QualityAssessment(
                 assessment_tier=3,
-                extraction_method="llm_sonnet",
+                extraction_method=llm_extraction_method(model),
                 study_design=study_design,
                 quality_tier=DESIGN_TO_TIER.get(study_design, QualityTier.UNCLASSIFIED),
                 quality_score=quality_score,
@@ -254,7 +258,7 @@ Focus on THIS study's methodology, not studies it references."""
                 bias_risk=bias_risk,
                 strengths=data.get("strengths", []),
                 limitations=data.get("limitations", []),
-                extraction_details=["Detailed assessment via Claude Sonnet"],
+                extraction_details=[f"Detailed assessment via {model}"],
             )
 
         except json.JSONDecodeError as e:

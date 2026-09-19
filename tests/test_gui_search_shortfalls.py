@@ -223,8 +223,19 @@ class TestTheSystematicReviewWorker:
         assert "No documents passed quality filter" in message
 
 
-def incremental_worker(target: int) -> tuple[IncrementalSearchWorker, Recorder]:
-    """A search-for-more worker for a fresh question, recording its signals."""
+def incremental_worker(
+    target: int,
+    retry_documents: "list[LiteDocument] | None" = None,
+    already_scored_ids: "set[str] | None" = None,
+) -> tuple[IncrementalSearchWorker, Recorder]:
+    """A search-for-more worker for a fresh question, recording its signals.
+
+    Args:
+        target: New documents to find.
+        retry_documents: Documents to score again, given to the constructor
+            as the Research Questions tab gives them.
+        already_scored_ids: Documents the search skips.
+    """
     config = LiteConfig()
     config.pubmed.email = "test@example.com"
     config.pubmed.api_key = "0123456789abcdef0123456789abcdef0123"
@@ -232,9 +243,10 @@ def incremental_worker(target: int) -> tuple[IncrementalSearchWorker, Recorder]:
         question=QUESTION,
         pubmed_query="aspirin AND stroke",
         target_new_docs=target,
-        already_scored_ids=set(),
+        already_scored_ids=already_scored_ids or set(),
         config=config,
         storage=MagicMock(),
+        retry_documents=retry_documents,
     )
     recorder = Recorder()
     worker.error.connect(recorder.slot("error"))
@@ -369,9 +381,11 @@ class TestTheIncrementalSearchWorker:
         }
         with running(script) as server:
             point_pubmed_client_at(monkeypatch, server.url)
-            worker, recorder = incremental_worker(target=1)
-            worker.retry_documents = [make_document("9")]
-            worker.already_scored_ids = {"pmid-9"}
+            worker, recorder = incremental_worker(
+                target=1,
+                retry_documents=[make_document("9")],
+                already_scored_ids={"pmid-9"},
+            )
 
             worker.run()
 
@@ -385,8 +399,9 @@ class TestTheIncrementalSearchWorker:
         """They need no search: the failure travels with them, not as an error."""
         with running({ESEARCH_PATH: [status_answer(HTTPStatus.TOO_MANY_REQUESTS)]}) as server:
             point_pubmed_client_at(monkeypatch, server.url)
-            worker, recorder = incremental_worker(target=5)
-            worker.retry_documents = [make_document("9")]
+            worker, recorder = incremental_worker(
+                target=5, retry_documents=[make_document("9")]
+            )
 
             worker.run()
 
@@ -394,6 +409,25 @@ class TestTheIncrementalSearchWorker:
         [(documents, shortfalls)] = recorder.calls["finished"]
         assert [document.pmid for document in documents] == ["9"]
         assert [shortfall.provider for shortfall in shortfalls] == [SearchProvider.PUBMED]
+
+    def test_an_unexpected_error_says_the_retries_were_not_scored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The error alone left the documents to retry unmentioned."""
+        from bmlibrarian_lite import pubmed
+
+        def broken_client(**_: Any) -> Any:
+            """A client that cannot be built."""
+            raise RuntimeError("client broke")
+
+        monkeypatch.setattr(pubmed, "PubMedSearchClient", broken_client)
+        worker, recorder = incremental_worker(target=5, retry_documents=[make_document("9")])
+
+        worker.run()
+
+        [(message,)] = recorder.calls["error"]
+        assert message.startswith("client broke")
+        assert "1 document whose scoring failed before was not scored again" in message
 
     def test_a_complete_search_of_scored_documents_is_not_a_failure(
         self, monkeypatch: pytest.MonkeyPatch

@@ -18,6 +18,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtWidgets import QLabel, QTableWidget  # noqa: E402
+
 from bmlibrarian_lite.benchmarking.display import (  # noqa: E402
     FAILED_SCORE_TEXT,
     NOT_AVAILABLE,
@@ -138,6 +140,32 @@ class TestTheTabOverAnOutage:
             outage_result.document_comparisons[0], outage_result.evaluator_stats
         )
         assert dialog.windowTitle() == "Quality Assessment Comparison"
+        texts = [label.text() for label in dialog.findChildren(QLabel)]
+        failure = EvaluationErrorCode.API_CONNECTION_ERROR.description
+        assert f"<b>Assessment failed:</b> {failure}" in texts
+
+    def test_the_comparison_counts_failures_apart(
+        self, qapp: Any, outage_result: QualityBenchmarkResult
+    ) -> None:
+        """The Failed column, and no confidence for the model that answered nothing."""
+        tab = QualityBenchmarkResultsTab(result=outage_result)
+        [table] = [
+            t
+            for t in tab.findChildren(QTableWidget)
+            if t.horizontalHeaderItem(2) is not None
+            and t.horizontalHeaderItem(2).text() == "Failed"
+        ]
+        assert column_texts(table, 1) == ["2", "0"]
+        assert column_texts(table, 2) == ["0", "2"]
+        assert column_texts(table, 3)[1] == NOT_AVAILABLE
+
+    def test_the_header_says_how_many_assessments_failed(
+        self, qapp: Any, outage_result: QualityBenchmarkResult
+    ) -> None:
+        """The failures are named where the run is summarised."""
+        tab = QualityBenchmarkResultsTab(result=outage_result)
+        texts = [label.text() for label in tab.findChildren(QLabel)]
+        assert any("2 of 4 assessments failed" in text for text in texts)
 
     def test_the_result_counts_the_failures(
         self, outage_result: QualityBenchmarkResult
@@ -149,3 +177,4 @@ class TestTheTabOverAnOutage:
         names = (answering.evaluator.display_name, down.evaluator.display_name)
         assert outage_result.design_agreement_matrix[names] is None
         assert outage_result.design_agreement_matrix[(names[1], names[1])] is None
+        assert outage_result.tier_agreement_matrix[(names[1], names[1])] is None

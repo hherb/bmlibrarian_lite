@@ -554,6 +554,22 @@ class TestComputeMeanTierDifference:
         # |5-2| + |3-1| = 3 + 2 = 5, mean = 2.5
         assert compute_mean_tier_difference(tiers1, tiers2) == 2.5
 
+    def test_no_data_is_no_figure(self):
+        """As 0.0, nothing to compare read as full agreement (#314)."""
+        assert compute_mean_tier_difference([], []) is None
+        assert compute_mean_tier_difference([QualityTier.TIER_3_CONTROLLED], []) is None
+        assert (
+            compute_mean_tier_difference([QualityTier.TIER_3_CONTROLLED, None], [None, QualityTier.TIER_1_ANECDOTAL])
+            is None
+        )
+
+    def test_a_failure_is_left_out(self):
+        """Only documents both assessed are compared."""
+        assert compute_mean_tier_difference(
+            [QualityTier.TIER_5_SYNTHESIS, None],
+            [QualityTier.TIER_3_CONTROLLED, QualityTier.TIER_1_ANECDOTAL],
+        ) == 2.0
+
 
 class TestComputeConfidenceCorrelation:
     """Tests for compute_confidence_correlation function."""
@@ -581,6 +597,13 @@ class TestComputeConfidenceCorrelation:
 
         correlation = compute_confidence_correlation(conf1, conf2)
         assert correlation is None
+
+    def test_a_failure_is_left_out(self):
+        """Only documents both assessed are correlated."""
+        conf1 = [0.5, 0.6, None, 0.8]
+        conf2 = [0.5, 0.6, 0.1, 0.8]
+
+        assert compute_confidence_correlation(conf1, conf2) == pytest.approx(1.0)
 
 
 class TestQualityEvaluation:

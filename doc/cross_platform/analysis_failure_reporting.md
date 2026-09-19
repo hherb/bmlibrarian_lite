@@ -271,12 +271,15 @@ to read a record written elsewhere.
   follow the same rules — failures counted per model and left out, a pair
   with too few documents in common shown as "n/a", never 0%. **A quality
   benchmark** (study design classification or detailed assessment) follows
-  them too (#314): a failed call, or an answer naming no design on the list
-  the prompt offers, is a failure — never the "unknown" design, which is
-  an answer — counted apart from the design and tier distributions and the
-  agreement between models. A review's assessment stands in for its model's
-  answer only when that model made it for the same task and it names a
-  design; a design read from publication-type metadata answers for no model.
+  them too (#314): a failed call, or an answer naming no recognised design,
+  is a failure — never the "unknown" design, which is an answer — counted
+  apart from the design and tier distributions and the agreement between
+  models; one malformed answer fails its document, not the run. A review's
+  assessment stands in for a model's answer only when it records that model
+  as its maker, is for the same task, names a design and was not downgraded
+  afterwards; a design read from publication-type metadata answers for no
+  model. A reused assessment is not counted in cost or speed per
+  assessment.
 - **A rerun retries a failure** (#316). Deduplicating a search for more
   documents against those already scored, a document whose every scoring
   failed is not scored: it is scored again, and the user is told how many are

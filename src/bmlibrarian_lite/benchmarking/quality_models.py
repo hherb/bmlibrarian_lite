@@ -44,9 +44,9 @@ class QualityEvaluatorStats:
 
     Aggregates performance metrics across all documents evaluated by this
     evaluator for quality assessment. An assessment the evaluator could not
-    produce is counted apart, never among its assessments: recorded as
-    "unclassified", an outage read as the model's own verdict that it could
-    not tell the design (#314).
+    produce is counted apart, never among its assessments. (Before #314 a
+    failure was recorded as "unclassified", so an outage read as the model's
+    own verdict that it could not tell the design.)
 
     Attributes:
         evaluator: The evaluator these stats are for
@@ -61,6 +61,8 @@ class QualityEvaluatorStats:
         total_tokens_output: Total output tokens used, failed calls included
         total_cost_usd: Total estimated cost, failed calls included
         failed_evaluations: Number of documents it could not assess
+        reused_evaluations: Of its assessments, how many were the review's
+            own, replayed at no cost
     """
 
     evaluator: Evaluator
@@ -73,6 +75,7 @@ class QualityEvaluatorStats:
     total_tokens_output: int
     total_cost_usd: float
     failed_evaluations: int
+    reused_evaluations: int = 0
 
     @property
     def total_evaluations(self) -> int:
@@ -85,25 +88,29 @@ class QualityEvaluatorStats:
 
         Returns:
             The cost, failed calls included since they were billed, divided
-            by the assessments it bought; None when it assessed no document.
-            As 0.0, a model whose every call failed ranked as the cheapest.
+            by the assessments it bought in this run -- not those replayed
+            from the review, which cost nothing and made the baseline look
+            cheap; None when it bought none. As 0.0, a model whose every call
+            failed ranked as the cheapest.
         """
-        if self.total_evaluations == 0:
+        bought = self.total_evaluations - self.reused_evaluations
+        if bought <= 0:
             return None
-        return self.total_cost_usd / self.total_evaluations
+        return self.total_cost_usd / bought
 
     @property
     def tokens_per_evaluation(self) -> float | None:
         """What each assessment took in tokens, failed calls included.
 
         Returns:
-            The tokens, failed calls included, divided by the assessments;
-            None when it assessed no document.
+            The tokens, failed calls included, divided by the assessments
+            bought in this run; None when it bought none.
         """
-        if self.total_evaluations == 0:
+        bought = self.total_evaluations - self.reused_evaluations
+        if bought <= 0:
             return None
         total = self.total_tokens_input + self.total_tokens_output
-        return total / self.total_evaluations
+        return total / bought
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -121,6 +128,7 @@ class QualityEvaluatorStats:
             "cost_per_evaluation": self.cost_per_evaluation,
             "tokens_per_evaluation": self.tokens_per_evaluation,
             "failed_evaluations": self.failed_evaluations,
+            "reused_evaluations": self.reused_evaluations,
         }
 
 
@@ -130,8 +138,9 @@ class QualityDocumentComparison:
     Comparison of quality assessments for a single document across evaluators.
 
     Only assessments are compared. An evaluator that could not assess the
-    document is named in ``failures`` instead: among the assessments, its
-    "unknown" design made the document look like a disagreement (#314).
+    document is named in ``failures`` instead. (Before #314 it was among the
+    assessments, and its "unknown" design made the document look like a
+    disagreement.)
 
     Attributes:
         document: The document being compared (for access to full metadata)
@@ -149,6 +158,27 @@ class QualityDocumentComparison:
     tiers: dict[str, QualityTier]  # evaluator display name -> tier
     confidences: dict[str, float]  # evaluator display name -> confidence
     failures: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Refuse an evaluator both assessed and failed, or half-recorded.
+
+        Raises:
+            ValueError: If the designs, tiers and confidences are not of the
+                same evaluators as the assessments, or an evaluator is among
+                both the assessments and the failures.
+        """
+        assessed = set(self.assessments)
+        if not assessed == set(self.designs) == set(self.tiers) == set(self.confidences):
+            raise ValueError(
+                f"Comparison of {self.document.id}: designs, tiers and "
+                "confidences must be of the evaluators that assessed it"
+            )
+        both = assessed & set(self.failures)
+        if both:
+            raise ValueError(
+                f"Comparison of {self.document.id}: {sorted(both)} both "
+                "assessed the document and failed"
+            )
 
     @property
     def document_id(self) -> str:
@@ -450,7 +480,7 @@ class QualityBenchmarkResult:
         return json.dumps(self.to_dict(), indent=2)
 
 
-@dataclass
+@dataclass(frozen=True)
 class QualityEvaluation:
     """
     A single quality evaluation result with metadata.
@@ -471,6 +501,8 @@ class QualityEvaluation:
         tokens_output: Number of output tokens used
         cost_usd: Estimated cost in USD
         timestamp: When this evaluation was performed
+        reused: Whether the assessment is the review's own, replayed rather
+            than bought in this run -- so it took no time and cost nothing
     """
 
     document_id: str
@@ -482,13 +514,15 @@ class QualityEvaluation:
     tokens_output: int = 0
     cost_usd: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
+    reused: bool = False
 
     def __post_init__(self) -> None:
         """Refuse an evaluation that is both, or neither, an answer and a failure.
 
         Raises:
             ValueError: If exactly one of ``assessment`` and ``failure`` is
-                not given, or the failure is ``SUCCESS``.
+                not given, the failure is ``SUCCESS``, the assessment names
+                the "unknown" design, or a failure is marked reused.
         """
         if (self.assessment is None) == (self.failure is None):
             raise ValueError(
@@ -497,6 +531,18 @@ class QualityEvaluation:
             )
         if self.failure is EvaluationErrorCode.SUCCESS:
             raise ValueError(f"Evaluation of {self.document_id}: SUCCESS is not a failure")
+        # No prompt offers "unknown" ("other" is the uncertain answer): it is
+        # how the review's filter records a failure, not a model's verdict
+        if (
+            self.assessment is not None
+            and self.assessment.study_design is StudyDesign.UNKNOWN
+        ):
+            raise ValueError(
+                f"Evaluation of {self.document_id}: an \"unknown\" design is a "
+                "failure, not an assessment"
+            )
+        if self.reused and self.assessment is None:
+            raise ValueError(f"Evaluation of {self.document_id}: a failure cannot be reused")
 
     @property
     def is_failure(self) -> bool:
@@ -537,4 +583,5 @@ class QualityEvaluation:
             "tokens_output": self.tokens_output,
             "cost_usd": self.cost_usd,
             "timestamp": self.timestamp.isoformat(),
+            "reused": self.reused,
         }

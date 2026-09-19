@@ -265,11 +265,14 @@ The quality benchmark follows the same rules. A document a model could not
 classify is counted in its **Failed** column and shown as **failed** in the
 document details (hover for why), never as an "Unknown" design: "Unknown" is
 an answer, a failure is none. Design and tier agreement compare only
-documents both models classified. An answer that names no study design on
-the list the model is given is counted as a failure. When the benchmark
-reuses the review's own classifications for the review's model, it reuses
-only classifications that model actually made for the same task, never one
-the review could not make or one read from PubMed's publication types.
+documents both models classified. An answer that names no recognised study
+design is counted as a failure, and one bad answer fails only that document,
+not the whole benchmark. When the benchmark reuses the review's own
+classifications, it reuses only those the same model made for the same task,
+as the model gave them: never one the review could not make, one read from
+PubMed's publication types, one a transparency check downgraded, or one
+another model made. Reused classifications cost nothing in this run, so they
+are left out of the cost and speed per assessment.
 
 A model's answer counts as a score only when it gives a whole number from 1
 to 5. An answer that declines to score, gives 0, or scores on another scale

@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Quality benchmark results display dialogs for BMLibrarian Lite.
+Quality benchmark results tab and document dialog for BMLibrarian Lite.
 
 Provides:
 - QualityBenchmarkResultsTab: Display quality benchmark results with tables
@@ -281,8 +281,8 @@ class QualityBenchmarkResultsTab(QWidget):
     """
     Tab widget displaying quality benchmark results.
 
-    This is a non-modal version that can be embedded as a tab in the main window.
-    Can be created empty and updated later with results.
+    Embedded as a tab in the main window; can be created empty and updated
+    later with results.
     """
 
     def __init__(

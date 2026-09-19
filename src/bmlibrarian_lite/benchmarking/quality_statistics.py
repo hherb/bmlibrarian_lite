@@ -74,9 +74,9 @@ def compute_quality_evaluator_stats(
     confidences = [a.confidence for a in assessments]
     mean_confidence = statistics.mean(confidences) if confidences else None
 
-    # Latency stats: how long the evaluator takes to answer, which a
-    # timed-out attempt does not say
-    latencies = [e.latency_ms for e in judged if e.latency_ms > 0]
+    # Latency stats: how long the evaluator takes to answer, which neither a
+    # timed-out attempt nor a replayed review assessment says
+    latencies = [e.latency_ms for e in judged if not e.reused]
     mean_latency = statistics.mean(latencies) if latencies else None
 
     # Token stats
@@ -97,6 +97,7 @@ def compute_quality_evaluator_stats(
         total_tokens_output=total_output,
         total_cost_usd=total_cost,
         failed_evaluations=len(evaluations) - len(judged),
+        reused_evaluations=sum(1 for e in judged if e.reused),
     )
 
 
@@ -339,38 +340,45 @@ def find_tier_disagreement_documents(
 
 
 def compute_confidence_correlation(
-    confidences1: list[float],
-    confidences2: list[float],
+    confidences1: Sequence[float | None],
+    confidences2: Sequence[float | None],
 ) -> Optional[float]:
     """
     Compute Pearson correlation between confidence scores of two evaluators.
 
     Args:
-        confidences1: First evaluator's confidence scores
-        confidences2: Second evaluator's confidence scores
+        confidences1: First evaluator's confidence scores (ordered by
+            document), None where it assessed none
+        confidences2: Second evaluator's confidence scores (same order)
 
     Returns:
-        Pearson correlation coefficient (-1.0 to 1.0), or None if cannot compute
+        Pearson correlation coefficient (-1.0 to 1.0) over the documents both
+        assessed, or None if cannot compute
     """
-    if len(confidences1) != len(confidences2) or len(confidences1) < 2:
+    if len(confidences1) != len(confidences2):
         return None
+    pairs = _assessed_pairs(confidences1, confidences2)
+    if len(pairs) < 2:
+        return None
+    xs = [c1 for c1, _ in pairs]
+    ys = [c2 for _, c2 in pairs]
 
     try:
         # Check if either list has zero variance
-        if len(set(confidences1)) == 1 or len(set(confidences2)) == 1:
+        if len(set(xs)) == 1 or len(set(ys)) == 1:
             return None
 
-        mean1 = statistics.mean(confidences1)
-        mean2 = statistics.mean(confidences2)
-        std1 = statistics.stdev(confidences1)
-        std2 = statistics.stdev(confidences2)
+        mean1 = statistics.mean(xs)
+        mean2 = statistics.mean(ys)
+        std1 = statistics.stdev(xs)
+        std2 = statistics.stdev(ys)
 
         if std1 == 0 or std2 == 0:
             return None
 
-        n = len(confidences1)
+        n = len(xs)
         covariance = sum(
-            (c1 - mean1) * (c2 - mean2) for c1, c2 in zip(confidences1, confidences2)
+            (c1 - mean1) * (c2 - mean2) for c1, c2 in zip(xs, ys)
         ) / (n - 1)
 
         return covariance / (std1 * std2)
@@ -379,24 +387,28 @@ def compute_confidence_correlation(
 
 
 def compute_mean_tier_difference(
-    tiers1: list[QualityTier],
-    tiers2: list[QualityTier],
-) -> float:
+    tiers1: Sequence[QualityTier | None],
+    tiers2: Sequence[QualityTier | None],
+) -> float | None:
     """
     Compute mean absolute difference between tier values.
 
     Args:
-        tiers1: First evaluator's quality tiers
-        tiers2: Second evaluator's quality tiers
+        tiers1: First evaluator's quality tiers (ordered by document), None
+            where it assessed none
+        tiers2: Second evaluator's quality tiers (same order)
 
     Returns:
-        Mean absolute difference (0.0 to 5.0 for 0-5 tier scale)
+        Mean absolute difference (0.0 to 5.0 for 0-5 tier scale) over the
+        documents both assessed; None when there are none, or the lists
+        differ in length. As 0.0, no data read as full agreement.
     """
-    if len(tiers1) != len(tiers2) or not tiers1:
-        return 0.0
-
-    total_diff = sum(abs(t1.value - t2.value) for t1, t2 in zip(tiers1, tiers2))
-    return total_diff / len(tiers1)
+    if len(tiers1) != len(tiers2):
+        return None
+    pairs = _assessed_pairs(tiers1, tiers2)
+    if not pairs:
+        return None
+    return sum(abs(t1.value - t2.value) for t1, t2 in pairs) / len(pairs)
 
 
 def compute_design_distribution(

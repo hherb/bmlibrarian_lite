@@ -156,6 +156,25 @@ def failed_assessments_sentence(result: QualityBenchmarkResult) -> str | None:
     return f"{failed} of {attempted} assessments failed (see the Failed column)"
 
 
+def quality_benchmark_finished_text(result: QualityBenchmarkResult) -> str:
+    """The status line a finished quality benchmark leaves.
+
+    Args:
+        result: The benchmark result.
+
+    Returns:
+        e.g. "Quality benchmark complete - 2 of 4 assessments failed - Total
+        cost: $0.0100". Its cost alone read as success when every
+        assessment had failed.
+    """
+    parts = ["Quality benchmark complete"]
+    failed = result.failed_evaluations
+    if failed:
+        parts.append(f"{failed} of {failed + result.total_evaluations} assessments failed")
+    parts.append(f"Total cost: ${result.total_cost_usd:.4f}")
+    return " - ".join(parts)
+
+
 def quality_agreement_background(value: float | None, is_design: bool) -> str | None:
     """The background colour a quality agreement cell is drawn with.
 

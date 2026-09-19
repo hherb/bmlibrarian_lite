@@ -12,6 +12,7 @@ question over. A document is judged when any scoring of it is a judgement;
 one whose every scoring failed is scored again, and the user is told so.
 """
 
+import sqlite3
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -226,6 +227,27 @@ class TestTheRerun:
             "1 document already scored; 1 whose scoring failed will be scored again"
         )
 
+    def test_a_failed_document_with_no_record_is_left_for_the_search(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any, storage: LiteStorage
+    ) -> None:
+        """Skipped as well, it could never be found again, as the tab promises."""
+        record(storage, make_document("2"), UNREACHABLE)
+        record(storage, make_document("3"), UNREACHABLE)
+        loadable = storage.get_documents
+        monkeypatch.setattr(
+            storage,
+            "get_documents",
+            lambda ids: loadable([i for i in ids if i != "pmid-3"]),
+        )
+        tab, _ = rerun_tab(monkeypatch, tmp_path, storage)
+
+        tab._on_rerun_clicked()
+
+        [started] = RecordingWorker.started
+        assert started["already_scored_ids"] == {"pmid-2"}
+        assert [d.id for d in started["retry_documents"]] == ["pmid-2"]
+        assert "1 whose scoring failed can no longer be loaded" in tab.progress_label.text()
+
     def test_the_finish_counts_the_retried_apart(
         self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any, storage: LiteStorage
     ) -> None:
@@ -245,6 +267,38 @@ class TestTheRerun:
         assert [d.id for d in documents] == ["pmid-2", "pmid-3"]
         message_box.information.assert_called_once()
 
+    def test_an_incomplete_search_that_found_only_retries_warns(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any, storage: LiteStorage
+    ) -> None:
+        """The retried documents go on to score; the warning counts them apart."""
+        from bmlibrarian_lite.data_models import (
+            RequestFailure,
+            RequestFailureKind,
+            RetrievalShortfall,
+            SearchProvider,
+        )
+
+        record(storage, make_document("2"), UNREACHABLE)
+        tab, message_box = rerun_tab(monkeypatch, tmp_path, storage)
+        handed_on: list[tuple[Any, ...]] = []
+        tab.new_documents_found.connect(lambda *args: handed_on.append(args))
+        tab._on_rerun_clicked()
+        pubmed_down = RetrievalShortfall(
+            SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 429)
+        )
+
+        tab._on_search_finished([make_document("2")], [pubmed_down])
+
+        [(_, _, documents, shortfalls)] = handed_on
+        assert [d.id for d in documents] == ["pmid-2"]
+        assert shortfalls == [pubmed_down]
+        message_box.warning.assert_called_once()
+        _, title, text = message_box.warning.call_args.args
+        assert title == "Search Incomplete"
+        assert text.startswith(
+            "Found no new documents; 1 document whose scoring failed before"
+        )
+
     def test_unreadable_scores_stop_the_rerun_and_say_so(
         self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
@@ -252,6 +306,21 @@ class TestTheRerun:
         storage = MagicMock()
         storage.get_research_questions_summary.return_value = []
         storage.get_rerun_document_ids_for_question.side_effect = SQLiteError("locked")
+        tab, message_box = rerun_tab(monkeypatch, tmp_path, storage)
+
+        tab._on_rerun_clicked()
+
+        assert RecordingWorker.started == []
+        message_box.warning.assert_called_once()
+
+    def test_unloadable_failed_documents_stop_the_rerun_too(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """The split read; loading the documents to retry did not."""
+        storage = MagicMock()
+        storage.get_research_questions_summary.return_value = []
+        storage.get_rerun_document_ids_for_question.return_value = ({"pmid-1"}, {"pmid-2"})
+        storage.get_documents.side_effect = sqlite3.Error("disk I/O error")
         tab, message_box = rerun_tab(monkeypatch, tmp_path, storage)
 
         tab._on_rerun_clicked()

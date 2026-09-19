@@ -101,7 +101,8 @@ class QualityBenchmarkWorker(QThread):
             task_type: "study_classification" or "quality_assessment"
             checkpoint_id: Optional checkpoint ID for storing results
             existing_assessments: Pre-existing assessments to reuse
-            reuse_cross_run: If True, reuse from previous runs
+            reuse_cross_run: Passed on to the runner, which ignores it: the
+                quality benchmark stores no per-document evaluations to reuse
         """
         super().__init__()
         self.config = config
