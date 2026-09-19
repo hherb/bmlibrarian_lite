@@ -473,6 +473,26 @@ class QualityFilterWorker(QThread):
         self._cancelled = True
 
 
+def unexpected_rerun_error_text(error: str, retrying: int) -> str:
+    """What a rerun that stopped on an unexpected error says.
+
+    Args:
+        error: The error's text.
+        retrying: Documents the rerun was to score again.
+
+    Returns:
+        The error, and -- when there were any -- that the documents to
+        retry were not scored again, which the error alone left unsaid.
+    """
+    if not retrying:
+        return error
+    if retrying == 1:
+        unscored = "1 document whose scoring failed before was not scored again"
+    else:
+        unscored = f"{retrying} documents whose scoring failed before were not scored again"
+    return f"{error}\n\n{unscored}; re-run the question to retry them."
+
+
 class IncrementalSearchWorker(QThread):
     """
     Background worker for incremental PubMed searches with deduplication.
@@ -490,14 +510,18 @@ class IncrementalSearchWorker(QThread):
     efetch batch could not fetch, or the parser could not read, are recorded
     and the search goes on. When the search ends with new documents, they
     travel with the shortfalls saying what is missing; when failures leave
-    it with no new document, the search is an error.
+    it with nothing to score, the search is an error.
+
+    Documents whose every scoring failed are scored again (#316): the caller
+    passes them in, and they lead what the search finds.
 
     Signals:
         progress: Emitted with (new_docs_found, target, message)
         batch_complete: Emitted when a batch is fetched (batch_docs)
-        finished: Emitted when search completes (all_new_docs, shortfalls);
-            the shortfalls list is empty unless part of the search failed,
-            and never set when no new document was found
+        finished: Emitted when search completes (documents to score --
+            the retried ones, then the new ones -- and shortfalls); the
+            shortfalls list is empty unless part of the search failed, and
+            never set when there is nothing to score
         error: Emitted on error (error message, with advice for a failed search)
     """
 
@@ -515,6 +539,7 @@ class IncrementalSearchWorker(QThread):
         config: "LiteConfig",
         storage: "LiteStorage",
         parent: Optional[QWidget] = None,
+        retry_documents: "list[LiteDocument] | None" = None,
     ) -> None:
         """
         Initialize the incremental search worker.
@@ -523,16 +548,25 @@ class IncrementalSearchWorker(QThread):
             question: Natural language research question
             pubmed_query: PubMed query string to execute
             target_new_docs: Target number of new documents to find
-            already_scored_ids: Set of document IDs already scored
+            already_scored_ids: Document IDs the search skips: those already
+                scored, and those being retried
             config: Lite configuration
             storage: Storage layer for saving documents
             parent: Optional parent widget
+            retry_documents: Documents whose every scoring failed, to be
+                scored again (#316). They lead the documents found, do not
+                count toward ``target_new_docs``, and survive a search that
+                ended in recorded failures (shortfalls): they need no search
+                to be scored. An unexpected error ends the rerun without
+                them, and says so; they are still failed, so the next rerun
+                retries them.
         """
         super().__init__(parent)
         self.question = question
         self.pubmed_query = pubmed_query
         self.target_new_docs = target_new_docs
         self.already_scored_ids = already_scored_ids
+        self.retry_documents: list[LiteDocument] = list(retry_documents or [])
         self.config = config
         self.storage = storage
         self._cancelled = False
@@ -680,13 +714,13 @@ class IncrementalSearchWorker(QThread):
                     break
 
             shortfalls = combined_shortfalls(shortfalls)
-            if shortfalls and not all_new_docs:
-                # Nothing new, and something failed: nobody knows whether the
-                # failed records held new documents (#247).
+            if shortfalls and not all_new_docs and not self.retry_documents:
+                # Nothing to score, and something failed: nobody knows
+                # whether the failed records held new documents (#247).
                 raise SearchFailedError(shortfalls)
 
             if not self._cancelled:
-                self.finished.emit(all_new_docs, shortfalls)
+                self.finished.emit(self.retry_documents + all_new_docs, shortfalls)
 
         except SearchFailedError as e:
             logger.warning(f"Incremental search failed: {e}")
@@ -695,7 +729,9 @@ class IncrementalSearchWorker(QThread):
         except Exception as e:
             logger.exception("Incremental search failed")
             if not self._cancelled:
-                self.error.emit(str(e))
+                self.error.emit(
+                    unexpected_rerun_error_text(str(e), len(self.retry_documents))
+                )
 
     def _extract_year(self, date_str: Optional[str]) -> Optional[int]:
         """

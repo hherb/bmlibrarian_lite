@@ -56,7 +56,7 @@ from ..audit_records import (
 )
 from ..config import LiteConfig
 from ..storage import LiteStorage
-from .research_questions_tab import ResearchQuestionsTab
+from .research_questions_tab import ResearchQuestionsTab, documents_text
 from .systematic_review_tab import SystematicReviewTab
 from .audit_trail_tab import AuditTrailTab
 from .report_tab import ReportTab
@@ -516,7 +516,8 @@ class LiteMainWindow(QMainWindow):
         Args:
             question: The research question text
             pubmed_query: The PubMed query string
-            documents: List of new LiteDocument objects found
+            documents: The LiteDocuments to score: new ones, and any whose
+                every scoring failed before (#316)
             search_shortfalls: RetrievalShortfall list for what the search is
                 missing; the review's report must say so (#247)
         """
@@ -535,7 +536,8 @@ class LiteMainWindow(QMainWindow):
         self.tab_widget.setCurrentWidget(self.systematic_review_tab)
 
         self.status_bar.showMessage(
-            f"Found {len(documents)} new documents. Click 'Run Review' to score them.", 5000
+            f"{documents_text(len(documents))} to score. Click 'Run Review' to score them.",
+            5000,
         )
 
     def _load_benchmark_results_for_question(self, question: str) -> None:

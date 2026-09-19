@@ -121,6 +121,7 @@ class TestQualityEvaluatorStats:
             total_tokens_input=400,
             total_tokens_output=200,
             total_cost_usd=0.002,
+            failed_evaluations=0,
         )
         assert stats.total_evaluations == 2
 
@@ -140,6 +141,7 @@ class TestQualityEvaluatorStats:
             total_tokens_input=400,
             total_tokens_output=200,
             total_cost_usd=0.004,
+            failed_evaluations=0,
         )
         assert stats.cost_per_evaluation == pytest.approx(0.002)
 
@@ -153,13 +155,15 @@ class TestQualityEvaluatorStats:
             assessments=[],
             design_distribution={},
             tier_distribution={},
-            mean_confidence=0.0,
-            mean_latency_ms=0.0,
+            mean_confidence=None,
+            mean_latency_ms=None,
             total_tokens_input=0,
             total_tokens_output=0,
             total_cost_usd=0.0,
+            failed_evaluations=0,
         )
-        assert stats.cost_per_evaluation == 0.0
+        # As 0.0, a model that assessed nothing ranked as the cheapest (#314)
+        assert stats.cost_per_evaluation is None
 
     def test_to_dict(
         self,
@@ -177,6 +181,7 @@ class TestQualityEvaluatorStats:
             total_tokens_input=200,
             total_tokens_output=100,
             total_cost_usd=0.001,
+            failed_evaluations=0,
         )
         result = stats.to_dict()
 
@@ -292,6 +297,7 @@ class TestQualityBenchmarkResult:
             total_tokens_input=400,
             total_tokens_output=200,
             total_cost_usd=0.002,
+            failed_evaluations=0,
         )
 
         result = QualityBenchmarkResult(
@@ -322,6 +328,7 @@ class TestQualityBenchmarkResult:
             total_tokens_input=200,
             total_tokens_output=100,
             total_cost_usd=0.001,
+            failed_evaluations=0,
         )
         stats2 = QualityEvaluatorStats(
             evaluator=sample_evaluator,
@@ -333,6 +340,7 @@ class TestQualityBenchmarkResult:
             total_tokens_input=200,
             total_tokens_output=100,
             total_cost_usd=0.002,
+            failed_evaluations=0,
         )
 
         result = QualityBenchmarkResult(
@@ -374,8 +382,8 @@ class TestComputeDesignAgreement:
         assert agreement == pytest.approx(2/3)  # 2 out of 3 match
 
     def test_empty_lists(self):
-        """Test with empty lists (perfect agreement)."""
-        assert compute_design_agreement([], []) == 1.0
+        """Two evaluators with no document in common have no agreement (#314)."""
+        assert compute_design_agreement([], []) is None
 
     def test_mismatched_lengths_raises(self):
         """Test that mismatched lengths raise ValueError."""
@@ -546,6 +554,22 @@ class TestComputeMeanTierDifference:
         # |5-2| + |3-1| = 3 + 2 = 5, mean = 2.5
         assert compute_mean_tier_difference(tiers1, tiers2) == 2.5
 
+    def test_no_data_is_no_figure(self):
+        """As 0.0, nothing to compare read as full agreement (#314)."""
+        assert compute_mean_tier_difference([], []) is None
+        assert compute_mean_tier_difference([QualityTier.TIER_3_CONTROLLED], []) is None
+        assert (
+            compute_mean_tier_difference([QualityTier.TIER_3_CONTROLLED, None], [None, QualityTier.TIER_1_ANECDOTAL])
+            is None
+        )
+
+    def test_a_failure_is_left_out(self):
+        """Only documents both assessed are compared."""
+        assert compute_mean_tier_difference(
+            [QualityTier.TIER_5_SYNTHESIS, None],
+            [QualityTier.TIER_3_CONTROLLED, QualityTier.TIER_1_ANECDOTAL],
+        ) == 2.0
+
 
 class TestComputeConfidenceCorrelation:
     """Tests for compute_confidence_correlation function."""
@@ -573,6 +597,13 @@ class TestComputeConfidenceCorrelation:
 
         correlation = compute_confidence_correlation(conf1, conf2)
         assert correlation is None
+
+    def test_a_failure_is_left_out(self):
+        """Only documents both assessed are correlated."""
+        conf1 = [0.5, 0.6, None, 0.8]
+        conf2 = [0.5, 0.6, 0.1, 0.8]
+
+        assert compute_confidence_correlation(conf1, conf2) == pytest.approx(1.0)
 
 
 class TestQualityEvaluation:
@@ -632,5 +663,5 @@ class TestComputeQualityEvaluatorStats:
         stats = compute_quality_evaluator_stats(sample_evaluator, [])
 
         assert stats.total_evaluations == 0
-        assert stats.mean_confidence == 0.0
+        assert stats.mean_confidence is None
         assert stats.design_distribution == {}

@@ -71,6 +71,8 @@ from ..data_models import (
     analysis_shortfall_for_failed_scores,
 )
 from ..benchmarking.display import failed_scorings_sentence
+from ..benchmarking.quality_display import quality_benchmark_finished_text
+from ..benchmarking.quality_models import QualityBenchmarkResult
 from ..benchmarking.models import BenchmarkResult
 from ..analysis_failures import (
     analysis_failure_advice,
@@ -1536,11 +1538,8 @@ class SystematicReviewTab(QWidget):
         self.quality_benchmark_btn.setEnabled(True)
 
         # Log summary
-        if hasattr(result, 'total_cost_usd'):
-            cost = result.total_cost_usd
-            self.progress_label.setText(
-                f"Quality benchmark complete - Total cost: ${cost:.4f}"
-            )
+        if isinstance(result, QualityBenchmarkResult):
+            self.progress_label.setText(quality_benchmark_finished_text(result))
             logger.info(f"Quality benchmark completed: {result}")
 
             # Emit signal to show results (handled by main window)

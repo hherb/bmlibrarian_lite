@@ -8,81 +8,93 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#306 + #307 + #310 + #315 — a failure is not a score**, branch
-`fix/failure-is-not-a-score-306`, PR #317. Python only. Compress
-into **Recently landed** once merged. Every place a failed model call was
-still read, drawn, counted or reused as a judgement; the contract
-(`doc/cross_platform/analysis_failure_reporting.md`) gained the rules.
+**#314 + #316 — a quality benchmark counts a failure apart, and a rerun
+retries one**, branch `fix/benchmark-and-rerun-failures-314-316`, PR #321. Python only. Compress into **Recently landed** once merged.
+#306's rules carried to the two places PR #317 left. Contract
+(`doc/cross_platform/analysis_failure_reporting.md`) updated; Python's only
+known gap there is now #319.
 
-- **The benchmark** (#306). `BenchmarkRunner` reads answers with the review's
-  `parse_score_response()` and records a failure as its classified code — it
-  stored a 1 with the raw exception, and defaulted an unreadable answer to 1.
-  Statistics count failures apart: no mean, latency or self-agreement for a
-  model that judged nothing, agreement over documents both models judged,
-  spread and disagreement rates over documents at least two judged — `None`,
-  shown as `n/a` by `benchmarking/display.py`, never 0% or 100%. **A stored
-  failure is never reused, and reuse is of the same question only** (it read
-  every question's scores). A stored pre-#306 result reads its legacy entries
-  as failures and says its 1s may include them; its distribution reloads with
-  int keys (it showed 0 everywhere). The confirm dialog's estimate counts
-  judged documents per model, not earlier runs. `BenchmarkResultsDialog`, an
-  unused duplicate of the tab's code, is gone.
-- **An answer holding no score on the scale is a failure** (second review).
-  `parse_score_response()` clamped "0"/"-3"/"42" to a verdict, read `true` as
-  1, read "Score: 10/10" and "a score 1-5" as 1, and searched a null-score
-  JSON answer's explanation for a digit. It now returns `None` for all of
-  these (retried, then `JSON_PARSE_ERROR`); a JSON answer is that object
-  alone. Also: cost/tokens per judgement are `None` for a model that judged
-  nothing (`get_ranking_by_cost` ranked it cheapest and stored 0.0); an
-  unreadable stored benchmark raises `StoredResultUnreadableError` and the tab
-  says "could not be loaded" (it read as "no results", inviting a paid
-  re-run); older empty stats reload with no mean or latency; the distribution
-  of a model that judged nothing is `n/a`; the Research Questions tab and
-  restore message count failures apart (`scored_count_text()`).
-- **A stored failure has two forms.** `is_scoring_failure()` (+
-  `scoring_failure_sql()`, exact prefix via `substr` because SQLite `LIKE`
-  ignores case) recognises the score-1 rows older builds wrote; a restore
-  passes scores through `as_recorded_failure()` (#315) so they audit as
-  failures without their raw text — and `classify_document_outcomes()` now
-  applies it itself, so no load path has to remember. One older form cannot
-  be recognised (the pre-#306 runner's 1 for an answer with no `score`); the
-  older-result note says so. **Scripts:** `concordance_analysis.py` counts
-  failures per model, shows a pair with too few shared documents as `n/a`
-  (was 0%), and keys by the whole question (50 characters let two collide);
-  `fix_missing_evaluations.py` deletes a failure only for its own question
-  and only after the re-score is saved, and skips pairs judged since;
-  `run_benchmark.py` retries the older form too.
-- **The Audit Trail tab** (#307): a grey "Scoring failed" badge with the
-  reason, never "-4/5"; cards sort judged, failed, never scored
-  (`outcome_sort_key()`); the Queries card counts failures apart.
-- **Silent or unread** (#310). `CitationOutcome.failed` names each
-  `ExtractionFailure`; counts and causes derive from it. **Recorded only when
-  extraction ran to the end** (`citation_extraction_recorded`): an earlier
-  revision of this branch recorded a cancelled run's unread documents as
-  "none quotable". A stored list naming a document twice, or a cause of
-  `SUCCESS`, reads as not recorded / `UNKNOWN_ERROR`. The audit
-  file lists them, the dialog says per relevant document cited / none
-  quotable / could not be extracted, the checkpoint keeps them, and **`None`
-  is "not recorded", never "none failed"**. A restore reads its own run's
-  citations and prefers the question's checkpoint with a report (a later
-  benchmark checkpoint hid the review). MCP sources carry
-  `citation_extraction_error`.
-- **Lodged, not addressed here:** #314 the quality benchmark records a failed
-  call as an "unclassified" study; #316 a rerun treats a failed document as
-  already scored; #318 "a failure is not a score" is a convention, not a type
-  invariant (`ScoredDocument` accepts 0, storage getters return the older
-  form as a judgement, mutable `CitationOutcome.citations`).
-- **Verified:** `pytest tests/` — 1499 passed, 3 xfailed; `lint_delta.py
+- **Quality benchmark** (#314). `QualityEvaluation` (frozen) holds exactly one
+  of `assessment` / `failure` (`EvaluationErrorCode`, checked in
+  `__post_init__`, which also refuses an `"unknown"` design and a reused
+  failure). The runner's shared `_evaluate()` classifies a raised call
+  (`classify_exhausted_retries` for the wrapper); an answer is `EMPTY_RESPONSE`
+  (blank), `JSON_PARSE_ERROR` (no JSON) or `INVALID_RESPONSE_FORMAT` (JSON
+  naming no mapped design, `"unknown"` included, or a malformed field), and
+  anything a parser raises is caught there as that document's failure, not
+  the run's; tokens and cost still count.
+  Statistics: `failed_evaluations`, `None` for the mean confidence, latency,
+  cost/tokens per assessment of a model that assessed nothing; agreement over
+  documents both assessed (`None` when none, self-agreement too); tier
+  difference and disagreement rates over comparable documents only; rankings
+  put a model with no figure last. **The review's assessments are replayed
+  only through `is_reusable_assessment()`**: task tier, a known design, no
+  transparency downgrade, and `extraction_method == llm_extraction_method(the
+  evaluator's model)`. The review's detailed assessor now records its model
+  (it wrote `"llm_sonnet"` whatever was configured), and the baseline shown is
+  the benchmark task's model, not always the classifier's; the review's
+  classifier/assessor still record a failure as "unknown"/"unclassified"
+  (#319). A replayed evaluation is `reused`, left out of cost/tokens per
+  assessment and latency. `QualityDocumentComparison` refuses an evaluator
+  both assessed and failed. The Systematic Review status line names failed
+  assessments (`quality_benchmark_finished_text()`). Tab cells come from the new
+  pure `benchmarking/quality_display.py`: "failed" + reason tooltip, `n/a`,
+  no colour for no figure, a Failed column, a header sentence. Also fixed on
+  the way: `DESIGN_LABELS` is keyed by the enum and was looked up by value,
+  so no label was ever shown (`design_label()`); the export errors now tell
+  the user; the unused `QualityBenchmarkResultsDialog` duplicate is gone.
+  `reuse_cross_run` is documented as ignored (the quality benchmark stores no
+  per-document evaluations; no checkbox is ever built).
+- **Rerun** (#316). `get_rerun_document_ids_for_question()` splits judged (any
+  judgement) from failed (every scoring a failure, either form); the rerun's
+  search skips the judged and the loaded failed ones — not a failed one whose
+  record is gone, so the search can find it again — and passes the loaded ones
+  to `IncrementalSearchWorker(retry_documents=…)`, which puts them first, keeps
+  them out of the target count, and still emits them when the search ends in
+  shortfalls; an unexpected error says they were not rescored
+  (`unexpected_rerun_error_text()`). Messages: `rerun_start_text()`,
+  `rerun_found_text()`.
+  `get_scored_document_ids_for_question()` is unchanged for the benchmark
+  launchers.
+- **Lodged:** #319 the review's quality filter records a failed
+  classification as an "unknown" design; #320 cancelling a rerun leaves the
+  tab stuck on "Cancelling..." (the worker emits nothing when cancelled;
+  pre-existing); #322 the quality parsers (benchmark and review) invent a 0.5
+  confidence that the benchmark averages and ranks by; #323 "other" is scored
+  as tier 0 in tier comparisons. Further type refinements (derived
+  projections, failure codes kept as codes, `latency_ms`/`task_type`) are
+  noted on #318.
+- **Verified:** `pytest tests/` — 1622 passed, 3 xfailed; `lint_delta.py
   --base-ref master` 0 new ruff, 0 new mypy (both totals below master).
-  Swift and Android untouched. Reviewed twice by independent agents (the
-  second a five-agent review with mutation testing); every finding fixed or
-  lodged above.
+  Second review (five agents) acted on: a malformed answer ended the whole
+  run, a failed document with no record could never be retried, and a quality
+  model's assessments were credited to the classifier; each fix has a test
+  seen to fail without it.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A failure is not a score** (Python; #306/#307/#310/#315, PR #317, merged
+  2026-09-19). Rules in `doc/cross_platform/analysis_failure_reporting.md`.
+  - **One parser.** The benchmark reads answers with the review's
+    `parse_score_response()`; an answer holding no score on the scale (0, 42,
+    `true`, "10/10", a null-score JSON) is `None` → retried → `JSON_PARSE_ERROR`,
+    never clamped or defaulted to 1.
+  - **Statistics count failures apart**, and what nothing judged is `None`
+    (`n/a`), never 0%/100% or "cheapest": agreement over documents both judged,
+    spread over documents at least two judged. **A stored failure is never
+    reused, and reuse is of the same question only.**
+  - **A stored failure has two forms**: a negative `EvaluationErrorCode`, and the
+    score-1 rows older builds wrote (`is_scoring_failure()` /
+    `scoring_failure_sql()`, exact prefix via `substr` — SQLite `LIKE` ignores
+    case). `classify_document_outcomes()` applies `as_recorded_failure()` itself;
+    the storage getters do not yet (#318).
+  - **`None` is "not recorded", never "none failed"** — `CitationOutcome.failed`
+    is recorded only when extraction ran to the end. The Audit Trail shows a grey
+    "Scoring failed" badge, never "-4/5".
 
 - **The analysis-failure family** (Python; #261–#264 PR #301, #302–#304 PR
   #305, merged 2026-09-17/18). The contract is
@@ -282,17 +294,18 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
+- **#320** a cancelled rerun never resets the Research Questions tab.
+- **#319** the review's quality filter records a failed classification as an
+  "unknown" design, which `passes_filter()` then decides on.
+- **#318** make "a failure is not a score" a type invariant rather than a
+  convention (`ScoredDocument` accepts 0; storage getters return the older form
+  as a judgement; mutable `CitationOutcome.citations`).
 - Python, lodged by PR #305: **#308** the Interrogation paywall flow (stale
   pending citation, empty pane on Cancel); **#309** three abstract fallbacks
   still misstating their cause; **#311** raw provider error text in the PDF and
   OpenAthens dialogs; **#312** a restore's found documents span every run of
   the question, and the checkpoint keeps no quality filter settings (its
   citations half was fixed by PR #317).
-- Python, lodged by this branch: **#314** the *quality* benchmark records a
-  failed call as an "unclassified" study (the relevance benchmark's #306
-  shape); **#316** a Research Questions rerun treats a document whose scoring
-  failed as already scored, so it is never retried; **#318** make "a failure
-  is not a score" a type invariant rather than a convention.
 - Older: **#249** nothing connects `analysis_failed`; **#250** an efetch with no
   article yields "No conflict of interest statement found"; **#258** the search
   merge drops a distinct article whose title differs by a number, as

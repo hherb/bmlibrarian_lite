@@ -18,16 +18,17 @@
 Quality benchmark runner for comparing evaluator performance.
 
 Orchestrates quality benchmark execution across multiple evaluators,
-with caching of existing evaluations and progress tracking. Supports
+with reuse of the review's own assessments and progress tracking. Supports
 both study classification (Tier 2) and detailed quality assessment (Tier 3).
 """
 
 import json
 import logging
+import math
 import re
 import time
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from ..config import LiteConfig
 from ..constants import (
@@ -39,24 +40,25 @@ from ..constants import (
 from ..data_models import (
     BenchmarkRun,
     BenchmarkStatus,
+    EvaluationErrorCode,
     Evaluator,
     LiteDocument,
 )
+from ..exceptions import RetryExhaustedError
 from ..llm import LLMClient, LLMMessage
 from ..quality.data_models import (
     QualityAssessment,
     StudyDesign,
     QualityTier,
-    StudyClassification,
     DESIGN_TO_TIER,
     DESIGN_TO_SCORE,
+    llm_extraction_method,
 )
 from ..quality.study_classifier import STUDY_DESIGN_MAPPING
 from ..storage import LiteStorage
+from ..utils import classify_exhausted_retries, classify_llm_exception
 from .quality_models import (
     QualityBenchmarkResult,
-    QualityDocumentComparison,
-    QualityEvaluatorStats,
     QualityEvaluation,
     QUALITY_TASK_STUDY_CLASSIFICATION,
     QUALITY_TASK_QUALITY_ASSESSMENT,
@@ -69,6 +71,70 @@ from .quality_statistics import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: The assessment tier each benchmark task produces.
+TASK_ASSESSMENT_TIER: dict[str, int] = {
+    QUALITY_TASK_STUDY_CLASSIFICATION: 2,
+    QUALITY_TASK_QUALITY_ASSESSMENT: 3,
+}
+
+
+def is_reusable_assessment(
+    assessment: QualityAssessment,
+    task_type: str,
+    model_string: str | None,
+) -> bool:
+    """Whether a review's assessment can stand as an evaluator's answer.
+
+    Only an assessment that evaluator's model made, for the task
+    benchmarked, answers for it -- as the review stored it, before any
+    transparency downgrade changed its tier. The review's quality filter
+    records a failed call as an "unknown" design (with no classifier call
+    at all, as "unclassified"), and a design read from PubMed's publication
+    types is no model's answer: replayed, each was counted as the baseline
+    model's verdict (#314). An assessment that names no model, or another
+    one, is asked again rather than credited to this one.
+
+    Args:
+        assessment: The review's assessment of a document.
+        task_type: The benchmark's task.
+        model_string: The evaluator's model, as "provider:model"; None for
+            a human evaluator, who made no assessment of the review.
+
+    Returns:
+        True when the assessment is of the task's tier, names a design, was
+        made by this model, and is as the model gave it.
+    """
+    return (
+        model_string is not None
+        and assessment.assessment_tier == TASK_ASSESSMENT_TIER.get(task_type)
+        and assessment.study_design is not StudyDesign.UNKNOWN
+        and assessment.extraction_method == llm_extraction_method(model_string)
+        and not assessment.transparency_adjusted
+    )
+
+
+def parse_study_design(data: object) -> StudyDesign | None:
+    """The study design an answer states, if it states one.
+
+    Args:
+        data: The answer, decoded from JSON.
+
+    Returns:
+        The design, or None when the answer is not an object, or names no
+        design the classifier's mapping recognises -- "unknown" excluded:
+        no prompt offers it, and read as a design, an unreadable answer
+        became the model's verdict that it could not tell (#314).
+    """
+    if not isinstance(data, dict):
+        return None
+    design_str = data.get("study_design")
+    if not isinstance(design_str, str):
+        return None
+    design = STUDY_DESIGN_MAPPING.get(design_str.lower().strip())
+    if design is None or design is StudyDesign.UNKNOWN:
+        return None
+    return design
 
 
 # System prompt for study classification (Tier 2 style)
@@ -102,7 +168,7 @@ class QualityBenchmarkRunner:
     Features:
     - Runs quality assessment with multiple model evaluators
     - Supports study classification (Tier 2) and detailed assessment (Tier 3)
-    - Caches and reuses existing evaluations
+    - Reuses the review's own assessments for the baseline model
     - Tracks progress with callbacks
     - Computes comparison statistics
     - Calculates costs and latency metrics
@@ -226,9 +292,14 @@ class QualityBenchmarkRunner:
             run_id: Benchmark run ID
             checkpoint_id: Checkpoint ID to associate assessments with
             progress_callback: Called with (current, total, status_message)
-            reuse_existing: If True, reuse cached evaluations from this run
-            existing_assessments: Pre-existing assessments to reuse (doc_id -> assessment)
-            reuse_cross_run: If True, reuse from previous runs of same question
+            reuse_existing: Accepted for parity with the relevance benchmark,
+                and ignored: reuse is of ``existing_assessments`` alone
+            existing_assessments: Pre-existing assessments to reuse (doc_id -> assessment),
+                for the baseline model only and only where
+                :func:`is_reusable_assessment` allows
+            reuse_cross_run: Accepted for parity with the relevance benchmark,
+                and ignored: the quality benchmark stores no per-document
+                evaluations, so there is nothing from earlier runs to reuse
 
         Returns:
             Complete quality benchmark results
@@ -272,10 +343,6 @@ class QualityBenchmarkRunner:
         if existing_map:
             logger.info(f"Loaded {len(existing_map)} existing assessments for reuse")
 
-        # Get the baseline model string (the model used for initial assessment)
-        baseline_model = self.config.models.get_model_string("study_classification")
-        logger.debug(f"Baseline model for quality assessment: {baseline_model}")
-
         # Collect evaluations: evaluator_id -> document_id -> QualityEvaluation
         all_evaluations: dict[str, dict[str, QualityEvaluation]] = {}
 
@@ -298,22 +365,24 @@ class QualityBenchmarkRunner:
                         progress_current=current_op,
                     )
 
-                    # Check for existing assessment from initial run
-                    # if this evaluator matches the baseline model
-                    if existing_map and evaluator.model_string == baseline_model:
-                        if document.id in existing_map:
-                            existing = existing_map[document.id]
-                            logger.debug(
-                                f"Reusing initial assessment for {document.id} "
-                                f"(baseline model: {evaluator.display_name})"
-                            )
-                            evaluation = QualityEvaluation(
-                                document_id=document.id,
-                                evaluator=evaluator,
-                                assessment=existing,
-                            )
-                            all_evaluations[evaluator.id][document.id] = evaluation
-                            continue
+                    # The review's own assessment, where this evaluator's
+                    # model made it for this task
+                    existing = existing_map.get(document.id)
+                    if existing is not None and is_reusable_assessment(
+                        existing, run.task_type, evaluator.model_string
+                    ):
+                        logger.debug(
+                            f"Reusing initial assessment for {document.id} "
+                            f"(baseline model: {evaluator.display_name})"
+                        )
+                        evaluation = QualityEvaluation(
+                            document_id=document.id,
+                            evaluator=evaluator,
+                            assessment=existing,
+                            reused=True,
+                        )
+                        all_evaluations[evaluator.id][document.id] = evaluation
+                        continue
 
                     # Run the evaluation based on task type
                     if run.task_type == QUALITY_TASK_QUALITY_ASSESSMENT:
@@ -391,7 +460,7 @@ class QualityBenchmarkRunner:
             name: Optional benchmark name
             progress_callback: Progress callback
             existing_assessments: Pre-existing assessments for baseline model
-            reuse_cross_run: If True, reuse from previous runs
+            reuse_cross_run: Ignored; see :meth:`run_benchmark`
 
         Returns:
             Quality benchmark results
@@ -481,50 +550,13 @@ IMPORTANT: Classify what THIS study did, not studies it references."""
             LLMMessage(role="user", content=user_prompt),
         ]
 
-        # Call LLM with timing
-        start_time = time.time()
-        try:
-            response = self.llm_client.chat(
-                messages=messages,
-                model=evaluator.model_string,
-                temperature=evaluator.temperature or QUALITY_LLM_TEMPERATURE,
-                max_tokens=evaluator.max_tokens or QUALITY_CLASSIFIER_MAX_TOKENS,
-                json_mode=True,
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            # Parse response
-            assessment = self._parse_classification_response(response.content)
-
-            # Calculate cost
-            cost = calculate_cost(
-                evaluator.model_string or "",
-                response.input_tokens,
-                response.output_tokens,
-            )
-
-            return QualityEvaluation(
-                document_id=document.id,
-                evaluator=evaluator,
-                assessment=assessment,
-                latency_ms=latency_ms,
-                tokens_input=response.input_tokens,
-                tokens_output=response.output_tokens,
-                cost_usd=cost,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"Failed to classify document {document.id} with "
-                f"{evaluator.display_name}: {e}"
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
-            return QualityEvaluation(
-                document_id=document.id,
-                evaluator=evaluator,
-                assessment=QualityAssessment.unclassified(),
-                latency_ms=latency_ms,
-            )
+        return self._evaluate(
+            document=document,
+            evaluator=evaluator,
+            messages=messages,
+            max_tokens=QUALITY_CLASSIFIER_MAX_TOKENS,
+            parse=self._parse_classification_response,
+        )
 
     def _assess_document(
         self,
@@ -584,52 +616,135 @@ Focus on THIS study's methodology, not studies it references."""
             LLMMessage(role="user", content=user_prompt),
         ]
 
-        # Call LLM with timing
+        return self._evaluate(
+            document=document,
+            evaluator=evaluator,
+            messages=messages,
+            max_tokens=QUALITY_ASSESSOR_MAX_TOKENS,
+            parse=self._parse_assessment_response,
+        )
+
+    def _evaluate(
+        self,
+        document: LiteDocument,
+        evaluator: Evaluator,
+        messages: list[LLMMessage],
+        max_tokens: int,
+        parse: Callable[[str], QualityAssessment | EvaluationErrorCode],
+    ) -> QualityEvaluation:
+        """Ask an evaluator for its assessment, recording a failure as one.
+
+        A failed call, and an answer that names no design, are recorded as
+        their error code -- never as an "unclassified" assessment, which is
+        what a model that read the abstract and could not tell the design
+        answers (#314). The provider's text stays in the log: it can print
+        the request, and the result is shown to the user.
+
+        Args:
+            document: Document to assess
+            evaluator: Evaluator to use
+            messages: The prompt
+            max_tokens: Token limit when the evaluator sets none
+            parse: Reads the answer: the assessment, or why it holds none
+
+        Returns:
+            QualityEvaluation with the assessment, or the failure
+        """
         start_time = time.time()
         try:
             response = self.llm_client.chat(
                 messages=messages,
                 model=evaluator.model_string,
                 temperature=evaluator.temperature or QUALITY_LLM_TEMPERATURE,
-                max_tokens=evaluator.max_tokens or QUALITY_ASSESSOR_MAX_TOKENS,
+                max_tokens=evaluator.max_tokens or max_tokens,
                 json_mode=True,
             )
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            # Parse response
-            assessment = self._parse_assessment_response(response.content)
-
-            # Calculate cost
-            cost = calculate_cost(
-                evaluator.model_string or "",
-                response.input_tokens,
-                response.output_tokens,
-            )
-
-            return QualityEvaluation(
-                document_id=document.id,
-                evaluator=evaluator,
-                assessment=assessment,
-                latency_ms=latency_ms,
-                tokens_input=response.input_tokens,
-                tokens_output=response.output_tokens,
-                cost_usd=cost,
-            )
-
         except Exception as e:
+            error_code = (
+                classify_exhausted_retries(e)
+                if isinstance(e, RetryExhaustedError)
+                else classify_llm_exception(e)
+            )
             logger.error(
                 f"Failed to assess document {document.id} with "
-                f"{evaluator.display_name}: {e}"
+                f"{evaluator.display_name} ({error_code.name}): {e}"
             )
-            latency_ms = int((time.time() - start_time) * 1000)
             return QualityEvaluation(
                 document_id=document.id,
                 evaluator=evaluator,
-                assessment=QualityAssessment.unclassified(),
-                latency_ms=latency_ms,
+                failure=error_code,
+                latency_ms=int((time.time() - start_time) * 1000),
             )
+        latency_ms = int((time.time() - start_time) * 1000)
 
-    def _parse_classification_response(self, response: str) -> QualityAssessment:
+        # The call was made and billed whether or not its answer is usable
+        cost = calculate_cost(
+            evaluator.model_string or "",
+            response.input_tokens,
+            response.output_tokens,
+        )
+
+        # One answer the parser did not foresee is that document's failure,
+        # not the end of the whole run
+        try:
+            parsed = parse(response.content)
+        except Exception:
+            logger.exception(
+                f"Unexpected error reading {evaluator.display_name}'s "
+                f"assessment of document {document.id}"
+            )
+            parsed = EvaluationErrorCode.INVALID_RESPONSE_FORMAT
+        if isinstance(parsed, EvaluationErrorCode):
+            logger.warning(
+                f"{evaluator.display_name} gave no readable assessment of "
+                f"document {document.id} ({parsed.name})"
+            )
+            assessment, failure = None, parsed
+        else:
+            assessment, failure = parsed, None
+        return QualityEvaluation(
+            document_id=document.id,
+            evaluator=evaluator,
+            assessment=assessment,
+            failure=failure,
+            latency_ms=latency_ms,
+            tokens_input=response.input_tokens,
+            tokens_output=response.output_tokens,
+            cost_usd=cost,
+        )
+
+    def _read_answer(
+        self, response: str
+    ) -> tuple[dict[str, Any], StudyDesign] | EvaluationErrorCode:
+        """The JSON object an answer holds, and the design it names.
+
+        Args:
+            response: LLM response text
+
+        Returns:
+            The decoded object and its design, or why there is none: EMPTY_RESPONSE for
+            nothing, JSON_PARSE_ERROR for text holding no JSON, and
+            INVALID_RESPONSE_FORMAT for JSON naming no study design -- a
+            well-formed answer is not reported as unreadable.
+        """
+        if not response or not response.strip():
+            return EvaluationErrorCode.EMPTY_RESPONSE
+        cleaned = self._clean_json_response(response)
+        if not cleaned:
+            return EvaluationErrorCode.JSON_PARSE_ERROR
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse benchmark answer as JSON: {e}")
+            return EvaluationErrorCode.JSON_PARSE_ERROR
+        study_design = parse_study_design(data)
+        if study_design is None:
+            return EvaluationErrorCode.INVALID_RESPONSE_FORMAT
+        return data, study_design
+
+    def _parse_classification_response(
+        self, response: str
+    ) -> QualityAssessment | EvaluationErrorCode:
         """
         Parse classification response into QualityAssessment.
 
@@ -637,19 +752,13 @@ Focus on THIS study's methodology, not studies it references."""
             response: LLM response text
 
         Returns:
-            QualityAssessment (Tier 2 style)
+            QualityAssessment (Tier 2 style), or why the answer holds none
         """
+        answer = self._read_answer(response)
+        if isinstance(answer, EvaluationErrorCode):
+            return answer
+        data, study_design = answer
         try:
-            cleaned = self._clean_json_response(response)
-            if not cleaned:
-                return QualityAssessment.unclassified()
-
-            data = json.loads(cleaned)
-
-            # Parse study design
-            design_str = data.get("study_design", "unknown").lower().strip()
-            study_design = STUDY_DESIGN_MAPPING.get(design_str, StudyDesign.UNKNOWN)
-
             # Parse blinding
             is_blinded = self._parse_blinding(data.get("is_blinded"))
 
@@ -672,11 +781,13 @@ Focus on THIS study's methodology, not studies it references."""
                 extraction_details=["Benchmark classification"],
             )
 
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
+        except (ValueError, TypeError, AttributeError, OverflowError) as e:
             logger.warning(f"Failed to parse classification response: {e}")
-            return QualityAssessment.unclassified()
+            return EvaluationErrorCode.INVALID_RESPONSE_FORMAT
 
-    def _parse_assessment_response(self, response: str) -> QualityAssessment:
+    def _parse_assessment_response(
+        self, response: str
+    ) -> QualityAssessment | EvaluationErrorCode:
         """
         Parse detailed assessment response into QualityAssessment.
 
@@ -684,21 +795,15 @@ Focus on THIS study's methodology, not studies it references."""
             response: LLM response text
 
         Returns:
-            QualityAssessment (Tier 3 style)
+            QualityAssessment (Tier 3 style), or why the answer holds none
         """
         from ..quality.data_models import BiasRisk
 
+        answer = self._read_answer(response)
+        if isinstance(answer, EvaluationErrorCode):
+            return answer
+        data, study_design = answer
         try:
-            cleaned = self._clean_json_response(response)
-            if not cleaned:
-                return QualityAssessment.unclassified()
-
-            data = json.loads(cleaned)
-
-            # Parse study design
-            design_str = data.get("study_design", "unknown").lower().strip()
-            study_design = STUDY_DESIGN_MAPPING.get(design_str, StudyDesign.UNKNOWN)
-
             # Parse design characteristics
             chars = data.get("design_characteristics", {})
 
@@ -738,9 +843,9 @@ Focus on THIS study's methodology, not studies it references."""
                 extraction_details=["Benchmark detailed assessment"],
             )
 
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
+        except (ValueError, TypeError, AttributeError, OverflowError) as e:
             logger.warning(f"Failed to parse assessment response: {e}")
-            return QualityAssessment.unclassified()
+            return EvaluationErrorCode.INVALID_RESPONSE_FORMAT
 
     def _clean_json_response(self, response: str) -> str:
         """
@@ -800,24 +905,31 @@ Focus on THIS study's methodology, not studies it references."""
             return None
         try:
             return int(value)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
+            # OverflowError: JSON reads 1e999 as infinity
             return None
 
     def _parse_quality_score(self, value: float | str) -> float:
         """Parse and clamp quality score."""
         try:
             score = float(value)
-            return max(0.0, min(10.0, score))
         except (ValueError, TypeError):
             return 0.0
+        if not math.isfinite(score):
+            # NaN would clamp to the top of the scale
+            return 0.0
+        return max(0.0, min(10.0, score))
 
     def _parse_confidence(self, value: float | str) -> float:
         """Parse and clamp confidence value."""
         try:
             conf = float(value)
-            return max(0.0, min(1.0, conf))
         except (ValueError, TypeError):
             return 0.5
+        if not math.isfinite(conf):
+            # NaN would clamp to full confidence
+            return 0.5
+        return max(0.0, min(1.0, conf))
 
     def _compute_results(
         self,
@@ -870,41 +982,30 @@ Focus on THIS study's methodology, not studies it references."""
         # Compute agreement matrices using display names
         doc_ids = [d.id for d in documents]
 
-        # Design agreement matrix
-        evaluator_designs: dict[str, list[StudyDesign]] = {}
+        # Agreement is over the documents both evaluators assessed: a
+        # document with no assessment -- a failure, or never asked -- is
+        # None, never "unknown", which compared as a disagreement (#314)
+        evaluator_designs: dict[str, list[StudyDesign | None]] = {}
+        evaluator_tiers: dict[str, list[QualityTier | None]] = {}
         for evaluator in evaluators:
-            designs = []
-            for doc_id in doc_ids:
-                if doc_id in all_evaluations.get(evaluator.id, {}):
-                    designs.append(
-                        all_evaluations[evaluator.id][doc_id].study_design
-                    )
-                else:
-                    designs.append(StudyDesign.UNKNOWN)
-            evaluator_designs[evaluator.display_name] = designs
+            by_document = all_evaluations.get(evaluator.id, {})
+            evaluations = [by_document.get(doc_id) for doc_id in doc_ids]
+            evaluator_designs[evaluator.display_name] = [
+                e.study_design if e is not None else None for e in evaluations
+            ]
+            evaluator_tiers[evaluator.display_name] = [
+                e.quality_tier if e is not None else None for e in evaluations
+            ]
 
         design_agreement_matrix = compute_design_agreement_matrix(evaluator_designs)
-
-        # Tier agreement matrix
-        evaluator_tiers: dict[str, list[QualityTier]] = {}
-        for evaluator in evaluators:
-            tiers = []
-            for doc_id in doc_ids:
-                if doc_id in all_evaluations.get(evaluator.id, {}):
-                    tiers.append(
-                        all_evaluations[evaluator.id][doc_id].quality_tier
-                    )
-                else:
-                    tiers.append(QualityTier.UNCLASSIFIED)
-            evaluator_tiers[evaluator.display_name] = tiers
 
         tier_agreement_matrix = compute_tier_agreement_matrix(
             evaluator_tiers, tolerance=1
         )
 
-        # Determine baseline evaluator name from config
+        # The baseline is the model the review used for this task
         baseline_name = None
-        baseline_model = self.config.models.get_model_string("study_classification")
+        baseline_model = self.config.models.get_model_string(task_type)
         if baseline_model:
             for evaluator in evaluators:
                 if evaluator.model_string == baseline_model:

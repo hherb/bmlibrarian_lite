@@ -1856,8 +1856,10 @@ class LiteStorage:
         """
         Get all document IDs that have been scored for a research question.
 
-        This includes documents of any score (even low ones) to enable
-        deduplication during incremental searches.
+        This includes documents of any score (even low ones), and documents
+        whose every scoring failed. The benchmark launchers use it; a rerun
+        uses :meth:`get_rerun_document_ids_for_question`, which tells the
+        failed apart so they are scored again (#316).
 
         Args:
             question: The research question text
@@ -1878,6 +1880,46 @@ class LiteStorage:
                 (question,),
             )
             return {row["document_id"] for row in cursor}
+
+    def get_rerun_document_ids_for_question(
+        self,
+        question: str,
+    ) -> tuple[set[str], set[str]]:
+        """Split a question's scored documents for a rerun: judged, or failed.
+
+        A document is judged when any scoring of it for the question is a
+        judgement, and failed when every scoring of it failed, in either
+        form a failure is stored in. A rerun skips the first and scores the
+        second again: counted as scored, a document the model could not
+        reach was never retried (#316). The rule is the one the Research
+        Questions table counts by.
+
+        Args:
+            question: The research question text
+
+        Returns:
+            The judged document IDs, and the IDs of documents every scoring
+            of which failed
+        """
+        with self._sqlite_connection() as conn:
+            # COALESCE: the condition is NULL for a 1 stored with no
+            # explanation, which is a score
+            cursor = conn.execute(
+                f"""
+                SELECT sd.document_id,
+                       MIN(COALESCE({scoring_failure_sql("sd")}, 0)) AS only_failed
+                FROM scored_documents sd
+                INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+                WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
+                GROUP BY sd.document_id
+                """,
+                (question,),
+            )
+            judged: set[str] = set()
+            failed: set[str] = set()
+            for row in cursor:
+                (failed if row["only_failed"] else judged).add(row["document_id"])
+            return judged, failed
 
     def add_question_documents(
         self,
