@@ -25,20 +25,42 @@ still read, drawn, counted or reused as a judgement; the contract
   every question's scores). A stored pre-#306 result reads its legacy entries
   as failures and says its 1s may include them; its distribution reloads with
   int keys (it showed 0 everywhere). The confirm dialog's estimate counts
-  judged documents per model, not earlier runs. The dead, byte-identical
-  `BenchmarkResultsDialog` is gone.
+  judged documents per model, not earlier runs. `BenchmarkResultsDialog`, an
+  unused duplicate of the tab's code, is gone.
+- **An answer holding no score on the scale is a failure** (second review).
+  `parse_score_response()` clamped "0"/"-3"/"42" to a verdict, read `true` as
+  1, read "Score: 10/10" and "a score 1-5" as 1, and searched a null-score
+  JSON answer's explanation for a digit. It now returns `None` for all of
+  these (retried, then `JSON_PARSE_ERROR`); a JSON answer is that object
+  alone. Also: cost/tokens per judgement are `None` for a model that judged
+  nothing (`get_ranking_by_cost` ranked it cheapest and stored 0.0); an
+  unreadable stored benchmark raises `StoredResultUnreadableError` and the tab
+  says "could not be loaded" (it read as "no results", inviting a paid
+  re-run); older empty stats reload with no mean or latency; the distribution
+  of a model that judged nothing is `n/a`; the Research Questions tab and
+  restore message count failures apart (`scored_count_text()`).
 - **A stored failure has two forms.** `is_scoring_failure()` (+
   `scoring_failure_sql()`, exact prefix via `substr` because SQLite `LIKE`
   ignores case) recognises the score-1 rows older builds wrote; a restore
   passes scores through `as_recorded_failure()` (#315) so they audit as
-  failures without their raw text. The concordance and fix-up scripts use it.
+  failures without their raw text — and `classify_document_outcomes()` now
+  applies it itself, so no load path has to remember. One older form cannot
+  be recognised (the pre-#306 runner's 1 for an answer with no `score`); the
+  older-result note says so. **Scripts:** `concordance_analysis.py` counts
+  failures per model, shows a pair with too few shared documents as `n/a`
+  (was 0%), and keys by the whole question (50 characters let two collide);
+  `fix_missing_evaluations.py` deletes a failure only for its own question
+  and only after the re-score is saved, and skips pairs judged since;
+  `run_benchmark.py` retries the older form too.
 - **The Audit Trail tab** (#307): a grey "Scoring failed" badge with the
   reason, never "-4/5"; cards sort judged, failed, never scored
   (`outcome_sort_key()`); the Queries card counts failures apart.
 - **Silent or unread** (#310). `CitationOutcome.failed` names each
   `ExtractionFailure`; counts and causes derive from it. **Recorded only when
-  extraction ran to the end** (`citation_extraction_recorded`): a cancelled
-  run's unread documents read as "none quotable" in the first cut. The audit
+  extraction ran to the end** (`citation_extraction_recorded`): an earlier
+  revision of this branch recorded a cancelled run's unread documents as
+  "none quotable". A stored list naming a document twice, or a cause of
+  `SUCCESS`, reads as not recorded / `UNKNOWN_ERROR`. The audit
   file lists them, the dialog says per relevant document cited / none
   quotable / could not be extracted, the checkpoint keeps them, and **`None`
   is "not recorded", never "none failed"**. A restore reads its own run's
@@ -47,11 +69,14 @@ still read, drawn, counted or reused as a judgement; the contract
   `citation_extraction_error`.
 - **Lodged, not addressed here:** #314 the quality benchmark records a failed
   call as an "unclassified" study; #316 a rerun treats a failed document as
-  already scored.
-- **Verified:** `pytest tests/` — 1440 passed, 3 xfailed; `lint_delta.py
-  --base-ref origin/master` 0 new ruff, 0 new mypy (both totals below
-  master). Swift and Android untouched. Reviewed by two independent agents;
-  every finding fixed or lodged above.
+  already scored; #318 "a failure is not a score" is a convention, not a type
+  invariant (`ScoredDocument` accepts 0, storage getters return the older
+  form as a judgement, mutable `CitationOutcome.citations`).
+- **Verified:** `pytest tests/` — 1499 passed, 3 xfailed; `lint_delta.py
+  --base-ref master` 0 new ruff, 0 new mypy (both totals below master).
+  Swift and Android untouched. Reviewed twice by independent agents (the
+  second a five-agent review with mutation testing); every finding fixed or
+  lodged above.
 
 ## Recently landed (context)
 
@@ -255,18 +280,19 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **#300 — Swift and Android are unchecked against
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
-  longer (#302–#304, #306, #307, #310). Both run the same pipeline with the
+  longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
 - Python, lodged by PR #305: **#308** the Interrogation paywall flow (stale
   pending citation, empty pane on Cancel); **#309** three abstract fallbacks
   still misstating their cause; **#311** raw provider error text in the PDF and
-  OpenAthens dialogs; **#312** a restore's found documents (and its citations,
-  `get_citations_for_question`) span every run of the question, and the
-  checkpoint keeps no quality filter settings.
+  OpenAthens dialogs; **#312** a restore's found documents span every run of
+  the question, and the checkpoint keeps no quality filter settings (its
+  citations half was fixed by PR #317).
 - Python, lodged by this branch: **#314** the *quality* benchmark records a
   failed call as an "unclassified" study (the relevance benchmark's #306
   shape); **#316** a Research Questions rerun treats a document whose scoring
-  failed as already scored, so it is never retried.
+  failed as already scored, so it is never retried; **#318** make "a failure
+  is not a score" a type invariant rather than a convention.
 - Older: **#249** nothing connects `analysis_failed`; **#250** an efetch with no
   article yields "No conflict of interest statement found"; **#258** the search
   merge drops a distinct article whose title differs by a number, as

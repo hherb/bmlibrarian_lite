@@ -561,12 +561,10 @@ class LiteMainWindow(QMainWindow):
 
         except Exception as e:
             # Left in place, the previous question's benchmark read as this
-            # one's
-            logger.warning(f"Failed to load benchmark results: {e}")
-            self.benchmark_tab.update_result(None)
-            self.status_bar.showMessage(
-                "This question's benchmark results could not be loaded", 5000
-            )
+            # one's; shown as "no results", it invited a paid re-run; and said
+            # only in the status bar, the "Loaded question" message replaced it
+            logger.warning(f"Failed to load benchmark results: {e!r}")
+            self.benchmark_tab.show_unreadable()
 
     def _on_question_selected(
         self,
@@ -675,9 +673,12 @@ class LiteMainWindow(QMainWindow):
             # 10. Switch to Report tab
             self.tab_widget.setCurrentWidget(self.report_tab)
 
+            # A failure is not a scored document (#307)
+            failed_count = sum(1 for scored in scored_documents if scored.score < 0)
+            failed_text = f" ({failed_count} could not be scored)" if failed_count else ""
             self.status_bar.showMessage(
-                f"Loaded question with {len(scored_documents)} scored docs, "
-                f"{len(citations)} citations",
+                f"Loaded question with {len(scored_documents) - failed_count} "
+                f"scored docs{failed_text}, {len(citations)} citations",
                 5000
             )
 

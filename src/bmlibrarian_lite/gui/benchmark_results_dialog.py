@@ -58,6 +58,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from ..benchmarking.display import (
     agreement_background,
     cost_ranking,
+    distribution_cell,
     failed_count_text,
     failures_note,
     format_agreement,
@@ -81,6 +82,17 @@ if TYPE_CHECKING:
     from ..data_models import LiteDocument
 
 logger = logging.getLogger(__name__)
+
+NO_RESULT_TEXT = (
+    "No benchmark results available.\n\n"
+    "Run a benchmark from the Systematic Review tab\n"
+    "or select a research question with existing results."
+)
+UNREADABLE_RESULT_TEXT = (
+    "This question's benchmark results could not be loaded.\n\n"
+    "That is not the same as having none: the log says why.\n"
+    "Running the benchmark again would repeat its cost."
+)
 
 
 def _create_score_agreement_matrix_widget(
@@ -261,16 +273,28 @@ class BenchmarkResultsTab(QWidget):
         else:
             self._build_results_ui()
 
-    def _show_empty_state(self) -> None:
-        """Display empty state when no results are available."""
+    def show_unreadable(self) -> None:
+        """Say this question's benchmark could not be loaded.
+
+        Shown as the empty state, it invited the user to pay for a benchmark
+        that may already exist; said in the status bar, the next message
+        replaced it before anyone read it.
+        """
+        self.result = None
+        self._current_comparisons = []
+        self._clear_content()
+        self._show_empty_state(UNREADABLE_RESULT_TEXT)
+
+    def _show_empty_state(self, text: str = NO_RESULT_TEXT) -> None:
+        """Display the state shown in place of results.
+
+        Args:
+            text: What to say: by default, that no results are available.
+        """
         # Clear existing content
         self._clear_content()
 
-        empty_label = QLabel(
-            "No benchmark results available.\n\n"
-            "Run a benchmark from the Systematic Review tab\n"
-            "or select a research question with existing results."
-        )
+        empty_label = QLabel(text)
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_label.setStyleSheet("color: gray;")
         self._main_layout.addWidget(empty_label)
@@ -516,12 +540,8 @@ class BenchmarkResultsTab(QWidget):
             table.setItem(row, 0, QTableWidgetItem(stats.evaluator.display_name))
 
             # Score counts with visual bar
-            total = stats.total_evaluations
             for score in range(1, 6):
-                count = stats.score_distribution.get(score, 0)
-                pct = (count / total * 100) if total > 0 else 0
-
-                item = QTableWidgetItem(f"{count} ({pct:.0f}%)")
+                item = QTableWidgetItem(distribution_cell(stats, score))
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setBackground(QColor(BENCHMARK_SCORE_COLORS[score]))
                 table.setItem(row, score, item)

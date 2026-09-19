@@ -39,7 +39,7 @@ from ..data_models import (
     LiteDocument,
     ScoredDocument,
 )
-from ..exceptions import RetryExhaustedError
+from ..exceptions import RetryExhaustedError, StoredResultUnreadableError
 from ..llm import LLMClient, LLMMessage
 from ..storage import LiteStorage
 from ..utils import classify_exhausted_retries, classify_llm_exception
@@ -66,6 +66,21 @@ def _stored_count(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
+
+
+def _stored_latency(value: object) -> float | None:
+    """A mean latency read back from a stored summary, if one was measured.
+
+    Args:
+        value: What the summary stored.
+
+    Returns:
+        The latency, or None for none stored -- or for the 0.0 an older
+        build stored when none was measured, which ranked as the fastest.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return float(value)
 
 
 def _stored_failures(value: object) -> dict[str, str]:
@@ -123,15 +138,27 @@ def _stored_comparison(document: LiteDocument, data: dict[str, Any]) -> Document
 
     Returns:
         The comparison.
+
+    Raises:
+        ValueError: If a stored score is not a score or a failure. Dropped,
+            the cell read "-", as though the model was never asked; the
+            caller reports the whole result as unreadable instead.
+        AttributeError: If the scores or explanations are not mappings.
     """
     scores: dict[str, int] = {}
     explanations: dict[str, str] = {}
     failures = _stored_failures(data.get("failures"))
     stored_explanations = data.get("explanations") or {}
     for name, score in (data.get("scores") or {}).items():
-        if isinstance(score, bool) or not isinstance(score, int):
-            logger.warning(f"Stored comparison of {document.id} holds no score for {name}")
-            continue
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, int)
+            or 0 <= score < SCORE_MIN
+            or score > SCORE_MAX
+        ):
+            raise ValueError(
+                f"Stored comparison of {document.id} holds no score for {name}: {score!r}"
+            )
         explanation = stored_explanations.get(name, "")
         if is_scoring_failure(ScoredDocument(document, score, explanation)):
             failures.setdefault(name, UNNAMED_FAILURE_REASON)
@@ -647,9 +674,9 @@ Evaluate the relevance of this document to the research question."""
     ) -> ScoredDocument:
         """A scoring the evaluator could not produce, recorded as a failure.
 
-        Recorded as a score of 1, as it was until #306, an outage read as a
+        Recorded as its negative error code, as the review records a failure
+        (#262). Until #306 it was stored as a 1, so an outage read as a
         confident "not relevant" in every statistic the benchmark computes.
-        The review records a failure the same way (#262).
 
         Args:
             document: The document that could not be scored.
@@ -766,7 +793,12 @@ Evaluate the relevance of this document to the research question."""
             run_id: Benchmark run ID
 
         Returns:
-            BenchmarkResult if available, None otherwise
+            BenchmarkResult if one is stored, None otherwise
+
+        Raises:
+            StoredResultUnreadableError: If one is stored but cannot be read.
+                Answered as None, it read as "no benchmark" and invited the
+                user to pay for it again.
         """
         run = self.storage.get_benchmark_run(run_id)
         if not run or not run.results_summary:
@@ -781,17 +813,26 @@ Evaluate the relevance of this document to the research question."""
             for stat_data in data.get("evaluator_stats", []):
                 # Get evaluator from storage
                 evaluator = self.storage.get_evaluator(stat_data["evaluator_id"])
-                if evaluator:
+                if evaluator is None:
+                    logger.warning(
+                        f"Benchmark {run_id}: evaluator {stat_data['evaluator_id']} "
+                        "is no longer stored; its statistics are not shown"
+                    )
+                else:
+                    # An older build stored 0.0 for the mean and deviation of
+                    # a model that judged nothing: read back, it ranked as
+                    # a real mean
+                    judged_nothing = stat_data["total_evaluations"] == 0
                     stats = EvaluatorStats(
                         evaluator=evaluator,
                         scores=stat_data["scores"],
-                        mean_score=stat_data["mean_score"],
-                        std_dev=stat_data["std_dev"],
+                        mean_score=None if judged_nothing else stat_data["mean_score"],
+                        std_dev=None if judged_nothing else stat_data["std_dev"],
                         score_distribution=_stored_distribution(
                             stat_data["score_distribution"]
                         ),
                         total_evaluations=stat_data["total_evaluations"],
-                        mean_latency_ms=stat_data["mean_latency_ms"],
+                        mean_latency_ms=_stored_latency(stat_data["mean_latency_ms"]),
                         total_tokens_input=stat_data["total_tokens_input"],
                         total_tokens_output=stat_data["total_tokens_output"],
                         total_cost_usd=stat_data["total_cost_usd"],
@@ -808,7 +849,12 @@ Evaluate the relevance of this document to the research question."""
             for comp_data in data.get("document_comparisons", []):
                 doc_id = comp_data["document_id"]
                 document = self.storage.get_document(doc_id)
-                if document:
+                if document is None:
+                    logger.warning(
+                        f"Benchmark {run_id}: document {doc_id} is no longer "
+                        "stored; its comparison is not shown"
+                    )
+                else:
                     comparison = _stored_comparison(document, comp_data)
                     document_comparisons.append(comparison)
 
@@ -841,9 +887,13 @@ Evaluate the relevance of this document to the research question."""
                 created_at=datetime.fromisoformat(data["created_at"]),
             )
 
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse benchmark result: {e}")
-            return None
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as e:
+            # ValueError: a timestamp fromisoformat cannot read; TypeError and
+            # AttributeError: a stored value of the wrong shape
+            logger.error(f"Failed to parse benchmark result {run_id}: {e!r}")
+            raise StoredResultUnreadableError(
+                f"Benchmark run {run_id} is stored but could not be read"
+            ) from e
 
     def get_latest_benchmark_result_for_question(
         self,
@@ -857,6 +907,11 @@ Evaluate the relevance of this document to the research question."""
 
         Returns:
             Most recent BenchmarkResult if available, None otherwise
+
+        Raises:
+            StoredResultUnreadableError: If the most recent one is stored but
+                cannot be read. An older one is not shown in its place: it
+                would read as the question's latest benchmark.
         """
         from ..data_models import BenchmarkStatus
 

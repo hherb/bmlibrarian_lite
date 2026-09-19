@@ -1345,11 +1345,21 @@ class ExtractionFailure:
 
     Attributes:
         document: The document the model could not read.
-        cause: Why, as the failure it was spent on.
+        cause: The error code classifying why extraction failed.
     """
 
     document: LiteDocument
     cause: EvaluationErrorCode
+
+    def __post_init__(self) -> None:
+        """Refuse a failure whose cause is success.
+
+        Raises:
+            ValueError: If the cause is ``SUCCESS``: the audit would say the
+                document failed because it succeeded.
+        """
+        if self.cause is EvaluationErrorCode.SUCCESS:
+            raise ValueError(f"{self.document.id}: a failure cannot be caused by success")
 
 
 @dataclass(frozen=True)
@@ -1366,7 +1376,8 @@ class CitationOutcome:
     Attributes:
         citations: The passages that were extracted.
         documents_attempted: How many documents extraction tried: those at or
-            above the threshold, minus any the run was cancelled before.
+            above the threshold, each counted once however often it was
+            listed, minus any the run was cancelled before.
         failed: The documents it could not read, each with why, in the order
             they failed. The count and the causes are read from these.
     """
@@ -1633,8 +1644,10 @@ class ResearchQuestionSummary:
         pubmed_query: Most recent PubMed query string used
         last_run_at: When the question was last run
         total_documents: Total documents found across all runs
-        scored_documents: Count of scored documents
+        scored_documents: Count of documents with a score, failures excluded
         run_count: Number of times this question has been run
+        failed_documents: Count of documents every scoring of which failed;
+            counted as scored, an outage looked like a finished review (#307)
     """
 
     question: str
@@ -1644,6 +1657,7 @@ class ResearchQuestionSummary:
     total_documents: int = 0
     scored_documents: int = 0
     run_count: int = 1
+    failed_documents: int = 0
 
 
 @dataclass

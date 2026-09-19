@@ -37,6 +37,7 @@ from bmlibrarian_lite.data_models import (  # noqa: E402
     ScoredDocument,
 )
 from bmlibrarian_lite.gui.benchmark_results_dialog import (  # noqa: E402
+    UNREADABLE_RESULT_TEXT,
     BenchmarkResultsTab,
     DocumentExplanationsDialog,
 )
@@ -286,6 +287,43 @@ class TestTheConfirmDialog:
         assert "reusing" not in dialog.cost_label.text()
 
 
+    def test_a_model_that_judged_some_documents_is_priced_for_the_rest(
+        self, qapp: Any, tmp_path: Any
+    ) -> None:
+        """Only the documents it already judged are free; the rest are billed."""
+        from bmlibrarian_lite.benchmarking.runner import BenchmarkRunner
+        from bmlibrarian_lite.config import BenchmarkModelConfig, LiteConfig
+        from bmlibrarian_lite.constants import calculate_cost
+        from bmlibrarian_lite.gui.benchmark_dialog import BenchmarkConfirmDialog
+        from bmlibrarian_lite.llm import LLMResponse
+        from bmlibrarian_lite.storage import LiteStorage
+
+        model = "anthropic:claude-sonnet-5"
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        config.benchmark.models = [
+            BenchmarkModelConfig(provider="anthropic", model="claude-sonnet-5")
+        ]
+        storage = LiteStorage(config)
+        documents = [make_document(str(i)) for i in range(4)]
+        judge = MagicMock()
+        judge.chat.return_value = LLMResponse(
+            content='{"score": 4, "explanation": "On topic."}',
+            input_tokens=100,
+            output_tokens=20,
+        )
+        runner = BenchmarkRunner(config=config, storage=storage)
+        runner._llm_client = judge
+        runner.run_quick_benchmark(question="Q", documents=documents[:2], models=[model])
+
+        dialog = BenchmarkConfirmDialog(
+            config=config, documents=documents, question="Q", storage=storage
+        )
+
+        two_documents = calculate_cost(model, 500 * 2, 100 * 2)
+        assert f"~${two_documents:.4f}" in dialog.cost_label.text()
+
+
 class TestTheCompletionMessage:
     """The Systematic Review tab's status line after a benchmark."""
 
@@ -300,6 +338,18 @@ class TestTheCompletionMessage:
         config.storage.data_dir = tmp_path
         tab = SystematicReviewTab(config=config, storage=MagicMock())
         tab._benchmark_progress_dialog = None
+
+        tab._on_benchmark_finished(outage_result())
+
+        assert "2 of 4 scorings failed" in tab.progress_label.text()
+
+
+    def test_the_research_questions_tab_names_them_too(self, qapp: Any) -> None:
+        """Only the Systematic Review tab's message was checked."""
+        from bmlibrarian_lite.config import LiteConfig
+        from bmlibrarian_lite.gui.research_questions_tab import ResearchQuestionsTab
+
+        tab = ResearchQuestionsTab(config=LiteConfig(), storage=MagicMock())
 
         tab._on_benchmark_finished(outage_result())
 
@@ -325,5 +375,17 @@ class TestSelectingAQuestion:
 
         LiteMainWindow._load_benchmark_results_for_question(window, "Q")
 
-        window.benchmark_tab.update_result.assert_called_once_with(None)
-        assert "could not be loaded" in window.status_bar.showMessage.call_args.args[0]
+        window.benchmark_tab.show_unreadable.assert_called_once_with()
+        window.benchmark_tab.update_result.assert_not_called()
+
+    def test_the_tab_says_it_could_not_load_rather_than_that_there_is_none(
+        self, qapp: Any
+    ) -> None:
+        """The empty state's "Run a benchmark" is the wrong advice here."""
+        tab = BenchmarkResultsTab()
+        tab.update_result(outage_result())
+
+        tab.show_unreadable()
+
+        assert tab.result is None
+        assert tab._content_widget.text() == UNREADABLE_RESULT_TEXT

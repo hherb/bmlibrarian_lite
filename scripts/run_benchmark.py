@@ -40,6 +40,7 @@ from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.llm import LLMClient
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
+from bmlibrarian_lite.audit_records import is_scoring_failure
 from bmlibrarian_lite.data_models import (
     Evaluator,
     LiteDocument,
@@ -137,7 +138,10 @@ def get_already_scored_doc_ids(
         existing = storage.get_scored_document_for_question(
             doc_id, evaluator_id, research_question
         )
-        if existing and existing.score > 0:  # Valid score (not error code)
+        # A failure is not a score, in either form: a negative code, or the
+        # 1 older builds stored in its place (#315), which read as done here
+        # and was never retried
+        if existing and not is_scoring_failure(existing):
             already_scored.add(doc_id)
 
     return already_scored
@@ -253,14 +257,20 @@ def score_documents_for_question(
             # Save to storage
             storage.save_scored_document(scored_doc, checkpoint.id)
 
-            if scored_doc.score > 0:
+            if not is_scoring_failure(scored_doc):
                 stats["newly_scored"] += 1
                 stats["total_cost_usd"] += cost
                 stats["total_latency_ms"] += latency_ms
             else:
                 stats["failed"] += 1
 
-        except Exception:
+        except Exception as e:
+            # Counted with no word of why, a broken save and a flaky model
+            # looked the same
+            tqdm.write(
+                f"Could not score {doc.id}: {type(e).__name__}: {e}", file=sys.stderr
+            )
+            logger.warning(f"Scoring {doc.id} failed", exc_info=True)
             stats["failed"] += 1
 
         # Update progress bar

@@ -35,6 +35,7 @@ from bmlibrarian_lite.benchmarking.display import (
     NOT_RECORDED,
     agreement_background,
     cost_ranking,
+    distribution_cell,
     documents_left_to_score,
     failed_count_text,
     failed_scorings_sentence,
@@ -68,7 +69,11 @@ from bmlibrarian_lite.data_models import (
     LiteDocument,
     ScoredDocument,
 )
-from bmlibrarian_lite.exceptions import APIError, RetryExhaustedError
+from bmlibrarian_lite.exceptions import (
+    APIError,
+    RetryExhaustedError,
+    StoredResultUnreadableError,
+)
 from bmlibrarian_lite.llm import LLMResponse
 from bmlibrarian_lite.storage import LiteStorage
 
@@ -204,6 +209,49 @@ class TestTheAnswerIsReadOnce:
             2,
             "Score: 2 -- tangential.",
         )
+
+    @pytest.mark.parametrize(
+        "declined",
+        [
+            # A null score fell through to the prose search, which found the 5
+            '{"score": null, "explanation": "A score: 5 needs an abstract."}',
+            '{"score": "N/A", "explanation": "score: 1 is inappropriate"}',
+            # Clamped or truncated, each became a verdict the model never gave
+            '{"score": 0, "explanation": "cannot assess"}',
+            '{"score": -3, "explanation": "x"}',
+            '{"score": 42, "explanation": "x"}',
+            '{"score": 3.5, "explanation": "x"}',
+            # int(True) is 1
+            '{"score": true, "explanation": "x"}',
+            # The prose search read one digit of the 10, and the 1 of a range
+            "Relevance score: 10/10",
+            "Score: 10",
+            "I cannot assign a score 1-5 without an abstract.",
+        ],
+    )
+    def test_an_answer_that_gives_no_score_on_the_scale_is_unreadable(
+        self, declined: str
+    ) -> None:
+        """A verdict nobody gave is not read into an answer (#306)."""
+        assert parse_score_response(declined) is None
+
+    @pytest.mark.parametrize(
+        ("answer", "score"),
+        [
+            ('{"score": "4", "explanation": "x"}', 4),
+            ('{"score": 4.0, "explanation": "x"}', 4),
+            ("Score: 4/5 -- relevant.", 4),
+            ("Score: 3 out of 5.", 3),
+        ],
+    )
+    def test_a_score_on_the_scale_is_read_however_it_is_written(
+        self, answer: str, score: int
+    ) -> None:
+        """Only what is off the scale is refused."""
+        parsed = parse_score_response(answer)
+
+        assert parsed is not None
+        assert parsed[0] == score
 
     def test_a_structured_explanation_is_kept_as_text(self) -> None:
         """The runner's parser could not read a nested object at all."""
@@ -359,6 +407,47 @@ class TestEvaluatorStatistics:
         stats = compute_evaluator_stats(evaluator, [row])
 
         assert stats.total_cost_usd == 0.25
+
+    def test_the_latency_is_of_judgements_only(self) -> None:
+        """A 30-second timeout says nothing of how fast the model answers."""
+        evaluator = make_evaluator()
+        answered = judged(make_document("1"), 4, evaluator)
+        answered.latency_ms = 100
+        timed_out = failure(make_document("2"), evaluator, EvaluationErrorCode.API_TIMEOUT)
+        timed_out.latency_ms = 30000
+
+        stats = compute_evaluator_stats(evaluator, [answered, timed_out])
+
+        assert stats.mean_latency_ms == 100
+
+    def test_failed_calls_still_count_towards_tokens(self) -> None:
+        """Like the cost, the tokens are what was spent."""
+        evaluator = make_evaluator()
+        answered = judged(make_document("1"), 4, evaluator)
+        answered.tokens_input, answered.tokens_output = 100, 20
+        unreadable = failure(
+            make_document("2"), evaluator, EvaluationErrorCode.JSON_PARSE_ERROR
+        )
+        unreadable.tokens_input, unreadable.tokens_output = 100, 30
+
+        stats = compute_evaluator_stats(evaluator, [answered, unreadable])
+
+        assert (stats.total_tokens_input, stats.total_tokens_output) == (200, 50)
+
+    def test_a_score_off_the_scale_is_no_judgement(self) -> None:
+        """A stored 0 moved the mean while the distribution left it out."""
+        evaluator = make_evaluator()
+        rows = [
+            judged(make_document("1"), 4, evaluator),
+            judged(make_document("2"), 0, evaluator),
+        ]
+
+        stats = compute_evaluator_stats(evaluator, rows)
+
+        assert stats.scores == [4]
+        assert stats.mean_score == 4.0
+        assert stats.failed_evaluations == 1
+        assert sum(stats.score_distribution.values()) == stats.total_evaluations
 
     def test_the_count_survives_being_stored(self) -> None:
         """The summary is what a later session reads back."""
@@ -686,6 +775,32 @@ class TestWhatTheResultsTabShows:
         assert down not in ranking.split(", ")[0]
         assert f"{down} ({NOT_AVAILABLE})" in ranking
 
+    def test_a_billed_model_that_judged_nothing_is_not_the_cheapest(self) -> None:
+        """At $0.00 per judgement, the model whose every call failed ranked first.
+
+        The tab's own ranking had this right; the result's did not, and the
+        0.0 was stored with the result.
+        """
+        result = self.result_with_an_outage()
+        answered, down = result.evaluator_stats
+        down.total_cost_usd = 0.03
+
+        assert down.cost_per_evaluation is None
+        assert down.tokens_per_evaluation is None
+        assert down.to_dict()["cost_per_evaluation"] is None
+        assert result.get_ranking_by_cost() == [
+            (answered.evaluator, answered.cost_per_evaluation),
+            (down.evaluator, None),
+        ]
+
+    def test_a_model_that_judged_nothing_has_no_distribution(self) -> None:
+        """Shown as "0 (0%)" in every column, it never gave any score."""
+        answered, down = self.result_with_an_outage().evaluator_stats
+
+        assert distribution_cell(down, 4) == NOT_AVAILABLE
+        assert distribution_cell(answered, 4) == "1 (100%)"
+        assert distribution_cell(answered, 2) == "0 (0%)"
+
     def test_the_failed_count_is_shown(self) -> None:
         """A model that could not answer is visible without opening each row."""
         result = self.result_with_an_outage()
@@ -799,6 +914,29 @@ class TestAStoredResultIsReadBackTruthfully:
         )
         return runner, result.run_id
 
+    def test_an_older_empty_evaluator_has_no_mean_or_latency(
+        self, storage: LiteStorage
+    ) -> None:
+        """Stored as 0.0, it reloaded as a real mean and as the fastest model."""
+        runner, run_id = self.stored(storage)
+        run = storage.get_benchmark_run(run_id)
+        summary = json.loads(run.results_summary)
+        down = summary["evaluator_stats"][1]
+        down.update(mean_score=0.0, std_dev=0.0, mean_latency_ms=0.0)
+        del down["failed_evaluations"]
+        storage.update_benchmark_run(run_id, results_summary=json.dumps(summary))
+
+        stored = runner.get_benchmark_result(run_id)
+
+        assert stored is not None
+        reloaded = stored.evaluator_stats[1]
+        assert (reloaded.mean_score, reloaded.std_dev, reloaded.mean_latency_ms) == (
+            None,
+            None,
+            None,
+        )
+        assert stored.get_ranking_by_speed()[-1] == (reloaded.evaluator, None)
+
     def test_the_distribution_survives_being_stored(self, storage: LiteStorage) -> None:
         """Its keys came back as strings, so every loaded result showed 0 (0%)."""
         runner, run_id = self.stored(storage)
@@ -837,17 +975,82 @@ class TestAStoredResultIsReadBackTruthfully:
         Cross-run reuse read every score the model ever gave the document.
         """
         document = make_document("1")
+        # A finished benchmark of this question, so cross-run reuse is
+        # consulted at all: with none, it answers before the question filter
+        # is reached, and this test passed with the filter removed
+        runner_with(storage, ScriptedClient(ON_TOPIC)).run_quick_benchmark(
+            question=QUESTION, documents=[make_document("2")], models=[MODEL]
+        )
         runner_with(storage, ScriptedClient('{"score": 2, "explanation": "Off."}')).run_quick_benchmark(
             question="A different question", documents=[document], models=[MODEL]
         )
-        client = ScriptedClient(ON_TOPIC)
+        client = ScriptedClient('{"score": 5, "explanation": "Direct."}')
 
         result = runner_with(storage, client).run_quick_benchmark(
             question=QUESTION, documents=[document], models=[MODEL]
         )
 
         assert client.calls == [MODEL]
+        assert result.evaluator_stats[0].scores == [5]
+
+    def test_this_questions_score_is_reused(self, storage: LiteStorage) -> None:
+        """The control for the test above: reuse does reach this far."""
+        document = make_document("1")
+        runner_with(storage, ScriptedClient(ON_TOPIC)).run_quick_benchmark(
+            question=QUESTION, documents=[document], models=[MODEL]
+        )
+        client = ScriptedClient('{"score": 5, "explanation": "Direct."}')
+
+        result = runner_with(storage, client).run_quick_benchmark(
+            question=QUESTION, documents=[document], models=[MODEL]
+        )
+
+        assert client.calls == []
         assert result.evaluator_stats[0].scores == [4]
+
+    @pytest.mark.parametrize(
+        "damage",
+        [
+            lambda summary: '{"run_id": "cut short',
+            lambda summary: json.dumps({k: v for k, v in summary.items() if k != "run_id"}),
+            lambda summary: json.dumps({**summary, "created_at": "yesterday"}),
+            lambda summary: json.dumps({**summary, "evaluator_stats": [{"scores": []}]}),
+            # Dropped, the cell read "-", as though the model was never asked
+            lambda summary: json.dumps(
+                {
+                    **summary,
+                    "document_comparisons": [
+                        {**summary["document_comparisons"][0], "scores": {"x": "four"}}
+                    ],
+                }
+            ),
+            lambda summary: json.dumps(
+                {
+                    **summary,
+                    "document_comparisons": [
+                        {**summary["document_comparisons"][0], "scores": ["not", "a", "map"]}
+                    ],
+                }
+            ),
+        ],
+    )
+    def test_a_result_that_cannot_be_read_is_not_no_result(
+        self, storage: LiteStorage, damage: Callable[[dict[str, Any]], str]
+    ) -> None:
+        """Read as "no benchmark", the tab invited a paid re-run of one that exists."""
+        runner, run_id = self.stored(storage)
+        run = storage.get_benchmark_run(run_id)
+        summary = json.loads(run.results_summary)
+        storage.update_benchmark_run(run_id, results_summary=damage(summary))
+
+        with pytest.raises(StoredResultUnreadableError):
+            runner.get_latest_benchmark_result_for_question(QUESTION)
+
+    def test_no_stored_result_is_none(self, storage: LiteStorage) -> None:
+        """Only an unreadable result raises; a question never benchmarked does not."""
+        runner = runner_with(storage, ScriptedClient(ON_TOPIC))
+
+        assert runner.get_latest_benchmark_result_for_question(QUESTION) is None
 
 
 class TestAnAnswerThatOverflows:

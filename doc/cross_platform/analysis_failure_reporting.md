@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #315) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #315), except two known gaps: a Research Questions rerun reuses a failed document as already scored (#316), and the quality benchmark records a failure as "unclassified" (#314) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -212,9 +212,10 @@ to read a record written elsewhere.
     have been either. **The list is recorded only once extraction has run to
     the end**: a cancelled run's unreached documents were never read, and
     recorded as complete they read as "none quotable". A list — in a
-    checkpoint or an audit file — that cannot be read whole makes the record
-    unreadable rather than shorter; an unknown cause code degrades to
-    `UNKNOWN_ERROR`. A failed write of the checkpoint's list does not end the
+    checkpoint or an audit file — that cannot be read whole, or that names a
+    document twice, reads as not recorded rather than shorter or longer; the
+    rest of the record is still shown. An unknown cause code — or one that
+    names no failure, such as success — degrades to `UNKNOWN_ERROR`. A failed write of the checkpoint's list does not end the
     review; its restore then says "not recorded". **A restore reads its own
     run's citations**, as it reads its own scores: counted against every
     run's, a document this run found silent reads as cited.
@@ -227,8 +228,21 @@ to read a record written elsewhere.
     reasons — and never shows the older form's text, which is raw provider
     output. Python: `is_scoring_failure()`, its SQL form
     `scoring_failure_sql()` (an exact, case-sensitive prefix match), and
-    `as_recorded_failure()`, which a restore applies so the older form is
-    audited as a failure whose cause cannot be named (#315).
+    `as_recorded_failure()`, which the audit's classification applies itself
+    — no load path has to remember to — so the older form is audited as a
+    failure whose cause cannot be named (#315). **One older form cannot be
+    recognised**: the benchmark runner before #306 also stored a JSON answer
+    with no `score` in it as a 1 with the model's own explanation. Nothing
+    tells those from real 1s, so a result stored before #306 says its 1s may
+    include failures, and nothing more can be claimed for it.
+  - **An answer holding no score on the scale is a failure, not a score.**
+    A `score` that is missing, null, not a whole number, or off the 1–5
+    scale, and an answer stated in prose whose number is on another scale
+    ("10/10") or is a range ("1-5"), are unreadable: retried, then recorded
+    as `JSON_PARSE_ERROR`. Clamped, "0" and "-3" read as a confident "not
+    relevant". Once an answer is a JSON object, only that object is read —
+    a digit in its explanation is not a score. Python:
+    `parse_score_response()`, shared by the review and the benchmark.
 - **The live Audit Trail view** follows the record (#307): a document that
   could not be scored is drawn as a failure with its reason (Python: a grey
   "Scoring failed" badge, the description as tooltip), never as its code on
@@ -248,7 +262,14 @@ to read a record written elsewhere.
   question. A cost estimate counts the documents a model has judged, not that
   it ran before. A result stored before failures were counted says its 1s
   may include them, and reads its older-form entries as failures. The run's
-  completion message says how many scorings failed.
+  completion message says how many scorings failed. A model that judged
+  nothing has no cost per judgement either — ranked at $0.00, the model whose
+  every billed call failed was the cheapest — and no score distribution. A
+  stored result that cannot be read back says so where the results would be,
+  never "no results": that invited paying for the benchmark again. Offline
+  comparisons across questions (Python: `scripts/concordance_analysis.py`)
+  follow the same rules — failures counted per model and left out, a pair
+  with too few documents in common shown as "n/a", never 0%.
 - **A degraded source is named where the source is named** (#304). Falling
   back from full text to the abstract — discovery failing, content arriving
   empty, the load raising, PDF extraction yielding nothing, a paywall the user

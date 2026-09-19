@@ -54,6 +54,7 @@ sqlite3.register_converter(
     lambda b: datetime.fromisoformat(b.decode().replace(" ", "T"))
 )
 
+from .audit_records import scoring_failure_sql  # noqa: E402
 from .config import LiteConfig
 from .constants import (
     BENCHMARK_QUESTION_HASH_LENGTH,
@@ -1793,7 +1794,7 @@ class LiteStorage:
                 question_hash = compute_question_hash(question)
 
                 # Count scored documents for this question
-                scored_count = self._count_scored_documents_for_question(
+                scored_count, failed_count = self._count_scored_documents_for_question(
                     conn, question
                 )
 
@@ -1805,6 +1806,7 @@ class LiteStorage:
                     total_documents=row["total_documents"] or 0,
                     scored_documents=scored_count,
                     run_count=row["run_count"],
+                    failed_documents=failed_count,
                 ))
 
             return summaries
@@ -1813,22 +1815,29 @@ class LiteStorage:
         self,
         conn: sqlite3.Connection,
         question: str,
-    ) -> int:
+    ) -> tuple[int, int]:
         """
         Count scored documents for a research question.
+
+        A failed scoring is not a score (#307), in either form it is stored
+        in; counted as one, an outage read as a finished review.
 
         Args:
             conn: Active SQLite connection
             question: The research question text
 
         Returns:
-            Count of unique scored documents
+            The documents with a score, and those every scoring of which
+            failed
         """
-        # Find checkpoints matching this question directly
-        # Then count unique document_ids in scored_documents
+        # COALESCE: the condition is NULL for a 1 stored with no explanation,
+        # which is a score
         cursor = conn.execute(
-            """
-            SELECT COUNT(DISTINCT sd.document_id) as count
+            f"""
+            SELECT
+                COUNT(DISTINCT CASE WHEN NOT COALESCE({scoring_failure_sql("sd")}, 0)
+                      THEN sd.document_id END) AS judged,
+                COUNT(DISTINCT sd.document_id) AS total
             FROM scored_documents sd
             INNER JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
             WHERE LOWER(TRIM(rc.research_question)) = LOWER(TRIM(?))
@@ -1836,7 +1845,9 @@ class LiteStorage:
             (question,),
         )
         row = cursor.fetchone()
-        return row["count"] if row else 0
+        if not row:
+            return 0, 0
+        return row["judged"], row["total"] - row["judged"]
 
     def get_scored_document_ids_for_question(
         self,
@@ -3582,9 +3593,11 @@ class LiteStorage:
         """
         Get all benchmark scores for a research question across all runs.
 
-        Aggregates scores from all completed benchmark runs for the
-        given question. For documents scored multiple times by the
-        same evaluator, returns the most recent score.
+        Finds the evaluators of the question's completed benchmark runs, and
+        returns every score each gave in any checkpoint of this question --
+        review runs included -- never another question's. For documents
+        scored multiple times by the same evaluator, returns the most recent
+        score.
 
         Args:
             question: Research question text

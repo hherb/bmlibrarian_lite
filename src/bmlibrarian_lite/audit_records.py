@@ -25,7 +25,9 @@ irrelevant.
 
 The functions here classify instead of inferring: a document's outcome is
 decided by the score it actually received, which is negative when the scoring
-failed (see :class:`~bmlibrarian_lite.data_models.EvaluationErrorCode`), and
+failed (see :class:`~bmlibrarian_lite.data_models.EvaluationErrorCode`) -- or,
+from an older build, a 1 with a recognisable explanation, which is read as the
+failure it was (:func:`as_recorded_failure`) -- and
 a document with no score at all is recorded as not scored, in none of the
 scored lists. They also build the part of the audit record that says so, so
 the saved file and the dialog cannot drift apart, and read what records and
@@ -159,7 +161,10 @@ def classify_document_outcomes(
             is one document.
         scored_documents: Every document that received a score, accepted,
             rejected and failed alike. Repeated scores for one document are
-            reduced to the first.
+            reduced to the first. A failure an older build stored as a 1 is
+            read as the failure it was (:func:`as_recorded_failure`), so no
+            caller has to remember to: missed, it was audited as rejected,
+            with the raw provider text as its reason (#315).
         min_score: The threshold the run accepted at.
 
     Returns:
@@ -170,10 +175,11 @@ def classify_document_outcomes(
     failed: list[ScoredDocument] = []
     seen: set[str] = set()
 
-    for scored in scored_documents:
-        if scored.document.id in seen:
+    for stored in scored_documents:
+        if stored.document.id in seen:
             continue
-        seen.add(scored.document.id)
+        seen.add(stored.document.id)
+        scored = as_recorded_failure(stored)
         if scored.score < 0:
             failed.append(scored)
         elif scored.score >= min_score:
@@ -542,8 +548,9 @@ def recorded_extraction_failures(
         The failures, possibly none; or None when the checkpoint recorded
         none (a run from before they were kept) or a record that cannot be
         read whole -- skipping what it cannot read would under-count what
-        failed. A cause this build cannot name degrades to
-        ``UNKNOWN_ERROR``: the reason degrades, the loss never does.
+        failed, and a document listed twice would over-count it. A cause
+        this build cannot name degrades to ``UNKNOWN_ERROR``: the reason
+        degrades, the loss never does.
     """
     if not isinstance(checkpoint_metadata, Mapping):
         return None
@@ -551,13 +558,15 @@ def recorded_extraction_failures(
     if not isinstance(entries, list):
         return None
     failures: list[ExtractionFailure] = []
+    seen: set[str] = set()
     for entry in entries:
         if not isinstance(entry, Mapping):
             return None
         document_id = entry.get("document_id")
         document = documents.get(document_id) if isinstance(document_id, str) else None
-        if document is None:
+        if document is None or document.id in seen:
             return None
+        seen.add(document.id)
         failures.append(ExtractionFailure(document, _recorded_cause(entry.get("error_code"))))
     return failures
 
@@ -569,9 +578,10 @@ def _recorded_cause(value: object) -> EvaluationErrorCode:
         value: The stored code.
 
     Returns:
-        The code, or ``UNKNOWN_ERROR`` for one this build cannot name.
+        The code, or ``UNKNOWN_ERROR`` for one this build cannot name -- or
+        for ``SUCCESS``, which names no failure.
     """
-    if isinstance(value, bool) or not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int) or value >= 0:
         return EvaluationErrorCode.UNKNOWN_ERROR
     try:
         return EvaluationErrorCode(value)

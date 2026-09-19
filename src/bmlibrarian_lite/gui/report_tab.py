@@ -841,9 +841,10 @@ class ReportTab(QWidget):
         lines.append("")
         if not extraction_recorded:
             lines.append(
-                "*This run predates extraction failures being recorded: a "
-                "relevant document without a citation may have held nothing "
-                "quotable, or its extraction may have failed.*"
+                "*Which relevant documents could not be read for citations "
+                "is not recorded for this run: a relevant document without a "
+                "citation may have held nothing quotable, or its extraction "
+                "may have failed.*"
             )
             lines.append("")
 

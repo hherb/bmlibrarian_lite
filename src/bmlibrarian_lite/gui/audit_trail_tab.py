@@ -171,7 +171,8 @@ class AuditTrailTab(QWidget):
         """
         Handle workflow completion.
 
-        Re-sorts literature by score.
+        Re-sorts literature by outcome: judged by score, then failed, then
+        never scored.
         """
         logger.debug("Audit trail: workflow finished")
         self.literature_tab.resort_by_score()

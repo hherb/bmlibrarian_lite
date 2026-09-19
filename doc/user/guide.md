@@ -144,7 +144,7 @@ relevant in it.
 
 The Research Questions tab lets you manage and revisit past searches:
 
-- View all previous research questions
+- View all previous research questions. The **Scored** column counts the documents a model scored; documents whose every scoring failed are shown beside it, for example **12 (+3 failed)**
 - Re-run searches with incremental pagination (fetch more results)
 - Automatic deduplication of already-scored documents
 - Context menu: re-classify, re-score, delete, or run benchmarks
@@ -251,8 +251,17 @@ shown as **failed** in the document details (hover for why). It is never
 counted as a score: not in the mean, the distribution, or the agreement
 between models, which compares only documents both models scored (**n/a**
 when they scored none in common). The next benchmark of the same question
-scores it again rather than reusing the failure. A result saved before this
-was recorded says so: its scores of 1 may include failures.
+scores it again rather than reusing the failure. A model that scored nothing
+shows **n/a** for its cost per document and its score distribution, rather
+than $0.00 or 0%. A result saved before this was recorded says so: its scores
+of 1 may include failures. If a saved result cannot be read back, the
+Benchmark tab says the results **could not be loaded**; that is not the same
+as having none, and running the benchmark again would repeat its cost.
+
+A model's answer counts as a score only when it gives a whole number from 1
+to 5. An answer that declines to score, gives 0, or scores on another scale
+(such as "10/10") is retried, and if it never gives a score it is counted as
+a failure, not as a score of 1.
 
 ### Quality Assessment
 

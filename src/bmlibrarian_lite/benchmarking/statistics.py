@@ -30,7 +30,7 @@ from ..audit_records import (
     scoring_failure_reason,
 )
 from ..data_models import Evaluator, LiteDocument, ScoredDocument
-from ..constants import DEFAULT_MIN_SCORE
+from ..constants import DEFAULT_MIN_SCORE, SCORE_MAX, SCORE_MIN
 from .models import EvaluatorStats, DocumentComparison
 
 
@@ -41,9 +41,10 @@ def compute_evaluator_stats(
     """
     Compute statistics for a single evaluator.
 
-    A document the evaluator could not score is counted as a failure and
-    left out of every figure describing its judgements (#306). What the
-    attempt cost is still counted: the call was made.
+    A document the evaluator could not score -- or whose stored score is off
+    the scale -- is counted as a failure and left out of every figure
+    describing its judgements (#306). What the attempt cost is still
+    counted: the call was made.
 
     Args:
         evaluator: The evaluator to compute stats for
@@ -53,14 +54,20 @@ def compute_evaluator_stats(
     Returns:
         EvaluatorStats with aggregated metrics
     """
-    judged = [sd for sd in scored_documents if not is_scoring_failure(sd)]
+    # A value off the scale (a stored 0, say) is no judgement either: kept
+    # among the scores, it moved the mean while the distribution, which
+    # counts 1-5 only, left it out
+    judged = [
+        sd
+        for sd in scored_documents
+        if not is_scoring_failure(sd) and SCORE_MIN <= sd.score <= SCORE_MAX
+    ]
     scores = [sd.score for sd in judged]
 
     # Score distribution
-    distribution = {i: 0 for i in range(1, 6)}
+    distribution = {i: 0 for i in range(SCORE_MIN, SCORE_MAX + 1)}
     for score in scores:
-        if 1 <= score <= 5:
-            distribution[score] += 1
+        distribution[score] += 1
 
     # Latency stats: how long the evaluator takes to answer, which a
     # timed-out attempt does not say

@@ -303,8 +303,18 @@ class TestTheReviewTab:
 
 @pytest.fixture
 def tab(qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> ReportTab:
-    """A report tab auto-saving into a directory this test owns."""
+    """A report tab auto-saving into a directory this test owns.
+
+    Its message boxes fail the test: left real, a load that raised opened a
+    modal dialog and the suite hung until killed instead of failing.
+    """
     monkeypatch.setattr(report_tab_module, "REPORTS_DIR", tmp_path)
+    dialogs = MagicMock()
+    for kind in ("critical", "warning"):
+        getattr(dialogs, kind).side_effect = lambda _parent, title, text: pytest.fail(
+            f"The report tab showed a dialog: {title}: {text}"
+        )
+    monkeypatch.setattr(report_tab_module, "QMessageBox", dialogs)
     return ReportTab(config=MagicMock(), storage=MagicMock())
 
 
@@ -429,8 +439,27 @@ class TestTheDialog:
 
         text = tab._audit_trail_text()
 
-        assert "predates extraction failures being recorded" in text
+        assert "is not recorded for this run" in text
         assert "none quotable" not in text
+
+    def test_a_current_file_reads_back_as_it_was_shown(
+        self, tab: ReportTab, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the live dialog was checked; a reload is what a reader opens later."""
+        display(tab, [FAILURE])
+        report_path = sorted(tmp_path.glob("*_report.md"))[-1]
+        monkeypatch.setattr(
+            report_tab_module.QFileDialog,
+            "getOpenFileName",
+            lambda *_args, **_kwargs: (str(report_path), ""),
+        )
+        tab._load_report()
+
+        text = tab._audit_trail_text()
+
+        assert "- **Citations:** 1" in text
+        assert "- **Citations:** none quotable" in text
+        assert f"- **Citations:** could not be extracted ({UNREACHABLE.description})" in text
 
 
 class TestADamagedAuditFile:

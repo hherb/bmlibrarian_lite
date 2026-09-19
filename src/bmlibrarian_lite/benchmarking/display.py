@@ -236,6 +236,24 @@ def documents_left_to_score(
     return -(-documents_benchmarked * unjudged // documents_available)
 
 
+def distribution_cell(stats: EvaluatorStats, score: int) -> str:
+    """How often an evaluator gave a score, as its distribution cell.
+
+    Args:
+        stats: The evaluator's statistics.
+        score: The score on the scale.
+
+    Returns:
+        "count (share%)", or n/a for an evaluator that judged nothing: shown
+        as "0 (0%)" in every column, it read as a model that never gave any
+        score rather than one that could not give one.
+    """
+    if stats.total_evaluations == 0:
+        return NOT_AVAILABLE
+    count = stats.score_distribution.get(score, 0)
+    return f"{count} ({count / stats.total_evaluations * 100:.0f}%)"
+
+
 def failed_count_text(stats: EvaluatorStats) -> str:
     """How many documents an evaluator could not score.
 
@@ -286,15 +304,15 @@ def cost_ranking(
     Returns:
         "1. name ($cost/eval), ..." cheapest first.
     """
+    costs = [(s.evaluator.display_name, s.cost_per_evaluation) for s in evaluator_stats]
     priced = sorted(
-        (s for s in evaluator_stats if s.total_evaluations > 0),
-        key=lambda s: s.total_cost_usd / s.total_evaluations,
+        ((name, cost) for name, cost in costs if cost is not None),
+        key=lambda entry: entry[1],
     )
-    unpriced = [s for s in evaluator_stats if s.total_evaluations == 0]
-    entries = [
-        f"{s.evaluator.display_name} (${s.total_cost_usd / s.total_evaluations:.4f}/eval)"
-        for s in priced
-    ] + [f"{s.evaluator.display_name} ({NOT_AVAILABLE})" for s in unpriced]
+    unpriced = [name for name, cost in costs if cost is None]
+    entries = [f"{name} (${cost:.4f}/eval)" for name, cost in priced] + [
+        f"{name} ({NOT_AVAILABLE})" for name in unpriced
+    ]
     return ", ".join(
         f"{place}. {entry}" for place, entry in enumerate(entries[:limit], start=1)
     )
@@ -314,6 +332,8 @@ def failures_note(result: BenchmarkResult) -> str | None:
         return None
     return (
         "This result was computed before failed scorings were told apart "
-        "from scores: a document a model could not score may be counted "
-        "here as a score of 1."
+        "from scores: a document a model could not score may be counted as "
+        "a score of 1 in its statistics and agreement figures, even where "
+        "the documents table shows it as failed -- and an answer that held "
+        "no score was recorded as a 1 that cannot be told apart at all."
     )

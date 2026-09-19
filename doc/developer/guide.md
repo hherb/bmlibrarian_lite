@@ -397,10 +397,23 @@ carry `citation_extraction_error`.
 is true for a negative score, and for the score of 1 older builds wrote with
 `"Scoring failed: …"` or `"Could not parse response"` (the benchmark runner
 until #306, the review scorer until 2025-12-23); `scoring_failure_sql()` states
-it for a query, and a restore passes each stored score through
-`as_recorded_failure()` (#315). The benchmark runner never reuses one, and
-reuses only the same question's scores; `benchmarking/display.py` states every
-figure the benchmark could not compute as `n/a`. `outcome_sort_key()` orders a
+it for a query, and `classify_document_outcomes()` passes each score through
+`as_recorded_failure()` itself (#315), so no load path has to. One older form
+cannot be recognised: the pre-#306 runner also stored an answer with no
+`score` as a 1 with the model's own explanation, which is why an older result
+says its 1s may include failures. The benchmark runner never reuses a
+failure, and reuses only the same question's scores; `benchmarking/display.py`
+states every figure the benchmark could not compute as `n/a`, including the
+cost per judgement and the distribution of a model that judged nothing. A
+stored result that cannot be read raises `StoredResultUnreadableError`, which
+the Benchmark tab shows as "could not be loaded" (`show_unreadable()`), never as
+no results.
+
+**An answer holding no score on the scale is a failure.**
+`parse_score_response()` (shared by the review and the benchmark) returns
+`None` — retried, then recorded as `JSON_PARSE_ERROR` — for a `score` that is
+missing, null, not a whole number or off 1–5, and for prose whose number is on
+another scale or is a range; a JSON answer is read as that object alone. `outcome_sort_key()` orders a
 listing judged-then-failed-then-unscored, which the Audit Trail's literature
 cards follow (#307).
 
@@ -535,6 +548,10 @@ citation_extracted = Signal(object)  # Citation
 # SystematicReviewTab for the Report tab (#310)
 citation_extraction_recorded = Signal(list)  # list[ExtractionFailure]
 ```
+
+`citation_extraction_recorded` is listed here for completeness: the Audit
+Trail tab does not connect to it; `SystematicReviewTab` keeps its list for the
+Report tab's audit record.
 
 ### Data Models
 

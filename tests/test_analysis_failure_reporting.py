@@ -922,6 +922,50 @@ class TestTheCauseSurvivesTheRetries:
         assert shortfall is not None
         assert "Settings" in analysis_failure_advice([shortfall])
 
+    @pytest.mark.parametrize(
+        "unreadable",
+        [
+            '{"explanation": "no idea"}',
+            '{"score": null, "explanation": "A score: 5 needs an abstract."}',
+            '{"score": 0, "explanation": "cannot assess"}',
+            "I cannot assign a score 1-5 without an abstract.",
+        ],
+    )
+    def test_an_answer_holding_no_score_is_a_failure_not_a_score(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        without_retry_delays: None,
+        unreadable: str,
+    ) -> None:
+        """Retried, then recorded as unreadable -- never as a verdict (#306).
+
+        Every other scoring test patches ``_score_with_retry`` away, so none
+        of them reach the check that turns an unreadable answer into a retry.
+        """
+        documents = [make_document("1"), make_document("2")]
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(agent, "_chat", ScriptedLLM([unreadable] * 4 + [SCORED_WELL]))
+
+        outcome = agent.score_documents(QUESTION, documents, min_score=1)
+
+        assert [sd.document.id for sd in outcome.failed] == [documents[0].id]
+        assert outcome.failed[0].score == EvaluationErrorCode.JSON_PARSE_ERROR.value
+        assert [sd.document.id for sd in outcome.accepted] == [documents[1].id]
+
+    def test_an_unreadable_answer_is_retried_until_one_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, without_retry_delays: None
+    ) -> None:
+        """The retry is what the unreadable answer is turned into."""
+        agent = LiteScoringAgent()
+        monkeypatch.setattr(
+            agent, "_chat", ScriptedLLM(['{"explanation": "no idea"}', SCORED_WELL])
+        )
+
+        outcome = agent.score_documents(QUESTION, [make_document("1")], min_score=1)
+
+        assert outcome.failed == []
+        assert [sd.score for sd in outcome.accepted] == [4]
+
     def test_a_wrapper_carrying_nothing_still_names_the_retries(self) -> None:
         """With no cause to read, the loss is still recorded, reason degraded."""
         assert (

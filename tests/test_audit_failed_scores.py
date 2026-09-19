@@ -126,6 +126,20 @@ class TestTheCard:
         assert UNREACHABLE.description in text
         assert not text.startswith("Score:")
 
+    def test_a_failure_with_no_text_replaces_what_the_card_showed(
+        self, qapp: Any
+    ) -> None:
+        """With no rationale passed, the card kept showing the earlier score's."""
+        card = DocumentCard(document=make_document("1"))
+        card.set_score(4, "On topic.")
+        assert card._rationale_widget is not None
+
+        card.set_score(UNREACHABLE.value, "")
+
+        shown = card._rationale_widget.text()
+        assert shown.startswith(SCORING_FAILED_TEXT)
+        assert "On topic." not in shown
+
 
 class TestTheOrder:
     """Judged documents first, then failures, then the never scored."""
@@ -195,3 +209,75 @@ class TestTheQueryCard:
         assert card.stats_label.text() == (
             "Found: 2 | Scored: 1 | Could not score: 1 | Citations: 0"
         )
+
+
+class TestTheResearchQuestionsCount:
+    """The Research Questions tab counts a failure apart from the scores."""
+
+    def test_the_database_counts_failures_apart(self, tmp_path: Any) -> None:
+        """Counted as scored, an outage read as a finished review.
+
+        A document scored after an earlier failure is scored; an older
+        build's failure, stored as a 1, is a failure; a 1 with no
+        explanation is a score.
+        """
+        from bmlibrarian_lite.config import LiteConfig
+        from bmlibrarian_lite.storage import LiteStorage
+
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        storage = LiteStorage(config)
+        checkpoint = storage.create_checkpoint(research_question="Q")
+        rows = [
+            scored("1", 4),
+            failed("2"),
+            ScoredDocument(make_document("3"), 1, "Scoring failed: Connection refused"),
+            failed("4"),
+            scored("4", 3),
+            ScoredDocument(make_document("5"), 1, None),  # type: ignore[arg-type]
+        ]
+        for row in rows:
+            storage.upsert_document(row.document)
+            storage.save_scored_document(row, checkpoint.id)
+
+        with storage._sqlite_connection() as conn:
+            counts = storage._count_scored_documents_for_question(conn, "Q")
+
+        assert counts == (3, 2)
+
+    def test_the_column_names_the_failures(self) -> None:
+        """Shown only when there are any."""
+        from datetime import datetime
+
+        from bmlibrarian_lite.data_models import ResearchQuestionSummary
+        from bmlibrarian_lite.gui.research_questions_tab import scored_count_text
+
+        question = ResearchQuestionSummary(
+            question="Q", question_hash="h", pubmed_query="q", last_run_at=datetime.now()
+        )
+        question.scored_documents = 12
+
+        assert scored_count_text(question) == "12"
+
+        question.failed_documents = 3
+
+        assert scored_count_text(question) == "12 (+3 failed)"
+
+
+class TestAnOlderFailureIsAuditedAsOne:
+    """Classification reads an older build's failure, whoever loaded it."""
+
+    def test_a_stored_one_that_was_a_failure_is_failed_not_rejected(self) -> None:
+        """Only the restore converted it; any other path audited it as rejected (#315)."""
+        from bmlibrarian_lite.audit_records import classify_document_outcomes
+
+        older = ScoredDocument(make_document("1"), 1, "Scoring failed: SECRET text")
+        judged = scored("2", 1)
+
+        outcomes = classify_document_outcomes(
+            [older.document, judged.document], [older, judged], min_score=3
+        )
+
+        assert [sd.document.id for sd in outcomes.failed] == ["doc-1"]
+        assert "SECRET" not in outcomes.failed[0].explanation
+        assert [sd.document.id for sd in outcomes.rejected] == ["doc-2"]

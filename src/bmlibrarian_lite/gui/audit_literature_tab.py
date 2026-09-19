@@ -323,8 +323,8 @@ class AuditLiteratureTab(QWidget):
 
         Judged documents by score (highest first), then documents the model
         could not score, then documents never scored. A failure's negative
-        code is not a score to sort by (#307). Called after scoring completes
-        to reorder documents.
+        code is not a score to sort by (#307). Called when the workflow
+        finishes (``AuditTrailTab.on_workflow_finished``).
         """
         with self._lock:
             cards_with_scores = [
@@ -332,7 +332,7 @@ class AuditLiteratureTab(QWidget):
                 for card in self._cards_by_doc_id.values()
             ]
 
-            # sorted() is stable: documents with the same outcome keep the
+            # list.sort() is stable: documents with the same outcome keep the
             # order they were added in
             cards_with_scores.sort(key=lambda x: x[1])
 

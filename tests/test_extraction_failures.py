@@ -302,6 +302,27 @@ class TestTheCheckpointKeepsThem:
             ExtractionFailure(document, EvaluationErrorCode.UNKNOWN_ERROR)
         ]
 
+    @pytest.mark.parametrize("stored", [0, 3])
+    def test_a_stored_cause_that_is_no_failure_is_not_success(self, stored: int) -> None:
+        """Read back as SUCCESS, the audit said the document failed because it succeeded."""
+        document = make_document("1")
+        metadata = {
+            CHECKPOINT_EXTRACTION_FAILURES_KEY: [
+                {"document_id": "doc-1", "error_code": stored}
+            ]
+        }
+
+        recorded = recorded_extraction_failures(metadata, {"doc-1": document})
+
+        assert recorded == [
+            ExtractionFailure(document, EvaluationErrorCode.UNKNOWN_ERROR)
+        ]
+
+    def test_a_failure_cannot_be_caused_by_success(self) -> None:
+        """The type refuses what the record above could otherwise hold."""
+        with pytest.raises(ValueError):
+            ExtractionFailure(make_document("1"), EvaluationErrorCode.SUCCESS)
+
     @pytest.mark.parametrize(
         "damaged",
         [
@@ -309,6 +330,11 @@ class TestTheCheckpointKeepsThem:
             [{"error_code": -4}],
             [{"document_id": "doc-unknown", "error_code": -4}],
             ["not an entry"],
+            # Listed twice, one document would be counted as two failures
+            [
+                {"document_id": "doc-1", "error_code": -4},
+                {"document_id": "doc-1", "error_code": -4},
+            ],
         ],
     )
     def test_a_damaged_record_is_not_read_as_a_smaller_loss(self, damaged: Any) -> None:
@@ -398,6 +424,9 @@ class TestARestoreReadsItsOwnRun:
         storage.create_checkpoint(
             research_question=QUESTION, metadata={"type": "benchmark"}
         )
+        # An empty report is no report either
+        emptied = storage.create_checkpoint(research_question=QUESTION)
+        storage.update_checkpoint(checkpoint_id=emptied.id, report="")
 
         restored = storage.get_checkpoint_for_question(QUESTION)
 

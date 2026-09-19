@@ -72,17 +72,28 @@ class EvaluatorStats:
     failed_evaluations: int | None = None
 
     @property
-    def cost_per_evaluation(self) -> float:
-        """Average cost per document evaluation."""
+    def cost_per_evaluation(self) -> float | None:
+        """What each judgement cost, failed calls included.
+
+        Returns:
+            The cost, failed calls included since they were billed, divided
+            by the judgements it bought; None when it judged no document. As
+            0.0, a model whose every call failed ranked as the cheapest.
+        """
         if self.total_evaluations == 0:
-            return 0.0
+            return None
         return self.total_cost_usd / self.total_evaluations
 
     @property
-    def tokens_per_evaluation(self) -> float:
-        """Average tokens per document evaluation."""
+    def tokens_per_evaluation(self) -> float | None:
+        """What each judgement took in tokens, failed calls included.
+
+        Returns:
+            The tokens, failed calls included, divided by the judgements;
+            None when it judged no document.
+        """
         if self.total_evaluations == 0:
-            return 0.0
+            return None
         total = self.total_tokens_input + self.total_tokens_output
         return total / self.total_evaluations
 
@@ -190,7 +201,7 @@ class DocumentComparison:
         Returns:
             True if at least one evaluator would include and another exclude
         """
-        if len(self.scores) < 2:
+        if not self.is_comparable:
             return False
         score_values = list(self.scores.values())
         includes = any(s >= inclusion_threshold for s in score_values)
@@ -351,17 +362,29 @@ class BenchmarkResult:
         ]
         return ranked + unranked
 
-    def get_ranking_by_cost(self) -> list[tuple[Evaluator, float]]:
+    def get_ranking_by_cost(self) -> list[tuple[Evaluator, float | None]]:
         """
         Rank evaluators by cost efficiency (ascending).
 
         Returns:
-            List of (evaluator, cost_per_eval) tuples, cheapest first
+            List of (evaluator, cost_per_eval) tuples, cheapest first; an
+            evaluator that judged no document has no cost per judgement and
+            comes last
         """
-        return sorted(
-            [(s.evaluator, s.cost_per_evaluation) for s in self.evaluator_stats],
-            key=lambda x: x[1],
+        priced: list[tuple[Evaluator, float | None]] = sorted(
+            (
+                (s.evaluator, s.cost_per_evaluation)
+                for s in self.evaluator_stats
+                if s.cost_per_evaluation is not None
+            ),
+            key=lambda x: x[1] or 0.0,
         )
+        unpriced: list[tuple[Evaluator, float | None]] = [
+            (s.evaluator, None)
+            for s in self.evaluator_stats
+            if s.cost_per_evaluation is None
+        ]
+        return priced + unpriced
 
     def get_ranking_by_speed(self) -> list[tuple[Evaluator, float | None]]:
         """

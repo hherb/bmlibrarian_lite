@@ -188,9 +188,11 @@ scoring, citation extraction, and report generation.
 }
 ```
 
-Each source's `citation_extraction_error` is `null` when its citations were
-read, or why they could not be (for example `"Failed to connect to API"`). A
-source with no citation and no error was read and held nothing quotable.
+Each source's `citation_extraction_error` is `null` when the source was read,
+or why it could not be (for example `"Failed to connect to API"`). A source
+that was read may still have held nothing quotable: the result gives only the
+total `citations_extracted`, and the citations themselves appear in the
+report, so a `null` error says the source was read, not that it was cited.
 
 **Note:** This is a long-running operation (1-5 minutes) because it makes
 multiple LLM calls to score each document and extract citations.
