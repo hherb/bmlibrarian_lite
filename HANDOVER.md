@@ -8,74 +8,82 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#314 + #316 — a quality benchmark counts a failure apart, and a rerun
-retries one**, branch `fix/benchmark-and-rerun-failures-314-316`, PR #321. Python only. Compress into **Recently landed** once merged.
-#306's rules carried to the two places PR #317 left. Contract
-(`doc/cross_platform/analysis_failure_reporting.md`) updated; Python's only
-known gap there is now #319.
+**#320 — a cancelled run on the Research Questions tab ends, and says so**,
+branch `fix/cancelled-rerun-320`, PR #325. Python only. Compress into **Recently
+landed** once merged.
 
-- **Quality benchmark** (#314). `QualityEvaluation` (frozen) holds exactly one
-  of `assessment` / `failure` (`EvaluationErrorCode`, checked in
-  `__post_init__`, which also refuses an `"unknown"` design and a reused
-  failure). The runner's shared `_evaluate()` classifies a raised call
-  (`classify_exhausted_retries` for the wrapper); an answer is `EMPTY_RESPONSE`
-  (blank), `JSON_PARSE_ERROR` (no JSON) or `INVALID_RESPONSE_FORMAT` (JSON
-  naming no mapped design, `"unknown"` included, or a malformed field), and
-  anything a parser raises is caught there as that document's failure, not
-  the run's; tokens and cost still count.
-  Statistics: `failed_evaluations`, `None` for the mean confidence, latency,
-  cost/tokens per assessment of a model that assessed nothing; agreement over
-  documents both assessed (`None` when none, self-agreement too); tier
-  difference and disagreement rates over comparable documents only; rankings
-  put a model with no figure last. **The review's assessments are replayed
-  only through `is_reusable_assessment()`**: task tier, a known design, no
-  transparency downgrade, and `extraction_method == llm_extraction_method(the
-  evaluator's model)`. The review's detailed assessor now records its model
-  (it wrote `"llm_sonnet"` whatever was configured), and the baseline shown is
-  the benchmark task's model, not always the classifier's; the review's
-  classifier/assessor still record a failure as "unknown"/"unclassified"
-  (#319). A replayed evaluation is `reused`, left out of cost/tokens per
-  assessment and latency. `QualityDocumentComparison` refuses an evaluator
-  both assessed and failed. The Systematic Review status line names failed
-  assessments (`quality_benchmark_finished_text()`). Tab cells come from the new
-  pure `benchmarking/quality_display.py`: "failed" + reason tooltip, `n/a`,
-  no colour for no figure, a Failed column, a header sentence. Also fixed on
-  the way: `DESIGN_LABELS` is keyed by the enum and was looked up by value,
-  so no label was ever shown (`design_label()`); the export errors now tell
-  the user; the unused `QualityBenchmarkResultsDialog` duplicate is gone.
-  `reuse_cross_run` is documented as ignored (the quality benchmark stores no
-  per-document evaluations; no checkbox is ever built).
-- **Rerun** (#316). `get_rerun_document_ids_for_question()` splits judged (any
-  judgement) from failed (every scoring a failure, either form); the rerun's
-  search skips the judged and the loaded failed ones — not a failed one whose
-  record is gone, so the search can find it again — and passes the loaded ones
-  to `IncrementalSearchWorker(retry_documents=…)`, which puts them first, keeps
-  them out of the target count, and still emits them when the search ends in
-  shortfalls; an unexpected error says they were not rescored
-  (`unexpected_rerun_error_text()`). Messages: `rerun_start_text()`,
-  `rerun_found_text()`.
-  `get_scored_document_ids_for_question()` is unchanged for the benchmark
-  launchers.
-- **Lodged:** #319 the review's quality filter records a failed
-  classification as an "unknown" design; #320 cancelling a rerun leaves the
-  tab stuck on "Cancelling..." (the worker emits nothing when cancelled;
-  pre-existing); #322 the quality parsers (benchmark and review) invent a 0.5
-  confidence that the benchmark averages and ranks by; #323 "other" is scored
-  as tier 0 in tier comparisons. Further type refinements (derived
-  projections, failure codes kept as codes, `latency_ms`/`task_type`) are
-  noted on #318.
-- **Verified:** `pytest tests/` — 1622 passed, 3 xfailed; `lint_delta.py
-  --base-ref master` 0 new ruff, 0 new mypy (both totals below master).
-  Second review (five agents) acted on: a malformed answer ended the whole
-  run, a failed document with no record could never be retried, and a quality
-  model's assessments were credited to the classifier; each fix has a test
-  seen to fail without it.
+- **The contract is enforced, not just documented.** `IncrementalSearchWorker`,
+  `ReclassifyWorker` and `RescoreWorker` mix in **`SingleOutcome`**: they emit
+  through `_end()` (first terminal signal only) and run their body inside
+  `_run_once()`, which reports whatever escapes it. Saying "exactly one of
+  `finished` / `error` / `cancelled`" in a docstring did not hold it — an
+  import that failed inside the body left `SearchFailedError` unbound, so the
+  first `except` raised in turn and the thread ended in silence, which is the
+  hang #320 is about. Those imports now sit before the `try`.
+- **Cancelling is not failing, but a failure is never hidden** (golden rule 8).
+  `cancelled` carries the error that also ended the run, or `""`: the pass
+  workers as `(succeeded, failed, total, error)`. A crash mid-cancel used to
+  read as an orderly stop ("cancelled after 0 of 30 documents"). A cancel that
+  lands after the last item stopped nothing, so the run `finished` — the search
+  worker has the same `stopped` flag as the pass workers, so a late cancel no
+  longer throws away a search that had already completed.
+- The tab's Cancel reaches whichever of the three is running (it reached only
+  the search, though enabled for all), disables itself, and each ends in a
+  ready tab: `rerun_cancelled_text()` (which names the retry documents that
+  were not scored again), `pass_cancelled_text()`. A cancelled pass with
+  failures now warns, as the finished path does — for a re-classification that
+  dialog is the only lasting notice, since a failed classification is stored
+  nowhere.
+- **Re-run stayed disabled after every run**, cancelled or not: `_reset_ui`
+  re-checked the buttons while the worker was still held. Each cleanup now
+  re-checks them (`_update_action_buttons()`, which leaves the progress line
+  alone; `_is_busy()` counts all four workers).
+- **Rescore counted a failed scoring as a success** (the agent returns a
+  failure, never raises): now `is_scoring_failure()` → failed; the failure row
+  is still stored, so a rerun retries it (#316).
+- **Every run starts through `_set_busy_state(cancellable=…)`.** Two start
+  paths disabling different buttons is what let a benchmark begin on top of a
+  running re-run and leave that re-run's Cancel dead; `_on_benchmark_clicked`
+  also returns early when `_is_busy()`. A benchmark cannot be cancelled (the
+  runners never see the flag), so its Cancel stays off and the dead
+  `_cancel_benchmark` is gone. The Systematic Review tab's "Benchmark
+  cancelled" lets it run on, spending, and leaves its modal dialog stuck —
+  **#324**.
+- **Lodged separately, out of scope here:** the other workers still end a
+  cancel in silence (**#326**); a failed pass reports how many failed, never
+  which or why (**#327**); a re-scored failure supersedes a good score in the
+  latest-wins read and the Scored column does not show it (**#328**).
+- **Verified:** `pytest tests/` — 1667 passed, 3 xfailed; `lint_delta.py
+  --base-ref master` 0 new ruff or mypy findings. `tests/test_cancelled_rerun.py`
+  is 45 tests; eight mutations of the behaviour above (dropped `_is_busy`
+  guard, dropped cleanup scheduling, `stopped` reverted to `_cancelled` in
+  both the search and rescore workers, imports moved back inside the `try`,
+  the error dropped from `cancelled`, the reclassify wording, the failure
+  warning) each fail a test.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A quality benchmark counts a failure apart; a rerun retries one** (Python;
+  #314/#316, PR #321, merged 2026-09-19). Same contract as below.
+  - **`QualityEvaluation` holds exactly one of `assessment` / `failure`**
+    (checked in `__post_init__`); a malformed answer or a raising parser is
+    that document's failure, never the run's. Statistics are `None` for a model
+    that assessed nothing; rankings put it last.
+  - **The review's assessments are replayed only via
+    `is_reusable_assessment()`** (task tier, a known design, no transparency
+    downgrade, `extraction_method == llm_extraction_method(model)`). A replayed
+    evaluation is `reused` and left out of cost, tokens and latency.
+  - **A rerun skips the judged and retries the failed**
+    (`get_rerun_document_ids_for_question()`); a failed document whose record
+    is gone is left for the search to find again.
+    `IncrementalSearchWorker(retry_documents=…)` puts them first, outside the
+    target count, and still emits them when the search ends in shortfalls.
+  - Benchmark tab cells come from the pure `benchmarking/quality_display.py`;
+    `DESIGN_LABELS` is keyed by the enum (use `design_label()`).
 
 - **A failure is not a score** (Python; #306/#307/#310/#315, PR #317, merged
   2026-09-19). Rules in `doc/cross_platform/analysis_failure_reporting.md`.
@@ -294,9 +302,14 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- **#320** a cancelled rerun never resets the Research Questions tab.
+- **#324** cancelling a benchmark (either kind) does not stop it: it runs on,
+  spending, and the Systematic Review tab re-enables Benchmark meanwhile.
 - **#319** the review's quality filter records a failed classification as an
-  "unknown" design, which `passes_filter()` then decides on.
+  "unknown" design, which `passes_filter()` then decides on (what the filter
+  does with such a document is a maintainer decision).
+- **#322** the quality parsers invent a 0.5 confidence that the benchmark
+  averages and ranks by; **#323** "other" is scored as tier 0 in tier
+  comparisons (wants a decision, and cross-platform).
 - **#318** make "a failure is not a score" a type invariant rather than a
   convention (`ScoredDocument` accepts 0; storage getters return the older form
   as a judgement; mutable `CitationOutcome.citations`).

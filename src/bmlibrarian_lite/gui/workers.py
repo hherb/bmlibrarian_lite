@@ -36,7 +36,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
@@ -493,7 +493,64 @@ def unexpected_rerun_error_text(error: str, retrying: int) -> str:
     return f"{error}\n\n{unscored}; re-run the question to retry them."
 
 
-class IncrementalSearchWorker(QThread):
+class SingleOutcome:
+    """Ends a run with exactly one terminal signal, whatever happens.
+
+    The workers on the Research Questions tab each end a run with one of
+    ``finished``, ``error`` and ``cancelled``, and the tab returns to ready
+    only when one arrives. A run that emitted none left the tab waiting for
+    a signal that never came -- stuck on "Cancelling...", its actions
+    disabled until the tab was rebuilt (#320). Stating that contract in a
+    docstring was not enough to hold it: an import that failed inside the
+    body, or anything else raised outside the paths the body anticipates,
+    still ended the thread in silence.
+
+    A worker therefore emits its terminal signals through :meth:`_end`, and
+    runs its body inside :meth:`_run_once`, which reports whatever escaped.
+    """
+
+    _ended: bool = False
+
+    def _end(self, signal: SignalInstance, *args: Any) -> None:
+        """Emit the one signal that ends this run.
+
+        Args:
+            signal: The terminal signal to emit.
+            *args: Its arguments.
+
+        Later calls do nothing, so a failure raised while reporting a
+        result cannot report the same run twice.
+        """
+        if self._ended:
+            return
+        self._ended = True
+        signal.emit(*args)
+
+    def _run_once(self, body: Callable[[], None], fallback: Callable[[str], None]) -> None:
+        """Run a worker's body, and report whatever it failed to report.
+
+        Args:
+            body: The run itself, which ends by calling :meth:`_end`.
+            fallback: Called with the error text when the body raised
+                without ending the run; it must end the run.
+        """
+        self._ended = False
+        try:
+            body()
+        except Exception as e:
+            logger.exception(f"{type(self).__name__} ended unexpectedly")
+            if not self._ended:
+                fallback(str(e))
+        except BaseException as e:
+            # A SystemExit or the like: end the run so the tab is not left
+            # waiting, then let it carry on unwinding the thread
+            logger.exception(f"{type(self).__name__} was stopped")
+            if not self._ended:
+                fallback(str(e))
+            raise
+
+
+class IncrementalSearchWorker(SingleOutcome, QThread):
     """
     Background worker for incremental PubMed searches with deduplication.
 
@@ -523,12 +580,19 @@ class IncrementalSearchWorker(QThread):
             shortfalls list is empty unless part of the search failed, and
             never set when there is nothing to score
         error: Emitted on error (error message, with advice for a failed search)
+        cancelled: Emitted when a cancel stopped the search before it ran to
+            its end; what it had found is dropped (#320). Carries the error
+            that also ended it, or an empty string when nothing went wrong:
+            a cancel does not excuse us from reporting a failure (rule 8).
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
     """
 
     progress = Signal(int, int, str)  # new_docs_found, target, message
     batch_complete = Signal(list)  # batch of new LiteDocuments
     finished = Signal(list, list)  # all new LiteDocuments, List[RetrievalShortfall]
     error = Signal(str)
+    cancelled = Signal(str)  # the error that also ended it, or ""
 
     def __init__(
         self,
@@ -572,18 +636,37 @@ class IncrementalSearchWorker(QThread):
         self._cancelled = False
 
     def run(self) -> None:
-        """Execute incremental search in background thread."""
-        try:
-            from ..pubmed import PubMedSearchClient, expected_esearch_listing
-            from ..data_models import DocumentSource, LiteDocument, RetrievalShortfall
-            from ..search_failures import combined_shortfalls, format_search_failure_message
-            from ..exceptions import SearchFailedError, SourceRequestError
-            from ..search_service import pubmed_shortfalls
-            from ..constants import (
-                INCREMENTAL_SEARCH_BATCH_SIZE,
-                MAX_PUBMED_SEARCH_OFFSET,
-            )
+        """Execute incremental search in background thread.
 
+        Ends with exactly one of ``finished``, ``error`` and ``cancelled``,
+        including when the search fails in a way it does not anticipate.
+        """
+        self._run_once(
+            self._search,
+            lambda error: self._end(
+                self.error,
+                unexpected_rerun_error_text(error, len(self.retry_documents)),
+            ),
+        )
+
+    def _search(self) -> None:
+        """Search PubMed until the target is met, and end the run."""
+        # Imported before the try, not inside it: an import that failed in
+        # there left ``SearchFailedError`` unbound, so evaluating the first
+        # ``except`` raised in turn, and what the user saw was that confusing
+        # error rather than the import that really failed.
+        from ..pubmed import PubMedSearchClient, expected_esearch_listing
+        from ..data_models import DocumentSource, LiteDocument, RetrievalShortfall
+        from ..search_failures import combined_shortfalls, format_search_failure_message
+        from ..exceptions import SearchFailedError, SourceRequestError
+        from ..search_service import pubmed_shortfalls
+        from ..constants import (
+            INCREMENTAL_SEARCH_BATCH_SIZE,
+            MAX_PUBMED_SEARCH_OFFSET,
+        )
+
+        stopped = False
+        try:
             client = PubMedSearchClient(
                 email=self.config.pubmed.email,
                 api_key=self.config.pubmed.api_key,
@@ -595,7 +678,14 @@ class IncrementalSearchWorker(QThread):
             offset = 0
             batch_size = INCREMENTAL_SEARCH_BATCH_SIZE
 
-            while len(all_new_docs) < self.target_new_docs and not self._cancelled:
+            while len(all_new_docs) < self.target_new_docs:
+                # A cancel stops the search here, where there is still
+                # searching left to do; one that arrives after the loop has
+                # run its course stopped nothing, so that run finished
+                if self._cancelled:
+                    stopped = True
+                    break
+
                 # Check offset limit
                 if offset >= MAX_PUBMED_SEARCH_OFFSET:
                     logger.info(
@@ -663,6 +753,7 @@ class IncrementalSearchWorker(QThread):
                 batch_new_docs: List["LiteDocument"] = []
                 for article in articles:
                     if self._cancelled:
+                        stopped = True
                         break
 
                     doc_id = f"pmid-{article.pmid}"
@@ -719,18 +810,27 @@ class IncrementalSearchWorker(QThread):
                 # whether the failed records held new documents (#247).
                 raise SearchFailedError(shortfalls)
 
-            if not self._cancelled:
-                self.finished.emit(self.retry_documents + all_new_docs, shortfalls)
+            # A cancel that came after the last page stopped nothing
+            if stopped:
+                self._end(self.cancelled, "")
+            else:
+                self._end(self.finished, self.retry_documents + all_new_docs, shortfalls)
 
         except SearchFailedError as e:
             logger.warning(f"Incremental search failed: {e}")
-            if not self._cancelled:
-                self.error.emit(format_search_failure_message(e))
+            # Cancelling is not failing -- but the failure is still reported
+            if self._cancelled:
+                self._end(self.cancelled, format_search_failure_message(e))
+            else:
+                self._end(self.error, format_search_failure_message(e))
         except Exception as e:
             logger.exception("Incremental search failed")
-            if not self._cancelled:
-                self.error.emit(
-                    unexpected_rerun_error_text(str(e), len(self.retry_documents))
+            if self._cancelled:
+                self._end(self.cancelled, str(e))
+            else:
+                self._end(
+                    self.error,
+                    unexpected_rerun_error_text(str(e), len(self.retry_documents)),
                 )
 
     def _extract_year(self, date_str: Optional[str]) -> Optional[int]:
@@ -757,7 +857,7 @@ class IncrementalSearchWorker(QThread):
         self._cancelled = True
 
 
-class ReclassifyWorker(QThread):
+class ReclassifyWorker(SingleOutcome, QThread):
     """
     Background worker for re-running study design classification.
 
@@ -768,11 +868,18 @@ class ReclassifyWorker(QThread):
         progress: Emitted with (current, total, message) during classification
         finished: Emitted with (success_count, fail_count) when complete
         error: Emitted with error message on failure
+        cancelled: Emitted with (success_count, fail_count, total, error) when
+            cancelled before every document was classified (#320). The error
+            is what also ended the run, or an empty string when nothing went
+            wrong: a cancel does not excuse us from reporting it (rule 8).
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
     """
 
     progress = Signal(int, int, str)  # current, total, message
     finished = Signal(int, int)  # success_count, fail_count
     error = Signal(str)
+    cancelled = Signal(int, int, int, str)  # succeeded, failed, total, error
 
     def __init__(
         self,
@@ -797,19 +904,30 @@ class ReclassifyWorker(QThread):
         self._cancelled = False
 
     def run(self) -> None:
-        """Execute re-classification in background thread."""
+        """Execute re-classification in background thread.
+
+        Ends with exactly one of ``finished``, ``error`` and ``cancelled``,
+        including when it fails in a way it does not anticipate.
+        """
+        self._run_once(
+            self._reclassify, lambda error: self._end(self.error, error)
+        )
+
+    def _reclassify(self) -> None:
+        """Classify each document, and end the run."""
+        success_count = 0
+        fail_count = 0
+        total = len(self.documents)
+        stopped = False
         try:
             from ..quality.study_classifier import LiteStudyClassifier
             from ..quality.data_models import StudyDesign
 
             classifier = LiteStudyClassifier(config=self.config)
 
-            success_count = 0
-            fail_count = 0
-            total = len(self.documents)
-
             for i, doc in enumerate(self.documents):
                 if self._cancelled:
+                    stopped = True
                     break
 
                 self.progress.emit(
@@ -846,20 +964,26 @@ class ReclassifyWorker(QThread):
                         f"Failed to classify document {doc.id}: {e}"
                     )
 
-            if not self._cancelled:
-                self.finished.emit(success_count, fail_count)
+            # A cancel that came after the last document stopped nothing
+            if stopped:
+                self._end(self.cancelled, success_count, fail_count, total, "")
+            else:
+                self._end(self.finished, success_count, fail_count)
 
         except Exception as e:
             logger.exception("Reclassification failed")
-            if not self._cancelled:
-                self.error.emit(str(e))
+            # Cancelling is not failing -- but the failure is still reported
+            if self._cancelled:
+                self._end(self.cancelled, success_count, fail_count, total, str(e))
+            else:
+                self._end(self.error, str(e))
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""
         self._cancelled = True
 
 
-class RescoreWorker(QThread):
+class RescoreWorker(SingleOutcome, QThread):
     """
     Background worker for re-running relevance scoring.
 
@@ -870,11 +994,20 @@ class RescoreWorker(QThread):
         progress: Emitted with (current, total, message) during scoring
         finished: Emitted with (success_count, fail_count) when complete
         error: Emitted with error message on failure
+        cancelled: Emitted with (success_count, fail_count, total, error) when
+            cancelled before every document was scored (#320). The error is
+            what also ended the run, or an empty string when nothing went
+            wrong: a cancel does not excuse us from reporting it (rule 8).
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
+    A scoring that failed counts as failed, and its failure is still stored,
+    so a rerun scores that document again (#316).
     """
 
     progress = Signal(int, int, str)  # current, total, message
     finished = Signal(int, int)  # success_count, fail_count
     error = Signal(str)
+    cancelled = Signal(int, int, int, str)  # succeeded, failed, total, error
 
     def __init__(
         self,
@@ -902,15 +1035,24 @@ class RescoreWorker(QThread):
         self._cancelled = False
 
     def run(self) -> None:
-        """Execute re-scoring in background thread."""
+        """Execute re-scoring in background thread.
+
+        Ends with exactly one of ``finished``, ``error`` and ``cancelled``,
+        including when it fails in a way it does not anticipate.
+        """
+        self._run_once(self._rescore, lambda error: self._end(self.error, error))
+
+    def _rescore(self) -> None:
+        """Score each document again, and end the run."""
+        success_count = 0
+        fail_count = 0
+        total = len(self.documents)
+        stopped = False
         try:
             from ..agents.scoring_agent import LiteScoringAgent
+            from ..audit_records import is_scoring_failure
 
             scoring_agent = LiteScoringAgent(config=self.config)
-
-            success_count = 0
-            fail_count = 0
-            total = len(self.documents)
 
             # Get or create a checkpoint for this re-scoring run
             checkpoint = self.storage.create_checkpoint(
@@ -919,6 +1061,7 @@ class RescoreWorker(QThread):
 
             for i, doc in enumerate(self.documents):
                 if self._cancelled:
+                    stopped = True
                     break
 
                 self.progress.emit(
@@ -932,11 +1075,17 @@ class RescoreWorker(QThread):
                         self.question, doc
                     )
 
-                    # Save the scored document to storage
+                    # Save the scored document to storage -- a failure
+                    # too, which a rerun then scores again (#316)
                     self.storage.save_scored_document(
                         scored_doc, checkpoint.id
                     )
-                    success_count += 1
+                    # The agent returns a failure rather than raising it;
+                    # counted as a success, an outage read "all succeeded"
+                    if is_scoring_failure(scored_doc):
+                        fail_count += 1
+                    else:
+                        success_count += 1
 
                 except Exception as e:
                     fail_count += 1
@@ -944,13 +1093,19 @@ class RescoreWorker(QThread):
                         f"Failed to score document {doc.id}: {e}"
                     )
 
-            if not self._cancelled:
-                self.finished.emit(success_count, fail_count)
+            # A cancel that came after the last document stopped nothing
+            if stopped:
+                self._end(self.cancelled, success_count, fail_count, total, "")
+            else:
+                self._end(self.finished, success_count, fail_count)
 
         except Exception as e:
             logger.exception("Re-scoring failed")
-            if not self._cancelled:
-                self.error.emit(str(e))
+            # Cancelling is not failing -- but the failure is still reported
+            if self._cancelled:
+                self._end(self.cancelled, success_count, fail_count, total, str(e))
+            else:
+                self._end(self.error, str(e))
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""
