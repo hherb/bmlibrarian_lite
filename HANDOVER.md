@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#326 + #327 — a cancelled worker ends, and a failed pass names its cause**,
-branch `fix/silent-cancels-and-failure-causes-326`. Python only. Compress into
+branch `fix/silent-cancels-and-failure-causes-326`, PR #333. Python only. Compress into
 **Recently landed** once merged.
 
 - **The contract now covers the whole module, and a test sweeps for it.**
