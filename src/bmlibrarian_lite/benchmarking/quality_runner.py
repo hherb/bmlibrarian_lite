@@ -57,6 +57,7 @@ from ..quality.data_models import (
 from ..quality.study_classifier import STUDY_DESIGN_MAPPING
 from ..storage import LiteStorage
 from ..utils import classify_exhausted_retries, classify_llm_exception
+from .models import BenchmarkCancellation
 from .quality_models import (
     QualityBenchmarkResult,
     QualityEvaluation,
@@ -284,6 +285,7 @@ class QualityBenchmarkRunner:
         reuse_existing: bool = True,
         existing_assessments: Optional[dict[str, QualityAssessment]] = None,
         reuse_cross_run: bool = True,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> QualityBenchmarkResult:
         """
         Execute a quality benchmark run.
@@ -300,9 +302,17 @@ class QualityBenchmarkRunner:
             reuse_cross_run: Accepted for parity with the relevance benchmark,
                 and ignored: the quality benchmark stores no per-document
                 evaluations, so there is nothing from earlier runs to reuse
+            should_cancel: Asked before each evaluation, and the run stops at
+                the first True -- before the call that evaluation would pay
+                for. Until #324 the runner was given no way to see a cancel:
+                it went on calling every model for every document, spending,
+                and the caller threw the finished result away.
 
         Returns:
-            Complete quality benchmark results
+            Complete quality benchmark results. A run a cancel stopped
+            carries a
+            :class:`~bmlibrarian_lite.benchmarking.models.BenchmarkCancellation`
+            and holds only what it evaluated, which is real and is kept.
 
         Raises:
             ValueError: If benchmark run not found
@@ -346,11 +356,21 @@ class QualityBenchmarkRunner:
         # Collect evaluations: evaluator_id -> document_id -> QualityEvaluation
         all_evaluations: dict[str, dict[str, QualityEvaluation]] = {}
 
+        cancelled = False
+
         try:
             for evaluator in evaluators:
+                if cancelled:
+                    break
                 all_evaluations[evaluator.id] = {}
 
                 for document in documents:
+                    # Asked before the evaluation, so a cancel stops the run
+                    # before it pays for one more (#324)
+                    if should_cancel is not None and should_cancel():
+                        cancelled = True
+                        break
+
                     current_op += 1
                     if progress_callback:
                         progress_callback(
@@ -402,6 +422,17 @@ class QualityBenchmarkRunner:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
 
+            cancellation = (
+                BenchmarkCancellation(
+                    evaluations_made=sum(
+                        len(e) for e in all_evaluations.values()
+                    ),
+                    evaluations_planned=total_ops,
+                )
+                if cancelled
+                else None
+            )
+
             result = self._compute_results(
                 run_id=run_id,
                 question=run.question,
@@ -410,27 +441,49 @@ class QualityBenchmarkRunner:
                 documents=documents,
                 all_evaluations=all_evaluations,
                 duration=duration,
+                cancellation=cancellation,
             )
 
-            # Update run status
+            # A cancelled run is stored as cancelled, never as complete: its
+            # comparisons are over the part that ran (#324)
             self.storage.update_benchmark_run(
                 run_id,
-                status=BenchmarkStatus.COMPLETED,
+                status=(
+                    BenchmarkStatus.CANCELLED if cancelled
+                    else BenchmarkStatus.COMPLETED
+                ),
                 completed_at=end_time,
                 results_summary=result.to_json(),
             )
 
-            logger.info(
-                f"Quality benchmark {run_id} completed: {len(evaluators)} evaluators, "
-                f"{len(documents)} documents, {duration:.1f}s"
-            )
+            if cancellation is not None:
+                logger.info(
+                    f"Quality benchmark {run_id} cancelled after "
+                    f"{cancellation.evaluations_made} of "
+                    f"{cancellation.evaluations_planned} evaluations, "
+                    f"{duration:.1f}s"
+                )
+            else:
+                logger.info(
+                    f"Quality benchmark {run_id} completed: {len(evaluators)} evaluators, "
+                    f"{len(documents)} documents, {duration:.1f}s"
+                )
             return result
 
         except Exception as e:
             logger.error(f"Quality benchmark {run_id} failed: {e}")
+            # A crash after a cancel is still a cancelled run. Stored FAILED,
+            # its evaluations fell outside get_all_scores_for_question, so the
+            # user paid a second time for what the cancel had already bought
+            # -- the very harm #324 exists to prevent (#329 review). The error
+            # is kept either way: cancelling is not failing, but a failure is
+            # never hidden (golden rule 8).
             self.storage.update_benchmark_run(
                 run_id,
-                status=BenchmarkStatus.FAILED,
+                status=(
+                    BenchmarkStatus.CANCELLED if cancelled
+                    else BenchmarkStatus.FAILED
+                ),
                 error_message=str(e),
                 completed_at=datetime.now(),
             )
@@ -447,6 +500,7 @@ class QualityBenchmarkRunner:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         existing_assessments: Optional[dict[str, QualityAssessment]] = None,
         reuse_cross_run: bool = True,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> QualityBenchmarkResult:
         """
         Convenience method to create and run a quality benchmark in one call.
@@ -461,6 +515,8 @@ class QualityBenchmarkRunner:
             progress_callback: Progress callback
             existing_assessments: Pre-existing assessments for baseline model
             reuse_cross_run: Ignored; see :meth:`run_benchmark`
+            should_cancel: Asked before each evaluation; see
+                :meth:`run_benchmark`
 
         Returns:
             Quality benchmark results
@@ -506,6 +562,7 @@ class QualityBenchmarkRunner:
             progress_callback=progress_callback,
             existing_assessments=existing_assessments,
             reuse_cross_run=reuse_cross_run,
+            should_cancel=should_cancel,
         )
 
     def _classify_document(
@@ -940,6 +997,7 @@ Focus on THIS study's methodology, not studies it references."""
         documents: list[LiteDocument],
         all_evaluations: dict[str, dict[str, QualityEvaluation]],
         duration: float,
+        cancellation: BenchmarkCancellation | None = None,
     ) -> QualityBenchmarkResult:
         """
         Compute quality benchmark statistics from collected evaluations.
@@ -952,6 +1010,8 @@ Focus on THIS study's methodology, not studies it references."""
             documents: List of documents
             all_evaluations: Nested dict of evaluator_id -> doc_id -> QualityEvaluation
             duration: Total execution time in seconds
+            cancellation: What the run had evaluated when a cancel stopped
+                it, or None for a run that reached the end
 
         Returns:
             Complete QualityBenchmarkResult
@@ -1022,4 +1082,5 @@ Focus on THIS study's methodology, not studies it references."""
             tier_agreement_matrix=tier_agreement_matrix,
             total_duration_seconds=duration,
             baseline_evaluator_name=baseline_name,
+            cancellation=cancellation,
         )

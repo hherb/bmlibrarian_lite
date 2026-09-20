@@ -496,9 +496,11 @@ def unexpected_rerun_error_text(error: str, retrying: int) -> str:
 class SingleOutcome:
     """Ends a run with exactly one terminal signal, whatever happens.
 
-    The workers on the Research Questions tab each end a run with one of
-    ``finished``, ``error`` and ``cancelled``, and the tab returns to ready
-    only when one arrives. A run that emitted none left the tab waiting for
+    A worker that mixes this in ends a run with exactly one of ``finished``,
+    ``error`` and ``cancelled``, and the tab that started it returns to ready
+    only when one arrives. Both tabs rely on it: the Research Questions tab's
+    four workers, and the two benchmark workers the Systematic Review tab
+    also drives (#324). A run that emitted none left the tab waiting for
     a signal that never came -- stuck on "Cancelling...", its actions
     disabled until the tab was rebuilt (#320). Stating that contract in a
     docstring was not enough to hold it: an import that failed inside the

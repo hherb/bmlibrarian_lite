@@ -30,6 +30,9 @@ lost and why; the functions here turn that record into what a reader sees.
   :func:`without_analysis_shortfall_notice` turn shortfalls into what the
   report, the GUI and MCP callers see.
 - :func:`analysis_failure_advice` says what the user can do about it.
+- :func:`also_failed_text` names an error that ended a run alongside
+  something else -- a cancel. It takes a bare error rather than a shortfall:
+  cancelling is not failing, but a failure is never hidden (golden rule 8).
 
 The wording follows the search contract in
 ``doc/cross_platform/search_failure_reporting.md``; this family's own contract
@@ -167,3 +170,17 @@ def analysis_failure_advice(shortfalls: Sequence[AnalysisShortfall]) -> str:
     if causes.intersection(_UNREADABLE_CAUSES):
         advice.append(_UNREADABLE_ADVICE)
     return " ".join(advice) if advice else _FALLBACK_ADVICE
+
+
+def also_failed_text(error: str) -> str:
+    """What a cancelled run adds when an error ended it too.
+
+    Args:
+        error: The error that ended the run, or an empty string.
+
+    Returns:
+        A sentence naming the error, or "" when nothing went wrong. A cancel
+        is not a licence to hide a failure (golden rule 8): without this, a
+        crash mid-cancel read as an orderly stop (#320).
+    """
+    return f" It also stopped on an error: {error}" if error else ""

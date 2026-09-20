@@ -55,7 +55,12 @@ Usage:
     )
 """
 
-from .models import BenchmarkResult, DocumentComparison, EvaluatorStats
+from .models import (
+    BenchmarkCancellation,
+    BenchmarkResult,
+    DocumentComparison,
+    EvaluatorStats,
+)
 from .runner import BenchmarkRunner
 from .statistics import (
     compute_agreement,
@@ -93,6 +98,7 @@ from .quality_statistics import (
 __all__ = [
     # Scoring benchmark classes
     "BenchmarkRunner",
+    "BenchmarkCancellation",
     "BenchmarkResult",
     "EvaluatorStats",
     "DocumentComparison",

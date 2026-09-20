@@ -70,11 +70,12 @@ from ..data_models import (
     SearchProvider,
     analysis_shortfall_for_failed_scores,
 )
-from ..benchmarking.display import failed_scorings_sentence
+from ..benchmarking.display import benchmark_cancelled_text, failed_scorings_sentence
 from ..benchmarking.quality_display import quality_benchmark_finished_text
 from ..benchmarking.quality_models import QualityBenchmarkResult
 from ..benchmarking.models import BenchmarkResult
 from ..analysis_failures import (
+    also_failed_text,
     analysis_failure_advice,
     describe_analysis_shortfalls,
     with_analysis_shortfall_notice,
@@ -1359,17 +1360,58 @@ class SystematicReviewTab(QWidget):
         self._benchmark_worker.progress.connect(self._on_benchmark_progress)
         self._benchmark_worker.finished.connect(self._on_benchmark_finished)
         self._benchmark_worker.error.connect(self._on_benchmark_error)
+        self._benchmark_worker.cancelled.connect(self._on_benchmark_cancelled)
         self._benchmark_worker.start()
 
         # Show the progress dialog
         self._benchmark_progress_dialog.show()
 
     def _cancel_benchmark(self) -> None:
-        """Cancel the running benchmark."""
+        """Ask the running benchmark to stop; the UI stays busy until it has.
+
+        Benchmark stays disabled until the worker says what became of the
+        run: re-enabled here, a second benchmark could start on top of the
+        first, overwriting ``_benchmark_worker`` while that thread was still
+        live and still spending (#324).
+        """
         if self._benchmark_worker:
             self._benchmark_worker.cancel()
-            self.progress_label.setText("Benchmark cancelled")
+            self.progress_label.setText("Cancelling benchmark...")
+
+    def _on_benchmark_cancelled(self, result: object, error: str) -> None:
+        """Report what a cancelled benchmark evaluated before it stopped.
+
+        Args:
+            result: The partial result, or None when the run stopped before
+                one could be computed.
+            error: The error that also ended the run, or "".
+        """
+        if self._benchmark_progress_dialog:
+            self._benchmark_progress_dialog.close()
+
         self.benchmark_btn.setEnabled(True)
+
+        cancellation = (
+            result.cancellation if isinstance(result, BenchmarkResult) else None
+        )
+        if cancellation is not None:
+            self.progress_label.setText(
+                benchmark_cancelled_text(cancellation, error)
+            )
+            # What it did evaluate is real, and is shown rather than dropped
+            # -- but only if it evaluated something: a cancel that landed
+            # before the first evaluation would otherwise replace a complete
+            # comparison on screen with an empty one, and the reader would be
+            # switched to it (#329 review)
+            if cancellation.evaluations_made:
+                self.benchmark_completed.emit(result)
+        else:
+            self.progress_label.setText(
+                "Benchmark cancelled." + also_failed_text(error)
+            )
+        logger.info("Benchmark cancelled")
+
+        QTimer.singleShot(100, self._cleanup_benchmark_worker)
 
     def _on_benchmark_progress(self, current: int, total: int, message: str) -> None:
         """Handle benchmark progress updates."""
@@ -1509,17 +1551,61 @@ class SystematicReviewTab(QWidget):
         self._quality_benchmark_worker.error.connect(
             self._on_quality_benchmark_error
         )
+        self._quality_benchmark_worker.cancelled.connect(
+            self._on_quality_benchmark_cancelled
+        )
         self._quality_benchmark_worker.start()
 
         # Show the progress dialog
         self._quality_benchmark_progress_dialog.show()
 
     def _cancel_quality_benchmark(self) -> None:
-        """Cancel the running quality benchmark."""
+        """Ask the running quality benchmark to stop; the UI stays busy until it has.
+
+        Quality Benchmark stays disabled until the worker says what became
+        of the run; see :meth:`_cancel_benchmark` (#324).
+        """
         if self._quality_benchmark_worker:
             self._quality_benchmark_worker.cancel()
-            self.progress_label.setText("Quality benchmark cancelled")
+            self.progress_label.setText("Cancelling quality benchmark...")
+
+    def _on_quality_benchmark_cancelled(self, result: object, error: str) -> None:
+        """Report what a cancelled quality benchmark evaluated before stopping.
+
+        Args:
+            result: The partial result, or None when the run stopped before
+                one could be computed.
+            error: The error that also ended the run, or "".
+        """
+        if self._quality_benchmark_progress_dialog:
+            self._quality_benchmark_progress_dialog.close()
+
         self.quality_benchmark_btn.setEnabled(True)
+
+        cancellation = (
+            result.cancellation
+            if isinstance(result, QualityBenchmarkResult)
+            else None
+        )
+        if cancellation is not None:
+            # Named "Quality benchmark", because both runs write into this
+            # one label: "Benchmark cancelled" here named the other one
+            self.progress_label.setText(
+                benchmark_cancelled_text(
+                    cancellation, error, subject="Quality benchmark"
+                )
+            )
+            # What it did evaluate is real, and is shown rather than dropped
+            # -- but only if it evaluated something (#329 review)
+            if cancellation.evaluations_made:
+                self.quality_benchmark_completed.emit(result)
+        else:
+            self.progress_label.setText(
+                "Quality benchmark cancelled." + also_failed_text(error)
+            )
+        logger.info("Quality benchmark cancelled")
+
+        QTimer.singleShot(100, self._cleanup_quality_benchmark_worker)
 
     def _on_quality_benchmark_progress(
         self, current: int, total: int, message: str

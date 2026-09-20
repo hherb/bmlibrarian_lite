@@ -21,6 +21,7 @@ These models store aggregated statistics from benchmark runs,
 enabling comparison of evaluator performance.
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
@@ -30,6 +31,121 @@ if TYPE_CHECKING:
 
 from ..data_models import Evaluator
 from ..constants import DEFAULT_MIN_SCORE
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BenchmarkCancellation:
+    """What a benchmark had evaluated when a cancel stopped it (#324).
+
+    A cancelled benchmark's comparisons are over the part that ran, so the
+    result says it is partial rather than leaving the reader to take it for
+    a whole one. Until #324 a cancel stopped nothing: the run went on
+    calling every model for every document, spending, and its result was
+    thrown away.
+
+    Attributes:
+        evaluations_made: Evaluations the run holds -- judgements, failures
+            and reuses alike -- when it stopped.
+        evaluations_planned: Evaluations it was given: evaluators ×
+            documents.
+    """
+
+    evaluations_made: int
+    evaluations_planned: int
+
+    def __post_init__(self) -> None:
+        """Refuse counts a run cannot have had.
+
+        Raises:
+            ValueError: If either count is negative, or more evaluations
+                were made than planned. Clamped instead -- ``max(0, n)`` for
+                a negative, ``min(made, planned)`` for an overrun -- an
+                off-by-one would read as a run that stopped at its very
+                first document, or as one that had finished.
+        """
+        if self.evaluations_made < 0 or self.evaluations_planned < 0:
+            raise ValueError(
+                "A cancelled benchmark cannot have a negative count: "
+                f"{self.evaluations_made} of {self.evaluations_planned}"
+            )
+        if self.evaluations_made > self.evaluations_planned:
+            raise ValueError(
+                f"A cancelled benchmark made {self.evaluations_made} "
+                f"evaluations, more than the {self.evaluations_planned} "
+                "it planned"
+            )
+
+    @property
+    def evaluations_skipped(self) -> int:
+        """Evaluations the cancel left unmade."""
+        return self.evaluations_planned - self.evaluations_made
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "evaluations_made": self.evaluations_made,
+            "evaluations_planned": self.evaluations_planned,
+        }
+
+    @staticmethod
+    def from_stored(value: object) -> "BenchmarkCancellation | None":
+        """A cancellation read back from a stored summary, if it holds one.
+
+        Args:
+            value: What the summary stored -- JSON from the database, so it
+                is read as input (golden rule 1).
+
+        Returns:
+            The cancellation, or None when the summary states none (a run
+            that was not cancelled, or one stored before #324). A stored
+            pair that is not two counts, or that is impossible, is no
+            cancellation: a result is not made to look partial by damage.
+
+            This does not contradict ``to_dict``'s "a stored partial result
+            must not read back as a whole one": the run's
+            ``BenchmarkStatus.CANCELLED`` is the durable record that a cancel
+            stopped it, so damage here loses the counts, not the fact.
+            :meth:`BenchmarkRunner.get_benchmark_result` reads the two
+            together and refuses the pair that would mislead (#329 review).
+            Damage is logged rather than passed over in silence.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            logger.warning(
+                "Stored benchmark cancellation is not an object (%r); read as "
+                "no cancellation",
+                type(value).__name__,
+            )
+            return None
+        made = value.get("evaluations_made")
+        planned = value.get("evaluations_planned")
+        if made is None and planned is None:
+            return None
+        if (
+            isinstance(made, bool)
+            or isinstance(planned, bool)
+            or not isinstance(made, int)
+            or not isinstance(planned, int)
+        ):
+            logger.warning(
+                "Stored benchmark cancellation counts are not two integers "
+                "(%r of %r); read as no cancellation",
+                made,
+                planned,
+            )
+            return None
+        try:
+            return BenchmarkCancellation(made, planned)
+        except ValueError as e:
+            logger.warning(
+                "Stored benchmark cancellation is impossible (%s); read as no "
+                "cancellation",
+                e,
+            )
+            return None
 
 
 @dataclass
@@ -243,6 +359,8 @@ class BenchmarkResult:
             likewise
         inclusion_threshold: Score threshold for document inclusion
         total_duration_seconds: Total benchmark execution time
+        cancellation: What the run had evaluated when a cancel stopped it,
+            or None for a run that was not cancelled (#324)
         created_at: When results were computed
     """
 
@@ -259,6 +377,7 @@ class BenchmarkResult:
     inclusion_threshold: int = DEFAULT_MIN_SCORE
     total_duration_seconds: float = 0.0
     baseline_evaluator_name: str | None = None
+    cancellation: BenchmarkCancellation | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
@@ -430,6 +549,13 @@ class BenchmarkResult:
             "total_cost_usd": self.total_cost_usd,
             "disagreement_rate": self.disagreement_rate,
             "inclusion_disagreement_rate": self.inclusion_disagreement_rate,
+            # None for a run that ran to the end; a stored partial result
+            # must not read back as a whole one (#324)
+            "cancellation": (
+                self.cancellation.to_dict()
+                if self.cancellation is not None
+                else None
+            ),
             "created_at": self.created_at.isoformat(),
         }
 

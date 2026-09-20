@@ -723,17 +723,17 @@ class TestTheTab:
             tab_module.QTimer.singleShot.call_args_list
         )
 
-    def test_cancel_is_never_offered_for_a_benchmark(
+    def test_cancel_is_offered_for_a_benchmark(
         self, tab: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A Cancel that only dropped the result would let it go on spending."""
+        """Since #324 the runner honours a cancel, so Cancel is offered."""
         monkeypatch.setattr(tab_module, "BenchmarkWorker", RecordingWorker)
         tab.config.benchmark.enabled = True
 
         tab._on_benchmark_clicked()
 
         assert tab._benchmark_worker is not None
-        assert not tab.cancel_btn.isEnabled()
+        assert tab.cancel_btn.isEnabled()
 
     def test_a_benchmark_cannot_be_started_on_top_of_a_rerun(
         self, tab: Any, monkeypatch: pytest.MonkeyPatch
@@ -754,7 +754,7 @@ class TestTheTab:
         """Its cleanup re-checks the buttons, as the other three do."""
         tab._benchmark_worker = MagicMock()
         tab._benchmark_worker.isRunning.return_value = False
-        tab._set_busy_state(cancellable=False)
+        tab._set_busy_state()
 
         tab._reset_ui()
         tab._cleanup_benchmark_worker()

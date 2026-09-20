@@ -58,6 +58,7 @@ from ..benchmarking.display import (
     format_agreement,
     format_latency,
     format_statistic,
+    partial_result_note,
 )
 from ..benchmarking.quality_display import (
     design_cell,
@@ -365,6 +366,18 @@ class QualityBenchmarkResultsTab(QWidget):
         )
         header_layout.addWidget(summary_label)
 
+        # A cancelled run's figures are over the part that ran, and say so
+        # (#324): shown without this, a partial comparison reads as a whole
+        partial = (
+            partial_result_note(self.result.cancellation)
+            if self.result is not None
+            else None
+        )
+        if partial is not None:
+            partial_label = QLabel(f"<i>{partial}</i>")
+            partial_label.setWordWrap(True)
+            header_layout.addWidget(partial_label)
+
         failed_sentence = (
             failed_assessments_sentence(self.result) if self.result is not None else None
         )
@@ -667,6 +680,10 @@ class QualityBenchmarkResultsTab(QWidget):
 
     def _export_csv(self) -> None:
         """Export results to CSV."""
+        # Nothing to write, and nothing to say about a run that is not there
+        if self.result is None:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Results as CSV",
@@ -679,6 +696,13 @@ class QualityBenchmarkResultsTab(QWidget):
         try:
             with open(file_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
+
+                # The partial-result note travels with the data, not just the
+                # window (#329 review)
+                note = partial_result_note(self.result.cancellation)
+                if note:
+                    writer.writerow([note])
+
                 evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
                 writer.writerow(["Document ID", "Document Title"] + evaluator_names)
 
@@ -700,6 +724,10 @@ class QualityBenchmarkResultsTab(QWidget):
 
     def _export_json(self) -> None:
         """Export results to JSON."""
+        # Nothing to write, and nothing to say about a run that is not there
+        if self.result is None:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Results as JSON",

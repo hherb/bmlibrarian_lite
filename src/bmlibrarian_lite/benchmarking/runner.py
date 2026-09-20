@@ -43,7 +43,12 @@ from ..exceptions import RetryExhaustedError, StoredResultUnreadableError
 from ..llm import LLMClient, LLMMessage
 from ..storage import LiteStorage
 from ..utils import classify_exhausted_retries, classify_llm_exception
-from .models import BenchmarkResult, DocumentComparison, EvaluatorStats
+from .models import (
+    BenchmarkCancellation,
+    BenchmarkResult,
+    DocumentComparison,
+    EvaluatorStats,
+)
 from .statistics import (
     compute_agreement_matrix,
     compute_document_comparison,
@@ -295,6 +300,7 @@ class BenchmarkRunner:
         reuse_existing: bool = True,
         existing_scores: list[ScoredDocument] | None = None,
         reuse_cross_run: bool = True,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> BenchmarkResult:
         """
         Execute a benchmark run.
@@ -306,9 +312,16 @@ class BenchmarkRunner:
             reuse_existing: If True, reuse cached evaluations from this run
             existing_scores: Pre-existing scores to reuse (e.g., from initial scoring)
             reuse_cross_run: If True, reuse scores from previous runs of same question
+            should_cancel: Asked before each evaluation, and the run stops at
+                the first True -- before the call that evaluation would pay
+                for. Until #324 the runner was given no way to see a cancel:
+                it went on calling every model for every document, spending,
+                and the caller threw the finished result away.
 
         Returns:
-            Complete benchmark results
+            Complete benchmark results. A run a cancel stopped carries a
+            :class:`~bmlibrarian_lite.benchmarking.models.BenchmarkCancellation`
+            and holds only what it evaluated, which is real and is kept.
 
         Raises:
             ValueError: If benchmark run not found
@@ -374,11 +387,21 @@ class BenchmarkRunner:
         # Collect scores: evaluator_id -> document_id -> ScoredDocument
         all_scores: dict[str, dict[str, ScoredDocument]] = {}
 
+        cancelled = False
+
         try:
             for evaluator in evaluators:
+                if cancelled:
+                    break
                 all_scores[evaluator.id] = {}
 
                 for document in documents:
+                    # Asked before the evaluation, so a cancel stops the run
+                    # before it pays for one more (#324)
+                    if should_cancel is not None and should_cancel():
+                        cancelled = True
+                        break
+
                     current_op += 1
                     if progress_callback:
                         progress_callback(
@@ -468,6 +491,15 @@ class BenchmarkRunner:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
 
+            cancellation = (
+                BenchmarkCancellation(
+                    evaluations_made=sum(len(s) for s in all_scores.values()),
+                    evaluations_planned=total_ops,
+                )
+                if cancelled
+                else None
+            )
+
             result = self._compute_results(
                 run_id=run_id,
                 question=run.question,
@@ -476,27 +508,50 @@ class BenchmarkRunner:
                 documents=documents,
                 all_scores=all_scores,
                 duration=duration,
+                cancellation=cancellation,
             )
 
-            # Update run status
+            # A cancelled run is stored as cancelled, never as complete: its
+            # comparisons are over the part that ran (#324). What it did
+            # evaluate is still stored, so nothing is paid for twice.
             self.storage.update_benchmark_run(
                 run_id,
-                status=BenchmarkStatus.COMPLETED,
+                status=(
+                    BenchmarkStatus.CANCELLED if cancelled
+                    else BenchmarkStatus.COMPLETED
+                ),
                 completed_at=end_time,
                 results_summary=result.to_json(),
             )
 
-            logger.info(
-                f"Benchmark {run_id} completed: {len(evaluators)} evaluators, "
-                f"{len(documents)} documents, {duration:.1f}s"
-            )
+            if cancellation is not None:
+                logger.info(
+                    f"Benchmark {run_id} cancelled after "
+                    f"{cancellation.evaluations_made} of "
+                    f"{cancellation.evaluations_planned} evaluations, "
+                    f"{duration:.1f}s"
+                )
+            else:
+                logger.info(
+                    f"Benchmark {run_id} completed: {len(evaluators)} evaluators, "
+                    f"{len(documents)} documents, {duration:.1f}s"
+                )
             return result
 
         except Exception as e:
             logger.error(f"Benchmark {run_id} failed: {e}")
+            # A crash after a cancel is still a cancelled run. Stored FAILED,
+            # its evaluations fell outside get_all_scores_for_question, so the
+            # user paid a second time for what the cancel had already bought
+            # -- the very harm #324 exists to prevent (#329 review). The error
+            # is kept either way: cancelling is not failing, but a failure is
+            # never hidden (golden rule 8).
             self.storage.update_benchmark_run(
                 run_id,
-                status=BenchmarkStatus.FAILED,
+                status=(
+                    BenchmarkStatus.CANCELLED if cancelled
+                    else BenchmarkStatus.FAILED
+                ),
                 error_message=str(e),
                 completed_at=datetime.now(),
             )
@@ -512,6 +567,7 @@ class BenchmarkRunner:
         progress_callback: Callable[[int, int, str], None] | None = None,
         existing_scores: list[ScoredDocument] | None = None,
         reuse_cross_run: bool = True,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> BenchmarkResult:
         """
         Convenience method to create and run a benchmark in one call.
@@ -525,6 +581,8 @@ class BenchmarkRunner:
             progress_callback: Progress callback
             existing_scores: Pre-existing scores to reuse for the baseline model
             reuse_cross_run: If True, reuse scores from previous runs of same question
+            should_cancel: Asked before each evaluation; see
+                :meth:`run_benchmark`
 
         Returns:
             Benchmark results
@@ -560,6 +618,7 @@ class BenchmarkRunner:
             progress_callback=progress_callback,
             existing_scores=existing_scores,
             reuse_cross_run=reuse_cross_run,
+            should_cancel=should_cancel,
         )
 
     def _score_document(
@@ -711,6 +770,7 @@ Evaluate the relevance of this document to the research question."""
         documents: list[LiteDocument],
         all_scores: dict[str, dict[str, ScoredDocument]],
         duration: float,
+        cancellation: BenchmarkCancellation | None = None,
     ) -> BenchmarkResult:
         """
         Compute benchmark statistics from collected scores.
@@ -723,6 +783,8 @@ Evaluate the relevance of this document to the research question."""
             documents: List of documents
             all_scores: Nested dict of evaluator_id -> doc_id -> ScoredDocument
             duration: Total execution time in seconds
+            cancellation: What the run had evaluated when a cancel stopped
+                it, or None for a run that reached the end
 
         Returns:
             Complete BenchmarkResult
@@ -783,6 +845,7 @@ Evaluate the relevance of this document to the research question."""
             inclusion_agreement_matrix=inclusion_agreement_matrix,
             total_duration_seconds=duration,
             baseline_evaluator_name=baseline_name,
+            cancellation=cancellation,
         )
 
     def get_benchmark_result(self, run_id: str) -> BenchmarkResult | None:
@@ -874,6 +937,21 @@ Evaluate the relevance of this document to the research question."""
                     parts = key_str.split("|", 1)
                     inclusion_agreement_matrix[(parts[0], parts[1])] = value
 
+            # The run's own status is the durable record that a cancel
+            # stopped it; the counts live in the summary. A summary damaged
+            # past reading loses the counts, not the fact -- and answered as
+            # "not cancelled", a partial comparison would render with no
+            # note, i.e. as a whole one. Unreadable is not absent, which is
+            # how every other field here is already read (#329 review).
+            stored_cancellation = BenchmarkCancellation.from_stored(
+                data.get("cancellation")
+            )
+            if run.status == BenchmarkStatus.CANCELLED and stored_cancellation is None:
+                raise StoredResultUnreadableError(
+                    f"Benchmark run {run_id} is stored as cancelled, but how "
+                    "much of it ran could not be read"
+                )
+
             return BenchmarkResult(
                 run_id=data["run_id"],
                 question=data["question"],
@@ -884,6 +962,8 @@ Evaluate the relevance of this document to the research question."""
                 inclusion_agreement_matrix=inclusion_agreement_matrix,
                 inclusion_threshold=data.get("inclusion_threshold", 3),
                 total_duration_seconds=data["total_duration_seconds"],
+                # A stored partial result must not read back as a whole one
+                cancellation=stored_cancellation,
                 created_at=datetime.fromisoformat(data["created_at"]),
             )
 
@@ -901,6 +981,11 @@ Evaluate the relevance of this document to the research question."""
     ) -> BenchmarkResult | None:
         """
         Get the most recent completed benchmark result for a research question.
+
+        Completed runs only: a run a cancel stopped is not the question's
+        latest benchmark, because its comparisons are over part of a run
+        (#324). Its individual scores are still reused -- see
+        :meth:`LiteStorage.get_all_scores_for_question`.
 
         Args:
             question: Research question text

@@ -67,6 +67,7 @@ from ..benchmarking.display import (
     format_spread,
     format_statistic,
     mean_score_ranking,
+    partial_result_note,
     score_cell,
 )
 from ..constants import (
@@ -367,6 +368,14 @@ class BenchmarkResultsTab(QWidget):
             f"<b>Total Cost:</b> ${cost:.4f}"
         )
         header_layout.addWidget(summary_label)
+
+        # A cancelled run's figures are over the part that ran, and say so
+        # (#324): shown without this, a partial comparison reads as a whole
+        partial = partial_result_note(self.result.cancellation)
+        if partial is not None:
+            partial_label = QLabel(f"<i>{partial}</i>")
+            partial_label.setWordWrap(True)
+            header_layout.addWidget(partial_label)
 
         # A result stored before failures were counted cannot tell its 1s
         # from outages, and says so (#306)
@@ -702,6 +711,10 @@ class BenchmarkResultsTab(QWidget):
 
     def _export_csv(self) -> None:
         """Export results to CSV."""
+        # Nothing to write, and nothing to say about a run that is not there
+        if self.result is None:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Results as CSV",
@@ -714,6 +727,13 @@ class BenchmarkResultsTab(QWidget):
         try:
             with open(file_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
+
+                # The partial-result note travels with the data, not just the
+                # window: a cancelled run's rows are over part of a run (#329
+                # review)
+                note = partial_result_note(self.result.cancellation)
+                if note:
+                    writer.writerow([note])
 
                 # Header
                 evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
@@ -740,6 +760,10 @@ class BenchmarkResultsTab(QWidget):
 
     def _export_json(self) -> None:
         """Export results to JSON."""
+        # Nothing to write, and nothing to say about a run that is not there
+        if self.result is None:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Results as JSON",
@@ -784,6 +808,15 @@ class BenchmarkResultsTab(QWidget):
                     }
                     for c in self.result.document_comparisons
                 ],
+                # A file outlives the window the partial-result note is shown
+                # in: without this, a cancelled run's figures reach a reader
+                # who has no way to know they are over part of a run (#329
+                # review). None for a run that reached the end.
+                "cancellation": (
+                    self.result.cancellation.to_dict()
+                    if self.result.cancellation is not None
+                    else None
+                ),
             }
 
             with open(file_path, 'w', encoding='utf-8') as f:
