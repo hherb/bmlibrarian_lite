@@ -50,12 +50,21 @@ from PySide6.QtWidgets import (
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-from ..analysis_failures import also_failed_text
+from ..analysis_failures import (
+    also_failed_text,
+    pass_failure_detail,
+    unclassified_text,
+)
 from ..benchmarking.display import benchmark_cancelled_text, failed_scorings_sentence
 from ..benchmarking.models import BenchmarkResult
 from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
-from ..data_models import LiteDocument, ResearchQuestionSummary, RetrievalShortfall
+from ..data_models import (
+    LiteDocument,
+    PassOutcome,
+    ResearchQuestionSummary,
+    RetrievalShortfall,
+)
 from ..exceptions import SQLiteError
 from ..search_failures import describe_search_shortfalls
 from ..storage import LiteStorage
@@ -153,16 +162,14 @@ def rerun_cancelled_text(retried: int, error: str = "") -> str:
 
 
 def pass_cancelled_text(
-    pass_name: str, verb: str, succeeded: int, failed: int, total: int, error: str = ""
+    pass_name: str, verb: str, outcome: PassOutcome, error: str = ""
 ) -> str:
     """What a cancelled pass over a question's documents says it did.
 
     Args:
         pass_name: The pass, as a sentence starts, e.g. "Re-scoring".
         verb: What it does to one document, e.g. "re-scored".
-        succeeded: Documents it finished.
-        failed: Documents it tried and could not finish.
-        total: Documents it was given.
+        outcome: What it did with the documents it was given.
         error: The error that also ended the run, or an empty string.
 
     Returns:
@@ -176,20 +183,56 @@ def pass_cancelled_text(
         borrows the phrasing for evaluations *held* -- same words, a
         different count, so do not read one from the other.
     """
-    attempted = succeeded + failed
     text = (
-        f"{pass_name} cancelled after {attempted} of {documents_text(total)}: "
-        f"{succeeded} {verb}"
+        f"{pass_name} cancelled after {outcome.attempted} of "
+        f"{documents_text(outcome.total)}: {outcome.succeeded} {verb}"
     )
-    if failed:
-        text += f", {failed} failed"
+    if outcome.failed:
+        text += f", {outcome.failed} failed"
     text += "."
-    remaining = total - attempted
+    remaining = outcome.not_attempted
     if remaining == 1:
         text += f" The other one was not {verb}."
     elif remaining > 1:
         text += f" The other {remaining} were not {verb}."
     return text + also_failed_text(error)
+
+
+def pass_finished_text(pass_name: str, verb: str, outcome: PassOutcome) -> str:
+    """What a pass that reached the end of its documents says it did.
+
+    Args:
+        pass_name: The pass, as a sentence starts, e.g. "Re-scoring".
+        verb: What it does to one document, e.g. "re-scored".
+        outcome: What it did with the documents it was given.
+
+    Returns:
+        e.g. "Re-scoring complete: 27 re-scored, 3 failed."
+    """
+    text = f"{pass_name} complete: {outcome.succeeded} {verb}"
+    if outcome.failed:
+        text += f", {outcome.failed} failed"
+    return text + "."
+
+
+def pass_failure_explanation(outcome: PassOutcome) -> str:
+    """Why a pass's failures happened, and what the user can do about it.
+
+    A count alone told the user nothing they could act on (#327): the
+    classified cause, one example and the matching advice do. The provider's
+    own words are not here; they can carry a credential, and stay in the log
+    (#330).
+
+    Args:
+        outcome: What the pass did with the documents it was given.
+
+    Returns:
+        The failure detail, the unclassified note, or both -- each only when
+        it has something to say; "" when the pass had neither.
+    """
+    return pass_failure_detail(outcome.failures) + unclassified_text(
+        outcome.unclassified
+    )
 
 
 class ResearchQuestionsTab(QWidget):
@@ -1010,28 +1053,33 @@ class ResearchQuestionsTab(QWidget):
             self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-    def _on_reclassify_finished(self, success_count: int, fail_count: int) -> None:
-        """Handle reclassify completion."""
+    def _on_reclassify_finished(self, outcome: PassOutcome) -> None:
+        """A re-classification that reached the end of its documents.
+
+        Args:
+            outcome: What it did with the documents it was given, including
+                why each failure failed (#327).
+        """
         self._reset_ui()
         self._load_questions()  # Refresh the table
 
-        self.progress_label.setText(
-            f"Re-classification complete: {success_count} succeeded, "
-            f"{fail_count} failed"
-        )
+        message = pass_finished_text("Re-classification", "re-classified", outcome)
+        self.progress_label.setText(message)
 
-        if fail_count > 0:
+        explanation = pass_failure_explanation(outcome)
+        if outcome.failed:
+            # A failed classification is recorded nowhere, so this dialog is
+            # the only lasting notice of it
             QMessageBox.warning(
                 self,
                 "Re-classification Complete",
-                f"Re-classified {success_count} documents.\n"
-                f"{fail_count} documents failed classification.",
+                f"{message}\n\n{explanation}",
             )
         else:
             QMessageBox.information(
                 self,
                 "Re-classification Complete",
-                f"Successfully re-classified {success_count} documents.",
+                f"{message}{explanation}",
             )
 
         # Clean up worker
@@ -1052,26 +1100,30 @@ class ResearchQuestionsTab(QWidget):
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
     def _on_reclassify_cancelled(
-        self, succeeded: int, failed: int, total: int, error: str = ""
+        self, outcome: PassOutcome, error: str = ""
     ) -> None:
         """A cancelled re-classification: what it did stays done (#320).
 
         Args:
-            succeeded: Documents it classified.
-            failed: Documents it tried and could not classify.
-            total: Documents it was given.
+            outcome: What it did before the cancel, including why each
+                failure failed (#327).
             error: The error that also ended the run, or an empty string.
         """
         self._reset_ui()
         self._load_questions()  # Refresh the table
         message = pass_cancelled_text(
-            "Re-classification", "re-classified", succeeded, failed, total, error
+            "Re-classification", "re-classified", outcome, error
         )
         self.progress_label.setText(message)
         # A failed classification is recorded nowhere, so this dialog is the
         # only lasting notice of it -- the label the next click overwrites
-        if failed or error:
-            QMessageBox.warning(self, "Re-classification Cancelled", message)
+        if outcome.failed or error:
+            explanation = pass_failure_explanation(outcome)
+            QMessageBox.warning(
+                self,
+                "Re-classification Cancelled",
+                f"{message}\n\n{explanation}" if explanation else message,
+            )
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
     def _cleanup_reclassify_worker(self) -> None:
@@ -1150,28 +1202,29 @@ class ResearchQuestionsTab(QWidget):
             self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-    def _on_rescore_finished(self, success_count: int, fail_count: int) -> None:
-        """Handle rescore completion."""
+    def _on_rescore_finished(self, outcome: PassOutcome) -> None:
+        """A re-scoring that reached the end of its documents.
+
+        Args:
+            outcome: What it did with the documents it was given, including
+                why each failure failed (#327).
+        """
         self._reset_ui()
         self._load_questions()  # Refresh the table
 
-        self.progress_label.setText(
-            f"Re-scoring complete: {success_count} succeeded, {fail_count} failed"
-        )
+        message = pass_finished_text("Re-scoring", "re-scored", outcome)
+        self.progress_label.setText(message)
 
-        if fail_count > 0:
+        if outcome.failed:
             QMessageBox.warning(
                 self,
                 "Re-scoring Complete",
-                f"Re-scored {success_count} documents.\n"
-                f"{fail_count} documents failed scoring.",
+                f"{message}\n\n{pass_failure_explanation(outcome)}\n\n"
+                "The failures were recorded, and re-running the question "
+                "scores those documents again.",
             )
         else:
-            QMessageBox.information(
-                self,
-                "Re-scoring Complete",
-                f"Successfully re-scored {success_count} documents.",
-            )
+            QMessageBox.information(self, "Re-scoring Complete", message)
 
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_rescore_worker)
@@ -1190,28 +1243,25 @@ class ResearchQuestionsTab(QWidget):
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_rescore_worker)
 
-    def _on_rescore_cancelled(
-        self, succeeded: int, failed: int, total: int, error: str = ""
-    ) -> None:
+    def _on_rescore_cancelled(self, outcome: PassOutcome, error: str = "") -> None:
         """A cancelled re-scoring: what it did stays done (#320).
 
         Args:
-            succeeded: Documents it scored.
-            failed: Documents it tried and could not score.
-            total: Documents it was given.
+            outcome: What it did before the cancel, including why each
+                failure failed (#327).
             error: The error that also ended the run, or an empty string.
         """
         self._reset_ui()
         self._load_questions()  # Refresh the table
-        message = pass_cancelled_text(
-            "Re-scoring", "re-scored", succeeded, failed, total, error
-        )
+        message = pass_cancelled_text("Re-scoring", "re-scored", outcome, error)
         self.progress_label.setText(message)
-        if failed or error:
+        if outcome.failed or error:
+            explanation = pass_failure_explanation(outcome)
+            detail = f"{message}\n\n{explanation}" if explanation else message
             QMessageBox.warning(
                 self,
                 "Re-scoring Cancelled",
-                f"{message}\n\nThe failures were recorded, and re-running "
+                f"{detail}\n\nThe failures were recorded, and re-running "
                 "the question scores those documents again.",
             )
         QTimer.singleShot(100, self._cleanup_rescore_worker)

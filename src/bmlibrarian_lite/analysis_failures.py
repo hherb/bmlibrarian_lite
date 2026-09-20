@@ -39,9 +39,10 @@ The wording follows the search contract in
 is ``doc/cross_platform/analysis_failure_reporting.md``.
 """
 
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Iterable, Sequence
 
-from .data_models import AnalysisShortfall, EvaluationErrorCode
+from .data_models import AnalysisShortfall, EvaluationErrorCode, PassFailure
 
 
 def describe_analysis_shortfalls(shortfalls: Sequence[AnalysisShortfall]) -> str:
@@ -159,15 +160,35 @@ def analysis_failure_advice(shortfalls: Sequence[AnalysisShortfall]) -> str:
         refused API key; waiting out a rate limit; checking the provider is
         reachable; trying another model. Otherwise, trying again later.
     """
-    causes = {cause for shortfall in shortfalls for cause in shortfall.causes}
+    return advice_for_causes(
+        cause for shortfall in shortfalls for cause in shortfall.causes
+    )
+
+
+def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
+    """Say what the user can do about a set of failures.
+
+    The advice a reader can act on comes from the causes alone, so a failure
+    recorded as a shortfall and one recorded per document (:class:`PassFailure`)
+    get the same sentences from the same place.
+
+    Args:
+        causes: Why documents failed, in any order, repeats allowed.
+
+    Returns:
+        One or more sentences, each at most once, in this order: checking a
+        refused API key; waiting out a rate limit; checking the provider is
+        reachable; trying another model. Otherwise, trying again later.
+    """
+    seen = set(causes)
     advice: list[str] = []
-    if EvaluationErrorCode.API_AUTH_ERROR in causes:
+    if EvaluationErrorCode.API_AUTH_ERROR in seen:
         advice.append(_AUTH_ADVICE)
-    if EvaluationErrorCode.API_RATE_LIMIT in causes:
+    if EvaluationErrorCode.API_RATE_LIMIT in seen:
         advice.append(_RATE_LIMIT_ADVICE)
-    if causes.intersection(_UNREACHABLE_CAUSES):
+    if seen.intersection(_UNREACHABLE_CAUSES):
         advice.append(_UNREACHABLE_ADVICE)
-    if causes.intersection(_UNREADABLE_CAUSES):
+    if seen.intersection(_UNREADABLE_CAUSES):
         advice.append(_UNREADABLE_ADVICE)
     return " ".join(advice) if advice else _FALLBACK_ADVICE
 
@@ -184,3 +205,70 @@ def also_failed_text(error: str) -> str:
         crash mid-cancel read as an orderly stop (#320).
     """
     return f" It also stopped on an error: {error}" if error else ""
+
+
+def pass_failure_detail(failures: Sequence[PassFailure]) -> str:
+    """Say what a pass's failures mostly were, with one example and what to do.
+
+    A count alone -- "17 documents failed classification" -- lumps together an
+    unreachable provider, a refused key, a rate limit, a storage error and an
+    abstract the model choked on. The first is one line of fix and the last is
+    an afternoon, and the user could not tell which they had (#327).
+
+    The provider's own text is not here. It can carry the request, and with it
+    a credential (#330); the classified cause is what the user can act on, and
+    the raw text stays in the log.
+
+    Args:
+        failures: What the pass could not finish, in the order it happened.
+
+    Returns:
+        A sentence naming the cause most of them shared, an example document
+        and the advice for every cause among them; or ``""`` when nothing
+        failed, so a clean pass never reads as a qualified one.
+    """
+    if not failures:
+        return ""
+    counts = Counter(failure.cause for failure in failures)
+    # Counter preserves first-seen order among ties, so the same failures in
+    # the same order always name the same cause
+    cause, count = counts.most_common(1)[0]
+    example = next(
+        failure.document_id for failure in failures if failure.cause is cause
+    )
+    total = len(failures)
+    if total == 1:
+        lead, where = "The failure was:", example
+    elif count == total:
+        lead, where = f"All {total:,} failures were:", f"first: {example}"
+    else:
+        lead, where = f"Most failures ({count:,} of {total:,}) were:", f"first: {example}"
+    return f"{lead} {cause.description} ({where}). {advice_for_causes(counts)}"
+
+
+def unclassified_text(unclassified: int) -> str:
+    """What a re-classification adds for documents the model named no design for.
+
+    Nothing went wrong for these: the model read the document and would not
+    say what kind of study it is. Counted among the failures, they turned a
+    pass in which nothing broke into "6 documents failed classification"
+    (#327).
+
+    Args:
+        unclassified: How many documents the model named no design for.
+
+    Returns:
+        A sentence, or ``""`` when the model named a design for every document
+        it answered about.
+    """
+    if unclassified <= 0:
+        return ""
+    if unclassified == 1:
+        return (
+            " The model named no study design for 1 document; "
+            "its stored design is unchanged."
+        )
+    return (
+        f" The model named no study design for {unclassified:,} documents; "
+        "their stored designs are unchanged."
+    )

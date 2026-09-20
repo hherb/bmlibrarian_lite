@@ -29,6 +29,11 @@ Provides QThread-based workers for long-running operations:
 
 These workers allow the main GUI thread to remain responsive while
 background operations execute.
+
+Every worker here mixes in :class:`SingleOutcome`: a run ends with exactly one
+terminal signal, whatever happens to it (#320, #326). A worker that can be
+cancelled has a ``cancelled`` signal, because a cancel that emitted nothing
+left its caller waiting for a signal that never came.
 """
 
 import logging
@@ -39,9 +44,11 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
+from ..data_models import EvaluationErrorCode, PassFailure, PassOutcome
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_utils import generate_pdf_path
 from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
+from ..utils import classify_analysis_exception
 
 if TYPE_CHECKING:
     from ..config import LiteConfig
@@ -53,459 +60,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AnswerWorker(QThread):
-    """
-    Background worker for generating answers.
-
-    Executes the interrogation agent's ask() method in a background thread
-    to prevent blocking the GUI.
-
-    Signals:
-        finished: Emitted when answer is ready (answer, sources)
-        error: Emitted on error (error message)
-    """
-
-    finished = Signal(str, list)  # answer, sources
-    error = Signal(str)
-
-    def __init__(
-        self,
-        agent: 'LiteInterrogationAgent',
-        question: str,
-    ) -> None:
-        """
-        Initialize the answer worker.
-
-        Args:
-            agent: Interrogation agent instance
-            question: Question to answer
-        """
-        super().__init__()
-        self.agent = agent
-        self.question = question
-
-    def run(self) -> None:
-        """Generate answer in background thread."""
-        try:
-            answer, sources = self.agent.ask(self.question)
-            self.finished.emit(answer, sources)
-        except Exception as e:
-            logger.exception("Answer generation error")
-            self.error.emit(str(e))
-
-
-class PDFDiscoveryWorker(QThread):
-    """
-    Background worker for PDF discovery and download.
-
-    Discovers and downloads PDFs from multiple sources:
-    - PubMed Central (PMC) for open access articles
-    - Unpaywall API for open access discovery
-    - Direct DOI resolution
-
-    Signals:
-        progress: Emitted with (stage, status) during download
-        finished: Emitted with file_path when download succeeds
-        verification_warning: Emitted with (file_path, warning_message) on verification mismatch
-        paywall_detected: Emitted with (article_url, error_message) when paywall blocks access
-        error: Emitted with error message on failure
-    """
-
-    progress = Signal(str, str)  # stage, status
-    finished = Signal(str)  # file_path on success
-    verification_warning = Signal(str, str)  # file_path, warning_message
-    paywall_detected = Signal(str, str)  # article_url, error_message
-    error = Signal(str)  # error message
-
-    def __init__(
-        self,
-        doc_dict: Dict[str, Any],
-        output_dir: Path,
-        unpaywall_email: Optional[str] = None,
-        openathens_url: Optional[str] = None,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        """
-        Initialize PDF discovery worker.
-
-        Args:
-            doc_dict: Document dictionary with doi, pmid, title, year, etc.
-            output_dir: Base directory for PDF storage (year subdirs created)
-            unpaywall_email: Email for Unpaywall API
-            openathens_url: OpenAthens institution URL for authenticated downloads
-            parent: Optional parent widget
-        """
-        super().__init__(parent)
-        self.doc_dict = doc_dict
-        self.output_dir = output_dir
-        self.unpaywall_email = unpaywall_email
-        self.openathens_url = openathens_url
-        self._cancelled = False
-        self._discoverer: Optional[PDFDiscoverer] = None
-
-    def run(self) -> None:
-        """Execute PDF discovery and download."""
-        try:
-            # Extract identifiers from doc_dict
-            doi = self.doc_dict.get("doi")
-            pmid = self.doc_dict.get("pmid")
-            pmcid = self.doc_dict.get("pmcid") or self.doc_dict.get("pmc_id")
-            title = self.doc_dict.get("title")
-
-            if not (doi or pmid or pmcid):
-                self.error.emit(
-                    "No identifiers available (DOI, PMID, or PMCID required).\n"
-                    "Please enter an identifier manually."
-                )
-                return
-
-            # Generate output path
-            output_path = generate_pdf_path(self.doc_dict, self.output_dir)
-
-            # Create discoverer with progress callback
-            self._discoverer = PDFDiscoverer(
-                unpaywall_email=self.unpaywall_email,
-                openathens_url=self.openathens_url,
-                progress_callback=self._emit_progress,
-            )
-
-            # Perform discovery and download
-            result = self._discoverer.discover_and_download(
-                output_path=output_path,
-                doi=doi,
-                pmid=pmid,
-                pmcid=pmcid,
-                title=title,
-                expected_title=title,
-            )
-
-            # Handle result
-            if self._cancelled:
-                return
-
-            if result.success:
-                if result.verification_warning:
-                    self.verification_warning.emit(
-                        str(result.file_path),
-                        result.verification_warning,
-                    )
-                self.finished.emit(str(result.file_path))
-            elif result.is_paywall:
-                self.paywall_detected.emit(
-                    result.paywall_url or "",
-                    result.error or "Access requires subscription",
-                )
-            else:
-                self.error.emit(result.error or "Unknown error during PDF discovery")
-
-        except Exception as e:
-            logger.exception("PDF discovery failed")
-            self.error.emit(f"PDF discovery error: {str(e)}")
-
-    def _emit_progress(self, stage: str, status: str) -> None:
-        """Emit progress signal from discoverer callback."""
-        if not self._cancelled:
-            self.progress.emit(stage, status)
-
-    def cancel(self) -> None:
-        """Request cancellation of the operation."""
-        self._cancelled = True
-        if self._discoverer:
-            self._discoverer.cancel()
-
-
-class FulltextDiscoveryWorker(QThread):
-    """
-    Background worker for full-text discovery.
-
-    Discovers and retrieves full-text content from multiple sources:
-    1. Cached full-text markdown (fastest)
-    2. Europe PMC XML API (best quality)
-    3. Cached PDF
-    4. PDF download from various sources
-
-    Signals:
-        progress: Emitted with (stage, status) during discovery
-        finished: Emitted with (markdown_content, file_path, source_type) on success
-        paywall_detected: Emitted with (article_url, error_message) when paywall blocks access
-        error: Emitted with error message on failure
-    """
-
-    progress = Signal(str, str)  # stage, status
-    finished = Signal(str, str, str)  # markdown_content, file_path, source_type
-    paywall_detected = Signal(str, str)  # article_url, error_message
-    error = Signal(str)  # error message
-
-    def __init__(
-        self,
-        doc_dict: Dict[str, Any],
-        unpaywall_email: Optional[str] = None,
-        openathens_url: Optional[str] = None,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        """
-        Initialize full-text discovery worker.
-
-        Args:
-            doc_dict: Document dictionary with doi, pmid, pmcid, title, year, etc.
-            unpaywall_email: Email for Unpaywall API
-            openathens_url: OpenAthens institution URL for authenticated downloads
-            parent: Optional parent widget
-        """
-        super().__init__(parent)
-        self.doc_dict = doc_dict
-        self.unpaywall_email = unpaywall_email
-        self.openathens_url = openathens_url
-        self._cancelled = False
-        self._discoverer: Optional[FulltextDiscoverer] = None
-
-    def run(self) -> None:
-        """Execute full-text discovery."""
-        try:
-            # Extract identifiers from doc_dict
-            doi = self.doc_dict.get("doi")
-            pmid = self.doc_dict.get("pmid")
-            pmcid = self.doc_dict.get("pmcid") or self.doc_dict.get("pmc_id")
-            title = self.doc_dict.get("title")
-
-            if not (doi or pmid or pmcid):
-                self.error.emit(
-                    "No identifiers available (DOI, PMID, or PMCID required).\n"
-                    "Please enter an identifier manually."
-                )
-                return
-
-            # Create discoverer with progress callback
-            self._discoverer = FulltextDiscoverer(
-                unpaywall_email=self.unpaywall_email,
-                openathens_url=self.openathens_url,
-                progress_callback=self._emit_progress,
-            )
-
-            # Perform discovery
-            result = self._discoverer.discover_fulltext(
-                doc_dict=self.doc_dict,
-            )
-
-            # Handle result
-            if self._cancelled:
-                return
-
-            if result.success:
-                file_path = str(result.file_path) if result.file_path else ""
-                self.finished.emit(
-                    result.markdown_content or "",
-                    file_path,
-                    result.source_type.value,
-                )
-            elif result.is_paywall:
-                self.paywall_detected.emit(
-                    result.paywall_url or "",
-                    result.error or "Access requires subscription",
-                )
-            else:
-                self.error.emit(result.error or "Full-text not available")
-
-        except Exception as e:
-            logger.exception("Full-text discovery failed")
-            self.error.emit(f"Full-text discovery error: {str(e)}")
-
-    def _emit_progress(self, stage: str, status: str) -> None:
-        """Emit progress signal from discoverer callback."""
-        if not self._cancelled:
-            self.progress.emit(stage, status)
-
-    def cancel(self) -> None:
-        """Request cancellation of the operation."""
-        self._cancelled = True
-        if self._discoverer:
-            self._discoverer.cancel()
-
-
-class OpenAthensAuthWorker(QThread):
-    """
-    Background worker for OpenAthens interactive authentication.
-
-    Opens the institutional login page in the default web browser and
-    waits for the user to complete authentication. The browser session
-    will typically persist cookies that can be used for subsequent
-    PDF downloads.
-
-    Note: This is a simple browser-based authentication flow. For full
-    automation, the main BMLibrarian application provides more advanced
-    session management.
-
-    Signals:
-        finished: Emitted when authentication is presumed complete
-        error: Emitted with error message on failure
-    """
-
-    finished = Signal()  # Authentication presumed complete
-    error = Signal(str)  # error message
-
-    def __init__(
-        self,
-        institution_url: str,
-        session_max_age_hours: int = 24,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        """
-        Initialize OpenAthens authentication worker.
-
-        Args:
-            institution_url: Institution's OpenAthens login URL (HTTPS)
-            session_max_age_hours: Maximum session age before re-authentication
-            parent: Optional parent widget
-        """
-        super().__init__(parent)
-        self.institution_url = institution_url
-        self.session_max_age_hours = session_max_age_hours
-
-    def run(self) -> None:
-        """Execute OpenAthens interactive authentication via browser."""
-        try:
-            if not self.institution_url:
-                self.error.emit("No institution URL configured.")
-                return
-
-            # Convert domain to OpenAthens Redirector URL if needed
-            institution_url = self.institution_url
-            if not institution_url.startswith(("http://", "https://")):
-                # Assume it's a domain - convert to OpenAthens Redirector URL
-                # OpenAthens Redirector format: https://go.openathens.net/redirector/DOMAIN
-                institution_url = f"https://go.openathens.net/redirector/{institution_url}"
-                logger.info(f"Converted domain to OpenAthens Redirector URL: {institution_url}")
-
-            logger.info(f"Opening browser for OpenAthens authentication: {institution_url}")
-
-            # Open browser for authentication
-            success = webbrowser.open(institution_url)
-
-            if not success:
-                self.error.emit(
-                    "Could not open web browser.\n"
-                    "Please open your browser manually and navigate to:\n"
-                    f"{institution_url}"
-                )
-                return
-
-            # Give the user time to authenticate (browser has been opened)
-            # The actual authentication happens in the browser, and cookies
-            # will be stored by the browser. For full session management,
-            # the main BMLibrarian app provides more sophisticated handling.
-
-            # Signal that browser was opened successfully
-            # User will need to complete authentication in browser
-            self.finished.emit()
-
-        except Exception as e:
-            logger.exception("OpenAthens authentication failed")
-            self.error.emit(f"Authentication error: {str(e)}")
-
-
-class QualityFilterWorker(QThread):
-    """
-    Background worker for quality filtering documents.
-
-    Executes quality assessment and filtering in a background thread
-    to prevent blocking the GUI during LLM calls.
-
-    Signals:
-        progress: Emitted during progress (current, total, assessment)
-        finished: Emitted when filtering completes (filtered_docs, all_assessments)
-        error: Emitted on error (error message)
-    """
-
-    progress = Signal(int, int, object)  # current, total, QualityAssessment
-    finished = Signal(list, list)  # filtered docs, all assessments
-    error = Signal(str)
-
-    def __init__(
-        self,
-        quality_manager: "QualityManager",
-        documents: List["LiteDocument"],
-        filter_settings: "QualityFilter",
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        """
-        Initialize the quality filter worker.
-
-        Args:
-            quality_manager: QualityManager instance for assessment
-            documents: List of documents to filter
-            filter_settings: Quality filter configuration
-            parent: Optional parent widget
-        """
-        super().__init__(parent)
-        self.quality_manager = quality_manager
-        self.documents = documents
-        self.filter_settings = filter_settings
-        self._cancelled = False
-
-    def run(self) -> None:
-        """Run quality filtering in background thread."""
-        try:
-            def progress_callback(
-                current: int,
-                total: int,
-                assessment: "QualityAssessment",
-            ) -> None:
-                """Emit progress signal if not cancelled."""
-                if not self._cancelled:
-                    self.progress.emit(current, total, assessment)
-
-            filtered, assessments = self.quality_manager.filter_documents(
-                self.documents,
-                self.filter_settings,
-                progress_callback=progress_callback,
-            )
-
-            if not self._cancelled:
-                self.finished.emit(filtered, assessments)
-
-        except Exception as e:
-            logger.exception("Quality filtering failed")
-            if not self._cancelled:
-                self.error.emit(str(e))
-
-    def cancel(self) -> None:
-        """Request cancellation of the operation."""
-        self._cancelled = True
-
-
-def unexpected_rerun_error_text(error: str, retrying: int) -> str:
-    """What a rerun that stopped on an unexpected error says.
-
-    Args:
-        error: The error's text.
-        retrying: Documents the rerun was to score again.
-
-    Returns:
-        The error, and -- when there were any -- that the documents to
-        retry were not scored again, which the error alone left unsaid.
-    """
-    if not retrying:
-        return error
-    if retrying == 1:
-        unscored = "1 document whose scoring failed before was not scored again"
-    else:
-        unscored = f"{retrying} documents whose scoring failed before were not scored again"
-    return f"{error}\n\n{unscored}; re-run the question to retry them."
-
-
 class SingleOutcome:
     """Ends a run with exactly one terminal signal, whatever happens.
 
-    A worker that mixes this in ends a run with exactly one of ``finished``,
-    ``error`` and ``cancelled``, and the tab that started it returns to ready
-    only when one arrives. Both tabs rely on it: the Research Questions tab's
-    four workers, and the two benchmark workers the Systematic Review tab
-    also drives (#324). A run that emitted none left the tab waiting for
-    a signal that never came -- stuck on "Cancelling...", its actions
-    disabled until the tab was rebuilt (#320). Stating that contract in a
-    docstring was not enough to hold it: an import that failed inside the
-    body, or anything else raised outside the paths the body anticipates,
-    still ended the thread in silence.
+    A worker that mixes this in ends a run with exactly one terminal signal
+    -- ``finished``, ``error``, ``cancelled``, or whatever else stands for a
+    run being over -- and the tab that started it returns to ready only when
+    one arrives. Every worker in this module relies on it, as do the two
+    benchmark workers the Systematic Review tab drives (#324). A run that
+    emitted none left the tab waiting for a signal that never came -- stuck
+    on "Cancelling...", its actions disabled until the tab was rebuilt
+    (#320, #326). Stating that contract in a docstring was not enough to
+    hold it: an import that failed inside the body, or anything else raised
+    outside the paths the body anticipates, still ended the thread in
+    silence.
+
+    "Whatever happens" includes what ``except Exception`` does not catch: a
+    ``BaseException`` used to walk out of the thread with nothing emitted.
+    :meth:`_run_once` ends the run first and then lets it carry on unwinding.
 
     A worker therefore emits its terminal signals through :meth:`_end`, and
     runs its body inside :meth:`_run_once`, which reports whatever escaped.
@@ -550,6 +122,571 @@ class SingleOutcome:
             if not self._ended:
                 fallback(str(e))
             raise
+
+
+class AnswerWorker(SingleOutcome, QThread):
+    """
+    Background worker for generating answers.
+
+    Executes the interrogation agent's ask() method in a background thread
+    to prevent blocking the GUI.
+
+    Signals:
+        finished: Emitted when answer is ready (answer, sources)
+        error: Emitted on error (error message)
+
+    Exactly one of ``finished`` and ``error`` ends a run. This worker cannot
+    be cancelled, and its body already reports what it anticipates; it is on
+    the contract so that *every* worker in this module is, which is what
+    makes the rule checkable rather than a habit (#326). What it gains is the
+    arm the body does not have: a ``BaseException`` walks straight past
+    ``except Exception``, and the run then ended in silence.
+    """
+
+    finished = Signal(str, list)  # answer, sources
+    error = Signal(str)
+
+    def __init__(
+        self,
+        agent: 'LiteInterrogationAgent',
+        question: str,
+    ) -> None:
+        """
+        Initialize the answer worker.
+
+        Args:
+            agent: Interrogation agent instance
+            question: Question to answer
+        """
+        super().__init__()
+        self.agent = agent
+        self.question = question
+
+    def run(self) -> None:
+        """Generate answer in background thread.
+
+        Ends with exactly one of ``finished`` and ``error``, including when
+        it fails in a way it does not anticipate.
+        """
+        self._run_once(self._answer, lambda error: self._end(self.error, error))
+
+    def _answer(self) -> None:
+        """Ask the agent, and end the run."""
+        try:
+            answer, sources = self.agent.ask(self.question)
+        except Exception as e:
+            logger.exception("Answer generation error")
+            self._end(self.error, str(e))
+            return
+        self._end(self.finished, answer, sources)
+
+
+class PDFDiscoveryWorker(SingleOutcome, QThread):
+    """
+    Background worker for PDF discovery and download.
+
+    Discovers and downloads PDFs from multiple sources:
+    - PubMed Central (PMC) for open access articles
+    - Unpaywall API for open access discovery
+    - Direct DOI resolution
+
+    Signals:
+        progress: Emitted with (stage, status) during download
+        finished: Emitted with file_path when download succeeds
+        verification_warning: Emitted with (file_path, warning_message) on verification mismatch
+        paywall_detected: Emitted with (article_url, error_message) when paywall blocks access
+        error: Emitted with error message on failure
+        cancelled: Emitted with the error that also ended the run, or an empty
+            string, when a cancel stopped it (#326). Cancelling is not
+            failing, but a failure is never hidden (golden rule 8).
+
+    Exactly one of ``finished``, ``paywall_detected``, ``error`` and
+    ``cancelled`` ends a run; ``verification_warning`` accompanies a
+    ``finished`` rather than replacing it. A cancelled run used to ``return``
+    in silence, so whatever waited on those signals waited forever.
+    """
+
+    progress = Signal(str, str)  # stage, status
+    finished = Signal(str)  # file_path on success
+    verification_warning = Signal(str, str)  # file_path, warning_message
+    paywall_detected = Signal(str, str)  # article_url, error_message
+    error = Signal(str)  # error message
+    cancelled = Signal(str)  # the error that also ended the run, or ""
+
+    def __init__(
+        self,
+        doc_dict: Dict[str, Any],
+        output_dir: Path,
+        unpaywall_email: Optional[str] = None,
+        openathens_url: Optional[str] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize PDF discovery worker.
+
+        Args:
+            doc_dict: Document dictionary with doi, pmid, title, year, etc.
+            output_dir: Base directory for PDF storage (year subdirs created)
+            unpaywall_email: Email for Unpaywall API
+            openathens_url: OpenAthens institution URL for authenticated downloads
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.doc_dict = doc_dict
+        self.output_dir = output_dir
+        self.unpaywall_email = unpaywall_email
+        self.openathens_url = openathens_url
+        self._cancelled = False
+        self._discoverer: Optional[PDFDiscoverer] = None
+
+    def run(self) -> None:
+        """Execute PDF discovery and download.
+
+        Ends with exactly one terminal signal, including when it fails in a
+        way it does not anticipate.
+        """
+        self._run_once(self._discover, self._report_failure)
+
+    def _report_failure(self, error: str) -> None:
+        """End a run that failed, as a cancel when one was asked for.
+
+        Args:
+            error: What went wrong.
+        """
+        if self._cancelled:
+            self._end(self.cancelled, error)
+        else:
+            self._end(self.error, error)
+
+    def _discover(self) -> None:
+        """Find and download the PDF, and end the run."""
+        try:
+            # Extract identifiers from doc_dict
+            doi = self.doc_dict.get("doi")
+            pmid = self.doc_dict.get("pmid")
+            pmcid = self.doc_dict.get("pmcid") or self.doc_dict.get("pmc_id")
+            title = self.doc_dict.get("title")
+
+            if not (doi or pmid or pmcid):
+                self._end(
+                    self.error,
+                    "No identifiers available (DOI, PMID, or PMCID required).\n"
+                    "Please enter an identifier manually.",
+                )
+                return
+
+            # Generate output path
+            output_path = generate_pdf_path(self.doc_dict, self.output_dir)
+
+            # Create discoverer with progress callback
+            self._discoverer = PDFDiscoverer(
+                unpaywall_email=self.unpaywall_email,
+                openathens_url=self.openathens_url,
+                progress_callback=self._emit_progress,
+            )
+
+            # Perform discovery and download
+            result = self._discoverer.discover_and_download(
+                output_path=output_path,
+                doi=doi,
+                pmid=pmid,
+                pmcid=pmcid,
+                title=title,
+                expected_title=title,
+            )
+
+            # A cancel the discoverer honoured stopped the download, so
+            # whatever it came back with describes the stop, not the article
+            if self._cancelled:
+                self._end(self.cancelled, "")
+                return
+
+            if result.success:
+                if result.verification_warning:
+                    self.verification_warning.emit(
+                        str(result.file_path),
+                        result.verification_warning,
+                    )
+                self._end(self.finished, str(result.file_path))
+            elif result.is_paywall:
+                self._end(
+                    self.paywall_detected,
+                    result.paywall_url or "",
+                    result.error or "Access requires subscription",
+                )
+            else:
+                self._end(
+                    self.error, result.error or "Unknown error during PDF discovery"
+                )
+
+        except Exception as e:
+            logger.exception("PDF discovery failed")
+            self._report_failure(f"PDF discovery error: {str(e)}")
+
+    def _emit_progress(self, stage: str, status: str) -> None:
+        """Emit progress signal from discoverer callback."""
+        if not self._cancelled:
+            self.progress.emit(stage, status)
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+        if self._discoverer:
+            self._discoverer.cancel()
+
+
+class FulltextDiscoveryWorker(SingleOutcome, QThread):
+    """
+    Background worker for full-text discovery.
+
+    Discovers and retrieves full-text content from multiple sources:
+    1. Cached full-text markdown (fastest)
+    2. Europe PMC XML API (best quality)
+    3. Cached PDF
+    4. PDF download from various sources
+
+    Signals:
+        progress: Emitted with (stage, status) during discovery
+        finished: Emitted with (markdown_content, file_path, source_type) on success
+        paywall_detected: Emitted with (article_url, error_message) when paywall blocks access
+        error: Emitted with error message on failure
+        cancelled: Emitted with the error that also ended the run, or an empty
+            string, when a cancel stopped it (#326). Cancelling is not
+            failing, but a failure is never hidden (golden rule 8).
+
+    Exactly one of ``finished``, ``paywall_detected``, ``error`` and
+    ``cancelled`` ends a run. A cancelled run used to ``return`` in silence,
+    so whatever waited on those signals waited forever.
+    """
+
+    progress = Signal(str, str)  # stage, status
+    finished = Signal(str, str, str)  # markdown_content, file_path, source_type
+    paywall_detected = Signal(str, str)  # article_url, error_message
+    error = Signal(str)  # error message
+    cancelled = Signal(str)  # the error that also ended the run, or ""
+
+    def __init__(
+        self,
+        doc_dict: Dict[str, Any],
+        unpaywall_email: Optional[str] = None,
+        openathens_url: Optional[str] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize full-text discovery worker.
+
+        Args:
+            doc_dict: Document dictionary with doi, pmid, pmcid, title, year, etc.
+            unpaywall_email: Email for Unpaywall API
+            openathens_url: OpenAthens institution URL for authenticated downloads
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.doc_dict = doc_dict
+        self.unpaywall_email = unpaywall_email
+        self.openathens_url = openathens_url
+        self._cancelled = False
+        self._discoverer: Optional[FulltextDiscoverer] = None
+
+    def run(self) -> None:
+        """Execute full-text discovery.
+
+        Ends with exactly one terminal signal, including when it fails in a
+        way it does not anticipate.
+        """
+        self._run_once(self._discover, self._report_failure)
+
+    def _report_failure(self, error: str) -> None:
+        """End a run that failed, as a cancel when one was asked for.
+
+        Args:
+            error: What went wrong.
+        """
+        if self._cancelled:
+            self._end(self.cancelled, error)
+        else:
+            self._end(self.error, error)
+
+    def _discover(self) -> None:
+        """Find the full text, and end the run."""
+        try:
+            # Extract identifiers from doc_dict
+            doi = self.doc_dict.get("doi")
+            pmid = self.doc_dict.get("pmid")
+            pmcid = self.doc_dict.get("pmcid") or self.doc_dict.get("pmc_id")
+            title = self.doc_dict.get("title")
+
+            if not (doi or pmid or pmcid):
+                self._end(
+                    self.error,
+                    "No identifiers available (DOI, PMID, or PMCID required).\n"
+                    "Please enter an identifier manually.",
+                )
+                return
+
+            # Create discoverer with progress callback
+            self._discoverer = FulltextDiscoverer(
+                unpaywall_email=self.unpaywall_email,
+                openathens_url=self.openathens_url,
+                progress_callback=self._emit_progress,
+            )
+
+            # Perform discovery
+            result = self._discoverer.discover_fulltext(
+                doc_dict=self.doc_dict,
+            )
+
+            # A cancel the discoverer honoured stopped the retrieval, so
+            # whatever it came back with describes the stop, not the article
+            if self._cancelled:
+                self._end(self.cancelled, "")
+                return
+
+            if result.success:
+                file_path = str(result.file_path) if result.file_path else ""
+                self._end(
+                    self.finished,
+                    result.markdown_content or "",
+                    file_path,
+                    result.source_type.value,
+                )
+            elif result.is_paywall:
+                self._end(
+                    self.paywall_detected,
+                    result.paywall_url or "",
+                    result.error or "Access requires subscription",
+                )
+            else:
+                self._end(self.error, result.error or "Full-text not available")
+
+        except Exception as e:
+            logger.exception("Full-text discovery failed")
+            self._report_failure(f"Full-text discovery error: {str(e)}")
+
+    def _emit_progress(self, stage: str, status: str) -> None:
+        """Emit progress signal from discoverer callback."""
+        if not self._cancelled:
+            self.progress.emit(stage, status)
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+        if self._discoverer:
+            self._discoverer.cancel()
+
+
+class OpenAthensAuthWorker(SingleOutcome, QThread):
+    """
+    Background worker for OpenAthens interactive authentication.
+
+    Opens the institutional login page in the default web browser and
+    waits for the user to complete authentication. The browser session
+    will typically persist cookies that can be used for subsequent
+    PDF downloads.
+
+    Note: This is a simple browser-based authentication flow. For full
+    automation, the main BMLibrarian application provides more advanced
+    session management.
+
+    Signals:
+        finished: Emitted when authentication is presumed complete
+        error: Emitted with error message on failure
+
+    Exactly one of ``finished`` and ``error`` ends a run. This worker cannot
+    be cancelled; it is on the contract for the reason :class:`AnswerWorker`
+    gives (#326).
+    """
+
+    finished = Signal()  # Authentication presumed complete
+    error = Signal(str)  # error message
+
+    def __init__(
+        self,
+        institution_url: str,
+        session_max_age_hours: int = 24,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize OpenAthens authentication worker.
+
+        Args:
+            institution_url: Institution's OpenAthens login URL (HTTPS)
+            session_max_age_hours: Maximum session age before re-authentication
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.institution_url = institution_url
+        self.session_max_age_hours = session_max_age_hours
+
+    def run(self) -> None:
+        """Execute OpenAthens interactive authentication via browser.
+
+        Ends with exactly one of ``finished`` and ``error``, including when
+        it fails in a way it does not anticipate.
+        """
+        self._run_once(
+            self._authenticate, lambda error: self._end(self.error, error)
+        )
+
+    def _authenticate(self) -> None:
+        """Open the login page, and end the run."""
+        try:
+            if not self.institution_url:
+                self._end(self.error, "No institution URL configured.")
+                return
+
+            # Convert domain to OpenAthens Redirector URL if needed
+            institution_url = self.institution_url
+            if not institution_url.startswith(("http://", "https://")):
+                # Assume it's a domain - convert to OpenAthens Redirector URL
+                # OpenAthens Redirector format: https://go.openathens.net/redirector/DOMAIN
+                institution_url = f"https://go.openathens.net/redirector/{institution_url}"
+                logger.info(f"Converted domain to OpenAthens Redirector URL: {institution_url}")
+
+            logger.info(f"Opening browser for OpenAthens authentication: {institution_url}")
+
+            # Open browser for authentication
+            success = webbrowser.open(institution_url)
+
+            if not success:
+                self._end(
+                    self.error,
+                    "Could not open web browser.\n"
+                    "Please open your browser manually and navigate to:\n"
+                    f"{institution_url}",
+                )
+                return
+
+            # Give the user time to authenticate (browser has been opened)
+            # The actual authentication happens in the browser, and cookies
+            # will be stored by the browser. For full session management,
+            # the main BMLibrarian app provides more sophisticated handling.
+
+            # Signal that browser was opened successfully
+            # User will need to complete authentication in browser
+            self._end(self.finished)
+
+        except Exception as e:
+            logger.exception("OpenAthens authentication failed")
+            self._end(self.error, f"Authentication error: {str(e)}")
+
+
+class QualityFilterWorker(SingleOutcome, QThread):
+    """
+    Background worker for quality filtering documents.
+
+    Executes quality assessment and filtering in a background thread
+    to prevent blocking the GUI during LLM calls.
+
+    Signals:
+        progress: Emitted during progress (current, total, assessment)
+        finished: Emitted when filtering completes (filtered_docs, all_assessments)
+        error: Emitted on error (error message)
+        cancelled: Emitted with (filtered_docs, assessments, total, error) when
+            a cancel stopped it (#326). What it assessed before the cancel is
+            real and is kept; the error is what also ended the run, or an
+            empty string (golden rule 8).
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run. Both
+    arms used to fall silent once cancelled, so whatever waited on those
+    signals waited forever.
+    """
+
+    progress = Signal(int, int, object)  # current, total, QualityAssessment
+    finished = Signal(list, list)  # filtered docs, all assessments
+    error = Signal(str)
+    cancelled = Signal(list, list, int, str)  # filtered, assessments, total, error
+
+    def __init__(
+        self,
+        quality_manager: "QualityManager",
+        documents: List["LiteDocument"],
+        filter_settings: "QualityFilter",
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """
+        Initialize the quality filter worker.
+
+        Args:
+            quality_manager: QualityManager instance for assessment
+            documents: List of documents to filter
+            filter_settings: Quality filter configuration
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.quality_manager = quality_manager
+        self.documents = documents
+        self.filter_settings = filter_settings
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Run quality filtering in background thread.
+
+        Ends with exactly one of ``finished``, ``error`` and ``cancelled``,
+        including when it fails in a way it does not anticipate.
+        """
+        self._run_once(self._filter, lambda error: self._end(self.error, error))
+
+    def _filter(self) -> None:
+        """Assess each document, and end the run."""
+        total = len(self.documents)
+        filtered: list[LiteDocument] = []
+        assessments: list[QualityAssessment] = []
+
+        def progress_callback(
+            current: int,
+            total: int,
+            assessment: "QualityAssessment",
+        ) -> None:
+            """Emit progress signal if not cancelled."""
+            if not self._cancelled:
+                self.progress.emit(current, total, assessment)
+
+        try:
+            filtered, assessments = self.quality_manager.filter_documents(
+                self.documents,
+                self.filter_settings,
+                progress_callback=progress_callback,
+                should_cancel=lambda: self._cancelled,
+            )
+        except Exception as e:
+            logger.exception("Quality filtering failed")
+            # Cancelling is not failing -- but the failure is still reported
+            if self._cancelled:
+                self._end(self.cancelled, filtered, assessments, total, str(e))
+            else:
+                self._end(self.error, str(e))
+            return
+
+        # A cancel that came after the last document stopped nothing
+        if self._cancelled and len(assessments) < total:
+            self._end(self.cancelled, filtered, assessments, total, "")
+        else:
+            self._end(self.finished, filtered, assessments)
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+
+
+def unexpected_rerun_error_text(error: str, retrying: int) -> str:
+    """What a rerun that stopped on an unexpected error says.
+
+    Args:
+        error: The error's text.
+        retrying: Documents the rerun was to score again.
+
+    Returns:
+        The error, and -- when there were any -- that the documents to
+        retry were not scored again, which the error alone left unsaid.
+    """
+    if not retrying:
+        return error
+    if retrying == 1:
+        unscored = "1 document whose scoring failed before was not scored again"
+    else:
+        unscored = f"{retrying} documents whose scoring failed before were not scored again"
+    return f"{error}\n\n{unscored}; re-run the question to retry them."
 
 
 class IncrementalSearchWorker(SingleOutcome, QThread):
@@ -868,20 +1005,24 @@ class ReclassifyWorker(SingleOutcome, QThread):
 
     Signals:
         progress: Emitted with (current, total, message) during classification
-        finished: Emitted with (success_count, fail_count) when complete
+        finished: Emitted with the :class:`PassOutcome` when complete
         error: Emitted with error message on failure
-        cancelled: Emitted with (success_count, fail_count, total, error) when
-            cancelled before every document was classified (#320). The error
-            is what also ended the run, or an empty string when nothing went
-            wrong: a cancel does not excuse us from reporting it (rule 8).
+        cancelled: Emitted with (outcome, error) when cancelled before every
+            document was classified (#320). The error is what also ended the
+            run, or an empty string when nothing went wrong: a cancel does not
+            excuse us from reporting it (rule 8).
 
     Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
+    The outcome carries a :class:`PassFailure` per document that failed,
+    with the cause classified, so the user is told why rather than only how
+    many (#327). A model that answers without naming a study design has not
+    failed: it is counted apart.
     """
 
     progress = Signal(int, int, str)  # current, total, message
-    finished = Signal(int, int)  # success_count, fail_count
+    finished = Signal(object)  # PassOutcome
     error = Signal(str)
-    cancelled = Signal(int, int, int, str)  # succeeded, failed, total, error
+    cancelled = Signal(object, str)  # PassOutcome, error
 
     def __init__(
         self,
@@ -918,9 +1059,20 @@ class ReclassifyWorker(SingleOutcome, QThread):
     def _reclassify(self) -> None:
         """Classify each document, and end the run."""
         success_count = 0
-        fail_count = 0
+        unclassified = 0
+        failures: list[PassFailure] = []
         total = len(self.documents)
         stopped = False
+
+        def outcome() -> PassOutcome:
+            """What the pass has done so far."""
+            return PassOutcome(
+                succeeded=success_count,
+                failures=tuple(failures),
+                total=total,
+                unclassified=unclassified,
+            )
+
         try:
             from ..quality.study_classifier import LiteStudyClassifier
             from ..quality.data_models import StudyDesign
@@ -954,29 +1106,36 @@ class ReclassifyWorker(SingleOutcome, QThread):
                             f"(confidence: {classification.confidence:.2f})"
                         )
                     else:
-                        fail_count += 1
-                        logger.warning(
-                            f"Classification failed for {doc.id}: "
-                            f"UNKNOWN design with confidence {classification.confidence}"
+                        # The model answered and named no design. Nothing
+                        # broke, so this is not a failure: counted as one, it
+                        # made "6 documents failed classification" out of a
+                        # pass in which nothing went wrong (#327)
+                        unclassified += 1
+                        logger.info(
+                            f"No study design named for {doc.id} "
+                            f"(confidence: {classification.confidence})"
                         )
 
                 except Exception as e:
-                    fail_count += 1
+                    # The provider's text stays in the log: it can print the
+                    # request, credentials and all (#330)
+                    cause = classify_analysis_exception(e)
+                    failures.append(PassFailure(document_id=doc.id, cause=cause))
                     logger.warning(
-                        f"Failed to classify document {doc.id}: {e}"
+                        f"Failed to classify document {doc.id} ({cause.name}): {e}"
                     )
 
             # A cancel that came after the last document stopped nothing
             if stopped:
-                self._end(self.cancelled, success_count, fail_count, total, "")
+                self._end(self.cancelled, outcome(), "")
             else:
-                self._end(self.finished, success_count, fail_count)
+                self._end(self.finished, outcome())
 
         except Exception as e:
             logger.exception("Reclassification failed")
             # Cancelling is not failing -- but the failure is still reported
             if self._cancelled:
-                self._end(self.cancelled, success_count, fail_count, total, str(e))
+                self._end(self.cancelled, outcome(), str(e))
             else:
                 self._end(self.error, str(e))
 
@@ -994,22 +1153,25 @@ class RescoreWorker(SingleOutcome, QThread):
 
     Signals:
         progress: Emitted with (current, total, message) during scoring
-        finished: Emitted with (success_count, fail_count) when complete
+        finished: Emitted with the :class:`PassOutcome` when complete
         error: Emitted with error message on failure
-        cancelled: Emitted with (success_count, fail_count, total, error) when
-            cancelled before every document was scored (#320). The error is
-            what also ended the run, or an empty string when nothing went
-            wrong: a cancel does not excuse us from reporting it (rule 8).
+        cancelled: Emitted with (outcome, error) when cancelled before every
+            document was scored (#320). The error is what also ended the run,
+            or an empty string when nothing went wrong: a cancel does not
+            excuse us from reporting it (rule 8).
 
     Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
     A scoring that failed counts as failed, and its failure is still stored,
-    so a rerun scores that document again (#316).
+    so a rerun scores that document again (#316). The outcome carries a
+    :class:`PassFailure` per document that failed, with the cause classified
+    -- from the stored failure itself, which the agent returns rather than
+    raises -- so the user is told why rather than only how many (#327).
     """
 
     progress = Signal(int, int, str)  # current, total, message
-    finished = Signal(int, int)  # success_count, fail_count
+    finished = Signal(object)  # PassOutcome
     error = Signal(str)
-    cancelled = Signal(int, int, int, str)  # succeeded, failed, total, error
+    cancelled = Signal(object, str)  # PassOutcome, error
 
     def __init__(
         self,
@@ -1047,12 +1209,19 @@ class RescoreWorker(SingleOutcome, QThread):
     def _rescore(self) -> None:
         """Score each document again, and end the run."""
         success_count = 0
-        fail_count = 0
+        failures: list[PassFailure] = []
         total = len(self.documents)
         stopped = False
+
+        def outcome() -> PassOutcome:
+            """What the pass has done so far."""
+            return PassOutcome(
+                succeeded=success_count, failures=tuple(failures), total=total
+            )
+
         try:
             from ..agents.scoring_agent import LiteScoringAgent
-            from ..audit_records import is_scoring_failure
+            from ..audit_records import is_scoring_failure, scoring_failure_cause
 
             scoring_agent = LiteScoringAgent(config=self.config)
 
@@ -1083,29 +1252,42 @@ class RescoreWorker(SingleOutcome, QThread):
                         scored_doc, checkpoint.id
                     )
                     # The agent returns a failure rather than raising it;
-                    # counted as a success, an outage read "all succeeded"
+                    # counted as a success, an outage read "all succeeded".
+                    # The cause is in the row it just stored (#327)
                     if is_scoring_failure(scored_doc):
-                        fail_count += 1
+                        cause = (
+                            scoring_failure_cause(scored_doc)
+                            or EvaluationErrorCode.UNKNOWN_ERROR
+                        )
+                        failures.append(
+                            PassFailure(document_id=doc.id, cause=cause)
+                        )
+                        logger.warning(
+                            f"Scoring failed for {doc.id} ({cause.name})"
+                        )
                     else:
                         success_count += 1
 
                 except Exception as e:
-                    fail_count += 1
+                    # The provider's text stays in the log: it can print the
+                    # request, credentials and all (#330)
+                    cause = classify_analysis_exception(e)
+                    failures.append(PassFailure(document_id=doc.id, cause=cause))
                     logger.warning(
-                        f"Failed to score document {doc.id}: {e}"
+                        f"Failed to score document {doc.id} ({cause.name}): {e}"
                     )
 
             # A cancel that came after the last document stopped nothing
             if stopped:
-                self._end(self.cancelled, success_count, fail_count, total, "")
+                self._end(self.cancelled, outcome(), "")
             else:
-                self._end(self.finished, success_count, fail_count)
+                self._end(self.finished, outcome())
 
         except Exception as e:
             logger.exception("Re-scoring failed")
             # Cancelling is not failing -- but the failure is still reported
             if self._cancelled:
-                self._end(self.cancelled, success_count, fail_count, total, str(e))
+                self._end(self.cancelled, outcome(), str(e))
             else:
                 self._end(self.error, str(e))
 

@@ -308,6 +308,35 @@ to read a record written elsewhere.
   quality benchmark stores no per-document evaluation, so it has nothing from
   an earlier run — cancelled or complete — to reuse; for it, only the
   cancelled status and the partial result are kept.
+- **A background run ends, whatever happens to it** (#320, #326). Every
+  worker that does analysis in the background ends a run with exactly one
+  terminal signal — finished, failed, or cancelled — and the screen that
+  started it returns to ready only when one arrives. This is enforced by the
+  mechanism the workers emit through, not stated in a comment: a worker that
+  fell silent once cancelled (`if not cancelled: finished.emit(...)`, or a
+  bare return) left its screen waiting for a signal that never came, stuck
+  mid-cancel with its actions disabled until it was rebuilt. The enforcement
+  must also cover what the body does not anticipate — a failed import, or a
+  failure no `except Exception` catches — because those ended the thread in
+  the same silence. A worker that can be cancelled says when it was; a
+  worker that cannot be cancelled has nothing to say and no such signal. A
+  cancel the runner cannot see is not a cancel: it mutes the progress
+  reporting while the run goes on paying for every remaining document.
+- **A failed pass says what failed and why, not only how many** (#327). A
+  re-classification or re-scoring reports one entry per document it could not
+  finish, each naming the document and a **classified** cause; from those the
+  user is told the cause most of them shared, its share of the total, one
+  example document, and what to do about every cause among them. "17
+  documents failed" is the same sentence for an unreachable provider, a
+  refused key and seventeen unprocessable abstracts — one is a one-line fix
+  and another is an afternoon in the log. **The provider's own words are not
+  shown**: they can print the request, credentials and all, and stay in the
+  log. Spent retries are classified by the failure they were spent on, never
+  by the wrapper. A failure the analysis stage *returns* rather than raises
+  is classified from the record it stored, not guessed. **A model that
+  answers without naming a study design has not failed** — nothing broke, and
+  counting it as a failure reported a clean pass as a broken one; it is
+  counted apart and the user is told its stored design is unchanged.
 - **A rerun retries a failure** (#316). Deduplicating a search for more
   documents against those already scored, a document whose every scoring
   failed is not scored: it is scored again, and the user is told how many are
