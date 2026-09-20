@@ -129,12 +129,44 @@ def rerun_found_text(new: int, retried: int) -> str:
     return found
 
 
-RERUN_CANCELLED_TEXT = "Re-run cancelled. No documents were passed on for scoring."
-"""What a cancelled rerun says: what it found is dropped, not scored (#320)."""
+def also_failed_text(error: str) -> str:
+    """What a cancelled run adds when an error ended it too.
+
+    Args:
+        error: The error that ended the run, or an empty string.
+
+    Returns:
+        A sentence naming the error, or "" when nothing went wrong. A cancel
+        is not a licence to hide a failure (golden rule 8): without this, a
+        crash mid-cancel read as an orderly stop.
+    """
+    return f" It also stopped on an error: {error}" if error else ""
+
+
+def rerun_cancelled_text(retried: int, error: str = "") -> str:
+    """What a cancelled rerun says: what it found is dropped, not scored.
+
+    Args:
+        retried: Documents whose every scoring failed that this rerun was
+            going to score again, and now will not.
+        error: The error that also ended the run, or an empty string.
+
+    Returns:
+        e.g. "Re-run cancelled. No documents were passed on for scoring. The
+        3 documents whose scoring failed before were not scored again; re-run
+        the question to retry them." (#320)
+    """
+    text = "Re-run cancelled. No documents were passed on for scoring."
+    if retried:
+        text += (
+            f" The {documents_text(retried)} whose scoring failed before were "
+            "not scored again; re-run the question to retry them."
+        )
+    return text + also_failed_text(error)
 
 
 def pass_cancelled_text(
-    pass_name: str, verb: str, succeeded: int, failed: int, total: int
+    pass_name: str, verb: str, succeeded: int, failed: int, total: int, error: str = ""
 ) -> str:
     """What a cancelled pass over a question's documents says it did.
 
@@ -144,6 +176,7 @@ def pass_cancelled_text(
         succeeded: Documents it finished.
         failed: Documents it tried and could not finish.
         total: Documents it was given.
+        error: The error that also ended the run, or an empty string.
 
     Returns:
         e.g. "Re-scoring cancelled after 4 of 10 documents: 3 re-scored,
@@ -163,7 +196,7 @@ def pass_cancelled_text(
         text += f" The other one was not {verb}."
     elif remaining > 1:
         text += f" The other {remaining} were not {verb}."
-    return text
+    return text + also_failed_text(error)
 
 
 class ResearchQuestionsTab(QWidget):
@@ -602,12 +635,11 @@ class ResearchQuestionsTab(QWidget):
         self._worker.error.connect(self._on_search_error)
         self._worker.cancelled.connect(self._on_search_cancelled)
 
-        # Update UI state
-        self.rerun_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(True)
+        # Update UI state. Benchmark is disabled with the rest: started on
+        # top of the search, it left that search with a dead Cancel button
+        self._set_busy_state()
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.questions_table.setEnabled(False)
 
         self._worker.start()
 
@@ -618,14 +650,7 @@ class ResearchQuestionsTab(QWidget):
         (#320). A benchmark cannot be stopped once started, so Cancel is
         never enabled for one.
         """
-        worker = next(
-            (
-                w
-                for w in (self._worker, self._reclassify_worker, self._rescore_worker)
-                if w is not None
-            ),
-            None,
-        )
+        worker = self._worker or self._reclassify_worker or self._rescore_worker
         if worker is None:
             return
         worker.cancel()
@@ -714,14 +739,28 @@ class ResearchQuestionsTab(QWidget):
             f"An error occurred during the search:\n\n{error_message}",
         )
 
-    def _on_search_cancelled(self) -> None:
-        """A cancelled rerun: back to ready, and nothing passed on (#320)."""
+    def _on_search_cancelled(self, error: str = "") -> None:
+        """A cancelled rerun: back to ready, and nothing passed on (#320).
+
+        Args:
+            error: The error that also ended the run, or an empty string.
+        """
         self._reset_ui()
-        self.progress_label.setText(RERUN_CANCELLED_TEXT)
+        self.progress_label.setText(
+            rerun_cancelled_text(len(self._retried_ids), error)
+        )
+        if error:
+            QMessageBox.warning(
+                self,
+                "Re-run Cancelled",
+                "The re-run was cancelled, and it also stopped on an "
+                f"error:\n\n{error}",
+            )
 
     def _reset_ui(self) -> None:
         """Reset UI to ready state."""
-        self.rerun_btn.setEnabled(True)
+        # Re-run is left to _update_action_buttons below: the worker that
+        # just ended is still held, so it stays disabled until its cleanup
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.questions_table.setEnabled(True)
@@ -742,6 +781,12 @@ class ResearchQuestionsTab(QWidget):
 
     def _on_benchmark_clicked(self) -> None:
         """Handle benchmark button click."""
+        # A benchmark started while another run is going would hold two
+        # workers at once, and its own cleanup would drop the other's
+        # reference while that one is still running (#320)
+        if self._is_busy():
+            return
+
         question = self._get_selected_question()
         if not question:
             return
@@ -792,15 +837,11 @@ class ResearchQuestionsTab(QWidget):
         self._benchmark_worker.finished.connect(self._on_benchmark_finished)
         self._benchmark_worker.error.connect(self._on_benchmark_error)
 
-        # Update UI state
-        self.rerun_btn.setEnabled(False)
-        self.benchmark_btn.setEnabled(False)
-        # The benchmark runner cannot be stopped mid-run: a Cancel that only
-        # dropped its result would let it go on spending
-        self.cancel_btn.setEnabled(False)
+        # Update UI state. The benchmark runner cannot be stopped mid-run: a
+        # Cancel that only dropped its result would let it go on spending
+        self._set_busy_state(cancellable=False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.questions_table.setEnabled(False)
 
         self._benchmark_worker.start()
 
@@ -910,7 +951,7 @@ class ResearchQuestionsTab(QWidget):
         self._reclassify_worker.cancelled.connect(self._on_reclassify_cancelled)
 
         # Update UI state
-        self._set_busy_state(True)
+        self._set_busy_state()
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_label.setText("Re-classifying documents...")
@@ -967,13 +1008,27 @@ class ResearchQuestionsTab(QWidget):
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
-    def _on_reclassify_cancelled(self, succeeded: int, failed: int, total: int) -> None:
-        """A cancelled re-classification: what it did stays done (#320)."""
+    def _on_reclassify_cancelled(
+        self, succeeded: int, failed: int, total: int, error: str = ""
+    ) -> None:
+        """A cancelled re-classification: what it did stays done (#320).
+
+        Args:
+            succeeded: Documents it classified.
+            failed: Documents it tried and could not classify.
+            total: Documents it was given.
+            error: The error that also ended the run, or an empty string.
+        """
         self._reset_ui()
         self._load_questions()  # Refresh the table
-        self.progress_label.setText(
-            pass_cancelled_text("Re-classification", "re-classified", succeeded, failed, total)
+        message = pass_cancelled_text(
+            "Re-classification", "re-classified", succeeded, failed, total, error
         )
+        self.progress_label.setText(message)
+        # A failed classification is recorded nowhere, so this dialog is the
+        # only lasting notice of it -- the label the next click overwrites
+        if failed or error:
+            QMessageBox.warning(self, "Re-classification Cancelled", message)
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
     def _cleanup_reclassify_worker(self) -> None:
@@ -1038,7 +1093,7 @@ class ResearchQuestionsTab(QWidget):
         self._rescore_worker.cancelled.connect(self._on_rescore_cancelled)
 
         # Update UI state
-        self._set_busy_state(True)
+        self._set_busy_state()
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_label.setText("Re-scoring documents...")
@@ -1092,13 +1147,30 @@ class ResearchQuestionsTab(QWidget):
         # Clean up worker
         QTimer.singleShot(100, self._cleanup_rescore_worker)
 
-    def _on_rescore_cancelled(self, succeeded: int, failed: int, total: int) -> None:
-        """A cancelled re-scoring: what it did stays done (#320)."""
+    def _on_rescore_cancelled(
+        self, succeeded: int, failed: int, total: int, error: str = ""
+    ) -> None:
+        """A cancelled re-scoring: what it did stays done (#320).
+
+        Args:
+            succeeded: Documents it scored.
+            failed: Documents it tried and could not score.
+            total: Documents it was given.
+            error: The error that also ended the run, or an empty string.
+        """
         self._reset_ui()
         self._load_questions()  # Refresh the table
-        self.progress_label.setText(
-            pass_cancelled_text("Re-scoring", "re-scored", succeeded, failed, total)
+        message = pass_cancelled_text(
+            "Re-scoring", "re-scored", succeeded, failed, total, error
         )
+        self.progress_label.setText(message)
+        if failed or error:
+            QMessageBox.warning(
+                self,
+                "Re-scoring Cancelled",
+                f"{message}\n\nThe failures were recorded, and re-running "
+                "the question scores those documents again.",
+            )
         QTimer.singleShot(100, self._cleanup_rescore_worker)
 
     def _cleanup_rescore_worker(self) -> None:
@@ -1155,14 +1227,19 @@ class ResearchQuestionsTab(QWidget):
     # Helper methods
     # -------------------------------------------------------------------------
 
-    def _set_busy_state(self, busy: bool) -> None:
-        """
-        Set the UI to busy or ready state.
+    def _set_busy_state(self, cancellable: bool = True) -> None:
+        """Disable what a running worker rules out, for every kind of run.
+
+        Every run goes through here, so none of them can leave an action
+        enabled that starting a second run would break: a benchmark begun
+        on top of a re-run used to leave that re-run's Cancel dead (#320).
 
         Args:
-            busy: True to disable controls, False to enable
+            cancellable: Whether Cancel can reach this run. A benchmark
+                cannot be stopped once started, so its Cancel stays off
+                rather than only dropping a result still being paid for.
         """
-        self.rerun_btn.setEnabled(not busy)
-        self.benchmark_btn.setEnabled(not busy)
-        self.cancel_btn.setEnabled(busy)
-        self.questions_table.setEnabled(not busy)
+        self.rerun_btn.setEnabled(False)
+        self.benchmark_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(cancellable)
+        self.questions_table.setEnabled(False)

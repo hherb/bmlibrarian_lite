@@ -12,14 +12,28 @@ its slice has landed; add a new section when handing off new work.
 branch `fix/cancelled-rerun-320`, PR #325. Python only. Compress into **Recently
 landed** once merged.
 
-- `IncrementalSearchWorker`, `ReclassifyWorker` and `RescoreWorker` each end a
-  run with **exactly one** of `finished` / `error` / `cancelled` (new signal;
-  the pass workers carry `(succeeded, failed, total)`). Cancelling is not
-  failing: an error after a cancel emits `cancelled`. A cancel that lands after
-  the last document stopped nothing, so the pass `finished`.
+- **The contract is enforced, not just documented.** `IncrementalSearchWorker`,
+  `ReclassifyWorker` and `RescoreWorker` mix in **`SingleOutcome`**: they emit
+  through `_end()` (first terminal signal only) and run their body inside
+  `_run_once()`, which reports whatever escapes it. Saying "exactly one of
+  `finished` / `error` / `cancelled`" in a docstring did not hold it — an
+  import that failed inside the body left `SearchFailedError` unbound, so the
+  first `except` raised in turn and the thread ended in silence, which is the
+  hang #320 is about. Those imports now sit before the `try`.
+- **Cancelling is not failing, but a failure is never hidden** (golden rule 8).
+  `cancelled` carries the error that also ended the run, or `""`: the pass
+  workers as `(succeeded, failed, total, error)`. A crash mid-cancel used to
+  read as an orderly stop ("cancelled after 0 of 30 documents"). A cancel that
+  lands after the last item stopped nothing, so the run `finished` — the search
+  worker has the same `stopped` flag as the pass workers, so a late cancel no
+  longer throws away a search that had already completed.
 - The tab's Cancel reaches whichever of the three is running (it reached only
   the search, though enabled for all), disables itself, and each ends in a
-  ready tab: `RERUN_CANCELLED_TEXT`, `pass_cancelled_text()`.
+  ready tab: `rerun_cancelled_text()` (which names the retry documents that
+  were not scored again), `pass_cancelled_text()`. A cancelled pass with
+  failures now warns, as the finished path does — for a re-classification that
+  dialog is the only lasting notice, since a failed classification is stored
+  nowhere.
 - **Re-run stayed disabled after every run**, cancelled or not: `_reset_ui`
   re-checked the buttons while the worker was still held. Each cleanup now
   re-checks them (`_update_action_buttons()`, which leaves the progress line
@@ -27,13 +41,25 @@ landed** once merged.
 - **Rescore counted a failed scoring as a success** (the agent returns a
   failure, never raises): now `is_scoring_failure()` → failed; the failure row
   is still stored, so a rerun retries it (#316).
-- **A benchmark cannot be cancelled** (the runners never see the flag): Cancel
-  is disabled for one on this tab and the dead `_cancel_benchmark` removed.
-  The Systematic Review tab's "Benchmark cancelled" lets it run on, spending,
-  and re-enables Benchmark meanwhile — lodged as **#324**.
-- **Verified:** `pytest tests/` — 1638 passed, 3 xfailed; `lint_delta.py
-  --base-ref master` 0 new. `tests/test_cancelled_rerun.py` fails against
-  master's workers, and the rescore count test fails with the check removed.
+- **Every run starts through `_set_busy_state(cancellable=…)`.** Two start
+  paths disabling different buttons is what let a benchmark begin on top of a
+  running re-run and leave that re-run's Cancel dead; `_on_benchmark_clicked`
+  also returns early when `_is_busy()`. A benchmark cannot be cancelled (the
+  runners never see the flag), so its Cancel stays off and the dead
+  `_cancel_benchmark` is gone. The Systematic Review tab's "Benchmark
+  cancelled" lets it run on, spending, and leaves its modal dialog stuck —
+  **#324**.
+- **Lodged separately, out of scope here:** the other workers still end a
+  cancel in silence (**#326**); a failed pass reports how many failed, never
+  which or why (**#327**); a re-scored failure supersedes a good score in the
+  latest-wins read and the Scored column does not show it (**#328**).
+- **Verified:** `pytest tests/` — 1667 passed, 3 xfailed; `lint_delta.py
+  --base-ref master` 0 new ruff or mypy findings. `tests/test_cancelled_rerun.py`
+  is 45 tests; eight mutations of the behaviour above (dropped `_is_busy`
+  guard, dropped cleanup scheduling, `stopped` reverted to `_cancelled` in
+  both the search and rescore workers, imports moved back inside the `try`,
+  the error dropped from `cancelled`, the reclassify wording, the failure
+  warning) each fail a test.
 
 ## Recently landed (context)
 

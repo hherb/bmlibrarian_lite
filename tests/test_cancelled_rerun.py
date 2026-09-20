@@ -12,8 +12,9 @@ benchmark it could not stop. Each worker now ends a run with exactly one of
 ``finished``, ``error`` and ``cancelled``, and cancelling is not failing.
 """
 
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -24,12 +25,15 @@ from bmlibrarian_lite.data_models import (  # noqa: E402
     DocumentSource,
     EvaluationErrorCode,
     LiteDocument,
+    RequestFailure,
+    RequestFailureKind,
     ScoredDocument,
+    SearchProvider,
 )
 from bmlibrarian_lite.gui import research_questions_tab as tab_module  # noqa: E402
 from bmlibrarian_lite.gui.research_questions_tab import (  # noqa: E402
-    RERUN_CANCELLED_TEXT,
     pass_cancelled_text,
+    rerun_cancelled_text,
 )
 from bmlibrarian_lite.gui.workers import (  # noqa: E402
     IncrementalSearchWorker,
@@ -127,6 +131,42 @@ class TestPassCancelledText:
         """What was done before the cancel stays done."""
         assert pass_cancelled_text("Re-scoring", "re-scored", succeeded, failed, total) == text
 
+    def test_an_error_that_also_ended_the_run_is_reported(self) -> None:
+        """A cancel is no licence to hide a failure (golden rule 8)."""
+        text = pass_cancelled_text("Re-scoring", "re-scored", 1, 0, 4, "disk is full")
+
+        assert text.endswith(" It also stopped on an error: disk is full")
+
+    def test_a_clean_cancel_mentions_no_error(self) -> None:
+        """The control: nothing went wrong, so nothing is claimed to have."""
+        assert "error" not in pass_cancelled_text("Re-scoring", "re-scored", 1, 0, 4)
+
+
+class TestRerunCancelledText:
+    """What a cancelled rerun says about the documents it was retrying."""
+
+    def test_it_says_the_retried_documents_were_not_scored_again(self) -> None:
+        """Told only "none were passed on", the user lost sight of them."""
+        text = rerun_cancelled_text(3)
+
+        assert text == (
+            "Re-run cancelled. No documents were passed on for scoring. The 3 "
+            "documents whose scoring failed before were not scored again; "
+            "re-run the question to retry them."
+        )
+
+    def test_with_nothing_to_retry_it_says_only_what_happened(self) -> None:
+        """No retries, so no sentence about them."""
+        assert rerun_cancelled_text(0) == (
+            "Re-run cancelled. No documents were passed on for scoring."
+        )
+
+    def test_an_error_that_also_ended_the_run_is_reported(self) -> None:
+        """The failure reaches the user, not just the log."""
+        assert rerun_cancelled_text(0, "connection reset").endswith(
+            " It also stopped on an error: connection reset"
+        )
+
 
 class TestTheSearchWorker:
     """A cancelled search ends in ``cancelled``, and only that."""
@@ -140,12 +180,12 @@ class TestTheSearchWorker:
         worker.run()
 
         # The documents to retry are not passed on: nothing is scored
-        assert recorder.only() == ("cancelled", ())
+        assert recorder.only() == ("cancelled", ("",))
 
     def test_an_error_while_cancelling_is_not_a_failure(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Cancelling is not failing."""
+        """Cancelling is not failing -- but the failure is still carried."""
         worker = search_worker()
         recorder = Recorder(worker)
 
@@ -159,7 +199,97 @@ class TestTheSearchWorker:
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", ())
+        # Reported as cancelled, but the error rides along (golden rule 8)
+        assert recorder.only() == ("cancelled", ("connection reset",))
+
+    def test_a_search_that_failed_outright_while_cancelling_says_both(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ``SearchFailedError`` arm, which no test reached before."""
+        from bmlibrarian_lite.exceptions import SourceRequestError
+
+        worker = search_worker()
+        recorder = Recorder(worker)
+
+        def cancel_then_fail(*_: Any, **__: Any) -> Any:
+            worker.cancel()
+            raise SourceRequestError(
+                SearchProvider.PUBMED,
+                RequestFailure(RequestFailureKind.CONNECTION),
+            )
+
+        monkeypatch.setattr(
+            "bmlibrarian_lite.pubmed.PubMedSearchClient.search_with_offset", cancel_then_fail
+        )
+
+        worker.run()
+
+        name, args = recorder.only()
+        assert name == "cancelled"
+        assert args[0]  # the shortfall message travels with the cancel
+
+    def test_a_failure_the_search_never_anticipated_still_ends_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A run that emitted nothing left the tab hung forever.
+
+        ``SearchFailedError`` was imported in the same ``try`` whose first
+        ``except`` names it, so an earlier import failing left the name
+        unbound; evaluating that clause raised in turn and ``run`` exited
+        with no signal at all -- the hang #320 is about. Stating the
+        contract in a docstring did not hold it, so it is enforced.
+        """
+        import builtins
+
+        worker = search_worker()
+        recorder = Recorder(worker)
+        real_import = builtins.__import__
+
+        def broken(name: str, *args: Any, **kwargs: Any) -> Any:
+            fromlist = args[2] if len(args) > 2 else kwargs.get("fromlist") or ()
+            if "PubMedSearchClient" in (fromlist or ()):
+                raise ImportError("simulated broken install")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", broken)
+
+        worker.run()
+
+        name, args = recorder.only()
+        assert name == "error"
+        assert "simulated broken install" in args[0]
+
+    def test_a_run_reports_its_outcome_only_once(self) -> None:
+        """A failure while reporting a result reported the same run twice."""
+        worker = search_worker()
+        recorder = Recorder(worker)
+
+        worker._end(worker.error, "the first outcome")
+        worker._end(worker.finished, [], [])
+
+        assert recorder.only() == ("error", ("the first outcome",))
+
+    def test_a_cancel_after_the_search_ran_its_course_stopped_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A finished search is not thrown away by a late cancel."""
+        worker = search_worker(retry_documents=[make_document("1")])
+        recorder = Recorder(worker)
+
+        def no_results(*_: Any, **__: Any) -> Any:
+            # The search exhausts PubMed, then the user cancels
+            worker.cancel()
+            return SimpleNamespace(pmids=[], total_count=0, unlisted_count=0)
+
+        monkeypatch.setattr(
+            "bmlibrarian_lite.pubmed.PubMedSearchClient.search_with_offset", no_results
+        )
+
+        worker.run()
+
+        name, args = recorder.only()
+        assert name == "finished"
+        assert [doc.pmid for doc in args[0]] == ["1"]
 
     def test_an_error_without_a_cancel_is_still_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -260,7 +390,7 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", (2, 0, 3))
+        assert recorder.only() == ("cancelled", (2, 0, 3, ""))
 
     def test_a_cancel_at_the_last_document_stopped_nothing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -271,6 +401,42 @@ class TestTheReclassifyWorker:
         worker.run()
 
         assert recorder.only() == ("finished", (2, 0))
+
+    def test_an_error_while_cancelling_carries_the_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A crash mid-cancel read as an orderly stop (golden rule 8)."""
+        worker, recorder = reclassify_worker(monkeypatch, count=3, cancel_at=None)
+
+        def cancel_then_fail(config: Any) -> Any:
+            worker.cancel()
+            raise RuntimeError("no model configured")
+
+        monkeypatch.setattr(
+            "bmlibrarian_lite.quality.study_classifier.LiteStudyClassifier",
+            cancel_then_fail,
+        )
+
+        worker.run()
+
+        assert recorder.only() == ("cancelled", (0, 0, 3, "no model configured"))
+
+    def test_the_same_failure_uncancelled_is_still_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The control: nothing was cancelled, so it is reported as failing."""
+        worker, recorder = reclassify_worker(monkeypatch, count=3, cancel_at=None)
+
+        def fail(config: Any) -> Any:
+            raise RuntimeError("no model configured")
+
+        monkeypatch.setattr(
+            "bmlibrarian_lite.quality.study_classifier.LiteStudyClassifier", fail
+        )
+
+        worker.run()
+
+        assert recorder.only() == ("error", ("no model configured",))
 
 
 class TestTheRescoreWorker:
@@ -286,13 +452,59 @@ class TestTheRescoreWorker:
         # The failure is still stored, so a rerun scores it again (#316)
         assert worker.storage.save_scored_document.call_count == 2
 
+    def test_a_legacy_failure_row_also_counts_as_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The older failure form is recognised too, via the shared predicate.
+
+        ``RescoreWorker`` defers to ``is_scoring_failure`` rather than
+        re-deriving "a failure is a negative score", so the two cannot drift.
+        """
+        from bmlibrarian_lite.audit_records import LEGACY_FAILURE_EXPLANATION_PREFIX
+        from bmlibrarian_lite.constants import SCORE_MIN
+
+        worker, recorder = rescore_worker(monkeypatch, count=1, cancel_at=None)
+
+        def legacy_failure(question: str, document: LiteDocument) -> ScoredDocument:
+            return ScoredDocument(
+                document, SCORE_MIN, LEGACY_FAILURE_EXPLANATION_PREFIX + "timeout"
+            )
+
+        monkeypatch.setattr(FakeScoringAgent, "score_document", legacy_failure)
+
+        worker.run()
+
+        assert recorder.only() == ("finished", (0, 1))
+
     def test_a_cancel_part_way_reports_the_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """One judged, one failed; the third is never reached."""
         worker, recorder = rescore_worker(monkeypatch, count=3, cancel_at=2)
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", (1, 1, 3))
+        assert recorder.only() == ("cancelled", (1, 1, 3, ""))
+
+    def test_a_cancel_at_the_last_document_stopped_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every document was scored, so the run finished."""
+        worker, recorder = rescore_worker(monkeypatch, count=2, cancel_at=2)
+
+        worker.run()
+
+        assert recorder.only() == ("finished", (1, 1))
+
+    def test_an_error_while_cancelling_carries_the_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A crash mid-cancel read as an orderly stop (golden rule 8)."""
+        worker, recorder = rescore_worker(monkeypatch, count=3, cancel_at=None)
+        worker.storage.create_checkpoint.side_effect = RuntimeError("database is locked")
+        worker.cancel()
+
+        worker.run()
+
+        assert recorder.only() == ("cancelled", (0, 0, 3, "database is locked"))
 
 
 @pytest.fixture(scope="module")
@@ -355,7 +567,7 @@ class TestTheTab:
         tab._on_search_cancelled()
         tab._cleanup_worker()
 
-        assert tab.progress_label.text() == RERUN_CANCELLED_TEXT
+        assert tab.progress_label.text() == rerun_cancelled_text(0)
         assert tab._worker is None
         assert tab.rerun_btn.isEnabled()
         assert tab.questions_table.isEnabled()
@@ -387,17 +599,182 @@ class TestTheTab:
         worker.cancel.assert_called_once_with()
         assert tab.progress_label.text() == "Cancelling..."
 
-    def test_a_cancelled_rescore_says_what_it_did(self, tab: Any) -> None:
-        """The tab returns to ready and counts the documents."""
-        tab._rescore_worker = MagicMock()
-        tab._set_busy_state(True)
+    @pytest.mark.parametrize(
+        "slot, handler, cleanup, pass_name, verb",
+        [
+            (
+                "_rescore_worker",
+                "_on_rescore_cancelled",
+                "_cleanup_rescore_worker",
+                "Re-scoring",
+                "re-scored",
+            ),
+            (
+                "_reclassify_worker",
+                "_on_reclassify_cancelled",
+                "_cleanup_reclassify_worker",
+                "Re-classification",
+                "re-classified",
+            ),
+        ],
+    )
+    def test_a_cancelled_pass_says_what_it_did(
+        self, tab: Any, slot: str, handler: str, cleanup: str, pass_name: str, verb: str
+    ) -> None:
+        """The tab returns to ready and counts the documents, by its own name."""
+        setattr(tab, slot, MagicMock())
+        tab._set_busy_state()
 
-        tab._on_rescore_cancelled(3, 1, 10)
-        tab._cleanup_rescore_worker()
+        getattr(tab, handler)(3, 1, 10)
+        getattr(tab, cleanup)()
 
         assert tab.progress_label.text() == pass_cancelled_text(
-            "Re-scoring", "re-scored", 3, 1, 10
+            pass_name, verb, 3, 1, 10
         )
-        assert tab._rescore_worker is None
+        assert getattr(tab, slot) is None
         assert tab.rerun_btn.isEnabled()
         assert not tab.cancel_btn.isEnabled()
+
+    @pytest.mark.parametrize(
+        "slot, handler",
+        [
+            ("_rescore_worker", "_on_rescore_cancelled"),
+            ("_reclassify_worker", "_on_reclassify_cancelled"),
+        ],
+    )
+    def test_a_cancelled_pass_with_failures_warns(
+        self, tab: Any, slot: str, handler: str
+    ) -> None:
+        """A label the next click overwrites was the only notice of them."""
+        setattr(tab, slot, MagicMock())
+
+        getattr(tab, handler)(3, 1, 10)
+
+        tab_module.QMessageBox.warning.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "slot, handler",
+        [
+            ("_rescore_worker", "_on_rescore_cancelled"),
+            ("_reclassify_worker", "_on_reclassify_cancelled"),
+        ],
+    )
+    def test_a_clean_cancelled_pass_does_not_warn(
+        self, tab: Any, slot: str, handler: str
+    ) -> None:
+        """The control: nothing failed, so there is nothing to warn about."""
+        setattr(tab, slot, MagicMock())
+
+        getattr(tab, handler)(3, 0, 10)
+
+        tab_module.QMessageBox.warning.assert_not_called()
+
+    def test_an_error_that_also_ended_a_pass_reaches_the_user(self, tab: Any) -> None:
+        """Logged only, a crash mid-cancel read as an orderly stop."""
+        tab._rescore_worker = MagicMock()
+
+        tab._on_rescore_cancelled(1, 0, 10, "database is locked")
+
+        assert "database is locked" in tab.progress_label.text()
+        tab_module.QMessageBox.warning.assert_called_once()
+
+    def test_an_error_that_also_ended_a_rerun_reaches_the_user(self, tab: Any) -> None:
+        """The search worker's equivalent."""
+        tab._on_rerun_clicked()
+
+        tab._on_search_cancelled("connection reset")
+
+        assert "connection reset" in tab.progress_label.text()
+        tab_module.QMessageBox.warning.assert_called_once()
+
+    def test_every_run_schedules_the_cleanup_that_frees_its_worker(
+        self, tab: Any
+    ) -> None:
+        """Nothing scheduled, the worker is held and Re-run never comes back.
+
+        The other tab tests call the cleanups by hand, so without this the
+        one line that releases the worker in the real app is unverified.
+        """
+        tab._on_rerun_clicked()
+        tab_module.QTimer.singleShot.reset_mock()
+
+        tab._on_search_cancelled()
+
+        assert call(100, tab._cleanup_worker) in (
+            tab_module.QTimer.singleShot.call_args_list
+        )
+
+    @pytest.mark.parametrize(
+        "handler, cleanup",
+        [
+            ("_on_rescore_cancelled", "_cleanup_rescore_worker"),
+            ("_on_reclassify_cancelled", "_cleanup_reclassify_worker"),
+        ],
+    )
+    def test_a_cancelled_pass_schedules_its_own_cleanup(
+        self, tab: Any, handler: str, cleanup: str
+    ) -> None:
+        """``_reset_ui`` only ever frees the search worker."""
+        tab_module.QTimer.singleShot.reset_mock()
+
+        getattr(tab, handler)(1, 0, 3)
+
+        assert call(100, getattr(tab, cleanup)) in (
+            tab_module.QTimer.singleShot.call_args_list
+        )
+
+    def test_cancel_is_never_offered_for_a_benchmark(
+        self, tab: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Cancel that only dropped the result would let it go on spending."""
+        monkeypatch.setattr(tab_module, "BenchmarkWorker", RecordingWorker)
+        tab.config.benchmark.enabled = True
+
+        tab._on_benchmark_clicked()
+
+        assert tab._benchmark_worker is not None
+        assert not tab.cancel_btn.isEnabled()
+
+    def test_a_benchmark_cannot_be_started_on_top_of_a_rerun(
+        self, tab: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It left the running re-run with a Cancel button that did nothing."""
+        monkeypatch.setattr(tab_module, "BenchmarkWorker", RecordingWorker)
+        tab.config.benchmark.enabled = True
+        tab._on_rerun_clicked()
+
+        assert not tab.benchmark_btn.isEnabled()
+        tab._on_benchmark_clicked()  # as a stray click would
+
+        assert tab._benchmark_worker is None
+        # The re-run can still be cancelled
+        assert tab.cancel_btn.isEnabled()
+
+    def test_a_benchmark_leaves_the_tab_ready_again(self, tab: Any) -> None:
+        """Its cleanup re-checks the buttons, as the other three do."""
+        tab._benchmark_worker = MagicMock()
+        tab._benchmark_worker.isRunning.return_value = False
+        tab._set_busy_state(cancellable=False)
+
+        tab._reset_ui()
+        tab._cleanup_benchmark_worker()
+
+        assert tab._benchmark_worker is None
+        assert tab.rerun_btn.isEnabled()
+
+    def test_selecting_a_question_during_a_pass_keeps_re_run_disabled(
+        self, tab: Any
+    ) -> None:
+        """Ignoring the pass workers, it let a second run start over the first."""
+        tab._rescore_worker = MagicMock()
+        tab._set_busy_state()
+
+        tab._on_selection_changed()
+
+        assert not tab.rerun_btn.isEnabled()
+
+    def test_cancel_with_nothing_running_does_nothing(self, tab: Any) -> None:
+        """No worker to reach, so no crash and no "Cancelling..."."""
+        tab._on_cancel_clicked()
+
+        assert tab.progress_label.text() != "Cancelling..."
