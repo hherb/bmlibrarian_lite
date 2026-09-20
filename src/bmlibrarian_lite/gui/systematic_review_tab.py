@@ -1367,7 +1367,7 @@ class SystematicReviewTab(QWidget):
         self._benchmark_progress_dialog.show()
 
     def _cancel_benchmark(self) -> None:
-        """Ask the running benchmark to stop, and wait for it to.
+        """Ask the running benchmark to stop; the UI stays busy until it has.
 
         Benchmark stays disabled until the worker says what became of the
         run: re-enabled here, a second benchmark could start on top of the
@@ -1391,12 +1391,20 @@ class SystematicReviewTab(QWidget):
 
         self.benchmark_btn.setEnabled(True)
 
-        if isinstance(result, BenchmarkResult) and result.cancellation is not None:
+        cancellation = (
+            result.cancellation if isinstance(result, BenchmarkResult) else None
+        )
+        if cancellation is not None:
             self.progress_label.setText(
-                benchmark_cancelled_text(result.cancellation, error)
+                benchmark_cancelled_text(cancellation, error)
             )
             # What it did evaluate is real, and is shown rather than dropped
-            self.benchmark_completed.emit(result)
+            # -- but only if it evaluated something: a cancel that landed
+            # before the first evaluation would otherwise replace a complete
+            # comparison on screen with an empty one, and the reader would be
+            # switched to it (#329 review)
+            if cancellation.evaluations_made:
+                self.benchmark_completed.emit(result)
         else:
             self.progress_label.setText(
                 "Benchmark cancelled." + also_failed_text(error)
@@ -1552,7 +1560,7 @@ class SystematicReviewTab(QWidget):
         self._quality_benchmark_progress_dialog.show()
 
     def _cancel_quality_benchmark(self) -> None:
-        """Ask the running quality benchmark to stop, and wait for it to.
+        """Ask the running quality benchmark to stop; the UI stays busy until it has.
 
         Quality Benchmark stays disabled until the worker says what became
         of the run; see :meth:`_cancel_benchmark` (#324).
@@ -1574,15 +1582,23 @@ class SystematicReviewTab(QWidget):
 
         self.quality_benchmark_btn.setEnabled(True)
 
-        if (
-            isinstance(result, QualityBenchmarkResult)
-            and result.cancellation is not None
-        ):
+        cancellation = (
+            result.cancellation
+            if isinstance(result, QualityBenchmarkResult)
+            else None
+        )
+        if cancellation is not None:
+            # Named "Quality benchmark", because both runs write into this
+            # one label: "Benchmark cancelled" here named the other one
             self.progress_label.setText(
-                benchmark_cancelled_text(result.cancellation, error)
+                benchmark_cancelled_text(
+                    cancellation, error, subject="Quality benchmark"
+                )
             )
             # What it did evaluate is real, and is shown rather than dropped
-            self.quality_benchmark_completed.emit(result)
+            # -- but only if it evaluated something (#329 review)
+            if cancellation.evaluations_made:
+                self.quality_benchmark_completed.emit(result)
         else:
             self.progress_label.setText(
                 "Quality benchmark cancelled." + also_failed_text(error)

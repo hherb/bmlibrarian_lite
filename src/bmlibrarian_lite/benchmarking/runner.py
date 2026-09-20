@@ -540,9 +540,18 @@ class BenchmarkRunner:
 
         except Exception as e:
             logger.error(f"Benchmark {run_id} failed: {e}")
+            # A crash after a cancel is still a cancelled run. Stored FAILED,
+            # its evaluations fell outside get_all_scores_for_question, so the
+            # user paid a second time for what the cancel had already bought
+            # -- the very harm #324 exists to prevent (#329 review). The error
+            # is kept either way: cancelling is not failing, but a failure is
+            # never hidden (golden rule 8).
             self.storage.update_benchmark_run(
                 run_id,
-                status=BenchmarkStatus.FAILED,
+                status=(
+                    BenchmarkStatus.CANCELLED if cancelled
+                    else BenchmarkStatus.FAILED
+                ),
                 error_message=str(e),
                 completed_at=datetime.now(),
             )
@@ -928,6 +937,21 @@ Evaluate the relevance of this document to the research question."""
                     parts = key_str.split("|", 1)
                     inclusion_agreement_matrix[(parts[0], parts[1])] = value
 
+            # The run's own status is the durable record that a cancel
+            # stopped it; the counts live in the summary. A summary damaged
+            # past reading loses the counts, not the fact -- and answered as
+            # "not cancelled", a partial comparison would render with no
+            # note, i.e. as a whole one. Unreadable is not absent, which is
+            # how every other field here is already read (#329 review).
+            stored_cancellation = BenchmarkCancellation.from_stored(
+                data.get("cancellation")
+            )
+            if run.status == BenchmarkStatus.CANCELLED and stored_cancellation is None:
+                raise StoredResultUnreadableError(
+                    f"Benchmark run {run_id} is stored as cancelled, but how "
+                    "much of it ran could not be read"
+                )
+
             return BenchmarkResult(
                 run_id=data["run_id"],
                 question=data["question"],
@@ -939,9 +963,7 @@ Evaluate the relevance of this document to the research question."""
                 inclusion_threshold=data.get("inclusion_threshold", 3),
                 total_duration_seconds=data["total_duration_seconds"],
                 # A stored partial result must not read back as a whole one
-                cancellation=BenchmarkCancellation.from_stored(
-                    data.get("cancellation")
-                ),
+                cancellation=stored_cancellation,
                 created_at=datetime.fromisoformat(data["created_at"]),
             )
 
@@ -959,6 +981,11 @@ Evaluate the relevance of this document to the research question."""
     ) -> BenchmarkResult | None:
         """
         Get the most recent completed benchmark result for a research question.
+
+        Completed runs only: a run a cancel stopped is not the question's
+        latest benchmark, because its comparisons are over part of a run
+        (#324). Its individual scores are still reused -- see
+        :meth:`LiteStorage.get_all_scores_for_question`.
 
         Args:
             question: Research question text

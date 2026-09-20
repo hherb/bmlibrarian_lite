@@ -680,6 +680,10 @@ class QualityBenchmarkResultsTab(QWidget):
 
     def _export_csv(self) -> None:
         """Export results to CSV."""
+        # Nothing to write, and nothing to say about a run that is not there
+        if self.result is None:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Results as CSV",
@@ -692,6 +696,13 @@ class QualityBenchmarkResultsTab(QWidget):
         try:
             with open(file_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
+
+                # The partial-result note travels with the data, not just the
+                # window (#329 review)
+                note = partial_result_note(self.result.cancellation)
+                if note:
+                    writer.writerow([note])
+
                 evaluator_names = [s.evaluator.display_name for s in self.result.evaluator_stats]
                 writer.writerow(["Document ID", "Document Title"] + evaluator_names)
 
@@ -713,6 +724,10 @@ class QualityBenchmarkResultsTab(QWidget):
 
     def _export_json(self) -> None:
         """Export results to JSON."""
+        # Nothing to write, and nothing to say about a run that is not there
+        if self.result is None:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Results as JSON",

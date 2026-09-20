@@ -472,9 +472,18 @@ class QualityBenchmarkRunner:
 
         except Exception as e:
             logger.error(f"Quality benchmark {run_id} failed: {e}")
+            # A crash after a cancel is still a cancelled run. Stored FAILED,
+            # its evaluations fell outside get_all_scores_for_question, so the
+            # user paid a second time for what the cancel had already bought
+            # -- the very harm #324 exists to prevent (#329 review). The error
+            # is kept either way: cancelling is not failing, but a failure is
+            # never hidden (golden rule 8).
             self.storage.update_benchmark_run(
                 run_id,
-                status=BenchmarkStatus.FAILED,
+                status=(
+                    BenchmarkStatus.CANCELLED if cancelled
+                    else BenchmarkStatus.FAILED
+                ),
                 error_message=str(e),
                 completed_at=datetime.now(),
             )

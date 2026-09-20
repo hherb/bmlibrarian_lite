@@ -20,8 +20,9 @@ A figure the benchmark could not compute -- the mean of an evaluator that
 judged nothing, the agreement of two that judged no document in common, a
 count an older result never kept -- is stated as missing, never as a number
 that would rank or compare it. A document an evaluator could not score says
-so, and why. The functions are pure, so the Benchmark tab's choices can be
-tested without a window.
+so, and why. A run a cancel stopped part way says so too, rather than
+letting its figures read as a whole comparison (#324). The functions are
+pure, so the Benchmark tab's choices can be tested without a window.
 """
 
 from collections.abc import Mapping, Sequence
@@ -360,31 +361,76 @@ def evaluations_text(count: int) -> str:
 def benchmark_cancelled_text(
     cancellation: BenchmarkCancellation,
     error: str = "",
+    subject: str = "Benchmark",
 ) -> str:
     """What a cancelled benchmark says it did before it stopped.
 
     Args:
         cancellation: What the run had evaluated when it stopped.
         error: The error that also ended the run, or an empty string.
+        subject: What to call the run, so the quality benchmark does not
+            report itself as the relevance one -- both write into the same
+            label on the Systematic Review tab.
 
     Returns:
         e.g. "Benchmark cancelled after 12 of 40 evaluations. The other 28
-        were not made, and were not paid for. What was evaluated is kept."
-        What ran before the cancel is real and is counted, not called off
-        (#324).
+        were not started: no model was called for them. What was evaluated
+        is kept." What ran before the cancel is real and is counted, not
+        called off (#324).
+
+        The sentence says what was *not* started, never what was paid for:
+        ``evaluations_made`` counts reuses as well as fresh calls (see
+        :class:`~bmlibrarian_lite.benchmarking.models.BenchmarkCancellation`),
+        so a run that replayed cached scores paid for fewer evaluations than
+        it made. Reworded into a claim about spend, it would overstate the
+        bill for every re-benchmark.
     """
     text = (
-        f"Benchmark cancelled after {cancellation.evaluations_made} of "
+        f"{subject} cancelled after {cancellation.evaluations_made} of "
         f"{evaluations_text(cancellation.evaluations_planned)}."
     )
     skipped = cancellation.evaluations_skipped
     if skipped == 1:
-        text += " The other one was not made, and was not paid for."
+        text += " The other one was not started: no model was called for it."
     elif skipped > 1:
-        text += f" The other {skipped} were not made, and were not paid for."
+        text += (
+            f" The other {skipped} were not started: no model was called "
+            "for them."
+        )
     if cancellation.evaluations_made:
         text += " What was evaluated is kept."
     return text + also_failed_text(error)
+
+
+def benchmark_status_text(
+    subject: str,
+    cancellation: BenchmarkCancellation | None,
+    doc_count: int,
+    cost: float,
+) -> str:
+    """What the status bar says about a benchmark that has just ended.
+
+    Args:
+        subject: What to call the run, e.g. "Benchmark".
+        cancellation: What the run had evaluated when a cancel stopped it,
+            or None for a run that reached the end.
+        doc_count: Documents the result compares.
+        cost: What the run cost, in USD.
+
+    Returns:
+        e.g. "Benchmark complete: 9 documents, $0.0412", or, for a run a
+        cancel stopped, "Benchmark cancelled after 12 of 40 evaluations:
+        9 documents, $0.0412 - partial results shown". A cancelled run
+        reaches the same slot, and "complete" told the reader the opposite
+        of the truth in the one message that flashes at them (#329 review).
+    """
+    if cancellation is None:
+        return f"{subject} complete: {doc_count} documents, ${cost:.4f}"
+    return (
+        f"{subject} cancelled after {cancellation.evaluations_made} of "
+        f"{evaluations_text(cancellation.evaluations_planned)}: "
+        f"{doc_count} documents, ${cost:.4f} - partial results shown"
+    )
 
 
 def partial_result_note(cancellation: BenchmarkCancellation | None) -> str | None:
@@ -397,7 +443,9 @@ def partial_result_note(cancellation: BenchmarkCancellation | None) -> str | Non
     Returns:
         The note, or None for a benchmark that ran to the end. Shown without
         it, a partial comparison reads as a whole one: a model the cancel cut
-        short looks like one that judged fewer documents (#324).
+        short looks like one that judged fewer documents, and one it never
+        reached -- ``_compute_results`` gives every evaluator a row, empty or
+        not -- looks like one that failed (#324).
     """
     if cancellation is None:
         return None
@@ -407,5 +455,7 @@ def partial_result_note(cancellation: BenchmarkCancellation | None) -> str | Non
         f"{evaluations_text(cancellation.evaluations_planned)}: every figure "
         "below is over that part of the run only, and a model the cancel "
         "reached last may have been asked about fewer documents than the "
-        "others."
+        "others. A model the cancel never reached was asked about none at "
+        "all: its row is empty because it did not run, not because it "
+        "failed."
     )

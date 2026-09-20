@@ -474,10 +474,16 @@ class QualityBenchmarkResult:
             "design_disagreement_rate": self.design_disagreement_rate,
             "tier_disagreement_rate": self.tier_disagreement_rate,
             "baseline_evaluator_name": self.baseline_evaluator_name,
-            # None for a run that ran to the end; a stored partial result
-            # must not read back as a whole one (#324)
+            # None for a run that ran to the end. Written so a stored
+            # partial result cannot read back as a whole one -- but the
+            # quality result has no read-back path yet, so nothing reads this
+            # field today. Whoever writes that reader should use
+            # BenchmarkCancellation.from_stored and check it against the run's
+            # status, as BenchmarkRunner.get_benchmark_result does (#324).
             "cancellation": (
-                self.cancellation.to_dict() if self.cancellation else None
+                self.cancellation.to_dict()
+                if self.cancellation is not None
+                else None
             ),
             "created_at": self.created_at.isoformat(),
         }

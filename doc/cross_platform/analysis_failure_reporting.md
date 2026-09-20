@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316), except one known gap: the review's quality filter records a failed classification as an "unknown" design (#319) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316, #320, #324), except one known gap: the review's quality filter records a failed classification as an "unknown" design (#319) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -285,17 +285,29 @@ to read a record written elsewhere.
   cancel stops the run *before* it pays for one more — a flag only the caller
   could see let the run go on calling every model for every document, and
   then threw the result away. What ran before the cancel is real and is kept:
-  its evaluations are stored, the run is stored as **cancelled** rather than
-  complete, and its scores are reused by a later benchmark of the question,
-  which would otherwise buy again what the user has paid for. A cancelled
-  run's result carries how many evaluations were made of how many planned —
-  a pair that refuses impossible counts rather than repairing them — so the
-  message names what was evaluated and what was not paid for, and the results
-  view says every figure is over that part of the run only. The UI stays busy
-  until the thread has actually ended: re-enabling the action at once let a
+  the run is stored as **cancelled** rather than complete, and its partial
+  result is shown rather than dropped. A cancelled run's result carries how
+  many evaluations were made of how many planned — a pair that refuses
+  impossible counts rather than repairing them — so the message names what
+  was evaluated and what was *not started*, and the results view says every
+  figure is over that part of the run only. Because that count includes
+  evaluations a run replayed from earlier ones, the message says what was not
+  started, never what was paid for. The note travels with the data, not only
+  the window: an exported cancelled result carries it too. The UI stays busy
+  until the run has actually ended: re-enabling the action at once let a
   second run start on top of a live one. A cancelled run is not the
-  question's latest benchmark. Cancelling is not failing, but a failure
-  mid-cancel is still named.
+  question's latest benchmark, and a cancel that stopped the run before its
+  first evaluation publishes no result at all, rather than replacing a whole
+  comparison with an empty one. Cancelling is not failing, but a failure
+  mid-cancel is still named — and a run that was cancelled *and* then failed
+  is still stored as cancelled, so what it bought stays reusable.
+
+  **Reuse is relevance-only.** The relevance benchmark stores a per-document
+  score, so a cancelled run's scores are reused by a later benchmark of the
+  question, which would otherwise buy again what the user has paid for. The
+  quality benchmark stores no per-document evaluation, so it has nothing from
+  an earlier run — cancelled or complete — to reuse; for it, only the
+  cancelled status and the partial result are kept.
 - **A rerun retries a failure** (#316). Deduplicating a search for more
   documents against those already scored, a document whose every scoring
   failed is not scored: it is scored again, and the user is told how many are

@@ -21,6 +21,7 @@ These models store aggregated statistics from benchmark runs,
 enabling comparison of evaluator performance.
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
 
 from ..data_models import Evaluator
 from ..constants import DEFAULT_MIN_SCORE
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,8 +60,9 @@ class BenchmarkCancellation:
 
         Raises:
             ValueError: If either count is negative, or more evaluations
-                were made than planned. Repaired with ``max()`` instead,
-                an off-by-one would read as a run that stopped at its very
+                were made than planned. Clamped instead -- ``max(0, n)`` for
+                a negative, ``min(made, planned)`` for an overrun -- an
+                off-by-one would read as a run that stopped at its very
                 first document, or as one that had finished.
         """
         if self.evaluations_made < 0 or self.evaluations_planned < 0:
@@ -98,21 +102,49 @@ class BenchmarkCancellation:
             that was not cancelled, or one stored before #324). A stored
             pair that is not two counts, or that is impossible, is no
             cancellation: a result is not made to look partial by damage.
+
+            This does not contradict ``to_dict``'s "a stored partial result
+            must not read back as a whole one": the run's
+            ``BenchmarkStatus.CANCELLED`` is the durable record that a cancel
+            stopped it, so damage here loses the counts, not the fact.
+            :meth:`BenchmarkRunner.get_benchmark_result` reads the two
+            together and refuses the pair that would mislead (#329 review).
+            Damage is logged rather than passed over in silence.
         """
+        if value is None:
+            return None
         if not isinstance(value, dict):
+            logger.warning(
+                "Stored benchmark cancellation is not an object (%r); read as "
+                "no cancellation",
+                type(value).__name__,
+            )
             return None
         made = value.get("evaluations_made")
         planned = value.get("evaluations_planned")
+        if made is None and planned is None:
+            return None
         if (
             isinstance(made, bool)
             or isinstance(planned, bool)
             or not isinstance(made, int)
             or not isinstance(planned, int)
         ):
+            logger.warning(
+                "Stored benchmark cancellation counts are not two integers "
+                "(%r of %r); read as no cancellation",
+                made,
+                planned,
+            )
             return None
         try:
             return BenchmarkCancellation(made, planned)
-        except ValueError:
+        except ValueError as e:
+            logger.warning(
+                "Stored benchmark cancellation is impossible (%s); read as no "
+                "cancellation",
+                e,
+            )
             return None
 
 
@@ -520,7 +552,9 @@ class BenchmarkResult:
             # None for a run that ran to the end; a stored partial result
             # must not read back as a whole one (#324)
             "cancellation": (
-                self.cancellation.to_dict() if self.cancellation else None
+                self.cancellation.to_dict()
+                if self.cancellation is not None
+                else None
             ),
             "created_at": self.created_at.isoformat(),
         }

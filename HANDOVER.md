@@ -18,42 +18,66 @@ landed** once merged.
   on calling every model for every document, spending, and the caller threw
   the finished result away.
 - **What ran is real, and is kept.** The run is stored as
-  `BenchmarkStatus.CANCELLED`, its evaluations stay stored, and
-  `get_all_scores_for_question` now reads **cancelled runs too** — left out,
+  `BenchmarkStatus.CANCELLED`, and stays cancelled even if it *then* crashed
+  — stored `FAILED`, its evaluations fell outside the reuse lookup and the
+  user bought them twice. `get_all_scores_for_question` reads **cancelled
+  runs too** (as does `get_evaluators_for_question`, its sibling) — left out,
   a later benchmark would buy again what the user already paid for. A
   cancelled run is still not the question's latest benchmark (that filter is
-  `COMPLETED` only).
+  `COMPLETED` only). **Reuse is relevance-only**: the quality benchmark
+  stores no per-document evaluation, so it has nothing to reuse.
 - **`BenchmarkCancellation`** (frozen, in `benchmarking/models.py`, on both
   result types and serialized) holds `evaluations_made` /
   `evaluations_planned` and **refuses impossible counts** rather than
-  repairing them. `from_stored()` reads it as input: damage is *no*
-  cancellation, because a complete result must not be made to look partial.
+  repairing them. `from_stored()` reads it as input, and logs damage rather
+  than passing over it. Damage yields *no* cancellation — but the run's
+  `CANCELLED` status is the durable record, so `get_benchmark_result` reads
+  the two together and raises `StoredResultUnreadableError` for the pair that
+  would mislead. Unreadable is not absent, as everywhere else in that reader.
 - **A partial comparison never reads as a whole one**: `partial_result_note`
-  in both results tabs, `benchmark_cancelled_text` in the progress lines.
-  Both pure, in `benchmarking/display.py`; `also_failed_text` moved from
+  in both results tabs, `benchmark_cancelled_text` in the progress lines,
+  `benchmark_status_text` in the status bar — which said "Benchmark
+  complete" after a cancel — and in **both exports**, so the note travels
+  with a file that outlives the window. All pure, in
+  `benchmarking/display.py`; `also_failed_text` moved from
   `research_questions_tab.py` to `analysis_failures.py` so both can use it.
+  The message says what was **not started**, never what was paid for:
+  `evaluations_made` counts replays, which cost nothing.
 - **Both workers mix in `SingleOutcome`** and gain `cancelled(result, error)`.
   Whether a run was cancelled is the *runner's* answer (`result.cancellation`),
   not the flag's — a cancel landing after the last evaluation stopped nothing,
   so the run `finished` and its result is not thrown away (#320's rule).
-  A crash mid-cancel is named on the `cancelled` signal, never hidden.
-- **The UI stays busy until the thread ends.** The Systematic Review tab's
+  A crash mid-cancel is named on the `cancelled` signal, and on the Research
+  Questions tab it still raises the modal that `_on_benchmark_error` raises:
+  a failure that merely coincided with a cancel is not demoted to a label.
+- **The UI stays busy until the run ends.** The Systematic Review tab's
   Cancel no longer re-enables Benchmark at once (a second run could start on
   top of a live one, overwriting the worker reference) and the `cancelled`
   handler closes the modal dialog that used to be left stuck. The Research
   Questions tab offers Cancel for a benchmark again; `_set_busy_state` lost
-  its `cancellable` parameter, since all four workers now stop.
-- **Verified:** `pytest tests/` — 1731 passed, 3 xfailed; `lint_delta.py
+  its `cancellable` parameter, since all four workers now stop. A cancel that
+  stopped the run **before its first evaluation publishes nothing** — it
+  would otherwise replace a whole comparison on screen with an empty one, and
+  switch the reader to it. A cancelled *quality* run names itself, rather
+  than reporting as the relevance run into the same label.
+- **Verified:** `pytest tests/` — 1771 passed, 3 xfailed; `lint_delta.py
   --base-ref master` 0 new ruff or mypy findings.
-  `tests/test_cancelled_benchmark.py` is 64 tests; **21 mutations** of the
-  behaviour above each fail a test (dropped cancel check in either runner,
-  cancelled stored as complete, the cancellation dropped from the result or
-  trusted from storage, the error clause dropped, the note suppressed, the
-  partial result dropped by a worker or a tab, a late cancel throwing the
-  result away, `should_cancel` never passed, either tab's cancel wiring,
-  cancelled runs excluded from reuse).
+  `tests/test_cancelled_benchmark.py` is 104 tests. Beyond the original 21,
+  the review of this PR added coverage for: the `cancelled.connect` wiring on
+  both tabs and the progress dialog (deleting any one of the three passed
+  every test before), a crash mid-cancel keeping the run cancelled and its
+  scores reusable, a zero-evaluation cancel publishing nothing, the quality
+  run naming itself, the status bar not saying "complete", both exports
+  carrying the note, the status/cancellation cross-check on read-back, a
+  cancel counting replays it did not pay for, and the progress mute (with a
+  control, since the old harness never reported progress at all).
 - The contract is `doc/cross_platform/analysis_failure_reporting.md`, which
-  gained the rule.
+  gained the rule and now scopes reuse to the relevance benchmark.
+- **Lodged, not fixed:** #330 (provider error text reaches the UI verbatim
+  and can carry a credential — `also_failed_text` has three call sites, and
+  stripping it is truncation, so golden rule 13 says ask first) and #331
+  (a stored quality benchmark result has no read-back path, so a cancelled
+  one's partiality is lost the moment anyone adds a history view).
 
 ## Recently landed (context)
 

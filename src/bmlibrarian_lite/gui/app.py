@@ -65,6 +65,7 @@ from .settings_dialog import SettingsDialog
 from .benchmark_results_dialog import BenchmarkResultsTab
 from .quality_benchmark_results_dialog import QualityBenchmarkResultsTab
 from ..benchmarking import BenchmarkRunner
+from ..benchmarking.display import benchmark_status_text
 
 if TYPE_CHECKING:
     from bmlibrarian_lite.data_models import ExtractionFailure, RetrievalShortfall
@@ -471,7 +472,13 @@ class LiteMainWindow(QMainWindow):
             cost = result.total_cost_usd
             doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
             self.status_bar.showMessage(
-                f"Benchmark complete: {doc_count} documents, ${cost:.4f}", 5000
+                benchmark_status_text(
+                    "Benchmark",
+                    getattr(result, "cancellation", None),
+                    doc_count,
+                    cost,
+                ),
+                5000,
             )
 
     def _on_quality_benchmark_completed(self, result: object) -> None:
@@ -495,7 +502,12 @@ class LiteMainWindow(QMainWindow):
             doc_count = len(result.document_comparisons) if hasattr(result, 'document_comparisons') else 0
             task_type = getattr(result, 'task_type', 'unknown')
             self.status_bar.showMessage(
-                f"Quality benchmark ({task_type}) complete: {doc_count} documents, ${cost:.4f}",
+                benchmark_status_text(
+                    f"Quality benchmark ({task_type})",
+                    getattr(result, "cancellation", None),
+                    doc_count,
+                    cost,
+                ),
                 5000
             )
 

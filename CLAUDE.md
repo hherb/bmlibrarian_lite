@@ -45,7 +45,7 @@ data_models.py        # LiteDocument, ScoredDocument, Citation, SearchProvider, 
 europepmc.py          # EuropePMCClient (cursor pagination)
 search_service.py     # Unified search across PubMed + Europe PMC
 search_failures.py    # RequestFailure from requests errors; shortfall clauses, notice, advice, session metadata
-analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after the search)
+analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after the search); also_failed_text
 audit_records.py      # What became of each document: accepted/rejected/failed/not scored
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query

@@ -169,6 +169,12 @@ def pass_cancelled_text(
         e.g. "Re-scoring cancelled after 4 of 10 documents: 3 re-scored,
         1 failed. The other 6 were not re-scored." What was done before
         the cancel stays done, so it is counted, not called off (#320).
+
+        The "after N of M" here counts documents *attempted*, failures
+        included, and breaks them down in the same sentence.
+        :func:`~bmlibrarian_lite.benchmarking.display.benchmark_cancelled_text`
+        borrows the phrasing for evaluations *held* -- same words, a
+        different count, so do not read one from the other.
     """
     attempted = succeeded + failed
     text = (
@@ -631,7 +637,7 @@ class ResearchQuestionsTab(QWidget):
         self._worker.start()
 
     def _on_cancel_clicked(self) -> None:
-        """Ask whichever run is going to stop.
+        """Ask the running worker -- whichever of the four it is -- to stop.
 
         Each of the four workers ends by emitting ``cancelled``, which
         returns the tab to ready (#320). A benchmark is among them since
@@ -880,17 +886,35 @@ class ResearchQuestionsTab(QWidget):
         self._reset_ui()
         self.progress_bar.setVisible(False)
 
-        if isinstance(result, BenchmarkResult) and result.cancellation is not None:
+        cancellation = (
+            result.cancellation if isinstance(result, BenchmarkResult) else None
+        )
+        if cancellation is not None:
             self.progress_label.setText(
-                benchmark_cancelled_text(result.cancellation, error)
+                benchmark_cancelled_text(cancellation, error)
             )
             # What it did evaluate is real, and is shown rather than dropped
-            self.benchmark_completed.emit(result)
+            # -- but only if it evaluated something: a cancel that landed
+            # before the first evaluation would otherwise replace a complete
+            # comparison on screen with an empty one, and the reader would be
+            # switched to it (#329 review)
+            if cancellation.evaluations_made:
+                self.benchmark_completed.emit(result)
         else:
             self.progress_label.setText(
                 "Benchmark cancelled." + also_failed_text(error)
             )
         logger.info("Benchmark cancelled")
+
+        # A crash that happened to coincide with a cancel is still a crash:
+        # reported the way _on_benchmark_error reports one, not demoted to a
+        # sentence on a label the next run overwrites (golden rule 8)
+        if error:
+            QMessageBox.warning(
+                self,
+                "Benchmark Error",
+                f"An error occurred during benchmarking:\n\n{error}",
+            )
 
         QTimer.singleShot(100, self._cleanup_benchmark_worker)
 

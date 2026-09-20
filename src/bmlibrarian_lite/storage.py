@@ -3740,16 +3740,24 @@ class LiteStorage:
         """
         Get all evaluators that have scored documents for a question.
 
+        Finished runs count, cancelled ones included: what a cancelled run
+        evaluated was paid for and is a real judgement (#324).
+
         Args:
             question: Research question text
 
         Returns:
             List of Evaluator objects that have contributed scores
         """
-        # Get all completed runs for this question
-        runs = self.get_benchmark_runs_by_question(
-            question, status=BenchmarkStatus.COMPLETED
-        )
+        # Finished runs, cancelled ones included -- the same rule as
+        # get_all_scores_for_question, which answers the same question about
+        # the same runs. Left filtering COMPLETED only, this would have handed
+        # its first caller pre-#324 behaviour without saying so (#329 review).
+        runs = [
+            run
+            for status in (BenchmarkStatus.COMPLETED, BenchmarkStatus.CANCELLED)
+            for run in self.get_benchmark_runs_by_question(question, status=status)
+        ]
 
         if not runs:
             return []
