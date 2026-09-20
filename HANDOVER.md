@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#324 — cancelling a benchmark stops it, and says what it evaluated**,
-branch `fix/cancelled-benchmark-324`. Python only. Compress into **Recently
+branch `fix/cancelled-benchmark-324`, PR #329. Python only. Compress into **Recently
 landed** once merged.
 
 - **A cancel the runner can see.** Both runners take `should_cancel`, asked
