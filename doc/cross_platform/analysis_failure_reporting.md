@@ -280,6 +280,22 @@ to read a record written elsewhere.
   afterwards; a design read from publication-type metadata answers for no
   model. A reused assessment is not counted in cost or speed per
   assessment.
+- **Cancelling a benchmark stops it** (#324), relevance and quality alike.
+  The runner is asked before each evaluation and stops at the first yes, so a
+  cancel stops the run *before* it pays for one more — a flag only the caller
+  could see let the run go on calling every model for every document, and
+  then threw the result away. What ran before the cancel is real and is kept:
+  its evaluations are stored, the run is stored as **cancelled** rather than
+  complete, and its scores are reused by a later benchmark of the question,
+  which would otherwise buy again what the user has paid for. A cancelled
+  run's result carries how many evaluations were made of how many planned —
+  a pair that refuses impossible counts rather than repairing them — so the
+  message names what was evaluated and what was not paid for, and the results
+  view says every figure is over that part of the run only. The UI stays busy
+  until the thread has actually ended: re-enabling the action at once let a
+  second run start on top of a live one. A cancelled run is not the
+  question's latest benchmark. Cancelling is not failing, but a failure
+  mid-cancel is still named.
 - **A rerun retries a failure** (#316). Deduplicating a search for more
   documents against those already scored, a document whose every scoring
   failed is not scored: it is scored again, and the user is told how many are

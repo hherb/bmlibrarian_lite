@@ -51,6 +51,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from ..config import LiteConfig, BenchmarkModelConfig
 from ..data_models import LiteDocument, Evaluator
 from ..quality.data_models import QualityAssessment
+from .workers import SingleOutcome
 from ..constants import (
     calculate_cost,
     get_model_pricing,
@@ -61,21 +62,29 @@ from ..constants import (
 logger = logging.getLogger(__name__)
 
 
-class QualityBenchmarkWorker(QThread):
+class QualityBenchmarkWorker(SingleOutcome, QThread):
     """
     Background worker for quality benchmark execution.
 
     Runs quality benchmark across multiple evaluators in a background thread.
+    A run ends with exactly one of ``finished``, ``error`` and ``cancelled``,
+    and cancelling stops it: until #324 :meth:`cancel` only muted the
+    progress and dropped the result, while the runner went on calling every
+    model for every document, spending.
 
     Signals:
         progress: Emitted with (current, total, message)
         finished: Emitted when benchmark completes (QualityBenchmarkResult)
         error: Emitted on error (error message)
+        cancelled: Emitted when a cancel stopped the run, with the partial
+            QualityBenchmarkResult (or None, when it stopped before one could
+            be computed) and the error that also ended it, or ""
     """
 
     progress = Signal(int, int, str)  # current, total, message
     finished = Signal(object)  # QualityBenchmarkResult
     error = Signal(str)
+    cancelled = Signal(object, str)  # partial QualityBenchmarkResult or None, error
 
     def __init__(
         self,
@@ -114,21 +123,31 @@ class QualityBenchmarkWorker(QThread):
         self.checkpoint_id = checkpoint_id
         self.existing_assessments = existing_assessments
         self.reuse_cross_run = reuse_cross_run
-        self._cancelled = False
+        self._stopped = False
 
     def run(self) -> None:
         """Execute quality benchmark in background thread."""
+        self._run_once(self._benchmark, lambda error: self._end(self.error, error))
+
+    def _benchmark(self) -> None:
+        """Run the benchmark, and end the run with what became of it.
+
+        Whether the run was cancelled is the runner's answer, not the flag's:
+        a cancel that arrives once the last evaluation is made stopped
+        nothing, so the run finished and its result is not thrown away
+        (#320).
+        """
+        from ..benchmarking import QualityBenchmarkRunner
+
+        runner = QualityBenchmarkRunner(self.config, self.storage)
+
+        def on_progress(current: int, total: int, message: str) -> None:
+            # Muted once cancelled so "Cancelling..." is not overwritten by
+            # the evaluation the runner was already making
+            if not self._stopped:
+                self.progress.emit(current, total, message)
+
         try:
-            from ..benchmarking import QualityBenchmarkRunner
-
-            runner = QualityBenchmarkRunner(self.config, self.storage)
-
-            # Progress callback
-            def on_progress(current: int, total: int, message: str) -> None:
-                if not self._cancelled:
-                    self.progress.emit(current, total, message)
-
-            # Run the benchmark
             result = runner.run_quick_benchmark(
                 question=self.question,
                 documents=self.documents,
@@ -138,19 +157,26 @@ class QualityBenchmarkWorker(QThread):
                 progress_callback=on_progress,
                 existing_assessments=self.existing_assessments,
                 reuse_cross_run=self.reuse_cross_run,
+                should_cancel=lambda: self._stopped,
             )
-
-            if not self._cancelled:
-                self.finished.emit(result)
-
         except Exception as e:
             logger.exception("Quality benchmark error")
-            if not self._cancelled:
-                self.error.emit(str(e))
+            # Cancelling is not failing, but a failure is never hidden
+            # (golden rule 8): a crash mid-cancel is named, not swallowed
+            if self._stopped:
+                self._end(self.cancelled, None, str(e))
+            else:
+                self._end(self.error, str(e))
+            return
+
+        if result.cancellation is not None:
+            self._end(self.cancelled, result, "")
+        else:
+            self._end(self.finished, result)
 
     def cancel(self) -> None:
-        """Cancel the benchmark."""
-        self._cancelled = True
+        """Ask the running benchmark to stop before its next evaluation."""
+        self._stopped = True
 
 
 class QualityBenchmarkConfirmDialog(QDialog):

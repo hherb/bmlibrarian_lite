@@ -26,6 +26,7 @@ tested without a window.
 
 from collections.abc import Mapping, Sequence
 
+from ..analysis_failures import also_failed_text
 from ..audit_records import is_scoring_failure
 from ..constants import (
     BENCHMARK_AGREEMENT_HIGH,
@@ -33,7 +34,12 @@ from ..constants import (
     BENCHMARK_RANKING_SIZE,
 )
 from ..data_models import ScoredDocument
-from .models import BenchmarkResult, DocumentComparison, EvaluatorStats
+from .models import (
+    BenchmarkCancellation,
+    BenchmarkResult,
+    DocumentComparison,
+    EvaluatorStats,
+)
 
 #: What stands in for a figure that does not exist.
 NOT_AVAILABLE = "n/a"
@@ -336,4 +342,70 @@ def failures_note(result: BenchmarkResult) -> str | None:
         "a score of 1 in its statistics and agreement figures, even where "
         "the documents table shows it as failed -- and an answer that held "
         "no score was recorded as a 1 that cannot be told apart at all."
+    )
+
+
+def evaluations_text(count: int) -> str:
+    """A count of evaluations, in words that agree with it.
+
+    Args:
+        count: The evaluations.
+
+    Returns:
+        e.g. "1 evaluation", "12 evaluations".
+    """
+    return f"{count} evaluation" if count == 1 else f"{count} evaluations"
+
+
+def benchmark_cancelled_text(
+    cancellation: BenchmarkCancellation,
+    error: str = "",
+) -> str:
+    """What a cancelled benchmark says it did before it stopped.
+
+    Args:
+        cancellation: What the run had evaluated when it stopped.
+        error: The error that also ended the run, or an empty string.
+
+    Returns:
+        e.g. "Benchmark cancelled after 12 of 40 evaluations. The other 28
+        were not made, and were not paid for. What was evaluated is kept."
+        What ran before the cancel is real and is counted, not called off
+        (#324).
+    """
+    text = (
+        f"Benchmark cancelled after {cancellation.evaluations_made} of "
+        f"{evaluations_text(cancellation.evaluations_planned)}."
+    )
+    skipped = cancellation.evaluations_skipped
+    if skipped == 1:
+        text += " The other one was not made, and was not paid for."
+    elif skipped > 1:
+        text += f" The other {skipped} were not made, and were not paid for."
+    if cancellation.evaluations_made:
+        text += " What was evaluated is kept."
+    return text + also_failed_text(error)
+
+
+def partial_result_note(cancellation: BenchmarkCancellation | None) -> str | None:
+    """The note a result needs when a cancel stopped it part way.
+
+    Args:
+        cancellation: What the run had evaluated when it stopped, or None
+            for a run that was not cancelled.
+
+    Returns:
+        The note, or None for a benchmark that ran to the end. Shown without
+        it, a partial comparison reads as a whole one: a model the cancel cut
+        short looks like one that judged fewer documents (#324).
+    """
+    if cancellation is None:
+        return None
+    return (
+        "This benchmark was cancelled after "
+        f"{cancellation.evaluations_made} of "
+        f"{evaluations_text(cancellation.evaluations_planned)}: every figure "
+        "below is over that part of the run only, and a model the cancel "
+        "reached last may have been asked about fewer documents than the "
+        "others."
     )

@@ -167,3 +167,17 @@ def analysis_failure_advice(shortfalls: Sequence[AnalysisShortfall]) -> str:
     if causes.intersection(_UNREADABLE_CAUSES):
         advice.append(_UNREADABLE_ADVICE)
     return " ".join(advice) if advice else _FALLBACK_ADVICE
+
+
+def also_failed_text(error: str) -> str:
+    """What a cancelled run adds when an error ended it too.
+
+    Args:
+        error: The error that ended the run, or an empty string.
+
+    Returns:
+        A sentence naming the error, or "" when nothing went wrong. A cancel
+        is not a licence to hide a failure (golden rule 8): without this, a
+        crash mid-cancel read as an orderly stop (#320).
+    """
+    return f" It also stopped on an error: {error}" if error else ""

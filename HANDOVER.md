@@ -8,58 +8,52 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#320 — a cancelled run on the Research Questions tab ends, and says so**,
-branch `fix/cancelled-rerun-320`, PR #325. Python only. Compress into **Recently
+**#324 — cancelling a benchmark stops it, and says what it evaluated**,
+branch `fix/cancelled-benchmark-324`. Python only. Compress into **Recently
 landed** once merged.
 
-- **The contract is enforced, not just documented.** `IncrementalSearchWorker`,
-  `ReclassifyWorker` and `RescoreWorker` mix in **`SingleOutcome`**: they emit
-  through `_end()` (first terminal signal only) and run their body inside
-  `_run_once()`, which reports whatever escapes it. Saying "exactly one of
-  `finished` / `error` / `cancelled`" in a docstring did not hold it — an
-  import that failed inside the body left `SearchFailedError` unbound, so the
-  first `except` raised in turn and the thread ended in silence, which is the
-  hang #320 is about. Those imports now sit before the `try`.
-- **Cancelling is not failing, but a failure is never hidden** (golden rule 8).
-  `cancelled` carries the error that also ended the run, or `""`: the pass
-  workers as `(succeeded, failed, total, error)`. A crash mid-cancel used to
-  read as an orderly stop ("cancelled after 0 of 30 documents"). A cancel that
-  lands after the last item stopped nothing, so the run `finished` — the search
-  worker has the same `stopped` flag as the pass workers, so a late cancel no
-  longer throws away a search that had already completed.
-- The tab's Cancel reaches whichever of the three is running (it reached only
-  the search, though enabled for all), disables itself, and each ends in a
-  ready tab: `rerun_cancelled_text()` (which names the retry documents that
-  were not scored again), `pass_cancelled_text()`. A cancelled pass with
-  failures now warns, as the finished path does — for a re-classification that
-  dialog is the only lasting notice, since a failed classification is stored
-  nowhere.
-- **Re-run stayed disabled after every run**, cancelled or not: `_reset_ui`
-  re-checked the buttons while the worker was still held. Each cleanup now
-  re-checks them (`_update_action_buttons()`, which leaves the progress line
-  alone; `_is_busy()` counts all four workers).
-- **Rescore counted a failed scoring as a success** (the agent returns a
-  failure, never raises): now `is_scoring_failure()` → failed; the failure row
-  is still stored, so a rerun retries it (#316).
-- **Every run starts through `_set_busy_state(cancellable=…)`.** Two start
-  paths disabling different buttons is what let a benchmark begin on top of a
-  running re-run and leave that re-run's Cancel dead; `_on_benchmark_clicked`
-  also returns early when `_is_busy()`. A benchmark cannot be cancelled (the
-  runners never see the flag), so its Cancel stays off and the dead
-  `_cancel_benchmark` is gone. The Systematic Review tab's "Benchmark
-  cancelled" lets it run on, spending, and leaves its modal dialog stuck —
-  **#324**.
-- **Lodged separately, out of scope here:** the other workers still end a
-  cancel in silence (**#326**); a failed pass reports how many failed, never
-  which or why (**#327**); a re-scored failure supersedes a good score in the
-  latest-wins read and the Scored column does not show it (**#328**).
-- **Verified:** `pytest tests/` — 1667 passed, 3 xfailed; `lint_delta.py
-  --base-ref master` 0 new ruff or mypy findings. `tests/test_cancelled_rerun.py`
-  is 45 tests; eight mutations of the behaviour above (dropped `_is_busy`
-  guard, dropped cleanup scheduling, `stopped` reverted to `_cancelled` in
-  both the search and rescore workers, imports moved back inside the `try`,
-  the error dropped from `cancelled`, the reclassify wording, the failure
-  warning) each fail a test.
+- **A cancel the runner can see.** Both runners take `should_cancel`, asked
+  **before** each evaluation, so a cancel stops the run before it pays for
+  one more. `cancel()` only set a flag neither runner was given: the run went
+  on calling every model for every document, spending, and the caller threw
+  the finished result away.
+- **What ran is real, and is kept.** The run is stored as
+  `BenchmarkStatus.CANCELLED`, its evaluations stay stored, and
+  `get_all_scores_for_question` now reads **cancelled runs too** — left out,
+  a later benchmark would buy again what the user already paid for. A
+  cancelled run is still not the question's latest benchmark (that filter is
+  `COMPLETED` only).
+- **`BenchmarkCancellation`** (frozen, in `benchmarking/models.py`, on both
+  result types and serialized) holds `evaluations_made` /
+  `evaluations_planned` and **refuses impossible counts** rather than
+  repairing them. `from_stored()` reads it as input: damage is *no*
+  cancellation, because a complete result must not be made to look partial.
+- **A partial comparison never reads as a whole one**: `partial_result_note`
+  in both results tabs, `benchmark_cancelled_text` in the progress lines.
+  Both pure, in `benchmarking/display.py`; `also_failed_text` moved from
+  `research_questions_tab.py` to `analysis_failures.py` so both can use it.
+- **Both workers mix in `SingleOutcome`** and gain `cancelled(result, error)`.
+  Whether a run was cancelled is the *runner's* answer (`result.cancellation`),
+  not the flag's — a cancel landing after the last evaluation stopped nothing,
+  so the run `finished` and its result is not thrown away (#320's rule).
+  A crash mid-cancel is named on the `cancelled` signal, never hidden.
+- **The UI stays busy until the thread ends.** The Systematic Review tab's
+  Cancel no longer re-enables Benchmark at once (a second run could start on
+  top of a live one, overwriting the worker reference) and the `cancelled`
+  handler closes the modal dialog that used to be left stuck. The Research
+  Questions tab offers Cancel for a benchmark again; `_set_busy_state` lost
+  its `cancellable` parameter, since all four workers now stop.
+- **Verified:** `pytest tests/` — 1731 passed, 3 xfailed; `lint_delta.py
+  --base-ref master` 0 new ruff or mypy findings.
+  `tests/test_cancelled_benchmark.py` is 64 tests; **21 mutations** of the
+  behaviour above each fail a test (dropped cancel check in either runner,
+  cancelled stored as complete, the cancellation dropped from the result or
+  trusted from storage, the error clause dropped, the note suppressed, the
+  partial result dropped by a worker or a tab, a late cancel throwing the
+  result away, `should_cancel` never passed, either tab's cancel wiring,
+  cancelled runs excluded from reuse).
+- The contract is `doc/cross_platform/analysis_failure_reporting.md`, which
+  gained the rule.
 
 ## Recently landed (context)
 
@@ -67,42 +61,52 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **A cancelled run on the Research Questions tab ends, and says so** (Python;
+  #320, PR #325, merged 2026-09-20). **`SingleOutcome`** (`gui/workers.py`)
+  enforces the outcome contract instead of documenting it: a worker emits
+  through `_end()` (first terminal signal only) and runs its body inside
+  `_run_once()`, which reports whatever escapes. A docstring did not hold it —
+  an import failing inside the body left `SearchFailedError` unbound, so the
+  first `except` raised in turn and the thread ended in silence. **Imports
+  belong before the `try`.** Cancelling is not failing, but `cancelled`
+  carries the error that also ended the run (golden rule 8), and a cancel
+  landing after the last item stopped nothing, so the run `finished`. Every
+  run starts through `_set_busy_state()`, `_is_busy()` counts all four
+  workers, and each cleanup re-checks the buttons. Lodged, still open:
+  **#326**, **#327**, **#328**.
+
 - **A quality benchmark counts a failure apart; a rerun retries one** (Python;
   #314/#316, PR #321, merged 2026-09-19). Same contract as below.
-  - **`QualityEvaluation` holds exactly one of `assessment` / `failure`**
-    (checked in `__post_init__`); a malformed answer or a raising parser is
-    that document's failure, never the run's. Statistics are `None` for a model
-    that assessed nothing; rankings put it last.
-  - **The review's assessments are replayed only via
-    `is_reusable_assessment()`** (task tier, a known design, no transparency
-    downgrade, `extraction_method == llm_extraction_method(model)`). A replayed
-    evaluation is `reused` and left out of cost, tokens and latency.
-  - **A rerun skips the judged and retries the failed**
-    (`get_rerun_document_ids_for_question()`); a failed document whose record
-    is gone is left for the search to find again.
-    `IncrementalSearchWorker(retry_documents=…)` puts them first, outside the
-    target count, and still emits them when the search ends in shortfalls.
-  - Benchmark tab cells come from the pure `benchmarking/quality_display.py`;
-    `DESIGN_LABELS` is keyed by the enum (use `design_label()`).
+  **`QualityEvaluation` holds exactly one of `assessment` / `failure`**
+  (`__post_init__`); a malformed answer fails that document, never the run.
+  Statistics are `None` for a model that assessed nothing; rankings put it
+  last. **The review's assessments are replayed only via
+  `is_reusable_assessment()`** (task tier, a known design, no transparency
+  downgrade, `extraction_method == llm_extraction_method(model)`), and a
+  replayed evaluation is `reused`, outside cost, tokens and latency. **A rerun
+  skips the judged and retries the failed**
+  (`get_rerun_document_ids_for_question()`);
+  `IncrementalSearchWorker(retry_documents=…)` puts them first, outside the
+  target count, and still emits them when the search ends in shortfalls.
+  Benchmark tab cells come from the pure `benchmarking/quality_display.py`;
+  `DESIGN_LABELS` is keyed by the enum (use `design_label()`).
 
 - **A failure is not a score** (Python; #306/#307/#310/#315, PR #317, merged
   2026-09-19). Rules in `doc/cross_platform/analysis_failure_reporting.md`.
-  - **One parser.** The benchmark reads answers with the review's
-    `parse_score_response()`; an answer holding no score on the scale (0, 42,
-    `true`, "10/10", a null-score JSON) is `None` → retried → `JSON_PARSE_ERROR`,
-    never clamped or defaulted to 1.
-  - **Statistics count failures apart**, and what nothing judged is `None`
-    (`n/a`), never 0%/100% or "cheapest": agreement over documents both judged,
-    spread over documents at least two judged. **A stored failure is never
-    reused, and reuse is of the same question only.**
-  - **A stored failure has two forms**: a negative `EvaluationErrorCode`, and the
-    score-1 rows older builds wrote (`is_scoring_failure()` /
-    `scoring_failure_sql()`, exact prefix via `substr` — SQLite `LIKE` ignores
-    case). `classify_document_outcomes()` applies `as_recorded_failure()` itself;
-    the storage getters do not yet (#318).
-  - **`None` is "not recorded", never "none failed"** — `CitationOutcome.failed`
-    is recorded only when extraction ran to the end. The Audit Trail shows a grey
-    "Scoring failed" badge, never "-4/5".
+  **One parser**: the benchmark reads answers with the review's
+  `parse_score_response()`; an answer holding no score on the scale (0, 42,
+  `true`, "10/10", a null-score JSON) is `None` → retried →
+  `JSON_PARSE_ERROR`, never clamped or defaulted to 1. **Statistics count
+  failures apart**, and what nothing judged is `None` (`n/a`), never 0%/100%
+  or "cheapest". **A stored failure is never reused, and reuse is of the same
+  question only.** **A stored failure has two forms**: a negative
+  `EvaluationErrorCode`, and the score-1 rows older builds wrote
+  (`is_scoring_failure()` / `scoring_failure_sql()`, exact prefix via `substr`
+  — SQLite `LIKE` ignores case); `classify_document_outcomes()` applies
+  `as_recorded_failure()` itself, the storage getters do not yet (#318).
+  **`None` is "not recorded", never "none failed"** — `CitationOutcome.failed`
+  is recorded only when extraction ran to the end; the Audit Trail shows a
+  grey "Scoring failed" badge, never "-4/5".
 
 - **The analysis-failure family** (Python; #261–#264 PR #301, #302–#304 PR
   #305, merged 2026-09-17/18). The contract is
@@ -302,8 +306,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- **#324** cancelling a benchmark (either kind) does not stop it: it runs on,
-  spending, and the Systematic Review tab re-enables Benchmark meanwhile.
+- Lodged by PR #325, all Python: **#326** every background worker outside the
+  Research Questions tab still ends a cancel in silence (`SingleOutcome` is the
+  shape to reuse); **#327** a failed re-classification or re-scoring reports
+  how many failed, never which or why; **#328** a re-scored failure supersedes
+  a document's good score under latest-wins, and the Scored column does not
+  show it.
 - **#319** the review's quality filter records a failed classification as an
   "unknown" design, which `passes_filter()` then decides on (what the filter
   does with such a document is a maintainer decision).

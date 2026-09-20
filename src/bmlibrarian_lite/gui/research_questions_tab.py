@@ -50,7 +50,8 @@ from PySide6.QtWidgets import (
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-from ..benchmarking.display import failed_scorings_sentence
+from ..analysis_failures import also_failed_text
+from ..benchmarking.display import benchmark_cancelled_text, failed_scorings_sentence
 from ..benchmarking.models import BenchmarkResult
 from ..config import LiteConfig
 from ..constants import DEFAULT_TARGET_NEW_DOCUMENTS
@@ -127,20 +128,6 @@ def rerun_found_text(new: int, retried: int) -> str:
     if retried:
         return f"{found}, and {retried} whose scoring failed before"
     return found
-
-
-def also_failed_text(error: str) -> str:
-    """What a cancelled run adds when an error ended it too.
-
-    Args:
-        error: The error that ended the run, or an empty string.
-
-    Returns:
-        A sentence naming the error, or "" when nothing went wrong. A cancel
-        is not a licence to hide a failure (golden rule 8): without this, a
-        crash mid-cancel read as an orderly stop.
-    """
-    return f" It also stopped on an error: {error}" if error else ""
 
 
 def rerun_cancelled_text(retried: int, error: str = "") -> str:
@@ -644,13 +631,19 @@ class ResearchQuestionsTab(QWidget):
         self._worker.start()
 
     def _on_cancel_clicked(self) -> None:
-        """Ask the running search, re-classification or re-scoring to stop.
+        """Ask whichever run is going to stop.
 
-        Each ends by emitting ``cancelled``, which returns the tab to ready
-        (#320). A benchmark cannot be stopped once started, so Cancel is
-        never enabled for one.
+        Each of the four workers ends by emitting ``cancelled``, which
+        returns the tab to ready (#320). A benchmark is among them since
+        #324: its runner is asked before each evaluation, so cancelling one
+        stops it spending rather than only dropping what it has paid for.
         """
-        worker = self._worker or self._reclassify_worker or self._rescore_worker
+        worker = (
+            self._worker
+            or self._reclassify_worker
+            or self._rescore_worker
+            or self._benchmark_worker
+        )
         if worker is None:
             return
         worker.cancel()
@@ -836,10 +829,11 @@ class ResearchQuestionsTab(QWidget):
         self._benchmark_worker.progress.connect(self._on_benchmark_progress)
         self._benchmark_worker.finished.connect(self._on_benchmark_finished)
         self._benchmark_worker.error.connect(self._on_benchmark_error)
+        self._benchmark_worker.cancelled.connect(self._on_benchmark_cancelled)
 
-        # Update UI state. The benchmark runner cannot be stopped mid-run: a
-        # Cancel that only dropped its result would let it go on spending
-        self._set_busy_state(cancellable=False)
+        # The runner is asked before each evaluation, so Cancel stops the
+        # benchmark spending rather than only dropping its result (#324)
+        self._set_busy_state()
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
@@ -873,6 +867,31 @@ class ResearchQuestionsTab(QWidget):
         )
 
         # Clean up worker
+        QTimer.singleShot(100, self._cleanup_benchmark_worker)
+
+    def _on_benchmark_cancelled(self, result: object, error: str) -> None:
+        """Report what a cancelled benchmark evaluated before it stopped.
+
+        Args:
+            result: The partial result, or None when the run stopped before
+                one could be computed.
+            error: The error that also ended the run, or "".
+        """
+        self._reset_ui()
+        self.progress_bar.setVisible(False)
+
+        if isinstance(result, BenchmarkResult) and result.cancellation is not None:
+            self.progress_label.setText(
+                benchmark_cancelled_text(result.cancellation, error)
+            )
+            # What it did evaluate is real, and is shown rather than dropped
+            self.benchmark_completed.emit(result)
+        else:
+            self.progress_label.setText(
+                "Benchmark cancelled." + also_failed_text(error)
+            )
+        logger.info("Benchmark cancelled")
+
         QTimer.singleShot(100, self._cleanup_benchmark_worker)
 
     def _on_benchmark_error(self, error_message: str) -> None:
@@ -1227,19 +1246,16 @@ class ResearchQuestionsTab(QWidget):
     # Helper methods
     # -------------------------------------------------------------------------
 
-    def _set_busy_state(self, cancellable: bool = True) -> None:
+    def _set_busy_state(self) -> None:
         """Disable what a running worker rules out, for every kind of run.
 
         Every run goes through here, so none of them can leave an action
         enabled that starting a second run would break: a benchmark begun
         on top of a re-run used to leave that re-run's Cancel dead (#320).
-
-        Args:
-            cancellable: Whether Cancel can reach this run. A benchmark
-                cannot be stopped once started, so its Cancel stays off
-                rather than only dropping a result still being paid for.
+        Every one of the four is cancellable, the benchmark since #324, so
+        Cancel is enabled for all of them.
         """
         self.rerun_btn.setEnabled(False)
         self.benchmark_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(cancellable)
+        self.cancel_btn.setEnabled(True)
         self.questions_table.setEnabled(False)

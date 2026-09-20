@@ -58,6 +58,7 @@ from ..benchmarking.display import (
     format_agreement,
     format_latency,
     format_statistic,
+    partial_result_note,
 )
 from ..benchmarking.quality_display import (
     design_cell,
@@ -364,6 +365,18 @@ class QualityBenchmarkResultsTab(QWidget):
             f"<b>Total Cost:</b> ${cost:.4f}"
         )
         header_layout.addWidget(summary_label)
+
+        # A cancelled run's figures are over the part that ran, and say so
+        # (#324): shown without this, a partial comparison reads as a whole
+        partial = (
+            partial_result_note(self.result.cancellation)
+            if self.result is not None
+            else None
+        )
+        if partial is not None:
+            partial_label = QLabel(f"<i>{partial}</i>")
+            partial_label.setWordWrap(True)
+            header_layout.addWidget(partial_label)
 
         failed_sentence = (
             failed_assessments_sentence(self.result) if self.result is not None else None

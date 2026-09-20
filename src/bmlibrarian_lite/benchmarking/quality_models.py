@@ -35,6 +35,7 @@ from ..quality.data_models import (
     StudyDesign,
     QualityTier,
 )
+from .models import BenchmarkCancellation
 
 
 @dataclass
@@ -287,6 +288,8 @@ class QualityBenchmarkResult:
             likewise
         total_duration_seconds: Total benchmark execution time
         baseline_evaluator_name: Name of baseline evaluator (if applicable)
+        cancellation: What the run had evaluated when a cancel stopped it,
+            or None for a run that was not cancelled (#324)
         created_at: When results were computed
     """
 
@@ -300,6 +303,7 @@ class QualityBenchmarkResult:
     tier_agreement_matrix: dict[tuple[str, str], float | None]
     total_duration_seconds: float = 0.0
     baseline_evaluator_name: Optional[str] = None
+    cancellation: BenchmarkCancellation | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
@@ -470,6 +474,11 @@ class QualityBenchmarkResult:
             "design_disagreement_rate": self.design_disagreement_rate,
             "tier_disagreement_rate": self.tier_disagreement_rate,
             "baseline_evaluator_name": self.baseline_evaluator_name,
+            # None for a run that ran to the end; a stored partial result
+            # must not read back as a whole one (#324)
+            "cancellation": (
+                self.cancellation.to_dict() if self.cancellation else None
+            ),
             "created_at": self.created_at.isoformat(),
         }
 
