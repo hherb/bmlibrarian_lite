@@ -107,10 +107,19 @@ branch `fix/silent-cancels-and-failure-causes-326`, PR #333. Python only. Compre
   instead). Both rules are in
   `doc/cross_platform/analysis_failure_reporting.md`, the first now scoped to
   what Python actually holds — see #334.
-- **`tests/test_europepmc_integration.py` hits Europe PMC live** and was
-  failing on 2026-09-21 (3 failed, 9 errors) **identically on a clean
-  checkout of the merge base**, so it is the service, not this branch. Re-run
-  it before reading anything into those numbers.
+- **`tests/test_europepmc_integration.py` was running in the default
+  `pytest tests/`** despite its own docstring saying it is excluded, because
+  `addopts` never carried `-m "not integration"` — CI passed that flag
+  explicitly, so only local runs hit the live network. `addopts` now carries
+  it; `pytest -m integration` still selects them.
+  Its intermittent failures were **not** a defect in this branch or in the
+  JATS code: the whole file passes (63 passed) when the requests are paced.
+  Europe PMC's nginx serves **503 after about two rapid requests**, with no
+  `Retry-After`, and stays throttled for up to ~70s, while the client's
+  retry budget (`EUROPEPMC_MAX_RETRIES = 3`, `backoff_factor=1`) is about 6s
+  of backoff. Lodged as **#341**, which matters in production too: a review
+  fetching many full texts spends most of its run throttled, and a throttled
+  article is reported as having no full text.
 - **Trap this slice walked into:** the mutation harness restored five files
   from a `cp` backup *and* `git checkout`-ed a sixth it had not backed up,
   `data_models.py`, which held the new value objects. Every later mutation

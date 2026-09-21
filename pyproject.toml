@@ -152,7 +152,11 @@ disallow_untyped_defs = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+# Integration tests hit live services (Europe PMC throttles to a couple of
+# rapid requests, then serves 503 for up to a minute), so a default run
+# excludes them, as their own docstrings say it does. CI passes the same
+# flag explicitly; run them with `pytest -m integration`.
+addopts = "-v --tb=short -m 'not integration'"
 markers = [
     "integration: marks tests as integration tests requiring network access (deselect with '-m \"not integration\"')",
 ]
