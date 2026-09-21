@@ -866,3 +866,7 @@ POLITE_SLOW_WAIT_LOG_SECONDS = 1.0
 # The statuses that mean "you are asking too fast", as opposed to a genuine
 # server fault.
 POLITE_THROTTLE_STATUSES = (429, 503)
+
+# How many times a throttled request is retried through the pacing before
+# the status is handed back to the caller.
+POLITE_MAX_THROTTLE_RETRIES = 3
