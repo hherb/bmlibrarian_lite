@@ -20,7 +20,10 @@ from unittest.mock import MagicMock
 import requests
 from urllib3.util.retry import Retry
 
-from bmlibrarian_lite.constants import POLITE_MAX_THROTTLE_RETRIES
+from bmlibrarian_lite.constants import (
+    POLITE_MAX_THROTTLE_RETRIES,
+    POLITE_RECOVERY_SUCCESSES,
+)
 from bmlibrarian_lite.polite_session import (
     PoliteAdapter,
     is_loopback_host,
@@ -187,6 +190,35 @@ class TestTheAdapterPaces:
         adapter.send(request_to("https://www.ebi.ac.uk/x"))
 
         assert limiter_for("api.crossref.org").interval == untouched
+
+    def test_a_server_fault_does_not_earn_the_rate_back(self) -> None:
+        """A host streaming 500s is failing, not recovering.
+
+        500 is not a throttle status, so the adapter hands it straight back
+        -- but crediting it as a success would let a broken host be asked
+        faster and faster while it breaks.
+        """
+        limiter = limiter_for("api.crossref.org")
+        limiter.penalise()
+        penalised = limiter.interval
+        adapter = RecordingAdapter([500] * (POLITE_RECOVERY_SUCCESSES * 2))
+
+        for _ in range(POLITE_RECOVERY_SUCCESSES * 2):
+            adapter.send(request_to("https://api.crossref.org/works/x"))
+
+        assert limiter.interval == penalised
+
+    def test_a_good_response_still_earns_the_rate_back(self) -> None:
+        """The control: only the failure signal changed, not recovery."""
+        limiter = limiter_for("api.crossref.org")
+        limiter.penalise()
+        penalised = limiter.interval
+        adapter = RecordingAdapter([200] * POLITE_RECOVERY_SUCCESSES)
+
+        for _ in range(POLITE_RECOVERY_SUCCESSES):
+            adapter.send(request_to("https://api.crossref.org/works/x"))
+
+        assert limiter.interval < penalised
 
 
 class _AlwaysThrottled:

@@ -35,6 +35,7 @@ from dataclasses import dataclass
 
 from .constants import (
     DEFAULT_POLITE_RATE_PER_SECOND,
+    POLITE_MAX_PENALTY_SECONDS,
     POLITE_PENALTY_FLOOR_SECONDS,
     POLITE_RATE_CEILINGS,
     POLITE_RECOVERY_SUCCESSES,
@@ -92,9 +93,12 @@ def policy_for_host(host: str, api_key: str | None = None) -> HostPolicy:
 class RateLimiter:
     """Paces requests to one host, and yields when it pushes back.
 
-    Every method is safe to call from any thread: the lock is held across
-    the wait, which is what makes N workers share one budget rather than
-    hold one each.
+    Every method is safe to call from any thread. A caller *claims* its slot
+    under the lock and then waits for it with the lock released, so N workers
+    still share one budget -- each claim is one interval after the last --
+    without one long penalty freezing every other thread that wants this
+    host. Sleeping under the lock was how a single ``Retry-After`` could
+    block an entire thread pool.
     """
 
     def __init__(
@@ -102,6 +106,7 @@ class RateLimiter:
         policy: HostPolicy,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        host: str = "",
     ) -> None:
         """Start at the policy's ceiling.
 
@@ -109,10 +114,13 @@ class RateLimiter:
             policy: The fastest this host is asked.
             clock: Reads the current time; injected so tests need not wait.
             sleep: Waits; injected for the same reason.
+            host: The hostname this limiter paces, for the log only. Never a
+                URL and never any response text (#330).
         """
         self._policy = policy
         self._clock = clock
         self._sleep = sleep
+        self._host = host
         self._lock = threading.Lock()
         self._interval = 1.0 / policy.ceiling_per_second
         self._successes = 0
@@ -129,35 +137,77 @@ class RateLimiter:
         with self._lock:
             return self._interval
 
-    def acquire(self) -> None:
-        """Wait until this host may be asked again, then take the slot."""
+    @property
+    def host(self) -> str:
+        """The host this limiter paces.
+
+        Returns:
+            The hostname, or the empty string for a limiter built without one.
+        """
+        return self._host
+
+    def _claim_slot(self) -> tuple[float, float]:
+        """Reserve the next departure time for this caller.
+
+        Held under the lock, and deliberately short: no waiting happens here.
+        ``last_request_at`` is advanced to the claimed time *before* the lock
+        is released, so the next caller's claim is one interval later and two
+        threads can never be handed the same instant (the interval is always
+        positive, because a :class:`HostPolicy` ceiling is always positive).
+
+        Returns:
+            The claimed departure time, and how long the caller must wait for
+            it.
+        """
         with self._lock:
             now = self._clock()
             if self._has_requested:
                 earliest = self.last_request_at + self._interval
-                wait = earliest - now
-                if wait > 0:
-                    if wait > POLITE_SLOW_WAIT_LOG_SECONDS:
-                        logger.debug(f"Pacing: waiting {wait:.1f}s")
-                    self._sleep(wait)
-                    now = self._clock()
             else:
                 self._has_requested = True
-            self.last_request_at = now
+                earliest = now
+            departure = max(earliest, now)
+            self.last_request_at = departure
+            return departure, departure - now
+
+    def acquire(self) -> float:
+        """Claim the next slot for this host, then wait until it arrives.
+
+        The wait happens with the lock released, so a host under a long
+        penalty does not also hold every other thread that wants it.
+
+        Returns:
+            The claimed departure time, on the injected clock. Callers that
+            only want the pacing may ignore it; it is what lets a test assert
+            that no two threads were given the same instant.
+        """
+        departure, wait = self._claim_slot()
+        if wait > 0:
+            if wait > POLITE_SLOW_WAIT_LOG_SECONDS:
+                logger.info(
+                    f"Pacing {self._host or 'request'}: waiting {wait:.1f}s"
+                )
+            self._sleep(wait)
+        return departure
 
     def penalise(self, retry_after: float | None = None) -> None:
         """Yield: this host says it is being asked too fast.
 
         Args:
             retry_after: What the service asked for, in seconds, when it
-                said. That is not ours to shorten: it is honoured in full,
-                uncapped, even past ``POLITE_PENALTY_FLOOR_SECONDS``. Without
-                it, the rate is halved, down to the floor.
+                said. It is honoured in full up to five minutes
+                (:data:`POLITE_MAX_PENALTY_SECONDS`) -- including past
+                ``POLITE_PENALTY_FLOOR_SECONDS``, which bounds our own
+                halving and not the service's word -- and clamped beyond
+                that, because an arbitrary publisher answering
+                ``Retry-After: 3600`` must not park the application for an
+                hour. Without the header, the rate is halved, down to the
+                floor.
         """
         with self._lock:
             self._successes = 0
             if retry_after is not None and retry_after > 0:
-                self._interval = retry_after
+                self._interval = min(retry_after, POLITE_MAX_PENALTY_SECONDS)
             else:
                 self._interval = min(
                     self._interval * 2, POLITE_PENALTY_FLOOR_SECONDS
@@ -165,6 +215,32 @@ class RateLimiter:
             logger.info(
                 f"Backing off: now one request every {self._interval:.1f}s"
             )
+
+    def raise_ceiling_to(self, policy: HostPolicy) -> bool:
+        """Adopt a faster policy for this host, never a slower one.
+
+        A registered API key raises what a service permits, and the limiter
+        for that host may already exist because an unkeyed caller got there
+        first. Raising is safe -- the service itself sanctioned the higher
+        rate -- while lowering is not, because it would silently slow every
+        caller that presented a key. A penalty already in force is kept: only
+        the rate recovery aims at is changed.
+
+        Args:
+            policy: The candidate policy.
+
+        Returns:
+            True if the ceiling was raised, False if the policy was not
+            faster than the one already in force.
+        """
+        with self._lock:
+            if policy.ceiling_per_second <= self._policy.ceiling_per_second:
+                return False
+            was_unpenalised = self._interval <= 1.0 / self._policy.ceiling_per_second
+            self._policy = policy
+            if was_unpenalised:
+                self._interval = 1.0 / policy.ceiling_per_second
+            return True
 
     def succeed(self) -> None:
         """Record a request the host answered, and earn the rate back slowly."""
@@ -185,6 +261,16 @@ _registry_lock = threading.Lock()
 def limiter_for(host: str, api_key: str | None = None) -> RateLimiter:
     """The one limiter for this host, shared process-wide.
 
+    The registry is keyed on the **host alone**, never on (host, key): the
+    host is what does the throttling, and two limiters for one host would
+    hand it two budgets and defeat the whole design.
+
+    An ``api_key`` presented by any caller therefore raises the shared
+    limiter's ceiling if it is higher than the one in force, and is ignored
+    if it is not. A ceiling is never lowered, so an unkeyed caller arriving
+    after a keyed one cannot take away the rate the key bought, and a keyed
+    caller arriving after an unkeyed one is not stuck at the unkeyed rate.
+
     Args:
         host: The hostname.
         api_key: Raises the ceiling where the service offers one.
@@ -193,9 +279,14 @@ def limiter_for(host: str, api_key: str | None = None) -> RateLimiter:
         The limiter, created on first use.
     """
     with _registry_lock:
-        if host not in _registry:
-            _registry[host] = RateLimiter(policy_for_host(host, api_key))
-        return _registry[host]
+        existing = _registry.get(host)
+        if existing is None:
+            created = RateLimiter(policy_for_host(host, api_key), host=host)
+            _registry[host] = created
+            return created
+        if api_key:
+            existing.raise_ceiling_to(policy_for_host(host, api_key))
+        return existing
 
 
 def reset_limiters() -> None:

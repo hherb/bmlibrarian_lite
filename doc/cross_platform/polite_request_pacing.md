@@ -64,6 +64,16 @@ had NCBI's whole allowance to themselves. Python: `rate_limit.limiter_for`,
 backed by a process-wide registry under a lock (`rate_limit.reset_limiters`
 exists only so tests do not share pacing state with each other).
 
+The registry is keyed on the host **alone**, never on (host, credential):
+two limiters for one host would hand it two budgets and defeat the rule. A
+credential that raises what the service permits (rule 2's NCBI API key)
+therefore *raises the shared limiter's ceiling* when it is higher than the
+one in force, and is ignored when it is not. A ceiling is never lowered, so
+neither caller order loses: an unkeyed caller arriving second cannot take
+away the rate the key bought, and a keyed caller arriving second is not
+stuck at the unkeyed rate. Python: `rate_limit.limiter_for`,
+`RateLimiter.raise_ceiling_to`.
+
 **2. Ceilings are per host, in requests per second**, from a published or
 measured rate, falling back to a conservative default for a host with
 neither. Python's table (`constants.POLITE_RATE_CEILINGS`, default
@@ -84,16 +94,27 @@ Europe PMC's ceiling is measured, not published: its own documentation once
 claimed 10/s, which is plausibly why it shipped with no pacing at all
 (`doc/developer/europepmc_and_pubmed.md`, "Europe PMC Limits").
 
-**3. An explicit `Retry-After` is honoured in full, and uncapped.** When a
-throttled response names how long to wait, that is the new interval,
-whatever it is — a service that asks for 60 seconds gets 60, because
-shortening what it asked for is less polite than asking. **The 30-second
-floor applies only to the halving path** (rule 4), when the service pushed
-back without saying for how long; it never caps an explicit `Retry-After`.
+**3. An explicit `Retry-After` is honoured in full, up to five minutes.**
+When a throttled response names how long to wait, that is the new interval —
+a service that asks for 60 seconds gets 60, because shortening what it asked
+for is less polite than asking. **The 30-second floor applies only to the
+halving path** (rule 4), when the service pushed back without saying for how
+long; it never caps an explicit `Retry-After`.
+
+The one bound on it is a separate, much higher ceiling of five minutes
+(`constants.POLITE_MAX_PENALTY_SECONDS`). Pacing reaches arbitrary publisher
+hosts, and a Cloudflare-fronted one answers `Retry-After: 3600` readily; an
+uncapped honouring of that would pin the host for an hour and, because the
+wait is taken on the calling thread, park a desktop application's worker for
+the same hour. Five minutes is long enough to be a real yield to a
+struggling service and short enough that the application stays answerable.
+The two limits are not the same limit and both apply: 30 seconds bounds our
+own halving, 300 seconds bounds what a stranger's header may impose.
+
 Python: `polite_session.retry_after_seconds` reads only the numeric form of
 the header (the HTTP-date form is valid but rare here, and a wrong parse
-would be worse than falling back to halving); `RateLimiter.penalise` applies
-it without capping.
+would be worse than falling back to halving); `RateLimiter.penalise` clamps
+it to `POLITE_MAX_PENALTY_SECONDS`.
 
 **4. Without an explicit wait, halve the rate, down to a floor of one
 request per 30 seconds** (`constants.POLITE_PENALTY_FLOOR_SECONDS`). Ten
@@ -103,6 +124,12 @@ has been quiet (`constants.POLITE_RECOVERY_SUCCESSES`; Python:
 `RateLimiter.succeed`). A single success does not undo a penalty; a
 penalised host earns its rate back one doubling at a time, resetting the
 success count on the next penalty.
+
+Only an answer that actually worked counts as a success: a status below 400
+(`constants.HTTP_ERROR_STATUS_MIN`). A host streaming 500, 502 or 504 is
+failing, not recovering, and crediting those would let a broken service be
+asked faster and faster while it breaks. Those statuses are still returned
+to the caller unchanged — only the recovery signal is withheld.
 
 **5. Loopback is never paced.** `localhost`, `::1`, any `*.localhost`
 hostname, and any literal address `ipaddress` calls loopback, are skipped
@@ -126,14 +153,23 @@ retry-on-status list and retried by the pacing layer instead, one
 by default, but a client that configures its own retry budget on the
 mounted session has that budget honoured instead, so the two do not silently
 disagree. A client whose own calling code already retries (PubMed's search
-client) mounts with a retry total of zero, so the two retry loops do not
-multiply each other. Python: `polite_session.mount_politely` strips the
+client), or which makes exactly one request per call and reports the result
+itself (the five transparency clients), mounts with a retry total of zero,
+so mounting pacing does not multiply that client's request count. Adding
+pacing must never increase the traffic it exists to reduce: the default
+budget would turn one physical request into four on a persistent 503, and
+those extra requests are charged to a budget other call sites share. Python: `polite_session.mount_politely` strips the
 throttle statuses from the passed-in `Retry` and passes its `total` through
 to `PoliteAdapter` as `max_throttle_retries`; `PoliteAdapter.send` runs the
 acquire/send/penalise loop.
 
-**7. Pacing never invents a failure.** `acquire()` only delays; it never
-raises and never turns a request into an error. A throttle that outlives its
+**7. Pacing never invents a failure, and never re-classifies one.**
+`acquire()` only delays; it never raises and never turns a request into an
+error. Nor may handing a status back change what a caller makes of it: a
+caller that only ever saw a transport-level exception for a persistent 5xx
+now sees the response, and any status classification it does must check the
+status before sniffing the body. A 503 is a broken server, never a paywall
+(`pdf_discovery.py`). A throttle that outlives its
 retries is handed back to the caller as the response it is (a 429 or 503),
 so the caller's existing error handling — retries, error classification,
 whatever it already does with a bad status — runs exactly as it would
@@ -144,18 +180,22 @@ not add.
 ## Where it lives (Python)
 
 - `rate_limit.py` — `HostPolicy` (a ceiling, refusing zero or negative),
-  `RateLimiter` (thread-safe: the lock is held across the wait, which is
-  what makes concurrent workers share one budget rather than hold one
-  each), `policy_for_host`, `limiter_for`, `reset_limiters`.
+  `RateLimiter` (thread-safe: a caller *claims* its departure time under the
+  lock, advancing the limiter's clock before releasing it, and then waits for
+  that time with the lock released — which is what makes concurrent workers
+  share one budget rather than hold one each, without a long penalty on one
+  host freezing every thread that wants it), `policy_for_host`,
+  `limiter_for`, `reset_limiters`.
 - `polite_session.py` — `PoliteAdapter` (a `requests.HTTPAdapter` subclass),
   `mount_politely` (mounts one `PoliteAdapter` on both the `http://` and
   `https://` prefixes of a session), `retry_after_seconds`,
   `is_loopback_host`.
 - `constants.py` — the `POLITE_*` block: `POLITE_RATE_CEILINGS`,
   `DEFAULT_POLITE_RATE_PER_SECOND`, `NCBI_RATE_WITH_API_KEY_PER_SECOND`,
-  `POLITE_PENALTY_FLOOR_SECONDS`, `POLITE_RECOVERY_SUCCESSES`,
-  `POLITE_SLOW_WAIT_LOG_SECONDS`, `POLITE_THROTTLE_STATUSES`,
-  `POLITE_MAX_THROTTLE_RETRIES`.
+  `POLITE_PENALTY_FLOOR_SECONDS`, `POLITE_MAX_PENALTY_SECONDS`,
+  `POLITE_RECOVERY_SUCCESSES`, `POLITE_SLOW_WAIT_LOG_SECONDS`,
+  `POLITE_THROTTLE_STATUSES`, `POLITE_MAX_THROTTLE_RETRIES`, and
+  `HTTP_ERROR_STATUS_MIN` (the recovery signal's threshold).
 
 Every client that makes outbound requests to a third-party host mounts
 pacing on its `requests.Session` through `mount_politely` at construction,

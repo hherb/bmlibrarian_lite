@@ -853,8 +853,17 @@ NCBI_RATE_WITH_API_KEY_PER_SECOND = 10.0
 
 # A penalised host is never driven to a standstill: one request every 30
 # seconds is slow enough to stop hammering and fast enough to notice that
-# the service has recovered.
+# the service has recovered. This bounds OUR OWN halving; it says nothing
+# about a Retry-After the service sent, which is bounded by
+# POLITE_MAX_PENALTY_SECONDS below.
 POLITE_PENALTY_FLOOR_SECONDS = 30.0
+
+# The longest a service's own Retry-After is allowed to pin a host for.
+# A Cloudflare-fronted publisher answers "Retry-After: 3600" readily, and an
+# uncapped honouring of it would park a desktop GUI thread for an hour.
+# Five minutes is long enough to be a real yield to a struggling service,
+# and short enough that the application stays answerable to its user.
+POLITE_MAX_PENALTY_SECONDS = 300.0
 
 # Consecutive successes before a penalised host earns its rate back. Long
 # enough that one lucky request does not undo a penalty.
@@ -870,3 +879,12 @@ POLITE_THROTTLE_STATUSES = (429, 503)
 # How many times a throttled request is retried through the pacing before
 # the status is handed back to the caller.
 POLITE_MAX_THROTTLE_RETRIES = 3
+
+# The lowest status that means the request did not succeed. Only a status
+# below this earns rate back: a host streaming 500/502/504 is failing, and
+# must not be credited with recovery for doing so.
+HTTP_ERROR_STATUS_MIN = 400
+
+# The statuses that mean "this is yours only if you pay or log in". They are
+# a genuine paywall signal, unlike a 5xx, which is the server being broken.
+PAYWALL_HTTP_STATUSES = (401, 403)

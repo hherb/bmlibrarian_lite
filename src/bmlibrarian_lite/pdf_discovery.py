@@ -48,6 +48,7 @@ from urllib.parse import quote, urljoin, urlparse
 import requests
 from urllib3.util.retry import Retry
 
+from .constants import HTTP_ERROR_STATUS_MIN, PAYWALL_HTTP_STATUSES
 from .polite_session import mount_politely
 
 logger = logging.getLogger(__name__)
@@ -881,6 +882,21 @@ class PDFDiscoverer:
             except Exception:
                 body_prefix = b""
 
+            # A broken server is not a paywall. The paywall sniff below
+            # treats any text/html body whose URL contains "access" as a
+            # paywall, which matches every ".../openaccess/..." URL, so a
+            # persistent 503 would be reported to the reader as "requires
+            # institutional subscription". Until this module owned its own
+            # throttle retries, urllib3's Retry raised on a persistent 503
+            # and the sniff was never reached; the status is now classified
+            # here instead, so any non-2xx that is not a genuine paywall
+            # signal takes the error path it always took.
+            if (
+                response.status_code >= HTTP_ERROR_STATUS_MIN
+                and response.status_code not in PAYWALL_HTTP_STATUSES
+            ):
+                response.raise_for_status()
+
             # Check for paywall indicators
             if self._is_paywall_response(response, source.url, body_prefix):
                 logger.info(f"Paywall detected at {source.url}")
@@ -944,7 +960,10 @@ class PDFDiscoverer:
             )
 
         except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code in [401, 403]:
+            if (
+                e.response is not None
+                and e.response.status_code in PAYWALL_HTTP_STATUSES
+            ):
                 return DiscoveryResult(
                     success=False,
                     is_paywall=True,
@@ -1038,7 +1057,7 @@ class PDFDiscoverer:
                 still needed to write the file.
         """
         # Check status code
-        if response.status_code in [401, 403]:
+        if response.status_code in PAYWALL_HTTP_STATUSES:
             return True
 
         # Check content type - HTML usually means landing page

@@ -22,7 +22,17 @@ from datetime import datetime, timedelta
 from enum import Enum
 import requests
 
+from urllib3.util.retry import Retry
+
 from ..polite_session import mount_politely
+
+# Each client below owns its own request loop and its own error handling,
+# and made exactly one physical request per call before pacing was mounted.
+# The adapter must therefore retry a 429/503 zero times on its own: left to
+# the default of POLITE_MAX_THROTTLE_RETRIES, a persistent 503 would cost
+# four requests where it used to cost one, which is the opposite of being
+# polite -- and www.ebi.ac.uk's budget is shared with the main search path.
+_ADAPTER_OWNS_NO_THROTTLE_RETRIES = 0
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -912,7 +922,11 @@ class PubMedClient:
     def __init__(self, email: str, api_key: Optional[str] = None):
         self.email = email
         self.api_key = api_key
-        self.session = mount_politely(requests.Session(), api_key=api_key)
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+            api_key=api_key,
+        )
 
     def _make_request(self, endpoint: str, params: Dict[str, Any]) -> requests.Response:
         """Make a rate-limited E-utilities request.
@@ -1105,7 +1119,10 @@ class CrossRefClient:
 
     def __init__(self, email: str):
         self.email = email
-        self.session = mount_politely(requests.Session())
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
         self.session.headers.update({
             'User-Agent': f'StudyTransparencyAnalyzer/1.0 (mailto:{email})'
         })
@@ -1158,7 +1175,10 @@ class ClinicalTrialsClient:
     BASE_URL = "https://clinicaltrials.gov/api/v2"
 
     def __init__(self):
-        self.session = mount_politely(requests.Session())
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
 
     def get_study(self, nct_id: str) -> Optional[Dict]:
         """Get study by NCT ID."""
@@ -1248,7 +1268,10 @@ class EuropePMCClient:
     BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 
     def __init__(self):
-        self.session = mount_politely(requests.Session())
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
 
     def get_article(self, pmid: str = None, pmcid: str = None, doi: str = None) -> Optional[Dict]:
         """Get article by various IDs."""
@@ -1301,7 +1324,10 @@ class OpenAlexClient:
 
     def __init__(self, email: str):
         self.email = email
-        self.session = mount_politely(requests.Session())
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
 
     def get_work(self, doi: str = None, pmid: str = None) -> Optional[Dict]:
         """Get work by DOI or PMID."""

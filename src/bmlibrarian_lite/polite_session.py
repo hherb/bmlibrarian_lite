@@ -34,6 +34,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .constants import (
+    HTTP_ERROR_STATUS_MIN,
     POLITE_MAX_THROTTLE_RETRIES,
     POLITE_THROTTLE_STATUSES,
 )
@@ -184,7 +185,12 @@ class PoliteAdapter(HTTPAdapter):
                 limiter.acquire()
             response = self._send_once(request, **send_kwargs)
             if response.status_code not in POLITE_THROTTLE_STATUSES:
-                if limiter is not None:
+                # Only an answer that actually worked earns the rate back. A
+                # host streaming 500/502/504 is failing, and crediting it
+                # with recovery would let it be asked faster and faster
+                # while it does so. The response is still returned either
+                # way: the retry behaviour is unchanged, only the signal.
+                if limiter is not None and response.status_code < HTTP_ERROR_STATUS_MIN:
                     limiter.succeed()
                 return response
             if limiter is not None:
