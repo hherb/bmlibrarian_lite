@@ -39,10 +39,10 @@ from ..data_models import (
     LiteDocument,
     ScoredDocument,
 )
-from ..exceptions import RetryExhaustedError, StoredResultUnreadableError
+from ..exceptions import StoredResultUnreadableError
 from ..llm import LLMClient, LLMMessage
 from ..storage import LiteStorage
-from ..utils import classify_exhausted_retries, classify_llm_exception
+from ..utils import classify_analysis_exception
 from .models import (
     BenchmarkCancellation,
     BenchmarkResult,
@@ -672,11 +672,7 @@ Evaluate the relevance of this document to the research question."""
         except Exception as e:
             # The provider's text stays in the log: it can print the request,
             # and the record is shown to the user (#306).
-            error_code = (
-                classify_exhausted_retries(e)
-                if isinstance(e, RetryExhaustedError)
-                else classify_llm_exception(e)
-            )
+            error_code = classify_analysis_exception(e)
             logger.error(
                 f"Failed to score document {document.id} with "
                 f"{evaluator.display_name} ({error_code.name}): {e}"

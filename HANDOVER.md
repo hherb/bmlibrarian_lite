@@ -126,12 +126,149 @@ landed** once merged.
   stripping it is truncation, so golden rule 13 says ask first) and #331
   (a stored quality benchmark result has no read-back path, so a cancelled
   one's partiality is lost the moment anyone adds a history view).
+**#326 + #327 — a cancelled worker ends, and a failed pass names its cause**,
+branch `fix/silent-cancels-and-failure-causes-326`, PR #333. Python only. Compress into
+**Recently landed** once merged.
+
+- **The contract now covers the whole module, and a test sweeps for it.**
+  Every `QThread` in `gui/workers.py` mixes in `SingleOutcome`, asserted over
+  `vars(workers_module)` so a worker added later is covered without anyone
+  remembering to list it — with a guard (`len(worker_classes()) == 8`),
+  because an empty sweep passes vacuously. A second sweep pins the other half
+  both ways: `hasattr(cancelled) == hasattr(cancel)`, since a `cancelled`
+  signal no `cancel` can raise is the same silence.
+- **`QualityFilterWorker`, `PDFDiscoveryWorker`, `FulltextDiscoveryWorker`**
+  gained `cancelled` and end every run through `_end`. The discovery workers'
+  signal carries the error that also ended the run, or `""`; the quality worker's
+  carries `(filtered, assessments, total, error)`, because what it assessed
+  before the cancel is real and is kept.
+- **A cancel the runner cannot see is not a cancel.**
+  `QualityManager.filter_documents` takes `should_cancel`, asked **before**
+  each document (#324's rule, one worker along). Its flag previously only
+  muted the progress callback while every remaining document was still
+  assessed, and paid for.
+- **`AnswerWorker` and `OpenAthensAuthWorker` joined too** — but not for the
+  reason first written down. **PySide6 prints a slot's traceback and `emit()`
+  returns normally**, so a raising slot never re-enters the body's `except`
+  and there was no double report to fix. What they gain is the arm their
+  bodies lack: `except Exception` does not catch a `BaseException`, which
+  walked out of the thread with nothing emitted. A mutation survived before
+  this was corrected; the test now drives a `KeyboardInterrupt`.
+- **The interrogation tab keeps its worker until the run has ended.**
+  `_cancel_pdf_discovery` dropped the reference at click time, so the thread
+  ran on unobserved; `_cancel_fulltext_discovery` never released its worker at
+  all. Both now only ask it to stop, and the `cancelled` handler closes the
+  dialog and releases it. **A failure that ended the run alongside the cancel
+  goes to the log and no further** here: the user asked for the stop they got,
+  and provider text can carry the request (#330).
+- **#327: a failure names a document and a classified cause.** `PassFailure`
+  and `PassOutcome` (frozen, `data_models.py`) are what both passes' terminal
+  signals carry — `finished(outcome)`, `cancelled(outcome, error)` — and
+  `PassOutcome` **refuses impossible counts** rather than repairing them.
+  `pass_failure_detail()` (pure, `analysis_failures.py`) names the dominant
+  cause, its share, an example document *that cause happened to*, and the
+  advice for **every** cause among them; `advice_for_causes()` was extracted
+  from `analysis_failure_advice` so a shortfall and a per-document failure
+  cannot advise differently.
+- **The raw provider text never reaches the screen *on these paths*** (user's
+  call, 2026-09-20, over #327's own suggested wording): it can carry a
+  credential (#330). That covers the per-document failures **and**, since the
+  review of PR #333, the error that ends a whole pass: both workers now emit
+  `failure_cause_text(cause)` rather than `str(e)`, which used to be rendered
+  verbatim into a `QMessageBox`. `also_failed_text` still takes raw text at
+  its **six** remaining call sites — #330 is open for those, and said three.
+  `classify_analysis_exception()` (new, `utils.py`) is the "classify
+  the failure, not the wrapper" expression both benchmark runners had inline;
+  `scoring_failure_cause()` (new, `audit_records.py`) reads the cause out of
+  the row the agent *returned*, since it returns a failure rather than raising.
+- **An UNKNOWN design is not a failure** (#327's "also worth splitting"):
+  nothing broke and the model was honest, so it is `unclassified` and the user
+  is told its stored design is unchanged. Counted as a failure it made "6
+  documents failed classification" out of a clean pass.
+- **#332 — `QualityFilterWorker` is never constructed**; `_quality_worker` in
+  `systematic_review_tab.py` is always `None`, so its cancel and cleanup can
+  never run. Brought onto the contract and kept rather than deleted (user's
+  call, 2026-09-20). The review of PR #333 found the sting in this: the
+  `should_cancel` work above had landed **only** on that dead class, while the
+  quality filtering a user can actually start — inside `WorkflowWorker` —
+  still ran every remaining document after a cancel. That live call now passes
+  `should_cancel`; #332 stays open for the dead class itself.
+- **What the review of this PR changed** (2026-09-21). Three of the PR's own
+  claims did not hold, and each is now closed with a test that fails without
+  the fix:
+  - the `should_cancel` work had landed only on a class nothing constructs —
+    see #332 above;
+  - **the provider text still reached a dialog** by the other door: both
+    passes emitted `str(e)` on `error`/`cancelled` and
+    `_on_*_error` rendered it verbatim. They now emit
+    `failure_cause_text(cause)`;
+  - **`unclassified` documents fell out of the arithmetic on a cancel.**
+    `attempted` folds them in, but the sentence broke down only successes and
+    failures, so "after 9 of 20: 7 re-classified, other 11" lost two
+    documents — and the dialog explaining them was gated on something having
+    *failed*, so a clean cancel said nothing at all. The breakdown now names
+    them, on both the cancelled and the finished label, and the dialog is
+    gated on there being something to say.
+  Also: a superseded discovery's late `cancelled` used to close the *new*
+  run's dialog and drop its worker, leaving it running and uncancellable —
+  the connection now binds the emitting worker and a stale one is ignored;
+  `QualityFilterWorker` reports the assessments made before a failure instead
+  of two empty lists; both `_on_*_error` handlers refresh the table, since
+  each pass saves as it goes; and a document with no id can no longer abort a
+  whole pass through `PassFailure`'s own invariant.
+- **Verified** (2026-09-21, after the review fixes): `pytest tests/` — 1809
+  passed, 3 xfailed, with `tests/test_europepmc_integration.py` deselected;
+  `lint_delta.py --base <merge-base>` 0 new ruff or mypy findings.
+  `tests/test_silent_cancels.py` is 101 tests, and **21 mutations of the
+  behaviour above each fail a test**, no survivors (that sweep predates the
+  review fixes; the new tests were each confirmed to fail without their fix
+  instead). Both rules are in
+  `doc/cross_platform/analysis_failure_reporting.md`, the first now scoped to
+  what Python actually holds — see #334.
+- **`tests/test_europepmc_integration.py` was running in the default
+  `pytest tests/`** despite its own docstring saying it is excluded, because
+  `addopts` never carried `-m "not integration"` — CI passed that flag
+  explicitly, so only local runs hit the live network. `addopts` now carries
+  it; `pytest -m integration` still selects them.
+  Its intermittent failures were **not** a defect in this branch or in the
+  JATS code: the whole file passes (63 passed) when the requests are paced.
+  Europe PMC's nginx serves **503 after about two rapid requests**, with no
+  `Retry-After`, and stays throttled for up to ~70s, while the client's
+  retry budget (`EUROPEPMC_MAX_RETRIES = 3`, `backoff_factor=1`) is about 6s
+  of backoff. Lodged as **#341**, which matters in production too: a review
+  fetching many full texts spends most of its run throttled, and a throttled
+  article is reported as having no full text.
+- **Trap this slice walked into:** the mutation harness restored five files
+  from a `cp` backup *and* `git checkout`-ed a sixth it had not backed up,
+  `data_models.py`, which held the new value objects. Every later mutation
+  then reported CAUGHT because the tests failed for the wrong reason. **No git
+  in a mutation restore, for any path** — or commit first and mutate from
+  there.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **Cancelling a benchmark stops it, and says what it evaluated** (Python;
+  #324, PR #329, merged 2026-09-20). Both runners take `should_cancel`, asked
+  *before* each evaluation, so the run stops before paying for one more. **What
+  ran is kept**: stored `BenchmarkStatus.CANCELLED`, and it stays cancelled even
+  if it then crashed — stored `FAILED`, its evaluations fell outside the reuse
+  lookup and the user bought them twice. `get_all_scores_for_question` and
+  `get_evaluators_for_question` read cancelled runs; only `COMPLETED` is the
+  question's latest benchmark. **Reuse is relevance-only** — the quality
+  benchmark stores no per-document evaluation. **`BenchmarkCancellation`**
+  (frozen, `benchmarking/models.py`) refuses impossible counts;
+  `get_benchmark_result` cross-checks it against the run's status and raises
+  `StoredResultUnreadableError` for the misleading pair. **A partial comparison
+  never reads as a whole one**: the pure texts in `benchmarking/display.py`
+  reach both results tabs, both progress lines, the status bar and **both
+  exports**, and say what was *not started*, never what was paid for. Whether a
+  run was cancelled is the **runner's** answer (`result.cancellation`), not the
+  flag's; a cancel before the first evaluation **publishes nothing**. Lodged,
+  still open: **#330**, **#331**.
 
 - **A cancelled run on the Research Questions tab ends, and says so** (Python;
   #320, PR #325, merged 2026-09-20). **`SingleOutcome`** (`gui/workers.py`)
@@ -140,12 +277,11 @@ the rest.
   `_run_once()`, which reports whatever escapes. A docstring did not hold it —
   an import failing inside the body left `SearchFailedError` unbound, so the
   first `except` raised in turn and the thread ended in silence. **Imports
-  belong before the `try`.** Cancelling is not failing, but `cancelled`
-  carries the error that also ended the run (golden rule 8), and a cancel
-  landing after the last item stopped nothing, so the run `finished`. Every
-  run starts through `_set_busy_state()`, `_is_busy()` counts all four
-  workers, and each cleanup re-checks the buttons. Lodged, still open:
-  **#326**, **#327**, **#328**.
+  belong before the `try`.** Cancelling is not failing, but `cancelled` carries
+  the error that also ended the run (golden rule 8), and a cancel landing after
+  the last item stopped nothing, so the run `finished`. Every run starts through
+  `_set_busy_state()`, `_is_busy()` counts all four workers, and each cleanup
+  re-checks the buttons. Lodged, still open: **#328**.
 
 - **A quality benchmark counts a failure apart; a rerun retries one** (Python;
   #314/#316, PR #321, merged 2026-09-19). Same contract as below.
@@ -183,32 +319,26 @@ the rest.
 - **The analysis-failure family** (Python; #261–#264 PR #301, #302–#304 PR
   #305, merged 2026-09-17/18). The contract is
   `doc/cross_platform/analysis_failure_reporting.md`; read it first.
-  - **Vocabulary.** `AnalysisShortfall` (stage, failed, attempted, causes) in
-    `data_models.py`, pure functions in `analysis_failures.py`. Impossible
-    counts are *refused*, never repaired with `max()`: a floored `attempted`
-    reads as "every document failed", a terminal verdict.
-  - **Each stage fails in its own register.** Scoring raises
-    `AnalysisFailedError` only when *every* document failed; citation
-    extraction **never** raises; report generation raises rather than
-    returning its error as the report. A failed document is neither scored nor
-    rejected: `documents_scored == accepted + rejected`.
-  - **Classify the failure, not the wrapper.** `llm_retry` wraps every provider
-    failure in `RetryExhaustedError`; `classify_exhausted_retries()` reads
-    `last_error`. **A test patching `_score_with_retry`/`_extract_with_retry`
-    patches inside the decorator and cannot see this** — drive `_chat`.
-    Cancelling is not failing, and a later failure does not un-lose what an
-    earlier stage lost.
-  - **An answer with nothing in it is an answer** (#303): `{"passages": []}`
-    is *nothing quotable*; the report decides "extraction failed" from the
-    recorded shortfall alone, never from `documents_accepted > 0`.
-  - **The audit trail classifies instead of inferring** (#302): accepted,
-    rejected (the model's reason), failed (code + description), not scored (no
-    reason). **A restore is not a new record** — its own checkpoint's scores
-    and threshold, no auto-save; **an older record** gets a note, not the stock
-    "Score below minimum threshold". Both Horst's calls.
-  - **A degraded source is named where the source is named** (#304), in a
-    fixed phrase, never provider text. **`QProgressDialog.close()` emits
-    `canceled`** — use `_close_progress_dialog()`.
+  **Vocabulary**: `AnalysisShortfall` (stage, failed, attempted, causes) in
+  `data_models.py`, pure functions in `analysis_failures.py`; impossible counts
+  are *refused*, never repaired with `max()` — a floored `attempted` reads as
+  "every document failed", a terminal verdict. **Each stage fails in its own
+  register**: scoring raises `AnalysisFailedError` only when *every* document
+  failed, citation extraction **never** raises, report generation raises rather
+  than returning its error as the report; a failed document is neither scored
+  nor rejected (`documents_scored == accepted + rejected`). **Classify the
+  failure, not the wrapper** — `classify_exhausted_retries()` reads
+  `last_error`, and **a test patching `_score_with_retry` patches inside the
+  decorator and cannot see this**, so drive `_chat`. **An answer with nothing
+  in it is an answer** (#303): `{"passages": []}` is *nothing quotable*, and
+  the report decides "extraction failed" from the recorded shortfall alone.
+  **The audit trail classifies instead of inferring** (#302); **a restore is
+  not a new record** — its own checkpoint's scores and threshold, no auto-save,
+  and an older record gets a note rather than the stock threshold reason (both
+  Horst's calls). **A degraded source is named where the source is named**
+  (#304), in a fixed phrase, never provider text, and
+  **`QProgressDialog.close()` emits `canceled`** — use
+  `_close_progress_dialog()`.
 
 - **An unreadable store is kept whole, and a report records what its search
   lost** (iOS/macOS; #285 + #284, PR #291, merged 2026-09-17).
@@ -227,29 +357,24 @@ the rest.
   (#247/#248 PR #260, Android #252 PR #276, iOS/macOS #256/#253 PR #282;
   #255 closed everywhere 2026-09-17). The contract, one section per platform,
   is `doc/cross_platform/search_failure_reporting.md`; **read it before
-  touching any of this.** What is easiest to get wrong again:
-  - **Failures that leave nothing are an error**, never "No documents found"
-    (user, 2026-09-14), and a failure travels as kind + HTTP status only:
-    **no exception, body or parser message is kept** (each can print the NCBI
-    API key). **An HTTP 200 can be a failure**, a missing count is malformed
-    rather than 0, and **PubMed lists only 9,999 records**.
-  - **Shortfalls ride with the documents into the review** — a dialog alone
-    left the report claiming a complete search. Notice and Methodology line
-    are added by code, never the LLM. A stored shortfall degrades but is never
-    dropped; a damaged record stops a session before it spends anything.
-  - **A page that failures leave with no new document changes nothing**; a
-    failed later Europe PMC page ends the cursor, and **an ended cursor misses
-    every hit not received**. A failed alternative (smart-search) query has
-    **its own clause**; counts combine only within one query.
-  - **Swift shape.** The clients raise (`SourceRequestError`), the app
-    decides; paging travels as a `SearchContinuation`, and
-    **`SourceRequestError` must conform to `RetryableError`** or a 429 stops
-    being retried. **A lookup is not a page.** `refreshPaginationState`
-    replays pages already held: **no** shortfall, and finding nothing new is
-    ordinary — treating it as failure locked "Get more evidence" out of every
-    resumed session.
-  - Lodged across the three rounds: #258, #259, #261–#266 (Python),
-    #267–#275, #277–#280 (Android), #281, #283–#290 (Swift).
+  touching any of this.** Easiest to get wrong again: **failures that leave
+  nothing are an error**, never "No documents found" (user, 2026-09-14), and a
+  failure travels as kind + HTTP status only — **no exception, body or parser
+  message is kept** (each can print the NCBI API key). **An HTTP 200 can be a
+  failure**, a missing count is malformed rather than 0, and **PubMed lists
+  only 9,999 records**. **Shortfalls ride with the documents into the review**
+  — a dialog alone left the report claiming a complete search; notice and
+  Methodology line are added by code, never the LLM. **A page that failures
+  leave with no new document changes nothing**; a failed later Europe PMC page
+  ends the cursor, and **an ended cursor misses every hit not received**. A
+  failed alternative (smart-search) query has **its own clause**. **Swift
+  shape**: the clients raise (`SourceRequestError`), the app decides; paging
+  travels as a `SearchContinuation`, and **`SourceRequestError` must conform to
+  `RetryableError`** or a 429 stops being retried. **A lookup is not a page**,
+  and `refreshPaginationState` replays pages already held — **no** shortfall,
+  since finding nothing new is ordinary. Lodged across the three rounds: #258,
+  #259, #261–#266 (Python), #267–#275, #277–#280 (Android), #281, #283–#290
+  (Swift).
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
   #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs
@@ -378,12 +503,28 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- Lodged by PR #325, all Python: **#326** every background worker outside the
-  Research Questions tab still ends a cancel in silence (`SingleOutcome` is the
-  shape to reuse); **#327** a failed re-classification or re-scoring reports
-  how many failed, never which or why; **#328** a re-scored failure supersedes
-  a document's good score under latest-wins, and the Scored column does not
-  show it.
+- Lodged by PR #325, Python: **#328** a re-scored failure supersedes a
+  document's good score under latest-wins, and the Scored column does not show
+  it (a cancelled re-score also leaves an empty checkpoint). **#326** and
+  **#327** are the slice in flight above.
+- Lodged by PR #329, Python: **#330** `also_failed_text` interpolates the raw
+  provider error into a progress label and a dialog, and it can carry a
+  credential — **six** production call sites, not the three recorded here
+  until the review of PR #333 counted them; the remedy (classify, log the raw
+  text) is golden rule 13, so it was put to the user rather than made
+  silently; **#331** a stored quality benchmark result has no reader, so a
+  cancelled one's partiality is lost the moment anyone adds a history view
+  (mirror the relevance `get_benchmark_result`, status cross-check included).
+- Lodged by the review of PR #333, Python: **#334** `WorkflowWorker` — the
+  whole systematic review — is not on the single-terminal-signal contract and
+  reports a cancel as `finished`; **#335** a storage failure inside a pass is
+  classified as a *provider* failure, so a full disk is advised to "check that
+  Ollama is running"; **#336** a pass that ends on an error does not say how
+  far it got; **#337** the pass workers' `_run_once` fallback reports a
+  cancelled run as an outright error; **#338** the contract sweep checks
+  inheritance rather than use, and reaches one module; **#339** type-design
+  cleanups around `PassOutcome`/`PassFailure`; **#340** a cancelled re-run
+  discards the search shortfalls it recorded.
 - **#319** the review's quality filter records a failed classification as an
   "unknown" design, which `passes_filter()` then decides on (what the filter
   does with such a document is a maintainer decision).

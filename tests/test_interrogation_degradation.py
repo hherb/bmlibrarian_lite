@@ -57,12 +57,17 @@ FULL_TEXT = "# Aspirin trial\n\nAspirin reduced stroke incidence in 4,000 patien
 
 
 class StubFulltextWorker(QObject):
-    """Full-text discovery that answers only when the test emits for it."""
+    """Full-text discovery that answers only when the test emits for it.
+
+    ``cancelled`` is the worker's signal (#326), so the record of having been
+    asked to stop is ``stopped``.
+    """
 
     progress = Signal(str, str)
     finished = Signal(str, str, str)
     paywall_detected = Signal(str, str)
     error = Signal(str)
+    cancelled = Signal(str)
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         """Take the real worker's arguments and ignore them.
@@ -72,14 +77,14 @@ class StubFulltextWorker(QObject):
             **_kwargs: Likewise.
         """
         super().__init__()
-        self.cancelled = False
+        self.stopped = False
 
     def start(self) -> None:
         """Nothing runs until the test emits a result."""
 
     def cancel(self) -> None:
         """Record that the tab stopped discovery."""
-        self.cancelled = True
+        self.stopped = True
 
 
 class StubPdfWorker(QObject):
@@ -90,6 +95,7 @@ class StubPdfWorker(QObject):
     verification_warning = Signal(str, str)
     paywall_detected = Signal(str, str)
     error = Signal(str)
+    cancelled = Signal(str)
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         """Take the real worker's arguments and ignore them.
@@ -99,12 +105,14 @@ class StubPdfWorker(QObject):
             **_kwargs: Likewise.
         """
         super().__init__()
+        self.stopped = False
+
+    def cancel(self) -> None:
+        """Record that the tab stopped discovery."""
+        self.stopped = True
 
     def start(self) -> None:
         """Nothing runs until the test emits a result."""
-
-    def cancel(self) -> None:
-        """Nothing to stop."""
 
 
 @pytest.fixture
@@ -424,7 +432,7 @@ class TestClosingTheProgressDialogIsNotCancellingIt:
 
         assert FULLTEXT_CANCELLED in live_tab._bubbles.last
         assert not said_unavailable(live_tab)
-        assert live_tab._fulltext_worker.cancelled
+        assert live_tab._fulltext_worker.stopped
 
     def test_a_pdf_that_arrives_after_sign_in_is_not_reported_as_failed(
         self, live_tab: Any

@@ -518,11 +518,40 @@ class DocumentInterrogationTab(QWidget):
             dialog.close()
 
     def _cancel_pdf_discovery(self) -> None:
-        """Cancel any running PDF discovery."""
+        """Ask a running PDF discovery to stop.
+
+        The reference is kept: only the worker knows when it has actually
+        stopped, and it says so on ``cancelled`` (#326). Dropped here, the
+        thread ran on unobserved.
+        """
         if self._pdf_worker:
             self._pdf_worker.cancel()
-            self._pdf_worker = None
         self._close_progress_dialog()
+
+    def _on_pdf_cancelled(self, error: str, worker: object | None = None) -> None:
+        """A PDF discovery has finished stopping.
+
+        The tab was returned to ready when Cancel was clicked, so there is
+        nothing left to undo; what was missing is that the run ever said it
+        was over (#326). A failure that ended it alongside the cancel goes
+        to the log and no further: the user asked for the stop they got, and
+        provider text can carry the request, credentials and all (#330).
+
+        Args:
+            error: The error that also ended the run, or an empty string.
+            worker: The run that is reporting. A cancelled download can take
+                many seconds to notice, by which time the user may have
+                started another; acting on a stale run's signal closed the
+                new run's dialog and dropped its worker, leaving it running
+                and no longer cancellable (#326).
+        """
+        if worker is not None and worker is not self._pdf_worker:
+            logger.debug("A superseded PDF discovery reported its cancel")
+            return
+        self._close_progress_dialog()
+        self._pdf_worker = None
+        if error:
+            logger.warning(f"PDF discovery was cancelled, and also failed: {error}")
 
     def _fetch_pdf_from_identifier(self) -> None:
         """Fetch PDF using DOI/PMID."""
@@ -571,6 +600,9 @@ class DocumentInterrogationTab(QWidget):
         self._pdf_worker.verification_warning.connect(self._on_pdf_warning)
         self._pdf_worker.paywall_detected.connect(lambda url, err: self._on_paywall_detected(url, err, on_error))
         self._pdf_worker.error.connect(lambda e: self._on_pdf_error(e, on_error))
+        self._pdf_worker.cancelled.connect(
+            lambda e, w=self._pdf_worker: self._on_pdf_cancelled(e, w)
+        )
         self._pdf_worker.start()
 
     def _on_pdf_ready(self, file_path: str, callback=None) -> None:
@@ -867,6 +899,9 @@ class DocumentInterrogationTab(QWidget):
             lambda url, err: self._on_paywall_detected(url, err, on_error)
         )
         self._fulltext_worker.error.connect(lambda e: self._on_fulltext_error(e, citation, on_error))
+        self._fulltext_worker.cancelled.connect(
+            lambda e, w=self._fulltext_worker: self._on_fulltext_cancelled(e, w)
+        )
         self._fulltext_worker.start()
 
     def _on_fulltext_ready(
@@ -911,9 +946,41 @@ class DocumentInterrogationTab(QWidget):
             self._load_citation_abstract(citation, FULLTEXT_UNAVAILABLE)
 
     def _cancel_fulltext_discovery(self) -> None:
-        """Cancel ongoing full-text discovery."""
+        """Ask a running full-text discovery to stop.
+
+        Only the worker knows when it has actually stopped, and it says so on
+        ``cancelled`` (#326).
+        """
         if self._fulltext_worker:
             self._fulltext_worker.cancel()
+
+    def _on_fulltext_cancelled(
+        self, error: str, worker: object | None = None
+    ) -> None:
+        """A full-text discovery has finished stopping.
+
+        The abstract was already loaded, naming the cancellation, when Cancel
+        was clicked; what was missing is that the run ever said it was over,
+        so the worker was never released (#326). See
+        :meth:`_on_pdf_cancelled` for why a failure that ended it alongside
+        the cancel goes no further than the log.
+
+        Args:
+            error: The error that also ended the run, or an empty string.
+            worker: The run that is reporting. See :meth:`_on_pdf_cancelled`:
+                a stale run's signal must not close the dialog of the run
+                that replaced it, the more so because both paths share
+                ``_pdf_progress_dialog`` (#326).
+        """
+        if worker is not None and worker is not self._fulltext_worker:
+            logger.debug("A superseded full-text discovery reported its cancel")
+            return
+        self._close_progress_dialog()
+        self._fulltext_worker = None
+        if error:
+            logger.warning(
+                f"Full-text discovery was cancelled, and also failed: {error}"
+            )
 
     def _load_citation_fulltext(self, content: str, citation: 'Citation', source_type: str) -> None:
         """Load full-text markdown content for citation."""

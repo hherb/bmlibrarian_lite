@@ -717,6 +717,141 @@ def distinct_causes(
     return tuple(seen)
 
 
+@dataclass(frozen=True)
+class PassFailure:
+    """One document a re-classification or re-scoring pass could not finish (#327).
+
+    The pass counted its failures and logged the rest, so seventeen documents
+    behind one unreachable provider and seventeen unprocessable abstracts
+    reached the user as the same sentence: "17 documents failed". The user
+    could not tell a retry from a dead end.
+
+    The cause is classified, never the provider's own words: those can print
+    the request, credentials and all, and belong in the log (#330).
+
+    Attributes:
+        document_id: The document the pass was working on.
+        cause: What went wrong, classified.
+
+    Raises:
+        ValueError: On construction, if the document is unnamed or the cause
+            is not a failure. A failure with no cause and no document is the
+            count this class exists to replace.
+    """
+
+    document_id: str
+    cause: EvaluationErrorCode
+
+    def __post_init__(self) -> None:
+        """Refuse a failure that names neither a document nor a cause.
+
+        Raises:
+            ValueError: If the document id is not a non-empty string, if the
+                cause is not an :class:`EvaluationErrorCode`, or if it is
+                ``SUCCESS``, which is not a failure.
+        """
+        if not isinstance(self.document_id, str) or not self.document_id:
+            raise ValueError("A pass failure names the document it happened to")
+        if not isinstance(self.cause, EvaluationErrorCode):
+            raise ValueError("A pass failure names a classified cause")
+        if self.cause is EvaluationErrorCode.SUCCESS:
+            raise ValueError("A pass failure cannot be caused by success")
+
+
+@dataclass(frozen=True)
+class PassOutcome:
+    """What a re-classification or re-scoring did with the documents it was given.
+
+    Both passes reported a pair of counts, which a cancel then had to be told
+    separately (#320) and which said nothing about why anything failed (#327).
+    This is the one value both their terminal signals carry.
+
+    A document the model answered for without naming a study design is neither
+    a success nor a failure: nothing broke, and the model was honest. Counted
+    as a failure it made "6 documents failed classification" out of a pass in
+    which nothing went wrong.
+
+    Attributes:
+        succeeded: Documents the pass finished.
+        failures: One per document it could not finish, in the order they
+            happened.
+        total: Documents it was given.
+        unclassified: Documents the model answered for without naming a study
+            design. Re-classification only; re-scoring has no such answer.
+
+    Raises:
+        ValueError: On construction, for counts that cannot be true --
+            negative, or attempting more documents than were given. A pass
+            that reports more work than it was given is not describing a run
+            that happened.
+    """
+
+    succeeded: int
+    failures: tuple[PassFailure, ...] = ()
+    total: int = 0
+    unclassified: int = 0
+
+    def __post_init__(self) -> None:
+        """Refuse counts that cannot be true, and keep the failures a tuple.
+
+        Impossible counts are refused rather than repaired: a clamped count
+        reads as a fact about the run, and the repair is invisible (#261).
+
+        Raises:
+            ValueError: If any count is not a whole number of at least zero,
+                if the failures are not :class:`PassFailure` values, or if
+                more documents were attempted than the pass was given.
+        """
+        object.__setattr__(self, "failures", tuple(self.failures))
+        for count in (self.succeeded, self.total, self.unclassified):
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                raise ValueError("A pass outcome counts documents in whole numbers")
+        if not all(isinstance(failure, PassFailure) for failure in self.failures):
+            raise ValueError("A pass outcome's failures each name a document and a cause")
+        if self.attempted > self.total:
+            raise ValueError(
+                "A pass outcome cannot attempt more documents than it was given"
+            )
+
+    @property
+    def failed(self) -> int:
+        """How many documents the pass could not finish.
+
+        Returns:
+            The number of failures, which is what the user is told.
+        """
+        return len(self.failures)
+
+    @property
+    def attempted(self) -> int:
+        """How many documents the pass reached.
+
+        Returns:
+            The successes, the failures and the documents left unclassified:
+            every document it got an answer about, one way or another.
+        """
+        return self.succeeded + self.failed + self.unclassified
+
+    @property
+    def not_attempted(self) -> int:
+        """How many documents the pass never reached.
+
+        Returns:
+            What a cancel stopped it from getting to; zero for a pass that
+            ran to the end.
+        """
+        return self.total - self.attempted
+
+    @property
+    def causes(self) -> tuple[EvaluationErrorCode, ...]:
+        """Why documents failed, each cause once.
+
+        Returns:
+            Each distinct cause, in the order it first occurred.
+        """
+        return distinct_causes(failure.cause for failure in self.failures)
+
+
 class EvaluatorType(Enum):
     """Type of evaluator that produced an evaluation."""
 

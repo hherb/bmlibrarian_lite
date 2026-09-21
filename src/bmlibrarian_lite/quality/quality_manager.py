@@ -163,6 +163,7 @@ class QualityManager:
         documents: list[LiteDocument],
         filter_settings: QualityFilter,
         progress_callback: Optional[Callable[[int, int, QualityAssessment], None]] = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> tuple[list[LiteDocument], list[QualityAssessment]]:
         """
         Filter documents based on quality criteria.
@@ -174,15 +175,29 @@ class QualityManager:
             documents: List of documents to filter
             filter_settings: Quality filter configuration
             progress_callback: Optional callback(current, total, assessment)
+            should_cancel: Asked before each document, and the run stops at
+                the first True -- before the assessment that document would
+                pay for. Without it a cancel could only mute the progress
+                callback while every remaining document was still assessed
+                (#324's mistake, one worker along; #326).
 
         Returns:
-            Tuple of (filtered_documents, all_assessments)
+            Tuple of (filtered_documents, all_assessments), holding only the
+            documents assessed before a cancel: what was assessed is real, and
+            is kept. How far it got is ``len(assessments)``.
         """
         filtered: list[LiteDocument] = []
         assessments: list[QualityAssessment] = []
 
         total = len(documents)
         for i, doc in enumerate(documents):
+            if should_cancel is not None and should_cancel():
+                logger.info(
+                    f"Quality filtering cancelled after {len(assessments)} "
+                    f"of {total} documents"
+                )
+                break
+
             assessment = self.assess_document(doc, filter_settings)
             assessments.append(assessment)
 

@@ -44,7 +44,6 @@ from ..data_models import (
     Evaluator,
     LiteDocument,
 )
-from ..exceptions import RetryExhaustedError
 from ..llm import LLMClient, LLMMessage
 from ..quality.data_models import (
     QualityAssessment,
@@ -56,7 +55,7 @@ from ..quality.data_models import (
 )
 from ..quality.study_classifier import STUDY_DESIGN_MAPPING
 from ..storage import LiteStorage
-from ..utils import classify_exhausted_retries, classify_llm_exception
+from ..utils import classify_analysis_exception
 from .models import BenchmarkCancellation
 from .quality_models import (
     QualityBenchmarkResult,
@@ -717,11 +716,7 @@ Focus on THIS study's methodology, not studies it references."""
                 json_mode=True,
             )
         except Exception as e:
-            error_code = (
-                classify_exhausted_retries(e)
-                if isinstance(e, RetryExhaustedError)
-                else classify_llm_exception(e)
-            )
+            error_code = classify_analysis_exception(e)
             logger.error(
                 f"Failed to assess document {document.id} with "
                 f"{evaluator.display_name} ({error_code.name}): {e}"
