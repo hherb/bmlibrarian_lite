@@ -42,6 +42,13 @@ here turn either record into what a reader sees.
 - :func:`also_failed_text` names an error that ended a run alongside
   something else -- a cancel. It takes a bare error rather than a shortfall:
   cancelling is not failing, but a failure is never hidden (golden rule 8).
+- :func:`unreachable_source_caveat` says a source could not be read, so what
+  it would have told us is not assessed rather than absent (#346).
+  :func:`unreachable_lookups_clause` names the sources a full-text discovery
+  could not ask, each once; :func:`no_pdf_sources_message`,
+  :func:`paywall_message` and :func:`with_unestablished_access` are the three
+  sentences that carry it to the reader, and none of them claims a licence
+  that the lookup we could not make was the one to establish (#347).
 
 None of these put the provider's own words on the screen: those can print the
 request, credentials and all, and stay in the log (#330).
@@ -317,7 +324,7 @@ def unclassified_text(unclassified: int) -> str:
 def unreachable_source_caveat(
     service: str, failure: RequestFailure, sought: str
 ) -> str:
-    """Say that a source could not be read, so what follows is not a finding.
+    """Say that a source could not be read, so what it holds is not assessed.
 
     A source that answered "nothing" and one we could not reach are opposite
     answers, and only the first is the article's fault (#186, #187, #346).
@@ -333,31 +340,51 @@ def unreachable_source_caveat(
         service: The source that could not be read, named as the reader
             knows it, for example ``"Europe PMC"``.
         failure: Why it could not be read.
-        sought: What was being looked for, as a noun phrase completing "so
-            ...", for example ``"its data availability statement"``.
+        sought: What was being looked for, substituted into "so ... could
+            not be checked", for example ``"its data availability
+            statement"``.
 
     Returns:
-        One sentence, ending in a full stop.
+        Two sentences, ending in a full stop: what could not be read, and
+        that the result is therefore not a finding against the study. The
+        second says what *was* recorded rather than warning about an
+        absence reported elsewhere -- a caller that raises this caveat
+        records "not assessed", so there is no absence to discount.
     """
     return (
         f"{service} could not be read ({failure.describe()}), so {sought} "
-        f"could not be checked. An absence reported below is not evidence "
-        f"the study has none."
+        f"could not be checked. It is recorded as not assessed, which is "
+        f"not a finding against the study."
     )
+
+
+#: What a lookup we could not make leaves open, as the reader is told it.
+#: One place, because three sentences end with it and they must not drift.
+_ACCESS_NOT_ESTABLISHED = (
+    "so a freely available copy may exist. Whether this document is open "
+    "access was not established."
+)
 
 
 def unreachable_lookups_clause(failures: Sequence[SourceLookupFailure]) -> str:
     """Name the sources that could not be asked, each once.
 
-    Two lookups against one throttled host are one thing to tell the reader,
-    so the services are reduced here rather than at each place this is read.
+    Two lookups against one throttled host are one thing to tell the reader.
+    No caller records more than one failure per service today, so the
+    reduction is defensive rather than load-bearing; it is done here so that
+    a caller which starts recording per-attempt failures cannot make the
+    sentence repeat itself.
+
+    Where one service failed twice differently, the first failure is the one
+    described: they are equally true, and naming both would spend the
+    reader's attention on our retry policy rather than on the article.
 
     Args:
         failures: The lookups that could not be made; may be empty.
 
     Returns:
-        For example ``"Unpaywall (HTTP 429 Too Many Requests)"``, or two
-        such joined by "and". Empty when nothing failed.
+        For example ``"Unpaywall (HTTP 429 Too Many Requests)"``; several
+        are joined by commas with a final "and". Empty when nothing failed.
     """
     seen: dict[str, str] = {}
     for failure in failures:
@@ -368,6 +395,73 @@ def unreachable_lookups_clause(failures: Sequence[SourceLookupFailure]) -> str:
     if len(clauses) == 1:
         return clauses[0]
     return f"{', '.join(clauses[:-1])} and {clauses[-1]}"
+
+
+def unestablished_access_clause(failures: Sequence[SourceLookupFailure]) -> str:
+    """Say which sources were never asked, and what that leaves open.
+
+    Args:
+        failures: The lookups that could not be made; may be empty.
+
+    Returns:
+        Two sentences ending in a full stop, or empty when every lookup was
+        made. Never the bare denial "this is not evidence the document
+        requires access": read on its own, that repeats the claim it means
+        to withdraw.
+    """
+    if not failures:
+        return ""
+    return f"{unreachable_lookups_clause(failures)} could not be asked, {_ACCESS_NOT_ESTABLISHED}"
+
+
+def with_unestablished_access(
+    claim: str, failures: Sequence[SourceLookupFailure]
+) -> str:
+    """Add what was never asked to a claim that does not depend on it.
+
+    For a claim about *our* attempts -- that no source we reached served a
+    PDF -- which stays true whatever the unasked sources would have said.
+    A claim about the document's access is not of that kind; see
+    :func:`paywall_message`.
+
+    Args:
+        claim: The sentence to qualify, ending in a full stop.
+        failures: The lookups that could not be made; may be empty.
+
+    Returns:
+        ``claim`` when every lookup was made, else ``claim`` followed by
+        :func:`unestablished_access_clause`.
+    """
+    clause = unestablished_access_clause(failures)
+    return f"{claim} {clause}" if clause else claim
+
+
+def paywall_message(claim: str, failures: Sequence[SourceLookupFailure]) -> str:
+    """Say a source refused access, without claiming the document is paywalled.
+
+    A source that answers 401 or 403 establishes that *that* source wants
+    payment, not that the document has no free copy elsewhere -- and the
+    lookup we could not make is exactly the one that would have found it.
+    So where a lookup failed the claim is withheld rather than stated and
+    then retracted (#347).
+
+    Args:
+        claim: What to say when nothing failed: the wording of the source
+            that refused, ending in a full stop. It is deliberately unused
+            otherwise, because a claim about this document's access is
+            precisely what cannot be stood behind then.
+        failures: The lookups that could not be made; may be empty.
+
+    Returns:
+        One or two sentences for the reader, ending in a full stop.
+    """
+    if not failures:
+        return claim
+    return (
+        f"A source refused access, but "
+        f"{unreachable_lookups_clause(failures)} could not be asked, "
+        f"{_ACCESS_NOT_ESTABLISHED}"
+    )
 
 
 def no_pdf_sources_message(failures: Sequence[SourceLookupFailure]) -> str:
@@ -382,7 +476,7 @@ def no_pdf_sources_message(failures: Sequence[SourceLookupFailure]) -> str:
         failures: The lookups that could not be made; may be empty.
 
     Returns:
-        One sentence for the reader, ending in a full stop.
+        Two sentences for the reader, ending in a full stop.
     """
     if not failures:
         return (
@@ -390,7 +484,7 @@ def no_pdf_sources_message(failures: Sequence[SourceLookupFailure]) -> str:
             "access."
         )
     return (
-        f"No PDF sources found, but {unreachable_lookups_clause(failures)} "
-        f"could not be asked, so a freely available copy may exist. Whether "
-        f"this document is open access was not established."
+        f"No PDF sources found, but "
+        f"{unreachable_lookups_clause(failures)} could not be asked, "
+        f"{_ACCESS_NOT_ESTABLISHED}"
     )

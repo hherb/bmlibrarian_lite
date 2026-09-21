@@ -108,7 +108,8 @@ logged **and reported**).
   neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
   data availability statement — a number and a claim invented out of our own
   throttling. No risk-of-bias indicator may be raised from a source that was
-  never read.
+  never read — a rule the data-availability path now keeps and the COI path
+  does not yet (#351, #352).
 - **One status is genuinely about the article.** Europe PMC answers `404` for
   a PMC ID it holds no open-access full text for, and Unpaywall answers `404`
   for a DOI it has no record of. Those stay absences. Every other failure —
@@ -127,16 +128,41 @@ logged **and reported**).
   failed, the replacement says a freely available copy may exist and that open
   access *was not established* — it does not repeat the paywall claim in order
   to negate it, because that phrase read in isolation is the harm.
-- **Keep a control test for the honest finding.** Returning "unknown"
-  unconditionally passes every test that only checks the unreachable path. A
-  reachable source that answers "no statement" must still report `NOT_STATED`,
-  and an article genuinely without an open-access PDF must still get today's
-  wording.
+- **Unreadable is not absent either.** A source that answers `2xx` with an
+  empty body, or XML that does not parse, has told us nothing about the
+  article — so that is "not assessed" too, not an absence. The same for a
+  body whose shape we cannot read: `FullTextFetch` refuses a blank XML, and
+  the id converter routes a `pmcid` it cannot read to a failure while a
+  `pmcid` key that is simply *absent* stays the article's answer.
+- **Every unsuccessful path says it in words.** Carrying the failures in a
+  field is not reporting them: `DiscoveryResult.lookup_failures` reached no
+  consumer in its first form, so the qualifier now goes into `error` on
+  every unsuccessful return — the paywall, the failed download, and the
+  "no sources" sentence alike. A field nobody reads reproduces the defect
+  one layer up.
+- **Keep a control test for the honest finding, and for the success path.**
+  Returning "unknown" unconditionally passes every test that only checks the
+  unreachable path. A reachable source that answers "no statement" must still
+  report `NOT_STATED`; an article genuinely without an open-access PDF must
+  still get today's wording; and a source that *serves* the full text must be
+  shown to have it read, or the whole fix can silently become "nothing is
+  ever fetched".
 
-**Ports.** Python is canonical and has landed this. Swift
+**Ports.** Python is canonical and has landed this for the two paths #346 and
+#347 name: the Europe PMC full-text fetch behind data availability, and the
+three full-text discovery lookups. Swift
 (`Packages/BioMedLit/Sources/BioMedLit/Transparency/`) and Android still read
 an unreachable source as an absence — tracked on #346. No transparency
 *pattern* changes here, so the parity fixtures are not involved.
+
+**Still outstanding in Python**, so do not read the rule as fully enforced
+before checking: `EuropePMCClient.get_article` remains an ambiguous
+`Optional` and feeds COI (#351); the COI badge reads "Disclosed" for every
+study (#352); data availability still fabricates `NOT_STATED` for articles
+outside PMC (#353); `FulltextDiscoverer` maps every failure to `NOT_FOUND`
+(#354); a lookup skipped for want of configuration records nothing (#355);
+and trial registration and funding read an unreachable source as an absence
+(#356).
 
 ## What a stage records
 

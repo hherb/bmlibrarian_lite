@@ -190,30 +190,84 @@ class FullTextFetch:
     "this article has no open-access full text" and "we could not reach the
     service" -- and the caller read both as the first. A paper whose data
     availability statement we never managed to fetch was then reported to a
-    clinician as a paper that has none, and charged the score for it.
+    clinician as a paper that has none, and charged the score for it. The
+    full account is in ``doc/cross_platform/analysis_failure_reporting.md``.
 
-    The two states are opposite answers and only one of them is the
-    article's fault, so they are kept apart here rather than documented
-    apart: an XML and a failure together is refused, which is the ambiguity
-    itself made unrepresentable.
+    The three states -- served, absent, unreachable -- are reached through
+    :meth:`served`, :meth:`absent` and :meth:`unreachable` rather than by
+    choosing which fields to pass, because the dangerous one is the claim
+    about the article and it must not be what a caller gets by default.
 
     Attributes:
-        xml: The full text, when it was fetched.
+        xml: The full text, when it was fetched. Never empty: a source that
+            answers 2xx with nothing in the body has told us nothing about
+            the article, so that is a malformed answer, not an absence.
         failure: Why it could not be fetched, when the service could not be
             reached. ``None`` with no ``xml`` means the source answered, and
             answered that it holds no open-access full text.
 
     Raises:
-        ValueError: On construction, if both an XML and a failure are given.
+        ValueError: On construction, if both an XML and a failure are given,
+            or if the XML is present but blank.
     """
 
     xml: str | None = None
     failure: RequestFailure | None = None
 
     def __post_init__(self) -> None:
-        """Refuse a fetch that both succeeded and failed."""
+        """Refuse a fetch that both succeeded and failed, or served nothing."""
         if self.xml is not None and self.failure is not None:
             raise ValueError("A full-text fetch either succeeded or failed, not both")
+        if self.xml is not None and not self.xml.strip():
+            raise ValueError("A full-text fetch that served nothing is not a full text")
+
+    @classmethod
+    def served(cls, xml: str) -> "FullTextFetch":
+        """The source served the full text.
+
+        Args:
+            xml: The full text, which must not be blank.
+
+        Returns:
+            The fetch.
+
+        Raises:
+            ValueError: If the XML is blank.
+        """
+        return cls(xml=xml)
+
+    @classmethod
+    def absent(cls) -> "FullTextFetch":
+        """The source answered, and holds no open-access full text.
+
+        This is the one state that is a fact about the article, so it is
+        named rather than left as the zero-argument default.
+
+        Returns:
+            The fetch.
+        """
+        return cls()
+
+    @classmethod
+    def unreachable(cls, failure: RequestFailure) -> "FullTextFetch":
+        """The source could not be reached, so the article is unassessed.
+
+        Args:
+            failure: Why it could not be reached.
+
+        Returns:
+            The fetch.
+        """
+        return cls(failure=failure)
+
+    @property
+    def is_unreachable(self) -> bool:
+        """Whether the source could not be reached.
+
+        Returns:
+            ``True`` when nothing about the article was established.
+        """
+        return self.failure is not None
 
 
 @dataclass(frozen=True)
@@ -227,11 +281,17 @@ class SourceLookupFailure:
     Unpaywall or doi.org throttled.
 
     The service is named rather than enumerated because the set is open: a
-    publisher host is discovered from a DOI, not listed in advance.
+    publisher host is discovered from a DOI, not listed in advance. The
+    names in use are the ``SERVICE_*`` constants in
+    :mod:`~bmlibrarian_lite.constants`.
 
     Attributes:
         service: The source that could not be asked, named as the reader
-            knows it, for example ``"Unpaywall"``.
+            knows it, for example ``"Unpaywall"``. Stripped on construction,
+            because equality of this string is the grouping contract:
+            :func:`~bmlibrarian_lite.analysis_failures.unreachable_lookups_clause`
+            names each service once, and a stray space would make one
+            throttled host read to the reader as two.
         failure: Why, carrying the kind and HTTP status only -- never the
             provider's text, which for Unpaywall embeds the user's email
             address (#330).
@@ -245,9 +305,10 @@ class SourceLookupFailure:
     failure: RequestFailure
 
     def __post_init__(self) -> None:
-        """Refuse a failure that names no service."""
+        """Refuse a failure that names no service, and normalise the name."""
         if not self.service or not self.service.strip():
             raise ValueError("A source lookup failure names the service it asked")
+        object.__setattr__(self, "service", self.service.strip())
 
 
 # The kinds whose failure is an HTTP answer, and so can name its status.

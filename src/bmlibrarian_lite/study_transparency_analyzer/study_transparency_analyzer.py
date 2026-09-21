@@ -26,8 +26,8 @@ from urllib3.util.retry import Retry
 
 from ..polite_session import mount_politely
 from ..analysis_failures import unreachable_source_caveat
-from ..constants import HTTP_NOT_FOUND
-from ..data_models import FullTextFetch
+from ..constants import HTTP_NOT_FOUND, SERVICE_EUROPE_PMC
+from ..data_models import FullTextFetch, RequestFailure, RequestFailureKind
 from ..search_failures import request_failure_from_exception
 
 # Each client below owns its own request loop and its own error handling,
@@ -1302,8 +1302,27 @@ class EuropePMCClient:
             data = response.json()
             results = data.get('resultList', {}).get('result', [])
             return results[0] if results else None
-        except (requests.RequestException, IndexError) as e:
-            logger.error(f"Europe PMC API error: {e}")
+        except requests.RequestException as e:
+            # Never the provider's own text: a requests exception embeds the
+            # request URL, which for our credentialled lookups carries the
+            # API key or the user's email (#196, #330).
+            failure = request_failure_from_exception(e)
+            logger.warning(
+                "Europe PMC could not be asked about %s (%s), so anything it "
+                "holds on this article is not assessed, not absent.",
+                pmcid or pmid,
+                failure.describe(),
+            )
+            return None
+        except (KeyError, TypeError, AttributeError):
+            # The body was not the shape we assumed. Unreadable is not
+            # absent, and this still returns None: the ambiguity that
+            # remains here is #351, which needs the callers changed too.
+            logger.warning(
+                "Europe PMC answered about %s in a shape we cannot read, so "
+                "anything it holds on this article is not assessed.",
+                pmcid or pmid,
+            )
             return None
 
     def get_full_text_xml(self, pmcid: str) -> FullTextFetch:
@@ -1319,15 +1338,13 @@ class EuropePMCClient:
             open-access full text for this article.
 
         Note:
-            This used to return ``Optional[str]``, where ``None`` meant
-            either "no open-access full text" or "we could not reach Europe
-            PMC". The caller read both as the first and reported "no data
-            availability statement" for papers that have one (#346).
-
             A ``404`` is the one failure that really is about the article:
             it is how Europe PMC says it holds no full text for that PMC ID,
             so it stays an absence. Treating it as unreachable would put a
             caveat on every closed-access paper and drown the honest ones.
+
+            Why this is not an ``Optional[str]`` is in
+            ``doc/cross_platform/analysis_failure_reporting.md``.
         """
         pmcid = pmcid.upper()
         if not pmcid.startswith('PMC'):
@@ -1337,14 +1354,25 @@ class EuropePMCClient:
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
-            return FullTextFetch(xml=response.text)
+            if not response.text.strip():
+                # A 2xx that served nothing tells us nothing about the
+                # article, so it is a malformed answer, not an absence.
+                logger.warning(
+                    "Europe PMC served an empty body for %s, so any statement "
+                    "it carries is not assessed.",
+                    pmcid,
+                )
+                return FullTextFetch.unreachable(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                )
+            return FullTextFetch.served(response.text)
         except requests.RequestException as e:
             failure = request_failure_from_exception(e)
             if failure.status_code == HTTP_NOT_FOUND:
                 logger.info(
                     "Europe PMC holds no open-access full text for %s.", pmcid
                 )
-                return FullTextFetch()
+                return FullTextFetch.absent()
             # Never silently: a throttled Europe PMC and an article without
             # full text are not the same thing, and only one of them is the
             # article's fault (golden rule 8).
@@ -1354,7 +1382,7 @@ class EuropePMCClient:
                 pmcid,
                 failure.describe(),
             )
-            return FullTextFetch(failure=failure)
+            return FullTextFetch.unreachable(failure)
 
 
 class OpenAlexClient:
@@ -2322,6 +2350,33 @@ class StudyTransparencyAnalyzer:
                     "Industry funding detected but COI statement does not mention industry ties"
                 )
 
+    @staticmethod
+    def _record_data_availability_unassessed(
+        report: TransparencyReport, failure: RequestFailure
+    ) -> None:
+        """Record that nobody established this study's data availability.
+
+        UNKNOWN scores neutral and is matched by no risk indicator, so the
+        paper is charged nothing for a source we could not read. NOT_STATED
+        would cost it five points and tell a clinician it publishes no data
+        availability statement -- a number and a claim invented out of our
+        own throttling (#346).
+
+        Args:
+            report: The report to record it on; its warnings gain the caveat.
+            failure: Why Europe PMC could not be read, or its answer read.
+        """
+        report.data_availability = DataAvailabilityInfo(
+            disclosure_level=DataDisclosureLevel.UNKNOWN
+        )
+        report.warnings.append(
+            unreachable_source_caveat(
+                SERVICE_EUROPE_PMC,
+                failure,
+                "this study's data availability statement",
+            )
+        )
+
     def _analyze_data_availability(
         self,
         report: TransparencyReport,
@@ -2350,18 +2405,9 @@ class StudyTransparencyAnalyzer:
                 # so the analysis stops here rather than reading its silence
                 # as a finding. NOT_STATED would cost the paper five points
                 # and tell a clinician it publishes no data statement (#346).
-                report.data_availability = DataAvailabilityInfo(
-                    disclosure_level=DataDisclosureLevel.UNKNOWN
-                )
-                report.warnings.append(
-                    unreachable_source_caveat(
-                        "Europe PMC",
-                        unreachable,
-                        "this study's data availability statement",
-                    )
-                )
+                self._record_data_availability_unassessed(report, unreachable)
                 return
-            if fetch.xml:
+            if fetch.xml is not None:
                 import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(fetch.xml)
@@ -2370,13 +2416,22 @@ class StudyTransparencyAnalyzer:
                         if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):
                             data_statement = ' '.join(section.itertext())
                             break
-                except ET.ParseError as e:
+                except ET.ParseError:
+                    # A full text we could not read is not a study without a
+                    # statement: the statement may be right there, in the
+                    # half we failed to parse. Logging it and still charging
+                    # NOT_STATED leaves the fabricated finding in front of
+                    # the clinician (golden rule 8, #346).
                     logger.warning(
                         "Europe PMC full text for %s did not parse, so any "
-                        "data availability statement in it is being missed: %s",
+                        "data availability statement in it is not assessed.",
                         report.pmcid,
-                        e,
                     )
+                    self._record_data_availability_unassessed(
+                        report,
+                        RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+                    )
+                    return
 
         report.data_availability = analyze_data_availability(data_statement)
 

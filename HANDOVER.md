@@ -38,6 +38,24 @@ deliberately left on #341. Compress into **Recently landed** once merged.
   reader's sentence is the pure `no_pdf_sources_message()`; it **withholds
   the paywall claim rather than denying it**, because "may require
   institutional access" read in isolation is the harm.
+- **A field nobody reads is not reporting** — the review's main finding.
+  `lookup_failures` first reached the reader only on the "no sources at
+  all" branch, which a known PMC ID or a publisher URL pattern skips, so
+  the common case kept the confident claim: a throttled Unpaywall and a
+  403 from the publisher still produced "Access requires institutional
+  subscription or purchase." Every unsuccessful return now builds its
+  sentence through a pure function — `paywall_message()` withholds the
+  licence claim, `with_unestablished_access()` qualifies a claim about our
+  own attempts — and `with_lookup_failures()` **merges** rather than
+  replacing, so a download path that starts recording its own failure
+  cannot have it silently dropped.
+- **Unreadable is not absent either.** A 2xx with an empty body, XML that
+  does not parse, and a `pmcid` key holding an int all used to land as the
+  article's absence. `FullTextFetch` refuses a blank XML and is built
+  through `served()` / `absent()` / `unreachable()`, so the dangerous claim
+  is no longer what a caller gets by writing `FullTextFetch()`. A `pmcid`
+  key that is genuinely *missing*, and a converter with no record at all,
+  stay the article's answer — those are the controls.
 - **The caveats carry no provider text**, by construction: they are built
   from `RequestFailure.describe()` (kind and HTTP status only). A `requests`
   exception embeds the request URL, and the Unpaywall URL carries the user's
@@ -59,17 +77,37 @@ deliberately left on #341. Compress into **Recently landed** once merged.
   errors let the `TypeError` escape and end the discovery outright, so each
   shape is now tested for — golden rule 1, and the log names the shape, never
   the body.
-- **Verified:** `pytest tests/` — 1913 passed, 3 xfailed;
-  `lint_delta.py --base-ref origin/master` 0 new ruff or mypy findings (6
-  fewer ruff, 1 fewer mypy than base). `tests/test_unreachable_is_not_absent.py`
-  is 26 tests, and **9 mutations of the behaviour above each fail a test**,
-  no survivors.
-- **Lodged, not fixed:** #348 (the COI path fetches a Europe PMC article,
-  credits `data_sources_used` with it, and discards it unread — whether the
-  COI text should be read from that response is a behaviour decision, and
-  wiring it up moves real transparency scores). **#346 stays open for Swift
-  and Android**, which still read an unreachable source as an absence; no
-  transparency *pattern* changed, so the parity fixtures are not involved.
+- **The success path needed a control too.** No test fetched a full text
+  that *arrived*: mutating `get_full_text_xml` to return `absent()`
+  unconditionally — every article silently losing its full text — passed
+  the entire suite. That is the failure mode of this kind of fix, and the
+  reason `TestAFetchedFullTextIsActuallyUsed` exists.
+- **Verified:** `pytest tests/` — 1954 passed, 3 xfailed;
+  `lint_delta.py` 0 new ruff or mypy findings (6 fewer ruff, 1 fewer mypy
+  than base). `tests/test_unreachable_is_not_absent.py` is 67 tests, and
+  **14 mutations of the behaviour above each fail a test**, no survivors —
+  swept in an isolated copy under the scratchpad, never the working tree.
+- **Lodged rather than fixed** — all reachability defects of the same
+  family, each needing callers changed or moving real transparency scores,
+  so none belongs in this slice. Read them as the honest scope of what
+  "Python has landed this" means, which the contract doc now says too:
+  - `#350` the download paths still put `str(e)` in reader-facing fields
+    (no secret leaks today; publisher URLs, not the credentialled lookups)
+  - `#351` `EuropePMCClient.get_article` is still an ambiguous `Optional`,
+    and it feeds COI
+  - `#352` **`coi_disclosed` is unconditionally `True`** — every study's
+    badge reads "Conflicts of Interest: Disclosed", and the
+    `missing_coi_triggers_downgrade` setting is therefore dead code. Worst
+    of these: a *positive* fabricated finding
+  - `#353` data availability still fabricates `NOT_STATED` for every
+    article outside PMC — the larger population this PR does not reach
+  - `#354` `FulltextDiscoverer` maps every failure to `NOT_FOUND`
+  - `#355` a lookup skipped for want of configuration records nothing
+  - `#356` unreachable PubMed/CrossRef read as unregistered and unfunded
+  - `#348` the COI path fetches a Europe PMC article and discards it unread
+- **#346 stays open for Swift and Android**, which still read an unreachable
+  source as an absence; no transparency *pattern* changed, so the parity
+  fixtures are not involved.
 
 ## Recently landed (context)
 
