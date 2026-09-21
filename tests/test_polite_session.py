@@ -18,9 +18,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import requests
+from urllib3.util.retry import Retry
 
 from bmlibrarian_lite.polite_session import (
     PoliteAdapter,
+    mount_politely,
     retry_after_seconds,
 )
 from bmlibrarian_lite.rate_limit import (
@@ -103,6 +105,25 @@ def request_to(url: str) -> Any:
     return prepared
 
 
+def mounted_adapter(session: requests.Session, scheme: str = "https://") -> PoliteAdapter:
+    """The adapter actually mounted on a scheme, read off the session.
+
+    Reading it off ``session.adapters`` rather than the adapter object built
+    before mounting is what proves the mount carries the settings through,
+    not just that the adapter was constructed correctly.
+
+    Args:
+        session: The session `mount_politely` returned.
+        scheme: Which mount point to read.
+
+    Returns:
+        The mounted adapter, narrowed from ``requests.adapters.BaseAdapter``.
+    """
+    adapter = session.adapters[scheme]
+    assert isinstance(adapter, PoliteAdapter)
+    return adapter
+
+
 class TestTheAdapterPaces:
     """Every request through the session is acquired for."""
 
@@ -118,6 +139,16 @@ class TestTheAdapterPaces:
         reset_limiters()
         for host in _TEST_HOSTS:
             _registry[host] = RateLimiter(policy_for_host(host), sleep=_no_sleep)
+
+    def teardown_method(self) -> None:
+        """Forget the fake limiters, so they cannot leak into a later test.
+
+        Task 3 wires the real Europe PMC and PDF-discovery clients to these
+        exact hostnames. Without this, a later test that forgets its own
+        ``reset_limiters()`` would silently inherit the no-sleep fakes
+        seeded here.
+        """
+        reset_limiters()
 
     def test_a_throttled_response_penalises_that_host(self) -> None:
         """Europe PMC's 503 is the case this was built for."""
@@ -154,6 +185,79 @@ class TestTheAdapterPaces:
         adapter.send(request_to("https://www.ebi.ac.uk/x"))
 
         assert limiter_for("api.crossref.org").interval == untouched
+
+
+class TestMountPolitely:
+    """Stripping 429/503 off ``Retry`` is what stops urllib3 re-sending unpaced.
+
+    ``urllib3``'s own retry logic re-sends inside a single ``send()``, where
+    the limiter cannot see it. ``mount_politely`` must remove exactly the
+    throttle statuses from the caller's ``status_forcelist`` -- no more, no
+    less -- and must carry every other ``Retry`` setting through unchanged.
+    """
+
+    def test_throttle_statuses_are_filtered_from_the_forcelist(self) -> None:
+        """429 and 503 are ours; a genuine fault like 500 stays with urllib3."""
+        retry = Retry(status_forcelist=[429, 500, 503])
+
+        session = mount_politely(requests.Session(), retry=retry)
+
+        mounted_retry = mounted_adapter(session).max_retries
+        assert isinstance(mounted_retry, Retry)
+        assert set(mounted_retry.status_forcelist or []) == {500}
+
+    def test_other_retry_settings_survive_the_filtering(self) -> None:
+        """``retry.new(...)`` must not drop the caller's other settings."""
+        retry = Retry(
+            total=7,
+            status_forcelist=[429, 500, 503],
+            backoff_factor=0.5,
+            allowed_methods=frozenset({"GET", "POST"}),
+            raise_on_status=False,
+        )
+
+        session = mount_politely(requests.Session(), retry=retry)
+
+        mounted_retry = mounted_adapter(session).max_retries
+        assert isinstance(mounted_retry, Retry)
+        assert mounted_retry.total == 7
+        assert mounted_retry.backoff_factor == 0.5
+        assert mounted_retry.allowed_methods == frozenset({"GET", "POST"})
+        assert mounted_retry.raise_on_status is False
+
+    def test_a_none_forcelist_does_not_raise(self) -> None:
+        """No forcelist at all is a valid ``Retry``."""
+        retry = Retry(total=3, status_forcelist=None)
+
+        session = mount_politely(requests.Session(), retry=retry)
+
+        mounted_retry = mounted_adapter(session).max_retries
+        assert isinstance(mounted_retry, Retry)
+        assert not mounted_retry.status_forcelist
+
+    def test_an_empty_forcelist_does_not_raise(self) -> None:
+        """Nor is an explicitly empty one."""
+        retry = Retry(total=3, status_forcelist=[])
+
+        session = mount_politely(requests.Session(), retry=retry)
+
+        mounted_retry = mounted_adapter(session).max_retries
+        assert isinstance(mounted_retry, Retry)
+        assert not mounted_retry.status_forcelist
+
+    def test_no_retry_still_mounts_a_working_adapter_on_both_schemes(self) -> None:
+        """``retry=None`` is valid: pacing alone, no urllib3 retries."""
+        session = mount_politely(requests.Session())
+
+        assert isinstance(session.adapters["http://"], PoliteAdapter)
+        assert isinstance(session.adapters["https://"], PoliteAdapter)
+
+    def test_the_api_key_reaches_the_mounted_adapter(self) -> None:
+        """The key raises NCBI's ceiling; it must actually get there."""
+        session = mount_politely(requests.Session(), api_key="secret-key")
+
+        adapter = mounted_adapter(session)
+        assert adapter._api_key == "secret-key"
 
 
 class TestRetryAfter:
