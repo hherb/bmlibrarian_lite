@@ -827,3 +827,42 @@ def calculate_cost(
     input_cost = (tokens_input / 1_000_000) * pricing["input"]
     output_cost = (tokens_output / 1_000_000) * pricing["output"]
     return input_cost + output_cost
+
+
+# --- Polite request pacing -------------------------------------------------
+# A ceiling in requests per second, per host, because the host is what does
+# the throttling. Europe PMC publishes no limit and its own documentation
+# once claimed 10/s; measured on 2026-09-21 it serves 503 after about two
+# rapid requests, so it is paced far below what it claims to allow.
+POLITE_RATE_CEILINGS: dict[str, float] = {
+    "eutils.ncbi.nlm.nih.gov": 3.0,
+    "www.ebi.ac.uk": 1.0,
+    "api.openalex.org": 10.0,
+    "api.unpaywall.org": 5.0,
+    "api.crossref.org": 5.0,
+    "clinicaltrials.gov": 5.0,
+    "doi.org": 1.0,
+    "dx.doi.org": 1.0,
+}
+
+# An unknown host is somebody's web server until proven otherwise.
+DEFAULT_POLITE_RATE_PER_SECOND = 1.0
+
+# NCBI raises the ceiling for a registered key.
+NCBI_RATE_WITH_API_KEY_PER_SECOND = 10.0
+
+# A penalised host is never driven to a standstill: one request every 30
+# seconds is slow enough to stop hammering and fast enough to notice that
+# the service has recovered.
+POLITE_PENALTY_FLOOR_SECONDS = 30.0
+
+# Consecutive successes before a penalised host earns its rate back. Long
+# enough that one lucky request does not undo a penalty.
+POLITE_RECOVERY_SUCCESSES = 10
+
+# A wait longer than this is worth explaining in the log.
+POLITE_SLOW_WAIT_LOG_SECONDS = 1.0
+
+# The statuses that mean "you are asking too fast", as opposed to a genuine
+# server fault.
+POLITE_THROTTLE_STATUSES = (429, 503)
