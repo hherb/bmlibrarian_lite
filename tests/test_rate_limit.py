@@ -141,6 +141,7 @@ class TestThreadsShareOneBudget:
         lock = threading.Lock()
 
         def worker() -> None:
+            """Acquire the shared limiter and record when the slot landed."""
             rl.acquire()
             with lock:
                 seen.append(rl.last_request_at)
@@ -176,6 +177,14 @@ class TestBackoff:
         rl.penalise(retry_after=12.0)
 
         assert rl.interval == pytest.approx(12.0)
+
+    def test_retry_after_past_the_floor_is_not_clamped(self) -> None:
+        """The floor bounds our own halving, not the service's own word."""
+        rl, _clock = limiter(rate=2.0)
+
+        rl.penalise(retry_after=60.0)
+
+        assert rl.interval == pytest.approx(60.0)
 
     def test_the_penalty_has_a_floor(self) -> None:
         """Halving forever tends to a standstill."""

@@ -126,7 +126,8 @@ class RateLimiter:
         Returns:
             The current interval.
         """
-        return self._interval
+        with self._lock:
+            return self._interval
 
     def acquire(self) -> None:
         """Wait until this host may be asked again, then take the slot."""
@@ -149,13 +150,14 @@ class RateLimiter:
 
         Args:
             retry_after: What the service asked for, in seconds, when it
-                said. That is not ours to shorten. Without it, the rate is
-                halved, down to the floor.
+                said. That is not ours to shorten: it is honoured in full,
+                uncapped, even past ``POLITE_PENALTY_FLOOR_SECONDS``. Without
+                it, the rate is halved, down to the floor.
         """
         with self._lock:
             self._successes = 0
             if retry_after is not None and retry_after > 0:
-                self._interval = min(retry_after, POLITE_PENALTY_FLOOR_SECONDS)
+                self._interval = retry_after
             else:
                 self._interval = min(
                     self._interval * 2, POLITE_PENALTY_FLOOR_SECONDS
