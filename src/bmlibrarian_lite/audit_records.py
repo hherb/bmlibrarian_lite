@@ -313,6 +313,27 @@ def as_recorded_failure(scored: ScoredDocument) -> ScoredDocument:
     )
 
 
+def scoring_failure_cause(scored: ScoredDocument) -> EvaluationErrorCode | None:
+    """The classified cause a stored failed scoring names.
+
+    The scoring agent returns a failure rather than raising one, so a pass
+    that re-scores documents has no exception to classify: the cause is in the
+    row it just stored. An older build's failure has none -- its cause was the
+    provider text that is not shown -- and reads as ``UNKNOWN_ERROR``, which is
+    what :func:`as_recorded_failure` already decided it is.
+
+    Args:
+        scored: A score as stored.
+
+    Returns:
+        The cause, or ``None`` when the score is a judgement rather than a
+        failure.
+    """
+    if not is_scoring_failure(scored):
+        return None
+    return _recorded_cause(as_recorded_failure(scored).score)
+
+
 def scoring_failure_reason(scored: ScoredDocument) -> str | None:
     """Why this document's scoring failed, in the reader's words.
 

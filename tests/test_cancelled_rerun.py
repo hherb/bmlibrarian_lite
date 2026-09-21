@@ -20,11 +20,14 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from bmlibrarian_lite.analysis_failures import failure_cause_text  # noqa: E402
 from bmlibrarian_lite.config import LiteConfig  # noqa: E402
 from bmlibrarian_lite.data_models import (  # noqa: E402
     DocumentSource,
     EvaluationErrorCode,
     LiteDocument,
+    PassFailure,
+    PassOutcome,
     RequestFailure,
     RequestFailureKind,
     ScoredDocument,
@@ -48,6 +51,35 @@ from bmlibrarian_lite.storage import LiteStorage  # noqa: E402
 
 QUESTION = "Does aspirin prevent stroke?"
 TERMINAL_SIGNALS = ("finished", "error", "cancelled")
+
+
+def make_outcome(
+    succeeded: int,
+    failed: int,
+    total: int,
+    cause: EvaluationErrorCode = EvaluationErrorCode.API_TIMEOUT,
+    unclassified: int = 0,
+) -> PassOutcome:
+    """A pass outcome with ``failed`` interchangeable failures.
+
+    Args:
+        succeeded: Documents the pass finished.
+        failed: Documents it could not finish.
+        total: Documents it was given.
+        cause: What each failure was.
+        unclassified: Documents the model named no design for.
+
+    Returns:
+        The outcome the workers emit.
+    """
+    return PassOutcome(
+        succeeded=succeeded,
+        failures=tuple(
+            PassFailure(document_id=f"pmid-{i}", cause=cause) for i in range(failed)
+        ),
+        total=total,
+        unclassified=unclassified,
+    )
 
 
 class Recorder:
@@ -129,17 +161,23 @@ class TestPassCancelledText:
         self, succeeded: int, failed: int, total: int, text: str
     ) -> None:
         """What was done before the cancel stays done."""
-        assert pass_cancelled_text("Re-scoring", "re-scored", succeeded, failed, total) == text
+        outcome = make_outcome(succeeded, failed, total)
+
+        assert pass_cancelled_text("Re-scoring", "re-scored", outcome) == text
 
     def test_an_error_that_also_ended_the_run_is_reported(self) -> None:
         """A cancel is no licence to hide a failure (golden rule 8)."""
-        text = pass_cancelled_text("Re-scoring", "re-scored", 1, 0, 4, "disk is full")
+        text = pass_cancelled_text(
+            "Re-scoring", "re-scored", make_outcome(1, 0, 4), "disk is full"
+        )
 
         assert text.endswith(" It also stopped on an error: disk is full")
 
     def test_a_clean_cancel_mentions_no_error(self) -> None:
         """The control: nothing went wrong, so nothing is claimed to have."""
-        assert "error" not in pass_cancelled_text("Re-scoring", "re-scored", 1, 0, 4)
+        assert "error" not in pass_cancelled_text(
+            "Re-scoring", "re-scored", make_outcome(1, 0, 4)
+        )
 
 
 class TestRerunCancelledText:
@@ -348,6 +386,23 @@ class FakeScoringAgent:
         return ScoredDocument(document, code.value, code.description)
 
 
+def pass_counts(recorder: Recorder) -> tuple[str, int, int, int, str]:
+    """The counts a pass's one terminal signal carried.
+
+    Args:
+        recorder: What the worker emitted.
+
+    Returns:
+        The signal's name, then succeeded, failed, total and the error that
+        also ended the run -- the shape these tests asserted before the
+        counts became a :class:`PassOutcome` (#327).
+    """
+    name, args = recorder.only()
+    outcome = args[0]
+    error = args[1] if len(args) > 1 else ""
+    return name, outcome.succeeded, outcome.failed, outcome.total, error
+
+
 def reclassify_worker(
     monkeypatch: pytest.MonkeyPatch, count: int, cancel_at: int | None
 ) -> tuple[ReclassifyWorker, Recorder]:
@@ -390,7 +445,7 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", (2, 0, 3, ""))
+        assert pass_counts(recorder) == ("cancelled", 2, 0, 3, "")
 
     def test_a_cancel_at_the_last_document_stopped_nothing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -400,12 +455,16 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert recorder.only() == ("finished", (2, 0))
+        assert pass_counts(recorder) == ("finished", 2, 0, 2, "")
 
     def test_an_error_while_cancelling_carries_the_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A crash mid-cancel read as an orderly stop (golden rule 8)."""
+        """A crash mid-cancel read as an orderly stop (golden rule 8).
+
+        The error is the cause, classified: emitted raw it reached a dialog
+        the user can screenshot, request and credentials included (#330).
+        """
         worker, recorder = reclassify_worker(monkeypatch, count=3, cancel_at=None)
 
         def cancel_then_fail(config: Any) -> Any:
@@ -419,7 +478,14 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", (0, 0, 3, "no model configured"))
+        assert pass_counts(recorder) == (
+            "cancelled",
+            0,
+            0,
+            3,
+            failure_cause_text(EvaluationErrorCode.UNKNOWN_ERROR),
+        )
+        assert "no model configured" not in pass_counts(recorder)[4]
 
     def test_the_same_failure_uncancelled_is_still_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -436,7 +502,10 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert recorder.only() == ("error", ("no model configured",))
+        assert recorder.only() == (
+            "error",
+            (failure_cause_text(EvaluationErrorCode.UNKNOWN_ERROR),),
+        )
 
 
 class TestTheRescoreWorker:
@@ -448,7 +517,7 @@ class TestTheRescoreWorker:
 
         worker.run()
 
-        assert recorder.only() == ("finished", (1, 1))
+        assert pass_counts(recorder) == ("finished", 1, 1, 2, "")
         # The failure is still stored, so a rerun scores it again (#316)
         assert worker.storage.save_scored_document.call_count == 2
 
@@ -474,7 +543,7 @@ class TestTheRescoreWorker:
 
         worker.run()
 
-        assert recorder.only() == ("finished", (0, 1))
+        assert pass_counts(recorder) == ("finished", 0, 1, 1, "")
 
     def test_a_cancel_part_way_reports_the_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """One judged, one failed; the third is never reached."""
@@ -482,7 +551,7 @@ class TestTheRescoreWorker:
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", (1, 1, 3, ""))
+        assert pass_counts(recorder) == ("cancelled", 1, 1, 3, "")
 
     def test_a_cancel_at_the_last_document_stopped_nothing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -492,7 +561,7 @@ class TestTheRescoreWorker:
 
         worker.run()
 
-        assert recorder.only() == ("finished", (1, 1))
+        assert pass_counts(recorder) == ("finished", 1, 1, 2, "")
 
     def test_an_error_while_cancelling_carries_the_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -504,7 +573,14 @@ class TestTheRescoreWorker:
 
         worker.run()
 
-        assert recorder.only() == ("cancelled", (0, 0, 3, "database is locked"))
+        assert pass_counts(recorder) == (
+            "cancelled",
+            0,
+            0,
+            3,
+            failure_cause_text(EvaluationErrorCode.UNKNOWN_ERROR),
+        )
+        assert "database is locked" not in pass_counts(recorder)[4]
 
 
 @pytest.fixture(scope="module")
@@ -625,11 +701,12 @@ class TestTheTab:
         setattr(tab, slot, MagicMock())
         tab._set_busy_state()
 
-        getattr(tab, handler)(3, 1, 10)
+        outcome = make_outcome(3, 1, 10)
+        getattr(tab, handler)(outcome)
         getattr(tab, cleanup)()
 
         assert tab.progress_label.text() == pass_cancelled_text(
-            pass_name, verb, 3, 1, 10
+            pass_name, verb, outcome
         )
         assert getattr(tab, slot) is None
         assert tab.rerun_btn.isEnabled()
@@ -648,7 +725,7 @@ class TestTheTab:
         """A label the next click overwrites was the only notice of them."""
         setattr(tab, slot, MagicMock())
 
-        getattr(tab, handler)(3, 1, 10)
+        getattr(tab, handler)(make_outcome(3, 1, 10))
 
         tab_module.QMessageBox.warning.assert_called_once()
 
@@ -665,7 +742,7 @@ class TestTheTab:
         """The control: nothing failed, so there is nothing to warn about."""
         setattr(tab, slot, MagicMock())
 
-        getattr(tab, handler)(3, 0, 10)
+        getattr(tab, handler)(make_outcome(3, 0, 10))
 
         tab_module.QMessageBox.warning.assert_not_called()
 
@@ -673,7 +750,7 @@ class TestTheTab:
         """Logged only, a crash mid-cancel read as an orderly stop."""
         tab._rescore_worker = MagicMock()
 
-        tab._on_rescore_cancelled(1, 0, 10, "database is locked")
+        tab._on_rescore_cancelled(make_outcome(1, 0, 10), "database is locked")
 
         assert "database is locked" in tab.progress_label.text()
         tab_module.QMessageBox.warning.assert_called_once()
@@ -717,7 +794,7 @@ class TestTheTab:
         """``_reset_ui`` only ever frees the search worker."""
         tab_module.QTimer.singleShot.reset_mock()
 
-        getattr(tab, handler)(1, 0, 3)
+        getattr(tab, handler)(make_outcome(1, 0, 3))
 
         assert call(100, getattr(tab, cleanup)) in (
             tab_module.QTimer.singleShot.call_args_list

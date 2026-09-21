@@ -519,6 +519,26 @@ def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
     return EvaluationErrorCode.UNKNOWN_ERROR
 
 
+def classify_analysis_exception(exc: Exception) -> "EvaluationErrorCode":
+    """Classify anything a stage of the analysis raised, wrapper or not.
+
+    :func:`classify_llm_exception` answers ``RETRY_EXHAUSTED`` for the wrapper
+    ``llm_retry`` puts around every provider failure, which is the one thing
+    the user cannot act on. Every caller that wants the failure rather than
+    the wrapper wrote the same two-branch expression; this is it, once.
+
+    Args:
+        exc: Whatever the stage raised.
+
+    Returns:
+        The code classifying the failure retrying was spent on, for spent
+        retries; otherwise the code classifying the exception itself.
+    """
+    if isinstance(exc, RetryExhaustedError):
+        return classify_exhausted_retries(exc)
+    return classify_llm_exception(exc)
+
+
 def classify_exhausted_retries(exc: RetryExhaustedError) -> "EvaluationErrorCode":
     """Classify spent retries by the failure they were spent on.
 

@@ -331,10 +331,15 @@ class WorkflowWorker(QThread):
                             doc_id = documents[current - 1].id
                             self.quality_assessed.emit(doc_id, assessment)
 
+                    # A cancel the runner cannot see is not a cancel: without
+                    # this the flag only muted the progress callback while
+                    # every remaining document was still assessed and paid
+                    # for (#324's rule, one worker along; #326)
                     filtered, assessments = self.quality_manager.filter_documents(
                         documents,
                         self.quality_filter,
                         progress_callback=quality_progress,
+                        should_cancel=lambda: self._cancelled,
                     )
                     self.step_complete.emit("quality_filter", (filtered, assessments))
 
