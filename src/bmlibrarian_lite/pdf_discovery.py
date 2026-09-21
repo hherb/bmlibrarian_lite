@@ -46,8 +46,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, urljoin, urlparse
 
 import requests
-from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from .polite_session import mount_politely
 
 logger = logging.getLogger(__name__)
 
@@ -364,11 +365,8 @@ class PDFDiscoverer:
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET"],
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        return session
+        # Unpaywall, doi.org and publisher web servers, none of them ours
+        return mount_politely(session, retry=retry_strategy)
 
     def _emit_progress(self, stage: str, status: str) -> None:
         """Emit progress update."""
