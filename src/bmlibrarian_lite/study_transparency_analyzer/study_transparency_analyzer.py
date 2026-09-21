@@ -25,6 +25,10 @@ import requests
 from urllib3.util.retry import Retry
 
 from ..polite_session import mount_politely
+from ..analysis_failures import unreachable_source_caveat
+from ..constants import HTTP_NOT_FOUND
+from ..data_models import FullTextFetch
+from ..search_failures import request_failure_from_exception
 
 # Each client below owns its own request loop and its own error handling,
 # and made exactly one physical request per call before pacing was mounted.
@@ -1302,24 +1306,28 @@ class EuropePMCClient:
             logger.error(f"Europe PMC API error: {e}")
             return None
 
-    def get_full_text_xml(self, pmcid: str) -> Optional[str]:
+    def get_full_text_xml(self, pmcid: str) -> FullTextFetch:
         """Get full text XML for open access articles.
 
         Args:
             pmcid: The PMC identifier, with or without its ``PMC`` prefix.
 
         Returns:
-            The full-text XML, or ``None`` when it could not be fetched.
+            The fetch. It carries the XML when Europe PMC served it, a
+            :class:`RequestFailure` when Europe PMC could not be reached,
+            and neither when Europe PMC answered that it holds no
+            open-access full text for this article.
 
         Note:
-            ``None`` here is genuinely ambiguous to the caller: it means
-            either "this article has no open-access full text" or "we could
-            not reach Europe PMC". The caller treats both as the former and
-            goes on to report "no data availability statement", which for a
-            paper that has one is a fabricated finding shown to a clinician.
-            Silence is at least removed here -- the failure is logged with
-            the identifier and the reason -- but distinguishing the two
-            states needs an "unknown" in the report model itself (#346).
+            This used to return ``Optional[str]``, where ``None`` meant
+            either "no open-access full text" or "we could not reach Europe
+            PMC". The caller read both as the first and reported "no data
+            availability statement" for papers that have one (#346).
+
+            A ``404`` is the one failure that really is about the article:
+            it is how Europe PMC says it holds no full text for that PMC ID,
+            so it stays an absence. Treating it as unreachable would put a
+            caveat on every closed-access paper and drown the honest ones.
         """
         pmcid = pmcid.upper()
         if not pmcid.startswith('PMC'):
@@ -1329,18 +1337,24 @@ class EuropePMCClient:
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
-            return response.text
+            return FullTextFetch(xml=response.text)
         except requests.RequestException as e:
+            failure = request_failure_from_exception(e)
+            if failure.status_code == HTTP_NOT_FOUND:
+                logger.info(
+                    "Europe PMC holds no open-access full text for %s.", pmcid
+                )
+                return FullTextFetch()
             # Never silently: a throttled Europe PMC and an article without
             # full text are not the same thing, and only one of them is the
             # article's fault (golden rule 8).
             logger.warning(
-                "Europe PMC full text for %s could not be fetched, so any "
-                "statement it carries will be reported as absent: %s",
+                "Europe PMC full text for %s could not be fetched (%s), so "
+                "any statement it carries is not assessed.",
                 pmcid,
-                e,
+                failure.describe(),
             )
-            return None
+            return FullTextFetch(failure=failure)
 
 
 class OpenAlexClient:
@@ -2329,11 +2343,28 @@ class StudyTransparencyAnalyzer:
             logger.info("Using data sharing statement from full-text (%d chars)", len(data_statement))
         elif report.pmcid:
             # Fallback: Check Europe PMC for open access full text
-            full_text = self.europepmc.get_full_text_xml(report.pmcid)
-            if full_text:
+            fetch = self.europepmc.get_full_text_xml(report.pmcid)
+            unreachable = fetch.failure
+            if unreachable is not None:
+                # A service we could not reach says nothing about this study,
+                # so the analysis stops here rather than reading its silence
+                # as a finding. NOT_STATED would cost the paper five points
+                # and tell a clinician it publishes no data statement (#346).
+                report.data_availability = DataAvailabilityInfo(
+                    disclosure_level=DataDisclosureLevel.UNKNOWN
+                )
+                report.warnings.append(
+                    unreachable_source_caveat(
+                        "Europe PMC",
+                        unreachable,
+                        "this study's data availability statement",
+                    )
+                )
+                return
+            if fetch.xml:
                 import xml.etree.ElementTree as ET
                 try:
-                    root = ET.fromstring(full_text)
+                    root = ET.fromstring(fetch.xml)
                     for section in root.findall('.//sec'):
                         title = section.findtext('title', '').lower()
                         if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):

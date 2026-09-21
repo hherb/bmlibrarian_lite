@@ -86,6 +86,58 @@ document was relevant** (the "no relevant evidence" text). Inferring a failure
 from the accepted count is the defect: extraction only runs once a document
 was accepted, so it called every silent run a failed one.
 
+### A source we could not reach is not a finding
+
+The rule of #186/#187 one layer down, and the one #346 and #347 cost. A
+source that **answered "nothing"** and a source we **could not reach** are
+opposite answers, and only the first is a fact about the article. Where the
+two arrive as the same value — an `Optional[str]` that is `None`, an empty
+list of sources — every caller reads them as the first, and the reader is
+shown a property of the study that nobody established.
+
+This is not a logging problem. Logging the failure and still reporting the
+absence leaves the reader with the fabricated finding (golden rule 8: handled,
+logged **and reported**).
+
+- **Make the ambiguity unrepresentable, not documented.** Python's
+  `FullTextFetch` carries the XML *or* a `RequestFailure`, and refuses both
+  at once; `SourceLookupFailure` names the service a discovery could not ask.
+  A docstring saying "`None` is ambiguous here" did not stop a single caller.
+- **"Not assessed" is a state of its own, and it costs the paper nothing.**
+  An unreachable Europe PMC leaves `DataDisclosureLevel.UNKNOWN`, which scores
+  neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
+  data availability statement — a number and a claim invented out of our own
+  throttling. No risk-of-bias indicator may be raised from a source that was
+  never read.
+- **One status is genuinely about the article.** Europe PMC answers `404` for
+  a PMC ID it holds no open-access full text for, and Unpaywall answers `404`
+  for a DOI it has no record of. Those stay absences. Every other failure —
+  429, 503, a timeout, a refused connection — is unreachable. Reporting a 404
+  as unreachable would put a caveat on every closed-access paper and drown the
+  honest majority.
+- **The caveat names the service and the failure, never the provider's text.**
+  It is built from `RequestFailure.describe()`, which keeps the kind and HTTP
+  status only: a `requests` exception embeds the request URL, and the
+  Unpaywall URL carries the user's email address, the NCBI one the API key
+  (#196, #330). Python's `unreachable_source_caveat()` and
+  `no_pdf_sources_message()` are pure, so the sentence is tested without the
+  network.
+- **Withhold the claim, do not merely deny it.** The discovery sentence used
+  to read "The document may require institutional access." When a lookup
+  failed, the replacement says a freely available copy may exist and that open
+  access *was not established* — it does not repeat the paywall claim in order
+  to negate it, because that phrase read in isolation is the harm.
+- **Keep a control test for the honest finding.** Returning "unknown"
+  unconditionally passes every test that only checks the unreachable path. A
+  reachable source that answers "no statement" must still report `NOT_STATED`,
+  and an article genuinely without an open-access PDF must still get today's
+  wording.
+
+**Ports.** Python is canonical and has landed this. Swift
+(`Packages/BioMedLit/Sources/BioMedLit/Transparency/`) and Android still read
+an unreachable source as an absence — tracked on #346. No transparency
+*pattern* changes here, so the parity fixtures are not involved.
+
 ## What a stage records
 
 `AnalysisShortfall` (`data_models.py`) is the unit:

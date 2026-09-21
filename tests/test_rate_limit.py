@@ -317,6 +317,31 @@ class TestBackoff:
 
         assert rl.interval >= after_retry_after
 
+    def test_a_headerless_penalty_does_not_release_an_outstanding_pause(
+        self,
+    ) -> None:
+        """The second throttle must not cancel what the first one asked for.
+
+        The sibling test above asserts the *interval*, which is the
+        steady-state rate. The pause a ``Retry-After`` buys lives in
+        ``_not_before`` instead, and that is what #344's scenario is really
+        about: a service says "wait five minutes", a header-less 503 follows,
+        and the question is whether the next request still departs after the
+        five minutes or on the far shorter penalty interval.
+
+        Asserted on the departure rather than on either private field,
+        because the departure is what the host experiences.
+        """
+        rl, clock = limiter(rate=1.0)
+        rl.acquire()
+        rl.penalise(retry_after=POLITE_MAX_PENALTY_SECONDS)
+        pause_ends_at = clock.now + POLITE_MAX_PENALTY_SECONDS
+
+        rl.penalise()
+        departure = rl.acquire()
+
+        assert departure >= pause_ends_at - _FLOAT_SLACK
+
     def test_a_retry_after_never_breaches_the_ceiling(self) -> None:
         """The host's own ceiling is not a number the host may raise.
 

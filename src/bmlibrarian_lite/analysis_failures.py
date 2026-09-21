@@ -54,7 +54,13 @@ is ``doc/cross_platform/analysis_failure_reporting.md``.
 from collections import Counter
 from collections.abc import Iterable, Sequence
 
-from .data_models import AnalysisShortfall, EvaluationErrorCode, PassFailure
+from .data_models import (
+    AnalysisShortfall,
+    EvaluationErrorCode,
+    PassFailure,
+    RequestFailure,
+    SourceLookupFailure,
+)
 
 
 def describe_analysis_shortfalls(shortfalls: Sequence[AnalysisShortfall]) -> str:
@@ -305,4 +311,86 @@ def unclassified_text(unclassified: int) -> str:
     return (
         f" The model named no study design for {unclassified:,} documents; "
         "their stored designs are unchanged."
+    )
+
+
+def unreachable_source_caveat(
+    service: str, failure: RequestFailure, sought: str
+) -> str:
+    """Say that a source could not be read, so what follows is not a finding.
+
+    A source that answered "nothing" and one we could not reach are opposite
+    answers, and only the first is the article's fault (#186, #187, #346).
+    Where the second cannot be told from the first, the reader is shown a
+    property of the study that nobody ever established.
+
+    The failure is rendered through :meth:`RequestFailure.describe`, which
+    keeps only the kind and the HTTP status. The provider's own error text
+    is never interpolated: since #196 it can carry the NCBI API key, and an
+    Unpaywall URL carries the user's email address (#330).
+
+    Args:
+        service: The source that could not be read, named as the reader
+            knows it, for example ``"Europe PMC"``.
+        failure: Why it could not be read.
+        sought: What was being looked for, as a noun phrase completing "so
+            ...", for example ``"its data availability statement"``.
+
+    Returns:
+        One sentence, ending in a full stop.
+    """
+    return (
+        f"{service} could not be read ({failure.describe()}), so {sought} "
+        f"could not be checked. An absence reported below is not evidence "
+        f"the study has none."
+    )
+
+
+def unreachable_lookups_clause(failures: Sequence[SourceLookupFailure]) -> str:
+    """Name the sources that could not be asked, each once.
+
+    Two lookups against one throttled host are one thing to tell the reader,
+    so the services are reduced here rather than at each place this is read.
+
+    Args:
+        failures: The lookups that could not be made; may be empty.
+
+    Returns:
+        For example ``"Unpaywall (HTTP 429 Too Many Requests)"``, or two
+        such joined by "and". Empty when nothing failed.
+    """
+    seen: dict[str, str] = {}
+    for failure in failures:
+        seen.setdefault(failure.service, failure.failure.describe())
+    clauses = [f"{service} ({reason})" for service, reason in seen.items()]
+    if not clauses:
+        return ""
+    if len(clauses) == 1:
+        return clauses[0]
+    return f"{', '.join(clauses[:-1])} and {clauses[-1]}"
+
+
+def no_pdf_sources_message(failures: Sequence[SourceLookupFailure]) -> str:
+    """Say why no full-text source was found, without overstating it.
+
+    A lookup we could not make and an article with no open-access copy are
+    opposite answers, and only the second is a fact about the article. Where
+    a lookup failed, the sentence says so and stops short of the paywall
+    claim, because a throttled Unpaywall knows nothing about the licence.
+
+    Args:
+        failures: The lookups that could not be made; may be empty.
+
+    Returns:
+        One sentence for the reader, ending in a full stop.
+    """
+    if not failures:
+        return (
+            "No PDF sources found. The document may require institutional "
+            "access."
+        )
+    return (
+        f"No PDF sources found, but {unreachable_lookups_clause(failures)} "
+        f"could not be asked, so a freely available copy may exist. Whether "
+        f"this document is open access was not established."
     )

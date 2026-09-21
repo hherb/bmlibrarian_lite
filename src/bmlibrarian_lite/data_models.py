@@ -182,6 +182,74 @@ class RequestFailure:
         return cls(kind, status)
 
 
+@dataclass(frozen=True)
+class FullTextFetch:
+    """What asking a source for an article's full text produced (#346).
+
+    ``Optional[str]`` answered two different questions with one ``None`` --
+    "this article has no open-access full text" and "we could not reach the
+    service" -- and the caller read both as the first. A paper whose data
+    availability statement we never managed to fetch was then reported to a
+    clinician as a paper that has none, and charged the score for it.
+
+    The two states are opposite answers and only one of them is the
+    article's fault, so they are kept apart here rather than documented
+    apart: an XML and a failure together is refused, which is the ambiguity
+    itself made unrepresentable.
+
+    Attributes:
+        xml: The full text, when it was fetched.
+        failure: Why it could not be fetched, when the service could not be
+            reached. ``None`` with no ``xml`` means the source answered, and
+            answered that it holds no open-access full text.
+
+    Raises:
+        ValueError: On construction, if both an XML and a failure are given.
+    """
+
+    xml: str | None = None
+    failure: RequestFailure | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a fetch that both succeeded and failed."""
+        if self.xml is not None and self.failure is not None:
+            raise ValueError("A full-text fetch either succeeded or failed, not both")
+
+
+@dataclass(frozen=True)
+class SourceLookupFailure:
+    """A full-text lookup that could not be made at all (#347).
+
+    An empty list of PDF sources meant two things at once: this article has
+    no open-access copy, or we could not ask. The reader was told the first
+    -- "the document may require institutional access" -- for articles that
+    are freely available, and the evidence base narrowed silently whenever
+    Unpaywall or doi.org throttled.
+
+    The service is named rather than enumerated because the set is open: a
+    publisher host is discovered from a DOI, not listed in advance.
+
+    Attributes:
+        service: The source that could not be asked, named as the reader
+            knows it, for example ``"Unpaywall"``.
+        failure: Why, carrying the kind and HTTP status only -- never the
+            provider's text, which for Unpaywall embeds the user's email
+            address (#330).
+
+    Raises:
+        ValueError: On construction, if the service is not named. A failure
+            the reader cannot attribute is not reportable.
+    """
+
+    service: str
+    failure: RequestFailure
+
+    def __post_init__(self) -> None:
+        """Refuse a failure that names no service."""
+        if not self.service or not self.service.strip():
+            raise ValueError("A source lookup failure names the service it asked")
+
+
 # The kinds whose failure is an HTTP answer, and so can name its status.
 _STATUS_CODE_KINDS = (RequestFailureKind.HTTP_STATUS, RequestFailureKind.REDIRECT_REFUSED)
 

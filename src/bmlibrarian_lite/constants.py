@@ -902,6 +902,12 @@ POLITE_MAX_THROTTLE_RETRIES = 3
 # must not be credited with recovery for doing so.
 HTTP_ERROR_STATUS_MIN = 400
 
+# The one failed status that is a statement about the article rather than
+# about the service: Europe PMC answers 404 for a PMC ID it holds no
+# open-access full text for. Every other failure leaves the article's
+# transparency unassessed rather than absent (#346).
+HTTP_NOT_FOUND = 404
+
 # The statuses that mean "this is yours only if you pay or log in". They are
 # a genuine paywall signal, unlike a 5xx, which is the server being broken.
 PAYWALL_HTTP_STATUSES = (401, 403)
